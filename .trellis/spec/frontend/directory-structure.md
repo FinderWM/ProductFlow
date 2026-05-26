@@ -35,7 +35,7 @@ web/
     ├── index.css                    # Tailwind import and global base CSS
     ├── components/
     │   ├── StatusPill.tsx           # shared status badge
-    │   └── TopNav.tsx               # shared top navigation
+    │   └── TopNav.tsx               # shared top navigation, including the first-level Status route
     ├── lib/
     │   ├── api.ts                   # fetch wrapper, ApiError, typed API methods
     │   ├── format.ts                # date/price/job formatting helpers
@@ -47,7 +47,8 @@ web/
         ├── ProductDetailPage.tsx
         ├── product-detail/              # page-local product workflow constants/types/utils/components
         ├── ImageChatPage.tsx
-        └── SettingsPage.tsx
+        ├── SettingsPage.tsx
+        └── StatusPage.tsx
 ```
 
 There is no `hooks/` directory and no global state store today. Stateful logic currently lives in pages unless it is a
@@ -67,6 +68,7 @@ Routes are centralized in `web/src/App.tsx` inside `AppRoutes()`:
 - `/products/:productId/image-chat` -> product-scoped `ImageChatPage`
 - `/help` -> `HelpPage`
 - `/settings` -> `SettingsPage`
+- `/status` -> `StatusPage`
 
 Auth gating is also in `AppRoutes()`: it loads `api.getSessionState` with query key `['session']` and redirects
 unauthenticated users to `/login`.
@@ -83,6 +85,8 @@ Current examples:
   workbench actions.
 - `ImageChatPage.tsx` owns session selection, auto-create behavior, config-derived image size options, and generation.
 - `SettingsPage.tsx` owns config fetching, grouped drafts, secret touched state, save/reset mutations.
+- `StatusPage.tsx` owns read-only generation config pool status, settings secondary unlock, date-range filters, and
+  per-config operational rows. Keep status as a route-level page instead of embedding it in `SettingsPage.tsx`.
 
 Use `web/src/components/` for reusable presentational components with small props and no route ownership:
 

@@ -111,7 +111,8 @@ const DOC_PAGES: DocPage[] = [
               ["商品/工作台", "创建商品，进入商品详情工作台，组织节点和运行工作流。"],
               ["文/图生图", "围绕图片结果连续生成、改图、比较候选，并回写商品。"],
               ["画廊", "集中保存满意的生成图，保留来源、提示词、尺寸、模型和下载入口。"],
-              ["配置", "管理 provider、模型、尺寸、提示词模板、上传限制和密钥。"],
+              ["状态", "查看生成配置池的调用、并发、冻结和成功率。"],
+              ["配置", "管理 provider、生成配置池、模型、尺寸、提示词模板、上传限制和密钥。"],
               ["帮助", "查看当前产品内操作文档。"],
             ],
           },
@@ -128,7 +129,7 @@ const DOC_PAGES: DocPage[] = [
               "再阅读“商品工作台”“画布和节点”“模板”和“生成文案和图片”，理解画布工作台。",
               "需要收藏和复查生成图时阅读“画廊”。",
               "需要连续改图时阅读“文/图生图概览”“基图和参考图”“生成设置”和“任务与结果”。",
-              "部署、配置或排障时阅读“配置概览”“模型供应商”“图片工具参数”“提示词模板”和“故障排查”。",
+              "部署、配置或排障时阅读“配置概览”“模型供应商”“状态页”“图片工具参数”“提示词模板”和“故障排查”。",
             ],
           },
         ],
@@ -761,7 +762,7 @@ const DOC_PAGES: DocPage[] = [
   {
     slug: "settings-providers",
     title: "模型供应商",
-    description: "说明供应商档案、文案/图片用途绑定、模型和图片生成基础参数。",
+    description: "说明供应商档案、文案/图片生成配置池、模型和图片生成基础参数。",
     category: "配置",
     icon: Settings,
     sections: [
@@ -774,7 +775,8 @@ const DOC_PAGES: DocPage[] = [
             headers: ["字段", "说明"],
             rows: [
               ["供应商档案", "保存供应商类型、连接信息、API Key 和能力。Google Gemini 使用官方 SDK endpoint，不配置 Base URL；密钥不会回显，编辑档案时留空 API Key 会保留旧值。"],
-              ["文案用途绑定", "选择 `mock` 或真实 OpenAI Responses 兼容接口，并选择具备文案能力的供应商档案。"],
+              ["文案生成配置池", "文案可以配置多个 `text` 生成配置。每个配置选择 provider kind、供应商档案、模型、优先级、最大并发、启用状态、可用性窗口、失败阈值和冷冻期。"],
+              ["自动/手动选择", "工作台文案节点可以自动调度，也可以手动指定某个文案配置；指定配置仍受启用、冻结和并发上限约束。"],
               ["商品理解模型", "用于把商品名称、类目、价格、说明等整理成 CreativeBrief。"],
               ["文案生成模型", "用于生成 CopyPayloadV2 结构化文案，可包含自由正文、文案块、布局分区和视觉建议。"],
             ],
@@ -790,16 +792,72 @@ const DOC_PAGES: DocPage[] = [
             headers: ["字段", "说明"],
             rows: [
               ["供应商档案", "OpenAI 兼容档案可以同时声明文案、Responses 图片和 Images API 图片能力；Google Gemini 档案只声明 Gemini 图片能力。"],
-              ["图片用途绑定", "选择 `mock`、OpenAI Responses、OpenAI Images API 或 Google Gemini Image，并选择具备对应图片能力的供应商档案。"],
+              ["图片生成配置池", "图片可以配置多个 `image` 生成配置，覆盖 `mock`、OpenAI Responses、OpenAI Images API 或 Google Gemini Image。调度按优先级、健康度、并发容量和冻结状态选择可用配置。"],
+              ["自动/手动选择", "工作台生图节点和文/图生图可以自动调度，也可以手动指定图片配置；指定配置不可用时按任务队列或后端校验处理。"],
               ["图片模型", "发送给图片 provider 的默认图片模型。Responses、Images API 与 Gemini 支持范围不同。"],
-              ["Responses 后台响应模式", "只属于 OpenAI Responses 图片绑定。开启后长任务先拿到 response_id 再轮询状态；如果网关明确不支持，会按同步请求重试。"],
-              ["Images API Quality / Style", "只属于 OpenAI Images API 图片绑定。兼容网关不支持可选字段时会按基础参数重试。"],
-              ["Gemini API 版本 / 输出 MIME", "只属于 Google Gemini 图片绑定。API 版本默认 `v1beta`，输出 MIME 留空时使用供应商默认值。"],
+              ["Responses 后台响应模式", "只属于 OpenAI Responses 图片配置。开启后长任务先拿到 response_id 再轮询状态；如果网关明确不支持，会按同步请求重试。"],
+              ["Images API Quality / Style", "只属于 OpenAI Images API 图片配置。兼容网关不支持可选字段时会按基础参数重试。"],
+              ["Gemini API 版本 / 输出 MIME", "只属于 Google Gemini 图片配置。API 版本默认 `v1beta`，输出 MIME 留空时使用供应商默认值。"],
               ["生图最大单边", "工作台生图和文/图生图的最大宽/高像素。最大面积同步使用该值平方。"],
               ["主图尺寸（兼容默认）", "高级兼容值。只有当 provider 输入未明确传入 image_size 且类型为主图时才使用。新工作流优先看节点里的尺寸选择器。"],
               ["促销海报尺寸（兼容默认）", "高级兼容值。只有当 provider 输入未明确传入 image_size 且类型为促销海报时才使用。"],
-              ["海报生成模式", "`模板渲染` 只作为 mock/dev fallback；图片用途绑定真实供应商后，工作台生图自动调用 AI 生成。"],
+              ["海报生成模式", "`模板渲染` 只作为 mock/dev fallback；启用真实图片配置后，工作台生图自动调用 AI 生成。"],
               ["海报字体路径", "模板海报和 mock 图片中用于中文文字渲染的字体文件。"],
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    slug: "settings-status",
+    title: "状态页",
+    description: "状态页和配置同属一级导航，用于只读查看生成配置池的运行状态和按日统计。",
+    category: "配置",
+    icon: TerminalSquare,
+    sections: [
+      {
+        id: "status-access",
+        title: "访问规则",
+        blocks: [
+          {
+            type: "list",
+            items: [
+              "从顶部导航进入“状态”。状态页需要登录；如果配置启用了二次解锁，也需要输入 `SETTINGS_ACCESS_TOKEN`。",
+              "状态页只读展示运行状态，不提供跳转到配置的操作按钮。",
+            ],
+          },
+        ],
+      },
+      {
+        id: "status-range",
+        title: "日期范围",
+        blocks: [
+          {
+            type: "table",
+            headers: ["范围", "说明"],
+            rows: [
+              ["今日", "只看当前运行机器时区的当天统计。"],
+              ["近 7 天 / 近 30 天", "从今天倒推 6 天或 29 天，包含今天。"],
+              ["本月", "从本月 1 日到今天。"],
+              ["自定义日期", "手动选择开始日期和结束日期；结束日期早于开始日期时不会查询。"],
+            ],
+          },
+        ],
+      },
+      {
+        id: "status-metrics",
+        title: "指标口径",
+        blocks: [
+          {
+            type: "table",
+            headers: ["指标", "说明"],
+            rows: [
+              ["今日调用总数", "今天所有生成配置的调用数，并在卡片详情里拆分今日文案调用和今日图片调用。"],
+              ["所选范围调用", "当前筛选范围内的总调用数、成功数和失败数。"],
+              ["运行中/冻结配置", "显示当前并发大于 0 的配置数和仍在冷冻期的配置数。"],
+              ["配置行", "按配置显示用途、provider kind、优先级、当前并发/最大并发、范围调用、成功率、健康/冻结状态和最近失败原因。"],
+              ["统计来源", "读取 `generation_config_daily_stats` 和运行态表，不扫描历史使用记录。"],
             ],
           },
         ],
@@ -1003,6 +1061,7 @@ const NAV_GROUPS: NavGroup[] = [
     pages: [
       "settings",
       "settings-providers",
+      "settings-status",
       "settings-image-tool",
       "settings-prompts",
       "settings-operations",
@@ -1038,7 +1097,8 @@ const DOC_PAGES_EN: DocPage[] = [
               ["Products", "Create products, open the product workbench, organize nodes, and run workflows."],
               ["Image chat", "Continue generating and editing around image results, compare candidates, and write results back to products."],
               ["Gallery", "Save selected generated images with source, prompt, size, model, and download metadata."],
-              ["Settings", "Manage providers, models, sizes, prompt templates, upload limits, and secrets."],
+              ["Status", "Inspect generation config pool calls, concurrency, freezes, and success rates."],
+              ["Settings", "Manage providers, generation config pools, models, sizes, prompt templates, upload limits, and secrets."],
               ["Help", "Read the built-in product operation docs."],
             ],
           },
@@ -1055,7 +1115,7 @@ const DOC_PAGES_EN: DocPage[] = [
               "Read Product workbench, Canvas and nodes, Templates, and Generate copy and images to understand the canvas workflow.",
               "Read Gallery when you need to save and review generated images.",
               "Read Image chat overview, Base and reference images, Generation settings, and Tasks and results for iterative image editing.",
-              "Read Settings overview, Model providers, Image tool parameters, Prompt templates, Operations and safety, and Troubleshooting for deployment and operations.",
+              "Read Settings overview, Model providers, Status page, Image tool parameters, Prompt templates, Operations and safety, and Troubleshooting for deployment and operations.",
             ],
           },
         ],
@@ -1199,12 +1259,24 @@ const DOC_PAGES_EN: DocPage[] = [
   {
     slug: "settings-providers",
     title: "Model providers",
-    description: "Explains provider profiles, copy/image purpose bindings, models, and base image generation parameters.",
+    description: "Explains provider profiles, copy/image generation config pools, models, and base image generation parameters.",
     category: "Settings",
     icon: Settings,
     sections: [
-      { id: "text-settings", title: "Copy generation", blocks: [{ type: "table", headers: ["Field", "Description"], rows: [["Provider profile", "Stores provider type, connection data, API key, and capabilities. Google Gemini uses the official SDK endpoint and does not configure a Base URL. Secrets are not returned; leaving API key blank while editing preserves the old value."], ["Copy purpose binding", "Selects `mock` or a real OpenAI Responses-compatible interface, and points to a provider profile with copy capability."], ["Product understanding model", "Organizes product name, category, price, and description into a CreativeBrief."], ["Copy generation model", "Generates CopyPayloadV2 structured copy, which can contain freeform text, copy blocks, layout sections, and visual guidance."]] }] },
-      { id: "image-settings", title: "Image generation", blocks: [{ type: "table", headers: ["Field", "Description"], rows: [["Provider profile", "OpenAI-compatible profiles can declare copy, Responses image, and Images API image capabilities. Google Gemini profiles declare only Gemini image capability."], ["Image purpose binding", "Selects `mock`, OpenAI Responses, OpenAI Images API, or Google Gemini Image, and points to a provider profile with the matching image capability."], ["Image model", "Default image model sent to the image provider. Responses, Images API, and Gemini support different model sets."], ["Responses background mode", "Only belongs to the OpenAI Responses image binding. When enabled, long tasks first receive a response_id and then poll status; gateways that clearly do not support it retry as synchronous requests."], ["Images API Quality / Style", "Only belongs to the OpenAI Images API image binding. Compatible gateways that reject optional fields retry with the base parameters."], ["Gemini API version / output MIME", "Only belongs to the Google Gemini image binding. API version defaults to `v1beta`; blank output MIME uses the provider default."], ["Image max single edge", "Maximum width or height in pixels for workbench image generation and image chat. Maximum area uses this value squared."], ["Main image size (compat default)", "Advanced compatibility value used only when provider input does not explicitly send image_size and kind is main image. New workflows prefer the node size picker."], ["Promo poster size (compat default)", "Advanced compatibility value used only when provider input does not explicitly send image_size and kind is promo poster."], ["Poster generation mode", "`Template render` does not consume the image model; `AI generation` calls the image provider."], ["Poster font path", "Font file used for Chinese text rendering in template posters and mock images."]] }] },
+      { id: "text-settings", title: "Copy generation", blocks: [{ type: "table", headers: ["Field", "Description"], rows: [["Provider profile", "Stores provider type, connection data, API key, and capabilities. Google Gemini uses the official SDK endpoint and does not configure a Base URL. Secrets are not returned; leaving API key blank while editing preserves the old value."], ["Copy generation config pool", "Copy can use multiple `text` generation configs. Each config selects provider kind, provider profile, model, priority, max concurrency, enabled state, availability window, failure threshold, and cooldown."], ["Auto/manual selection", "Workbench copy nodes can use automatic scheduling or manually specify one copy config. Manual configs still obey enabled, frozen, and concurrency constraints."], ["Product understanding model", "Organizes product name, category, price, and description into a CreativeBrief."], ["Copy generation model", "Generates CopyPayloadV2 structured copy, which can contain freeform text, copy blocks, layout sections, and visual guidance."]] }] },
+      { id: "image-settings", title: "Image generation", blocks: [{ type: "table", headers: ["Field", "Description"], rows: [["Provider profile", "OpenAI-compatible profiles can declare copy, Responses image, and Images API image capabilities. Google Gemini profiles declare only Gemini image capability."], ["Image generation config pool", "Images can use multiple `image` generation configs covering `mock`, OpenAI Responses, OpenAI Images API, or Google Gemini Image. Scheduling selects available configs by priority, health, remaining concurrency, and freeze state."], ["Auto/manual selection", "Workbench image nodes and image chat can use automatic scheduling or manually specify an image config. Unavailable manual configs are handled by task queueing or backend validation."], ["Image model", "Default image model sent to the image provider. Responses, Images API, and Gemini support different model sets."], ["Responses background mode", "Only belongs to OpenAI Responses image configs. When enabled, long tasks first receive a response_id and then poll status; gateways that clearly do not support it retry as synchronous requests."], ["Images API Quality / Style", "Only belongs to OpenAI Images API image configs. Compatible gateways that reject optional fields retry with the base parameters."], ["Gemini API version / output MIME", "Only belongs to Google Gemini image configs. API version defaults to `v1beta`; blank output MIME uses the provider default."], ["Image max single edge", "Maximum width or height in pixels for workbench image generation and image chat. Maximum area uses this value squared."], ["Main image size (compat default)", "Advanced compatibility value used only when provider input does not explicitly send image_size and kind is main image. New workflows prefer the node size picker."], ["Promo poster size (compat default)", "Advanced compatibility value used only when provider input does not explicitly send image_size and kind is promo poster."], ["Poster generation mode", "`Template render` is only a mock/dev fallback; after a real image config is enabled, workbench image generation calls AI generation."], ["Poster font path", "Font file used for Chinese text rendering in template posters and mock images."]] }] },
+    ],
+  },
+  {
+    slug: "settings-status",
+    title: "Status page",
+    description: "Status is a first-level navigation page next to Settings for read-only generation config pool runtime state and daily stats.",
+    category: "Settings",
+    icon: TerminalSquare,
+    sections: [
+      { id: "status-access", title: "Access rules", blocks: [{ type: "list", items: ["Open Status from the top navigation. It requires login, and also requires `SETTINGS_ACCESS_TOKEN` when secondary settings unlock is configured.", "Status is read-only and does not provide a button that jumps to configuration."] }] },
+      { id: "status-range", title: "Date range", blocks: [{ type: "table", headers: ["Range", "Description"], rows: [["Today", "Shows the current local stat date on the running machine."], ["Last 7 days / Last 30 days", "Counts backward 6 or 29 days from today, including today."], ["This month", "Uses the first day of the current month through today."], ["Custom dates", "Choose start and end dates manually. The page does not query when the end date is before the start date."]] }] },
+      { id: "status-metrics", title: "Metric scope", blocks: [{ type: "table", headers: ["Metric", "Description"], rows: [["Today's total calls", "All generation config calls today, with text and image calls split in the card detail."], ["Selected-range calls", "Total calls, successes, and failures inside the selected date range."], ["Running/frozen configs", "Counts configs with current concurrency above 0 and configs still inside cooldown."], ["Config row", "Shows purpose, provider kind, priority, current/max concurrency, range calls, success rate, health/freeze state, and latest failure reason."], ["Stats source", "Reads `generation_config_daily_stats` plus runtime state tables and does not scan historical usage records."]] }] },
     ],
   },
   {
@@ -1262,6 +1334,7 @@ const NAV_GROUPS_EN: NavGroup[] = [
     pages: [
       "settings",
       "settings-providers",
+      "settings-status",
       "settings-image-tool",
       "settings-prompts",
       "settings-operations",
@@ -1292,9 +1365,13 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "画廊": "ギャラリー",
   "集中保存满意的生成图，保留来源、提示词、尺寸、模型和下载入口。":
     "満足した生成画像を集約保存し、ソース、プロンプト、サイズ、モデル、ダウンロード入口を保持します。",
+  "查看生成配置池的调用、并发、冻结和成功率。":
+    "生成設定プールの呼び出し、並行数、凍結、成功率を確認します。",
   "配置": "設定",
   "管理 provider、模型、尺寸、提示词模板、上传限制和密钥。":
     "プロバイダー、モデル、サイズ、プロンプトテンプレート、アップロード制限、シークレットを管理します。",
+  "管理 provider、生成配置池、模型、尺寸、提示词模板、上传限制和密钥。":
+    "プロバイダー、生成設定プール、モデル、サイズ、プロンプトテンプレート、アップロード制限、シークレットを管理します。",
   "帮助": "ヘルプ",
   "查看当前产品内操作文档。": "現在の製品内操作ドキュメントを確認します。",
   "推荐阅读路径": "推奨読書順",
@@ -1307,6 +1384,8 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
     "継続的に画像を編集したい場合は「画像生成チャット概要」「ベース画像と参考画像」「生成設定」「タスクと結果」を読みます。",
   "部署、配置或排障时阅读“配置概览”“模型供应商”“图片工具参数”“提示词模板”和“故障排查”。":
     "デプロイ、設定、トラブルシューティングでは「設定概要」「モデルプロバイダー」「画像ツールパラメータ」「プロンプトテンプレート」「トラブルシューティング」を読みます。",
+  "部署、配置或排障时阅读“配置概览”“模型供应商”“状态页”“图片工具参数”“提示词模板”和“故障排查”。":
+    "デプロイ、設定、トラブルシューティングでは「設定概要」「モデルプロバイダー」「ステータスページ」「画像ツールパラメータ」「プロンプトテンプレート」「トラブルシューティング」を読みます。",
   "快速开始": "クイックスタート",
   "用最短路径创建一个商品，选择初始画布模板，并生成第一张商品图片。":
     "最短手順で商品を作成し、初期キャンバステンプレートを選び、最初の商品画像を生成します。",
@@ -1726,6 +1805,8 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "模型供应商": "モデルプロバイダー",
   "说明供应商档案、文案/图片用途绑定、模型和图片生成基础参数。":
     "プロバイダープロファイル、コピー/画像用途バインディング、モデル、画像生成の基本パラメータを説明します。",
+  "说明供应商档案、文案/图片生成配置池、模型和图片生成基础参数。":
+    "プロバイダープロファイル、コピー/画像生成設定プール、モデル、画像生成の基本パラメータを説明します。",
   "字段": "項目",
   "供应商档案": "プロバイダープロファイル",
   "保存供应商类型、连接信息、API Key 和能力。Google Gemini 使用官方 SDK endpoint，不配置 Base URL；密钥不会回显，编辑档案时留空 API Key 会保留旧值。":
@@ -1733,6 +1814,12 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "文案用途绑定": "コピー用途バインディング",
   "选择 `mock` 或真实 OpenAI Responses 兼容接口，并选择具备文案能力的供应商档案。":
     "`mock` または実際の OpenAI Responses 互換インターフェースを選択し、コピー能力を持つプロバイダープロファイルを選びます。",
+  "文案生成配置池": "コピー生成設定プール",
+  "文案可以配置多个 `text` 生成配置。每个配置选择 provider kind、供应商档案、模型、优先级、最大并发、启用状态、可用性窗口、失败阈值和冷冻期。":
+    "コピーには複数の `text` 生成設定を構成できます。各設定で provider kind、プロバイダープロファイル、モデル、優先度、最大並行数、有効状態、可用性ウィンドウ、失敗しきい値、クールダウンを選びます。",
+  "自动/手动选择": "自動/手動選択",
+  "工作台文案节点可以自动调度，也可以手动指定某个文案配置；指定配置仍受启用、冻结和并发上限约束。":
+    "ワークベンチのコピーノードは自動スケジューリングも、特定コピー設定の手動指定もできます。指定した設定も有効状態、凍結、並行数上限の制約を受けます。",
   "商品理解模型": "商品理解モデル",
   "用于把商品名称、类目、价格、说明等整理成 CreativeBrief。":
     "商品名、カテゴリ、価格、説明などを CreativeBrief に整理するために使います。",
@@ -1745,6 +1832,11 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "图片用途绑定": "画像用途バインディング",
   "选择 `mock`、OpenAI Responses、OpenAI Images API 或 Google Gemini Image，并选择具备对应图片能力的供应商档案。":
     "`mock`、OpenAI Responses、OpenAI Images API、Google Gemini Image を選択し、対応する画像能力を持つプロバイダープロファイルを選びます。",
+  "图片生成配置池": "画像生成設定プール",
+  "图片可以配置多个 `image` 生成配置，覆盖 `mock`、OpenAI Responses、OpenAI Images API 或 Google Gemini Image。调度按优先级、健康度、并发容量和冻结状态选择可用配置。":
+    "画像には複数の `image` 生成設定を構成でき、`mock`、OpenAI Responses、OpenAI Images API、Google Gemini Image を対象にできます。スケジューリングは優先度、健全性、並行容量、凍結状態に基づいて利用可能な設定を選びます。",
+  "工作台生图节点和文/图生图可以自动调度，也可以手动指定图片配置；指定配置不可用时按任务队列或后端校验处理。":
+    "ワークベンチの画像生成ノードと画像生成チャットは自動スケジューリングも、画像設定の手動指定もできます。指定設定が利用できない場合はタスクキューまたはバックエンド検証で処理されます。",
   "图片模型": "画像モデル",
   "图片生成": "画像生成",
   "发送给图片 provider 的默认图片模型。Responses、Images API 与 Gemini 支持范围不同。":
@@ -1752,12 +1844,18 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "Responses 后台响应模式": "Responses バックグラウンド応答モード",
   "只属于 OpenAI Responses 图片绑定。开启后长任务先拿到 response_id 再轮询状态；如果网关明确不支持，会按同步请求重试。":
     "OpenAI Responses 画像バインディングだけに属します。有効にすると長時間タスクは先に response_id を取得してから状態をポーリングします。ゲートウェイが明確に非対応の場合は同期リクエストとして再試行します。",
+  "只属于 OpenAI Responses 图片配置。开启后长任务先拿到 response_id 再轮询状态；如果网关明确不支持，会按同步请求重试。":
+    "OpenAI Responses 画像設定だけに属します。有効にすると長時間タスクは先に response_id を取得してから状態をポーリングします。ゲートウェイが明確に非対応の場合は同期リクエストとして再試行します。",
   "Images API Quality / Style": "Images API Quality / Style",
   "只属于 OpenAI Images API 图片绑定。兼容网关不支持可选字段时会按基础参数重试。":
     "OpenAI Images API 画像バインディングだけに属します。互換ゲートウェイが任意項目に非対応の場合は、基本パラメータで再試行します。",
+  "只属于 OpenAI Images API 图片配置。兼容网关不支持可选字段时会按基础参数重试。":
+    "OpenAI Images API 画像設定だけに属します。互換ゲートウェイが任意項目に非対応の場合は、基本パラメータで再試行します。",
   "Gemini API 版本 / 输出 MIME": "Gemini API バージョン / 出力 MIME",
   "只属于 Google Gemini 图片绑定。API 版本默认 `v1beta`，输出 MIME 留空时使用供应商默认值。":
     "Google Gemini 画像バインディングだけに属します。API バージョンは既定で `v1beta`、出力 MIME を空欄にするとプロバイダー既定値を使います。",
+  "只属于 Google Gemini 图片配置。API 版本默认 `v1beta`，输出 MIME 留空时使用供应商默认值。":
+    "Google Gemini 画像設定だけに属します。API バージョンは既定で `v1beta`、出力 MIME を空欄にするとプロバイダー既定値を使います。",
   "生图最大单边": "画像生成の最大単辺",
   "工作台生图和文/图生图的最大宽/高像素。最大面积同步使用该值平方。":
     "ワークベンチ画像生成と画像生成チャットの最大幅/高さピクセルです。最大面積もこの値の二乗を使います。",
@@ -1770,9 +1868,47 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "海报生成模式": "ポスター生成モード",
   "`模板渲染` 只作为 mock/dev fallback；图片用途绑定真实供应商后，工作台生图自动调用 AI 生成。":
     "`テンプレートレンダリング` は mock/dev fallback のみです。画像用途が実プロバイダーにバインドされると、ワークベンチ画像生成は自動的に AI 生成を呼び出します。",
+  "`模板渲染` 只作为 mock/dev fallback；启用真实图片配置后，工作台生图自动调用 AI 生成。":
+    "`テンプレートレンダリング` は mock/dev fallback のみです。実画像設定を有効にすると、ワークベンチ画像生成は自動的に AI 生成を呼び出します。",
   "海报字体路径": "ポスターフォントパス",
   "模板海报和 mock 图片中用于中文文字渲染的字体文件。":
     "テンプレートポスターと mock 画像で中国語文字を描画するためのフォントファイルです。",
+  "状态页": "ステータスページ",
+  "状态页和配置同属一级导航，用于只读查看生成配置池的运行状态和按日统计。":
+    "ステータスページは設定と同じ第一階層ナビゲーションにあり、生成設定プールの実行状態と日次統計を読み取り専用で確認します。",
+  "访问规则": "アクセスルール",
+  "从顶部导航进入“状态”。状态页需要登录；如果配置启用了二次解锁，也需要输入 `SETTINGS_ACCESS_TOKEN`。":
+    "上部ナビゲーションから「ステータス」を開きます。ステータスページはログインが必要です。設定で二次ロック解除が有効な場合は `SETTINGS_ACCESS_TOKEN` も入力します。",
+  "状态页只读展示运行状态，不提供跳转到配置的操作按钮。":
+    "ステータスページは実行状態を読み取り専用で表示し、設定へ移動する操作ボタンは提供しません。",
+  "日期范围": "日付範囲",
+  "范围": "範囲",
+  "今日": "今日",
+  "只看当前运行机器时区的当天统计。": "現在実行中のマシンのタイムゾーンにおける当日統計だけを表示します。",
+  "近 7 天 / 近 30 天": "直近7日 / 直近30日",
+  "从今天倒推 6 天或 29 天，包含今天。": "今日を含めて、今日から6日または29日さかのぼって集計します。",
+  "本月": "今月",
+  "从本月 1 日到今天。": "今月1日から今日までを使います。",
+  "自定义日期": "カスタム日付",
+  "手动选择开始日期和结束日期；结束日期早于开始日期时不会查询。":
+    "開始日と終了日を手動で選びます。終了日が開始日より前の場合、ページはクエリを実行しません。",
+  "指标口径": "指標の範囲",
+  "指标": "指標",
+  "今日调用总数": "今日の呼び出し総数",
+  "今天所有生成配置的调用数，并在卡片详情里拆分今日文案调用和今日图片调用。":
+    "今日のすべての生成設定呼び出し数です。カード詳細で今日のコピー呼び出しと画像呼び出しに分けて表示します。",
+  "所选范围调用": "選択範囲の呼び出し",
+  "当前筛选范围内的总调用数、成功数和失败数。":
+    "現在のフィルター範囲内の総呼び出し数、成功数、失敗数です。",
+  "运行中/冻结配置": "実行中/凍結設定",
+  "显示当前并发大于 0 的配置数和仍在冷冻期的配置数。":
+    "現在の並行数が0より大きい設定数と、まだクールダウン中の設定数を表示します。",
+  "配置行": "設定行",
+  "按配置显示用途、provider kind、优先级、当前并发/最大并发、范围调用、成功率、健康/冻结状态和最近失败原因。":
+    "設定ごとに用途、provider kind、優先度、現在/最大並行数、範囲内呼び出し、成功率、健全/凍結状態、最新失敗理由を表示します。",
+  "统计来源": "統計ソース",
+  "读取 `generation_config_daily_stats` 和运行态表，不扫描历史使用记录。":
+    "`generation_config_daily_stats` と実行状態テーブルを読み取り、過去の利用記録はスキャンしません。",
   "说明 Responses 图片工具高级字段的含义，以及它们和前端可见控件、后端持久化的关系。":
     "Responses image_generation tool の高度項目の意味と、それらがフロントエンドの表示コントロールやバックエンド永続化とどう関係するかを説明します。",
   "tool_settings": "tool_settings",

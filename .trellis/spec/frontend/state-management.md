@@ -38,6 +38,9 @@ Current query key patterns:
   `admin_access_required`.
 - Settings lock state: `['settings-lock-state']` in `SettingsPage.tsx`; fetch full `['config']` only after the secondary
   settings token unlock succeeds.
+- Generation config status: `['generation-config-status', startDate, endDate]` in `StatusPage.tsx`; fetch
+  `GET /api/settings/generation-config-status` only after `['settings-lock-state']` reports secondary unlock and the date
+  range is valid.
 
 When writing mutations, update/invalidate every key that can show stale data.
 
@@ -53,8 +56,8 @@ Keep short-lived UI state local to the page that owns the interaction:
 - `ImageChatPage.tsx` stores selected session/generated asset, prompt draft, image size, rename mode, target product,
   and transient success/error messages.
 - `SettingsPage.tsx` stores config drafts, secret touched flags, reset progress, and save/error messages.
-- `SettingsPage.tsx` stores the transient settings unlock token only in local component state for the submit attempt; do
-  not persist the token in localStorage, query cache, or API responses.
+- `SettingsPage.tsx` and `StatusPage.tsx` store the transient settings unlock token only in local component state for the
+  submit attempt; do not persist the token in localStorage, query cache, or API responses.
 
 Local state should not duplicate server records unless the user is editing a draft. For example, `SettingsPage.tsx` creates
 `drafts` from fetched config so the user can edit before saving; product details themselves remain in TanStack Query.
@@ -113,6 +116,9 @@ Prefer derived values over additional state:
 - `ImageChatPage.tsx` derives built-in image-size picker presets from `web/src/lib/imageSizes.ts`, selected round from
   the selected asset ID, and product source/reference images from product detail.
 - `SettingsPage.tsx` derives grouped config items from the fetched config response.
+- `StatusPage.tsx` derives quick date ranges in local date-input format and passes the selected range to the status API;
+  it renders backend-provided `today_*`, `range_*`, and per-config `range_stat` fields instead of recalculating
+  generation history in the browser.
 
 Use `useMemo` where the derivation is non-trivial or passed deeply; otherwise a local helper function is fine.
 
