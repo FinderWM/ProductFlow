@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import itsdangerous.timed
@@ -20,6 +21,7 @@ from productflow_backend.config import (
 )
 from productflow_backend.infrastructure.db.models import (
     AppSetting,
+    GenerationConfigDailyStat,
     ProviderBinding,
     ProviderProfile,
 )
@@ -700,6 +702,83 @@ def test_provider_bootstrap_splits_different_legacy_connections(configured_env: 
     bindings = {binding["purpose"]: binding for binding in payload["bindings"]}
     assert bindings["text"]["provider_profile_id"] == profiles_by_base_url["https://text.example/v1"]["id"]
     assert bindings["image"]["provider_profile_id"] == profiles_by_base_url["https://image.example/v1"]["id"]
+
+
+def test_generation_config_status_filters_date_range_and_splits_purpose_stats(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    _unlock_settings(client)
+
+    provider_config = client.get("/api/settings/provider-config")
+    assert provider_config.status_code == 200
+    configs = provider_config.json()["generation_configs"]
+    text_config_id = next(item["id"] for item in configs if item["purpose"] == "text")
+    image_config_id = next(item["id"] for item in configs if item["purpose"] == "image")
+    today = datetime.now().astimezone().date()
+    start_date = today - timedelta(days=6)
+    outside_date = start_date - timedelta(days=1)
+
+    session = get_session_factory()()
+    try:
+        session.add_all(
+            [
+                GenerationConfigDailyStat(
+                    generation_config_id=text_config_id,
+                    stat_date=today,
+                    attempt_count=5,
+                    success_count=4,
+                    failure_count=1,
+                    generated_unit_count=8,
+                ),
+                GenerationConfigDailyStat(
+                    generation_config_id=image_config_id,
+                    stat_date=today - timedelta(days=1),
+                    attempt_count=7,
+                    success_count=6,
+                    failure_count=1,
+                    generated_unit_count=7,
+                ),
+                GenerationConfigDailyStat(
+                    generation_config_id=text_config_id,
+                    stat_date=outside_date,
+                    attempt_count=99,
+                    success_count=99,
+                    failure_count=0,
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(
+        f"/api/settings/generation-config-status?start_date={start_date.isoformat()}&end_date={today.isoformat()}"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["start_date"] == start_date.isoformat()
+    assert payload["end_date"] == today.isoformat()
+    assert payload["range_attempt_count"] == 12
+    assert payload["range_success_count"] == 10
+    assert payload["range_failure_count"] == 2
+    assert payload["range_text_attempt_count"] == 5
+    assert payload["range_image_attempt_count"] == 7
+    assert payload["today_attempt_count"] == 5
+    assert payload["today_text_attempt_count"] == 5
+    assert payload["today_image_attempt_count"] == 0
+
+    configs_by_id = {item["id"]: item for item in payload["configs"]}
+    assert configs_by_id[text_config_id]["range_stat"]["attempt_count"] == 5
+    assert configs_by_id[image_config_id]["range_stat"]["attempt_count"] == 7
+
+    invalid = client.get(
+        f"/api/settings/generation-config-status?start_date={today.isoformat()}&end_date={outside_date.isoformat()}"
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "日期范围无效"
 
 
 def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bindings(configured_env: Path) -> None:

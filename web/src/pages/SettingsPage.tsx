@@ -2,7 +2,6 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode, RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity,
   Box,
   Check,
   CheckCircle2,
@@ -60,7 +59,6 @@ export type SettingsSectionId =
   | "providers"
   | "text"
   | "image"
-  | "status"
   | "prompts"
   | "upload"
   | "queue"
@@ -178,13 +176,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     descriptionKey: "settings.section.imageDescription",
     groupKey: "settings.groupProviders",
     icon: Image,
-  },
-  {
-    id: "status",
-    labelKey: "settings.section.status",
-    descriptionKey: "settings.section.statusDescription",
-    groupKey: "settings.groupProviders",
-    icon: Activity,
   },
   {
     id: "prompts",
@@ -2156,68 +2147,6 @@ function GenerationConfigImageFields({
   );
 }
 
-function GenerationStatusSection({ data }: { data: ProviderConfigResponse | undefined }) {
-  const { t } = useI18n();
-  const summary = data?.status_summary;
-  const configs = generationConfigsForPurpose(data, "text").concat(generationConfigsForPurpose(data, "image"));
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatusMetric label={t("settings.generation.totalConfigs")} value={summary?.total_count ?? 0} />
-        <StatusMetric label={t("settings.generation.runningConfigs")} value={summary?.running_count ?? 0} />
-        <StatusMetric label={t("settings.generation.frozenConfigs")} value={summary?.frozen_count ?? 0} />
-        <StatusMetric label={t("settings.generation.todayAttempts")} value={summary?.today_attempt_count ?? 0} />
-      </div>
-      <div className={`${PANEL_CLASS} overflow-hidden p-0`}>
-        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-          <h2 className="text-base font-semibold text-slate-950 dark:text-white">
-            {t("settings.generation.statusTitle")}
-          </h2>
-        </div>
-        <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {configs.length ? (
-            configs.map((config) => (
-              <div key={config.id} className="grid gap-3 px-5 py-4 text-sm md:grid-cols-[1.3fr_0.7fr_1fr_1fr]">
-                <div>
-                  <div className="font-semibold text-slate-950 dark:text-white">{config.name}</div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {config.purpose} · {config.provider_kind} · {t("settings.generation.priority")} {config.priority}
-                  </div>
-                </div>
-                <div className="text-slate-600 dark:text-slate-300">
-                  {config.state?.current_concurrency ?? 0}/{config.max_concurrency}
-                </div>
-                <div className="text-slate-600 dark:text-slate-300">
-                  {t("settings.generation.statusStats", {
-                    attempts: config.today_stat?.attempt_count ?? 0,
-                    successRate: generationConfigSuccessRate(config),
-                  })}
-                </div>
-                <div className="text-slate-600 dark:text-slate-300">
-                  {config.state?.last_failure_reason || config.state?.frozen_until || t("settings.generation.healthy")}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="px-5 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
-              {t("settings.generation.emptyStatus")}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatusMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/20">
-      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{value}</div>
-    </div>
-  );
-}
-
 export function SettingsPage() {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -2922,8 +2851,6 @@ export function SettingsPage() {
                         }}
                       />
                     ) : null}
-
-                    {activeSection === "status" ? <GenerationStatusSection data={providerConfigQuery.data} /> : null}
 
                     {genericSection ? (
                       <form onSubmit={handleSubmit} className={`${PANEL_CLASS} space-y-2`}>

@@ -107,6 +107,19 @@ class GenerationConfigDailyStatResponse(BaseModel):
     last_failure_at: str | None = None
 
 
+class GenerationConfigStatAggregateResponse(BaseModel):
+    attempt_count: int
+    success_count: int
+    failure_count: int
+    timeout_count: int
+    throttled_count: int
+    generated_unit_count: int
+    total_latency_ms: int
+    freeze_count: int
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+
+
 class GenerationConfigResponse(BaseModel):
     id: str
     purpose: str
@@ -138,14 +151,37 @@ class GenerationConfigOptionResponse(BaseModel):
     frozen_until: str | None = None
 
 
+class GenerationConfigStatusConfigResponse(BaseModel):
+    id: str
+    purpose: str
+    name: str
+    provider_kind: str
+    priority: int
+    max_concurrency: int
+    enabled: bool
+    state: GenerationConfigStateResponse | None = None
+    today_stat: GenerationConfigDailyStatResponse | None = None
+    range_stat: GenerationConfigStatAggregateResponse
+
+
 class GenerationConfigStatusSummaryResponse(BaseModel):
     total_count: int
     enabled_count: int
     frozen_count: int
     running_count: int
+    start_date: str
+    end_date: str
+    range_attempt_count: int
+    range_success_count: int
+    range_failure_count: int
+    range_text_attempt_count: int
+    range_image_attempt_count: int
     today_attempt_count: int
     today_success_count: int
     today_failure_count: int
+    today_text_attempt_count: int
+    today_image_attempt_count: int
+    configs: list[GenerationConfigStatusConfigResponse] = Field(default_factory=list)
 
 
 class ProviderConfigResponse(BaseModel):

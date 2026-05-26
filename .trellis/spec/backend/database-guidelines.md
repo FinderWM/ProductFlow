@@ -247,6 +247,10 @@ For runtime settings:
 - `GET /api/settings/generation-config-options` is intentionally not behind the secondary settings unlock. It returns
   only non-secret fields (`id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`, `frozen_until`) for workflow
   and image-chat selectors.
+- `GET /api/settings/generation-config-status` stays behind the secondary settings unlock. It may receive
+  `start_date=YYYY-MM-DD` and `end_date=YYYY-MM-DD`; when omitted, the range defaults to today's local stat date. The
+  response must keep today's aggregate fields for compatibility, add selected-range totals, split text/image attempts by
+  `GenerationConfig.purpose`, and return per-config `range_stat` values aggregated from `generation_config_daily_stats`.
 - Automatic scheduling filters disabled, archived, frozen, over-capacity, profile-disabled, and capability-incompatible
   configs, then claims capacity with a conditional DB update on `generation_config_states.current_concurrency`.
 - Manual scheduling targets the supplied config id but still respects enabled state, profile availability, freeze state,

@@ -153,8 +153,16 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  getGenerationConfigStatus(): Promise<GenerationConfigStatusSummary> {
-    return request("/api/settings/generation-config-status");
+  getGenerationConfigStatus(input?: { start_date?: string; end_date?: string }): Promise<GenerationConfigStatusSummary> {
+    const params = new URLSearchParams();
+    if (input?.start_date) {
+      params.set("start_date", input.start_date);
+    }
+    if (input?.end_date) {
+      params.set("end_date", input.end_date);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/settings/generation-config-status${suffix}`);
   },
   listGenerationConfigs(): Promise<GenerationConfig[]> {
     return request("/api/settings/generation-configs");

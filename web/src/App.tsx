@@ -30,6 +30,9 @@ const ProductListPage = lazy(loadProductListPage);
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })),
 );
+const StatusPage = lazy(() =>
+  import("./pages/StatusPage").then((module) => ({ default: module.StatusPage })),
+);
 
 function LoadingScreen() {
   const { t } = useI18n();
@@ -90,6 +93,10 @@ function AppRoutes() {
         <Route
           path="/settings"
           element={authenticated ? <SettingsPage /> : <Navigate to="/login" replace />}
+        />
+        <Route
+          path="/status"
+          element={authenticated ? <StatusPage /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/products/:productId/image-chat"

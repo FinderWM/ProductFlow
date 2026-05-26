@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -72,7 +72,9 @@ from productflow_backend.presentation.schemas.settings import (
     GenerationConfigDailyStatResponse,
     GenerationConfigOptionResponse,
     GenerationConfigResponse,
+    GenerationConfigStatAggregateResponse,
     GenerationConfigStateResponse,
+    GenerationConfigStatusConfigResponse,
     GenerationConfigStatusSummaryResponse,
     GenerationConfigUpdateRequest,
     ProviderBindingResponse,
@@ -107,6 +109,20 @@ class _SettingsImportBundle:
     provider_bindings: list[dict[str, Any]]
     generation_configs: list[dict[str, Any]]
     preview: SettingsImportPreviewResponse
+
+
+@dataclass(slots=True)
+class _GenerationConfigStatAggregate:
+    attempt_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    timeout_count: int = 0
+    throttled_count: int = 0
+    generated_unit_count: int = 0
+    total_latency_ms: int = 0
+    freeze_count: int = 0
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
 
 
 def _settings_token_configured() -> bool:
@@ -254,10 +270,61 @@ def _serialize_generation_config_daily_stat(
     )
 
 
+def _serialize_generation_config_stat_aggregate(
+    stat: _GenerationConfigStatAggregate,
+) -> GenerationConfigStatAggregateResponse:
+    return GenerationConfigStatAggregateResponse(
+        attempt_count=stat.attempt_count,
+        success_count=stat.success_count,
+        failure_count=stat.failure_count,
+        timeout_count=stat.timeout_count,
+        throttled_count=stat.throttled_count,
+        generated_unit_count=stat.generated_unit_count,
+        total_latency_ms=stat.total_latency_ms,
+        freeze_count=stat.freeze_count,
+        last_success_at=_serialize_dt(stat.last_success_at),
+        last_failure_at=_serialize_dt(stat.last_failure_at),
+    )
+
+
 def _today_generation_config_stats(session: Session) -> dict[str, GenerationConfigDailyStat]:
     today = datetime.now().astimezone().date()
     rows = session.scalars(select(GenerationConfigDailyStat).where(GenerationConfigDailyStat.stat_date == today)).all()
     return {row.generation_config_id: row for row in rows}
+
+
+def _generation_config_stat_aggregates(
+    session: Session,
+    *,
+    start_date: date,
+    end_date: date,
+) -> dict[str, _GenerationConfigStatAggregate]:
+    rows = session.scalars(
+        select(GenerationConfigDailyStat).where(
+            GenerationConfigDailyStat.stat_date >= start_date,
+            GenerationConfigDailyStat.stat_date <= end_date,
+        )
+    ).all()
+    stats: dict[str, _GenerationConfigStatAggregate] = {}
+    for row in rows:
+        aggregate = stats.setdefault(row.generation_config_id, _GenerationConfigStatAggregate())
+        aggregate.attempt_count += row.attempt_count
+        aggregate.success_count += row.success_count
+        aggregate.failure_count += row.failure_count
+        aggregate.timeout_count += row.timeout_count
+        aggregate.throttled_count += row.throttled_count
+        aggregate.generated_unit_count += row.generated_unit_count
+        aggregate.total_latency_ms += row.total_latency_ms
+        aggregate.freeze_count += row.freeze_count
+        if row.last_success_at is not None and (
+            aggregate.last_success_at is None or row.last_success_at > aggregate.last_success_at
+        ):
+            aggregate.last_success_at = row.last_success_at
+        if row.last_failure_at is not None and (
+            aggregate.last_failure_at is None or row.last_failure_at > aggregate.last_failure_at
+        ):
+            aggregate.last_failure_at = row.last_failure_at
+    return stats
 
 
 def _serialize_generation_config(
@@ -287,6 +354,28 @@ def _serialize_generation_config(
     )
 
 
+def _serialize_generation_config_status_config(
+    generation_config: GenerationConfig,
+    *,
+    today_stats: dict[str, GenerationConfigDailyStat],
+    range_stats: dict[str, _GenerationConfigStatAggregate],
+) -> GenerationConfigStatusConfigResponse:
+    return GenerationConfigStatusConfigResponse(
+        id=generation_config.id,
+        purpose=generation_config.purpose,
+        name=generation_config.name,
+        provider_kind=generation_config.provider_kind,
+        priority=generation_config.priority,
+        max_concurrency=generation_config.max_concurrency,
+        enabled=generation_config.enabled,
+        state=_serialize_generation_config_state(generation_config.state),
+        today_stat=_serialize_generation_config_daily_stat(today_stats.get(generation_config.id)),
+        range_stat=_serialize_generation_config_stat_aggregate(
+            range_stats.get(generation_config.id, _GenerationConfigStatAggregate())
+        ),
+    )
+
+
 def _serialize_generation_config_option(generation_config: GenerationConfig) -> GenerationConfigOptionResponse:
     state = generation_config.state
     return GenerationConfigOptionResponse(
@@ -300,16 +389,49 @@ def _serialize_generation_config_option(generation_config: GenerationConfig) -> 
     )
 
 
-def _serialize_generation_config_status_summary(session: Session) -> GenerationConfigStatusSummaryResponse:
-    summary = generation_config_status_summary(session)
+def _serialize_generation_config_status_summary(
+    session: Session,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    include_configs: bool = True,
+) -> GenerationConfigStatusSummaryResponse:
+    today = datetime.now().astimezone().date()
+    range_start = start_date or end_date or today
+    range_end = end_date or range_start
+    summary = generation_config_status_summary(session, start_date=range_start, end_date=range_end)
+    generation_configs = list_generation_configs(session) if include_configs else []
+    today_stats = _today_generation_config_stats(session) if include_configs else {}
+    range_stats = (
+        _generation_config_stat_aggregates(session, start_date=range_start, end_date=range_end)
+        if include_configs
+        else {}
+    )
     return GenerationConfigStatusSummaryResponse(
         total_count=summary.total_count,
         enabled_count=summary.enabled_count,
         frozen_count=summary.frozen_count,
         running_count=summary.running_count,
+        start_date=summary.start_date.isoformat(),
+        end_date=summary.end_date.isoformat(),
+        range_attempt_count=summary.range_attempt_count,
+        range_success_count=summary.range_success_count,
+        range_failure_count=summary.range_failure_count,
+        range_text_attempt_count=summary.range_text_attempt_count,
+        range_image_attempt_count=summary.range_image_attempt_count,
         today_attempt_count=summary.today_attempt_count,
         today_success_count=summary.today_success_count,
         today_failure_count=summary.today_failure_count,
+        today_text_attempt_count=summary.today_text_attempt_count,
+        today_image_attempt_count=summary.today_image_attempt_count,
+        configs=[
+            _serialize_generation_config_status_config(
+                generation_config,
+                today_stats=today_stats,
+                range_stats=range_stats,
+            )
+            for generation_config in generation_configs
+        ],
     )
 
 
@@ -323,7 +445,7 @@ def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
             _serialize_generation_config(generation_config, today_stats=today_stats)
             for generation_config in generation_configs
         ],
-        status_summary=_serialize_generation_config_status_summary(session),
+        status_summary=_serialize_generation_config_status_summary(session, include_configs=False),
     )
 
 
@@ -770,10 +892,16 @@ def get_provider_config_endpoint(session: Session = Depends(get_session)) -> Pro
     dependencies=[Depends(require_settings_unlocked)],
 )
 def get_generation_config_status_endpoint(
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     session: Session = Depends(get_session),
 ) -> GenerationConfigStatusSummaryResponse:
     ensure_provider_config_bootstrapped(session)
-    return _serialize_generation_config_status_summary(session)
+    range_start = start_date or end_date
+    range_end = end_date or range_start
+    if range_start is not None and range_end is not None and range_end < range_start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="日期范围无效")
+    return _serialize_generation_config_status_summary(session, start_date=range_start, end_date=range_end)
 
 
 @router.get(

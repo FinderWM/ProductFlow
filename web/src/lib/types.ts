@@ -707,6 +707,19 @@ export interface GenerationConfigDailyStat {
   last_failure_at: string | null;
 }
 
+export interface GenerationConfigStatAggregate {
+  attempt_count: number;
+  success_count: number;
+  failure_count: number;
+  timeout_count: number;
+  throttled_count: number;
+  generated_unit_count: number;
+  total_latency_ms: number;
+  freeze_count: number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
+
 export interface GenerationConfig {
   id: string;
   purpose: ProviderPurpose;
@@ -738,14 +751,37 @@ export interface GenerationConfigOption {
   frozen_until: string | null;
 }
 
+export interface GenerationConfigStatusConfig {
+  id: string;
+  purpose: ProviderPurpose;
+  name: string;
+  provider_kind: string;
+  priority: number;
+  max_concurrency: number;
+  enabled: boolean;
+  state: GenerationConfigState | null;
+  today_stat: GenerationConfigDailyStat | null;
+  range_stat: GenerationConfigStatAggregate;
+}
+
 export interface GenerationConfigStatusSummary {
   total_count: number;
   enabled_count: number;
   frozen_count: number;
   running_count: number;
+  start_date: string;
+  end_date: string;
+  range_attempt_count: number;
+  range_success_count: number;
+  range_failure_count: number;
+  range_text_attempt_count: number;
+  range_image_attempt_count: number;
   today_attempt_count: number;
   today_success_count: number;
   today_failure_count: number;
+  today_text_attempt_count: number;
+  today_image_attempt_count: number;
+  configs: GenerationConfigStatusConfig[];
 }
 
 export interface GenerationConfigCreateRequest {

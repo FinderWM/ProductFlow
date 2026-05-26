@@ -108,9 +108,18 @@ class GenerationConfigStatusSummary:
     enabled_count: int
     frozen_count: int
     running_count: int
+    start_date: date
+    end_date: date
+    range_attempt_count: int
+    range_success_count: int
+    range_failure_count: int
+    range_text_attempt_count: int
+    range_image_attempt_count: int
     today_attempt_count: int
     today_success_count: int
     today_failure_count: int
+    today_text_attempt_count: int
+    today_image_attempt_count: int
 
 
 def ensure_provider_config_bootstrapped(session: Session | None = None) -> None:
@@ -776,10 +785,17 @@ def record_generation_config_result(
     )
 
 
-def generation_config_status_summary(session: Session) -> GenerationConfigStatusSummary:
+def generation_config_status_summary(
+    session: Session,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> GenerationConfigStatusSummary:
     ensure_provider_config_bootstrapped(session)
     now = datetime.now(UTC)
     today = _local_stat_date(now)
+    range_start = start_date or end_date or today
+    range_end = end_date or range_start
     configs = list(
         session.scalars(
             select(GenerationConfig)
@@ -787,9 +803,18 @@ def generation_config_status_summary(session: Session) -> GenerationConfigStatus
             .where(GenerationConfig.archived_at.is_(None))
         ).all()
     )
-    stats = list(
+    config_purposes = {item.id: item.purpose for item in configs}
+    today_stats = list(
         session.scalars(
             select(GenerationConfigDailyStat).where(GenerationConfigDailyStat.stat_date == today)
+        ).all()
+    )
+    range_stats = list(
+        session.scalars(
+            select(GenerationConfigDailyStat).where(
+                GenerationConfigDailyStat.stat_date >= range_start,
+                GenerationConfigDailyStat.stat_date <= range_end,
+            )
         ).all()
     )
     return GenerationConfigStatusSummary(
@@ -803,9 +828,30 @@ def generation_config_status_summary(session: Session) -> GenerationConfigStatus
             and _as_aware_utc(item.state.frozen_until) > now
         ),
         running_count=sum(item.state.current_concurrency for item in configs if item.state is not None),
-        today_attempt_count=sum(item.attempt_count for item in stats),
-        today_success_count=sum(item.success_count for item in stats),
-        today_failure_count=sum(item.failure_count for item in stats),
+        start_date=range_start,
+        end_date=range_end,
+        range_attempt_count=sum(item.attempt_count for item in range_stats),
+        range_success_count=sum(item.success_count for item in range_stats),
+        range_failure_count=sum(item.failure_count for item in range_stats),
+        range_text_attempt_count=sum(
+            item.attempt_count for item in range_stats if config_purposes.get(item.generation_config_id) == TEXT_PURPOSE
+        ),
+        range_image_attempt_count=sum(
+            item.attempt_count
+            for item in range_stats
+            if config_purposes.get(item.generation_config_id) == IMAGE_PURPOSE
+        ),
+        today_attempt_count=sum(item.attempt_count for item in today_stats),
+        today_success_count=sum(item.success_count for item in today_stats),
+        today_failure_count=sum(item.failure_count for item in today_stats),
+        today_text_attempt_count=sum(
+            item.attempt_count for item in today_stats if config_purposes.get(item.generation_config_id) == TEXT_PURPOSE
+        ),
+        today_image_attempt_count=sum(
+            item.attempt_count
+            for item in today_stats
+            if config_purposes.get(item.generation_config_id) == IMAGE_PURPOSE
+        ),
     )
 
 
