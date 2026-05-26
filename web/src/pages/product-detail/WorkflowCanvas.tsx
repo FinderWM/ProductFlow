@@ -15,7 +15,6 @@ import {
   Position,
   ReactFlow,
   SelectionMode,
-  getBezierPath,
   useOnViewportChange,
   useOnSelectionChange,
   useKeyPress,
@@ -56,6 +55,8 @@ import {
   PRODUCTFLOW_TARGET_HANDLE,
   type ProductFlowEdgeData,
   type ProductFlowNodeData,
+  type WorkflowEdgeObstacle,
+  buildOrthogonalAvoidingPath,
   connectionToWorkflowEdgeInput,
   getChangedWorkflowNodePositionCandidates,
   getNodePositionForViewportCenter,
@@ -104,6 +105,7 @@ interface WorkflowCanvasNodeData extends ProductFlowNodeData {
 interface WorkflowCanvasEdgeData extends ProductFlowEdgeData {
   deleteLabel: string;
   disabled: boolean;
+  obstacles: WorkflowEdgeObstacle[];
   onDeleteEdge: (edgeId: string) => void;
 }
 
@@ -372,19 +374,19 @@ function ProductFlowCanvasEdge({
   sourceY,
   targetX,
   targetY,
-  sourcePosition,
-  targetPosition,
   selected,
   data,
 }: EdgeProps<WorkflowCanvasEdge>) {
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const edgeRoute = buildOrthogonalAvoidingPath({
     sourceX,
     sourceY,
-    sourcePosition,
     targetX,
     targetY,
-    targetPosition,
+    sourceNodeId: data?.workflowEdge.source_node_id,
+    targetNodeId: data?.workflowEdge.target_node_id,
+    obstacles: data?.obstacles ?? [],
   });
+  const edgePath = edgeRoute.path;
 
   const [isHovered, setIsHovered] = useState(false);
 
@@ -410,8 +412,8 @@ function ProductFlowCanvasEdge({
       />
       <EdgeToolbar
         edgeId={id}
-        x={labelX}
-        y={labelY}
+        x={edgeRoute.labelX}
+        y={edgeRoute.labelY}
         isVisible
         className={`nodrag nowheel nopan transition-all duration-200 ${
           isHovered || selected
@@ -459,6 +461,53 @@ const WORKFLOW_MULTI_SELECTION_KEY_CODES = ["Control", "Meta"];
 const WORKFLOW_CLEAR_SELECTION_KEY_CODE = "Escape";
 const WORKFLOW_PAN_ACTIVATION_KEY_CODE = "Space";
 const WORKFLOW_ZOOM_ACTIVATION_KEY_CODES = ["Control", "Meta"];
+
+function estimateWorkflowNodeHeight(node: WorkflowNode): number {
+  let estimatedHeight = 116;
+  const isImageNode = node.node_type === "reference_image" || node.node_type === "image_generation";
+  const hasImage = isImageNode && (node.status === "succeeded" || node.status === "failed");
+  const imageWaiting = isImageNode && node.status === "queued";
+  if (hasImage || imageWaiting) {
+    estimatedHeight += 120;
+  }
+  if (node.status === "queued") {
+    estimatedHeight += 44;
+  }
+  if (node.failure_reason) {
+    estimatedHeight += 60;
+  }
+  return estimatedHeight;
+}
+
+function getWorkflowNodeElementRect(nodeId: string): DOMRect | null {
+  const element = document.querySelector(`[data-workflow-node-id="${nodeId}"]`);
+  if (!element) {
+    return null;
+  }
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 ? rect : null;
+}
+
+function getWorkflowNodeObstacle(
+  node: WorkflowCanvasNode,
+  instance: ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null,
+): WorkflowEdgeObstacle {
+  const measured = instance?.getNode(node.id)?.measured;
+  const elementRect = getWorkflowNodeElementRect(node.id);
+  const measuredWidth = measured?.width;
+  const measuredHeight = measured?.height;
+  return {
+    nodeId: node.id,
+    x: node.position.x,
+    y: node.position.y,
+    width: measuredWidth && measuredWidth > 0 ? measuredWidth : elementRect?.width ?? NODE_WIDTH,
+    height:
+      measuredHeight && measuredHeight > 0
+        ? measuredHeight
+        : elementRect?.height ?? estimateWorkflowNodeHeight(node.data.workflowNode),
+  };
+}
+
 interface WorkflowCanvasViewportBridgeProps {
   onViewportChange: (viewport: Viewport) => void;
   onViewportChangeEnd: (viewport: Viewport) => void;
@@ -817,27 +866,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         }
 
         const getNodeHeight = (node: typeof nodes[number]): number => {
-          const element = document.querySelector(`[data-workflow-node-id="${node.id}"]`);
-          if (element) {
-            const rect = element.getBoundingClientRect();
-            if (rect.height > 0) {
-              return rect.height;
-            }
-          }
-          let estimatedHeight = 116;
-          const isImageNode = node.node_type === "reference_image" || node.node_type === "image_generation";
-          const hasImage = isImageNode && (node.status === "succeeded" || node.status === "failed");
-          const imageWaiting = isImageNode && node.status === "queued";
-          if (hasImage || imageWaiting) {
-            estimatedHeight += 120;
-          }
-          if (node.status === "queued") {
-            estimatedHeight += 44;
-          }
-          if (node.failure_reason) {
-            estimatedHeight += 60;
-          }
-          return estimatedHeight;
+          return getWorkflowNodeElementRect(node.id)?.height ?? estimateWorkflowNodeHeight(node);
         };
 
         const startX = 72;
@@ -980,6 +1009,10 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
   ]);
 
   const nodes = useMemo<WorkflowCanvasNode[]>(() => buildNodes(), [buildNodes]);
+  const edgeObstacles = useMemo<WorkflowEdgeObstacle[]>(
+    () => nodes.map((node) => getWorkflowNodeObstacle(node, flowInstanceRef.current)),
+    [nodes, flowReady],
+  );
 
   const edges = useMemo<WorkflowCanvasEdge[]>(() => {
     if (!workflow) {
@@ -992,10 +1025,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         ...edge.data,
         deleteLabel: deleteEdgeLabel,
         disabled: structureBusy,
+        obstacles: edgeObstacles,
         onDeleteEdge,
       },
     }));
-  }, [deleteEdgeLabel, onDeleteEdge, structureBusy, workflow]);
+  }, [deleteEdgeLabel, edgeObstacles, onDeleteEdge, structureBusy, workflow]);
 
   useEffect(() => {
     const instance = flowInstanceRef.current;
