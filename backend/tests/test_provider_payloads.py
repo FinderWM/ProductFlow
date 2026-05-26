@@ -56,7 +56,8 @@ from productflow_backend.infrastructure.image.gemini_provider import (
 )
 from productflow_backend.infrastructure.image.images_provider import OpenAIImagesImageProvider
 from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageProvider
-from productflow_backend.infrastructure.provider_config import ResolvedImageProviderConfig
+from productflow_backend.infrastructure.openai_client import OPENAI_COMPATIBLE_DEFAULT_HEADERS
+from productflow_backend.infrastructure.provider_config import ResolvedImageProviderConfig, ResolvedTextProviderConfig
 
 REMOVED_COPY_OUTPUT_KEYS = [
     "derived" + "_fields",
@@ -148,6 +149,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
         session.close()
 
     text_calls: list[dict] = []
+    text_client_kwargs: list[dict] = []
 
     class DummyTextResponse:
         def __init__(self, output_text: str) -> None:
@@ -167,11 +169,19 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
 
     class DummyTextOpenAI:
         def __init__(self, **kwargs) -> None:
+            text_client_kwargs.append(kwargs)
             self.responses = DummyTextResponses()
 
     monkeypatch.setattr("productflow_backend.infrastructure.text.openai_provider.OpenAI", DummyTextOpenAI)
 
-    text_provider = OpenAITextProvider()
+    text_provider = OpenAITextProvider(
+        ResolvedTextProviderConfig(
+            provider_kind="openai",
+            brief_model="brief-model",
+            copy_model="copy-model",
+            api_key="super-secret-text-key",
+        )
+    )
     product_input = ProductInput(
         name="测试商品",
         category="类目",
@@ -182,6 +192,12 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
     brief, _ = text_provider.generate_brief(product_input)
     text_provider.generate_copy(product_input, brief)
 
+    assert text_client_kwargs == [
+        {
+            "api_key": "super-secret-text-key",
+            "default_headers": OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+        }
+    ]
     assert text_calls[0]["instructions"] == "自定义商品理解提示"
     assert text_calls[0]["input"][0]["role"] == "user"
     assert text_calls[1]["instructions"] == "自定义文案提示"
@@ -832,17 +848,19 @@ def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
 
     assert image_output["context_summary"]["copy_prompt_mode"] == "image_edit"
     assert image_output["copy_set_id"]
-    assert image_output["provider_results"] == [
-        {
-            "target_index": 1,
-            "provider_name": "capturing",
-            "model_name": "capturing-v1",
-            "provider_response_id": "resp_workflow_1",
-            "provider_response_status": "completed",
-            "actual_size": "800x800",
-            "notes": ["accepted quality", "normalized size"],
-        }
-    ]
+    assert len(image_output["provider_results"]) == 1
+    provider_result = image_output["provider_results"][0]
+    assert provider_result["generation_config_id"]
+    assert provider_result == {
+        "target_index": 1,
+        "provider_name": "capturing",
+        "model_name": "capturing-v1",
+        "generation_config_id": provider_result["generation_config_id"],
+        "provider_response_id": "resp_workflow_1",
+        "provider_response_status": "completed",
+        "actual_size": "800x800",
+        "notes": ["accepted quality", "normalized size"],
+    }
     assert len(captured_inputs) == 1
     assert captured_inputs[0].copy_prompt_mode == "image_edit"
     assert captured_inputs[0].instruction and "暖色露营场景" in captured_inputs[0].instruction
@@ -953,7 +971,11 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
     assert branched_round["base_asset_id"] == first_asset_id
     assert branched_round["selected_reference_asset_ids"] == [reference_id]
 
-    assert client_kwargs[0] == {"api_key": "demo-api-key", "base_url": "https://example.test/v1"}
+    assert client_kwargs[0] == {
+        "api_key": "demo-api-key",
+        "base_url": "https://example.test/v1",
+        "default_headers": OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+    }
     assert calls[0]["model"] == "gpt-5.4"
     assert calls[0]["tools"] == [{"type": "image_generation", "size": "1024x1024"}]
     assert "previous_response_id" not in calls[0]
@@ -1632,7 +1654,13 @@ def test_openai_images_provider_factory_and_client_generate_payload(
 
     result = OpenAIImagesClient().generate(prompt="生成商品图", size="1024x1024")[0]
 
-    assert client_kwargs == [{"api_key": "demo-api-key", "base_url": "https://example.test/v1"}]
+    assert client_kwargs == [
+        {
+            "api_key": "demo-api-key",
+            "base_url": "https://example.test/v1",
+            "default_headers": OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+        }
+    ]
     assert calls == [
         {
             "model": "gpt-image-1",

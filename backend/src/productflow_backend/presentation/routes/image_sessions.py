@@ -14,6 +14,7 @@ from productflow_backend.application.image_sessions import (
     get_image_session_detail,
     get_image_session_status,
     list_image_sessions,
+    polish_image_session_prompt,
     retry_image_session_generation_task,
     submit_image_session_generation_task,
     update_image_session,
@@ -29,6 +30,8 @@ from productflow_backend.presentation.schemas.image_sessions import (
     ImageSessionDetailResponse,
     ImageSessionListResponse,
     ImageSessionStatusResponse,
+    PolishImageSessionPromptRequest,
+    PolishImageSessionPromptResponse,
     ProductWritebackResponse,
     UpdateImageSessionRequest,
     serialize_image_session_detail,
@@ -143,6 +146,22 @@ def delete_image_session_reference_image_endpoint(
     return serialize_image_session_detail(image_session)
 
 
+@router.post("/image-sessions/prompt-polish", response_model=PolishImageSessionPromptResponse)
+def polish_image_session_prompt_endpoint(
+    payload: PolishImageSessionPromptRequest,
+) -> PolishImageSessionPromptResponse:
+    result = polish_image_session_prompt(
+        prompt=payload.prompt,
+        generation_config_mode=payload.generation_config_mode,
+        generation_config_id=payload.generation_config_id,
+    )
+    return PolishImageSessionPromptResponse(
+        prompt=result.prompt,
+        model_name=result.model_name,
+        generation_config_id=result.generation_config_id,
+    )
+
+
 @router.post(
     "/image-sessions/{image_session_id}/generate",
     response_model=ImageSessionDetailResponse,
@@ -162,6 +181,8 @@ def generate_image_session_round_endpoint(
         selected_reference_asset_ids=payload.selected_reference_asset_ids,
         generation_count=payload.generation_count,
         tool_options=payload.tool_options.model_dump(exclude_none=True) if payload.tool_options else None,
+        generation_config_mode=payload.generation_config_mode,
+        generation_config_id=payload.generation_config_id,
     )
     return serialize_image_session_detail(image_session)
 

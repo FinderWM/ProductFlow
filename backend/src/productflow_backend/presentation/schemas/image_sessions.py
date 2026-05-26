@@ -40,6 +40,7 @@ class ImageSessionRoundResponse(BaseModel):
     provider_response_id: str | None = None
     previous_response_id: str | None = None
     image_generation_call_id: str | None = None
+    generation_config_id: str | None = None
     generation_group_id: str | None = None
     candidate_index: int = 1
     candidate_count: int = 1
@@ -59,6 +60,9 @@ class ImageSessionGenerationTaskResponse(BaseModel):
     size: str
     base_asset_id: str | None = None
     selected_reference_asset_ids: list[str] = Field(default_factory=list)
+    generation_config_mode: Literal["auto", "manual"] = "auto"
+    requested_generation_config_id: str | None = None
+    used_generation_config_id: str | None = None
     generation_count: int
     completed_candidates: int
     active_candidate_index: int | None = None
@@ -160,11 +164,25 @@ class GenerateImageSessionRoundRequest(BaseModel):
     selected_reference_asset_ids: list[str] = Field(default_factory=list, max_length=6)
     generation_count: int = Field(default=1, ge=1, le=10)
     tool_options: ImageToolOptionsRequest | None = None
+    generation_config_mode: Literal["auto", "manual"] = "auto"
+    generation_config_id: str | None = Field(default=None, min_length=1, max_length=36)
 
     @field_validator("size")
     @classmethod
     def validate_size(cls, size: str) -> str:
         return validate_image_generation_size(size)
+
+
+class PolishImageSessionPromptRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=4000)
+    generation_config_mode: Literal["auto", "manual"] = "auto"
+    generation_config_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class PolishImageSessionPromptResponse(BaseModel):
+    prompt: str
+    model_name: str
+    generation_config_id: str
 
 
 class AttachImageSessionAssetRequest(BaseModel):
@@ -232,6 +250,7 @@ def serialize_image_session_round(round_item: ImageSessionRound) -> ImageSession
         provider_response_id=round_item.provider_response_id,
         previous_response_id=round_item.previous_response_id,
         image_generation_call_id=round_item.image_generation_call_id,
+        generation_config_id=round_item.generation_config_id,
         generation_group_id=round_item.generation_group_id,
         candidate_index=round_item.candidate_index,
         candidate_count=round_item.candidate_count,
@@ -259,6 +278,9 @@ def serialize_image_session_generation_task(
         size=task.size,
         base_asset_id=task.base_asset_id,
         selected_reference_asset_ids=task.selected_reference_asset_ids or [],
+        generation_config_mode="manual" if task.generation_config_mode == "manual" else "auto",
+        requested_generation_config_id=task.requested_generation_config_id,
+        used_generation_config_id=task.used_generation_config_id,
         generation_count=task.generation_count,
         completed_candidates=task.completed_candidates,
         active_candidate_index=task.active_candidate_index,

@@ -3,26 +3,25 @@ import { describe, expect, it } from "vitest";
 import {
   configValuesFromChangedDrafts,
   draftsFromConfig,
-  imageBindingPayloadFromDraft,
+  generationConfigPayloadFromDraft,
   providerDisableBlocked,
   providerDrawerCreateState,
   providerDrawerEditState,
   providerFormFromProfile,
   providerProfileCreatePayload,
   providerProfileUpdatePayload,
-  providerUsageFromBindings,
+  providerUsageFromGenerationConfigs,
   providerUsageLabelKeys,
   settingsExportFilename,
   settingsImportSummaryCounts,
   settingsSectionIds,
   shouldShowSettingsMigrationPanel,
-  textBindingPayloadFromDraft,
 } from "./SettingsPage";
 import { translate } from "../lib/i18n";
 import type {
   ConfigItem,
   ConfigResponse,
-  ProviderBinding,
+  GenerationConfig,
   ProviderCapability,
   ProviderProfile,
   SettingsImportPreviewResponse,
@@ -67,16 +66,26 @@ function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProf
   };
 }
 
-function providerBinding(overrides: Partial<ProviderBinding> & Pick<ProviderBinding, "purpose">): ProviderBinding {
+function generationConfig(overrides: Partial<GenerationConfig> & Pick<GenerationConfig, "purpose">): GenerationConfig {
   return {
-    id: overrides.id ?? `${overrides.purpose}-binding`,
+    id: overrides.id ?? `${overrides.purpose}-config`,
     purpose: overrides.purpose,
+    name: overrides.name ?? `${overrides.purpose} config`,
     provider_kind: overrides.provider_kind ?? "openai",
     provider_profile_id: overrides.provider_profile_id ?? "profile-1",
     model_settings: overrides.model_settings ?? {},
     config: overrides.config ?? {},
+    priority: overrides.priority ?? 100,
+    max_concurrency: overrides.max_concurrency ?? 1,
+    enabled: overrides.enabled ?? true,
+    availability_window_minutes: overrides.availability_window_minutes ?? 10,
+    failure_threshold: overrides.failure_threshold ?? 3,
+    cooldown_minutes: overrides.cooldown_minutes ?? 10,
+    archived_at: overrides.archived_at ?? null,
     created_at: overrides.created_at ?? "2026-05-13T00:00:00Z",
     updated_at: overrides.updated_at ?? "2026-05-13T00:00:00Z",
+    state: overrides.state ?? null,
+    today_stat: overrides.today_stat ?? null,
   };
 }
 
@@ -256,12 +265,12 @@ describe("SettingsPage provider profile helpers", () => {
     });
   });
 
-  it("derives card usage labels from text and image provider bindings", () => {
-    const usage = providerUsageFromBindings(
+  it("derives card usage labels from text and image generation configs", () => {
+    const usage = providerUsageFromGenerationConfigs(
       [
-        providerBinding({ purpose: "text", provider_profile_id: "profile-1" }),
-        providerBinding({ purpose: "image", provider_profile_id: "profile-1", provider_kind: "openai_images" }),
-        providerBinding({ purpose: "image", provider_profile_id: "other", provider_kind: "openai_images" }),
+        generationConfig({ purpose: "text", provider_profile_id: "profile-1" }),
+        generationConfig({ purpose: "image", provider_profile_id: "profile-1", provider_kind: "openai_images" }),
+        generationConfig({ purpose: "image", provider_profile_id: "other", provider_kind: "openai_images" }),
       ],
       "profile-1",
     );
@@ -273,35 +282,71 @@ describe("SettingsPage provider profile helpers", () => {
     ]);
   });
 
-  it("builds Google Gemini image binding payloads without OpenAI-specific config", () => {
+  it("builds Google Gemini image generation config payloads without OpenAI-specific config", () => {
     expect(
-      imageBindingPayloadFromDraft({
+      generationConfigPayloadFromDraft({
+        id: null,
+        purpose: "image",
+        name: "Gemini image",
         provider_kind: "google_gemini_image",
         provider_profile_id: "profile-gemini",
+        brief_model: "",
+        copy_model: "",
         model: " gemini-2.5-flash-image ",
         images_quality: "high",
         images_style: "vivid",
         responses_background_enabled: true,
         gemini_api_version: "v1beta",
         gemini_output_mime_type: " image/png ",
+        priority: "80",
+        max_concurrency: "2",
+        enabled: true,
+        availability_window_minutes: "15",
+        failure_threshold: "4",
+        cooldown_minutes: "20",
       }),
     ).toEqual({
+      name: "Gemini image",
+      purpose: "image",
       provider_kind: "google_gemini_image",
       provider_profile_id: "profile-gemini",
       model_settings: { model: "gemini-2.5-flash-image" },
       config: { gemini_api_version: "v1beta", gemini_output_mime_type: "image/png" },
+      priority: 80,
+      max_concurrency: 2,
+      enabled: true,
+      availability_window_minutes: 15,
+      failure_threshold: 4,
+      cooldown_minutes: 20,
     });
   });
 
-  it("builds text binding payloads with text models only", () => {
+  it("builds text generation config payloads with text models only", () => {
     expect(
-      textBindingPayloadFromDraft({
+      generationConfigPayloadFromDraft({
+        id: null,
+        purpose: "text",
+        name: "Primary text",
         provider_kind: "openai",
         provider_profile_id: "profile-1",
         brief_model: " gpt-5.4 ",
         copy_model: " gpt-5.4 ",
+        model: "",
+        images_quality: "",
+        images_style: "",
+        responses_background_enabled: true,
+        gemini_api_version: "v1beta",
+        gemini_output_mime_type: "",
+        priority: "100",
+        max_concurrency: "1",
+        enabled: true,
+        availability_window_minutes: "10",
+        failure_threshold: "3",
+        cooldown_minutes: "10",
       }),
     ).toEqual({
+      name: "Primary text",
+      purpose: "text",
       provider_kind: "openai",
       provider_profile_id: "profile-1",
       model_settings: {
@@ -309,10 +354,16 @@ describe("SettingsPage provider profile helpers", () => {
         copy_model: "gpt-5.4",
       },
       config: {},
+      priority: 100,
+      max_concurrency: 1,
+      enabled: true,
+      availability_window_minutes: 10,
+      failure_threshold: 3,
+      cooldown_minutes: 10,
     });
   });
 
-  it("blocks disabling an enabled provider that is currently used by a binding", () => {
+  it("blocks disabling an enabled provider that is currently used by a generation config", () => {
     expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: true, image: false })).toBe(true);
     expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: false, image: false })).toBe(false);
     expect(providerDisableBlocked(providerProfile({ enabled: false }), { text: true, image: true })).toBe(false);
@@ -367,6 +418,7 @@ describe("SettingsPage import/export helpers", () => {
       runtime_config_count: 12,
       provider_profile_count: 2,
       provider_binding_count: 2,
+      generation_config_count: 2,
       provider_profile_names: ["主供应商", "备用供应商"],
       provider_binding_purposes: ["image", "text"],
       includes_api_keys: true,

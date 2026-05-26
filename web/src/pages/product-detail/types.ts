@@ -1,4 +1,4 @@
-import type { CopyPayloadV2, ImageToolOptions } from "../../lib/types";
+import type { CopyPayloadV2, GenerationConfigSelectionMode, ImageToolOptions } from "../../lib/types";
 
 export type CanvasPoint = {
   x: number;
@@ -22,5 +22,7 @@ export type NodeConfigDraft = {
   channel: string;
   size: string;
   toolOptions: ImageToolOptions;
+  generationConfigMode: GenerationConfigSelectionMode;
+  generationConfigId: string | null;
   copyStructuredPayload: CopyPayloadV2 | null;
 };

@@ -4,6 +4,7 @@ export type PosterKind = "main_image" | "promo_poster";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type SourceAssetKind = "original_image" | "reference_image" | "processed_product_image";
 export type ImageSessionAssetKind = "reference_upload" | "generated_image";
+export type GenerationConfigSelectionMode = "auto" | "manual";
 export type WorkflowNodeType =
   | "product_context"
   | "reference_image"
@@ -432,6 +433,7 @@ export interface ImageSessionRound {
   provider_response_id: string | null;
   previous_response_id: string | null;
   image_generation_call_id: string | null;
+  generation_config_id: string | null;
   generation_group_id: string | null;
   candidate_index: number;
   candidate_count: number;
@@ -466,6 +468,9 @@ export interface ImageSessionGenerationTask {
   size: string;
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
+  generation_config_mode: GenerationConfigSelectionMode;
+  requested_generation_config_id: string | null;
+  used_generation_config_id: string | null;
   generation_count: number;
   completed_candidates: number;
   active_candidate_index: number | null;
@@ -676,9 +681,108 @@ export interface ProviderBindingUpdateRequest {
   config?: Record<string, unknown>;
 }
 
+export interface GenerationConfigState {
+  current_concurrency: number;
+  frozen_until: string | null;
+  failure_window_started_at: string | null;
+  failure_count_in_window: number;
+  last_used_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_failure_reason: string | null;
+  updated_at: string | null;
+}
+
+export interface GenerationConfigDailyStat {
+  stat_date: string;
+  attempt_count: number;
+  success_count: number;
+  failure_count: number;
+  timeout_count: number;
+  throttled_count: number;
+  generated_unit_count: number;
+  total_latency_ms: number;
+  freeze_count: number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
+
+export interface GenerationConfig {
+  id: string;
+  purpose: ProviderPurpose;
+  name: string;
+  provider_kind: string;
+  provider_profile_id: string | null;
+  model_settings: Record<string, unknown>;
+  config: Record<string, unknown>;
+  priority: number;
+  max_concurrency: number;
+  enabled: boolean;
+  availability_window_minutes: number;
+  failure_threshold: number;
+  cooldown_minutes: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  state: GenerationConfigState | null;
+  today_stat: GenerationConfigDailyStat | null;
+}
+
+export interface GenerationConfigOption {
+  id: string;
+  purpose: ProviderPurpose;
+  name: string;
+  provider_kind: string;
+  enabled: boolean;
+  priority: number;
+  frozen_until: string | null;
+}
+
+export interface GenerationConfigStatusSummary {
+  total_count: number;
+  enabled_count: number;
+  frozen_count: number;
+  running_count: number;
+  today_attempt_count: number;
+  today_success_count: number;
+  today_failure_count: number;
+}
+
+export interface GenerationConfigCreateRequest {
+  name: string;
+  purpose: ProviderPurpose;
+  provider_kind: string;
+  provider_profile_id?: string | null;
+  model_settings?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+  priority?: number;
+  max_concurrency?: number;
+  enabled?: boolean;
+  availability_window_minutes?: number | null;
+  failure_threshold?: number | null;
+  cooldown_minutes?: number | null;
+}
+
+export interface GenerationConfigUpdateRequest {
+  name?: string | null;
+  purpose?: ProviderPurpose | null;
+  provider_kind?: string | null;
+  provider_profile_id?: string | null;
+  model_settings?: Record<string, unknown> | null;
+  config?: Record<string, unknown> | null;
+  priority?: number | null;
+  max_concurrency?: number | null;
+  enabled?: boolean | null;
+  availability_window_minutes?: number | null;
+  failure_threshold?: number | null;
+  cooldown_minutes?: number | null;
+}
+
 export interface ProviderConfigResponse {
   profiles: ProviderProfile[];
   bindings: ProviderBinding[];
+  generation_configs: GenerationConfig[];
+  status_summary: GenerationConfigStatusSummary | null;
 }
 
 export interface ProviderModel {
@@ -721,11 +825,28 @@ export interface SettingsExportProviderBinding {
   config: Record<string, unknown>;
 }
 
+export interface SettingsExportGenerationConfig {
+  id?: string | null;
+  name: string;
+  purpose: ProviderPurpose;
+  provider_kind: string;
+  provider_profile_id?: string | null;
+  model_settings: Record<string, unknown>;
+  config: Record<string, unknown>;
+  priority: number;
+  max_concurrency: number;
+  enabled: boolean;
+  availability_window_minutes?: number | null;
+  failure_threshold?: number | null;
+  cooldown_minutes?: number | null;
+}
+
 export interface SettingsExportPayload {
   metadata: SettingsExportMetadata;
   runtime_config: Record<string, string | number | boolean | string[] | null>;
   provider_profiles: SettingsExportProviderProfile[];
   provider_bindings: SettingsExportProviderBinding[];
+  generation_configs: SettingsExportGenerationConfig[];
 }
 
 export interface SettingsImportPreviewResponse {
@@ -733,6 +854,7 @@ export interface SettingsImportPreviewResponse {
   runtime_config_count: number;
   provider_profile_count: number;
   provider_binding_count: number;
+  generation_config_count: number;
   provider_profile_names: string[];
   provider_binding_purposes: ProviderPurpose[];
   includes_api_keys: boolean;

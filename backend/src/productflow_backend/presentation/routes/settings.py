@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,22 +24,34 @@ from productflow_backend.config import (
     normalize_image_generation_size,
     parse_image_tool_allowed_fields,
 )
-from productflow_backend.infrastructure.db.models import AppSetting, ProviderBinding, ProviderProfile
+from productflow_backend.infrastructure.db.models import (
+    AppSetting,
+    GenerationConfig,
+    GenerationConfigDailyStat,
+    GenerationConfigState,
+    ProviderBinding,
+    ProviderProfile,
+)
 from productflow_backend.infrastructure.provider_config import (
     IMAGE_PROVIDER_KINDS,
     PROVIDER_PURPOSES,
     PROVIDER_TYPES,
     TEXT_PROVIDER_KINDS,
     UNSET_PROVIDER_FIELD,
+    add_generation_config,
+    archive_generation_config,
     archive_provider_profile,
     capability_for_provider_kind,
     create_provider_profile,
     ensure_provider_config_bootstrapped,
+    generation_config_status_summary,
     is_real_image_provider_kind,
+    list_generation_configs,
     list_provider_bindings,
     list_provider_profiles,
     normalize_provider_binding_model_settings,
     normalize_provider_binding_runtime_config,
+    update_generation_config,
     update_provider_binding,
     update_provider_profile,
     validate_provider_capabilities,
@@ -55,6 +68,13 @@ from productflow_backend.presentation.schemas.settings import (
     ConfigOptionResponse,
     ConfigResponse,
     ConfigUpdateRequest,
+    GenerationConfigCreateRequest,
+    GenerationConfigDailyStatResponse,
+    GenerationConfigOptionResponse,
+    GenerationConfigResponse,
+    GenerationConfigStateResponse,
+    GenerationConfigStatusSummaryResponse,
+    GenerationConfigUpdateRequest,
     ProviderBindingResponse,
     ProviderBindingUpdateRequest,
     ProviderConfigResponse,
@@ -66,6 +86,7 @@ from productflow_backend.presentation.schemas.settings import (
     RuntimeConfigResponse,
     SettingsExportDocument,
     SettingsExportMetadataResponse,
+    SettingsGenerationConfigExport,
     SettingsImportCommitResponse,
     SettingsImportPreviewResponse,
     SettingsLockStateResponse,
@@ -84,6 +105,7 @@ class _SettingsImportBundle:
     normalized_runtime_config: dict[str, str]
     provider_profiles: list[dict[str, Any]]
     provider_bindings: list[dict[str, Any]]
+    generation_configs: list[dict[str, Any]]
     preview: SettingsImportPreviewResponse
 
 
@@ -192,10 +214,116 @@ def _serialize_provider_binding(binding) -> ProviderBindingResponse:
     )
 
 
+def _serialize_dt(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _serialize_generation_config_state(state) -> GenerationConfigStateResponse | None:
+    if state is None:
+        return None
+    return GenerationConfigStateResponse(
+        current_concurrency=state.current_concurrency,
+        frozen_until=_serialize_dt(state.frozen_until),
+        failure_window_started_at=_serialize_dt(state.failure_window_started_at),
+        failure_count_in_window=state.failure_count_in_window,
+        last_used_at=_serialize_dt(state.last_used_at),
+        last_success_at=_serialize_dt(state.last_success_at),
+        last_failure_at=_serialize_dt(state.last_failure_at),
+        last_failure_reason=state.last_failure_reason,
+        updated_at=_serialize_dt(state.updated_at),
+    )
+
+
+def _serialize_generation_config_daily_stat(
+    stat: GenerationConfigDailyStat | None,
+) -> GenerationConfigDailyStatResponse | None:
+    if stat is None:
+        return None
+    return GenerationConfigDailyStatResponse(
+        stat_date=stat.stat_date.isoformat(),
+        attempt_count=stat.attempt_count,
+        success_count=stat.success_count,
+        failure_count=stat.failure_count,
+        timeout_count=stat.timeout_count,
+        throttled_count=stat.throttled_count,
+        generated_unit_count=stat.generated_unit_count,
+        total_latency_ms=stat.total_latency_ms,
+        freeze_count=stat.freeze_count,
+        last_success_at=_serialize_dt(stat.last_success_at),
+        last_failure_at=_serialize_dt(stat.last_failure_at),
+    )
+
+
+def _today_generation_config_stats(session: Session) -> dict[str, GenerationConfigDailyStat]:
+    today = datetime.now().astimezone().date()
+    rows = session.scalars(select(GenerationConfigDailyStat).where(GenerationConfigDailyStat.stat_date == today)).all()
+    return {row.generation_config_id: row for row in rows}
+
+
+def _serialize_generation_config(
+    generation_config: GenerationConfig,
+    *,
+    today_stats: dict[str, GenerationConfigDailyStat],
+) -> GenerationConfigResponse:
+    return GenerationConfigResponse(
+        id=generation_config.id,
+        purpose=generation_config.purpose,
+        name=generation_config.name,
+        provider_kind=generation_config.provider_kind,
+        provider_profile_id=generation_config.provider_profile_id,
+        model_settings=dict(generation_config.model_settings_json or {}),
+        config=dict(generation_config.config_json or {}),
+        priority=generation_config.priority,
+        max_concurrency=generation_config.max_concurrency,
+        enabled=generation_config.enabled,
+        availability_window_minutes=generation_config.availability_window_minutes,
+        failure_threshold=generation_config.failure_threshold,
+        cooldown_minutes=generation_config.cooldown_minutes,
+        archived_at=_serialize_dt(generation_config.archived_at),
+        created_at=generation_config.created_at.isoformat(),
+        updated_at=generation_config.updated_at.isoformat(),
+        state=_serialize_generation_config_state(generation_config.state),
+        today_stat=_serialize_generation_config_daily_stat(today_stats.get(generation_config.id)),
+    )
+
+
+def _serialize_generation_config_option(generation_config: GenerationConfig) -> GenerationConfigOptionResponse:
+    state = generation_config.state
+    return GenerationConfigOptionResponse(
+        id=generation_config.id,
+        purpose=generation_config.purpose,
+        name=generation_config.name,
+        provider_kind=generation_config.provider_kind,
+        enabled=generation_config.enabled,
+        priority=generation_config.priority,
+        frozen_until=_serialize_dt(state.frozen_until) if state else None,
+    )
+
+
+def _serialize_generation_config_status_summary(session: Session) -> GenerationConfigStatusSummaryResponse:
+    summary = generation_config_status_summary(session)
+    return GenerationConfigStatusSummaryResponse(
+        total_count=summary.total_count,
+        enabled_count=summary.enabled_count,
+        frozen_count=summary.frozen_count,
+        running_count=summary.running_count,
+        today_attempt_count=summary.today_attempt_count,
+        today_success_count=summary.today_success_count,
+        today_failure_count=summary.today_failure_count,
+    )
+
+
 def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
+    generation_configs = list_generation_configs(session)
+    today_stats = _today_generation_config_stats(session)
     return ProviderConfigResponse(
         profiles=[_serialize_provider_profile(profile) for profile in list_provider_profiles(session)],
         bindings=[_serialize_provider_binding(binding) for binding in list_provider_bindings(session)],
+        generation_configs=[
+            _serialize_generation_config(generation_config, today_stats=today_stats)
+            for generation_config in generation_configs
+        ],
+        status_summary=_serialize_generation_config_status_summary(session),
     )
 
 
@@ -248,6 +376,7 @@ def _build_settings_export_document(session: Session) -> SettingsExportDocument:
         .order_by(ProviderProfile.created_at, ProviderProfile.name)
     ).all()
     bindings = session.scalars(select(ProviderBinding).order_by(ProviderBinding.purpose)).all()
+    generation_configs = list_generation_configs(session)
     return SettingsExportDocument(
         metadata=SettingsExportMetadataResponse(
             schema_version=SETTINGS_EXPORT_SCHEMA_VERSION,
@@ -280,6 +409,24 @@ def _build_settings_export_document(session: Session) -> SettingsExportDocument:
                 config=dict(binding.config_json or {}),
             )
             for binding in bindings
+        ],
+        generation_configs=[
+            SettingsGenerationConfigExport(
+                id=generation_config.id,
+                name=generation_config.name,
+                purpose=generation_config.purpose,
+                provider_kind=generation_config.provider_kind,
+                provider_profile_id=generation_config.provider_profile_id,
+                model_settings=dict(generation_config.model_settings_json or {}),
+                config=dict(generation_config.config_json or {}),
+                priority=generation_config.priority,
+                max_concurrency=generation_config.max_concurrency,
+                enabled=generation_config.enabled,
+                availability_window_minutes=generation_config.availability_window_minutes,
+                failure_threshold=generation_config.failure_threshold,
+                cooldown_minutes=generation_config.cooldown_minutes,
+            )
+            for generation_config in generation_configs
         ],
     )
 
@@ -412,14 +559,102 @@ def _normalize_import_bindings(
     return bindings
 
 
+def _normalize_import_generation_configs(
+    document: SettingsExportDocument,
+    profiles: list[dict[str, Any]],
+    bindings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not document.generation_configs:
+        return [
+            {
+                "id": None,
+                "name": "默认文案配置" if binding["purpose"] == "text" else "默认图片配置",
+                "purpose": binding["purpose"],
+                "provider_kind": binding["provider_kind"],
+                "provider_profile_id": binding["provider_profile_id"],
+                "model_settings": dict(binding["model_settings_json"]),
+                "config": dict(binding["config_json"]),
+                "priority": 100,
+                "max_concurrency": 1,
+                "enabled": True,
+                "availability_window_minutes": None,
+                "failure_threshold": None,
+                "cooldown_minutes": None,
+            }
+            for binding in bindings
+        ]
+
+    profiles_by_id = {profile["id"]: profile for profile in profiles}
+    seen_ids: set[str] = set()
+    generation_configs: list[dict[str, Any]] = []
+    for item in document.generation_configs:
+        config_id = item.id.strip() if item.id else None
+        if config_id is not None:
+            if config_id in seen_ids:
+                raise ValueError("生成配置不能重复")
+            seen_ids.add(config_id)
+        if item.purpose not in PROVIDER_PURPOSES:
+            raise ValueError("用途必须是 text 或 image")
+        allowed_kinds = TEXT_PROVIDER_KINDS if item.purpose == "text" else IMAGE_PROVIDER_KINDS
+        if item.provider_kind not in allowed_kinds:
+            raise ValueError("供应商接口类型不支持当前用途")
+        normalized_config = normalize_provider_binding_runtime_config(
+            purpose=item.purpose,
+            provider_kind=item.provider_kind,
+            model_settings=item.model_settings,
+            config=item.config,
+        )
+        normalized_model_settings = normalize_provider_binding_model_settings(
+            purpose=item.purpose,
+            model_settings=item.model_settings,
+        )
+        provider_profile_id = item.provider_profile_id
+        if item.provider_kind == "mock":
+            provider_profile_id = None
+        else:
+            if not provider_profile_id:
+                raise ValueError("真实供应商必须选择供应商档案")
+            profile = profiles_by_id.get(provider_profile_id)
+            if profile is None:
+                raise ValueError("供应商不存在")
+            if not profile["enabled"]:
+                raise ValueError("供应商已停用")
+            capability = capability_for_provider_kind(item.provider_kind)
+            if capability not in set(profile["capabilities_json"]):
+                raise ValueError("供应商档案不支持当前接口能力")
+        generation_configs.append(
+            {
+                "id": config_id,
+                "name": item.name.strip(),
+                "purpose": item.purpose,
+                "provider_kind": item.provider_kind,
+                "provider_profile_id": provider_profile_id,
+                "model_settings": normalized_model_settings,
+                "config": normalized_config,
+                "priority": item.priority,
+                "max_concurrency": item.max_concurrency,
+                "enabled": item.enabled,
+                "availability_window_minutes": item.availability_window_minutes,
+                "failure_threshold": item.failure_threshold,
+                "cooldown_minutes": item.cooldown_minutes,
+            }
+        )
+    if not any(item["purpose"] == "text" for item in generation_configs):
+        raise ValueError("配置文件缺少文案生成配置")
+    if not any(item["purpose"] == "image" for item in generation_configs):
+        raise ValueError("配置文件缺少图片生成配置")
+    return generation_configs
+
+
 def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
     document = _parse_settings_import_document(payload)
     normalized_runtime_config = _normalize_runtime_import_config(document)
     profiles = _normalize_import_profiles(document)
     bindings = _normalize_import_bindings(document, profiles)
+    generation_configs = _normalize_import_generation_configs(document, profiles, bindings)
     if any(
-        binding["purpose"] == "image" and is_real_image_provider_kind(binding["provider_kind"])
-        for binding in bindings
+        generation_config["purpose"] == "image" and is_real_image_provider_kind(generation_config["provider_kind"])
+        for generation_config in generation_configs
     ):
         normalized_runtime_config["poster_generation_mode"] = "generated"
     preview = SettingsImportPreviewResponse(
@@ -427,8 +662,9 @@ def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
         runtime_config_count=len(normalized_runtime_config),
         provider_profile_count=len(profiles),
         provider_binding_count=len(bindings),
+        generation_config_count=len(generation_configs),
         provider_profile_names=[profile["name"] for profile in profiles],
-        provider_binding_purposes=sorted(binding["purpose"] for binding in bindings),
+        provider_binding_purposes=sorted({generation_config["purpose"] for generation_config in generation_configs}),
         includes_api_keys=any(bool(profile["api_key"]) for profile in profiles),
         provider_profiles_with_api_key_count=sum(1 for profile in profiles if profile["api_key"]),
     )
@@ -436,6 +672,7 @@ def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
         normalized_runtime_config=normalized_runtime_config,
         provider_profiles=profiles,
         provider_bindings=bindings,
+        generation_configs=generation_configs,
         preview=preview,
     )
 
@@ -449,6 +686,9 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
             else:
                 existing.value = value
 
+        session.execute(delete(GenerationConfigDailyStat))
+        session.execute(delete(GenerationConfigState))
+        session.execute(delete(GenerationConfig))
         session.execute(delete(ProviderBinding))
         session.execute(delete(ProviderProfile))
         session.flush()
@@ -468,15 +708,23 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
                 )
             )
         session.flush()
-        for binding in bundle.provider_bindings:
-            session.add(
-                ProviderBinding(
-                    purpose=binding["purpose"],
-                    provider_kind=binding["provider_kind"],
-                    provider_profile_id=binding["provider_profile_id"],
-                    model_settings_json=binding["model_settings_json"],
-                    config_json=binding["config_json"],
-                )
+        for generation_config in bundle.generation_configs:
+            add_generation_config(
+                session,
+                generation_config_id=generation_config["id"],
+                name=generation_config["name"],
+                purpose=generation_config["purpose"],
+                provider_kind=generation_config["provider_kind"],
+                provider_profile_id=generation_config["provider_profile_id"],
+                model_settings=generation_config["model_settings"],
+                config=generation_config["config"],
+                priority=generation_config["priority"],
+                max_concurrency=generation_config["max_concurrency"],
+                enabled=generation_config["enabled"],
+                availability_window_minutes=generation_config["availability_window_minutes"],
+                failure_threshold=generation_config["failure_threshold"],
+                cooldown_minutes=generation_config["cooldown_minutes"],
+                commit=False,
             )
     session.expire_all()
 
@@ -514,6 +762,142 @@ def get_config_endpoint(session: Session = Depends(get_session)) -> ConfigRespon
 def get_provider_config_endpoint(session: Session = Depends(get_session)) -> ProviderConfigResponse:
     ensure_provider_config_bootstrapped(session)
     return _serialize_provider_config(session)
+
+
+@router.get(
+    "/generation-config-status",
+    response_model=GenerationConfigStatusSummaryResponse,
+    dependencies=[Depends(require_settings_unlocked)],
+)
+def get_generation_config_status_endpoint(
+    session: Session = Depends(get_session),
+) -> GenerationConfigStatusSummaryResponse:
+    ensure_provider_config_bootstrapped(session)
+    return _serialize_generation_config_status_summary(session)
+
+
+@router.get(
+    "/generation-configs",
+    response_model=list[GenerationConfigResponse],
+    dependencies=[Depends(require_settings_unlocked)],
+)
+def list_generation_configs_endpoint(session: Session = Depends(get_session)) -> list[GenerationConfigResponse]:
+    ensure_provider_config_bootstrapped(session)
+    today_stats = _today_generation_config_stats(session)
+    return [
+        _serialize_generation_config(generation_config, today_stats=today_stats)
+        for generation_config in list_generation_configs(session)
+    ]
+
+
+@router.get("/generation-config-options", response_model=list[GenerationConfigOptionResponse])
+def list_generation_config_options_endpoint(
+    session: Session = Depends(get_session),
+) -> list[GenerationConfigOptionResponse]:
+    ensure_provider_config_bootstrapped(session)
+    return [
+        _serialize_generation_config_option(generation_config)
+        for generation_config in list_generation_configs(session)
+    ]
+
+
+@router.post(
+    "/generation-configs",
+    response_model=GenerationConfigResponse,
+    dependencies=[Depends(require_settings_unlocked)],
+)
+def create_generation_config_endpoint(
+    payload: GenerationConfigCreateRequest,
+    session: Session = Depends(get_session),
+) -> GenerationConfigResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        generation_config = add_generation_config(
+            session,
+            name=payload.name,
+            purpose=payload.purpose,
+            provider_kind=payload.provider_kind,
+            provider_profile_id=payload.provider_profile_id,
+            model_settings=payload.model_settings,
+            config=payload.config,
+            priority=payload.priority,
+            max_concurrency=payload.max_concurrency,
+            enabled=payload.enabled,
+            availability_window_minutes=payload.availability_window_minutes,
+            failure_threshold=payload.failure_threshold,
+            cooldown_minutes=payload.cooldown_minutes,
+            commit=False,
+        )
+        if generation_config.purpose == "image" and is_real_image_provider_kind(generation_config.provider_kind):
+            _upsert_app_setting(session, key="poster_generation_mode", value="generated")
+        session.commit()
+        session.refresh(generation_config)
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    today_stats = _today_generation_config_stats(session)
+    return _serialize_generation_config(generation_config, today_stats=today_stats)
+
+
+@router.patch(
+    "/generation-configs/{generation_config_id}",
+    response_model=GenerationConfigResponse,
+    dependencies=[Depends(require_settings_unlocked)],
+)
+def update_generation_config_endpoint(
+    generation_config_id: str,
+    payload: GenerationConfigUpdateRequest,
+    session: Session = Depends(get_session),
+) -> GenerationConfigResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        fields_set = payload.model_fields_set
+        generation_config = update_generation_config(
+            session,
+            generation_config_id,
+            name=payload.name,
+            purpose=payload.purpose,
+            provider_kind=payload.provider_kind,
+            provider_profile_id=(
+                payload.provider_profile_id if "provider_profile_id" in fields_set else UNSET_PROVIDER_FIELD
+            ),
+            model_settings=payload.model_settings,
+            config=payload.config,
+            priority=payload.priority,
+            max_concurrency=payload.max_concurrency,
+            enabled=payload.enabled,
+            availability_window_minutes=payload.availability_window_minutes,
+            failure_threshold=payload.failure_threshold,
+            cooldown_minutes=payload.cooldown_minutes,
+            commit=False,
+        )
+        if generation_config.purpose == "image" and is_real_image_provider_kind(generation_config.provider_kind):
+            _upsert_app_setting(session, key="poster_generation_mode", value="generated")
+        session.commit()
+        session.refresh(generation_config)
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    today_stats = _today_generation_config_stats(session)
+    return _serialize_generation_config(generation_config, today_stats=today_stats)
+
+
+@router.delete(
+    "/generation-configs/{generation_config_id}",
+    response_model=GenerationConfigResponse,
+    dependencies=[Depends(require_settings_unlocked)],
+)
+def archive_generation_config_endpoint(
+    generation_config_id: str,
+    session: Session = Depends(get_session),
+) -> GenerationConfigResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        generation_config = archive_generation_config(session, generation_config_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    today_stats = _today_generation_config_stats(session)
+    return _serialize_generation_config(generation_config, today_stats=today_stats)
 
 
 @router.get(

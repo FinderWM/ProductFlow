@@ -28,6 +28,7 @@ from productflow_backend.infrastructure.image.responses_provider import (
     build_responses_reference_images_from_poster,
     poster_has_reference_input,
 )
+from productflow_backend.infrastructure.openai_client import build_openai_client_kwargs
 from productflow_backend.infrastructure.prompts import render_prompt_template
 from productflow_backend.infrastructure.provider_config import (
     ResolvedImageProviderConfig,
@@ -94,10 +95,7 @@ class OpenAIImagesClient:
     def _client(self) -> OpenAI:
         if not self.api_key:
             raise RuntimeError("图片供应商档案缺少 API Key")
-        kwargs: dict[str, Any] = {"api_key": self.api_key}
-        if self.base_url:
-            kwargs["base_url"] = self.base_url
-        return OpenAI(**kwargs)
+        return OpenAI(**build_openai_client_kwargs(api_key=self.api_key, base_url=self.base_url))
 
     def _parse_response(
         self,

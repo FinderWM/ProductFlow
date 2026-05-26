@@ -35,6 +35,7 @@ import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from ".
 import { useI18n } from "../lib/preferences";
 import type {
   CanvasTemplateSummary,
+  GenerationConfigOption,
   ProductWorkflow,
   ProductWorkflowStatus,
   WorkflowNode,
@@ -232,6 +233,10 @@ export function ProductDetailPage() {
     queryKey: ["runtime-config"],
     queryFn: api.getRuntimeConfig,
   });
+  const generationConfigOptionsQuery = useQuery({
+    queryKey: ["generation-config-options"],
+    queryFn: api.listGenerationConfigOptions,
+  });
   const queueOverviewQuery = useQuery({
     queryKey: ["generation-queue"],
     queryFn: api.getGenerationQueueOverview,
@@ -243,6 +248,10 @@ export function ProductDetailPage() {
   const imageSizeOptions = useMemo(
     () => buildImageSizeOptions(imageGenerationMaxDimension),
     [imageGenerationMaxDimension],
+  );
+  const workflowGenerationConfigs = useMemo<GenerationConfigOption[]>(
+    () => generationConfigOptionsQuery.data ?? [],
+    [generationConfigOptionsQuery.data],
   );
 
   const selectedNode =
@@ -1935,6 +1944,7 @@ export function ProductDetailPage() {
         imageSizeOptions={imageSizeOptions}
         imageGenerationMaxDimension={imageGenerationMaxDimension}
         imageToolAllowedFields={imageToolAllowedFields}
+        generationConfigs={workflowGenerationConfigs}
         onPreviewImage={setPreviewImage}
         onDraftChange={handleDraftChange}
         onRun={() => void handleRunWorkflow(selectedNode.id)}

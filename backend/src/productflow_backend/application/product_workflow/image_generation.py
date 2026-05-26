@@ -11,6 +11,14 @@ from sqlalchemy.orm import Session
 
 from productflow_backend.application.contracts import PosterGenerationInput
 from productflow_backend.application.copy_payloads import copy_payload_context_text, normalize_copy_payload
+from productflow_backend.application.generation_config_runtime import (
+    GenerationConfigSelection,
+    claim_runtime_generation_config,
+    generation_config_selection_from_config,
+    generation_failure_is_timeout,
+    generation_failure_reason,
+    release_runtime_generation_config,
+)
 from productflow_backend.application.image_generation_core import build_stored_image_reference_payload
 from productflow_backend.application.image_generation_failures import classify_image_generation_failure
 from productflow_backend.application.product_workflow.artifacts import (
@@ -77,6 +85,17 @@ def effective_workflow_image_generation_mode(configured_mode: str, image_provide
     return configured_mode
 
 
+def should_claim_workflow_image_generation_config(
+    *,
+    configured_mode: str,
+    selection: GenerationConfigSelection,
+) -> bool:
+    if configured_mode == "generated" or selection.mode == "manual":
+        return True
+    provider_config = resolve_image_provider_config(generation_config_id=selection.generation_config_id)
+    return is_real_image_provider_kind(provider_config.provider_kind)
+
+
 def call_with_timeout[T](call: Callable[[], T], *, timeout_seconds: float, timeout_message: str) -> T:
     executor = ThreadPoolExecutor(max_workers=1)
     future = executor.submit(call)
@@ -111,163 +130,211 @@ def execute_workflow_image_generation(
 ) -> dict[str, object]:
     dependencies = dependencies or default_workflow_execution_dependencies()
     product = workflow.product
-    incoming_context = collect_incoming_context(workflow, node.id, include_transitive_product_context=True)
-    product_context = effective_product_context(workflow, node.id, include_transitive=True)
-    downstream_nodes = downstream_reference_nodes(workflow, node.id)
-    if not downstream_nodes:
-        raise BusinessValidationError("请先把生图节点连接到至少一个图片/参考图节点，再运行图片生成")
-
-    linked_copy_set_id = optional_config_text(node.config_json, "copy_set_id") or incoming_context.copy_set_id
-    copy_set = session.get(CopySet, linked_copy_set_id) if linked_copy_set_id else None
-    has_linked_copy_input = (
-        linked_copy_set_id is not None and copy_set is not None and copy_set.product_id == product.id
-    )
-    has_real_copy_context = (
-        has_linked_copy_input
-        and copy_set is not None
-        and copy_set.product_id == product.id
-        and not _is_workflow_context_copy_set(copy_set)
-    )
-    if copy_set is None or copy_set.product_id != product.id:
-        copy_set = create_context_copy_set(session, product=product, product_context=product_context, node=node)
-    structured_copy_context = None
-    if has_real_copy_context and isinstance(copy_set.structured_payload, dict):
-        try:
-            structured_copy_context = copy_payload_context_text(normalize_copy_payload(copy_set.structured_payload))
-        except ValueError:
-            structured_copy_context = None
-
-    storage = LocalStorage()
-    reference_assets = reference_assets_for_image_generation(
-        session,
-        workflow,
-        incoming_context.image_asset_ids,
-        incoming_context.poster_variant_ids,
-    )
-    reference_payload = build_stored_image_reference_payload(
-        reference_assets,
-        resolve_storage_path=storage.resolve,
-    )
-    render_input = PosterGenerationInput(
-        copy_prompt_mode="copy" if structured_copy_context else "image_edit",
-        product_name=product_context["name"] or "",
-        category=product_context["category"],
-        price=product_context["price"],
-        source_note=product_context["source_note"],
-        instruction=image_instruction_with_context(node, incoming_context.text_contexts),
-        image_size=image_size_from_config(node.config_json),
-        tool_options=image_tool_options_from_config(node.config_json),
-        structured_copy_context=structured_copy_context,
-        source_image=reference_payload.source_image,
-        reference_images=reference_payload.reference_images,
-    )
-    poster_ids: list[str] = []
-    filled_source_asset_ids: list[str] = []
-    filled_reference_node_ids: list[str] = []
-    provider_results: list[dict[str, object]] = []
     settings = get_runtime_settings()
     kind = poster_kind_from_config(node.config_json)
-    image_provider_config = (
-        None if settings.poster_generation_mode == "generated" else resolve_image_provider_config()
-    )
-    poster_generation_mode = effective_workflow_image_generation_mode(
-        settings.poster_generation_mode,
-        image_provider_config.provider_kind if image_provider_config is not None else None,
-    )
-    image_providers: list[ImageProvider] | None = None
-    if poster_generation_mode == "generated":
-        first_provider = dependencies.image_provider()
-        if callable(getattr(first_provider, "generate_poster_images", None)):
-            image_providers = [first_provider]
-        else:
-            image_providers = [first_provider, *[dependencies.image_provider() for _ in downstream_nodes[1:]]]
-    generated_images = generate_workflow_images_concurrently(
-        render_input=render_input,
-        kind=kind,
-        target_count=len(downstream_nodes),
-        poster_generation_mode=poster_generation_mode,
-        poster_font_path=settings.poster_font_path,
-        image_providers=image_providers,
-        renderer_factory=dependencies.poster_renderer,
-    )
-    for generated_image, target_node in zip(generated_images, downstream_nodes, strict=True):
-        content = generated_image.content
-        mime_type = generated_image.mime_type
-        relative_path = storage.save_generated_image(
-            product.id,
-            f"workflow-{kind.value}-{generated_image.target_index}",
-            content,
-            suffix=infer_extension(mime_type),
+    configured_generation_mode = settings.poster_generation_mode
+    generation_config_selection = generation_config_selection_from_config(node.config_json)
+    runtime_claim = None
+    used_generation_config_id: str | None = None
+    poster_generation_mode = configured_generation_mode
+    if should_claim_workflow_image_generation_config(
+        configured_mode=configured_generation_mode,
+        selection=generation_config_selection,
+    ):
+        runtime_claim = claim_runtime_generation_config(
+            purpose="image",
+            selection=generation_config_selection,
         )
-        poster = PosterVariant(
-            product_id=product.id,
-            copy_set_id=copy_set.id,
-            kind=kind,
-            template_name=generated_image.template_name,
-            storage_path=relative_path,
-            mime_type=mime_type,
-            width=generated_image.width,
-            height=generated_image.height,
+        used_generation_config_id = runtime_claim.generation_config_id
+        poster_generation_mode = effective_workflow_image_generation_mode(
+            configured_generation_mode,
+            runtime_claim.claim.provider_kind,
         )
-        session.add(poster)
-        session.flush()
-        poster_ids.append(poster.id)
+    provider_invoked = False
+    incoming_context = collect_incoming_context(workflow, node.id, include_transitive_product_context=True)
+    try:
+        product_context = effective_product_context(workflow, node.id, include_transitive=True)
+        downstream_nodes = downstream_reference_nodes(workflow, node.id)
+        if not downstream_nodes:
+            raise BusinessValidationError("请先把生图节点连接到至少一个图片/参考图节点，再运行图片生成")
 
-        filename = f"reference-{generated_image.target_index}{infer_extension(mime_type)}"
-        reference_path = storage.save_reference_upload(product.id, filename, content)
-        asset = SourceAsset(
-            product_id=product.id,
-            kind=SourceAssetKind.REFERENCE_IMAGE,
-            original_filename=filename,
-            mime_type=mime_type,
-            storage_path=reference_path,
-            source_poster_variant_id=poster.id,
+        linked_copy_set_id = optional_config_text(node.config_json, "copy_set_id") or incoming_context.copy_set_id
+        copy_set = session.get(CopySet, linked_copy_set_id) if linked_copy_set_id else None
+        has_linked_copy_input = (
+            linked_copy_set_id is not None and copy_set is not None and copy_set.product_id == product.id
         )
-        session.add(asset)
-        session.flush()
-        filled_source_asset_ids.append(asset.id)
-        filled_reference_node_ids.append(target_node.id)
-        fill_reference_node(target_node, asset, source_poster_variant_id=poster.id)
-        provider_result = {
-            "target_index": generated_image.target_index,
-            "provider_name": generated_image.provider_name,
-            "model_name": generated_image.model_name,
-            "provider_response_id": generated_image.provider_response_id,
-            "provider_response_status": generated_image.provider_response_status,
-        }
-        if isinstance(generated_image.provider_output_json, dict):
-            metadata = generated_image.provider_output_json.get("_productflow")
-            if isinstance(metadata, dict):
-                actual_size = metadata.get("actual_size")
-                notes = metadata.get("notes")
-                if isinstance(actual_size, str):
-                    provider_result["actual_size"] = actual_size
-                if isinstance(notes, list):
-                    provider_result["notes"] = [item for item in notes if isinstance(item, str)][:4]
-        safe_provider_result = {key: value for key, value in provider_result.items() if value is not None}
-        if safe_provider_result:
-            provider_results.append(safe_provider_result)
-    product.updated_at = now_utc()
-    return {
-        "copy_set_id": copy_set.id,
-        "generated_poster_variant_ids": poster_ids,
-        "filled_source_asset_ids": filled_source_asset_ids,
-        "filled_reference_node_ids": filled_reference_node_ids,
-        "provider_results": provider_results,
-        "target_count": len(downstream_nodes),
-        "size": image_size_from_config(node.config_json),
-        "instruction": optional_config_text(node.config_json, "instruction"),
-        "context_summary": {
-            "product_context": product_context,
+        has_real_copy_context = (
+            has_linked_copy_input
+            and copy_set is not None
+            and copy_set.product_id == product.id
+            and not _is_workflow_context_copy_set(copy_set)
+        )
+        should_create_context_copy_set = copy_set is None or copy_set.product_id != product.id
+        structured_copy_context = None
+        if has_real_copy_context and isinstance(copy_set.structured_payload, dict):
+            try:
+                structured_copy_context = copy_payload_context_text(normalize_copy_payload(copy_set.structured_payload))
+            except ValueError:
+                structured_copy_context = None
+
+        storage = LocalStorage()
+        reference_assets = reference_assets_for_image_generation(
+            session,
+            workflow,
+            incoming_context.image_asset_ids,
+            incoming_context.poster_variant_ids,
+        )
+        reference_payload = build_stored_image_reference_payload(
+            reference_assets,
+            resolve_storage_path=storage.resolve,
+        )
+        render_input = PosterGenerationInput(
+            copy_prompt_mode="copy" if structured_copy_context else "image_edit",
+            product_name=product_context["name"] or "",
+            category=product_context["category"],
+            price=product_context["price"],
+            source_note=product_context["source_note"],
+            instruction=image_instruction_with_context(node, incoming_context.text_contexts),
+            image_size=image_size_from_config(node.config_json),
+            tool_options=image_tool_options_from_config(node.config_json),
+            structured_copy_context=structured_copy_context,
+            source_image=reference_payload.source_image,
+            reference_images=reference_payload.reference_images,
+        )
+        poster_ids: list[str] = []
+        filled_source_asset_ids: list[str] = []
+        filled_reference_node_ids: list[str] = []
+        provider_results: list[dict[str, object]] = []
+        image_providers: list[ImageProvider] | None = None
+        if poster_generation_mode == "generated":
+            if runtime_claim is None:
+                raise RuntimeError("图片生成配置未初始化")
+            first_provider = dependencies.image_provider(runtime_claim.generation_config_id)
+            if callable(getattr(first_provider, "generate_poster_images", None)):
+                image_providers = [first_provider]
+            else:
+                image_providers = [
+                    first_provider,
+                    *[
+                        dependencies.image_provider(runtime_claim.generation_config_id)
+                        for _ in downstream_nodes[1:]
+                    ],
+                ]
+            provider_invoked = True
+        generated_images = generate_workflow_images_concurrently(
+            render_input=render_input,
+            kind=kind,
+            target_count=len(downstream_nodes),
+            poster_generation_mode=poster_generation_mode,
+            poster_font_path=settings.poster_font_path,
+            image_providers=image_providers,
+            renderer_factory=dependencies.poster_renderer,
+        )
+        if runtime_claim is not None:
+            # End the business session's read transaction before the independent
+            # stats transaction writes generation_config_daily_stats.
+            session.commit()
+        release_runtime_generation_config(
+            runtime_claim,
+            success=poster_generation_mode == "generated",
+            generated_unit_count=len(downstream_nodes) if poster_generation_mode == "generated" else 0,
+            record_result=poster_generation_mode == "generated",
+        )
+        runtime_claim = None
+        if should_create_context_copy_set:
+            copy_set = create_context_copy_set(session, product=product, product_context=product_context, node=node)
+        if copy_set is None:
+            raise RuntimeError("图片生成缺少文案上下文")
+        for generated_image, target_node in zip(generated_images, downstream_nodes, strict=True):
+            content = generated_image.content
+            mime_type = generated_image.mime_type
+            relative_path = storage.save_generated_image(
+                product.id,
+                f"workflow-{kind.value}-{generated_image.target_index}",
+                content,
+                suffix=infer_extension(mime_type),
+            )
+            poster = PosterVariant(
+                product_id=product.id,
+                copy_set_id=copy_set.id,
+                kind=kind,
+                template_name=generated_image.template_name,
+                storage_path=relative_path,
+                mime_type=mime_type,
+                width=generated_image.width,
+                height=generated_image.height,
+            )
+            session.add(poster)
+            session.flush()
+            poster_ids.append(poster.id)
+
+            filename = f"reference-{generated_image.target_index}{infer_extension(mime_type)}"
+            reference_path = storage.save_reference_upload(product.id, filename, content)
+            asset = SourceAsset(
+                product_id=product.id,
+                kind=SourceAssetKind.REFERENCE_IMAGE,
+                original_filename=filename,
+                mime_type=mime_type,
+                storage_path=reference_path,
+                source_poster_variant_id=poster.id,
+            )
+            session.add(asset)
+            session.flush()
+            filled_source_asset_ids.append(asset.id)
+            filled_reference_node_ids.append(target_node.id)
+            fill_reference_node(target_node, asset, source_poster_variant_id=poster.id)
+            provider_result = {
+                "target_index": generated_image.target_index,
+                "provider_name": generated_image.provider_name,
+                "model_name": generated_image.model_name,
+                "generation_config_id": used_generation_config_id,
+                "provider_response_id": generated_image.provider_response_id,
+                "provider_response_status": generated_image.provider_response_status,
+            }
+            if isinstance(generated_image.provider_output_json, dict):
+                metadata = generated_image.provider_output_json.get("_productflow")
+                if isinstance(metadata, dict):
+                    actual_size = metadata.get("actual_size")
+                    notes = metadata.get("notes")
+                    if isinstance(actual_size, str):
+                        provider_result["actual_size"] = actual_size
+                    if isinstance(notes, list):
+                        provider_result["notes"] = [item for item in notes if isinstance(item, str)][:4]
+            safe_provider_result = {key: value for key, value in provider_result.items() if value is not None}
+            if safe_provider_result:
+                provider_results.append(safe_provider_result)
+        product.updated_at = now_utc()
+        return {
             "copy_set_id": copy_set.id,
-            "copy_prompt_mode": render_input.copy_prompt_mode,
-            "upstream_text_count": len(incoming_context.text_contexts),
-            "reference_image_count": len(incoming_context.image_asset_ids),
-            "poster_variant_count": len(incoming_context.poster_variant_ids),
-        },
-        "context_sources": incoming_context.text_sources[:8],
-        "summary": f"已填充 {len(filled_reference_node_ids)} 个参考图",
-    }
+            "generated_poster_variant_ids": poster_ids,
+            "filled_source_asset_ids": filled_source_asset_ids,
+            "filled_reference_node_ids": filled_reference_node_ids,
+            "provider_results": provider_results,
+            "target_count": len(downstream_nodes),
+            "size": image_size_from_config(node.config_json),
+            "instruction": optional_config_text(node.config_json, "instruction"),
+            "context_summary": {
+                "product_context": product_context,
+                "copy_set_id": copy_set.id,
+                "copy_prompt_mode": render_input.copy_prompt_mode,
+                "upstream_text_count": len(incoming_context.text_contexts),
+                "reference_image_count": len(incoming_context.image_asset_ids),
+                "poster_variant_count": len(incoming_context.poster_variant_ids),
+            },
+            "context_sources": incoming_context.text_sources[:8],
+            "generation_config_id": used_generation_config_id,
+            "summary": f"已填充 {len(filled_reference_node_ids)} 个参考图",
+        }
+    except BaseException as exc:  # noqa: BLE001
+        release_runtime_generation_config(
+            runtime_claim,
+            success=False,
+            generated_unit_count=0,
+            failure_reason=generation_failure_reason(exc) if provider_invoked else None,
+            timeout=generation_failure_is_timeout(exc),
+            record_result=provider_invoked,
+        )
+        raise
 
 
 def generate_workflow_images_concurrently(

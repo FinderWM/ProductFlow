@@ -21,6 +21,14 @@ from productflow_backend.application.admission import (
     get_generation_task_queue_metadata,
     get_queued_generation_positions,
 )
+from productflow_backend.application.generation_config_runtime import (
+    GenerationConfigSelection,
+    GenerationConfigWaitError,
+    claim_runtime_generation_config,
+    generation_failure_is_timeout,
+    generation_failure_reason,
+    release_runtime_generation_config,
+)
 from productflow_backend.application.image_generation_core import (
     normalize_image_generation_tool_options,
     provider_output_with_actual_image_size,
@@ -52,11 +60,13 @@ from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.infrastructure.image.base import infer_extension
 from productflow_backend.infrastructure.image.chat_service import ImageChatService, ImageChatTurn
 from productflow_backend.infrastructure.image.responses_provider import PROVIDER_TEXT_OUTPUT_MESSAGE
+from productflow_backend.infrastructure.provider_config import ensure_provider_config_bootstrapped
 from productflow_backend.infrastructure.queue import (
     enqueue_image_session_generation_task,
     enqueue_image_session_generation_task_later,
 )
 from productflow_backend.infrastructure.storage import LocalStorage
+from productflow_backend.infrastructure.text.factory import get_text_provider
 
 ATTACH_TARGET = Literal["reference", "main_source"]
 DEFAULT_SESSION_TITLE = "未命名会话"
@@ -66,6 +76,7 @@ IMAGE_SESSION_GENERATION_MAX_ATTEMPTS = 3
 IMAGE_SESSION_GENERATION_MAX_COUNT = 10
 IMAGE_SESSION_IMAGES_API_N_MAX_COUNT = 10
 IMAGE_SESSION_CAPACITY_RETRY_DELAY_MS = 2000
+IMAGE_SESSION_GENERATION_CONFIG_RETRY_DELAY_MS = 2000
 GENERIC_IMAGE_GENERATION_FAILURE = "图片生成失败，请稍后重试"
 PARTIAL_IMAGE_GENERATION_FAILURE = "已生成 {completed}/{requested} 张候选，后续生成失败，请重新发起生成补齐。"
 PARTIAL_IMAGE_GENERATION_TIMEOUT = "已生成 {completed}/{requested} 张候选，但任务超时，剩余候选未完成。"
@@ -90,6 +101,13 @@ class _ImageSessionGenerationTaskClaimResult:
 class ImageSessionRoundGenerationResult:
     image_session: ImageSession
     generation_group_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ImagePromptPolishResult:
+    prompt: str
+    model_name: str
+    generation_config_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +323,60 @@ def _normalize_tool_options(tool_options: dict[str, Any] | None) -> dict[str, An
     return normalize_image_generation_tool_options(tool_options)
 
 
+def _generation_config_selection(
+    mode: str | None,
+    generation_config_id: str | None,
+) -> GenerationConfigSelection:
+    normalized_mode = (mode or "auto").strip().lower()
+    normalized_id = (generation_config_id or "").strip() or None
+    if normalized_mode != "manual":
+        return GenerationConfigSelection(mode="auto", generation_config_id=None)
+    if normalized_id is None:
+        raise BusinessValidationError("手动指定生成配置时必须选择配置")
+    return GenerationConfigSelection(mode="manual", generation_config_id=normalized_id)
+
+
+def polish_image_session_prompt(
+    *,
+    prompt: str,
+    generation_config_mode: str = "auto",
+    generation_config_id: str | None = None,
+) -> ImagePromptPolishResult:
+    normalized_prompt = prompt.strip()
+    if not normalized_prompt:
+        raise BusinessValidationError("画面描述不能为空")
+    generation_config_selection = _generation_config_selection(generation_config_mode, generation_config_id)
+    try:
+        runtime_claim = claim_runtime_generation_config(purpose="text", selection=generation_config_selection)
+    except (GenerationConfigWaitError, ValueError) as exc:
+        raise BusinessValidationError(str(exc)) from exc
+    try:
+        provider = get_text_provider(generation_config_id=runtime_claim.generation_config_id)
+    except Exception as exc:
+        release_runtime_generation_config(runtime_claim, success=False, record_result=False)
+        raise BusinessValidationError(str(exc)) from exc
+    try:
+        polished_prompt, model_name = provider.polish_image_prompt(normalized_prompt)
+    except Exception as exc:
+        release_runtime_generation_config(
+            runtime_claim,
+            success=False,
+            failure_reason=generation_failure_reason(exc),
+            timeout=generation_failure_is_timeout(exc),
+        )
+        raise BusinessValidationError("画面描述润色失败，请稍后重试") from exc
+    release_runtime_generation_config(runtime_claim, success=True, generated_unit_count=1)
+    return ImagePromptPolishResult(
+        prompt=polished_prompt,
+        model_name=model_name,
+        generation_config_id=runtime_claim.generation_config_id,
+    )
+
+
+def _image_task_generation_config_selection(task: ImageSessionGenerationTask) -> GenerationConfigSelection:
+    return _generation_config_selection(task.generation_config_mode, task.requested_generation_config_id)
+
+
 def _images_api_batch_count(
     *,
     provider_kind: str,
@@ -490,6 +562,7 @@ def _execute_image_session_round_generation(
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
     tool_options: dict[str, Any] | None = None,
+    generation_config_selection: GenerationConfigSelection | None = None,
     storage: LocalStorage | None = None,
     generation_task_id: str | None = None,
 ) -> ImageSessionRoundGenerationResult:
@@ -497,8 +570,10 @@ def _execute_image_session_round_generation(
     image_session = _get_image_session_or_raise(session, image_session_id)
     storage = storage or LocalStorage()
     generation_task = session.get(ImageSessionGenerationTask, generation_task_id) if generation_task_id else None
+    if generation_task is not None and generation_config_selection is None:
+        generation_config_selection = _image_task_generation_config_selection(generation_task)
+    generation_config_selection = generation_config_selection or GenerationConfigSelection()
     normalized_tool_options = _normalize_tool_options(tool_options)
-    service = ImageChatService()
     normalized_size, normalized_base_asset_id, normalized_reference_ids = _validate_generation_request(
         image_session,
         size=size,
@@ -549,6 +624,45 @@ def _execute_image_session_round_generation(
     generation_group_id = generation_group_id or new_id()
     should_update_default_title = not image_session.rounds and image_session.title == DEFAULT_SESSION_TITLE
     pending_provider_results = []
+    session.commit()
+    runtime_claim = claim_runtime_generation_config(purpose="image", selection=generation_config_selection)
+    completed_candidates_at_claim = completed_candidates
+    try:
+        service = ImageChatService(generation_config_id=runtime_claim.generation_config_id)
+    except BaseException:
+        release_runtime_generation_config(runtime_claim, success=False, record_result=False)
+        raise
+    if generation_task is not None:
+        generation_task.used_generation_config_id = runtime_claim.generation_config_id
+        generation_task.progress_phase = "generation_config_claimed"
+        generation_task.progress_updated_at = now_utc()
+        generation_task.progress_metadata = {
+            "generation_config_id": runtime_claim.generation_config_id,
+            "candidate_count": generation_count,
+            "completed_candidates": completed_candidates,
+        }
+        session.commit()
+    runtime_claim_released = False
+
+    def release_claim(
+        *,
+        success: bool,
+        failure_reason: str | None = None,
+        timeout: bool = False,
+        record_result: bool = True,
+    ) -> None:
+        nonlocal runtime_claim_released
+        if runtime_claim_released:
+            return
+        runtime_claim_released = True
+        release_runtime_generation_config(
+            runtime_claim,
+            success=success,
+            generated_unit_count=max(0, completed_candidates - completed_candidates_at_claim),
+            failure_reason=failure_reason,
+            timeout=timeout,
+            record_result=record_result,
+        )
 
     for candidate_index in range(completed_candidates + 1, generation_count + 1):
         relative_path: str | None = None
@@ -655,6 +769,7 @@ def _execute_image_session_round_generation(
                 base_asset_id=normalized_base_asset_id,
                 selected_reference_asset_ids=normalized_reference_ids,
                 generated_asset_id=asset.id,
+                generation_config_id=runtime_claim.generation_config_id,
             )
             session.add(round_item)
             session.flush()
@@ -697,15 +812,27 @@ def _execute_image_session_round_generation(
                 with suppress(ValueError, OSError):
                     storage.delete_image_with_variants(relative_path)
             if isinstance(exc, ImageSessionGenerationCancelledError):
+                release_claim(success=False, record_result=False)
                 raise
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                release_claim(success=False, record_result=False)
                 raise
             if generation_task_id is None:
+                release_claim(
+                    success=False,
+                    failure_reason=generation_failure_reason(exc),
+                    timeout=generation_failure_is_timeout(exc),
+                )
                 raise
             failure_decision = (
                 None
                 if str(exc) == PROVIDER_TEXT_OUTPUT_MESSAGE
                 else classify_image_generation_failure(exc, generic_message=GENERIC_IMAGE_GENERATION_FAILURE)
+            )
+            release_claim(
+                success=False,
+                failure_reason=generation_failure_reason(exc),
+                timeout=isinstance(exc, TimeLimitExceeded) or generation_failure_is_timeout(exc),
             )
             raise ImageSessionGenerationExecutionError(
                 completed_candidates=completed_candidates,
@@ -715,6 +842,7 @@ def _execute_image_session_round_generation(
                 safe_reason=str(exc) if str(exc) == PROVIDER_TEXT_OUTPUT_MESSAGE else failure_decision.reason,
                 failure_decision=failure_decision,
             ) from exc
+    release_claim(success=True)
     session.expire_all()
     return ImageSessionRoundGenerationResult(
         image_session=_get_image_session_or_raise(session, image_session.id),
@@ -733,6 +861,8 @@ def generate_image_session_round(
     generation_count: int = 1,
     tool_options: dict[str, Any] | None = None,
     storage: LocalStorage | None = None,
+    generation_config_mode: str = "auto",
+    generation_config_id: str | None = None,
 ) -> ImageSession:
     """兼容同步调用的薄封装；HTTP route 不再使用。"""
     return _execute_image_session_round_generation(
@@ -745,6 +875,7 @@ def generate_image_session_round(
         generation_count=generation_count,
         tool_options=tool_options,
         storage=storage,
+        generation_config_selection=_generation_config_selection(generation_config_mode, generation_config_id),
     ).image_session
 
 
@@ -758,10 +889,14 @@ def create_image_session_generation_task(
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
     tool_options: dict[str, Any] | None = None,
+    generation_config_mode: str = "auto",
+    generation_config_id: str | None = None,
 ) -> ImageSessionGenerationTaskCreationResult:
     """校验并创建连续生图 durable 任务；不调用 provider。"""
+    ensure_provider_config_bootstrapped(session)
     image_session = _get_image_session_or_raise(session, image_session_id)
     normalized_tool_options = _normalize_tool_options(tool_options)
+    generation_config_selection = _generation_config_selection(generation_config_mode, generation_config_id)
     normalized_size, normalized_base_asset_id, normalized_reference_ids = _validate_generation_request(
         image_session,
         size=size,
@@ -779,6 +914,8 @@ def create_image_session_generation_task(
         base_asset_id=normalized_base_asset_id,
         selected_reference_asset_ids=normalized_reference_ids,
         tool_options=normalized_tool_options,
+        generation_config_mode=generation_config_selection.mode,
+        requested_generation_config_id=generation_config_selection.generation_config_id,
         generation_count=generation_count,
     )
     session.add(task)
@@ -801,6 +938,8 @@ def submit_image_session_generation_task(
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
     tool_options: dict[str, Any] | None = None,
+    generation_config_mode: str = "auto",
+    generation_config_id: str | None = None,
     enqueue: Callable[[str], None] | None = None,
 ) -> ImageSession:
     result = create_image_session_generation_task(
@@ -812,6 +951,8 @@ def submit_image_session_generation_task(
         selected_reference_asset_ids=selected_reference_asset_ids,
         generation_count=generation_count,
         tool_options=tool_options,
+        generation_config_mode=generation_config_mode,
+        generation_config_id=generation_config_id,
     )
     enqueue_or_mark_failed(
         result.task.id,
@@ -1123,6 +1264,41 @@ def _requeue_image_generation_task_after_capacity_wait(task_id: str) -> None:
         logger.exception("连续生图等待并发容量后重新入队失败: task_id=%s", task_id)
 
 
+def _requeue_image_generation_task_after_generation_config_wait(task_id: str) -> None:
+    try:
+        enqueue_image_session_generation_task_later(task_id, delay_ms=IMAGE_SESSION_GENERATION_CONFIG_RETRY_DELAY_MS)
+    except Exception:  # noqa: BLE001
+        logger.exception("连续生图等待生成配置容量后重新入队失败: task_id=%s", task_id)
+
+
+def _reset_image_generation_task_for_generation_config_wait(session: Session, *, task_id: str) -> None:
+    task = session.get(ImageSessionGenerationTask, task_id)
+    if task is None:
+        return
+    session.refresh(task, attribute_names=["status"])
+    if IMAGE_SESSION_GENERATION_TASK_CONTRACT.is_terminal(task.status):
+        return
+    now = now_utc()
+    task.status = JobStatus.QUEUED
+    task.started_at = None
+    task.finished_at = None
+    task.failure_reason = None
+    task.active_candidate_index = None
+    task.progress_phase = "waiting_for_generation_config"
+    task.progress_updated_at = now
+    task.provider_response_id = None
+    task.provider_response_status = None
+    task.progress_metadata = {
+        "generation_config_mode": task.generation_config_mode,
+        "requested_generation_config_id": task.requested_generation_config_id,
+    }
+    task.used_generation_config_id = None
+    task.attempts = max(0, int(task.attempts or 0) - 1)
+    task.is_retryable = True
+    _touch_image_session_if_present(session, task.session_id, now=now)
+    session.commit()
+
+
 def _mark_image_generation_task_failed(session: Session, *, task_id: str, reason: str) -> None:
     task = session.get(ImageSessionGenerationTask, task_id)
     if task is None:
@@ -1257,6 +1433,11 @@ def execute_image_session_generation_task(task_id: str) -> None:
                 tool_options=task.tool_options,
                 generation_task_id=task_id,
             )
+        except GenerationConfigWaitError:
+            session.rollback()
+            _reset_image_generation_task_for_generation_config_wait(session, task_id=task_id)
+            _requeue_image_generation_task_after_generation_config_wait(task_id)
+            return
         except ImageSessionGenerationExecutionError as exc:
             session.rollback()
             reason = exc.safe_reason or GENERIC_IMAGE_GENERATION_FAILURE

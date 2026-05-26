@@ -22,6 +22,15 @@ function outputStructuredPayload(node: WorkflowNode | null): CopyPayloadV2 | nul
   return null;
 }
 
+function generationConfigModeFromNode(node: WorkflowNode | null): "auto" | "manual" {
+  return configString(node, "generation_config_mode") === "manual" ? "manual" : "auto";
+}
+
+function generationConfigIdFromNode(node: WorkflowNode | null): string | null {
+  const generationConfigId = configString(node, "generation_config_id");
+  return generationConfigId || null;
+}
+
 export function draftFromNode(
   node: WorkflowNode | null,
   product?: ProductDetail | null,
@@ -45,6 +54,8 @@ export function draftFromNode(
     channel: configString(node, "channel", "商品主图"),
     size: configString(node, "size", "1024x1024"),
     toolOptions: imageToolOptionsFromUnknown(node?.config_json?.tool_options),
+    generationConfigMode: generationConfigModeFromNode(node),
+    generationConfigId: generationConfigIdFromNode(node),
     copyStructuredPayload: copySet?.structured_payload ?? outputStructuredPayload(node),
   };
 }
@@ -76,6 +87,8 @@ export function nodeConfigFromDraft(
       channel: draft.channel,
       purpose: configString(node, "purpose"),
       output_mode: configString(node, "output_mode", "blocks"),
+      generation_config_mode: draft.generationConfigMode,
+      generation_config_id: draft.generationConfigMode === "manual" ? draft.generationConfigId : null,
     };
   }
   if (node.node_type === "image_generation") {
@@ -84,6 +97,8 @@ export function nodeConfigFromDraft(
       ...base,
       instruction: draft.instruction,
       size: draft.size,
+      generation_config_mode: draft.generationConfigMode,
+      generation_config_id: draft.generationConfigMode === "manual" ? draft.generationConfigId : null,
       ...(toolOptions ? { tool_options: toolOptions } : { tool_options: null }),
     };
   }
@@ -101,12 +116,16 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
       tone: "清晰可信",
       channel: "商品图",
       output_mode: "blocks",
+      generation_config_mode: "auto",
+      generation_config_id: null,
     };
   }
   if (type === "image_generation") {
     return {
       instruction: "描述你想生成的图片",
       size: "1024x1024",
+      generation_config_mode: "auto",
+      generation_config_id: null,
       tool_options: null,
     };
   }

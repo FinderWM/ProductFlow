@@ -16,6 +16,14 @@ from productflow_backend.application.copy_payloads import (
     normalize_copy_node_config,
     normalize_copy_payload,
 )
+from productflow_backend.application.generation_config_runtime import (
+    GenerationConfigWaitError,
+    claim_runtime_generation_config,
+    generation_config_selection_from_config,
+    generation_failure_is_timeout,
+    generation_failure_reason,
+    release_runtime_generation_config,
+)
 from productflow_backend.application.product_workflow import graph as product_workflow_graph
 from productflow_backend.application.product_workflow.artifacts import (
     copy_node_output,
@@ -79,6 +87,7 @@ from productflow_backend.infrastructure.db.models import (
     WorkflowRun,
 )
 from productflow_backend.infrastructure.db.session import get_session_factory
+from productflow_backend.infrastructure.provider_config import ensure_provider_config_bootstrapped
 from productflow_backend.infrastructure.queue import enqueue_workflow_node_run, enqueue_workflow_run
 from productflow_backend.infrastructure.storage import LocalStorage
 
@@ -168,6 +177,7 @@ def start_product_workflow_run(
     progress_metadata: dict[str, Any] | None = None,
     node_ids_to_run_override: set[str] | None = None,
 ) -> WorkflowRunKickoff:
+    ensure_provider_config_bootstrapped(session)
     workflow = get_or_create_product_workflow(session, product_id)
     session.expire(workflow, ["nodes", "edges", "runs"])
     ordered_nodes = product_workflow_graph.topological_nodes(workflow)
@@ -548,6 +558,12 @@ def _execute_workflow_node_run(
             node.node_type.value,
         )
         output = _execute_node(session, workflow_id=workflow.id, node=node, dependencies=dependencies)
+    except GenerationConfigWaitError:
+        session.rollback()
+        _reset_workflow_node_run_for_generation_config_wait(session, node_run_id=node_run_id)
+        if schedule_after_finish:
+            requeue_workflow_node_run_after_capacity_wait(node_run_id)
+        return
     except TimeLimitExceeded as exc:
         session.rollback()
         _mark_node_run_failed_and_schedule(
@@ -602,6 +618,25 @@ def _execute_workflow_node_run(
     logger.info("工作流节点执行成功: run_id=%s node_id=%s", run.id, node.id)
     if schedule_after_finish:
         _enqueue_workflow_run_safely(run.id)
+
+
+def _reset_workflow_node_run_for_generation_config_wait(session: Session, *, node_run_id: str) -> None:
+    node_run = session.get(WorkflowNodeRun, node_run_id)
+    if node_run is None:
+        return
+    if not WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_running(node_run.status):
+        return
+    now = now_utc()
+    node_run.status = WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_queued_statuses[0]
+    node_run.failure_reason = None
+    node_run.finished_at = None
+    node_run.started_at = now
+    node = session.get(WorkflowNode, node_run.node_id)
+    if node is not None:
+        node.status = WorkflowNodeStatus.QUEUED
+        node.failure_reason = None
+        node.last_run_at = now
+    session.commit()
 
 
 def _mark_node_run_failed_and_schedule(
@@ -964,8 +999,31 @@ def _execute_copy_generation(
         incoming_context,
     )
     config = config.model_copy(update={"instruction": instruction})
-    provider = dependencies.text_provider()
-    brief_payload, brief_model = _generate_brief_with_provider(provider, product_input, node_id=node.id)
+    runtime_claim = claim_runtime_generation_config(
+        purpose="text",
+        selection=generation_config_selection_from_config(node.config_json),
+    )
+    try:
+        provider = dependencies.text_provider(runtime_claim.generation_config_id)
+        brief_payload, brief_model = _generate_brief_with_provider(provider, product_input, node_id=node.id)
+        copy_payload, copy_model = _generate_copy_with_provider(
+            provider,
+            product_input,
+            brief_payload,
+            config=config,
+            reference_images=reference_images,
+            node_id=node.id,
+        )
+    except BaseException as exc:  # noqa: BLE001
+        release_runtime_generation_config(
+            runtime_claim,
+            success=False,
+            generated_unit_count=0,
+            failure_reason=generation_failure_reason(exc),
+            timeout=generation_failure_is_timeout(exc),
+        )
+        raise
+    release_runtime_generation_config(runtime_claim, success=True, generated_unit_count=2)
     brief = CreativeBrief(
         product_id=product.id,
         payload=brief_payload.model_dump(),
@@ -976,14 +1034,6 @@ def _execute_copy_generation(
     session.add(brief)
     session.flush()
 
-    copy_payload, copy_model = _generate_copy_with_provider(
-        provider,
-        product_input,
-        brief_payload,
-        config=config,
-        reference_images=reference_images,
-        node_id=node.id,
-    )
     structured_payload = copy_payload.model_dump(mode="json")
     copy_set = CopySet(
         product_id=product.id,
@@ -1006,6 +1056,7 @@ def _execute_copy_generation(
         "upstream_text_count": len(incoming_context.text_contexts),
     }
     output["context_sources"] = incoming_context.text_sources[:8]
+    output["generation_config_id"] = runtime_claim.generation_config_id
     return output
 
 

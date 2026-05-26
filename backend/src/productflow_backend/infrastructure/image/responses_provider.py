@@ -27,6 +27,7 @@ from productflow_backend.infrastructure.image.base import (
     image_dimensions_from_bytes,
     parse_size,
 )
+from productflow_backend.infrastructure.openai_client import build_openai_client_kwargs
 from productflow_backend.infrastructure.prompts import render_prompt_template
 from productflow_backend.infrastructure.provider_config import (
     ResolvedImageProviderConfig,
@@ -255,13 +256,10 @@ class OpenAIResponsesImageClient:
         if previous_response_id:
             request_payload["previous_response_id"] = previous_response_id
 
-        client_kwargs: dict[str, Any] = {"api_key": self.api_key}
-        if self.base_url:
-            client_kwargs["base_url"] = self.base_url
         fallback_used = False
         requested_tool = dict(tool)
         try:
-            client = OpenAI(**client_kwargs)
+            client = OpenAI(**build_openai_client_kwargs(api_key=self.api_key, base_url=self.base_url))
         except Exception as exc:  # noqa: BLE001
             self._log_provider_exception(
                 "初始化 Responses 图片供应商失败",

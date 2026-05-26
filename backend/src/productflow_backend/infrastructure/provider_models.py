@@ -6,6 +6,7 @@ from typing import Any
 from openai import OpenAI
 
 from productflow_backend.infrastructure.db.models import ProviderProfile
+from productflow_backend.infrastructure.openai_client import build_openai_client_kwargs
 from productflow_backend.infrastructure.provider_config import (
     PROVIDER_TYPE_GOOGLE_GEMINI,
     PROVIDER_TYPE_OPENAI_COMPATIBLE,
@@ -42,11 +43,8 @@ def _list_openai_compatible_models(profile: ProviderProfile) -> list[ProviderMod
     if not profile.api_key:
         raise ProviderModelDiscoveryError("供应商档案缺少 API Key，无法拉取模型列表")
 
-    client_kwargs: dict[str, Any] = {"api_key": profile.api_key}
-    if profile.base_url:
-        client_kwargs["base_url"] = profile.base_url
-
     try:
+        client_kwargs = build_openai_client_kwargs(api_key=profile.api_key, base_url=profile.base_url)
         response = OpenAI(**client_kwargs).models.list()
     except Exception as exc:  # noqa: BLE001
         raise ProviderModelDiscoveryError("供应商模型列表拉取失败，请检查 Base URL、API Key 或供应商权限") from exc

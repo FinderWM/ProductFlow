@@ -26,6 +26,9 @@ IMAGE_SESSION_IDLE_TIMEOUT_MIN_MINUTES = 1
 IMAGE_SESSION_IDLE_TIMEOUT_MAX_MINUTES = 24 * 60
 DEFAULT_IMAGE_SESSION_WORKER_FAILSAFE_TIME_LIMIT_MINUTES = 24 * 60
 DEFAULT_WORKFLOW_IMAGE_GENERATION_PROVIDER_TIMEOUT_SECONDS = 15 * 60
+DEFAULT_GENERATION_CONFIG_AVAILABILITY_WINDOW_MINUTES = 5
+DEFAULT_GENERATION_CONFIG_FAILURE_THRESHOLD = 3
+DEFAULT_GENERATION_CONFIG_COOLDOWN_MINUTES = 10
 IMAGE_SIZE_CONFIG_KEYS = {"image_main_image_size", "image_promo_poster_size"}
 PROMPT_CONFIG_KEYS = {
     "prompt_brief_system",
@@ -181,6 +184,9 @@ class Settings(BaseSettings):
     upload_allowed_image_mime_types: str = "image/png,image/jpeg,image/webp"
 
     generation_max_concurrent_tasks: int = Field(default=3, ge=1, le=20)
+    generation_config_default_availability_window_minutes: int = Field(default=5, ge=1, le=24 * 60)
+    generation_config_default_failure_threshold: int = Field(default=3, ge=1, le=100)
+    generation_config_default_cooldown_minutes: int = Field(default=10, ge=1, le=24 * 60)
     image_session_stale_running_after_minutes: int = Field(
         default=DEFAULT_IMAGE_SESSION_IDLE_TIMEOUT_MINUTES,
         ge=IMAGE_SESSION_IDLE_TIMEOUT_MIN_MINUTES,
@@ -507,6 +513,33 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         description="全局资源保护阈值；工作流和文/图生图达到上限时会提示稍后重试。",
         minimum=1,
         maximum=20,
+    ),
+    ConfigDefinition(
+        key="generation_config_default_availability_window_minutes",
+        label="默认可用性窗口（分钟）",
+        category="生成队列",
+        input_type="number",
+        description="新建文案/图片生成配置时使用的失败统计窗口；单个配置可单独覆盖。",
+        minimum=1,
+        maximum=24 * 60,
+    ),
+    ConfigDefinition(
+        key="generation_config_default_failure_threshold",
+        label="默认失败阈值",
+        category="生成队列",
+        input_type="number",
+        description="新建文案/图片生成配置时使用的窗口内失败阈值；达到后进入冷冻期。",
+        minimum=1,
+        maximum=100,
+    ),
+    ConfigDefinition(
+        key="generation_config_default_cooldown_minutes",
+        label="默认冷冻时长（分钟）",
+        category="生成队列",
+        input_type="number",
+        description="新建文案/图片生成配置触发熔断后默认暂停调度的分钟数。",
+        minimum=1,
+        maximum=24 * 60,
     ),
     ConfigDefinition(
         key="image_session_stale_running_after_minutes",

@@ -30,3 +30,7 @@ class TextProvider(ABC):
         reference_images: list[ReferenceImageInput] | None = None,
     ) -> tuple[CopyPayloadV2, str]:
         raise NotImplementedError
+
+    @abstractmethod
+    def polish_image_prompt(self, prompt: str) -> tuple[str, str]:
+        raise NotImplementedError

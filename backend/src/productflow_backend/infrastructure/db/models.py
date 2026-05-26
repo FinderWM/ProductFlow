@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -79,6 +79,105 @@ class ProviderProfile(Base, TimestampMixin):
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    generation_configs: Mapped[list[GenerationConfig]] = relationship(back_populates="provider_profile")
+
+
+class GenerationConfig(Base, TimestampMixin):
+    """可调度的文案/图片生成配置，运行时生成 provider 的唯一配置来源。"""
+
+    __tablename__ = "generation_configs"
+    __table_args__ = (
+        Index("ix_generation_configs_purpose", "purpose"),
+        Index("ix_generation_configs_enabled", "enabled"),
+        Index("ix_generation_configs_archived_at", "archived_at"),
+        Index("ix_generation_configs_sort", "purpose", "priority", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    purpose: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    provider_profile_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("provider_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    model_settings_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    config_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    max_concurrency: Mapped[int] = mapped_column(Integer, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    availability_window_minutes: Mapped[int] = mapped_column(Integer, default=5)
+    failure_threshold: Mapped[int] = mapped_column(Integer, default=3)
+    cooldown_minutes: Mapped[int] = mapped_column(Integer, default=10)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    provider_profile: Mapped[ProviderProfile | None] = relationship(back_populates="generation_configs")
+    state: Mapped[GenerationConfigState | None] = relationship(
+        back_populates="generation_config",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    daily_stats: Mapped[list[GenerationConfigDailyStat]] = relationship(
+        back_populates="generation_config",
+        cascade="all, delete-orphan",
+    )
+
+
+class GenerationConfigState(Base, TimestampMixin):
+    """生成配置运行态：当前并发、失败窗口和冻结信息。"""
+
+    __tablename__ = "generation_config_states"
+
+    generation_config_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("generation_configs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    current_concurrency: Mapped[int] = mapped_column(Integer, default=0)
+    frozen_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_window_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_count_in_window: Mapped[int] = mapped_column(Integer, default=0)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    generation_config: Mapped[GenerationConfig] = relationship(back_populates="state")
+
+
+class GenerationConfigDailyStat(Base, TimestampMixin):
+    """按当前机器时区自然日聚合的生成配置统计。"""
+
+    __tablename__ = "generation_config_daily_stats"
+    __table_args__ = (
+        Index(
+            "uq_generation_config_daily_stats_config_date",
+            "generation_config_id",
+            "stat_date",
+            unique=True,
+        ),
+        Index("ix_generation_config_daily_stats_stat_date", "stat_date"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    generation_config_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("generation_configs.id", ondelete="CASCADE"),
+    )
+    stat_date: Mapped[date] = mapped_column(Date, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    timeout_count: Mapped[int] = mapped_column(Integer, default=0)
+    throttled_count: Mapped[int] = mapped_column(Integer, default=0)
+    generated_unit_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    freeze_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    generation_config: Mapped[GenerationConfig] = relationship(back_populates="daily_stats")
 
 
 class ProviderBinding(Base, TimestampMixin):
@@ -486,6 +585,11 @@ class ImageSessionRound(Base):
     image_generation_call_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     provider_request_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     provider_output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    generation_config_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("generation_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     generation_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     candidate_index: Mapped[int] = mapped_column(Integer, default=1)
     candidate_count: Mapped[int] = mapped_column(Integer, default=1)
@@ -534,6 +638,17 @@ class ImageSessionGenerationTask(Base):
     )
     selected_reference_asset_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     tool_options: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    generation_config_mode: Mapped[str] = mapped_column(String(20), default="auto")
+    requested_generation_config_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("generation_configs.id", ondelete="SET NULL", name="fk_img_task_requested_gen_config"),
+        nullable=True,
+    )
+    used_generation_config_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("generation_configs.id", ondelete="SET NULL", name="fk_img_task_used_gen_config"),
+        nullable=True,
+    )
     generation_count: Mapped[int] = mapped_column(Integer, default=1)
     completed_candidates: Mapped[int] = mapped_column(Integer, default=0)
     active_candidate_index: Mapped[int | None] = mapped_column(Integer, nullable=True)

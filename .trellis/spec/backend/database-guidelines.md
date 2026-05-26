@@ -136,14 +136,15 @@ For runtime settings:
 - Database rows override only keys in `RUNTIME_CONFIG_KEYS`.
 - Reset deletes the database row and falls back to the env/default `Settings` value.
 
-## Scenario: Provider profile and purpose binding configuration
+## Scenario: Provider profile and generation config pool
 
 ### 1. Scope / Trigger
 
-- Trigger: changing text provider selection, image provider selection, settings APIs, provider secrets, or legacy
-  `text_*` / `image_*` provider env keys.
+- Trigger: changing text provider selection, image provider selection, generation scheduling, settings APIs, provider
+  secrets, or legacy `text_*` / `image_*` provider env keys.
 - This is a cross-layer and database contract because provider configuration spans `Settings`, `app_settings`,
-  `provider_profiles`, `provider_bindings`, provider factories, API DTOs, and `SettingsPage`.
+  `provider_profiles`, `generation_configs`, compatibility `provider_bindings`, scheduler state/stat tables, provider
+  factories, API DTOs, workflow/image-session payloads, and `SettingsPage`.
 
 ### 2. Signatures
 
@@ -159,20 +160,56 @@ For runtime settings:
   - `enabled: bool`
   - `archived_at: datetime | null`
 - DB table: `provider_bindings`
+  - Compatibility mirror for the old settings API/UI shape. It is not the runtime provider source.
   - `purpose: "text" | "image"`
   - `provider_kind: "mock" | "openai" | "openai_responses" | "openai_images" | "google_gemini_image"`
   - `provider_profile_id: String(36) | null`
   - `model_settings_json: JSON object`
   - `config_json: JSON object`
+- DB table: `generation_configs`
+  - `id: String(36)`
+  - `purpose: "text" | "image"`
+  - `name: String(120)`
+  - `provider_kind: "mock" | "openai" | "openai_responses" | "openai_images" | "google_gemini_image"`
+  - `provider_profile_id: String(36) | null`
+  - `model_settings_json: JSON object`
+  - `config_json: JSON object`
+  - `priority: int`
+  - `max_concurrency: int`
+  - `enabled: bool`
+  - `availability_window_minutes: int`
+  - `failure_threshold: int`
+  - `cooldown_minutes: int`
+  - `archived_at: datetime | null`
+- DB table: `generation_config_states`
+  - `generation_config_id: String(36)` primary key and FK to `generation_configs`
+  - `current_concurrency: int`
+  - `frozen_until: datetime | null`
+  - `failure_window_started_at: datetime | null`
+  - `failure_count_in_window: int`
+  - `last_used_at`, `last_success_at`, `last_failure_at`, `last_failure_reason`
+- DB table: `generation_config_daily_stats`
+  - unique `(generation_config_id, stat_date)`
+  - `attempt_count`, `success_count`, `failure_count`, `timeout_count`, `throttled_count`
+  - `generated_unit_count`, `total_latency_ms`, `freeze_count`, `last_success_at`, `last_failure_at`
 - API:
   - `GET /api/settings/provider-config`
   - `POST /api/settings/provider-profiles`
   - `PATCH /api/settings/provider-profiles/{profile_id}`
   - `DELETE /api/settings/provider-profiles/{profile_id}`
   - `PATCH /api/settings/provider-bindings/{purpose}`
+  - `GET /api/settings/generation-configs`
+  - `GET /api/settings/generation-config-options`
+  - `POST /api/settings/generation-configs`
+  - `PATCH /api/settings/generation-configs/{generation_config_id}`
+  - `DELETE /api/settings/generation-configs/{generation_config_id}`
+  - `POST /api/settings/generation-configs/reorder`
+  - `GET /api/settings/generation-config-status`
 - Resolver functions:
-  - `resolve_text_provider_config() -> ResolvedTextProviderConfig`
-  - `resolve_image_provider_config() -> ResolvedImageProviderConfig`
+  - `resolve_text_provider_config(generation_config_id: str | None = None) -> ResolvedTextProviderConfig`
+  - `resolve_image_provider_config(generation_config_id: str | None = None) -> ResolvedImageProviderConfig`
+  - `claim_generation_config(session, purpose, generation_config_id=None) -> GenerationConfigClaim | None`
+  - `release_generation_config_claim(session, generation_config_id, success=..., ...) -> None`
 
 ### 3. Contracts
 
@@ -182,70 +219,89 @@ For runtime settings:
   - `image_provider_kind`, `image_api_key`, `image_base_url`
   - `image_generate_model`, `image_images_quality`, `image_images_style`, `image_responses_background_enabled`
 - `Settings` may keep those fields only as env parsing and legacy bootstrap input.
+- `generation_configs` is the runtime source for provider selection. `provider_bindings` exists only as a compatibility
+  mirror of the highest-priority active config per purpose.
 - `ensure_provider_config_bootstrapped(session)` reads legacy effective provider config from env plus legacy
-  `app_settings` rows, then creates provider profiles and text/image bindings once.
+  `app_settings` rows, then creates provider profiles, generation configs, state rows, and compatibility bindings once.
 - If legacy text and image configs share the same `(base_url, api_key)`, bootstrap creates one profile with merged
   capabilities. Different connections create separate profiles.
 - Google Gemini profiles use `provider_type="google_gemini"`, declare only `image_google_gemini`, reject custom
   `base_url`, and can bind only to `provider_kind="google_gemini_image"`.
-- Google Gemini image bindings store `model_settings_json.model`, `config_json.gemini_api_version` (`v1beta` by default,
+- Google Gemini image configs store `model_settings_json.model`, `config_json.gemini_api_version` (`v1beta` by default,
   allowed values `v1` or `v1beta`), and optional `config_json.gemini_output_mime_type`.
 - Provider factories and concrete clients must read API key, base URL, provider kind, and model through
   `resolve_*_provider_config()`. They must not fall back to old `Settings.text_api_key`,
   `Settings.image_api_key`, or provider kind fields.
-- Saving or importing an image-purpose binding for a real image provider (`openai_responses`, `openai_images`, or
-  `google_gemini_image`) must persist `app_settings.poster_generation_mode = "generated"` so the visible runtime config
-  matches workflow execution. Saving a `mock` image binding preserves the existing runtime mode instead of forcing a reset.
-- Provider model settings must come from `provider_bindings.model_settings_json` or
+- Saving or importing an image-purpose generation config for a real image provider (`openai_responses`, `openai_images`,
+  or `google_gemini_image`) must persist `app_settings.poster_generation_mode = "generated"` so the visible runtime
+  config matches workflow execution. Saving a `mock` image config preserves the existing runtime mode instead of forcing a
+  reset.
+- Provider model settings must come from `generation_configs.model_settings_json` or
   `provider_profiles.default_models_json`. If required model settings are absent after bootstrap, resolvers must fail
   with a clear configuration error instead of falling back to legacy `Settings.text_brief_model`,
   `Settings.text_copy_model`, or `Settings.image_generate_model`.
-- Image binding config is provider-kind scoped: `openai_responses` owns `responses_background_enabled`, while
+- Image config is provider-kind scoped: `openai_responses` owns `responses_background_enabled`, while
   `openai_images` owns `images_quality` and `images_style`, and `google_gemini_image` owns `gemini_api_version` plus
   optional `gemini_output_mime_type`. Do not require or persist Responses background config for `openai_images`, Google
   Gemini, or `mock`.
+- `GET /api/settings/generation-config-options` is intentionally not behind the secondary settings unlock. It returns
+  only non-secret fields (`id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`, `frozen_until`) for workflow
+  and image-chat selectors.
+- Automatic scheduling filters disabled, archived, frozen, over-capacity, profile-disabled, and capability-incompatible
+  configs, then claims capacity with a conditional DB update on `generation_config_states.current_concurrency`.
+- Manual scheduling targets the supplied config id but still respects enabled state, profile availability, freeze state,
+  and max concurrency. Capacity/freeze exhaustion returns `None` to keep durable tasks queued.
+- Only real provider execution outcomes update `generation_config_daily_stats` and failure windows. Queue wait,
+  validation errors, user cancellation, and missing product/workflow references must not count as provider failures.
+- Daily stats use the running machine's local calendar date. Do not add a separate env-only timezone setting for stats.
+- SQLite tests can read `DateTime(timezone=True)` columns back as naive datetimes; scheduler comparisons must normalize
+  stored datetimes to aware UTC before comparing with `datetime.now(UTC)`.
 - API responses for provider profiles expose `has_api_key`; they never expose the raw `api_key`.
 - A blank API key update preserves the existing stored key. A non-blank API key update replaces it.
-- While a provider profile is referenced by a real text/image binding, profile updates must not disable it or remove the
-  capability required by that binding.
+- While a provider profile is referenced by an active real text/image generation config, profile updates must not disable
+  it or remove the capability required by that config.
 - Docker Compose must continue passing legacy `TEXT_*` / `IMAGE_*` provider env values into backend and worker containers
   during the migration window, because containerized bootstrap cannot read the host `.env` file directly.
 
 ### 4. Validation & Error Matrix
 
 - `PATCH /api/settings` with old provider keys -> `400`, `未知配置项: <key>`.
-- Provider binding with unsupported purpose -> `400` or `404` depending on route ownership.
+- Generation config with unsupported purpose -> `400`, purpose detail.
 - Real provider binding without `provider_profile_id` -> `400`, `真实供应商必须选择供应商档案`.
-- Binding to a disabled or archived profile -> `400`, profile unavailable detail.
-- Binding to a profile missing the required capability -> `400`, capability unsupported detail.
-- Removing a capability from a profile still used by a binding -> `400`, active binding detail.
-- Disabling a profile still used by a binding -> `400`, active binding detail.
-- Archiving a provider profile still used by a binding -> `400`, active binding detail.
+- Config bound to a disabled or archived profile -> `400`, profile unavailable detail.
+- Config bound to a profile missing the required capability -> `400`, capability unsupported detail.
+- Removing a capability from a profile still used by an active config -> `400`, active config detail.
+- Disabling a profile still used by an active config -> `400`, active config detail.
+- Archiving a provider profile still used by an active config -> `400`, active config detail.
+- Manual config id missing while `generation_config_mode == "manual"` -> route/use case validation error.
+- Manual config over capacity or frozen -> durable task remains queued for retry, not a provider failure.
 - Missing provider config tables during very early startup -> settings defaults may still load, but real provider
   resolution must fail clearly rather than using old URL/key fallback.
-- Missing text/image model settings in both binding and profile defaults -> resolver fails clearly and asks the operator to
+- Missing text/image model settings in both config and profile defaults -> resolver fails clearly and asks the operator to
   configure the provider binding; do not silently use legacy env/app_settings model values.
 - `google_gemini` profile with non-empty `base_url` -> provider profile create/update returns `400`.
 - `google_gemini` profile with any capability except `image_google_gemini` -> provider profile create/update returns
   `400`.
 - `openai_compatible` profile with `image_google_gemini` -> provider profile create/update returns `400`.
-- `google_gemini_image` binding with `gemini_api_version` outside `v1` or `v1beta` -> provider binding update returns
+- `google_gemini_image` config with `gemini_api_version` outside `v1` or `v1beta` -> config update returns
   `400`.
 - Missing `responses_background_enabled` -> only `openai_responses` image bindings fail. `openai_images` and `mock` must
   not require that field.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: one OpenAI-compatible gateway supports `text_responses` and `image_images`; text and image bindings point to the
-  same profile and carry separate model settings.
-- Good: a text gateway and an image gateway use different keys or URLs; bootstrap creates two profiles.
+- Good: one OpenAI-compatible gateway supports `text_responses` and `image_images`; multiple text/image generation
+  configs point to the same profile and carry separate model settings.
+- Good: a text gateway and an image gateway use different keys or URLs; bootstrap creates two profiles and one default
+  config per purpose.
 - Good: a Google Gemini profile has `provider_type="google_gemini"`, no `base_url`, capability
-  `image_google_gemini`, and the image binding stores `provider_kind="google_gemini_image"` plus Gemini-specific config.
-- Base: default local development has mock text/image bindings and no real provider profile.
+  `image_google_gemini`, and the image config stores `provider_kind="google_gemini_image"` plus Gemini-specific config.
+- Base: default local development has mock text/image configs and no real provider profile.
+- Base: status pages read `generation_config_states` plus today's stats row; they do not scan historical usage events.
 - Bad: showing `text_api_key` or `image_api_key` in `/api/settings`.
 - Bad: constructing an OpenAI client from `get_runtime_settings().image_api_key`.
 - Bad: modeling Google Gemini as an OpenAI-compatible gateway or storing a Gemini custom endpoint in `base_url`.
-- Bad: keeping a route-level legacy binding response that reports old provider kind when no binding exists.
+- Bad: letting a failed task remain running because release/update stats raised on naive-vs-aware datetime comparison.
 
 ### 6. Tests Required
 
@@ -253,11 +309,15 @@ For runtime settings:
 - Bootstrap test for matching legacy text/image URL and key producing one profile with merged capabilities.
 - Bootstrap test for different legacy URL/key pairs producing separate profiles.
 - API test that provider profile responses never include the raw key and blank-key update preserves the stored key.
-- Binding validation test for required capabilities and active profile constraints.
-- Profile update test that active bindings prevent removing required capabilities and disabling the profile.
-- Resolver test proving existing provider bindings override stale legacy `app_settings` rows.
+- Generation config validation test for required capabilities and active profile constraints.
+- Scheduler tests for priority selection, max concurrency, manual disabled/frozen/full config behavior, failure window,
+  freeze count, stats counters, and SQLite naive datetime handling.
+- Profile update test that active configs prevent removing required capabilities and disabling the profile.
+- Resolver test proving existing generation configs override stale legacy `app_settings` rows.
 - Resolver test proving missing binding/profile model settings do not fall back to stale legacy model rows or env values.
-- Settings API/import test proving real image bindings switch visible `poster_generation_mode` to `generated`.
+- Settings API/import test proving real image configs switch visible `poster_generation_mode` to `generated`.
+- Workflow and image-session tests proving `generation_config_id` is persisted into task/run output metadata and provider
+  stats update on success/failure.
 - Settings API test for creating a `google_gemini` profile, rejecting custom Gemini `base_url`, and rejecting mismatched
   capabilities across Google Gemini and OpenAI-compatible profiles.
 - Settings API test that `google_gemini_image` binding accepts only `v1` or `v1beta`, persists
@@ -282,6 +342,13 @@ provider_config = resolve_image_provider_config()
 client = OpenAI(api_key=provider_config.api_key, base_url=provider_config.base_url)
 ```
 
+Correct when executing a manually selected config:
+
+```python
+provider_config = resolve_image_provider_config(generation_config_id=generation_config_id)
+client = OpenAI(api_key=provider_config.api_key, base_url=provider_config.base_url)
+```
+
 Wrong:
 
 ```python
@@ -297,6 +364,20 @@ client = genai.Client(
     api_key=provider_config.api_key,
     http_options=types.HttpOptions(apiVersion=provider_config.gemini_api_version),
 )
+```
+
+Wrong:
+
+```python
+if state.frozen_until and state.frozen_until > datetime.now(UTC):
+    return None
+```
+
+Correct:
+
+```python
+if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
+    return None
 ```
 
 ## Scenario: Runtime admin access toggle

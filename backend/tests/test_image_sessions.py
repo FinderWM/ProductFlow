@@ -16,10 +16,12 @@ from helpers import (
     _make_demo_image_bytes_with_size,
     _read_image_size,
 )
+from sqlalchemy import select
 
 from productflow_backend.config import get_settings
 from productflow_backend.infrastructure.db.models import (
     AppSetting,
+    GenerationConfigDailyStat,
     ImageSession,
     ImageSessionAsset,
     ImageSessionGenerationTask,
@@ -27,6 +29,7 @@ from productflow_backend.infrastructure.db.models import (
     ProviderBinding,
     ProviderProfile,
 )
+from productflow_backend.infrastructure.db.session import get_session_factory
 
 
 @pytest.fixture(autouse=True)
@@ -106,6 +109,63 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     assert second_payload["rounds"][-1]["previous_response_id"] is None
     assert second_payload["rounds"][-1]["base_asset_id"] == first_asset_id
     assert second_payload["rounds"][-1]["selected_reference_asset_ids"] == []
+
+
+def test_generation_config_options_do_not_require_settings_unlock(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    locked_settings = client.get("/api/settings")
+    assert locked_settings.status_code == 403
+
+    options = client.get("/api/settings/generation-config-options")
+    assert options.status_code == 200
+    payload = options.json()
+    assert {item["purpose"] for item in payload} == {"text", "image"}
+    assert all(
+        set(item) == {"id", "purpose", "name", "provider_kind", "enabled", "priority", "frozen_until"}
+        for item in payload
+    )
+
+
+def test_prompt_polish_uses_text_generation_config_and_updates_stats(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    options = client.get("/api/settings/generation-config-options")
+    assert options.status_code == 200
+    text_config_id = next(item["id"] for item in options.json() if item["purpose"] == "text")
+
+    response = client.post(
+        "/api/image-sessions/prompt-polish",
+        json={
+            "prompt": "一张白底护手霜主图",
+            "generation_config_mode": "manual",
+            "generation_config_id": text_config_id,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generation_config_id"] == text_config_id
+    assert "一张白底护手霜主图" in payload["prompt"]
+
+    session = get_session_factory()()
+    try:
+        stat = session.scalar(
+            select(GenerationConfigDailyStat).where(GenerationConfigDailyStat.generation_config_id == text_config_id)
+        )
+        assert stat is not None
+        assert stat.attempt_count == 1
+        assert stat.success_count == 1
+        assert stat.generated_unit_count == 1
+    finally:
+        session.close()
 
 
 def test_image_session_generate_returns_queued_task_without_waiting_for_provider(

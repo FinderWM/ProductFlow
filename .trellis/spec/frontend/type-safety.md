@@ -179,37 +179,53 @@ return api.createProduct({
   - `SettingsExportMetadata`
   - `SettingsProviderProfileExport`
   - `SettingsProviderBindingExport`
+  - `SettingsGenerationConfigExport`
   - `SettingsImportPreview`
   - `SettingsImportCommitResponse`
+  - `GenerationConfig`, `GenerationConfigOption`, `GenerationConfigStatus`
 
 #### 3. Contracts
 - `runtime_config` is a map of config key to JSON scalar/list values from the backend export.
 - `provider_profiles` may include `api_key`; SettingsPage must treat exported files as sensitive and show confirmation
   copy before download.
-- `provider_bindings` references imported provider profile ids for non-mock bindings.
+- `generation_configs` is the runtime provider-selection payload. It includes `purpose`, `name`, `provider_kind`,
+  `provider_profile_id`, `model_settings`, `config`, `priority`, `max_concurrency`, `enabled`,
+  `availability_window_minutes`, `failure_threshold`, and `cooldown_minutes`.
+- `provider_bindings` is compatibility data only. New UI and workflow/image-chat selectors should read
+  `generation_configs` or `generation-config-options`.
 - Import preview response fields are flat DTO fields such as `runtime_config_count`,
-  `provider_profile_count`, `provider_binding_count`, `includes_api_keys`, and
-  `provider_profiles_with_api_key_count`; do not invent a nested `metadata.summary` layer unless the backend schema
-  changes in the same commit.
+  `provider_profile_count`, `provider_binding_count`, `generation_config_count`, `includes_api_keys`, and
+  `provider_profiles_with_api_key_count`; do not invent a nested `metadata.summary` layer unless the backend schema changes
+  in the same commit.
 - Import commit returns refreshed settings/provider config data or enough data for SettingsPage to invalidate and refetch
   `['config']`, `['provider-config']`, `['runtime-config']`, and `['session']`.
+- `GET /api/settings/generation-config-options` does not require the secondary settings unlock and intentionally returns
+  only non-secret selection fields: `id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`, `frozen_until`.
+- Workflow and image-chat request DTOs preserve backend snake_case fields:
+  `generation_config_mode: "auto" | "manual"` and `generation_config_id: string | null`.
 
 #### 4. Validation & Error Matrix
 - Invalid JSON file -> SettingsPage shows a local invalid-file error before calling the API.
 - API 400 from preview/commit -> show `ApiError.detail`.
 - User cancels export/import confirmation -> do not call the API.
 - Successful import -> invalidate settings/runtime/session queries so UI reflects the imported values.
+- Manual generation config mode with a blank config id -> page should keep the control visible and backend validation
+  remains authoritative.
 
 #### 5. Good/Base/Bad Cases
-- Good: export downloads exactly the typed backend payload, then importing that JSON previews the same counts.
+- Good: export downloads exactly the typed backend payload, including `generation_configs`, then importing that JSON
+  previews the same counts.
 - Good: preview with `includes_api_keys=true` shows sensitive-file warning before commit.
-- Base: import file contains `mock` provider bindings and no provider API keys.
+- Good: workflow and image-chat selectors use `GenerationConfigOption[]` filtered by `purpose`.
+- Base: import file contains `mock` generation configs and no provider API keys.
 - Bad: frontend reads `preview.metadata.summary` when backend returns flat preview fields.
 - Bad: converting DTO fields to camelCase in `types.ts` without an explicit API mapping layer.
+- Bad: reusing provider profile DTOs for generation config selectors and accidentally exposing `api_key`.
 
 #### 6. Tests Required
 - SettingsPage tests for export confirmation and generated JSON download path.
 - SettingsPage tests for import preview summary, API-key warning, commit confirmation, and query invalidation.
+- Helper tests proving workflow/image-chat payloads round-trip `generation_config_mode` and `generation_config_id`.
 - `pnpm --dir web build` after any settings migration DTO change.
 
 #### 7. Wrong vs Correct
@@ -227,6 +243,18 @@ const keyCount = preview.provider_profiles_with_api_key_count;
 ```
 
 Keep frontend reads aligned with the backend response shape.
+
+Wrong:
+
+```ts
+generationConfigId: selectedConfigId
+```
+
+Correct:
+
+```ts
+generation_config_id: selectedConfigId
+```
 
 ---
 

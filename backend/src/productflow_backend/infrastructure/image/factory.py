@@ -8,9 +8,9 @@ from productflow_backend.infrastructure.image.responses_provider import OpenAIRe
 from productflow_backend.infrastructure.provider_config import resolve_image_provider_config
 
 
-def get_image_provider() -> ImageProvider:
+def get_image_provider(generation_config_id: str | None = None) -> ImageProvider:
     """根据统一供应商用途绑定选择图片生成供应商。"""
-    provider_config = resolve_image_provider_config()
+    provider_config = resolve_image_provider_config(generation_config_id=generation_config_id)
     if provider_config.provider_kind == "mock":
         return MockImageProvider()
     if provider_config.provider_kind == "openai_responses":

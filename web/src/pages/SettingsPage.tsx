@@ -2,9 +2,11 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode, RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   Box,
   Check,
   CheckCircle2,
+  ChevronDown,
   Download,
   FileJson,
   Image,
@@ -39,10 +41,11 @@ import { useI18n } from "../lib/preferences";
 import type {
   ConfigItem,
   ConfigResponse,
-  ProviderBinding,
-  ProviderBindingUpdateRequest,
   ProviderCapability,
   ProviderConfigResponse,
+  GenerationConfig,
+  GenerationConfigCreateRequest,
+  GenerationConfigUpdateRequest,
   ProviderModel,
   ProviderProfile,
   ProviderProfileCreateRequest,
@@ -57,6 +60,7 @@ export type SettingsSectionId =
   | "providers"
   | "text"
   | "image"
+  | "status"
   | "prompts"
   | "upload"
   | "queue"
@@ -100,26 +104,30 @@ export interface ProviderDrawerViewState {
   form: ProviderProfileFormState;
 }
 
-export interface TextBindingDraft {
-  provider_kind: "mock" | "openai";
+export interface GenerationConfigDraft {
+  id: string | null;
+  purpose: "text" | "image";
+  name: string;
+  provider_kind: TextProviderKind | ImageProviderKind;
   provider_profile_id: string;
   brief_model: string;
   copy_model: string;
-}
-
-export interface ImageBindingDraft {
-  provider_kind: "mock" | "openai_responses" | "openai_images" | "google_gemini_image";
-  provider_profile_id: string;
   model: string;
   images_quality: string;
   images_style: string;
   responses_background_enabled: boolean;
   gemini_api_version: string;
   gemini_output_mime_type: string;
+  priority: string;
+  max_concurrency: string;
+  enabled: boolean;
+  availability_window_minutes: string;
+  failure_threshold: string;
+  cooldown_minutes: string;
 }
 
-type TextProviderKind = TextBindingDraft["provider_kind"];
-type ImageProviderKind = ImageBindingDraft["provider_kind"];
+type TextProviderKind = "mock" | "openai";
+type ImageProviderKind = "mock" | "openai_responses" | "openai_images" | "google_gemini_image";
 type ProviderModelKind = TextProviderKind | ImageProviderKind;
 
 const INPUT_CLASS =
@@ -170,6 +178,13 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     descriptionKey: "settings.section.imageDescription",
     groupKey: "settings.groupProviders",
     icon: Image,
+  },
+  {
+    id: "status",
+    labelKey: "settings.section.status",
+    descriptionKey: "settings.section.statusDescription",
+    groupKey: "settings.groupProviders",
+    icon: Activity,
   },
   {
     id: "prompts",
@@ -378,10 +393,23 @@ export function providerDrawerEditState(profile: ProviderProfile): ProviderDrawe
   };
 }
 
-export function providerUsageFromBindings(bindings: ProviderBinding[], profileId: string): ProviderProfileUsage {
+export function providerUsageFromGenerationConfigs(
+  generationConfigs: GenerationConfig[],
+  profileId: string,
+): ProviderProfileUsage {
   return {
-    text: bindings.some((binding) => binding.purpose === "text" && binding.provider_profile_id === profileId),
-    image: bindings.some((binding) => binding.purpose === "image" && binding.provider_profile_id === profileId),
+    text: generationConfigs.some(
+      (generationConfig) =>
+        generationConfig.purpose === "text" &&
+        generationConfig.provider_profile_id === profileId &&
+        !generationConfig.archived_at,
+    ),
+    image: generationConfigs.some(
+      (generationConfig) =>
+        generationConfig.purpose === "image" &&
+        generationConfig.provider_profile_id === profileId &&
+        !generationConfig.archived_at,
+    ),
   };
 }
 
@@ -422,51 +450,90 @@ export function providerProfileUpdatePayload(form: ProviderProfileFormState): Pr
   };
 }
 
-function getBinding(data: ProviderConfigResponse | undefined, purpose: "text" | "image"): ProviderBinding | undefined {
-  return data?.bindings.find((binding) => binding.purpose === purpose);
+function generationConfigsForPurpose(
+  data: ProviderConfigResponse | undefined,
+  purpose: "text" | "image",
+): GenerationConfig[] {
+  return (data?.generation_configs ?? [])
+    .filter((generationConfig) => generationConfig.purpose === purpose && !generationConfig.archived_at)
+    .sort((left, right) => right.priority - left.priority || left.name.localeCompare(right.name));
 }
 
-function textBindingDraft(binding: ProviderBinding | undefined): TextBindingDraft {
+function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfigDraft {
   return {
-    provider_kind: binding?.provider_kind === "openai" ? "openai" : "mock",
-    provider_profile_id: binding?.provider_profile_id ?? "",
-    brief_model: textValue(binding?.model_settings, "brief_model"),
-    copy_model: textValue(binding?.model_settings, "copy_model"),
+    id: null,
+    purpose,
+    name: purpose === "text" ? "Text config" : "Image config",
+    provider_kind: purpose === "text" ? "mock" : "mock",
+    provider_profile_id: "",
+    brief_model: "",
+    copy_model: "",
+    model: "",
+    images_quality: "",
+    images_style: "",
+    responses_background_enabled: true,
+    gemini_api_version: "v1beta",
+    gemini_output_mime_type: "",
+    priority: "100",
+    max_concurrency: "1",
+    enabled: true,
+    availability_window_minutes: "10",
+    failure_threshold: "3",
+    cooldown_minutes: "10",
   };
 }
 
-export function textBindingPayloadFromDraft(draft: TextBindingDraft): ProviderBindingUpdateRequest {
-  return {
-    provider_kind: draft.provider_kind,
-    provider_profile_id: draft.provider_kind === "mock" ? null : draft.provider_profile_id,
-    model_settings: {
-      ...(draft.brief_model.trim() ? { brief_model: draft.brief_model.trim() } : {}),
-      ...(draft.copy_model.trim() ? { copy_model: draft.copy_model.trim() } : {}),
-    },
-    config: {},
-  };
-}
-
-function imageBindingDraft(binding: ProviderBinding | undefined): ImageBindingDraft {
+function generationConfigDraft(config: GenerationConfig): GenerationConfigDraft {
   const providerKind =
-    binding?.provider_kind === "openai_responses" ||
-    binding?.provider_kind === "openai_images" ||
-    binding?.provider_kind === "google_gemini_image"
-      ? binding.provider_kind
-      : "mock";
+    config.purpose === "text"
+      ? config.provider_kind === "openai"
+        ? "openai"
+        : "mock"
+      : config.provider_kind === "openai_responses" ||
+          config.provider_kind === "openai_images" ||
+          config.provider_kind === "google_gemini_image"
+        ? config.provider_kind
+        : "mock";
   return {
+    id: config.id,
+    purpose: config.purpose,
+    name: config.name,
     provider_kind: providerKind,
-    provider_profile_id: binding?.provider_profile_id ?? "",
-    model: textValue(binding?.model_settings, "model"),
-    images_quality: textValue(binding?.config, "images_quality"),
-    images_style: textValue(binding?.config, "images_style"),
-    responses_background_enabled: boolValue(binding?.config, "responses_background_enabled", true),
-    gemini_api_version: textValue(binding?.config, "gemini_api_version") || "v1beta",
-    gemini_output_mime_type: textValue(binding?.config, "gemini_output_mime_type"),
+    provider_profile_id: config.provider_profile_id ?? "",
+    brief_model: textValue(config.model_settings, "brief_model"),
+    copy_model: textValue(config.model_settings, "copy_model"),
+    model: textValue(config.model_settings, "model"),
+    images_quality: textValue(config.config, "images_quality"),
+    images_style: textValue(config.config, "images_style"),
+    responses_background_enabled: boolValue(config.config, "responses_background_enabled", true),
+    gemini_api_version: textValue(config.config, "gemini_api_version") || "v1beta",
+    gemini_output_mime_type: textValue(config.config, "gemini_output_mime_type"),
+    priority: String(config.priority),
+    max_concurrency: String(config.max_concurrency),
+    enabled: config.enabled,
+    availability_window_minutes: String(config.availability_window_minutes),
+    failure_threshold: String(config.failure_threshold),
+    cooldown_minutes: String(config.cooldown_minutes),
   };
 }
 
-export function imageBindingPayloadFromDraft(draft: ImageBindingDraft): ProviderBindingUpdateRequest {
+function numberDraftValue(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function generationConfigPayloadFromDraft(
+  draft: GenerationConfigDraft,
+): GenerationConfigCreateRequest | GenerationConfigUpdateRequest {
+  const model_settings =
+    draft.purpose === "text"
+      ? {
+          ...(draft.brief_model.trim() ? { brief_model: draft.brief_model.trim() } : {}),
+          ...(draft.copy_model.trim() ? { copy_model: draft.copy_model.trim() } : {}),
+        }
+      : draft.model.trim()
+        ? { model: draft.model.trim() }
+        : {};
   const config =
     draft.provider_kind === "openai_responses"
       ? { responses_background_enabled: draft.responses_background_enabled }
@@ -484,10 +551,18 @@ export function imageBindingPayloadFromDraft(draft: ImageBindingDraft): Provider
             }
           : {};
   return {
+    name: draft.name.trim(),
+    purpose: draft.purpose,
     provider_kind: draft.provider_kind,
     provider_profile_id: draft.provider_kind === "mock" ? null : draft.provider_profile_id,
-    model_settings: draft.model.trim() ? { model: draft.model.trim() } : {},
+    model_settings,
     config,
+    priority: numberDraftValue(draft.priority, 100),
+    max_concurrency: numberDraftValue(draft.max_concurrency, 1),
+    enabled: draft.enabled,
+    availability_window_minutes: numberDraftValue(draft.availability_window_minutes, 10),
+    failure_threshold: numberDraftValue(draft.failure_threshold, 3),
+    cooldown_minutes: numberDraftValue(draft.cooldown_minutes, 10),
   };
 }
 
@@ -750,7 +825,11 @@ function ProviderModelInput({
   const { t } = useI18n();
   const reactId = useId();
   const inputId = `${idPrefix}-${reactId}`;
-  const datalistId = `${inputId}-models`;
+  const listboxId = `${inputId}-models`;
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [open, setOpen] = useState(false);
+  const [activeModelId, setActiveModelId] = useState(value);
   const canFetchModels = providerKind !== "mock" && Boolean(providerProfileId);
   const modelsQuery = useQuery({
     queryKey: providerModelsQueryKey(providerProfileId, providerKind),
@@ -770,26 +849,126 @@ function ProviderModelInput({
   const statusClassName = modelsQuery.error
     ? "text-red-600 dark:text-red-300"
     : "text-slate-500 dark:text-slate-400";
+  const canOpenModels = !disabled && canFetchModels && models.length > 0;
+  const activeModel = models.find((model) => model.id === activeModelId) ?? models[0] ?? null;
+
+  useEffect(() => {
+    if (!open) {
+      setActiveModelId(value);
+      return undefined;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [open, value]);
+
+  useEffect(() => {
+    if (open && activeModel) {
+      optionRefs.current[activeModel.id]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeModel, open]);
+
+  useEffect(() => {
+    if (!models.length) {
+      setOpen(false);
+    }
+  }, [models.length]);
+
+  function moveActiveModel(delta: number) {
+    if (!models.length) {
+      return;
+    }
+    const currentIndex = Math.max(
+      0,
+      models.findIndex((model) => model.id === activeModelId),
+    );
+    const nextIndex = (currentIndex + delta + models.length) % models.length;
+    setActiveModelId(models[nextIndex].id);
+  }
+
+  function selectModel(model: ProviderModel) {
+    onChange(model.id);
+    setActiveModelId(model.id);
+    setOpen(false);
+  }
 
   return (
-    <div className="space-y-2">
+    <div ref={rootRef} className="relative space-y-2">
       <label htmlFor={inputId} className="block text-xs font-medium text-slate-600 dark:text-slate-300">
         {label}
       </label>
       <div className="flex gap-2">
-        <input
-          id={inputId}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className={INPUT_CLASS}
-          placeholder={placeholder}
-          list={canFetchModels && models.length > 0 ? datalistId : undefined}
-          disabled={disabled}
-        />
+        <div className="relative min-w-0 flex-1">
+          <input
+            id={inputId}
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            value={value}
+            onChange={(event) => {
+              onChange(event.target.value);
+              setActiveModelId(event.target.value);
+            }}
+            onFocus={() => {
+              if (canOpenModels) {
+                setOpen(true);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (!canOpenModels) {
+                return;
+              }
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setOpen(true);
+                moveActiveModel(1);
+                return;
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setOpen(true);
+                moveActiveModel(-1);
+                return;
+              }
+              if (event.key === "Enter" && open && activeModel) {
+                event.preventDefault();
+                selectModel(activeModel);
+                return;
+              }
+              if (event.key === "Escape") {
+                setOpen(false);
+              }
+            }}
+            className={`${INPUT_CLASS} ${canOpenModels ? "pr-11" : ""}`}
+            placeholder={placeholder}
+            disabled={disabled}
+          />
+          {canOpenModels ? (
+            <button
+              type="button"
+              onClick={() => setOpen((current) => !current)}
+              className="absolute right-1.5 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+              aria-label={t("settings.provider.openModelOptions")}
+              title={t("settings.provider.openModelOptions")}
+            >
+              <ChevronDown size={15} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+            </button>
+          ) : null}
+        </div>
         {providerKind !== "mock" ? (
           <button
             type="button"
-            onClick={() => void modelsQuery.refetch()}
+            onClick={() => {
+              setOpen(false);
+              void modelsQuery.refetch();
+            }}
             disabled={disabled || !canFetchModels || modelsQuery.isFetching}
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm shadow-slate-200/35 hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-400 dark:shadow-black/20 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
             aria-label={t("settings.provider.refreshModels")}
@@ -799,12 +978,36 @@ function ProviderModelInput({
           </button>
         ) : null}
       </div>
-      {models.length > 0 ? (
-        <datalist id={datalistId}>
+      {open && canOpenModels ? (
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-labelledby={inputId}
+          className="absolute left-0 right-[3.25rem] z-[95] max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10"
+        >
           {models.map((model) => (
-            <option key={model.id} value={model.id} label={model.label} />
+            <button
+              key={model.id}
+              ref={(element) => {
+                optionRefs.current[model.id] = element;
+              }}
+              type="button"
+              role="option"
+              aria-selected={model.id === value}
+              onClick={() => selectModel(model)}
+              className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium outline-none transition-colors ${
+                model.id === value
+                  ? "bg-indigo-50 text-indigo-700 dark:bg-violet-500/18 dark:text-violet-100"
+                  : model.id === activeModel?.id
+                    ? "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
+                    : "text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+              }`}
+            >
+              <span className="min-w-0 flex-1 truncate">{model.label || model.id}</span>
+              {model.id === value ? <Check size={14} className="shrink-0" /> : null}
+            </button>
           ))}
-        </datalist>
+        </div>
       ) : null}
       {statusText ? <p className={`min-h-4 text-xs leading-5 ${statusClassName}`}>{statusText}</p> : null}
     </div>
@@ -1007,7 +1210,7 @@ function ProvidersSection({
     ? profiles.find((profile) => profile.id === editingProfileId)
     : undefined;
   const editingProfileUsage = editingProfile
-    ? providerUsageFromBindings(data?.bindings ?? [], editingProfile.id)
+    ? providerUsageFromGenerationConfigs(data?.generation_configs ?? [], editingProfile.id)
     : undefined;
   const editingProfileDisableBlocked =
     editingProfile && editingProfileUsage ? providerDisableBlocked(editingProfile, editingProfileUsage) : false;
@@ -1032,7 +1235,7 @@ function ProvidersSection({
       {profiles.length ? (
         <div className="grid gap-4 lg:grid-cols-2">
           {profiles.map((profile) => {
-            const usage = providerUsageFromBindings(data?.bindings ?? [], profile.id);
+            const usage = providerUsageFromGenerationConfigs(data?.generation_configs ?? [], profile.id);
             return (
               <ProviderProfileCard
                 key={profile.id}
@@ -1575,125 +1778,208 @@ function ProviderProfileDrawer({
   );
 }
 
-interface TextBindingSectionProps {
+interface GenerationConfigPoolSectionProps {
   data: ProviderConfigResponse | undefined;
-  draft: TextBindingDraft;
+  purpose: "text" | "image";
+  drafts: Record<string, GenerationConfigDraft>;
   pending: boolean;
-  onChange: (next: TextBindingDraft) => void;
-  onSave: () => void;
+  archivingConfigId: string | null;
+  onChange: (key: string, next: GenerationConfigDraft) => void;
+  onSave: (draft: GenerationConfigDraft) => void;
+  onArchive: (configId: string) => void;
 }
 
-function TextBindingSection({ data, draft, pending, onChange, onSave }: TextBindingSectionProps) {
-  const { t } = useI18n();
-  const profiles = (data?.profiles ?? []).filter(
-    (profile) => profile.enabled && !profile.archived_at && profile.capabilities.includes("text_responses"),
+function generationConfigDraftKey(draft: GenerationConfigDraft): string {
+  return draft.id ?? `new-${draft.purpose}`;
+}
+
+function providerProfilesForGenerationConfig(
+  profiles: ProviderProfile[],
+  draft: GenerationConfigDraft,
+): ProviderProfile[] {
+  const requiredCapability =
+    draft.purpose === "text"
+      ? "text_responses"
+      : draft.provider_kind === "openai_responses"
+        ? "image_responses"
+        : draft.provider_kind === "google_gemini_image"
+          ? "image_google_gemini"
+          : "image_images";
+  return profiles.filter(
+    (profile) => profile.enabled && !profile.archived_at && profile.capabilities.includes(requiredCapability),
   );
+}
+
+function generationConfigSuccessRate(config: GenerationConfig): string {
+  const stat = config.today_stat;
+  if (!stat || stat.attempt_count <= 0) {
+    return "0%";
+  }
+  return `${Math.round((stat.success_count / stat.attempt_count) * 100)}%`;
+}
+
+function GenerationConfigPoolSection({
+  data,
+  purpose,
+  drafts,
+  pending,
+  archivingConfigId,
+  onChange,
+  onSave,
+  onArchive,
+}: GenerationConfigPoolSectionProps) {
+  const { t } = useI18n();
+  const configs = generationConfigsForPurpose(data, purpose);
+  const profiles = data?.profiles ?? [];
+  const newDraftKey = `new-${purpose}`;
+  const newDraft = drafts[newDraftKey] ?? emptyGenerationConfigDraft(purpose);
+  const cards = [
+    ...configs.map((config) => ({ key: config.id, config, draft: drafts[config.id] ?? generationConfigDraft(config) })),
+    { key: newDraftKey, config: null, draft: newDraft },
+  ];
+
   return (
-    <div className={`${PANEL_CLASS} max-w-3xl space-y-5`}>
-      <SettingsFormField label={t("settings.provider.apiInterfaceLabel")}>
-        <SelectField
-          value={draft.provider_kind}
-          options={[
-            { value: "mock", label: t("settings.provider.interface.mock") },
-            { value: "openai", label: t("settings.provider.interface.openaiResponses") },
-          ]}
-          onChange={(value) => onChange({ ...draft, provider_kind: value === "openai" ? "openai" : "mock" })}
-          radius="lg"
-        />
-      </SettingsFormField>
-      {draft.provider_kind !== "mock" ? (
-        <SettingsFormField label={t("settings.provider.compatibleProviderLabel")}>
-          <SelectField
-            value={draft.provider_profile_id}
-            options={[
-              { value: "", label: t("settings.provider.selectProfile") },
-              ...profiles.map((profile) => ({ value: profile.id, label: profile.name })),
-            ]}
-            onChange={(value) => onChange({ ...draft, provider_profile_id: value })}
-            radius="lg"
-          />
-        </SettingsFormField>
-      ) : null}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <ProviderModelInput
-          idPrefix="text-brief-model"
-          label={t("settings.provider.textBriefModelLabel")}
-          value={draft.brief_model}
-          placeholder={t("settings.provider.textBriefModelPlaceholder")}
-          providerKind={draft.provider_kind}
-          providerProfileId={draft.provider_profile_id}
-          disabled={pending}
-          onChange={(brief_model) => onChange({ ...draft, brief_model })}
-        />
-        <ProviderModelInput
-          idPrefix="text-copy-model"
-          label={t("settings.provider.textCopyModelLabel")}
-          value={draft.copy_model}
-          placeholder={t("settings.provider.textCopyModelPlaceholder")}
-          providerKind={draft.provider_kind}
-          providerProfileId={draft.provider_profile_id}
-          disabled={pending}
-          onChange={(copy_model) => onChange({ ...draft, copy_model })}
-        />
-      </div>
-      <div className="flex justify-end border-t border-slate-100 pt-5 dark:border-slate-800">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+            {purpose === "text" ? t("settings.generation.textPoolTitle") : t("settings.generation.imagePoolTitle")}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+            {t("settings.generation.poolDescription")}
+          </p>
+        </div>
         <button
           type="button"
-          onClick={onSave}
-          disabled={pending || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
-          className={SETTINGS_MAIN_ACTION_CLASS}
+          onClick={() => window.location.reload()}
+          className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:hover:bg-slate-800"
         >
-          {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
-          {t("settings.provider.saveText")}
+          <RefreshCw size={14} className="mr-2" />
+          {t("settings.generation.refreshSort")}
         </button>
       </div>
+      {cards.map(({ key, config, draft }) => (
+        <GenerationConfigCard
+          key={key}
+          config={config}
+          draft={draft}
+          profiles={providerProfilesForGenerationConfig(profiles, draft)}
+          pending={pending || archivingConfigId === config?.id}
+          onChange={(next) => onChange(generationConfigDraftKey(next), next)}
+          onSave={() => onSave(draft)}
+          onArchive={config ? () => onArchive(config.id) : undefined}
+        />
+      ))}
     </div>
   );
 }
 
-interface ImageBindingSectionProps {
-  data: ProviderConfigResponse | undefined;
-  draft: ImageBindingDraft;
+interface GenerationConfigCardProps {
+  config: GenerationConfig | null;
+  draft: GenerationConfigDraft;
+  profiles: ProviderProfile[];
   pending: boolean;
-  onChange: (next: ImageBindingDraft) => void;
+  onChange: (next: GenerationConfigDraft) => void;
   onSave: () => void;
+  onArchive?: () => void;
 }
 
-function ImageBindingSection({ data, draft, pending, onChange, onSave }: ImageBindingSectionProps) {
+function GenerationConfigCard({ config, draft, profiles, pending, onChange, onSave, onArchive }: GenerationConfigCardProps) {
   const { t } = useI18n();
-  const requiredCapability =
-    draft.provider_kind === "openai_responses"
-      ? "image_responses"
-      : draft.provider_kind === "google_gemini_image"
-        ? "image_google_gemini"
-        : "image_images";
-  const profiles = (data?.profiles ?? []).filter(
-    (profile) => profile.enabled && !profile.archived_at && profile.capabilities.includes(requiredCapability),
-  );
+  const isNew = !config;
+  const providerKindOptions =
+    draft.purpose === "text"
+      ? [
+          { value: "mock", label: t("settings.provider.interface.mock") },
+          { value: "openai", label: t("settings.provider.interface.openaiResponses") },
+        ]
+      : [
+          { value: "mock", label: t("settings.provider.interface.mock") },
+          { value: "openai_responses", label: t("settings.provider.interface.openaiResponses") },
+          { value: "openai_images", label: t("settings.provider.interface.openaiImages") },
+          { value: "google_gemini_image", label: t("settings.provider.interface.googleGeminiImage") },
+        ];
+  const busy = pending;
+
   return (
-    <div className={`${PANEL_CLASS} max-w-3xl space-y-5`}>
-      <SettingsFormField label={t("settings.provider.apiInterfaceLabel")}>
-        <SelectField
-          value={draft.provider_kind}
-          options={[
-            { value: "mock", label: t("settings.provider.interface.mock") },
-            { value: "openai_responses", label: t("settings.provider.interface.openaiResponses") },
-            { value: "openai_images", label: t("settings.provider.interface.openaiImages") },
-            { value: "google_gemini_image", label: t("settings.provider.interface.googleGeminiImage") },
-          ]}
-          onChange={(value) =>
-            onChange({
-              ...draft,
-              provider_kind:
-                value === "openai_responses" || value === "openai_images" || value === "google_gemini_image"
-                  ? value
-                  : "mock",
-              provider_profile_id: "",
-            })
-          }
-          radius="lg"
-        />
-      </SettingsFormField>
+    <div className={`${PANEL_CLASS} space-y-5`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-base font-semibold text-slate-950 dark:text-white">
+              {isNew ? t("settings.generation.newConfig") : config.name}
+            </h3>
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                draft.enabled
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200"
+                  : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+              }`}
+            >
+              {draft.enabled ? t("settings.provider.enabled") : t("settings.provider.disabled")}
+            </span>
+            {config?.state?.frozen_until ? (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200">
+                {t("settings.generation.frozen")}
+              </span>
+            ) : null}
+          </div>
+          {config ? (
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {t("settings.generation.cardStats", {
+                running: config.state?.current_concurrency ?? 0,
+                max: config.max_concurrency,
+                attempts: config.today_stat?.attempt_count ?? 0,
+                successRate: generationConfigSuccessRate(config),
+              })}
+            </p>
+          ) : null}
+        </div>
+        {onArchive ? (
+          <button
+            type="button"
+            onClick={onArchive}
+            disabled={busy}
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
+          >
+            {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
+            {t("settings.generation.archive")}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <SettingsFormField label={t("settings.generation.nameLabel")}>
+          <input
+            value={draft.name}
+            onChange={(event) => onChange({ ...draft, name: event.target.value })}
+            className={INPUT_CLASS}
+            placeholder={t("settings.generation.namePlaceholder")}
+          />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.provider.apiInterfaceLabel")}>
+          <SelectField
+            value={draft.provider_kind}
+            options={providerKindOptions}
+            onChange={(value) =>
+              onChange({
+                ...draft,
+                provider_kind:
+                  draft.purpose === "text"
+                    ? value === "openai"
+                      ? "openai"
+                      : "mock"
+                    : value === "openai_responses" || value === "openai_images" || value === "google_gemini_image"
+                      ? value
+                      : "mock",
+                provider_profile_id: "",
+              })
+            }
+            radius="lg"
+          />
+        </SettingsFormField>
+      </div>
+
       {draft.provider_kind !== "mock" ? (
         <SettingsFormField label={t("settings.provider.providerProfileLabel")}>
           <SelectField
@@ -1707,12 +1993,102 @@ function ImageBindingSection({ data, draft, pending, onChange, onSave }: ImageBi
           />
         </SettingsFormField>
       ) : null}
+
+      {draft.purpose === "text" ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ProviderModelInput
+            idPrefix={`text-brief-model-${config?.id ?? "new"}`}
+            label={t("settings.provider.textBriefModelLabel")}
+            value={draft.brief_model}
+            placeholder={t("settings.provider.textBriefModelPlaceholder")}
+            providerKind={draft.provider_kind === "openai" ? "openai" : "mock"}
+            providerProfileId={draft.provider_profile_id}
+            disabled={busy}
+            onChange={(brief_model) => onChange({ ...draft, brief_model })}
+          />
+          <ProviderModelInput
+            idPrefix={`text-copy-model-${config?.id ?? "new"}`}
+            label={t("settings.provider.textCopyModelLabel")}
+            value={draft.copy_model}
+            placeholder={t("settings.provider.textCopyModelPlaceholder")}
+            providerKind={draft.provider_kind === "openai" ? "openai" : "mock"}
+            providerProfileId={draft.provider_profile_id}
+            disabled={busy}
+            onChange={(copy_model) => onChange({ ...draft, copy_model })}
+          />
+        </div>
+      ) : (
+        <GenerationConfigImageFields draft={draft} pending={busy} onChange={onChange} configId={config?.id ?? "new"} />
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <SettingsFormField label={t("settings.generation.priority")}>
+          <input value={draft.priority} onChange={(event) => onChange({ ...draft, priority: event.target.value })} className={INPUT_CLASS} type="number" />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.maxConcurrency")}>
+          <input value={draft.max_concurrency} onChange={(event) => onChange({ ...draft, max_concurrency: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.availabilityWindow")}>
+          <input value={draft.availability_window_minutes} onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.failureThreshold")}>
+          <input value={draft.failure_threshold} onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.cooldownMinutes")}>
+          <input value={draft.cooldown_minutes} onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+        </SettingsFormField>
+      </div>
+
+      <div className="flex flex-col gap-4 border-t border-slate-100 pt-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+        <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
+          />
+          {t("settings.generation.enabled")}
+        </label>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={busy || !draft.name.trim() || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
+          className={SETTINGS_MAIN_ACTION_CLASS}
+        >
+          {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
+          {isNew ? t("settings.generation.create") : t("settings.generation.save")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GenerationConfigImageFields({
+  draft,
+  pending,
+  onChange,
+  configId,
+}: {
+  draft: GenerationConfigDraft;
+  pending: boolean;
+  onChange: (next: GenerationConfigDraft) => void;
+  configId: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="space-y-3">
       <ProviderModelInput
-        idPrefix="image-model"
+        idPrefix={`image-model-${configId}`}
         label={t("settings.provider.imageModelLabel")}
         value={draft.model}
         placeholder={t("settings.provider.imageModelPlaceholder")}
-        providerKind={draft.provider_kind}
+        providerKind={
+          draft.provider_kind === "openai_responses" ||
+          draft.provider_kind === "openai_images" ||
+          draft.provider_kind === "google_gemini_image"
+            ? draft.provider_kind
+            : "mock"
+        }
         providerProfileId={draft.provider_profile_id}
         disabled={pending}
         onChange={(model) => onChange({ ...draft, model })}
@@ -1726,9 +2102,7 @@ function ImageBindingSection({ data, draft, pending, onChange, onSave }: ImageBi
                 { value: "v1beta", label: "v1beta" },
                 { value: "v1", label: "v1" },
               ]}
-              onChange={(value) =>
-                onChange({ ...draft, gemini_api_version: value === "v1" ? "v1" : "v1beta" })
-              }
+              onChange={(value) => onChange({ ...draft, gemini_api_version: value === "v1" ? "v1" : "v1beta" })}
               radius="lg"
             />
           </SettingsFormField>
@@ -1767,30 +2141,79 @@ function ImageBindingSection({ data, draft, pending, onChange, onSave }: ImageBi
           </SettingsFormField>
         </div>
       ) : null}
-      <div className="flex flex-col gap-5 border-t border-slate-100 pt-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-        {draft.provider_kind === "openai_responses" ? (
-          <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
-            <input
-              type="checkbox"
-              checked={draft.responses_background_enabled}
-              onChange={(event) => onChange({ ...draft, responses_background_enabled: event.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
-            />
-            {t("settings.provider.responsesBackground")}
-          </label>
-        ) : (
-          <span />
-        )}
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={pending || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
-          className={SETTINGS_MAIN_ACTION_CLASS}
-        >
-          {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
-          {t("settings.provider.saveImage")}
-        </button>
+      {draft.provider_kind === "openai_responses" ? (
+        <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={draft.responses_background_enabled}
+            onChange={(event) => onChange({ ...draft, responses_background_enabled: event.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
+          />
+          {t("settings.provider.responsesBackground")}
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
+function GenerationStatusSection({ data }: { data: ProviderConfigResponse | undefined }) {
+  const { t } = useI18n();
+  const summary = data?.status_summary;
+  const configs = generationConfigsForPurpose(data, "text").concat(generationConfigsForPurpose(data, "image"));
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatusMetric label={t("settings.generation.totalConfigs")} value={summary?.total_count ?? 0} />
+        <StatusMetric label={t("settings.generation.runningConfigs")} value={summary?.running_count ?? 0} />
+        <StatusMetric label={t("settings.generation.frozenConfigs")} value={summary?.frozen_count ?? 0} />
+        <StatusMetric label={t("settings.generation.todayAttempts")} value={summary?.today_attempt_count ?? 0} />
       </div>
+      <div className={`${PANEL_CLASS} overflow-hidden p-0`}>
+        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+          <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+            {t("settings.generation.statusTitle")}
+          </h2>
+        </div>
+        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          {configs.length ? (
+            configs.map((config) => (
+              <div key={config.id} className="grid gap-3 px-5 py-4 text-sm md:grid-cols-[1.3fr_0.7fr_1fr_1fr]">
+                <div>
+                  <div className="font-semibold text-slate-950 dark:text-white">{config.name}</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {config.purpose} · {config.provider_kind} · {t("settings.generation.priority")} {config.priority}
+                  </div>
+                </div>
+                <div className="text-slate-600 dark:text-slate-300">
+                  {config.state?.current_concurrency ?? 0}/{config.max_concurrency}
+                </div>
+                <div className="text-slate-600 dark:text-slate-300">
+                  {t("settings.generation.statusStats", {
+                    attempts: config.today_stat?.attempt_count ?? 0,
+                    successRate: generationConfigSuccessRate(config),
+                  })}
+                </div>
+                <div className="text-slate-600 dark:text-slate-300">
+                  {config.state?.last_failure_reason || config.state?.frozen_until || t("settings.generation.healthy")}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="px-5 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+              {t("settings.generation.emptyStatus")}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/20">
+      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{value}</div>
     </div>
   );
 }
@@ -1814,8 +2237,8 @@ export function SettingsPage() {
   const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
   const [pendingDeleteProviderProfile, setPendingDeleteProviderProfile] = useState<ProviderProfile | null>(null);
   const [togglingProviderProfileId, setTogglingProviderProfileId] = useState<string | null>(null);
-  const [textDraft, setTextDraft] = useState<TextBindingDraft>(textBindingDraft(undefined));
-  const [imageDraft, setImageDraft] = useState<ImageBindingDraft>(imageBindingDraft(undefined));
+  const [generationConfigDrafts, setGenerationConfigDrafts] = useState<Record<string, GenerationConfigDraft>>({});
+  const [archivingGenerationConfigId, setArchivingGenerationConfigId] = useState<string | null>(null);
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [importPayload, setImportPayload] = useState<SettingsExportPayload | null>(null);
   const [importPreview, setImportPreview] = useState<SettingsImportPreviewResponse | null>(null);
@@ -1853,8 +2276,16 @@ export function SettingsPage() {
   }, [configQuery.data, resetDraftsFromConfig]);
 
   useEffect(() => {
-    setTextDraft(textBindingDraft(getBinding(providerConfigQuery.data, "text")));
-    setImageDraft(imageBindingDraft(getBinding(providerConfigQuery.data, "image")));
+    const nextDrafts: Record<string, GenerationConfigDraft> = {
+      "new-text": emptyGenerationConfigDraft("text"),
+      "new-image": emptyGenerationConfigDraft("image"),
+    };
+    for (const generationConfig of providerConfigQuery.data?.generation_configs ?? []) {
+      if (!generationConfig.archived_at) {
+        nextDrafts[generationConfig.id] = generationConfigDraft(generationConfig);
+      }
+    }
+    setGenerationConfigDrafts(nextDrafts);
   }, [providerConfigQuery.data]);
 
   useEffect(() => {
@@ -2089,32 +2520,41 @@ export function SettingsPage() {
     onSettled: () => setTogglingProviderProfileId(null),
   });
 
-  const updateTextBindingMutation = useMutation({
-    mutationFn: () => api.updateProviderBinding("text", textBindingPayloadFromDraft(textDraft)),
+  const saveGenerationConfigMutation = useMutation({
+    mutationFn: (draft: GenerationConfigDraft) => {
+      const payload = generationConfigPayloadFromDraft(draft);
+      return draft.id
+        ? api.updateGenerationConfig(draft.id, payload as GenerationConfigUpdateRequest)
+        : api.createGenerationConfig(payload as GenerationConfigCreateRequest);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
       setError("");
-      setSavedMessage(t("settings.provider.textSaved"));
+      setSavedMessage(t("settings.generation.saved"));
     },
     onError: (mutationError) => {
       setSavedMessage("");
-      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.provider.textSaveFailed"));
+      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.saveFailed"));
     },
   });
 
-  const updateImageBindingMutation = useMutation({
-    mutationFn: () => {
-      return api.updateProviderBinding("image", imageBindingPayloadFromDraft(imageDraft));
+  const archiveGenerationConfigMutation = useMutation({
+    mutationFn: (configId: string) => api.archiveGenerationConfig(configId),
+    onMutate: (configId) => {
+      setArchivingGenerationConfigId(configId);
+      setError("");
+      setSavedMessage("");
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
       setError("");
-      setSavedMessage(t("settings.provider.imageSaved"));
+      setSavedMessage(t("settings.generation.archived"));
     },
     onError: (mutationError) => {
       setSavedMessage("");
-      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.provider.imageSaveFailed"));
+      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.archiveFailed"));
     },
+    onSettled: () => setArchivingGenerationConfigId(null),
   });
 
   const logoutMutation = useMutation({
@@ -2158,10 +2598,7 @@ export function SettingsPage() {
     updateProviderProfileMutation.isPending ||
     deleteProviderProfileMutation.isPending ||
     updateProviderProfileEnabledMutation.isPending;
-  const providerPending =
-    providerProfilePending ||
-    updateTextBindingMutation.isPending ||
-    updateImageBindingMutation.isPending;
+  const providerPending = providerProfilePending || saveGenerationConfigMutation.isPending;
 
   const isCheckingLockState = lockStateQuery.isLoading || lockStateQuery.isFetching;
   const loadingMain = configQuery.isLoading || providerConfigQuery.isLoading;
@@ -2443,38 +2880,50 @@ export function SettingsPage() {
                     ) : null}
 
                     {activeSection === "text" ? (
-                      <TextBindingSection
+                      <GenerationConfigPoolSection
                         data={providerConfigQuery.data}
-                        draft={textDraft}
+                        purpose="text"
+                        drafts={generationConfigDrafts}
                         pending={providerPending}
-                        onChange={(next) => {
-                          setTextDraft(next);
+                        archivingConfigId={archivingGenerationConfigId}
+                        onChange={(key, next) => {
+                          setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
                         }}
-                        onSave={() => {
+                        onSave={(draft) => {
                           setError("");
                           setSavedMessage("");
-                          updateTextBindingMutation.mutate();
+                          saveGenerationConfigMutation.mutate(draft);
+                        }}
+                        onArchive={(configId) => {
+                          archiveGenerationConfigMutation.mutate(configId);
                         }}
                       />
                     ) : null}
 
                     {activeSection === "image" ? (
-                      <ImageBindingSection
+                      <GenerationConfigPoolSection
                         data={providerConfigQuery.data}
-                        draft={imageDraft}
+                        purpose="image"
+                        drafts={generationConfigDrafts}
                         pending={providerPending}
-                        onChange={(next) => {
-                          setImageDraft(next);
+                        archivingConfigId={archivingGenerationConfigId}
+                        onChange={(key, next) => {
+                          setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
                         }}
-                        onSave={() => {
+                        onSave={(draft) => {
                           setError("");
                           setSavedMessage("");
-                          updateImageBindingMutation.mutate();
+                          saveGenerationConfigMutation.mutate(draft);
+                        }}
+                        onArchive={(configId) => {
+                          archiveGenerationConfigMutation.mutate(configId);
                         }}
                       />
                     ) : null}
+
+                    {activeSection === "status" ? <GenerationStatusSection data={providerConfigQuery.data} /> : null}
 
                     {genericSection ? (
                       <form onSubmit={handleSubmit} className={`${PANEL_CLASS} space-y-2`}>

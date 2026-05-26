@@ -24,6 +24,7 @@ from productflow_backend.infrastructure.db.models import (
     ProviderProfile,
 )
 from productflow_backend.infrastructure.db.session import get_session_factory
+from productflow_backend.infrastructure.openai_client import OPENAI_COMPATIBLE_DEFAULT_HEADERS
 from productflow_backend.infrastructure.provider_config import (
     resolve_image_provider_config,
     resolve_text_provider_config,
@@ -438,6 +439,36 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
             "config": {"responses_background_enabled": True, "images_quality": "high"},
         },
     ]
+    document["generation_configs"] = [
+        {
+            "name": "导入文案配置",
+            "purpose": "text",
+            "provider_kind": "openai",
+            "provider_profile_id": imported_profile_id,
+            "model_settings": {"brief_model": "brief-import", "copy_model": "copy-import"},
+            "config": {},
+            "priority": 100,
+            "max_concurrency": 2,
+            "enabled": True,
+            "availability_window_minutes": 5,
+            "failure_threshold": 3,
+            "cooldown_minutes": 10,
+        },
+        {
+            "name": "导入图片配置",
+            "purpose": "image",
+            "provider_kind": "openai_responses",
+            "provider_profile_id": imported_profile_id,
+            "model_settings": {"model": "image-import"},
+            "config": {"responses_background_enabled": True},
+            "priority": 90,
+            "max_concurrency": 1,
+            "enabled": True,
+            "availability_window_minutes": 5,
+            "failure_threshold": 3,
+            "cooldown_minutes": 10,
+        },
+    ]
 
     preview = client.post("/api/settings/import/preview", json=document)
     assert preview.status_code == 200
@@ -446,6 +477,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
         "runtime_config_count": len(RUNTIME_CONFIG_KEYS),
         "provider_profile_count": 1,
         "provider_binding_count": 2,
+        "generation_config_count": 2,
         "provider_profile_names": ["导入网关"],
         "provider_binding_purposes": ["image", "text"],
         "includes_api_keys": True,
@@ -1045,7 +1077,11 @@ def test_provider_model_list_endpoint_fetches_openai_compatible_models(
     )
 
     assert listed.status_code == 200
-    assert captured_kwargs == {"api_key": "secret-model-key", "base_url": "https://models.example/v1"}
+    assert captured_kwargs == {
+        "api_key": "secret-model-key",
+        "base_url": "https://models.example/v1",
+        "default_headers": OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+    }
     assert listed.json() == {
         "models": [
             {

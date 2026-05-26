@@ -38,12 +38,12 @@ from productflow_backend.infrastructure.db.models import (
     PosterVariant,
     Product,
     ProductWorkflow,
-    ProviderBinding,
     ProviderProfile,
     WorkflowEdge,
     WorkflowNode,
 )
 from productflow_backend.infrastructure.db.session import get_session_factory
+from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, add_generation_config
 
 _WORKFLOW_NODE_VISUAL_WIDTH = 248
 _WORKFLOW_NODE_VISUAL_HEIGHT = 248
@@ -371,7 +371,7 @@ def test_product_workflow_dag_runs_and_persists_artifacts(configured_env: Path) 
         session.close()
 
 
-def test_real_image_binding_uses_provider_even_when_legacy_poster_mode_is_template(
+def test_real_image_config_uses_provider_even_when_legacy_poster_mode_is_template(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -392,14 +392,16 @@ def test_real_image_binding_uses_provider_even_when_legacy_poster_mode_is_templa
         )
         session.add(profile)
         session.flush()
-        session.add(
-            ProviderBinding(
-                purpose="image",
-                provider_kind="openai_images",
-                provider_profile_id=profile.id,
-                model_settings_json={"model": "gpt-image-2"},
-                config_json={"images_quality": "high", "images_style": "natural"},
-            )
+        image_config = add_generation_config(
+            session,
+            name="真实图片配置",
+            purpose=IMAGE_PURPOSE,
+            provider_kind="openai_images",
+            provider_profile_id=profile.id,
+            model_settings={"model": "gpt-image-2"},
+            config={"images_quality": "high", "images_style": "natural"},
+            priority=200,
+            commit=False,
         )
         session.add(AppSetting(key="poster_generation_mode", value="template"))
         session.commit()
@@ -472,6 +474,7 @@ def test_real_image_binding_uses_provider_even_when_legacy_poster_mode_is_templa
             "target_index": 1,
             "provider_name": "capturing",
             "model_name": "gpt-image-2",
+            "generation_config_id": image_config.id,
             "provider_response_id": "resp-real-binding",
             "provider_response_status": "completed",
         }

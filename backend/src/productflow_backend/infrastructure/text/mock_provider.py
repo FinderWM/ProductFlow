@@ -87,3 +87,12 @@ class MockTextProvider(TextProvider):
             ),
         )
         return copy, "mock-copy-v2"
+
+    def polish_image_prompt(self, prompt: str) -> tuple[str, str]:
+        normalized = prompt.strip()
+        if not normalized:
+            return "", "mock-polish-v1"
+        return (
+            f"{normalized}。画面主体清晰，光线自然，构图干净，突出商品质感与可售卖细节。",
+            "mock-polish-v1",
+        )

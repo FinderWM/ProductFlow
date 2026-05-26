@@ -52,6 +52,7 @@ function round(overrides: Partial<ImageSessionRound>): ImageSessionRound {
     provider_response_id: null,
     previous_response_id: null,
     image_generation_call_id: null,
+    generation_config_id: null,
     generation_group_id: null,
     candidate_index: 1,
     candidate_count: 1,
@@ -74,6 +75,9 @@ function task(overrides: Partial<ImageSessionGenerationTask>): ImageSessionGener
     size: "1024x1024",
     base_asset_id: null,
     selected_reference_asset_ids: [],
+    generation_config_mode: "auto",
+    requested_generation_config_id: null,
+    used_generation_config_id: null,
     generation_count: 1,
     completed_candidates: 0,
     active_candidate_index: null,
@@ -595,6 +599,8 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 3,
       tool_options: { model: "image-model", quality: "high" },
+      generation_config_mode: "manual",
+      requested_generation_config_id: "config-1",
     });
 
     expect(isImageSessionGenerationTaskRegeneratable(cancelledTask)).toBe(true);
@@ -606,6 +612,8 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 3,
       tool_options: { model: "image-model", quality: "high" },
+      generation_config_mode: "manual",
+      generation_config_id: "config-1",
     });
   });
 
@@ -731,6 +739,13 @@ describe("image chat branching helpers", () => {
     expect(signature).not.toBe(buildImageGenerationSubmitSignature({ ...payload, generation_count: 3 }));
     expect(signature).not.toBe(
       buildImageGenerationSubmitSignature({ ...payload, tool_options: { quality: "low", output_format: "png" } }),
+    );
+    expect(signature).not.toBe(
+      buildImageGenerationSubmitSignature({
+        ...payload,
+        generation_config_mode: "manual",
+        generation_config_id: "config-1",
+      }),
     );
   });
 

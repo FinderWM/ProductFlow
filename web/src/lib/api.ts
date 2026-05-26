@@ -9,6 +9,12 @@ import type {
   DuplicateWorkflowNodeGroupInput,
   GalleryEntry,
   GalleryEntryListResponse,
+  GenerationConfig,
+  GenerationConfigCreateRequest,
+  GenerationConfigOption,
+  GenerationConfigSelectionMode,
+  GenerationConfigStatusSummary,
+  GenerationConfigUpdateRequest,
   GenerationQueueOverview,
   CreateUserTemplateGroupInput,
   CreateProductInput,
@@ -147,6 +153,30 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  getGenerationConfigStatus(): Promise<GenerationConfigStatusSummary> {
+    return request("/api/settings/generation-config-status");
+  },
+  listGenerationConfigs(): Promise<GenerationConfig[]> {
+    return request("/api/settings/generation-configs");
+  },
+  listGenerationConfigOptions(): Promise<GenerationConfigOption[]> {
+    return request("/api/settings/generation-config-options");
+  },
+  createGenerationConfig(payload: GenerationConfigCreateRequest): Promise<GenerationConfig> {
+    return request("/api/settings/generation-configs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateGenerationConfig(configId: string, payload: GenerationConfigUpdateRequest): Promise<GenerationConfig> {
+    return request(`/api/settings/generation-configs/${encodeURIComponent(configId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  archiveGenerationConfig(configId: string): Promise<GenerationConfig> {
+    return request(`/api/settings/generation-configs/${encodeURIComponent(configId)}`, { method: "DELETE" });
+  },
   getSettingsLockState(): Promise<SettingsLockState> {
     return request("/api/settings/lock-state");
   },
@@ -276,9 +306,21 @@ export const api = {
       selected_reference_asset_ids?: string[];
       generation_count?: number;
       tool_options?: ImageToolOptions | null;
+      generation_config_mode?: GenerationConfigSelectionMode;
+      generation_config_id?: string | null;
     },
   ): Promise<ImageSessionDetail> {
     return request(`/api/image-sessions/${sessionId}/generate`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  polishImageSessionPrompt(input: {
+    prompt: string;
+    generation_config_mode?: GenerationConfigSelectionMode;
+    generation_config_id?: string | null;
+  }): Promise<{ prompt: string; model_name: string; generation_config_id: string }> {
+    return request("/api/image-sessions/prompt-polish", {
       method: "POST",
       body: JSON.stringify(input),
     });

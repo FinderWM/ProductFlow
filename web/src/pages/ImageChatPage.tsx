@@ -25,6 +25,7 @@ import { ImageGenerationSettingsPanel } from "../components/ImageGenerationSetti
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../components/ImageGenerationSettingsTabs";
 import { ImageToolControls } from "../components/ImageToolControls";
 import { PromptPreviewDialog, type PromptPreview } from "../components/PromptPreviewDialog";
+import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
@@ -83,6 +84,8 @@ import type {
   ImageSessionListResponse,
   ImageSessionStatus,
   ImageToolOptions,
+  GenerationConfigOption,
+  GenerationConfigSelectionMode,
 } from "../lib/types";
 
 const DUPLICATE_GENERATION_SUBMIT_WINDOW_MS = 1800;
@@ -106,6 +109,10 @@ interface ImageChatRouteState {
   toolOptions: ImageToolOptions;
   settingsTab: ImageGenerationSettingsTab;
   targetProductId: string;
+  imageGenerationConfigMode: GenerationConfigSelectionMode;
+  selectedImageGenerationConfigId: string | null;
+  promptPolishConfigMode: GenerationConfigSelectionMode;
+  selectedPromptPolishConfigId: string | null;
 }
 
 const imageChatRouteStateCache = new Map<string, ImageChatRouteState>();
@@ -136,6 +143,15 @@ function writeImageChatRouteState(scope: string, state: ImageChatRouteState) {
 
 function getSessionReferenceAssets(imageSession: ImageSessionDetail | undefined): ImageSessionAsset[] {
   return imageSession?.assets.filter((asset) => asset.kind === "reference_upload") ?? [];
+}
+
+function generationConfigOptionLabel(config: GenerationConfigOption, disabledLabel: string, frozenLabel: string): string {
+  const markers = [
+    !config.enabled ? disabledLabel : "",
+    config.frozen_until ? frozenLabel : "",
+  ].filter(Boolean);
+  const suffix = markers.length ? ` (${markers.join(" · ")})` : "";
+  return `${config.name}${suffix}`;
 }
 
 type PendingDeleteAction =
@@ -183,12 +199,25 @@ export function ImageChatPage() {
   const [settingsTab, setSettingsTab] = useState<ImageGenerationSettingsTab>(
     () => readImageChatRouteState(routeStateScope)?.settingsTab ?? "basic",
   );
+  const [imageGenerationConfigMode, setImageGenerationConfigMode] = useState<GenerationConfigSelectionMode>(
+    () => readImageChatRouteState(routeStateScope)?.imageGenerationConfigMode ?? "auto",
+  );
+  const [selectedImageGenerationConfigId, setSelectedImageGenerationConfigId] = useState<string | null>(
+    () => readImageChatRouteState(routeStateScope)?.selectedImageGenerationConfigId ?? null,
+  );
+  const [promptPolishConfigMode, setPromptPolishConfigMode] = useState<GenerationConfigSelectionMode>(
+    () => readImageChatRouteState(routeStateScope)?.promptPolishConfigMode ?? "auto",
+  );
+  const [selectedPromptPolishConfigId, setSelectedPromptPolishConfigId] = useState<string | null>(
+    () => readImageChatRouteState(routeStateScope)?.selectedPromptPolishConfigId ?? null,
+  );
   const [titleDraft, setTitleDraft] = useState("");
   const [renameEnabled, setRenameEnabled] = useState(false);
   const [targetProductId, setTargetProductId] = useState(
     () => readImageChatRouteState(routeStateScope)?.targetProductId ?? "",
   );
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
+  const [polishedPrompt, setPolishedPrompt] = useState("");
   const [previewRound, setPreviewRound] = useState<ImageSessionRound | null>(null);
   const [pendingDeleteAction, setPendingDeleteAction] =
     useState<PendingDeleteAction | null>(null);
@@ -224,13 +253,21 @@ export function ImageChatPage() {
       toolOptions,
       settingsTab,
       targetProductId,
+      imageGenerationConfigMode,
+      selectedImageGenerationConfigId,
+      promptPolishConfigMode,
+      selectedPromptPolishConfigId,
     });
   }, [
     branchBaseAssetId,
     draft,
     generationCount,
+    imageGenerationConfigMode,
+    promptPolishConfigMode,
     routeStateScope,
     selectedGeneratedAssetId,
+    selectedImageGenerationConfigId,
+    selectedPromptPolishConfigId,
     selectedReferenceAssetIds,
     selectedSessionId,
     selectedTaskPlaceholderId,
@@ -297,6 +334,11 @@ export function ImageChatPage() {
     queryFn: api.getRuntimeConfig,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
+  const generationConfigOptionsQuery = useQuery({
+    queryKey: ["generation-config-options"],
+    queryFn: api.listGenerationConfigOptions,
+    staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
+  });
 
   const products = productsQuery.data?.items ?? [];
   const imageGenerationMaxDimension =
@@ -307,6 +349,34 @@ export function ImageChatPage() {
     () => buildImageSizeOptions(imageGenerationMaxDimension),
     [imageGenerationMaxDimension],
   );
+  const imageGenerationConfigs = useMemo(
+    () => generationConfigOptionsQuery.data?.filter((config) => config.purpose === "image") ?? [],
+    [generationConfigOptionsQuery.data],
+  );
+  const promptPolishConfigs = useMemo(
+    () => generationConfigOptionsQuery.data?.filter((config) => config.purpose === "text") ?? [],
+    [generationConfigOptionsQuery.data],
+  );
+
+  useEffect(() => {
+    if (
+      selectedImageGenerationConfigId &&
+      !imageGenerationConfigs.some((config) => config.id === selectedImageGenerationConfigId)
+    ) {
+      setSelectedImageGenerationConfigId(null);
+      setImageGenerationConfigMode("auto");
+    }
+  }, [imageGenerationConfigs, selectedImageGenerationConfigId]);
+
+  useEffect(() => {
+    if (
+      selectedPromptPolishConfigId &&
+      !promptPolishConfigs.some((config) => config.id === selectedPromptPolishConfigId)
+    ) {
+      setSelectedPromptPolishConfigId(null);
+      setPromptPolishConfigMode("auto");
+    }
+  }, [promptPolishConfigs, selectedPromptPolishConfigId]);
 
   function resetImageSessionSelection() {
     setSelectedGeneratedAssetId(null);
@@ -485,6 +555,14 @@ export function ImageChatPage() {
   }, [branchBaseAssetId, imageSession]);
   const baseRequirementMessage =
     requiresGenerationBase && !branchBaseRound ? t("chat.baseRequired") : "";
+  const imageGenerationConfigRequirementMessage =
+    imageGenerationConfigMode === "manual" && !selectedImageGenerationConfigId
+      ? t("chat.imageGenerationConfigRequired")
+      : "";
+  const promptPolishConfigRequirementMessage =
+    promptPolishConfigMode === "manual" && !selectedPromptPolishConfigId
+      ? t("chat.promptPolishConfigRequired")
+      : "";
 
   const sourceImage = useMemo(
     () => productQuery.data?.source_assets.find((asset) => asset.kind === "original_image") ?? null,
@@ -636,6 +714,23 @@ export function ImageChatPage() {
     },
   });
 
+  const polishPromptMutation = useMutation({
+    mutationFn: (prompt: string) =>
+      api.polishImageSessionPrompt({
+        prompt,
+        generation_config_mode: promptPolishConfigMode,
+        generation_config_id: promptPolishConfigMode === "manual" ? selectedPromptPolishConfigId : null,
+      }),
+    onSuccess: (response) => {
+      setPolishedPrompt(response.prompt);
+      setSuccessMessage(t("chat.promptPolished"));
+      setErrorMessage("");
+    },
+    onError: (error) => {
+      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.promptPolishFailed"));
+    },
+  });
+
   const retryGenerationTaskMutation = useMutation({
     mutationFn: (input: { sessionId: string; taskId: string }) =>
       api.retryImageSessionGenerationTask(input.sessionId, input.taskId),
@@ -671,7 +766,11 @@ export function ImageChatPage() {
   });
 
   const generateDisabled =
-    !selectedSessionId || !imageSession || !draft.trim() || generateMutation.isPending || Boolean(baseRequirementMessage);
+    !selectedSessionId ||
+    !imageSession ||
+    !draft.trim() ||
+    generateMutation.isPending ||
+    Boolean(baseRequirementMessage || imageGenerationConfigRequirementMessage);
 
   const attachMutation = useMutation({
     mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; productId?: string }) =>
@@ -729,6 +828,10 @@ export function ImageChatPage() {
       setErrorMessage(baseRequirementMessage);
       return;
     }
+    if (imageGenerationConfigRequirementMessage) {
+      setErrorMessage(imageGenerationConfigRequirementMessage);
+      return;
+    }
     const selectedReferenceIds = pruneSelectedReferenceIds(
       selectedReferenceAssetIds,
       sessionReferenceAssets.map((asset) => asset.id),
@@ -741,6 +844,8 @@ export function ImageChatPage() {
       selected_reference_asset_ids: selectedReferenceIds,
       generation_count: clampGenerationCount(generationCount),
       tool_options: compactedToolOptions,
+      generation_config_mode: imageGenerationConfigMode,
+      generation_config_id: imageGenerationConfigMode === "manual" ? selectedImageGenerationConfigId : null,
     };
     const signature = buildImageGenerationSubmitSignature(payload);
     const now = Date.now();
@@ -758,6 +863,28 @@ export function ImageChatPage() {
     duplicateSubmitGuardRef.current = { signature, submittedAt: now };
     pendingGeneratedRoundCountRef.current = imageSession?.rounds.length ?? 0;
     generateMutation.mutate(payload);
+  }
+
+  function handlePolishPrompt() {
+    const prompt = draft.trim();
+    if (!prompt || polishPromptMutation.isPending) {
+      return;
+    }
+    if (promptPolishConfigRequirementMessage) {
+      setErrorMessage(promptPolishConfigRequirementMessage);
+      return;
+    }
+    polishPromptMutation.mutate(prompt);
+  }
+
+  function handleUsePolishedPrompt() {
+    if (!polishedPrompt.trim()) {
+      return;
+    }
+    setDraft(polishedPrompt);
+    setPolishedPrompt("");
+    setSuccessMessage(t("chat.promptPolishApplied"));
+    setErrorMessage("");
   }
 
   function handleRetryGenerationTask(task: ImageSessionGenerationTask) {
@@ -1006,6 +1133,241 @@ export function ImageChatPage() {
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", finishSwipe);
     window.addEventListener("pointercancel", finishSwipe);
+  }
+
+  function renderResultUsageSection() {
+    return (
+      <section className="space-y-3">
+        <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
+          <GalleryHorizontalEnd size={15} /> {t("chat.resultUsage")}
+        </div>
+        <ProductAssociationPanel
+          isProductMode={isProductMode}
+          product={productQuery.data}
+          products={products}
+          targetProductId={targetProductId}
+          sourceImage={sourceImage}
+          referenceImages={productReferenceImages}
+          selectedRound={selectedRound}
+          attachBusy={attachMutation.isPending}
+          deletingReferenceAssetId={
+            deleteProductReferenceMutation.isPending ? (deleteProductReferenceMutation.variables ?? null) : null
+          }
+          onTargetProductChange={setTargetProductId}
+          onDeleteReference={handleDeleteProductReference}
+          onAttach={handleAttach}
+          t={t}
+        />
+      </section>
+    );
+  }
+
+  function renderGenerationConfigSelector({
+    title,
+    mode,
+    selectedConfigId,
+    configs,
+    onModeChange,
+    onConfigChange,
+  }: {
+    title: string;
+    mode: GenerationConfigSelectionMode;
+    selectedConfigId: string | null;
+    configs: GenerationConfigOption[];
+    onModeChange: (mode: GenerationConfigSelectionMode) => void;
+    onConfigChange: (configId: string | null) => void;
+  }) {
+    return (
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+        <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">{title}</div>
+        <div className="grid grid-cols-2 gap-2">
+          <SelectField
+            value={mode}
+            options={[
+              { value: "auto", label: t("chat.generationConfigAuto") },
+              { value: "manual", label: t("chat.generationConfigManual") },
+            ]}
+            onChange={(value) => {
+              const nextMode = value === "manual" ? "manual" : "auto";
+              onModeChange(nextMode);
+              if (nextMode === "auto") {
+                onConfigChange(null);
+              }
+            }}
+            ariaLabel={title}
+            radius="lg"
+            visualSize="sm"
+          />
+          <SelectField
+            value={selectedConfigId ?? ""}
+            options={[
+              {
+                value: "",
+                label: configs.length ? t("chat.selectGenerationConfig") : t("chat.noGenerationConfigs"),
+                disabled: mode === "manual",
+              },
+              ...configs.map((config) => ({
+                value: config.id,
+                label: generationConfigOptionLabel(
+                  config,
+                  t("chat.generationConfigDisabled"),
+                  t("chat.generationConfigFrozen"),
+                ),
+                disabled: !config.enabled,
+              })),
+            ]}
+            onChange={(value) => onConfigChange(value || null)}
+            ariaLabel={title}
+            disabled={mode !== "manual"}
+            radius="lg"
+            visualSize="sm"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  function renderGenerationSettingsTabs(promptId: string) {
+    return (
+      <ImageGenerationSettingsTabs
+        value={settingsTab}
+        onChange={setSettingsTab}
+        basic={
+          <div className="space-y-4">
+            <SessionReferencePanel
+              assets={sessionReferenceAssets}
+              selectedAssetIds={selectedReferenceAssetIds}
+              maxSelectedCount={maxSelectedReferenceCount}
+              uploadBusy={uploadReferenceMutation.isPending}
+              deletingAssetId={
+                deleteSessionReferenceMutation.isPending
+                  ? (deleteSessionReferenceMutation.variables?.assetId ?? null)
+                  : null
+              }
+              disabled={!selectedSessionId}
+              onFiles={handleUploadReferenceFiles}
+              onToggle={handleReferenceToggle}
+              onDelete={handleDeleteSessionReference}
+              t={t}
+            />
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-950 dark:text-white" htmlFor={promptId}>
+                {t("chat.prompt")}
+              </label>
+              <textarea
+                id={promptId}
+                value={draft}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  setPolishedPrompt("");
+                }}
+                rows={6}
+                placeholder={isProductMode ? t("chat.productPromptPlaceholder") : t("chat.freePromptPlaceholder")}
+                className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+              />
+              <div className="mt-2 grid gap-2">
+                {renderGenerationConfigSelector({
+                  title: t("chat.promptPolishConfig"),
+                  mode: promptPolishConfigMode,
+                  selectedConfigId: selectedPromptPolishConfigId,
+                  configs: promptPolishConfigs,
+                  onModeChange: setPromptPolishConfigMode,
+                  onConfigChange: setSelectedPromptPolishConfigId,
+                })}
+                <button
+                  type="button"
+                  onClick={handlePolishPrompt}
+                  disabled={!draft.trim() || polishPromptMutation.isPending}
+                  className="inline-flex w-full items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25"
+                >
+                  {polishPromptMutation.isPending ? (
+                    <Loader2 size={13} className="mr-1.5 animate-spin" />
+                  ) : (
+                    <Sparkles size={13} className="mr-1.5" />
+                  )}
+                  {t("chat.polishPrompt")}
+                </button>
+                {polishedPrompt ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-100">
+                    <div className="whitespace-pre-wrap">{polishedPrompt}</div>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleUsePolishedPrompt}
+                        className="inline-flex items-center rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500"
+                      >
+                        {t("chat.usePolishedPrompt")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPolishedPrompt("")}
+                        className="inline-flex items-center rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:border-emerald-300 dark:border-emerald-400/30 dark:bg-slate-950/60 dark:text-emerald-100"
+                      >
+                        {t("common.cancel")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {renderGenerationConfigSelector({
+              title: t("chat.imageGenerationConfig"),
+              mode: imageGenerationConfigMode,
+              selectedConfigId: selectedImageGenerationConfigId,
+              configs: imageGenerationConfigs,
+              onModeChange: setImageGenerationConfigMode,
+              onConfigChange: setSelectedImageGenerationConfigId,
+            })}
+
+            <ImageGenerationSettingsPanel
+              size={size}
+              sizeOptions={sizeOptions}
+              maxDimension={imageGenerationMaxDimension}
+              toolOptions={toolOptions}
+              allowedToolFields={imageToolAllowedFields}
+              generationCount={generationCount}
+              generationCountOptions={IMAGE_CHAT_GENERATION_COUNT_OPTIONS}
+              onSizeChange={setSize}
+              onToolOptionsChange={setToolOptions}
+              onGenerationCountChange={(count) => setGenerationCount(clampGenerationCount(count))}
+              showToolOptions={false}
+            />
+          </div>
+        }
+        advanced={
+          <ImageToolControls value={toolOptions} allowedFields={imageToolAllowedFields} onChange={setToolOptions} />
+        }
+      />
+    );
+  }
+
+  function renderGenerationSettingsSection(promptId: string) {
+    return (
+      <section className="space-y-3">
+        <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
+          <Settings size={15} /> {t("chat.generationSettings")}
+        </div>
+        {renderGenerationSettingsTabs(promptId)}
+      </section>
+    );
+  }
+
+  function renderActionSections(promptId: string) {
+    const generationSettingsSection = renderGenerationSettingsSection(promptId);
+    const resultUsageSection = renderResultUsageSection();
+    return selectedRound ? (
+      <>
+        {resultUsageSection}
+        {generationSettingsSection}
+      </>
+    ) : (
+      <>
+        {generationSettingsSection}
+        {resultUsageSection}
+      </>
+    );
   }
 
   const pendingDeleteDialog = pendingDeleteAction
@@ -1283,12 +1645,12 @@ export function ImageChatPage() {
           >
             <span className="h-12 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
           </button>
-          <div className="min-h-0 flex-1 px-4 py-5 lg:overflow-y-auto lg:px-5">
-            <div className="mb-5">
+          <div className="min-h-0 flex-1 space-y-6 px-4 py-5 lg:overflow-y-auto lg:px-5">
+            <div>
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
-                    <Settings size={15} /> {t("chat.generationSettings")}
+                    <Pencil size={15} /> {t("chat.sessionSettings")}
                   </div>
                 </div>
                 <button
@@ -1319,79 +1681,7 @@ export function ImageChatPage() {
               </div>
             </div>
 
-            <ImageGenerationSettingsTabs
-              value={settingsTab}
-              onChange={setSettingsTab}
-              basic={
-                <div className="space-y-4">
-                  <ProductAssociationPanel
-                    isProductMode={isProductMode}
-                    product={productQuery.data}
-                    products={products}
-                    targetProductId={targetProductId}
-                    sourceImage={sourceImage}
-                    referenceImages={productReferenceImages}
-                    selectedRound={selectedRound}
-                    attachBusy={attachMutation.isPending}
-                    deletingReferenceAssetId={
-                      deleteProductReferenceMutation.isPending ? (deleteProductReferenceMutation.variables ?? null) : null
-                    }
-                    onTargetProductChange={setTargetProductId}
-                    onDeleteReference={handleDeleteProductReference}
-                    onAttach={handleAttach}
-                    t={t}
-                  />
-
-                  <SessionReferencePanel
-                    assets={sessionReferenceAssets}
-                    selectedAssetIds={selectedReferenceAssetIds}
-                    maxSelectedCount={maxSelectedReferenceCount}
-                    uploadBusy={uploadReferenceMutation.isPending}
-                    deletingAssetId={
-                      deleteSessionReferenceMutation.isPending
-                        ? (deleteSessionReferenceMutation.variables?.assetId ?? null)
-                        : null
-                    }
-                    disabled={!selectedSessionId}
-                    onFiles={handleUploadReferenceFiles}
-                    onToggle={handleReferenceToggle}
-                    onDelete={handleDeleteSessionReference}
-                    t={t}
-                  />
-
-                  <div>
-                    <label className="mb-2 block text-sm font-semibold text-slate-950 dark:text-white" htmlFor="image-chat-prompt">
-                      {t("chat.prompt")}
-                    </label>
-                    <textarea
-                      id="image-chat-prompt"
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      rows={6}
-                      placeholder={isProductMode ? t("chat.productPromptPlaceholder") : t("chat.freePromptPlaceholder")}
-                      className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
-                    />
-                  </div>
-
-                  <ImageGenerationSettingsPanel
-                    size={size}
-                    sizeOptions={sizeOptions}
-                    maxDimension={imageGenerationMaxDimension}
-                    toolOptions={toolOptions}
-                    allowedToolFields={imageToolAllowedFields}
-                    generationCount={generationCount}
-                    generationCountOptions={IMAGE_CHAT_GENERATION_COUNT_OPTIONS}
-                    onSizeChange={setSize}
-                    onToolOptionsChange={setToolOptions}
-                    onGenerationCountChange={(count) => setGenerationCount(clampGenerationCount(count))}
-                    showToolOptions={false}
-                  />
-                </div>
-              }
-              advanced={
-                <ImageToolControls value={toolOptions} allowedFields={imageToolAllowedFields} onChange={setToolOptions} />
-              }
-            />
+            {renderActionSections("image-chat-prompt")}
 
             <div className="space-y-4">
               {successMessage ? (
@@ -1406,9 +1696,9 @@ export function ImageChatPage() {
           </div>
 
           <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-[0_-8px_24px_rgba(15,23,42,0.10)] backdrop-blur dark:border-slate-800 dark:bg-slate-950/90 dark:shadow-[0_-18px_40px_rgba(0,0,0,0.32)] lg:sticky lg:inset-x-auto lg:bottom-0 lg:p-4">
-            {baseRequirementMessage ? (
+            {baseRequirementMessage || imageGenerationConfigRequirementMessage ? (
               <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                {baseRequirementMessage}
+                {baseRequirementMessage || imageGenerationConfigRequirementMessage}
               </div>
             ) : null}
             <button
@@ -1601,81 +1891,8 @@ export function ImageChatPage() {
             <Drawer.Handle className="mx-auto mt-2 flex h-7 w-24 items-center justify-center rounded-full text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-500 dark:focus-visible:ring-violet-400">
               <span className="h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
             </Drawer.Handle>
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-2">
-
-              <ImageGenerationSettingsTabs
-                value={settingsTab}
-                onChange={setSettingsTab}
-                basic={
-                  <div className="space-y-4">
-                    <ProductAssociationPanel
-                      isProductMode={isProductMode}
-                      product={productQuery.data}
-                      products={products}
-                      targetProductId={targetProductId}
-                      sourceImage={sourceImage}
-                      referenceImages={productReferenceImages}
-                      selectedRound={selectedRound}
-                      attachBusy={attachMutation.isPending}
-                      deletingReferenceAssetId={
-                        deleteProductReferenceMutation.isPending ? (deleteProductReferenceMutation.variables ?? null) : null
-                      }
-                      onTargetProductChange={setTargetProductId}
-                      onDeleteReference={handleDeleteProductReference}
-                      onAttach={handleAttach}
-                      t={t}
-                    />
-
-                    <SessionReferencePanel
-                      assets={sessionReferenceAssets}
-                      selectedAssetIds={selectedReferenceAssetIds}
-                      maxSelectedCount={maxSelectedReferenceCount}
-                      uploadBusy={uploadReferenceMutation.isPending}
-                      deletingAssetId={
-                        deleteSessionReferenceMutation.isPending
-                          ? (deleteSessionReferenceMutation.variables?.assetId ?? null)
-                          : null
-                      }
-                      disabled={!selectedSessionId}
-                      onFiles={handleUploadReferenceFiles}
-                      onToggle={handleReferenceToggle}
-                      onDelete={handleDeleteSessionReference}
-                      t={t}
-                    />
-
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-950 dark:text-white" htmlFor="image-chat-prompt-mobile">
-                        {t("chat.prompt")}
-                      </label>
-                      <textarea
-                        id="image-chat-prompt-mobile"
-                        value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
-                        rows={6}
-                        placeholder={isProductMode ? t("chat.productPromptPlaceholder") : t("chat.freePromptPlaceholder")}
-                        className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
-                      />
-                    </div>
-
-                    <ImageGenerationSettingsPanel
-                      size={size}
-                      sizeOptions={sizeOptions}
-                      maxDimension={imageGenerationMaxDimension}
-                      toolOptions={toolOptions}
-                      allowedToolFields={imageToolAllowedFields}
-                      generationCount={generationCount}
-                      generationCountOptions={IMAGE_CHAT_GENERATION_COUNT_OPTIONS}
-                      onSizeChange={setSize}
-                      onToolOptionsChange={setToolOptions}
-                      onGenerationCountChange={(count) => setGenerationCount(clampGenerationCount(count))}
-                      showToolOptions={false}
-                    />
-                  </div>
-                }
-                advanced={
-                  <ImageToolControls value={toolOptions} allowedFields={imageToolAllowedFields} onChange={setToolOptions} />
-                }
-              />
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4 pt-2">
+              {renderActionSections("image-chat-prompt-mobile")}
 
               <div className="mt-4 space-y-3">
                 {successMessage ? (
@@ -1689,9 +1906,9 @@ export function ImageChatPage() {
               </div>
             </div>
             <div className="border-t border-slate-200 bg-white/96 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] dark:border-slate-800 dark:bg-slate-950/94">
-              {baseRequirementMessage ? (
+              {baseRequirementMessage || imageGenerationConfigRequirementMessage ? (
                 <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                  {baseRequirementMessage}
+                  {baseRequirementMessage || imageGenerationConfigRequirementMessage}
                 </div>
               ) : null}
               <button

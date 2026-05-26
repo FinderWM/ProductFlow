@@ -31,6 +31,8 @@ import type {
   CopyBlock,
   CopyPayloadV2,
   CopySection,
+  GenerationConfigOption,
+  GenerationConfigSelectionMode,
   ImageToolOptionKey,
   ProductDetail,
   ProductWorkflow,
@@ -85,6 +87,15 @@ const REFERENCE_ROLE_OPTIONS: Array<{ value: string; labelKey: TranslationKey }>
   { value: "background", labelKey: "detail.referenceRole.background" },
 ];
 
+function generationConfigOptionLabel(config: GenerationConfigOption, t: TFunction): string {
+  const markers = [
+    !config.enabled ? t("detail.inspector.generationConfigDisabled") : "",
+    config.frozen_until ? t("detail.inspector.generationConfigFrozen") : "",
+  ].filter(Boolean);
+  const suffix = markers.length ? ` (${markers.join(" · ")})` : "";
+  return `${config.name}${suffix}`;
+}
+
 interface InspectorPanelProps {
   product: ProductDetail;
   sourceImage: DownloadableImage | null;
@@ -94,6 +105,7 @@ interface InspectorPanelProps {
   imageSizeOptions: ImageSizeOption[];
   imageGenerationMaxDimension: number;
   imageToolAllowedFields: readonly ImageToolOptionKey[];
+  generationConfigs: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   onPreviewImage: (image: DownloadableImage) => void;
   onRun: () => void;
@@ -115,6 +127,7 @@ export function InspectorPanel({
   imageSizeOptions,
   imageGenerationMaxDimension,
   imageToolAllowedFields,
+  generationConfigs,
   onDraftChange,
   onPreviewImage,
   onRun,
@@ -344,6 +357,7 @@ export function InspectorPanel({
           <CopyNodeInspector
             node={node}
             draft={draft}
+            generationConfigs={generationConfigs.filter((config) => config.purpose === "text")}
             onDraftChange={onDraftChange}
             t={t}
           />
@@ -355,6 +369,7 @@ export function InspectorPanel({
             imageSizeOptions={imageSizeOptions}
             imageGenerationMaxDimension={imageGenerationMaxDimension}
             imageToolAllowedFields={imageToolAllowedFields}
+            generationConfigs={generationConfigs.filter((config) => config.purpose === "image")}
             onDraftChange={onDraftChange}
             downstreamReferenceCount={downstreamReferenceCount}
             onPreviewPrompt={setPromptPreview}
@@ -583,14 +598,78 @@ function ReferenceImageInspector({
   );
 }
 
+function GenerationConfigSelector({
+  label,
+  draft,
+  generationConfigs,
+  onDraftChange,
+  t,
+}: {
+  label: string;
+  draft: NodeConfigDraft;
+  generationConfigs: GenerationConfigOption[];
+  onDraftChange: (draft: NodeConfigDraft) => void;
+  t: TFunction;
+}) {
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">{label}</div>
+      <div className="grid grid-cols-2 gap-2">
+        <SelectField
+          value={draft.generationConfigMode}
+          options={[
+            { value: "auto", label: t("detail.inspector.generationConfigAuto") },
+            { value: "manual", label: t("detail.inspector.generationConfigManual") },
+          ]}
+          onChange={(value) => {
+            const generationConfigMode: GenerationConfigSelectionMode = value === "manual" ? "manual" : "auto";
+            onDraftChange({
+              ...draft,
+              generationConfigMode,
+              generationConfigId: generationConfigMode === "manual" ? draft.generationConfigId : null,
+            });
+          }}
+          ariaLabel={label}
+          radius="lg"
+          visualSize="sm"
+        />
+        <SelectField
+          value={draft.generationConfigId ?? ""}
+          options={[
+            {
+              value: "",
+              label: generationConfigs.length
+                ? t("detail.inspector.selectGenerationConfig")
+                : t("detail.inspector.noGenerationConfigs"),
+              disabled: draft.generationConfigMode === "manual",
+            },
+            ...generationConfigs.map((config) => ({
+              value: config.id,
+              label: generationConfigOptionLabel(config, t),
+              disabled: !config.enabled,
+            })),
+          ]}
+          onChange={(value) => onDraftChange({ ...draft, generationConfigId: value || null })}
+          ariaLabel={label}
+          disabled={draft.generationConfigMode !== "manual"}
+          radius="lg"
+          visualSize="sm"
+        />
+      </div>
+    </div>
+  );
+}
+
 function CopyNodeInspector({
   node,
   draft,
+  generationConfigs,
   onDraftChange,
   t,
 }: {
   node: WorkflowNode;
   draft: NodeConfigDraft;
+  generationConfigs: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   t: TFunction;
 }) {
@@ -604,6 +683,13 @@ function CopyNodeInspector({
         label={t("detail.inspector.copyInstruction")}
         value={draft.instruction}
         onChange={(value) => onDraftChange({ ...draft, instruction: value })}
+      />
+      <GenerationConfigSelector
+        label={t("detail.inspector.textGenerationConfig")}
+        draft={draft}
+        generationConfigs={generationConfigs}
+        onDraftChange={onDraftChange}
+        t={t}
       />
       <label className="block">
         <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
@@ -942,6 +1028,7 @@ function ImageGenerationInspector({
   imageSizeOptions,
   imageGenerationMaxDimension,
   imageToolAllowedFields,
+  generationConfigs,
   onDraftChange,
   downstreamReferenceCount,
   onPreviewPrompt,
@@ -952,6 +1039,7 @@ function ImageGenerationInspector({
   imageSizeOptions: ImageSizeOption[];
   imageGenerationMaxDimension: number;
   imageToolAllowedFields: readonly ImageToolOptionKey[];
+  generationConfigs: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   downstreamReferenceCount: number;
   onPreviewPrompt: (preview: PromptPreview) => void;
@@ -991,6 +1079,13 @@ function ImageGenerationInspector({
               label={t("detail.inspector.imageDescription")}
               value={draft.instruction}
               onChange={(value) => onDraftChange({ ...draft, instruction: value })}
+            />
+            <GenerationConfigSelector
+              label={t("detail.inspector.imageGenerationConfig")}
+              draft={draft}
+              generationConfigs={generationConfigs}
+              onDraftChange={onDraftChange}
+              t={t}
             />
             {previewText.trim() ? (
               <button

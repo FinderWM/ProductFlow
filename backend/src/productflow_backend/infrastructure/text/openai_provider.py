@@ -11,7 +11,11 @@ from productflow_backend.application.contracts import (
 )
 from productflow_backend.application.copy_payloads import normalize_copy_payload
 from productflow_backend.config import get_runtime_settings
-from productflow_backend.infrastructure.openai_response_parsing import read_json_object_from_response
+from productflow_backend.infrastructure.openai_client import build_openai_client_kwargs
+from productflow_backend.infrastructure.openai_response_parsing import (
+    read_json_object_from_response,
+    response_output_text,
+)
 from productflow_backend.infrastructure.prompts import text_or_default
 from productflow_backend.infrastructure.provider_config import (
     ResolvedTextProviderConfig,
@@ -27,10 +31,9 @@ class OpenAITextProvider(TextProvider):
     def __init__(self, provider_config: ResolvedTextProviderConfig | None = None) -> None:
         settings = get_runtime_settings()
         resolved_config = provider_config or resolve_text_provider_config()
-        client_kwargs = {"api_key": resolved_config.api_key}
-        if resolved_config.base_url:
-            client_kwargs["base_url"] = resolved_config.base_url
-        self.client = OpenAI(**client_kwargs)
+        self.client = OpenAI(
+            **build_openai_client_kwargs(api_key=resolved_config.api_key, base_url=resolved_config.base_url)
+        )
         self.brief_model = resolved_config.brief_model
         self.copy_model = resolved_config.copy_model
         self.brief_system_prompt = settings.prompt_brief_system
@@ -108,3 +111,22 @@ class OpenAITextProvider(TextProvider):
         )
         payload = normalize_copy_payload(self._read_output_json(response), fallback_purpose=config.purpose)
         return payload, self.copy_model
+
+    def polish_image_prompt(self, prompt: str) -> tuple[str, str]:
+        response = self.client.responses.create(
+            model=self.copy_model,
+            instructions=(
+                "你是电商图片生成提示词编辑器。只输出润色后的中文画面描述，不要输出 markdown、标题或解释。"
+                "保留原始商品、风格、构图和禁忌要求，补充清晰主体、光线、材质、背景和电商可售卖细节。"
+            ),
+            input=[
+                {
+                    "role": "user",
+                    "content": f"原始画面描述：\n{prompt.strip()}",
+                },
+            ],
+        )
+        polished = response_output_text(response).strip()
+        if not polished:
+            raise ValueError("文案 provider 未返回润色结果")
+        return polished, self.copy_model

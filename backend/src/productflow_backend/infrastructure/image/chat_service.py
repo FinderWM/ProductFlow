@@ -66,9 +66,16 @@ class ImageChatService:
     provider_name = "image-session"
     prompt_version = "responses-image-session-v1"
 
-    def __init__(self, provider_config: ResolvedImageProviderConfig | None = None) -> None:
+    def __init__(
+        self,
+        provider_config: ResolvedImageProviderConfig | None = None,
+        *,
+        generation_config_id: str | None = None,
+    ) -> None:
         settings = get_runtime_settings()
-        self.provider_config = provider_config or resolve_image_provider_config()
+        self.provider_config = provider_config or resolve_image_provider_config(
+            generation_config_id=generation_config_id
+        )
         self.provider_kind = self.provider_config.provider_kind
         self.prompt_template = settings.prompt_image_chat_template
 
