@@ -15,6 +15,7 @@ import {
   Loader2,
   LockKeyhole,
   MessageSquareText,
+  RefreshCw,
   RotateCcw,
   Save,
   Search,
@@ -42,6 +43,7 @@ import type {
   ProviderBindingUpdateRequest,
   ProviderCapability,
   ProviderConfigResponse,
+  ProviderModel,
   ProviderProfile,
   ProviderProfileCreateRequest,
   ProviderProfileUpdateRequest,
@@ -115,6 +117,10 @@ export interface ImageBindingDraft {
   gemini_api_version: string;
   gemini_output_mime_type: string;
 }
+
+type TextProviderKind = TextBindingDraft["provider_kind"];
+type ImageProviderKind = ImageBindingDraft["provider_kind"];
+type ProviderModelKind = TextProviderKind | ImageProviderKind;
 
 const INPUT_CLASS =
   "h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 " +
@@ -699,6 +705,109 @@ function SettingsFormField({ label, children, className = "" }: SettingsFormFiel
       <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{label}</span>
       {children}
     </label>
+  );
+}
+
+function providerModelsQueryKey(profileId: string, providerKind: ProviderModelKind) {
+  return ["provider-models", profileId, providerKind] as const;
+}
+
+function providerModelsStatusText(
+  models: ProviderModel[],
+  error: unknown,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (error) {
+    return error instanceof ApiError ? error.detail : t("settings.provider.modelsLoadFailed");
+  }
+  if (models.length > 0) {
+    return t("settings.provider.modelsLoaded", { count: models.length });
+  }
+  return t("settings.provider.modelsEmpty");
+}
+
+interface ProviderModelInputProps {
+  idPrefix: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  providerKind: ProviderModelKind;
+  providerProfileId: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}
+
+function ProviderModelInput({
+  idPrefix,
+  label,
+  value,
+  placeholder,
+  providerKind,
+  providerProfileId,
+  disabled = false,
+  onChange,
+}: ProviderModelInputProps) {
+  const { t } = useI18n();
+  const reactId = useId();
+  const inputId = `${idPrefix}-${reactId}`;
+  const datalistId = `${inputId}-models`;
+  const canFetchModels = providerKind !== "mock" && Boolean(providerProfileId);
+  const modelsQuery = useQuery({
+    queryKey: providerModelsQueryKey(providerProfileId, providerKind),
+    queryFn: () => api.listProviderModels(providerProfileId, providerKind),
+    enabled: canFetchModels,
+    retry: false,
+  });
+  const models = modelsQuery.data?.models ?? [];
+  const statusText =
+    providerKind === "mock"
+      ? ""
+      : !providerProfileId
+        ? t("settings.provider.modelSelectProfileFirst")
+        : modelsQuery.isLoading || modelsQuery.isFetching
+          ? t("settings.provider.modelsLoading")
+          : providerModelsStatusText(models, modelsQuery.error, t);
+  const statusClassName = modelsQuery.error
+    ? "text-red-600 dark:text-red-300"
+    : "text-slate-500 dark:text-slate-400";
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor={inputId} className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+        {label}
+      </label>
+      <div className="flex gap-2">
+        <input
+          id={inputId}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className={INPUT_CLASS}
+          placeholder={placeholder}
+          list={canFetchModels && models.length > 0 ? datalistId : undefined}
+          disabled={disabled}
+        />
+        {providerKind !== "mock" ? (
+          <button
+            type="button"
+            onClick={() => void modelsQuery.refetch()}
+            disabled={disabled || !canFetchModels || modelsQuery.isFetching}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm shadow-slate-200/35 hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-400 dark:shadow-black/20 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+            aria-label={t("settings.provider.refreshModels")}
+            title={t("settings.provider.refreshModels")}
+          >
+            {modelsQuery.isFetching ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+          </button>
+        ) : null}
+      </div>
+      {models.length > 0 ? (
+        <datalist id={datalistId}>
+          {models.map((model) => (
+            <option key={model.id} value={model.id} label={model.label} />
+          ))}
+        </datalist>
+      ) : null}
+      {statusText ? <p className={`min-h-4 text-xs leading-5 ${statusClassName}`}>{statusText}</p> : null}
+    </div>
   );
 }
 
@@ -1506,22 +1615,26 @@ function TextBindingSection({ data, draft, pending, onChange, onSave }: TextBind
         </SettingsFormField>
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
-        <SettingsFormField label={t("settings.provider.textBriefModelLabel")}>
-          <input
-            value={draft.brief_model}
-            onChange={(event) => onChange({ ...draft, brief_model: event.target.value })}
-            className={INPUT_CLASS}
-            placeholder={t("settings.provider.textBriefModelPlaceholder")}
-          />
-        </SettingsFormField>
-        <SettingsFormField label={t("settings.provider.textCopyModelLabel")}>
-          <input
-            value={draft.copy_model}
-            onChange={(event) => onChange({ ...draft, copy_model: event.target.value })}
-            className={INPUT_CLASS}
-            placeholder={t("settings.provider.textCopyModelPlaceholder")}
-          />
-        </SettingsFormField>
+        <ProviderModelInput
+          idPrefix="text-brief-model"
+          label={t("settings.provider.textBriefModelLabel")}
+          value={draft.brief_model}
+          placeholder={t("settings.provider.textBriefModelPlaceholder")}
+          providerKind={draft.provider_kind}
+          providerProfileId={draft.provider_profile_id}
+          disabled={pending}
+          onChange={(brief_model) => onChange({ ...draft, brief_model })}
+        />
+        <ProviderModelInput
+          idPrefix="text-copy-model"
+          label={t("settings.provider.textCopyModelLabel")}
+          value={draft.copy_model}
+          placeholder={t("settings.provider.textCopyModelPlaceholder")}
+          providerKind={draft.provider_kind}
+          providerProfileId={draft.provider_profile_id}
+          disabled={pending}
+          onChange={(copy_model) => onChange({ ...draft, copy_model })}
+        />
       </div>
       <div className="flex justify-end border-t border-slate-100 pt-5 dark:border-slate-800">
         <button
@@ -1594,14 +1707,16 @@ function ImageBindingSection({ data, draft, pending, onChange, onSave }: ImageBi
           />
         </SettingsFormField>
       ) : null}
-      <SettingsFormField label={t("settings.provider.imageModelLabel")}>
-        <input
-          value={draft.model}
-          onChange={(event) => onChange({ ...draft, model: event.target.value })}
-          className={INPUT_CLASS}
-          placeholder={t("settings.provider.imageModelPlaceholder")}
-        />
-      </SettingsFormField>
+      <ProviderModelInput
+        idPrefix="image-model"
+        label={t("settings.provider.imageModelLabel")}
+        value={draft.model}
+        placeholder={t("settings.provider.imageModelPlaceholder")}
+        providerKind={draft.provider_kind}
+        providerProfileId={draft.provider_profile_id}
+        disabled={pending}
+        onChange={(model) => onChange({ ...draft, model })}
+      />
       {draft.provider_kind === "google_gemini_image" ? (
         <div className="grid gap-3 sm:grid-cols-2">
           <SettingsFormField label={t("settings.provider.geminiApiVersionLabel")}>

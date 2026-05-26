@@ -44,6 +44,11 @@ from productflow_backend.infrastructure.provider_config import (
     validate_provider_capabilities,
     validate_provider_profile_contract,
 )
+from productflow_backend.infrastructure.provider_models import (
+    ProviderModelDiscoveryError,
+    ProviderModelDiscoveryUnsupportedError,
+    list_provider_models,
+)
 from productflow_backend.presentation.deps import get_session, require_admin
 from productflow_backend.presentation.schemas.settings import (
     ConfigItemResponse,
@@ -53,6 +58,8 @@ from productflow_backend.presentation.schemas.settings import (
     ProviderBindingResponse,
     ProviderBindingUpdateRequest,
     ProviderConfigResponse,
+    ProviderModelListResponse,
+    ProviderModelResponse,
     ProviderProfileCreateRequest,
     ProviderProfileResponse,
     ProviderProfileUpdateRequest,
@@ -190,6 +197,34 @@ def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
         profiles=[_serialize_provider_profile(profile) for profile in list_provider_profiles(session)],
         bindings=[_serialize_provider_binding(binding) for binding in list_provider_bindings(session)],
     )
+
+
+def _provider_model_response(model) -> ProviderModelResponse:
+    return ProviderModelResponse(
+        id=model.id,
+        label=model.label,
+        owned_by=model.owned_by,
+        created=model.created,
+    )
+
+
+def _load_profile_for_model_discovery(session: Session, profile_id: str, provider_kind: str) -> ProviderProfile:
+    if provider_kind == "mock":
+        raise ValueError("Mock 供应商不支持模型列表拉取")
+    allowed_kinds = TEXT_PROVIDER_KINDS | IMAGE_PROVIDER_KINDS
+    if provider_kind not in allowed_kinds:
+        raise ValueError("供应商接口类型不支持")
+    profile = session.get(ProviderProfile, profile_id)
+    if profile is None or profile.archived_at is not None:
+        raise ValueError("供应商不存在")
+    if not profile.enabled:
+        raise ValueError("供应商已停用")
+    capability = capability_for_provider_kind(provider_kind)
+    if capability not in set(profile.capabilities_json or []):
+        raise ValueError("供应商档案不支持当前接口能力")
+    if not profile.api_key:
+        raise ValueError("供应商档案缺少 API Key，无法拉取模型列表")
+    return profile
 
 
 def _export_config_value(value: Any, *, input_type: str) -> str | int | bool | list[str] | None:
@@ -479,6 +514,29 @@ def get_config_endpoint(session: Session = Depends(get_session)) -> ConfigRespon
 def get_provider_config_endpoint(session: Session = Depends(get_session)) -> ProviderConfigResponse:
     ensure_provider_config_bootstrapped(session)
     return _serialize_provider_config(session)
+
+
+@router.get(
+    "/provider-profiles/{profile_id}/models",
+    response_model=ProviderModelListResponse,
+    dependencies=[Depends(require_settings_unlocked)],
+)
+def list_provider_models_endpoint(
+    profile_id: str,
+    provider_kind: str,
+    session: Session = Depends(get_session),
+) -> ProviderModelListResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        profile = _load_profile_for_model_discovery(session, profile_id, provider_kind)
+        models = list_provider_models(profile, provider_kind)
+    except ProviderModelDiscoveryUnsupportedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProviderModelDiscoveryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ProviderModelListResponse(models=[_provider_model_response(model) for model in models])
 
 
 @router.get(

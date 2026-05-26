@@ -21,6 +21,7 @@ import type {
   ProviderBinding,
   ProviderBindingUpdateRequest,
   ProviderConfigResponse,
+  ProviderModelListResponse,
   ProviderProfile,
   ProviderProfileCreateRequest,
   ProviderProfileUpdateRequest,
@@ -117,6 +118,13 @@ export const api = {
   },
   getProviderConfig(): Promise<ProviderConfigResponse> {
     return request("/api/settings/provider-config");
+  },
+  listProviderModels(profileId: string, providerKind: string): Promise<ProviderModelListResponse> {
+    return request(
+      `/api/settings/provider-profiles/${encodeURIComponent(profileId)}/models?provider_kind=${encodeURIComponent(
+        providerKind,
+      )}`,
+    );
   },
   createProviderProfile(payload: ProviderProfileCreateRequest): Promise<ProviderProfile> {
     return request("/api/settings/provider-profiles", {

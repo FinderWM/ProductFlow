@@ -681,6 +681,17 @@ export interface ProviderConfigResponse {
   bindings: ProviderBinding[];
 }
 
+export interface ProviderModel {
+  id: string;
+  label: string;
+  owned_by: string | null;
+  created: number | null;
+}
+
+export interface ProviderModelListResponse {
+  models: ProviderModel[];
+}
+
 export interface SettingsExportMetadata {
   schema_version: number;
   exported_at: string;

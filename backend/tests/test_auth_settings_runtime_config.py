@@ -992,6 +992,172 @@ def test_provider_config_supports_google_gemini_profiles_bindings_and_import(con
     assert preview.json()["provider_profile_count"] >= 1
 
 
+def test_provider_model_list_endpoint_fetches_openai_compatible_models(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    captured_kwargs: dict[str, object] = {}
+
+    class DummyModels:
+        def list(self):
+            class ModelList:
+                data = [
+                    {"id": "z-copy-model", "owned_by": "vendor", "created": "1700000002"},
+                    {"id": "a-brief-model", "owned_by": "vendor", "created": 1700000001},
+                    {"id": "a-brief-model", "owned_by": "duplicate", "created": 1700000000},
+                    {"owned_by": "missing-id"},
+                ]
+
+            return ModelList()
+
+    class DummyOpenAI:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            self.models = DummyModels()
+
+    monkeypatch.setattr("productflow_backend.infrastructure.provider_models.OpenAI", DummyOpenAI)
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    _unlock_settings(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "模型列表供应商",
+            "provider_type": "openai_compatible",
+            "base_url": "https://models.example/v1",
+            "api_key": "secret-model-key",
+            "capabilities": ["text_responses", "image_images"],
+            "default_models": {},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+
+    listed = client.get(
+        f"/api/settings/provider-profiles/{created.json()['id']}/models",
+        params={"provider_kind": "openai_images"},
+    )
+
+    assert listed.status_code == 200
+    assert captured_kwargs == {"api_key": "secret-model-key", "base_url": "https://models.example/v1"}
+    assert listed.json() == {
+        "models": [
+            {
+                "id": "a-brief-model",
+                "label": "a-brief-model",
+                "owned_by": "duplicate",
+                "created": 1700000000,
+            },
+            {
+                "id": "z-copy-model",
+                "label": "z-copy-model",
+                "owned_by": "vendor",
+                "created": 1700000002,
+            },
+        ]
+    }
+    assert "secret-model-key" not in listed.text
+
+
+def test_provider_model_list_endpoint_validates_profile_and_maps_provider_failures(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    class FailingModels:
+        def list(self):
+            raise RuntimeError("upstream secret-model-key failed")
+
+    class FailingOpenAI:
+        def __init__(self, **kwargs):
+            self.models = FailingModels()
+
+    monkeypatch.setattr("productflow_backend.infrastructure.provider_models.OpenAI", FailingOpenAI)
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    _unlock_settings(client)
+
+    missing_key = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "无 Key 供应商",
+            "provider_type": "openai_compatible",
+            "base_url": "https://models.example/v1",
+            "api_key": None,
+            "capabilities": ["text_responses"],
+            "default_models": {},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert missing_key.status_code == 200
+    missing_key_models = client.get(
+        f"/api/settings/provider-profiles/{missing_key.json()['id']}/models",
+        params={"provider_kind": "openai"},
+    )
+    assert missing_key_models.status_code == 400
+    assert "缺少 API Key" in missing_key_models.json()["detail"]
+
+    text_only = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "纯文案供应商",
+            "provider_type": "openai_compatible",
+            "base_url": "https://models.example/v1",
+            "api_key": "secret-model-key",
+            "capabilities": ["text_responses"],
+            "default_models": {},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert text_only.status_code == 200
+    wrong_capability = client.get(
+        f"/api/settings/provider-profiles/{text_only.json()['id']}/models",
+        params={"provider_kind": "openai_images"},
+    )
+    assert wrong_capability.status_code == 400
+    assert "不支持当前接口能力" in wrong_capability.json()["detail"]
+
+    upstream_failure = client.get(
+        f"/api/settings/provider-profiles/{text_only.json()['id']}/models",
+        params={"provider_kind": "openai"},
+    )
+    assert upstream_failure.status_code == 502
+    assert "供应商模型列表拉取失败" in upstream_failure.json()["detail"]
+    assert "secret-model-key" not in upstream_failure.text
+
+    gemini = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Gemini 图片",
+            "provider_type": "google_gemini",
+            "base_url": None,
+            "api_key": "google-secret-key",
+            "capabilities": ["image_google_gemini"],
+            "default_models": {},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert gemini.status_code == 200
+    gemini_models = client.get(
+        f"/api/settings/provider-profiles/{gemini.json()['id']}/models",
+        params={"provider_kind": "google_gemini_image"},
+    )
+    assert gemini_models.status_code == 400
+    assert "Google Gemini 暂不支持" in gemini_models.json()["detail"]
+
+
 def test_resolvers_ignore_legacy_rows_after_provider_bindings_exist(configured_env: Path) -> None:
     session = get_session_factory()()
     try:

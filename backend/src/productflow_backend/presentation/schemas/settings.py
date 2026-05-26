@@ -86,6 +86,17 @@ class ProviderConfigResponse(BaseModel):
     bindings: list[ProviderBindingResponse]
 
 
+class ProviderModelResponse(BaseModel):
+    id: str
+    label: str
+    owned_by: str | None = None
+    created: int | None = None
+
+
+class ProviderModelListResponse(BaseModel):
+    models: list[ProviderModelResponse]
+
+
 class ProviderProfileCreateRequest(BaseModel):
     name: str = Field(min_length=1)
     provider_type: str = "openai_compatible"
