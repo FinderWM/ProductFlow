@@ -41,6 +41,10 @@
   and minimap aria labels through ReactFlow `ariaLabelConfig`.
 - Large ProductDetail canvases should use ReactFlow `MiniMap` for desktop overview. Mobile should either hide the minimap
   or expose it through an explicit mode/entry so it does not cover browse/edit/select touch flows.
+- The ProductDetail `MiniMap` should remain a locating aid for the currently executing workflow node: keep non-running
+  nodes visually neutral instead of coloring by node type, add the running-node emphasis through `nodeClassName` / SVG
+  styling, and route minimap node clicks through the same selection plus ReactFlow fit-view path used by the main canvas.
+  Do not replace ReactFlow `MiniMap` with a custom overview only to style active nodes.
 - ReactFlow's internal node/edge store owns live drag coordinates during active pointer movement. ProductDetail and
   WorkflowCanvas may resync nodes/edges from backend workflow data, selection state, and optimistic drop positions through
   ReactFlow instance methods, but they must not rebuild the full node array in React state on every drag-frame position

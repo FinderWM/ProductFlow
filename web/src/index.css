@@ -260,6 +260,25 @@ textarea {
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.1);
 }
 
+.workflow-canvas-minimap .react-flow__minimap-node {
+  cursor: pointer;
+}
+
+.workflow-canvas-minimap .workflow-canvas-minimap-node-running {
+  cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
+
+.workflow-canvas-minimap .workflow-canvas-minimap-node-running {
+  fill: #2563eb !important;
+  stroke: #1d4ed8 !important;
+  stroke-width: 2px !important;
+  filter: drop-shadow(0 2px 6px rgb(37 99 235 / 0.75));
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: workflow-minimap-running-bounce 0.95s infinite cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 @media (min-width: 1024px) {
   .workflow-canvas-controls .react-flow__controls-button {
     width: 30px;
@@ -280,6 +299,23 @@ textarea {
 :root.dark .workflow-canvas-minimap {
   border-color: rgb(51 65 85 / 0.8);
   box-shadow: 0 10px 24px rgb(0 0 0 / 0.2);
+}
+
+:root.dark .workflow-canvas-minimap .workflow-canvas-minimap-node-running {
+  fill: #818cf8 !important;
+  stroke: #c4b5fd !important;
+  filter: drop-shadow(0 2px 7px rgb(129 140 248 / 0.85));
+}
+
+@keyframes workflow-minimap-running-bounce {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    filter: drop-shadow(0 2px 5px rgb(37 99 235 / 0.55));
+  }
+  45% {
+    transform: translateY(-10%) scale(1.18);
+    filter: drop-shadow(0 5px 10px rgb(37 99 235 / 0.95));
+  }
 }
 
 @keyframes shimmer {

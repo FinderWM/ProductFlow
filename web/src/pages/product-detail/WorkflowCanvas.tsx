@@ -65,6 +65,11 @@ import {
   workflowToReactFlowEdges,
   workflowToReactFlowNodes,
 } from "./reactFlowAdapters";
+import {
+  workflowMiniMapNodeClassName as workflowMiniMapWorkflowNodeClassName,
+  workflowMiniMapNodeColor as workflowMiniMapWorkflowNodeColor,
+  workflowMiniMapNodeStrokeColor as workflowMiniMapWorkflowNodeStrokeColor,
+} from "./workflowMiniMap";
 
 export interface NodePositionCommitInput {
   node: WorkflowNode;
@@ -91,7 +96,7 @@ interface WorkflowCanvasNodeData extends ProductFlowNodeData {
   previewSelected: boolean;
   inputHandleLabel: string;
   outputHandleLabel: string;
-  onSelectNode: (nodeId: string, event: ReactMouseEvent<HTMLElement>) => void;
+  onSelectNode: (nodeId: string, event: ReactMouseEvent<Element>) => void;
   actionToolbar: WorkflowCanvasActionToolbar | null;
   onNodeAction: (actionId: WorkflowCanvasActionId, target: WorkflowCanvasActionTarget) => void;
 }
@@ -141,7 +146,7 @@ interface WorkflowCanvasProps {
   onToggleSnapToGrid: () => void;
   onAutoLayout: () => void;
   onBlankClick: (event: ReactMouseEvent<Element>) => void;
-  onSelectNode: (nodeId: string, event: ReactMouseEvent<HTMLElement>) => void;
+  onSelectNode: (nodeId: string, event: ReactMouseEvent<Element>) => void;
   onNodeDragCompleteSelect: (nodeId: string) => void;
   getNodeDragGroup: (nodeId: string) => string[];
   onSelectionBoxComplete: (nodeIds: string[]) => void;
@@ -454,21 +459,6 @@ const WORKFLOW_MULTI_SELECTION_KEY_CODES = ["Control", "Meta"];
 const WORKFLOW_CLEAR_SELECTION_KEY_CODE = "Escape";
 const WORKFLOW_PAN_ACTIVATION_KEY_CODE = "Space";
 const WORKFLOW_ZOOM_ACTIVATION_KEY_CODES = ["Control", "Meta"];
-const MINI_MAP_NODE_COLORS: Record<WorkflowNode["node_type"], string> = {
-  product_context: "#64748b",
-  reference_image: "#0ea5e9",
-  copy_generation: "#8b5cf6",
-  image_generation: "#22c55e",
-};
-const MINI_MAP_STATUS_STROKE_COLORS: Record<WorkflowNode["status"], string> = {
-  idle: "#94a3b8",
-  queued: "#f59e0b",
-  running: "#2563eb",
-  succeeded: "#16a34a",
-  failed: "#dc2626",
-  cancelled: "#71717a",
-};
-
 interface WorkflowCanvasViewportBridgeProps {
   onViewportChange: (viewport: Viewport) => void;
   onViewportChangeEnd: (viewport: Viewport) => void;
@@ -635,17 +625,18 @@ function WorkflowCanvasControlsPanel({
 }
 
 function workflowMiniMapNodeColor(node: WorkflowCanvasNode) {
-  return MINI_MAP_NODE_COLORS[node.data.workflowNode.node_type];
+  return workflowMiniMapWorkflowNodeColor(node.data.workflowNode);
 }
 
 function workflowMiniMapNodeStrokeColor(node: WorkflowCanvasNode) {
-  if (node.data.primarySelected) {
-    return "#2563eb";
-  }
-  if (node.data.secondarySelected) {
-    return "#7c3aed";
-  }
-  return MINI_MAP_STATUS_STROKE_COLORS[node.data.workflowNode.status];
+  return workflowMiniMapWorkflowNodeStrokeColor(node.data.workflowNode, {
+    primarySelected: node.data.primarySelected,
+    secondarySelected: node.data.secondarySelected,
+  });
+}
+
+function workflowMiniMapNodeClassName(node: WorkflowCanvasNode) {
+  return workflowMiniMapWorkflowNodeClassName(node.data.workflowNode);
 }
 
 export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasProps>(function WorkflowCanvas(
@@ -1221,6 +1212,15 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     [],
   );
 
+  const handleMiniMapNodeClick = useCallback(
+    (event: ReactMouseEvent, node: WorkflowCanvasNode) => {
+      event.stopPropagation();
+      onSelectNode(node.id, event);
+      fitNodeIds([node.id]);
+    },
+    [fitNodeIds, onSelectNode],
+  );
+
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-zinc-400 dark:text-slate-500">
@@ -1349,8 +1349,10 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
           className="workflow-canvas-minimap nopan nodrag nowheel hidden lg:block"
           nodeColor={workflowMiniMapNodeColor}
           nodeStrokeColor={workflowMiniMapNodeStrokeColor}
+          nodeClassName={workflowMiniMapNodeClassName}
           nodeBorderRadius={8}
-          nodeStrokeWidth={3}
+          nodeStrokeWidth={1.5}
+          onNodeClick={handleMiniMapNodeClick}
           pannable
           zoomable
           ariaLabel={canvasMiniMapLabel}
