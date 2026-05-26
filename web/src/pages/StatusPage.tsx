@@ -10,7 +10,6 @@ import {
   LockKeyhole,
   MessageSquareText,
   RefreshCw,
-  Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -250,7 +249,7 @@ export function StatusPage() {
         onLogout={() => logoutMutation.mutate()}
       />
       <main className="mx-auto w-full max-w-[1440px] flex-1 px-5 py-8 pb-24 sm:px-8 lg:px-10 lg:py-10">
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="mb-8">
           <div>
             <div className="mb-2 inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
               <Activity size={13} className="mr-1.5" />
@@ -263,14 +262,6 @@ export function StatusPage() {
               {t("statusPage.description")}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate("/settings")}
-            className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:hover:bg-slate-800"
-          >
-            <Settings size={14} className="mr-2" />
-            {t("statusPage.openSettings")}
-          </button>
         </div>
 
         {lockStateQuery.isLoading ? (
