@@ -46,15 +46,6 @@ class ConfigUpdateRequest(BaseModel):
     reset_keys: list[str] = Field(default_factory=list)
 
 
-class SettingsLockStateResponse(BaseModel):
-    unlocked: bool
-    configured: bool
-
-
-class SettingsUnlockRequest(BaseModel):
-    token: str = Field(min_length=1)
-
-
 class ProviderProfileResponse(BaseModel):
     id: str
     name: str

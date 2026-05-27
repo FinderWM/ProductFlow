@@ -6,6 +6,7 @@ from time import perf_counter
 from typing import Any, Literal
 
 from dramatiq.middleware.time_limit import TimeLimitExceeded
+from sqlalchemy.orm import Session
 
 from productflow_backend.application.usage_stats import record_user_usage_result
 from productflow_backend.infrastructure.db.session import get_session_factory
@@ -66,33 +67,40 @@ def claim_runtime_generation_config(
     *,
     purpose: Literal["text", "image"],
     selection: GenerationConfigSelection | None = None,
+    session: Session | None = None,
 ) -> RuntimeGenerationConfigClaim:
     if purpose not in {TEXT_PURPOSE, IMAGE_PURPOSE}:
         raise ValueError("用途必须是 text 或 image")
     resolved_selection = selection or GenerationConfigSelection()
-    session = get_session_factory()()
+    owns_session = session is None
+    working_session = session or get_session_factory()()
     try:
         claim = claim_generation_config(
-            session,
+            working_session,
             purpose=purpose,
             generation_config_id=generation_config_id_for_claim(resolved_selection),
         )
         if claim is None:
-            session.commit()
+            if owns_session:
+                working_session.commit()
             raise GenerationConfigWaitError("生成配置暂时不可用，等待并发容量或冷冻期恢复")
-        session.commit()
+        if owns_session:
+            working_session.commit()
         return RuntimeGenerationConfigClaim(claim=claim, started_perf_counter=perf_counter())
     except Exception:
-        session.rollback()
+        if owns_session:
+            working_session.rollback()
         raise
     finally:
-        session.close()
+        if owns_session:
+            working_session.close()
 
 
 def release_runtime_generation_config(
     runtime_claim: RuntimeGenerationConfigClaim | None,
     *,
     success: bool,
+    session: Session | None = None,
     user_id: str | None = None,
     generated_unit_count: int = 1,
     failure_reason: str | None = None,
@@ -103,12 +111,13 @@ def release_runtime_generation_config(
     if runtime_claim is None:
         return
     latency_ms = int(max(0.0, perf_counter() - runtime_claim.started_perf_counter) * 1000)
-    session = get_session_factory()()
+    owns_session = session is None
+    working_session = session or get_session_factory()()
     try:
         now = datetime.now(UTC)
         if user_id is not None and record_result:
             record_user_usage_result(
-                session,
+                working_session,
                 user_id=user_id,
                 purpose=runtime_claim.purpose,
                 success=success,
@@ -119,7 +128,7 @@ def release_runtime_generation_config(
                 now=now,
             )
         release_generation_config_claim(
-            session,
+            working_session,
             runtime_claim.generation_config_id,
             success=success,
             latency_ms=latency_ms,
@@ -130,12 +139,15 @@ def release_runtime_generation_config(
             record_result=record_result,
             now=now,
         )
-        session.commit()
+        if owns_session:
+            working_session.commit()
     except Exception:
-        session.rollback()
+        if owns_session:
+            working_session.rollback()
         raise
     finally:
-        session.close()
+        if owns_session:
+            working_session.close()
 
 
 def generation_failure_reason(exc: BaseException) -> str:

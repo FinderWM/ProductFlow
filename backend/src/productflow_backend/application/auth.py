@@ -15,6 +15,10 @@ from productflow_backend.domain.rbac import (
     ADMIN_USER_ID,
     ADMIN_USERNAME,
     API_PERMISSION_DEFINITIONS,
+    API_SETTINGS_MIGRATE,
+    API_SETTINGS_PROVIDER_WRITE,
+    API_SETTINGS_READ,
+    API_SETTINGS_WRITE,
     DEFAULT_ROLE_API_PERMISSION_CODES,
     DEFAULT_ROLE_CODE,
     DEFAULT_ROLE_MENU_CODES,
@@ -172,6 +176,26 @@ def user_has_api_permission(session: Session, user: AuthUser, permission_code: s
     )
 
 
+def user_has_any_api_permission(session: Session, user: AuthUser, permission_codes: Iterable[str]) -> bool:
+    if user.is_admin:
+        return True
+    normalized_codes = tuple(sorted(set(permission_codes)))
+    if not normalized_codes:
+        return False
+    return (
+        session.scalar(
+            select(RoleApiPermission.role_id)
+            .join(RbacApiPermission, RbacApiPermission.code == RoleApiPermission.permission_code)
+            .where(
+                RoleApiPermission.role_id == user.role_id,
+                RoleApiPermission.permission_code.in_(normalized_codes),
+                RbacApiPermission.enabled.is_(True),
+            )
+        )
+        is not None
+    )
+
+
 def create_trusted_user(
     session: Session,
     *,
@@ -306,8 +330,8 @@ def replace_role_permissions(
         raise BusinessValidationError("管理员角色不可编辑权限")
     valid_menu_codes = {definition.code for definition in MENU_DEFINITIONS}
     valid_api_codes = {definition.code for definition in API_PERMISSION_DEFINITIONS}
-    next_menu_codes = sorted(set(menu_codes) & valid_menu_codes)
-    next_api_codes = sorted(set(api_permission_codes) & valid_api_codes)
+    next_api_codes = _normalize_role_api_permission_codes(set(api_permission_codes) & valid_api_codes)
+    next_menu_codes = _normalize_role_menu_codes(set(menu_codes) & valid_menu_codes, next_api_codes)
 
     session.query(RoleMenuPermission).filter(RoleMenuPermission.role_id == role.id).delete()
     session.query(RoleApiPermission).filter(RoleApiPermission.role_id == role.id).delete()
@@ -344,6 +368,24 @@ def _ensure_admin_user(session: Session, admin_role: AuthRole) -> AuthUser:
         user.is_admin = True
         user.role_id = admin_role.id
     return user
+
+
+def _normalize_role_api_permission_codes(permission_codes: set[str]) -> list[str]:
+    next_api_codes = set(permission_codes)
+    if next_api_codes & {API_SETTINGS_WRITE, API_SETTINGS_PROVIDER_WRITE, API_SETTINGS_MIGRATE}:
+        next_api_codes.add(API_SETTINGS_READ)
+    return sorted(next_api_codes)
+
+
+def _normalize_role_menu_codes(menu_codes: set[str], api_permission_codes: Iterable[str]) -> list[str]:
+    next_menu_codes = set(menu_codes)
+    menu_code_by_permission = {definition.code: definition.menu_code for definition in API_PERMISSION_DEFINITIONS}
+    next_menu_codes.update(
+        menu_code_by_permission[permission_code]
+        for permission_code in api_permission_codes
+        if permission_code in menu_code_by_permission
+    )
+    return sorted(next_menu_codes)
 
 
 def _ensure_registry(session: Session) -> None:

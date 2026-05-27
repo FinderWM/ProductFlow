@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -196,6 +197,131 @@ class ReferenceImageInput(BaseModel):
     filename: str
     role: str | None = None
     label: str | None = None
+
+
+class TailSplitterConfig(BaseModel):
+    """尾巴节点配置。文件解析入口先保留为 document_source。"""
+
+    description: str = ""
+    source_text: str = ""
+    max_items: int = Field(default=8, ge=1, le=12)
+    generation_config_mode: Literal["auto", "manual"] = "auto"
+    generation_config_id: str | None = None
+    document_source: dict[str, Any] | None = None
+
+    @field_validator("description", "source_text")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("generation_config_id")
+    @classmethod
+    def normalize_generation_config_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class TailSplitPlanInput(BaseModel):
+    """尾巴拆分 provider 入参。"""
+
+    product_name: str
+    category: str | None = None
+    price: str | None = None
+    source_note: str | None = None
+    source_text: str = ""
+    description: str = ""
+    upstream_text_contexts: list[str] = Field(default_factory=list)
+    reference_images: list[ReferenceImageInput] = Field(default_factory=list)
+    max_items: int = Field(default=8, ge=1, le=12)
+
+
+class TailSplitPlanDraftItem(BaseModel):
+    """Provider 返回的单个拆分项。id/order 可缺省，由应用层补齐。"""
+
+    id: str | None = None
+    order: int | None = None
+    title: str
+    instruction: str
+    visual_intent: str
+    source_refs: list[str] = Field(default_factory=list)
+
+    @field_validator("id", "title", "instruction", "visual_intent", mode="before")
+    @classmethod
+    def normalize_scalar_text(cls, value: Any, info: ValidationInfo) -> Any:
+        return _normalize_ai_scalar_text(value, field_name=info.field_name)
+
+    @field_validator("title", "instruction", "visual_intent")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("拆分项标题、提示词和画面意图不能为空")
+        return value
+
+    @field_validator("id")
+    @classmethod
+    def normalize_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @field_validator("source_refs")
+    @classmethod
+    def normalize_source_refs(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item.strip()]
+
+
+class TailSplitPlanDraft(BaseModel):
+    """Provider 返回的拆分计划草稿。"""
+
+    source_summary: str
+    items: list[TailSplitPlanDraftItem] = Field(min_length=1)
+
+    @field_validator("source_summary", mode="before")
+    @classmethod
+    def normalize_source_summary(cls, value: Any) -> Any:
+        return _normalize_ai_scalar_text(value, field_name="source_summary")
+
+    @field_validator("source_summary")
+    @classmethod
+    def validate_source_summary(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("拆分计划摘要不能为空")
+        return value
+
+
+class TailSplitPlanItem(BaseModel):
+    id: str
+    order: int
+    title: str
+    instruction: str
+    visual_intent: str
+    source_refs: list[str] = Field(default_factory=list)
+
+
+class TailSplitPlan(BaseModel):
+    version: Literal[1] = 1
+    plan_id: str
+    status: Literal["pending", "applied"] = "pending"
+    source_summary: str
+    items: list[TailSplitPlanItem] = Field(min_length=1)
+    created_at: datetime
+
+
+class TailAppliedBatch(BaseModel):
+    batch_id: str
+    plan_id: str
+    item_ids: list[str]
+    node_ids: list[str]
+    created_at: datetime
+
+
+class TailSplitterOutput(BaseModel):
+    summary: str
+    latest_plan: TailSplitPlan | None = None
+    applied_batches: list[TailAppliedBatch] = Field(default_factory=list)
 
 
 class PosterGenerationInput(BaseModel):

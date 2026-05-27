@@ -122,7 +122,7 @@ class GenerationConfigStatusSummary:
     today_image_attempt_count: int
 
 
-def ensure_provider_config_bootstrapped(session: Session | None = None) -> None:
+def ensure_provider_config_bootstrapped(session: Session | None = None, *, commit: bool = True) -> None:
     """Create generation configs from legacy settings/bindings once.
 
     Provider profiles remain the connection layer. `generation_configs` is the
@@ -132,14 +132,17 @@ def ensure_provider_config_bootstrapped(session: Session | None = None) -> None:
     if session is None:
         owned_session = get_session_factory()()
         try:
-            ensure_provider_config_bootstrapped(owned_session)
+            ensure_provider_config_bootstrapped(owned_session, commit=commit)
         finally:
             owned_session.close()
         return
 
     if _generation_config_exists(session):
         _ensure_generation_config_states(session)
-        session.commit()
+        if commit:
+            session.commit()
+        else:
+            session.flush()
         return
 
     existing_bindings = list(session.scalars(select(ProviderBinding).order_by(ProviderBinding.purpose)).all())
@@ -147,7 +150,10 @@ def ensure_provider_config_bootstrapped(session: Session | None = None) -> None:
         for binding in existing_bindings:
             _add_generation_config_from_binding(session, binding)
         _ensure_generation_config_states(session)
-        session.commit()
+        if commit:
+            session.commit()
+        else:
+            session.flush()
         return
 
     settings = _load_effective_legacy_settings(session)
@@ -228,7 +234,10 @@ def ensure_provider_config_bootstrapped(session: Session | None = None) -> None:
         )
 
     _sync_compat_provider_bindings(session)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
 
 
 def list_provider_profiles(session: Session) -> list[ProviderProfile]:
@@ -618,72 +627,46 @@ def normalize_provider_binding_model_settings(*, purpose: str, model_settings: d
     return _normalize_binding_model_settings(purpose=purpose, model_settings=model_settings)
 
 
-def resolve_text_provider_config(generation_config_id: str | None = None) -> ResolvedTextProviderConfig:
-    session = get_session_factory()()
-    try:
-        ensure_provider_config_bootstrapped(session)
+def resolve_text_provider_config(
+    generation_config_id: str | None = None,
+    *,
+    session: Session | None = None,
+) -> ResolvedTextProviderConfig:
+    if session is not None:
+        ensure_provider_config_bootstrapped(session, commit=False)
         generation_config = _select_generation_config_for_resolution(
             session,
             purpose=TEXT_PURPOSE,
             generation_config_id=generation_config_id,
         )
-        kind = generation_config.provider_kind
-        if kind == "mock":
-            return ResolvedTextProviderConfig(
-                provider_kind="mock",
-                brief_model=_require_text_value(
-                    generation_config.model_settings_json,
-                    "brief_model",
-                    "文案商品理解模型未配置",
-                ),
-                copy_model=_require_text_value(
-                    generation_config.model_settings_json,
-                    "copy_model",
-                    "文案生成模型未配置",
-                ),
-                generation_config_id=generation_config.id,
-                generation_config_name=generation_config.name,
-            )
-        if kind != "openai":
-            raise RuntimeError(f"暂不支持的文案 provider: {kind}")
-        profile = _require_active_profile_for_config(generation_config)
-        _require_capability(profile, CAPABILITY_TEXT_RESPONSES)
-        return ResolvedTextProviderConfig(
-            provider_kind="openai",
-            brief_model=_require_text_value(
-                generation_config.model_settings_json,
-                "brief_model",
-                "文案商品理解模型未配置",
-                fallback_values=profile.default_models_json,
-            ),
-            copy_model=_require_text_value(
-                generation_config.model_settings_json,
-                "copy_model",
-                "文案生成模型未配置",
-                fallback_values=profile.default_models_json,
-            ),
-            provider_profile_id=profile.id,
-            api_key=profile.api_key,
-            base_url=profile.base_url,
-            generation_config_id=generation_config.id,
-            generation_config_name=generation_config.name,
-        )
-    finally:
-        session.close()
+        return _resolved_text_provider_config_from_generation_config(generation_config)
 
-
-def resolve_image_provider_config(generation_config_id: str | None = None) -> ResolvedImageProviderConfig:
-    session = get_session_factory()()
+    owned_session = get_session_factory()()
     try:
-        ensure_provider_config_bootstrapped(session)
+        return resolve_text_provider_config(generation_config_id=generation_config_id, session=owned_session)
+    finally:
+        owned_session.close()
+
+
+def resolve_image_provider_config(
+    generation_config_id: str | None = None,
+    *,
+    session: Session | None = None,
+) -> ResolvedImageProviderConfig:
+    if session is not None:
+        ensure_provider_config_bootstrapped(session, commit=False)
         generation_config = _select_generation_config_for_resolution(
             session,
             purpose=IMAGE_PURPOSE,
             generation_config_id=generation_config_id,
         )
         return _resolved_image_provider_config_from_generation_config(generation_config)
+
+    owned_session = get_session_factory()()
+    try:
+        return resolve_image_provider_config(generation_config_id=generation_config_id, session=owned_session)
     finally:
-        session.close()
+        owned_session.close()
 
 
 def claim_generation_config(
@@ -693,7 +676,7 @@ def claim_generation_config(
     generation_config_id: str | None = None,
     now: datetime | None = None,
 ) -> GenerationConfigClaim | None:
-    ensure_provider_config_bootstrapped(session)
+    ensure_provider_config_bootstrapped(session, commit=False)
     resolved_now = now or datetime.now(UTC)
     candidates = _candidate_generation_configs(
         session,
@@ -852,6 +835,52 @@ def generation_config_status_summary(
             for item in today_stats
             if config_purposes.get(item.generation_config_id) == IMAGE_PURPOSE
         ),
+    )
+
+
+def _resolved_text_provider_config_from_generation_config(
+    generation_config: GenerationConfig,
+) -> ResolvedTextProviderConfig:
+    kind = generation_config.provider_kind
+    if kind == "mock":
+        return ResolvedTextProviderConfig(
+            provider_kind="mock",
+            brief_model=_require_text_value(
+                generation_config.model_settings_json,
+                "brief_model",
+                "文案商品理解模型未配置",
+            ),
+            copy_model=_require_text_value(
+                generation_config.model_settings_json,
+                "copy_model",
+                "文案生成模型未配置",
+            ),
+            generation_config_id=generation_config.id,
+            generation_config_name=generation_config.name,
+        )
+    if kind != "openai":
+        raise RuntimeError(f"暂不支持的文案 provider: {kind}")
+    profile = _require_active_profile_for_config(generation_config)
+    _require_capability(profile, CAPABILITY_TEXT_RESPONSES)
+    return ResolvedTextProviderConfig(
+        provider_kind="openai",
+        brief_model=_require_text_value(
+            generation_config.model_settings_json,
+            "brief_model",
+            "文案商品理解模型未配置",
+            fallback_values=profile.default_models_json,
+        ),
+        copy_model=_require_text_value(
+            generation_config.model_settings_json,
+            "copy_model",
+            "文案生成模型未配置",
+            fallback_values=profile.default_models_json,
+        ),
+        provider_profile_id=profile.id,
+        api_key=profile.api_key,
+        base_url=profile.base_url,
+        generation_config_id=generation_config.id,
+        generation_config_name=generation_config.name,
     )
 
 

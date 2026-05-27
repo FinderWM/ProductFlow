@@ -5,6 +5,7 @@ export const NODE_WIDTH = 248;
 export const ADD_NODE_OPTIONS: Array<{ type: WorkflowNodeType }> = [
   { type: "reference_image" },
   { type: "copy_generation" },
+  { type: "tail_splitter" },
   { type: "image_generation" },
 ];
 

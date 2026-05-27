@@ -8,6 +8,8 @@ from productflow_backend.application.contracts import (
     CreativeBriefPayload,
     ProductInput,
     ReferenceImageInput,
+    TailSplitPlanDraft,
+    TailSplitPlanInput,
 )
 from productflow_backend.application.copy_payloads import normalize_copy_payload
 from productflow_backend.config import get_runtime_settings
@@ -130,3 +132,44 @@ class OpenAITextProvider(TextProvider):
         if not polished:
             raise ValueError("文案 provider 未返回润色结果")
         return polished, self.copy_model
+
+    def generate_tail_split_plan(self, payload: TailSplitPlanInput) -> tuple[TailSplitPlanDraft, str]:
+        reference_lines = [
+            (
+                f"{index}. {reference.label or reference.filename}"
+                f"（角色：{reference.role or '参考图'}，类型：{reference.mime_type}，文件：{reference.filename}）"
+            )
+            for index, reference in enumerate(payload.reference_images, start=1)
+        ]
+        upstream_text = "\n".join(f"{index}. {text}" for index, text in enumerate(payload.upstream_text_contexts, start=1))
+        response = self.client.responses.create(
+            model=self.copy_model,
+            instructions=(
+                "你是电商工作台的尾巴节点拆分器。"
+                "把输入拆成多条彼此独立、适合后续单独生图的方向。"
+                "只输出 JSON 对象，不要输出 markdown。"
+            ),
+            input=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"商品名：{payload.product_name}\n"
+                        f"类目：{payload.category or '未提供'}\n"
+                        f"价格：{payload.price or '未提供'}\n"
+                        f"商品描述/补充说明：{payload.source_note or '未提供'}\n"
+                        f"粘贴长文本：{payload.source_text or '未提供'}\n"
+                        f"尾巴节点描述：{payload.description or '未提供'}\n"
+                        f"上游文案上下文：\n{upstream_text or '未提供'}\n"
+                        f"参考图：\n{chr(10).join(reference_lines) if reference_lines else '未提供'}\n"
+                        f"最多拆分项：{payload.max_items}\n"
+                        "请输出字段：source_summary、items。\n"
+                        "items 为数组，每项包含 title、instruction、visual_intent、source_refs。\n"
+                        "要求：\n"
+                        "1. instruction 必须是可直接用于后续生图触发器的完整中文提示词；\n"
+                        "2. 每个 item 聚焦不同画面目标，不要只是同义改写；\n"
+                        "3. source_refs 使用简短字符串说明该方向来自哪些输入。"
+                    ),
+                },
+            ],
+        )
+        return TailSplitPlanDraft.model_validate(self._read_output_json(response)), self.copy_model

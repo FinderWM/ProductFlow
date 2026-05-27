@@ -85,7 +85,7 @@ Current examples:
   workbench actions.
 - `ImageChatPage.tsx` owns session selection, auto-create behavior, config-derived image size options, and generation.
 - `SettingsPage.tsx` owns config fetching, grouped drafts, secret touched state, save/reset mutations.
-- `StatusPage.tsx` owns read-only generation config pool status, settings secondary unlock, date-range filters, and
+- `StatusPage.tsx` owns read-only generation config pool status, date-range filters, and
   per-config operational rows. Keep status as a route-level page instead of embedding it in `SettingsPage.tsx`.
 
 Use `web/src/components/` for reusable presentational components with small props and no route ownership:

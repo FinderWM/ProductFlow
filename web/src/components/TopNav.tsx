@@ -18,6 +18,7 @@ import { Link, useLocation } from "react-router-dom";
 
 import { LOCALES, type Locale, type TranslationKey } from "../lib/i18n";
 import { usePreferences } from "../lib/preferences";
+import { hasSessionApiPermission, hasSessionMenu } from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
 
@@ -27,7 +28,14 @@ interface TopNavProps {
   onLogout?: () => void;
 }
 
-const navItems = [
+const navItems: Array<{
+  labelKey: TranslationKey;
+  to: string;
+  menuCode: string | null;
+  requiredPermission?: string;
+  icon: typeof Activity;
+  match: (pathname: string) => boolean;
+}> = [
   {
     labelKey: "nav.products",
     to: "/products",
@@ -74,6 +82,7 @@ const navItems = [
     labelKey: "nav.settings",
     to: "/settings",
     menuCode: "settings",
+    requiredPermission: "settings:read",
     icon: Settings,
     match: (pathname: string) => pathname.startsWith("/settings"),
   },
@@ -84,7 +93,7 @@ const navItems = [
     icon: ShieldCheck,
     match: (pathname: string) => pathname.startsWith("/rbac"),
   },
-] as const;
+];
 
 const themeIcons: Record<ThemePreference, typeof Sun> = {
   light: Sun,
@@ -111,8 +120,12 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const location = useLocation();
   const { locale, setLocale, t, themePreference, setThemePreference } = usePreferences();
   const session = useSessionState();
-  const allowedMenuCodes = new Set(session?.menus?.map((menu) => menu.code) ?? []);
-  const visibleNavItems = navItems.filter((item) => item.menuCode === null || allowedMenuCodes.has(item.menuCode));
+  const visibleNavItems = navItems.filter(
+    (item) =>
+      item.menuCode === null ||
+      (hasSessionMenu(session, item.menuCode) &&
+        (!item.requiredPermission || hasSessionApiPermission(session, item.requiredPermission))),
+  );
   const CurrentThemeIcon = themeIcons[themePreference];
   const nextThemePreference =
     THEME_PREFERENCES[(THEME_PREFERENCES.indexOf(themePreference) + 1) % THEME_PREFERENCES.length];

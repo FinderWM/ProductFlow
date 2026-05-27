@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from productflow_backend.application.admission import ensure_generation_capacity
-from productflow_backend.application.contracts import ProductInput
+from productflow_backend.application.contracts import ProductInput, TailSplitPlanInput
 from productflow_backend.application.copy_payloads import (
     normalize_copy_node_config,
     normalize_copy_payload,
@@ -38,6 +38,7 @@ from productflow_backend.application.product_workflow.context import (
     optional_config_text,
     product_context_values,
     reference_image_inputs_for_copy,
+    reference_image_inputs_for_tail,
     source_asset_ids_from_config,
 )
 from productflow_backend.application.product_workflow.image_generation import (
@@ -56,6 +57,13 @@ from productflow_backend.application.product_workflow.run_state import (
     workflow_node_failed_run_is_retryable,
     workflow_run_failure_context,
     workflow_run_failure_progress_metadata,
+)
+from productflow_backend.application.product_workflow.tail_splitter import (
+    apply_tail_split_plan,
+    build_tail_split_plan_output,
+    delete_tail_generated_branch,
+    pending_tail_split_plan_or_raise,
+    read_tail_splitter_config,
 )
 from productflow_backend.application.product_workflow_dependencies import (
     WorkflowExecutionDependencies,
@@ -209,10 +217,14 @@ def start_product_workflow_run(
         )
 
     ensure_generation_capacity(session)
+    next_progress_metadata = dict(progress_metadata or {})
+    next_progress_metadata.setdefault("run_mode", "selected" if start_node_id is not None else "full")
+    if start_node_id is not None:
+        next_progress_metadata.setdefault("start_node_id", start_node_id)
     run = WorkflowRun(
         workflow_id=workflow.id,
         status=WorkflowRunStatus.RUNNING,
-        progress_metadata=progress_metadata,
+        progress_metadata=next_progress_metadata or None,
     )
     logger.info(
         "创建商品工作流运行: product_id=%s workflow_id=%s start_node_id=%s",
@@ -380,9 +392,25 @@ def _workflow_run_retry_progress_metadata(run: WorkflowRun) -> dict[str, Any] | 
         metadata["last_failure_category"] = previous["last_failure_category"]
     if isinstance(previous.get("retry_hint"), str):
         metadata["retry_hint"] = previous["retry_hint"]
+    if isinstance(previous.get("run_mode"), str):
+        metadata["run_mode"] = previous["run_mode"]
+    if isinstance(previous.get("start_node_id"), str):
+        metadata["start_node_id"] = previous["start_node_id"]
     metadata["source_run_id"] = run.id
     metadata["manual_retry"] = True
     return metadata
+
+
+def _workflow_run_mode(run: WorkflowRun) -> str:
+    metadata = run.progress_metadata if isinstance(run.progress_metadata, dict) else {}
+    mode = metadata.get("run_mode")
+    if mode in {"full", "selected"}:
+        return str(mode)
+    return "full" if len(run.node_runs) >= len(run.workflow.nodes) else "selected"
+
+
+def _workflow_run_resplits_tails(run: WorkflowRun) -> bool:
+    return _workflow_run_mode(run) == "full"
 
 
 def execute_product_workflow_run(
@@ -551,6 +579,11 @@ def _execute_workflow_node_run(
     node_run = session.get(WorkflowNodeRun, node_run_id)
     if node_run is None:
         return
+    if node.node_type == WorkflowNodeType.TAIL_SPLITTER and _workflow_run_resplits_tails(run):
+        delete_tail_generated_branch(session, workflow=workflow, tail_node=node)
+        session.expire(workflow, ["nodes", "edges", "runs"])
+        workflow = queries.get_workflow_or_raise(run.workflow_id)
+        node = queries.get_node_or_raise(node_run.node_id)
     try:
         logger.info(
             "开始执行工作流节点: run_id=%s node_id=%s node_type=%s",
@@ -559,6 +592,10 @@ def _execute_workflow_node_run(
             node.node_type.value,
         )
         output = _execute_node(session, workflow_id=workflow.id, node=node, dependencies=dependencies)
+        if node.node_type == WorkflowNodeType.TAIL_SPLITTER and _workflow_run_resplits_tails(run):
+            node.output_json = output
+            _auto_apply_tail_plan_for_run(session, run=run, workflow=workflow, tail_node=node)
+            output = dict(node.output_json or output)
     except GenerationConfigWaitError:
         session.rollback()
         _reset_workflow_node_run_for_generation_config_wait(session, node_run_id=node_run_id)
@@ -783,6 +820,61 @@ def _finalize_workflow_run_if_terminal(session: Session, *, run: WorkflowRun) ->
     return True
 
 
+def _auto_apply_tail_plan_for_run(
+    session: Session,
+    *,
+    run: WorkflowRun,
+    workflow: ProductWorkflow,
+    tail_node: WorkflowNode,
+) -> None:
+    plan = pending_tail_split_plan_or_raise(tail_node)
+    applied = apply_tail_split_plan(
+        session,
+        tail_node=tail_node,
+        plan_id=plan.plan_id,
+        item_ids=[item.id for item in plan.items],
+        position_x=tail_node.position_x + 80,
+        position_y=tail_node.position_y,
+    )
+    existing_run_node_ids = {node_run.node_id for node_run in run.node_runs}
+    now = now_utc()
+    for node_id in applied.created_node_ids:
+        if node_id in existing_run_node_ids:
+            continue
+        created_node = session.get(WorkflowNode, node_id)
+        if created_node is None or created_node.workflow_id != workflow.id:
+            continue
+        if created_node.status == WorkflowNodeStatus.SUCCEEDED:
+            session.add(
+                WorkflowNodeRun(
+                    workflow_run_id=run.id,
+                    node_id=created_node.id,
+                    status=WorkflowNodeStatus.SUCCEEDED,
+                    output_json=created_node.output_json,
+                    copy_set_id=(
+                        created_node.output_json.get("copy_set_id")
+                        if isinstance(created_node.output_json, dict)
+                        and isinstance(created_node.output_json.get("copy_set_id"), str)
+                        else None
+                    ),
+                    finished_at=now,
+                )
+            )
+            continue
+        created_node.status = WorkflowNodeStatus.QUEUED
+        created_node.failure_reason = None
+        created_node.last_run_at = now
+        session.add(
+            WorkflowNodeRun(
+                workflow_run_id=run.id,
+                node_id=created_node.id,
+                status=WorkflowNodeStatus.QUEUED,
+            )
+        )
+    workflow.updated_at = now_utc()
+    session.flush()
+
+
 def _node_ids_to_run(session: Session, workflow: ProductWorkflow, start_node_id: str | None) -> set[str]:
     if start_node_id is None:
         return {node.id for node in workflow.nodes}
@@ -838,6 +930,9 @@ def _node_has_reusable_output(
         if not isinstance(copy_set_id, str):
             return False
         return queries.copy_set_for_product(copy_set_id, workflow.product_id) is not None
+    if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
+        latest_plan = output.get("latest_plan")
+        return isinstance(latest_plan, dict) and isinstance(latest_plan.get("plan_id"), str)
     if node.node_type == WorkflowNodeType.IMAGE_GENERATION:
         if target_node is not None and target_node.node_type == WorkflowNodeType.REFERENCE_IMAGE:
             return _image_generation_filled_reference_target(
@@ -932,6 +1027,8 @@ def _execute_node(
         return _execute_reference_image(session, workflow=workflow, node=node)
     if node.node_type == WorkflowNodeType.COPY_GENERATION:
         return _execute_copy_generation(session, workflow=workflow, node=node, dependencies=dependencies)
+    if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
+        return _execute_tail_splitter(session, workflow=workflow, node=node, dependencies=dependencies)
     if node.node_type == WorkflowNodeType.IMAGE_GENERATION:
         return execute_workflow_image_generation(session, workflow=workflow, node=node, dependencies=dependencies)
     raise BusinessValidationError("工作流节点类型不支持")
@@ -1003,9 +1100,10 @@ def _execute_copy_generation(
     runtime_claim = claim_runtime_generation_config(
         purpose="text",
         selection=generation_config_selection_from_config(node.config_json),
+        session=session,
     )
     try:
-        provider = dependencies.text_provider(runtime_claim.generation_config_id)
+        provider = dependencies.text_provider(runtime_claim.generation_config_id, session=session)
         brief_payload, brief_model = _generate_brief_with_provider(provider, product_input, node_id=node.id)
         copy_payload, copy_model = _generate_copy_with_provider(
             provider,
@@ -1019,6 +1117,7 @@ def _execute_copy_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=False,
+            session=session,
             user_id=product.owner_user_id,
             generated_unit_count=0,
             failure_reason=generation_failure_reason(exc),
@@ -1029,6 +1128,7 @@ def _execute_copy_generation(
     release_runtime_generation_config(
         runtime_claim,
         success=True,
+        session=session,
         user_id=product.owner_user_id,
         generated_unit_count=2,
     )
@@ -1068,12 +1168,101 @@ def _execute_copy_generation(
     return output
 
 
+def _execute_tail_splitter(
+    session: Session,
+    *,
+    workflow: ProductWorkflow,
+    node: WorkflowNode,
+    dependencies: WorkflowExecutionDependencies | None = None,
+) -> dict[str, Any]:
+    dependencies = dependencies or default_workflow_execution_dependencies()
+    product = workflow.product
+    storage = LocalStorage()
+    config = _normalize_tail_splitter_config_for_execution(node.config_json)
+    product_context = effective_product_context(workflow, node.id, include_transitive=True)
+    incoming_context = collect_incoming_context(workflow, node.id, include_transitive_product_context=True)
+    reference_images = reference_image_inputs_for_tail(
+        session,
+        workflow=workflow,
+        node_id=node.id,
+        storage=storage,
+        incoming_context=incoming_context,
+    )
+    payload = TailSplitPlanInput(
+        product_name=product_context["name"] or product.name or "自由创作",
+        category=product_context["category"],
+        price=product_context["price"],
+        source_note=product_context["source_note"],
+        source_text=config.source_text,
+        description=config.description,
+        upstream_text_contexts=incoming_context.text_contexts,
+        reference_images=reference_images,
+        max_items=config.max_items,
+    )
+    runtime_claim = claim_runtime_generation_config(
+        purpose="text",
+        selection=generation_config_selection_from_config(node.config_json),
+        session=session,
+    )
+    try:
+        provider = dependencies.text_provider(runtime_claim.generation_config_id, session=session)
+        draft, model_name = _call_text_provider_with_payload_retry(
+            lambda: provider.generate_tail_split_plan(payload),
+            operation="tail_split",
+            node_id=node.id,
+        )
+    except BaseException as exc:  # noqa: BLE001
+        release_runtime_generation_config(
+            runtime_claim,
+            success=False,
+            session=session,
+            user_id=product.owner_user_id,
+            generated_unit_count=0,
+            failure_reason=generation_failure_reason(exc),
+            timeout=generation_failure_is_timeout(exc),
+            throttled=generation_failure_is_throttled(exc),
+        )
+        raise
+    release_runtime_generation_config(
+        runtime_claim,
+        success=True,
+        session=session,
+        user_id=product.owner_user_id,
+        generated_unit_count=len(draft.items),
+    )
+    output = build_tail_split_plan_output(draft, existing_output_json=node.output_json).model_dump(mode="json")
+    output["context_summary"] = {
+        "product_context": product_context,
+        "upstream_text_count": len(incoming_context.text_contexts),
+        "reference_image_count": len(reference_images),
+        "source_text_length": len(config.source_text),
+    }
+    output["context_sources"] = incoming_context.text_sources[:8]
+    output["generation_config_id"] = runtime_claim.generation_config_id
+    output["provider_name"] = provider.provider_name
+    output["model_name"] = model_name
+    output["prompt_version"] = provider.prompt_version
+    return output
+
+
 def _normalize_copy_node_config_for_execution(raw_config: dict[str, Any] | None):
     try:
         return normalize_copy_node_config(raw_config)
     except (ValidationError, ValueError) as exc:
         raise WorkflowSafeExecutionError(
             "文案节点配置无效，请调整节点设置后重试",
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_config",
+        ) from exc
+
+
+def _normalize_tail_splitter_config_for_execution(raw_config: dict[str, Any] | None):
+    try:
+        return read_tail_splitter_config(raw_config)
+    except ValueError as exc:
+        raise WorkflowSafeExecutionError(
+            "尾巴节点配置无效，请调整节点设置后重试",
             retryable=False,
             retry_hint="revise_input",
             failure_category="invalid_node_config",

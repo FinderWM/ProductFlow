@@ -132,8 +132,8 @@ status filter together, then add a query behavior test. Do not reintroduce full-
 
 `config.py::CONFIG_DEFINITIONS` is the owner registry for settings that may be stored in `app_settings`.
 `RUNTIME_CONFIG_KEYS` must equal the keys in that registry. Env-only settings such as `ADMIN_ACCESS_KEY`,
-`SETTINGS_ACCESS_TOKEN`, `SESSION_SECRET`, `DATABASE_URL`, and `REDIS_URL` are required before database access or are
-secrets with separate lifecycle rules, so they must not be added to `CONFIG_DEFINITIONS` or persisted in `app_settings`.
+`SESSION_SECRET`, `DATABASE_URL`, and `REDIS_URL` are required before database access or are secrets with separate
+lifecycle rules, so they must not be added to `CONFIG_DEFINITIONS` or persisted in `app_settings`.
 
 For runtime settings:
 
@@ -250,13 +250,13 @@ For runtime settings:
   `openai_images` owns `images_quality` and `images_style`, and `google_gemini_image` owns `gemini_api_version` plus
   optional `gemini_output_mime_type`. Do not require or persist Responses background config for `openai_images`, Google
   Gemini, or `mock`.
-- `GET /api/settings/generation-config-options` is intentionally not behind the secondary settings unlock. It returns
-  only non-secret fields (`id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`, `frozen_until`) for workflow
-  and image-chat selectors.
-- `GET /api/settings/generation-config-status` stays behind the secondary settings unlock. It may receive
-  `start_date=YYYY-MM-DD` and `end_date=YYYY-MM-DD`; when omitted, the range defaults to today's local stat date. The
-  response must keep today's aggregate fields for compatibility, add selected-range totals, split text/image attempts by
-  `GenerationConfig.purpose`, and return per-config `range_stat` values aggregated from `generation_config_daily_stats`.
+- `GET /api/settings/generation-config-options` requires a matching workbench/image-chat read permission or
+  `settings:read`. It returns only non-secret fields (`id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`,
+  `frozen_until`) for workflow and image-chat selectors.
+- `GET /api/settings/generation-config-status` requires `status:read`. It may receive `start_date=YYYY-MM-DD` and
+  `end_date=YYYY-MM-DD`; when omitted, the range defaults to today's local stat date. The response must keep today's
+  aggregate fields for compatibility, add selected-range totals, split text/image attempts by `GenerationConfig.purpose`,
+  and return per-config `range_stat` values aggregated from `generation_config_daily_stats`.
 - Automatic scheduling filters disabled, archived, frozen, over-capacity, profile-disabled, and capability-incompatible
   configs, then claims capacity with a conditional DB update on `generation_config_states.current_concurrency`.
 - Manual scheduling targets the supplied config id but still respects enabled state, profile availability, freeze state,
@@ -390,14 +390,14 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
     return None
 ```
 
-## Scenario: Runtime admin access toggle
+## Scenario: Runtime account auth and RBAC boundary
 
 ### 1. Scope / Trigger
 
-- Trigger: changing login/session auth, settings persistence, `/api/auth/session`, `/api/settings/runtime`, or the
-  settings page security section.
-- This is a cross-layer contract because `Settings`, config serialization, route dependencies, session responses,
-  frontend DTOs, and route gating must agree on the same field and security boundary.
+- Trigger: changing login/session auth, RBAC permissions, settings persistence, `/api/auth/session`,
+  `/api/settings/runtime`, or the settings page security section.
+- This is a cross-layer contract because `Settings`, config serialization, route dependencies, session responses, RBAC
+  catalogs, frontend DTOs, and route gating must agree on the same security boundary.
 
 ### 2. Signatures
 
@@ -406,67 +406,60 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Config definition key: `admin_access_required`, non-secret, boolean, category `安全与运维`.
 - Runtime API response: `GET /api/settings/runtime` includes `admin_access_required`.
 - Session state response: `GET /api/auth/session` returns `authenticated: bool` and `access_required: bool`.
-- Guard helper: `presentation.deps.require_admin(request: Request) -> None`.
+- Guard helpers: `presentation.deps.require_authenticated`, `require_api_permission(...)`, and
+  `require_any_api_permission(...)`.
 
 ### 3. Contracts
 
-- Default behavior is secure: `admin_access_required` is `True` unless explicitly set through env/defaults or
-  `app_settings`.
-- When `admin_access_required` is true, private workspace routes require a signed Cookie session with
-  `is_authenticated == True`.
-- When `admin_access_required` is false, private workspace routes guarded by `require_admin` are open without a login
-  cookie.
-- Disabling admin access must not bypass the independent settings lock. Full settings reads/writes still require
-  `SETTINGS_ACCESS_TOKEN` through `require_settings_unlocked`.
-- `POST /api/auth/session` is a no-op success when login is disabled and must leave the existing session untouched,
-  including any `settings_unlocked` flag.
-- `DELETE /api/auth/session` still clears the browser session; if login is disabled, the next session-state response is
-  authenticated again because access is no longer required.
+- Account login is required for private workspace routes even if `admin_access_required` is changed at runtime.
+- Backend route access is controlled by API permission codes, not by frontend-only menu hiding.
+- Frontend route visibility is controlled by RBAC menu codes from `GET /api/auth/session`.
+- Full settings reads require `settings:read`; settings mutations require `settings:write`.
+- Status APIs require `status:read`. Non-secret generation runtime selectors require a matching workbench/image-chat
+  read permission or `settings:read`.
+- `DELETE /api/auth/session` clears the browser session and subsequent private route calls return `401` until login.
 
 ### 4. Validation & Error Matrix
 
-- `admin_access_required == True` and no login cookie -> private route returns `401`, `{"detail": "请先登录"}`.
-- `admin_access_required == True` and wrong admin key -> `POST /api/auth/session` returns `401`,
-  `{"detail": "管理员密钥不正确"}`.
-- `admin_access_required == False` and no login cookie -> private workspace route follows normal application behavior.
-- `admin_access_required == False` and no settings unlock -> `GET /api/settings` returns `403`,
-  `{"detail": "请先解锁系统配置"}`.
-- Re-enabling `admin_access_required` immediately restores the login requirement for unauthenticated clients.
+- No login cookie -> private route returns `401`, `{"detail": "请先登录"}`.
+- Wrong account password -> `POST /api/auth/login` returns `401`, `{"detail": "账号或密码不正确"}`.
+- Logged-in user without a route's API permission -> `403`, `{"detail": "没有接口权限"}`.
+- Logged-in non-admin user calling admin-only RBAC management -> `403`, `{"detail": "需要管理员权限"}`.
+- User with `status:read` can call status APIs but cannot call settings read/write APIs.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: a trusted LAN deployment disables the login gate for normal product workflows while keeping settings protected.
-- Base: the default deployment keeps `admin_access_required=True` and requires `ADMIN_ACCESS_KEY` login.
+- Good: default member roles can use inspiration/image-chat/status APIs but cannot read settings or manage RBAC.
+- Base: the seeded `libow` admin role has every menu and API permission.
 - Bad: storing `ADMIN_ACCESS_KEY` in DB settings; it is an env-only secret.
-- Bad: treating disabled login as permission to skip `SETTINGS_ACCESS_TOKEN`; settings protection is a separate boundary.
-- Bad: clearing `settings_unlocked` from `POST /api/auth/session` while login is disabled; that couples unrelated session
-  concerns.
+- Bad: relying on frontend navigation hiding while backend endpoints accept any authenticated user.
+- Bad: letting runtime config endpoints bypass RBAC because they return only non-secret data.
 
 ### 6. Tests Required
 
-- Default-required route test: unauthenticated private route returns 401.
-- Default-required login test: wrong admin key returns 401 with the documented detail.
-- Disabled-login route test: a fresh client can access a private workspace route without logging in.
-- Disabled-login session-state test: response is `{"authenticated": true, "access_required": false}`.
-- Settings-boundary test: disabled login still requires `SETTINGS_ACCESS_TOKEN` before full settings reads/writes.
-- No-op login test: disabled-login `POST /api/auth/session` does not clear an already unlocked settings session.
-- Re-enable test: setting `admin_access_required=True` makes a fresh unauthenticated client receive 401 again.
+- Unauthenticated private route returns 401.
+- Wrong account password returns 401 with the documented detail.
+- Default member role cannot call settings or RBAC management APIs.
+- Default member role can call status and non-secret generation runtime selector APIs.
+- A custom status-only role cannot call runtime selector APIs unless it has a matching workbench/image-chat/settings
+  permission.
 
 ### 7. Wrong vs Correct
 
 Wrong:
 
 ```python
-if not get_runtime_settings().admin_access_required:
-    request.session.clear()
-    return SessionResponse()
+@router.get("/settings/runtime")
+def get_runtime_config_endpoint():
+    return serialize_runtime_config()
 ```
 
 Correct:
 
 ```python
-if not get_runtime_settings().admin_access_required:
-    return SessionResponse()
+@router.get("/settings/runtime", dependencies=[READ_GENERATION_RUNTIME_PERMISSION])
+def get_runtime_config_endpoint():
+    return serialize_runtime_config()
 ```
 
 ## Scenario: Runtime deletion toggle for traceability
@@ -848,9 +841,8 @@ class AppSetting(Base, TimestampMixin):
 ```
 
 `backend/src/productflow_backend/config.py` keeps infrastructure secrets and bootstrap settings env-only
-(`DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `ADMIN_ACCESS_KEY`, `SETTINGS_ACCESS_TOKEN`) while allowing business
-settings listed in `CONFIG_DEFINITIONS` to be overridden from `app_settings`. The settings/config token is a secondary
-unlock secret for `/api/settings`; only a signed-session `settings_unlocked` flag may be persisted, never the token.
+(`DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `ADMIN_ACCESS_KEY`) while allowing business settings listed in
+`CONFIG_DEFINITIONS` to be overridden from `app_settings`. Settings API access is controlled by RBAC permissions.
 
 When adding a runtime setting, update all of these together:
 
@@ -1152,7 +1144,7 @@ system_prompt = settings.prompt_copy_system
 - Export API: `GET /api/settings/export -> SettingsExportDocument`.
 - Import preview API: `POST /api/settings/import/preview -> SettingsImportPreviewResponse`.
 - Import commit API: `POST /api/settings/import -> SettingsImportCommitResponse`.
-- All three routes are under `/api/settings`, require normal admin auth, and require `require_settings_unlocked`.
+- All three routes are under `/api/settings` and require the matching settings read/write API permission.
 - Export document sections: `metadata`, `runtime_config`, `provider_profiles`, and `provider_bindings`.
 
 ### 3. Contracts
@@ -1161,7 +1153,7 @@ system_prompt = settings.prompt_copy_system
 - Export must include provider API keys because the migration file is meant to let another machine use the same configured
   providers. Normal non-export settings reads still must not echo secret values.
 - Export must not include deployment/infrastructure environment settings such as `DATABASE_URL`, `REDIS_URL`,
-  `SESSION_SECRET`, `ADMIN_ACCESS_KEY`, `SETTINGS_ACCESS_TOKEN`, CORS origins, ports, or storage paths.
+  `SESSION_SECRET`, `ADMIN_ACCESS_KEY`, CORS origins, ports, or storage paths.
 - `runtime_config` must contain the current effective value, not only database override rows, so a clean target machine can
   import the same frontend-visible behavior.
 - Import preview must validate the whole document and return counts/names/flags for confirmation without mutating the
@@ -1187,7 +1179,7 @@ system_prompt = settings.prompt_copy_system
   provider profiles, bindings, and provider API keys.
 - Good: preview an import file and show counts plus whether API keys are present before commit.
 - Base: importing a `mock` text/image binding uses no provider profile id.
-- Bad: exporting `ADMIN_ACCESS_KEY` or `SETTINGS_ACCESS_TOKEN`; these protect access and belong to deployment setup.
+- Bad: exporting `ADMIN_ACCESS_KEY`; it protects access and belongs to deployment setup.
 - Bad: writing runtime rows before discovering a broken provider binding, leaving a half-imported state.
 
 ### 6. Tests Required
@@ -1627,6 +1619,95 @@ release_runtime_generation_config(runtime_claim, success=False, user_id=user_id,
 ```
 
 Expecting this to count a user failure is wrong; `record_result=False` intentionally skips result stats.
+
+---
+
+## Scenario: Workflow generation-config transaction ownership
+
+### 1. Scope / Trigger
+
+- Trigger: changing workflow node execution around generation-config claim/release, full-run tail resplit, or provider
+  resolver wiring.
+- Applies to `claim_runtime_generation_config(...)`, `release_runtime_generation_config(...)`, workflow copy/tail/image
+  node execution, and provider config resolution during workflow runs.
+
+### 2. Signatures
+
+- `claim_runtime_generation_config(*, purpose, selection=None, session=None) -> RuntimeGenerationConfigClaim`
+- `release_runtime_generation_config(runtime_claim, *, success, session=None, ...) -> None`
+- `resolve_text_provider_config(generation_config_id=None, *, session=None) -> ResolvedTextProviderConfig`
+- `resolve_image_provider_config(generation_config_id=None, *, session=None) -> ResolvedImageProviderConfig`
+- `ensure_provider_config_bootstrapped(session=None, *, commit=True) -> None`
+- `WorkflowExecutionDependencies.text_provider(generation_config_id=None, *, session=None) -> TextProvider`
+- `WorkflowExecutionDependencies.image_provider(generation_config_id=None, *, session=None) -> ImageProvider`
+
+### 3. Contracts
+
+- When `session` is passed to runtime claim/release helpers, they must not `commit`, `rollback`, or `close` the borrowed
+  session; transaction ownership stays with the workflow executor.
+- Borrowed-session claim/resolve paths must bootstrap provider config with `commit=False`, so bootstrap writes `flush`
+  only and never commits caller business mutations implicitly.
+- Workflow node execution for `copy_generation`, `tail_splitter`, and `image_generation` should pass the current workflow
+  session to claim/release and provider resolver calls, avoiding cross-session SQLite write locks during inline execution.
+- Non-workflow paths (for example image-session generation and prompt polish) may keep independent runtime helper
+  sessions when they do not need shared business-transaction ownership.
+
+### 4. Validation & Error Matrix
+
+- Borrowed-session claim cannot find available config -> raises `GenerationConfigWaitError`; caller decides whether to
+  rollback/requeue.
+- Borrowed-session node execution raises provider/runtime exception -> caller rollback must discard both business writes
+  and in-transaction claim/release side effects.
+- Provider bootstrap needed while borrowing session -> rows are flushed and remain in caller transaction until caller
+  commits.
+- Owned-session runtime claim/release (`session=None`) -> helper keeps previous behavior (self-managed commit/rollback).
+
+### 5. Good/Base/Bad Cases
+
+- Good: full workflow run hits a tail node, deletes old generated batch, runs tail split, auto-applies new batch, and
+  keeps the whole mutation chain inside the workflow executor transaction boundary.
+- Good: workflow copy generation resolves provider config through the current session and avoids opening a second session
+  while claim state is in-flight.
+- Base: image-session generation still uses runtime helper owned sessions and explicit release semantics.
+- Bad: borrowed-session claim path calls bootstrap with default commit and silently commits unrelated workflow mutations.
+- Bad: workflow node execution claims config in one session but resolves provider config from another session during the
+  same in-flight business transaction.
+
+### 6. Tests Required
+
+- Integration test: full workflow run with tail resplit deletes prior generated batch nodes and preserves manual nodes.
+- Integration test: tail split apply still tracks batch metadata and rejects second apply of the same pending plan.
+- Regression suite: `tests/test_tail_splitter_workflow.py`, `tests/test_workflow_domain_rules.py`,
+  `tests/test_product_workflow_dag.py`, `tests/test_product_workflow_mutations.py`.
+- Ruff check for touched runtime/execution/provider files.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+def claim_generation_config(session, ...):
+    ensure_provider_config_bootstrapped(session)  # may commit caller transaction
+```
+
+Correct:
+
+```python
+def claim_generation_config(session, ...):
+    ensure_provider_config_bootstrapped(session, commit=False)
+```
+
+Wrong:
+
+```python
+provider = dependencies.text_provider(runtime_claim.generation_config_id)  # opens independent session
+```
+
+Correct:
+
+```python
+provider = dependencies.text_provider(runtime_claim.generation_config_id, session=session)
+```
 
 ---
 

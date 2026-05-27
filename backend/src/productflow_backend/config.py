@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, ValidationError, ValidationInfo, field_validator, model_validator
+from pydantic import Field, ValidationError, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -123,7 +123,6 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False
 
     admin_access_key: str = Field(min_length=8)
-    settings_access_token: str | None = None
     session_secret: str = Field(min_length=16)
 
     database_url: str
@@ -241,12 +240,6 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_image_tool_allowed_fields(cls, value: Any) -> str:
         return normalize_image_tool_allowed_fields(value)
-
-    @model_validator(mode="after")
-    def _validate_distinct_settings_token(self) -> Settings:
-        if self.settings_access_token and self.settings_access_token.strip() == self.admin_access_key:
-            raise ValueError("SETTINGS_ACCESS_TOKEN 必须与 ADMIN_ACCESS_KEY 分开设置")
-        return self
 
     @property
     def cors_origins(self) -> list[str]:
@@ -564,13 +557,10 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ),
     ConfigDefinition(
         key="admin_access_required",
-        label="要求登录访问密钥",
+        label="要求账号登录",
         category="安全与运维",
         input_type="boolean",
-        description=(
-            "默认开启，普通工作台和私有 API 需要 ADMIN_ACCESS_KEY 登录；关闭后仍需 SETTINGS_ACCESS_TOKEN "
-            "才能查看和修改系统配置。"
-        ),
+        description="默认开启，普通工作台和私有 API 需要账号登录；系统配置查看和修改由 RBAC 权限控制。",
     ),
     ConfigDefinition(
         key="deletion_enabled",

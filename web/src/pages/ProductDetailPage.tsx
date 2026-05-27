@@ -46,6 +46,7 @@ import type {
   GenerationConfigOption,
   ProductWorkflow,
   ProductWorkflowStatus,
+  TailSplitPlan,
   WorkflowNode,
   WorkflowNodeType,
 } from "../lib/types";
@@ -60,6 +61,7 @@ import { InspectorPanel } from "./product-detail/InspectorPanel";
 import { RunsPanel } from "./product-detail/RunsPanel";
 import { SidebarTabButton } from "./product-detail/SidebarTabButton";
 import { TemplateGroupsPanel } from "./product-detail/TemplateGroupsPanel";
+import { TailSplitPlanDialog } from "./product-detail/TailSplitPlanDialog";
 import { WorkflowCanvas } from "./product-detail/WorkflowCanvas";
 import type { NodePositionCommitInput, WorkflowCanvasHandle } from "./product-detail/WorkflowCanvas";
 import {
@@ -109,6 +111,7 @@ import {
   isProductWorkflowStatusActive,
   mergeProductWorkflowStatusIntoDetail,
   outputText,
+  pendingTailSplitPlan,
   readStoredNumber,
   shouldRefreshProductWorkflowDetailFromStatus,
 } from "./product-detail/utils";
@@ -149,6 +152,7 @@ export function ProductDetailPage() {
   const workflowHistorySignatureRef = useRef<string | null>(null);
   const draftVersionRef = useRef(0);
   const previousDraftNodeIdRef = useRef<string | null>(null);
+  const lastOpenedTailPlanIdRef = useRef<string | null>(null);
   const skipNextCanvasBlankClickRef = useRef(false);
   const workflowClipboardRef = useRef<WorkflowClipboard | null>(null);
   const undoStackRef = useRef<WorkflowHistoryStep[]>([]);
@@ -206,6 +210,7 @@ export function ProductDetailPage() {
   const [pendingDeleteAction, setPendingDeleteAction] =
     useState<PendingDeleteAction | null>(null);
   const [pendingHistoryAction, setPendingHistoryAction] = useState<PendingHistoryAction | null>(null);
+  const [tailPlanDialogOpen, setTailPlanDialogOpen] = useState(false);
   const [historyActionBusy, setHistoryActionBusy] = useState(false);
   const [error, setError] = useState("");
   const normalizedTemplateSearch = templateSearch.trim();
@@ -299,6 +304,7 @@ export function ProductDetailPage() {
     workflow?.nodes.find((node) => node.id === selectedNodeId) ??
     workflow?.nodes[0] ??
     null;
+  const selectedTailPendingPlan = pendingTailSplitPlan(selectedNode);
   const workflowStructureSignature = useMemo(
     () => (workflow ? getWorkflowStructureSignature(workflow) : null),
     [workflow],
@@ -382,6 +388,25 @@ export function ProductDetailPage() {
     selectedNode?.id,
     selectedNode?.last_run_at,
     selectedNode?.updated_at,
+  ]);
+
+  useEffect(() => {
+    if (!selectedNode || selectedNode.node_type !== "tail_splitter" || !selectedTailPendingPlan) {
+      return;
+    }
+    if (selectedNode.status !== "succeeded") {
+      return;
+    }
+    if (lastOpenedTailPlanIdRef.current === selectedTailPendingPlan.plan_id) {
+      return;
+    }
+    lastOpenedTailPlanIdRef.current = selectedTailPendingPlan.plan_id;
+    setTailPlanDialogOpen(true);
+  }, [
+    selectedNode,
+    selectedNode?.status,
+    selectedTailPendingPlan,
+    selectedTailPendingPlan?.plan_id,
   ]);
 
   useEffect(() => {
@@ -986,6 +1011,39 @@ export function ProductDetailPage() {
     },
   });
 
+  const applyTailSplitPlanMutation = useMutation({
+    mutationFn: async ({ nodeId, plan, itemIds }: { nodeId: string; plan: TailSplitPlan; itemIds: string[] }) => {
+      assertProductUsable();
+      await flushSelectedDraft();
+      const previousWorkflow = getCurrentWorkflow();
+      const tailNode = previousWorkflow?.nodes.find((node) => node.id === nodeId) ?? null;
+      const nextWorkflow = await api.applyTailSplitPlan(nodeId, {
+        plan_id: plan.plan_id,
+        item_ids: itemIds,
+        position_x: (tailNode?.position_x ?? 120) + 80,
+        position_y: tailNode?.position_y ?? 120,
+      });
+      return { nextWorkflow, previousWorkflow, itemCount: itemIds.length };
+    },
+    onSuccess: ({ nextWorkflow, previousWorkflow, itemCount }) => {
+      const previousNodeIds = new Set(previousWorkflow?.nodes.map((node) => node.id) ?? []);
+      const createdNodeIds = nextWorkflow.nodes
+        .filter((node) => !previousNodeIds.has(node.id))
+        .map((node) => node.id);
+      setError("");
+      setNotice(t("detail.tailPlan.appliedNotice", { count: itemCount }));
+      setTailPlanDialogOpen(false);
+      setWorkflowCache(nextWorkflow);
+      pushUndoStep({ kind: "deleteNodes", nodeIds: createdNodeIds });
+      selectCreatedNodes(previousWorkflow, nextWorkflow);
+    },
+    onError: (mutationError) => {
+      setError(
+        mutationError instanceof ApiError ? mutationError.detail : t("detail.error.applyTailPlan"),
+      );
+    },
+  });
+
   const duplicateNodeGroupMutation = useMutation({
     mutationFn: async ({ nodeIds, source }: { nodeIds: string[]; source: "paste" | "duplicate" }) => {
       assertProductUsable();
@@ -1496,6 +1554,29 @@ export function ProductDetailPage() {
     }
   };
 
+  const handleConfirmTailSplitPlan = async (itemIds: string[]) => {
+    if (!selectedNode || selectedNode.node_type !== "tail_splitter" || !selectedTailPendingPlan) {
+      return;
+    }
+    if (!itemIds.length) {
+      setError(t("detail.tailPlan.selectAtLeastOne"));
+      return;
+    }
+    if (productBlocked) {
+      showBlockedProductError();
+      return;
+    }
+    try {
+      await applyTailSplitPlanMutation.mutateAsync({
+        nodeId: selectedNode.id,
+        plan: selectedTailPendingPlan,
+        itemIds,
+      });
+    } catch {
+      // mutation handles UI errors
+    }
+  };
+
   const handleCancelWorkflowRun = (run: ProductWorkflow["runs"][number]) => {
     if (!run.is_cancelable || cancelWorkflowRunMutation.isPending) {
       return;
@@ -1543,6 +1624,7 @@ export function ProductDetailPage() {
   const layoutMutationBusy =
     createNodeMutation.isPending ||
     applyTemplateGroupMutation.isPending ||
+    applyTailSplitPlanMutation.isPending ||
     duplicateNodeGroupMutation.isPending ||
     historyActionBusy ||
     updateNodeConfigMutation.isPending ||
@@ -1963,13 +2045,17 @@ export function ProductDetailPage() {
             ? t("detail.singleNode.description.referenceImage")
             : option.type === "copy_generation"
               ? t("detail.singleNode.description.copyGeneration")
-              : t("detail.singleNode.description.imageGeneration");
+              : option.type === "tail_splitter"
+                ? t("detail.singleNode.description.tailSplitter")
+                : t("detail.singleNode.description.imageGeneration");
         const creatingThisNode = createNodeMutation.isPending && createNodeMutation.variables === option.type;
         const NodeIcon = option.type === "reference_image"
           ? ImagePlus
           : option.type === "copy_generation"
             ? FileText
-            : ImageIcon;
+            : option.type === "tail_splitter"
+              ? Sparkles
+              : ImageIcon;
         return (
           <div
             key={option.type}
@@ -2058,46 +2144,67 @@ export function ProductDetailPage() {
 
   const renderDetailsPanelContent = () =>
     selectedNode ? (
-      <InspectorPanel
-        product={product}
-        sourceImage={sourceImage}
-        workflow={workflow}
-        node={selectedNode}
-        draft={draft}
-        imageSizeOptions={imageSizeOptions}
-        imageGenerationMaxDimension={imageGenerationMaxDimension}
-        imageToolAllowedFields={imageToolAllowedFields}
-        generationConfigs={workflowGenerationConfigs}
-        onPreviewImage={setPreviewImage}
-        onDraftChange={handleGuardedDraftChange}
-        onRun={() => void handleRunWorkflow(selectedNode.id)}
-        onCancelRun={
-          selectedNodeCancelableRun
-            ? () => handleCancelWorkflowRun(selectedNodeCancelableRun)
-            : null
-        }
-        saveStatus={saveStatus}
-        onUploadImage={(file) => uploadNodeImageMutation.mutate(file)}
-        onDelete={() => handleDeleteNode(selectedNode)}
-        busy={structureBusy}
-        cancelBusy={cancelWorkflowRunMutation.isPending}
-        runActionState={
-          productBlocked
-            ? {
-                ...getWorkflowNodeRunActionState(selectedNode, {
+      <div className="space-y-3">
+        {selectedTailPendingPlan && selectedNode.node_type === "tail_splitter" ? (
+          <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50/80 px-4 py-3 text-sm text-fuchsia-900 dark:border-fuchsia-400/35 dark:bg-fuchsia-500/10 dark:text-fuchsia-100">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-semibold">{t("detail.tailPlan.pendingTitle")}</div>
+                <div className="mt-1 text-xs leading-5 text-fuchsia-800/80 dark:text-fuchsia-100/75">
+                  {t("detail.tailPlan.pendingDescription", { count: selectedTailPendingPlan.items.length })}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTailPlanDialogOpen(true)}
+                className="shrink-0 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-fuchsia-700 ring-1 ring-fuchsia-200 transition-colors hover:bg-fuchsia-100 dark:bg-slate-950/80 dark:text-fuchsia-200 dark:ring-fuchsia-400/35 dark:hover:bg-fuchsia-500/10"
+              >
+                {t("detail.tailPlan.open")}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <InspectorPanel
+          product={product}
+          sourceImage={sourceImage}
+          workflow={workflow}
+          node={selectedNode}
+          draft={draft}
+          imageSizeOptions={imageSizeOptions}
+          imageGenerationMaxDimension={imageGenerationMaxDimension}
+          imageToolAllowedFields={imageToolAllowedFields}
+          generationConfigs={workflowGenerationConfigs}
+          onPreviewImage={setPreviewImage}
+          onDraftChange={handleGuardedDraftChange}
+          onRun={() => void handleRunWorkflow(selectedNode.id)}
+          onCancelRun={
+            selectedNodeCancelableRun
+              ? () => handleCancelWorkflowRun(selectedNodeCancelableRun)
+              : null
+          }
+          saveStatus={saveStatus}
+          onUploadImage={(file) => uploadNodeImageMutation.mutate(file)}
+          onDelete={() => handleDeleteNode(selectedNode)}
+          busy={structureBusy}
+          cancelBusy={cancelWorkflowRunMutation.isPending}
+          runActionState={
+            productBlocked
+              ? {
+                  ...getWorkflowNodeRunActionState(selectedNode, {
+                    runSubmissionPending,
+                    pendingStartNodeId,
+                  }),
+                  disabled: true,
+                  pending: false,
+                  title: blockedProductActionTitle,
+                }
+              : getWorkflowNodeRunActionState(selectedNode, {
                   runSubmissionPending,
                   pendingStartNodeId,
-                }),
-                disabled: true,
-                pending: false,
-                title: blockedProductActionTitle,
-              }
-            : getWorkflowNodeRunActionState(selectedNode, {
-                runSubmissionPending,
-                pendingStartNodeId,
-              })
-        }
-      />
+                })
+          }
+        />
+      </div>
     ) : (
       <div className="glass-empty-state px-4 py-8 text-center text-xs text-zinc-500 dark:text-slate-400 flex flex-col items-center justify-center gap-2">
         <MousePointer2 size={18} className="text-indigo-500 opacity-70 dark:text-indigo-400" />
@@ -2594,6 +2701,14 @@ export function ProductDetailPage() {
           onClose={() => setPreviewImage(null)}
         />
       ) : null}
+      <TailSplitPlanDialog
+        open={tailPlanDialogOpen && Boolean(selectedTailPendingPlan) && selectedNode?.node_type === "tail_splitter"}
+        nodeTitle={selectedNode?.title ?? ""}
+        plan={selectedTailPendingPlan}
+        busy={applyTailSplitPlanMutation.isPending}
+        onClose={() => setTailPlanDialogOpen(false)}
+        onConfirm={(itemIds) => void handleConfirmTailSplitPlan(itemIds)}
+      />
       <ConfirmDialog
         open={Boolean(pendingDeleteDialog)}
         title={pendingDeleteDialog?.title ?? ""}

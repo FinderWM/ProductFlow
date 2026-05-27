@@ -90,10 +90,14 @@ def should_claim_workflow_image_generation_config(
     *,
     configured_mode: str,
     selection: GenerationConfigSelection,
+    session: Session | None = None,
 ) -> bool:
     if configured_mode == "generated" or selection.mode == "manual":
         return True
-    provider_config = resolve_image_provider_config(generation_config_id=selection.generation_config_id)
+    provider_config = resolve_image_provider_config(
+        generation_config_id=selection.generation_config_id,
+        session=session,
+    )
     return is_real_image_provider_kind(provider_config.provider_kind)
 
 
@@ -141,10 +145,12 @@ def execute_workflow_image_generation(
     if should_claim_workflow_image_generation_config(
         configured_mode=configured_generation_mode,
         selection=generation_config_selection,
+        session=session,
     ):
         runtime_claim = claim_runtime_generation_config(
             purpose="image",
             selection=generation_config_selection,
+            session=session,
         )
         used_generation_config_id = runtime_claim.generation_config_id
         poster_generation_mode = effective_workflow_image_generation_mode(
@@ -210,14 +216,14 @@ def execute_workflow_image_generation(
         if poster_generation_mode == "generated":
             if runtime_claim is None:
                 raise RuntimeError("图片生成配置未初始化")
-            first_provider = dependencies.image_provider(runtime_claim.generation_config_id)
+            first_provider = dependencies.image_provider(runtime_claim.generation_config_id, session=session)
             if callable(getattr(first_provider, "generate_poster_images", None)):
                 image_providers = [first_provider]
             else:
                 image_providers = [
                     first_provider,
                     *[
-                        dependencies.image_provider(runtime_claim.generation_config_id)
+                        dependencies.image_provider(runtime_claim.generation_config_id, session=session)
                         for _ in downstream_nodes[1:]
                     ],
                 ]
@@ -231,13 +237,10 @@ def execute_workflow_image_generation(
             image_providers=image_providers,
             renderer_factory=dependencies.poster_renderer,
         )
-        if runtime_claim is not None:
-            # End the business session's read transaction before the independent
-            # stats transaction writes generation_config_daily_stats.
-            session.commit()
         release_runtime_generation_config(
             runtime_claim,
             success=poster_generation_mode == "generated",
+            session=session,
             user_id=product.owner_user_id,
             generated_unit_count=len(downstream_nodes) if poster_generation_mode == "generated" else 0,
             record_result=poster_generation_mode == "generated",
@@ -331,6 +334,7 @@ def execute_workflow_image_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=False,
+            session=session,
             user_id=product.owner_user_id,
             generated_unit_count=0,
             failure_reason=generation_failure_reason(exc) if provider_invoked else None,

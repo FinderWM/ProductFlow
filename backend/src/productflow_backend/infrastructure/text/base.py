@@ -8,6 +8,8 @@ from productflow_backend.application.contracts import (
     CreativeBriefPayload,
     ProductInput,
     ReferenceImageInput,
+    TailSplitPlanDraft,
+    TailSplitPlanInput,
 )
 
 
@@ -33,4 +35,8 @@ class TextProvider(ABC):
 
     @abstractmethod
     def polish_image_prompt(self, prompt: str) -> tuple[str, str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def generate_tail_split_plan(self, payload: TailSplitPlanInput) -> tuple[TailSplitPlanDraft, str]:
         raise NotImplementedError

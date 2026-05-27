@@ -185,12 +185,12 @@ Both modes target two artifact types:
 
 Configuration is split into two categories:
 
-1. Env-only infrastructure configuration: `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `ADMIN_ACCESS_KEY`, `SETTINGS_ACCESS_TOKEN`, and similar values. These must be available before the application can access the database, or they protect the secondary unlock for the settings page, so runtime DB overrides are not supported.
-2. Runtime business configuration: provider, model, image size, upload limits, task retry, global generation concurrency limit, poster mode, prompt templates, login-gate switch, business deletion switch, and similar values. They can be provided as defaults by `.env` / `.env.dev`, or written to `app_settings` through `/api/settings` after login and settings-page unlock.
+1. Env-only infrastructure configuration: `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `ADMIN_ACCESS_KEY`, and similar values. These must be available before the application can access the database, or they are deployment-level access secrets, so runtime DB overrides are not supported.
+2. Runtime business configuration: provider, model, image size, upload limits, task retry, global generation concurrency limit, poster mode, prompt templates, login-gate switch, business deletion switch, and similar values. They can be provided as defaults by `.env` / `.env.dev`, or written to `app_settings` through `/api/settings` after login with the required RBAC settings permission.
 
 Secret configuration values are not echoed back in API responses.
 
-The login gate `admin_access_required` is enabled by default. When enabled, private APIs require an admin marker in the Cookie session through `require_admin`, and invalid `ADMIN_ACCESS_KEY` values still return 401. When disabled, normal workspace/private APIs can be used without the admin key, and `GET /api/auth/session` returns `authenticated=true` and `access_required=false`; complete `/api/settings` reads/writes still require the independent `SETTINGS_ACCESS_TOKEN` unlock.
+The login-gate setting `admin_access_required` is retained as runtime configuration. Current access control is account login plus RBAC permissions. Settings reads, settings writes, status reads, resource governance, and RBAC management are bound to their matching backend API permissions.
 
 The business deletion switch `deletion_enabled` is disabled by default. When disabled, the backend rejects whole-product deletion and whole iterative image-session deletion at the route boundary, so demo sites do not lose evidence after problematic content is deleted. Workflow node/edge editing and reference-image deletion are not affected. `DELETE /api/auth/session` and restoring database overrides from the settings page are not part of business deletion protection.
 
@@ -210,11 +210,11 @@ Do not bypass the storage service by directly concatenating user-controlled path
 
 ## 10. Security Boundaries
 
-The current security model is "single-admin self-hosted":
+The current security model is "seed admin account plus multi-user RBAC":
 
-- Admin-key login, not public registration.
-- `ADMIN_ACCESS_KEY` is read only from environment variables and does not enter database configuration. The login gate can be disabled through the `admin_access_required` runtime switch and stays enabled by default.
-- The settings page uses an independent `SETTINGS_ACCESS_TOKEN` for secondary unlock; the session stores only the unlocked marker, not the plaintext token. Disabling the login gate does not disable this secondary unlock.
+- The initial admin username is `libow`; the admin role always has every menu and API permission.
+- `ADMIN_ACCESS_KEY` is read only from environment variables and does not enter database configuration. Account login and RBAC permissions decide visible pages and callable APIs.
+- Regular users are added to the trusted-user list by an admin before setting a password. Non-admin role menus and API permissions are admin-configurable.
 - Session cookies are signed with `SESSION_SECRET`.
 - CORS is controlled by `BACKEND_CORS_ORIGINS`.
 - Uploaded files have MIME, size, pixel, and count limits.

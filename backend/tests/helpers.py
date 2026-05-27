@@ -51,13 +51,7 @@ def _login(client: TestClient) -> None:
     )
 
 
-def _unlock_settings(client: TestClient) -> None:
-    unlock = client.post("/api/settings/unlock", json={"token": "super-secret-settings-token"})
-    assert unlock.status_code == 200
-
-
 def _enable_deletion(client: TestClient) -> None:
-    _unlock_settings(client)
     response = client.patch("/api/settings", json={"values": {"deletion_enabled": True}})
     assert response.status_code == 200
 

@@ -58,6 +58,7 @@ class WorkflowNodeType(StrEnum):
     REFERENCE_IMAGE = "reference_image"
     COPY_GENERATION = "copy_generation"
     IMAGE_GENERATION = "image_generation"
+    TAIL_SPLITTER = "tail_splitter"
 
 
 class WorkflowNodeStatus(StrEnum):

@@ -46,12 +46,21 @@ export function draftFromNode(
     productName: configString(node, "name", product?.name ?? ""),
     category: configString(node, "category", product?.category ?? ""),
     price: configString(node, "price", product?.price ?? ""),
-    sourceNote: configString(node, "source_note", product?.source_note ?? ""),
-    instruction: configString(node, "instruction"),
+    sourceNote:
+      node?.node_type === "tail_splitter"
+        ? configString(node, "source_text")
+        : configString(node, "source_note", product?.source_note ?? ""),
+    instruction:
+      node?.node_type === "tail_splitter"
+        ? configString(node, "description")
+        : configString(node, "instruction"),
     role: configString(node, "role", "reference"),
     label: configString(node, "label"),
     tone: configString(node, "tone", "转化清晰"),
-    channel: configString(node, "channel", "灵感主图"),
+    channel:
+      node?.node_type === "tail_splitter"
+        ? String(node?.config_json?.max_items ?? 8)
+        : configString(node, "channel", "灵感主图"),
     size: configString(node, "size", "1024x1024"),
     toolOptions: imageToolOptionsFromUnknown(node?.config_json?.tool_options),
     generationConfigMode: generationConfigModeFromNode(node),
@@ -102,6 +111,19 @@ export function nodeConfigFromDraft(
       ...(toolOptions ? { tool_options: toolOptions } : { tool_options: null }),
     };
   }
+  if (node.node_type === "tail_splitter") {
+    const parsedMaxItems = Number.parseInt(draft.channel || "8", 10);
+    return {
+      ...base,
+      description: draft.instruction,
+      source_text: draft.sourceNote,
+      max_items: Number.isFinite(parsedMaxItems) ? parsedMaxItems : 8,
+      generation_config_mode: draft.generationConfigMode,
+      generation_config_id: draft.generationConfigMode === "manual" ? draft.generationConfigId : null,
+      document_source:
+        base.document_source && typeof base.document_source === "object" ? base.document_source : null,
+    };
+  }
   return base;
 }
 
@@ -127,6 +149,16 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
       generation_config_mode: "auto",
       generation_config_id: null,
       tool_options: null,
+    };
+  }
+  if (type === "tail_splitter") {
+    return {
+      description: "",
+      source_text: "",
+      max_items: 8,
+      generation_config_mode: "auto",
+      generation_config_id: null,
+      document_source: null,
     };
   }
   return {};

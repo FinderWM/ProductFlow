@@ -378,6 +378,40 @@ def reference_image_inputs_for_copy(
     return inputs
 
 
+def reference_image_inputs_for_tail(
+    session: Session,
+    *,
+    workflow: ProductWorkflow,
+    node_id: str,
+    storage: LocalStorage,
+    incoming_context: IncomingContext | None = None,
+) -> list[ReferenceImageInput]:
+    context = incoming_context or collect_incoming_context(
+        workflow,
+        node_id,
+        include_transitive_product_context=True,
+    )
+    if not context.image_asset_ids:
+        return []
+    assets = list(session.scalars(select(SourceAsset).where(SourceAsset.id.in_(context.image_asset_ids))))
+    assets_by_id = {asset.id: asset for asset in assets if asset.product_id == workflow.product_id}
+    inputs: list[ReferenceImageInput] = []
+    for asset_id in context.image_asset_ids:
+        asset = assets_by_id.get(asset_id)
+        if asset is None:
+            continue
+        inputs.append(
+            ReferenceImageInput(
+                path=Path(storage.resolve(asset.storage_path)),
+                mime_type=asset.mime_type,
+                filename=asset.original_filename,
+                role="reference",
+                label=asset.original_filename,
+            )
+        )
+    return inputs
+
+
 def downstream_reference_nodes(workflow: ProductWorkflow, node_id: str) -> list[WorkflowNode]:
     target_ids = list(dict.fromkeys(edge.target_node_id for edge in workflow.edges if edge.source_node_id == node_id))
     nodes_by_id = {node.id: node for node in workflow.nodes}

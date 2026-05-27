@@ -151,7 +151,7 @@ const DOC_PAGES: DocPage[] = [
             type: "list",
             items: [
               "后端 API、worker、PostgreSQL 和 Redis 应处于可用状态。",
-              "如果开启登录门禁，先使用管理员密钥登录。",
+              "如果开启登录门禁，先使用账号密码登录。",
               "准备一张清楚的商品主图，推荐使用 JPG、PNG 或 WebP。",
             ],
           },
@@ -250,6 +250,7 @@ const DOC_PAGES: DocPage[] = [
               ["参考图", "单张图片槽位，可手动上传，也可由上游生图节点填充。"],
               ["文案", "生成并编辑结构化文案：可是一段自由正文，也可以是文案块或布局分区；后续生图会读取结构化文案上下文。"],
               ["生图", "触发图片生成。生成结果写入下游参考图节点，不在生图节点自身下载。"],
+              ["尾巴节点", "分析长文本、上游文案和参考图上下文，先生成可确认的拆分计划；确认后再批量创建后续生图分支。"],
             ],
           },
         ],
@@ -473,6 +474,64 @@ const DOC_PAGES: DocPage[] = [
           {
             type: "paragraph",
             text: "每轮只改一两个因素，例如背景、构图、光线或主体细节。一次改太多会很难判断哪句话影响了结果。",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    slug: "tail-splitter",
+    title: "尾巴节点",
+    description: "尾巴节点用于把长文本、上游文案和参考图上下文拆成多条可确认的生图计划。",
+    category: "画布工作台",
+    icon: GitBranch,
+    sections: [
+      {
+        id: "when-to-use",
+        title: "适用场景",
+        blocks: [
+          {
+            type: "list",
+            items: [
+              "需要把长文档、长描述或运营素材拆成多张图的生成计划。",
+              "需要先看 AI 拆分结果，再决定哪些方向真正落到画布。",
+              "需要把公共约束和公共参考图连接到一组批量生成分支。",
+            ],
+          },
+        ],
+      },
+      {
+        id: "plan-flow",
+        title: "拆分计划流程",
+        blocks: [
+          {
+            type: "steps",
+            items: [
+              "新增或选中尾巴节点。",
+              "填写长文本、节点描述，或把上游文案/参考图连到尾巴节点。",
+              "运行当前节点。系统先生成待确认的拆分计划。",
+              "在弹窗中移除不需要的拆分项。",
+              "确认后，系统创建公共文案节点、公共参考图节点、生图触发器节点和输出参考图节点。",
+            ],
+          },
+          {
+            type: "callout",
+            title: "取消不会改动画布",
+            text: "拆分计划弹窗只负责确认或裁剪本次计划；取消时不会创建节点或连线。",
+          },
+        ],
+      },
+      {
+        id: "rerun-modes",
+        title: "重拆分和当前批次重生图",
+        blocks: [
+          {
+            type: "table",
+            headers: ["操作", "行为"],
+            rows: [
+              ["重新拆分", "删除该尾巴节点上一批自动生成分支，重新生成拆分计划并重建后续节点。"],
+              ["保留当前批次重生图", "保留当前批次的公共节点和已建分支，只重新运行当前批次里的生图链路。"],
+            ],
           },
         ],
       },
@@ -735,7 +794,7 @@ const DOC_PAGES: DocPage[] = [
           {
             type: "list",
             items: [
-              "配置页需要先登录；如果设置页要求二次解锁，还需要输入 `SETTINGS_ACCESS_TOKEN`。",
+              "配置页需要登录并具备配置权限。",
               "配置项会显示来源。数据库覆盖值会标记为数据库来源；未覆盖时使用 env/default。",
               "只提交发生变化的字段。密钥字段留空不会覆盖已有值。",
               "点击恢复默认会删除数据库覆盖值，让该字段回到 env/default。",
@@ -751,8 +810,8 @@ const DOC_PAGES: DocPage[] = [
             type: "list",
             items: [
               "`DATABASE_URL`、`REDIS_URL`、`SESSION_SECRET`、`ADMIN_ACCESS_KEY` 等基础设施配置不支持设置页覆盖。",
-              "设置页二次解锁由 `SETTINGS_ACCESS_TOKEN` 保护。",
-              "关闭登录门禁不会关闭设置页二次解锁。",
+              "配置读写由用户角色权限控制。",
+              "关闭登录门禁不会绕过配置权限。",
             ],
           },
         ],
@@ -823,7 +882,7 @@ const DOC_PAGES: DocPage[] = [
           {
             type: "list",
             items: [
-              "从顶部导航进入“状态”。状态页需要登录；如果配置启用了二次解锁，也需要输入 `SETTINGS_ACCESS_TOKEN`。",
+              "从顶部导航进入“状态”。状态页需要登录并具备状态查看权限。",
               "状态页只读展示运行状态，不提供跳转到配置的操作按钮。",
             ],
           },
@@ -859,6 +918,51 @@ const DOC_PAGES: DocPage[] = [
               ["配置行", "按配置显示用途、provider kind、优先级、当前并发/最大并发、范围调用、成功率、健康/冻结状态和最近失败原因。"],
               ["统计来源", "读取 `generation_config_daily_stats` 和运行态表，不扫描历史使用记录。"],
             ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    slug: "settings-rbac",
+    title: "权限和角色（RBAC）",
+    description: "说明菜单权限、接口权限，以及工作流运行、尾巴计划应用、配置和状态页的访问边界。",
+    category: "配置",
+    icon: Settings,
+    sections: [
+      {
+        id: "permission-model",
+        title: "权限模型",
+        blocks: [
+          {
+            type: "table",
+            headers: ["类型", "说明"],
+            rows: [
+              ["菜单权限", "决定导航入口和页面是否可见。"],
+              ["接口权限", "决定后端 API 是否可调用；手动请求同样会校验。"],
+            ],
+          },
+        ],
+      },
+      {
+        id: "common-boundaries",
+        title: "常见边界",
+        blocks: [
+          {
+            type: "table",
+            headers: ["操作", "要求"],
+            rows: [
+              ["工作流运行", "`inspirations:generate`"],
+              ["尾巴拆分计划确认应用", "`inspirations:write`"],
+              ["配置页读取/保存", "对应的 settings 读取或写入权限"],
+              ["状态页访问", "`status:read`"],
+              ["权限管理页", "管理员身份和 RBAC 管理权限"],
+            ],
+          },
+          {
+            type: "callout",
+            title: "角色变更后重新登录",
+            text: "角色权限变更后，重新登录可以同步新的菜单和接口权限，减少入口与接口状态不一致的误判。",
           },
         ],
       },
@@ -978,7 +1082,7 @@ const DOC_PAGES: DocPage[] = [
             type: "table",
             headers: ["字段", "说明"],
             rows: [
-              ["要求登录访问密钥", "默认开启。普通工作台和私有 API 需要 `ADMIN_ACCESS_KEY` 登录；关闭后仍需 `SETTINGS_ACCESS_TOKEN` 才能查看和修改系统配置。"],
+              ["要求账号登录", "默认开启。普通工作台和私有 API 需要账号登录；系统配置查看和修改由 RBAC 权限控制。"],
               ["启用业务删除", "默认关闭。用于体验站禁止整条商品和文/图生图会话被删除，保留溯源证据。工作流节点/连线编辑和参考图删除不受该开关影响。"],
             ],
           },
@@ -1046,7 +1150,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     title: "画布工作台",
-    pages: ["workbench", "canvas-nodes", "templates", "generate-assets"],
+    pages: ["workbench", "canvas-nodes", "templates", "generate-assets", "tail-splitter"],
   },
   {
     title: "画廊",
@@ -1062,6 +1166,7 @@ const NAV_GROUPS: NavGroup[] = [
       "settings",
       "settings-providers",
       "settings-status",
+      "settings-rbac",
       "settings-image-tool",
       "settings-prompts",
       "settings-operations",
@@ -1129,7 +1234,7 @@ const DOC_PAGES_EN: DocPage[] = [
     category: "Getting started",
     icon: TerminalSquare,
     sections: [
-      { id: "before-you-start", title: "Before you start", blocks: [{ type: "list", items: ["Backend API, worker, PostgreSQL, and Redis should be available.", "If login protection is enabled, sign in with the admin key first.", "Prepare a clear product main image. JPG, PNG, and WebP are recommended."] }] },
+      { id: "before-you-start", title: "Before you start", blocks: [{ type: "list", items: ["Backend API, worker, PostgreSQL, and Redis should be available.", "If login protection is enabled, sign in with username and password first.", "Prepare a clear product main image. JPG, PNG, and WebP are recommended."] }] },
       {
         id: "create-product",
         title: "Create a product",
@@ -1150,7 +1255,7 @@ const DOC_PAGES_EN: DocPage[] = [
     sections: [
       { id: "layout", title: "Layout", blocks: [{ type: "table", headers: ["Area", "Description"], rows: [["Canvas", "Shows product, reference image, copy, and image generation nodes plus their edges."], ["Details", "Edits the selected node configuration and output."], ["Runs", "Shows workflow run history, failure reasons, and retryable runs."], ["Library", "Shows product assets, generated images, and images that can fill reference nodes."], ["Templates", "Inserts built-in scene templates or manages user-saved templates."], ["Mobile bottom toolbar", "Switches Browse, Edit, and Select modes, and opens workflow run, Single node, Templates, Details, Runs, and Library entrypoints."], ["Mobile bottom sheet", "Carries the desktop right-panel Single node, Templates, Details, Runs, and Library content on phones."]] }] },
       { id: "mobile-workbench", title: "Mobile workbench", blocks: [{ type: "paragraph", text: "On phones, the product detail page keeps the canvas as the main operating area. The bottom mode control provides Browse, Edit, and Select. Browse pans the canvas, selects nodes, and supports two-finger pinch zoom. Edit allows node dragging and edge creation. Select lets taps add or remove nodes from multi-select." }, { type: "paragraph", text: "The bottom toolbar also provides workflow run, Single node, Templates, Details, Runs, and Library entrypoints. Opening one of these entrypoints expands a bottom sheet; closing it returns to the canvas." }] },
-      { id: "node-types", title: "Node types", blocks: [{ type: "table", headers: ["Node", "Description"], rows: [["Product", "Product context entry for name, category, price, and description."], ["Reference image", "A single image slot that can be uploaded manually or filled by an upstream image generation node."], ["Copy", "Generates and edits structured copy. It can be freeform text, copy blocks, or layout sections, and downstream image generation reads the structured copy context."], ["Image generation", "Triggers image generation. Results are written into downstream reference image nodes and are not downloaded from the generation node itself."]] }] },
+      { id: "node-types", title: "Node types", blocks: [{ type: "table", headers: ["Node", "Description"], rows: [["Product", "Product context entry for name, category, price, and description."], ["Reference image", "A single image slot that can be uploaded manually or filled by an upstream image generation node."], ["Copy", "Generates and edits structured copy. It can be freeform text, copy blocks, or layout sections, and downstream image generation reads the structured copy context."], ["Image generation", "Triggers image generation. Results are written into downstream reference image nodes and are not downloaded from the generation node itself."], ["Tail splitter", "Analyzes long text plus upstream copy/reference context, produces a reviewable split plan first, and creates downstream image branches only after confirmation."]] }] },
       { id: "run-model", title: "Run model", blocks: [{ type: "paragraph", text: "Edge direction controls which context a downstream node can read at run time. Connecting A to B means B can reference A." }, { type: "callout", title: "Save before running", text: "Workflow runs read saved content. If Details contains an unsaved draft, the run button first attempts to save it. If saving fails, the run is not submitted." }] },
     ],
   },
@@ -1188,6 +1293,18 @@ const DOC_PAGES_EN: DocPage[] = [
       { id: "copy-generation", title: "Generate copy", blocks: [{ type: "steps", items: ["Select the product node and confirm product data is saved.", "Select a copy node.", "Enter requirements such as audience, tone, and key selling points.", "Run the current node.", "Review and edit the generated summary, body, copy blocks, or layout sections. Empty optional fields stay collapsed until needed."] }, { type: "callout", title: "Copy is no longer forced into four fields", text: "Copy nodes save CopyPayloadV2. The model can output freeform text, short copy blocks, visual guidance, or layout notes by scenario. Downstream image generation reads the structured copy context directly." }] },
       { id: "image-generation", title: "Generate images", blocks: [{ type: "steps", items: ["Select an image generation node.", "Confirm that it connects to at least one downstream reference image node.", "Enter image requirements, including subject, background, lighting, composition, and purpose.", "Run the current node or the workflow.", "View results in downstream reference image nodes or the Library panel."] }, { type: "callout", title: "Image generation nodes are not image slots", text: "Generated images are written into downstream reference image nodes. If no downstream reference image exists, the system asks you to connect an image/reference node first." }] },
       { id: "prompt-pattern", title: "Prompt pattern", blocks: [{ type: "code", text: "Place a white tote bag on a commuter desk beside a laptop and coffee. Use clean natural light, keep the full product visible, preserve clear texture, and make it suitable for an ecommerce hero image." }, { type: "paragraph", text: "Change only one or two factors per run, such as background, composition, lighting, or product details. Changing too much at once makes it difficult to identify which phrase affected the result." }] },
+    ],
+  },
+  {
+    slug: "tail-splitter",
+    title: "Tail splitter",
+    description: "Tail splitters turn long text plus upstream copy/reference context into multiple reviewable image-generation branches.",
+    category: "Canvas workbench",
+    icon: GitBranch,
+    sections: [
+      { id: "when-to-use", title: "When to use it", blocks: [{ type: "list", items: ["When a long document, long product brief, or operating material should become several image directions.", "When you want to inspect AI split results before they change the graph.", "When one shared copy/reference pair should feed a batch of generated image branches."] }] },
+      { id: "plan-flow", title: "Split-plan flow", blocks: [{ type: "steps", items: ["Add or select a tail-splitter node.", "Enter long text and node instructions, or connect upstream copy/reference nodes into the tail node.", "Run the current node. ProductFlow first produces a pending split plan.", "Remove items you do not want from the dialog.", "Confirm the dialog. ProductFlow then creates ordinary public copy/reference nodes, image-trigger nodes, and output reference-image nodes."] }, { type: "callout", title: "Cancel keeps the graph unchanged", text: "The split-plan dialog is only for confirming or trimming the current plan. Cancelling does not create nodes or edges." }] },
+      { id: "rerun-modes", title: "Re-split vs rerun current batch images", blocks: [{ type: "table", headers: ["Action", "Behavior"], rows: [["Re-split", "Deletes the previous generated branch for that tail node, creates a new split plan, and rebuilds downstream nodes."], ["Rerun current batch images", "Keeps the current batch public nodes and generated branch, and reruns only the image path inside that batch."]] }] },
     ],
   },
   {
@@ -1252,8 +1369,8 @@ const DOC_PAGES_EN: DocPage[] = [
     category: "Settings",
     icon: Settings,
     sections: [
-      { id: "settings-access", title: "Access and save rules", blocks: [{ type: "list", items: ["Settings require login. If the settings page requires secondary unlock, enter `SETTINGS_ACCESS_TOKEN` as well.", "Each setting shows its source. Database overrides are marked as database source; otherwise env/default is used.", "Only changed fields are submitted. Leaving secret fields blank does not overwrite existing values.", "Restore default removes the database override so the field falls back to env/default."] }] },
-      { id: "env-only", title: "Env-only settings", blocks: [{ type: "list", items: ["Infrastructure settings such as `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, and `ADMIN_ACCESS_KEY` cannot be overridden in Settings.", "Settings secondary unlock is protected by `SETTINGS_ACCESS_TOKEN`.", "Disabling login protection does not disable the settings secondary unlock."] }] },
+      { id: "settings-access", title: "Access and save rules", blocks: [{ type: "list", items: ["Settings require login and settings permissions.", "Each setting shows its source. Database overrides are marked as database source; otherwise env/default is used.", "Only changed fields are submitted. Leaving secret fields blank does not overwrite existing values.", "Restore default removes the database override so the field falls back to env/default."] }] },
+      { id: "env-only", title: "Env-only settings", blocks: [{ type: "list", items: ["Infrastructure settings such as `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, and `ADMIN_ACCESS_KEY` cannot be overridden in Settings.", "Settings reads and writes are controlled by user role permissions.", "Disabling login protection does not bypass settings permissions."] }] },
     ],
   },
   {
@@ -1274,9 +1391,20 @@ const DOC_PAGES_EN: DocPage[] = [
     category: "Settings",
     icon: TerminalSquare,
     sections: [
-      { id: "status-access", title: "Access rules", blocks: [{ type: "list", items: ["Open Status from the top navigation. It requires login, and also requires `SETTINGS_ACCESS_TOKEN` when secondary settings unlock is configured.", "Status is read-only and does not provide a button that jumps to configuration."] }] },
+      { id: "status-access", title: "Access rules", blocks: [{ type: "list", items: ["Open Status from the top navigation. It requires login and status read permission.", "Status is read-only and does not provide a button that jumps to configuration."] }] },
       { id: "status-range", title: "Date range", blocks: [{ type: "table", headers: ["Range", "Description"], rows: [["Today", "Shows the current local stat date on the running machine."], ["Last 7 days / Last 30 days", "Counts backward 6 or 29 days from today, including today."], ["This month", "Uses the first day of the current month through today."], ["Custom dates", "Choose start and end dates manually. The page does not query when the end date is before the start date."]] }] },
       { id: "status-metrics", title: "Metric scope", blocks: [{ type: "table", headers: ["Metric", "Description"], rows: [["Today's total calls", "All generation config calls today, with text and image calls split in the card detail."], ["Selected-range calls", "Total calls, successes, and failures inside the selected date range."], ["Running/frozen configs", "Counts configs with current concurrency above 0 and configs still inside cooldown."], ["Config row", "Shows purpose, provider kind, priority, current/max concurrency, range calls, success rate, health/freeze state, and latest failure reason."], ["Stats source", "Reads `generation_config_daily_stats` plus runtime state tables and does not scan historical usage records."]] }] },
+    ],
+  },
+  {
+    slug: "settings-rbac",
+    title: "Roles and permissions (RBAC)",
+    description: "Explains menu permissions, API permissions, and the current access boundaries for workflow run, tail-plan apply, Settings, and Status.",
+    category: "Settings",
+    icon: Settings,
+    sections: [
+      { id: "permission-model", title: "Permission model", blocks: [{ type: "table", headers: ["Type", "Description"], rows: [["Menu permission", "Controls whether a navigation entry or page is visible."], ["API permission", "Controls whether a backend route can be called. Manual requests still go through the same checks."]] }] },
+      { id: "common-boundaries", title: "Common boundaries", blocks: [{ type: "table", headers: ["Action", "Requirement"], rows: [["Workflow run", "`inspirations:generate`"], ["Tail split-plan apply", "`inspirations:write`"], ["Settings read/save", "The matching settings read or write permission"], ["Status page access", "`status:read`"], ["RBAC page", "Admin identity plus RBAC management permission"]] }, { type: "callout", title: "Sign in again after role changes", text: "After role grants change, signing in again refreshes menu and API permissions together and helps catch visible-entry / 403 mismatches." }] },
     ],
   },
   {
@@ -1307,7 +1435,7 @@ const DOC_PAGES_EN: DocPage[] = [
     icon: Settings,
     sections: [
       { id: "upload-and-queue", title: "Upload, queue, and recovery", blocks: [{ type: "table", headers: ["Field", "Description"], rows: [["Max bytes per image", "Limits the size of one uploaded image."], ["Max reference images", "Limits reference image count. Image chat also has a 6-image context limit per round."], ["Max pixels", "Limits the pixel area of uploaded images."], ["Allowed image MIME", "Comma-separated list such as `image/png,image/jpeg,image/webp`."], ["Global generation concurrency", "Shared protection threshold for workflow and image chat generation. When reached, the page asks users to retry later."], ["Image chat progress stale recovery threshold", "During worker startup recovery, running image chat tasks are checked by recent progress heartbeat."], ["Workflow image provider timeout", "Project-level timeout ceiling for one workflow AI image generation provider call. Timeout safely fails the task and releases queue capacity."]] }] },
-      { id: "security-settings", title: "Security and operations", blocks: [{ type: "paragraph", text: "Secrets are not returned by API responses or shown in the page. Leaving a secret field blank keeps the existing secret; only entering a new value writes a database override." }, { type: "table", headers: ["Field", "Description"], rows: [["Require login access key", "Enabled by default. The normal workbench and private APIs require `ADMIN_ACCESS_KEY` login; when disabled, `SETTINGS_ACCESS_TOKEN` is still required for system settings."], ["Enable business deletion", "Disabled by default. Used by demo deployments to prevent deleting whole products and image chat sessions, preserving traceability. Workflow node/edge editing and reference deletion are not controlled by this switch."]] }] },
+      { id: "security-settings", title: "Security and operations", blocks: [{ type: "paragraph", text: "Secrets are not returned by API responses or shown in the page. Leaving a secret field blank keeps the existing secret; only entering a new value writes a database override." }, { type: "table", headers: ["Field", "Description"], rows: [["Require account login", "Enabled by default. The normal workbench and private APIs require account login; system settings are controlled by RBAC permissions."], ["Enable business deletion", "Disabled by default. Used by demo deployments to prevent deleting whole products and image chat sessions, preserving traceability. Workflow node/edge editing and reference deletion are not controlled by this switch."]] }] },
     ],
   },
   {
@@ -1326,7 +1454,7 @@ const DOC_PAGES_EN: DocPage[] = [
 
 const NAV_GROUPS_EN: NavGroup[] = [
   { title: "Getting started", pages: ["overview", "quickstart"] },
-  { title: "Canvas workbench", pages: ["workbench", "canvas-nodes", "templates", "generate-assets"] },
+  { title: "Canvas workbench", pages: ["workbench", "canvas-nodes", "templates", "generate-assets", "tail-splitter"] },
   { title: "Gallery", pages: ["gallery"] },
   { title: "Image chat", pages: ["image-chat", "image-chat-references", "image-chat-generation", "image-chat-tasks"] },
   {
@@ -1335,6 +1463,7 @@ const NAV_GROUPS_EN: NavGroup[] = [
       "settings",
       "settings-providers",
       "settings-status",
+      "settings-rbac",
       "settings-image-tool",
       "settings-prompts",
       "settings-operations",
@@ -1392,7 +1521,7 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "开始前": "始める前に",
   "后端 API、worker、PostgreSQL 和 Redis 应处于可用状态。":
     "バックエンド API、worker、PostgreSQL、Redis が利用可能な状態である必要があります。",
-  "如果开启登录门禁，先使用管理员密钥登录。": "ログイン保護が有効な場合は、先に管理者キーでログインします。",
+  "如果开启登录门禁，先使用账号密码登录。": "ログイン保護が有効な場合は、先にアカウントとパスワードでログインします。",
   "准备一张清楚的商品主图，推荐使用 JPG、PNG 或 WebP。":
     "鮮明な商品メイン画像を用意します。JPG、PNG、WebP を推奨します。",
   "创建商品": "商品を作成",
@@ -1789,8 +1918,7 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "配置页用于管理运行时业务配置。基础设施配置仍由环境变量控制，不在设置页覆盖。":
     "設定ページは実行時の業務設定を管理します。インフラ設定は引き続き環境変数で制御され、設定ページでは上書きしません。",
   "访问和保存规则": "アクセスと保存ルール",
-  "配置页需要先登录；如果设置页要求二次解锁，还需要输入 `SETTINGS_ACCESS_TOKEN`。":
-    "設定ページは先にログインが必要です。設定ページが二次ロック解除を要求する場合は、`SETTINGS_ACCESS_TOKEN` も入力します。",
+  "配置页需要登录并具备配置权限。": "設定ページはログインと設定権限が必要です。",
   "配置项会显示来源。数据库覆盖值会标记为数据库来源；未覆盖时使用 env/default。":
     "各設定項目にはソースが表示されます。データベース上書き値はデータベースソースとして表示され、未上書きの場合は env/default を使います。",
   "只提交发生变化的字段。密钥字段留空不会覆盖已有值。":
@@ -1800,8 +1928,8 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "Env-only 配置": "Env-only 設定",
   "`DATABASE_URL`、`REDIS_URL`、`SESSION_SECRET`、`ADMIN_ACCESS_KEY` 等基础设施配置不支持设置页覆盖。":
     "`DATABASE_URL`、`REDIS_URL`、`SESSION_SECRET`、`ADMIN_ACCESS_KEY` などのインフラ設定は、設定ページでの上書きに対応していません。",
-  "设置页二次解锁由 `SETTINGS_ACCESS_TOKEN` 保护。": "設定ページの二次ロック解除は `SETTINGS_ACCESS_TOKEN` で保護されます。",
-  "关闭登录门禁不会关闭设置页二次解锁。": "ログイン保護を無効にしても、設定ページの二次ロック解除は無効になりません。",
+  "配置读写由用户角色权限控制。": "設定の読み書きはユーザーロール権限で制御されます。",
+  "关闭登录门禁不会绕过配置权限。": "ログイン保護を無効にしても設定権限は迂回されません。",
   "模型供应商": "モデルプロバイダー",
   "说明供应商档案、文案/图片用途绑定、模型和图片生成基础参数。":
     "プロバイダープロファイル、コピー/画像用途バインディング、モデル、画像生成の基本パラメータを説明します。",
@@ -1877,8 +2005,8 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "状态页和配置同属一级导航，用于只读查看生成配置池的运行状态和按日统计。":
     "ステータスページは設定と同じ第一階層ナビゲーションにあり、生成設定プールの実行状態と日次統計を読み取り専用で確認します。",
   "访问规则": "アクセスルール",
-  "从顶部导航进入“状态”。状态页需要登录；如果配置启用了二次解锁，也需要输入 `SETTINGS_ACCESS_TOKEN`。":
-    "上部ナビゲーションから「ステータス」を開きます。ステータスページはログインが必要です。設定で二次ロック解除が有効な場合は `SETTINGS_ACCESS_TOKEN` も入力します。",
+  "从顶部导航进入“状态”。状态页需要登录并具备状态查看权限。":
+    "上部ナビゲーションから「ステータス」を開きます。ステータスページはログインとステータス表示権限が必要です。",
   "状态页只读展示运行状态，不提供跳转到配置的操作按钮。":
     "ステータスページは実行状態を読み取り専用で表示し、設定へ移動する操作ボタンは提供しません。",
   "日期范围": "日付範囲",
@@ -2000,9 +2128,9 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "安全与运维": "安全と運用",
   "密钥字段不会在 API 响应和页面中回显。留空保存不会覆盖已有密钥；只有输入新值才会写入数据库覆盖。":
     "シークレット項目は API レスポンスやページに表示されません。空欄で保存しても既存シークレットは上書きされず、新しい値を入力した場合だけデータベース上書きが書き込まれます。",
-  "要求登录访问密钥": "ログインアクセスキーを要求",
-  "默认开启。普通工作台和私有 API 需要 `ADMIN_ACCESS_KEY` 登录；关闭后仍需 `SETTINGS_ACCESS_TOKEN` 才能查看和修改系统配置。":
-    "既定で有効です。通常のワークベンチとプライベート API は `ADMIN_ACCESS_KEY` ログインが必要です。無効化しても、システム設定の閲覧・変更には `SETTINGS_ACCESS_TOKEN` が必要です。",
+  "要求账号登录": "アカウントログインを要求",
+  "默认开启。普通工作台和私有 API 需要账号登录；系统配置查看和修改由 RBAC 权限控制。":
+    "既定で有効です。通常のワークベンチとプライベート API はアカウントログインが必要です。システム設定の閲覧と変更は RBAC 権限で制御されます。",
   "启用业务删除": "業務削除を有効化",
   "默认关闭。用于体验站禁止整条商品和文/图生图会话被删除，保留溯源证据。工作流节点/连线编辑和参考图删除不受该开关影响。":
     "既定で無効です。デモ環境で商品全体や画像生成チャットセッションの削除を禁止し、追跡証拠を残すために使います。ワークフローノード/接続線の編集や参考画像削除はこのスイッチの影響を受けません。",
@@ -2033,6 +2161,63 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "API 和 worker 启动时会恢复未完成任务。": "API と worker の起動時に未完了タスクが復旧されます。",
   "如果刷新后仍没有变化，检查后端、worker、Redis 和供应商日志。":
     "更新後も変化がない場合は、バックエンド、worker、Redis、プロバイダーログを確認します。",
+  "尾巴节点": "テールノード",
+  "分析长文本、上游文案和参考图上下文，先生成可确认的拆分计划；确认后再批量创建后续生图分支。":
+    "長文、上流コピー、参考画像コンテキストを解析し、まず確認可能な分割プランを生成します。確認後に下流の画像生成分岐をまとめて作成します。",
+  "尾巴节点用于把长文本、上游文案和参考图上下文拆成多条可确认的生图计划。":
+    "テールノードは、長文と上流コピー/参考画像コンテキストを複数の確認可能な画像生成プランへ分割するために使います。",
+  "适用场景": "利用シーン",
+  "需要把长文档、长描述或运营素材拆成多张图的生成计划。":
+    "長文書、長い説明、運用素材を複数画像の生成計画に分割したいときに使います。",
+  "需要先看 AI 拆分结果，再决定哪些方向真正落到画布。":
+    "AI の分割結果を先に確認してから、どの方向を実際のキャンバスに反映するかを決めたいときに使います。",
+  "需要把公共约束和公共参考图连接到一组批量生成分支。":
+    "共通制約ノードと共通参考画像ノードを、1組の一括生成分岐へ接続したいときに使います。",
+  "拆分计划流程": "分割プランの流れ",
+  "新增或选中尾巴节点。": "テールノードを追加または選択します。",
+  "填写长文本、节点描述，或把上游文案/参考图连到尾巴节点。":
+    "長文やノード説明を入力するか、上流のコピー/参考画像をテールノードに接続します。",
+  "运行当前节点。系统先生成待确认的拆分计划。":
+    "現在ノードを実行します。システムは先に確認待ちの分割プランを生成します。",
+  "在弹窗中移除不需要的拆分项。": "ダイアログで不要な分割項目を除外します。",
+  "确认后，系统创建公共文案节点、公共参考图节点、生图触发器节点和输出参考图节点。":
+    "確認すると、共通コピー、共通参考画像、画像生成トリガー、出力参考画像ノードを作成します。",
+  "取消不会改动画布": "キャンセルではキャンバスは変わりません",
+  "拆分计划弹窗只负责确认或裁剪本次计划；取消时不会创建节点或连线。":
+    "分割プランのダイアログは今回のプラン確認と削減のみを行います。キャンセル時にノードや接続線は作成されません。",
+  "重拆分和当前批次重生图": "再分割と現バッチ画像再生成",
+  "行为": "挙動",
+  "重新拆分": "再分割",
+  "删除该尾巴节点上一批自动生成分支，重新生成拆分计划并重建后续节点。":
+    "このテールノードの前回自動生成分岐を削除し、分割プランを再生成して下流ノードを再構築します。",
+  "保留当前批次重生图": "現バッチを保持して画像再生成",
+  "保留当前批次的公共节点和已建分支，只重新运行当前批次里的生图链路。":
+    "現バッチの共通ノードと既存分岐を保持し、現バッチ内の画像生成チェーンだけを再実行します。",
+  "权限和角色（RBAC）": "権限とロール（RBAC）",
+  "说明菜单权限、接口权限，以及工作流运行、尾巴计划应用、配置和状态页的访问边界。":
+    "メニュー権限、API 権限、ワークフロー実行、テールプラン適用、設定、ステータスページのアクセス境界を説明します。",
+  "权限模型": "権限モデル",
+  "类型": "タイプ",
+  "菜单权限": "メニュー権限",
+  "决定导航入口和页面是否可见。": "ナビゲーション入口とページの可視性を決定します。",
+  "接口权限": "API 権限",
+  "决定后端 API 是否可调用；手动请求同样会校验。":
+    "バックエンド API を呼び出せるかを決定します。手動リクエストでも同じ検証が行われます。",
+  "常见边界": "代表的な境界",
+  "要求": "要件",
+  "工作流运行": "ワークフロー実行",
+  "`inspirations:generate`": "`inspirations:generate`",
+  "尾巴拆分计划确认应用": "テール分割プランの確認適用",
+  "`inspirations:write`": "`inspirations:write`",
+  "配置页读取/保存": "設定ページ読み取り/保存",
+  "对应的 settings 读取或写入权限": "対応する settings 読み取りまたは書き込み権限",
+  "状态页访问": "ステータスページアクセス",
+  "`status:read`": "`status:read`",
+  "权限管理页": "権限管理ページ",
+  "管理员身份和 RBAC 管理权限": "管理者身份と RBAC 管理権限",
+  "角色变更后重新登录": "ロール変更後に再ログイン",
+  "角色权限变更后，重新登录可以同步新的菜单和接口权限，减少入口与接口状态不一致的误判。":
+    "ロール権限変更後に再ログインすると、新しいメニュー権限と API 権限が同期され、入口表示と API 状態の不一致による誤判定を減らせます。",
 };
 
 function translateHelpTextToJapanese(text: string): string {

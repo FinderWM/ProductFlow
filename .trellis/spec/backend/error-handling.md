@@ -87,11 +87,12 @@ Examples:
 - Download/file-serving routes may still catch `ValueError` from `LocalStorage.resolve_for_variant(...)` and raise direct
   `HTTPException(404)` because the route owns file-serving semantics.
 - Settings routes may still translate local configuration normalization `ValueError` into direct `HTTPException(400)`
-  because settings unlock/runtime validation is presentation-owned.
+  because settings runtime validation is presentation-owned.
 
 When adding or touching use cases, prefer `BusinessValidationError` / `NotFoundError` over raw `ValueError` for expected
 business failures. Keep using direct `HTTPException` for HTTP-owned protocol boundaries such as auth/session, settings
-unlock, upload validation, and download/file serving. Do not import FastAPI `HTTPException` into application modules.
+runtime validation, upload validation, and download/file serving. Do not import FastAPI `HTTPException` into application
+modules.
 
 ### Scenario: Typed business errors at the route boundary
 
@@ -168,27 +169,32 @@ if product is None:
 
 ## Authentication and Session Errors
 
-`presentation/deps.py::require_admin` protects private API routes with a session flag when
-`get_runtime_settings().admin_access_required` is true. It raises:
+`presentation/deps.py::require_authenticated` protects private API routes with the signed session user id. It raises:
 
 - `401` with detail `"请先登录"` when the session is not authenticated.
 
-When `admin_access_required` is false, `require_admin` allows private workspace routes without the admin login session.
-This does not bypass `presentation/routes/settings.py::require_settings_unlocked`; full settings reads/writes still require
-the independent `SETTINGS_ACCESS_TOKEN` unlock.
+`presentation/deps.py::require_api_permission(...)` and `require_any_api_permission(...)` enforce backend RBAC for each
+API surface and raise:
 
-`presentation/routes/auth.py::create_session` compares the submitted admin key with `Settings.admin_access_key` while
-login is required and raises:
+- `403` with detail `"没有接口权限"` when the authenticated user lacks the required API permission.
 
-- `401` with detail `"管理员密钥不正确"` for an invalid key.
+`presentation/deps.py::require_admin` is reserved for admin-only surfaces such as RBAC management and resource
+moderation. It raises:
+
+- `403` with detail `"需要管理员权限"` when the authenticated user is not an admin.
+
+`presentation/routes/auth.py::create_session` and `login` compare submitted account credentials with the stored user
+password hash and raise:
+
+- `401` with detail `"账号或密码不正确"` for invalid credentials.
 
 When login is disabled, `POST /api/auth/session` is a harmless no-op success and leaves the current session untouched. `GET
 /api/auth/session` returns `authenticated=true` and `access_required=false`; after login is re-enabled, an unauthenticated
 session again returns `authenticated=false` and `access_required=true`.
 
-Routes that require auth use `dependencies=[Depends(require_admin)]` on the router, for example
-`presentation/routes/products.py`, `presentation/routes/image_sessions.py`, `presentation/routes/product_workflows.py`,
-and `presentation/routes/settings.py`.
+Routes that require auth bind explicit RBAC permissions at the route boundary. Examples include inspiration routes using
+`API_INSPIRATIONS_*`, image-chat routes using `API_IMAGE_CHAT_*`, status routes using `API_STATUS_READ`, and settings
+routes using `API_SETTINGS_READ` / `API_SETTINGS_WRITE`.
 
 `presentation/api.py` registers `presentation/session.py::ClockStableSessionMiddleware` for signed cookie sessions. It is
 a thin wrapper around Starlette's session middleware that keeps the timestamp signer monotonic within the process. This

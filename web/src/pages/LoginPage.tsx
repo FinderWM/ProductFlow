@@ -32,7 +32,6 @@ export function LoginPage({ authenticated }: LoginPageProps) {
         ? api.login(payload.username, payload.password)
         : api.setPassword(payload.username, payload.password),
     onSuccess: async () => {
-      queryClient.removeQueries({ queryKey: ["settings-lock-state"] });
       queryClient.removeQueries({ queryKey: ["config"] });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
       navigate("/products", { replace: true });

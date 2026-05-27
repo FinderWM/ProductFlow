@@ -21,6 +21,7 @@ from productflow_backend.application.product_workflow.graph import (
 )
 from productflow_backend.application.product_workflow.mutations import (
     AppliedWorkflowTemplateGroup,
+    apply_tail_split_plan,
     apply_node_group_template_to_workflow,
     bind_workflow_node_image,
     create_workflow_edge,
@@ -68,6 +69,7 @@ def get_product_workflow_status(session, product_id: str) -> ProductWorkflowStat
 __all__ = [
     "WorkflowRunKickoff",
     "AppliedWorkflowTemplateGroup",
+    "apply_tail_split_plan",
     "apply_node_group_template_to_workflow",
     "archive_user_canvas_template",
     "archive_canvas_template_category",

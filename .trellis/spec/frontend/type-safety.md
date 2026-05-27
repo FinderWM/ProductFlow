@@ -199,12 +199,12 @@ return api.createProduct({
   in the same commit.
 - Import commit returns refreshed settings/provider config data or enough data for SettingsPage to invalidate and refetch
   `['config']`, `['provider-config']`, `['runtime-config']`, and `['session']`.
-- `GET /api/settings/generation-config-options` does not require the secondary settings unlock and intentionally returns
-  only non-secret selection fields: `id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`, `frozen_until`.
-- `GET /api/settings/generation-config-status` requires the secondary settings unlock and accepts optional
-  `start_date` / `end_date` query parameters in backend `YYYY-MM-DD` stat-date format. Keep `today_*` fields as today's
-  local stat bucket, use `range_*` fields for the selected date range, and render per-config `range_stat` instead of
-  recalculating stats from frontend history.
+- `GET /api/settings/generation-config-options` requires backend RBAC and intentionally returns only non-secret selection
+  fields: `id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`, `frozen_until`.
+- `GET /api/settings/generation-config-status` requires `status:read` and accepts optional `start_date` / `end_date`
+  query parameters in backend `YYYY-MM-DD` stat-date format. Keep `today_*` fields as today's local stat bucket, use
+  `range_*` fields for the selected date range, and render per-config `range_stat` instead of recalculating stats from
+  frontend history.
 - Workflow and image-chat request DTOs preserve backend snake_case fields:
   `generation_config_mode: "auto" | "manual"` and `generation_config_id: string | null`.
 

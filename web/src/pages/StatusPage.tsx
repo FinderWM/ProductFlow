@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -191,46 +190,18 @@ export function StatusPage() {
   const queryClient = useQueryClient();
   const [range, setRange] = useState<StatusDateRange>(() => quickDateRange("today"));
   const [activeQuickRange, setActiveQuickRange] = useState<QuickRangeId | null>("today");
-  const [unlockToken, setUnlockToken] = useState("");
-  const [error, setError] = useState("");
   const rangeInvalid = range.start_date > range.end_date;
-
-  const lockStateQuery = useQuery({
-    queryKey: ["settings-lock-state"],
-    queryFn: api.getSettingsLockState,
-  });
 
   const statusQuery = useQuery({
     queryKey: ["generation-config-status", range.start_date, range.end_date],
     queryFn: () => api.getGenerationConfigStatus(range),
-    enabled: Boolean(lockStateQuery.data?.unlocked) && !rangeInvalid,
+    enabled: !rangeInvalid,
     retry: false,
-  });
-
-  useEffect(() => {
-    if (statusQuery.error instanceof ApiError && statusQuery.error.status === 403) {
-      queryClient.setQueryData(["settings-lock-state"], { unlocked: false, configured: true });
-      queryClient.removeQueries({ queryKey: ["generation-config-status"] });
-    }
-  }, [queryClient, statusQuery.error]);
-
-  const unlockMutation = useMutation({
-    mutationFn: () => api.unlockSettings(unlockToken),
-    onSuccess: (data) => {
-      queryClient.setQueryData(["settings-lock-state"], data);
-      setUnlockToken("");
-      setError("");
-      void queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
-    },
-    onError: (mutationError) => {
-      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.unlockFailed"));
-    },
   });
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
     onSuccess: async () => {
-      queryClient.removeQueries({ queryKey: ["settings-lock-state"] });
       queryClient.removeQueries({ queryKey: ["generation-config-status"] });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
       navigate("/login", { replace: true });
@@ -243,12 +214,6 @@ export function StatusPage() {
     text: summary?.today_text_attempt_count ?? 0,
     image: summary?.today_image_attempt_count ?? 0,
   });
-
-  const handleUnlock = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError("");
-    unlockMutation.mutate();
-  };
 
   return (
     <div className="flex min-h-screen flex-col bg-white dark:bg-[#060a12] dark:text-slate-100">
@@ -273,57 +238,7 @@ export function StatusPage() {
           </div>
         </div>
 
-        {lockStateQuery.isLoading ? (
-          <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
-            <Loader2 size={22} className="animate-spin" />
-          </div>
-        ) : lockStateQuery.isError ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-            {t("settings.lockLoadFailed")}
-          </div>
-        ) : !lockStateQuery.data?.configured ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-100">
-            {t("settings.tokenMissing")}
-          </div>
-        ) : !lockStateQuery.data.unlocked ? (
-          <form onSubmit={handleUnlock} className={`${PANEL_CLASS} mx-auto max-w-xl p-6`}>
-            <div className="mb-5 flex items-start gap-3">
-              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-100">
-                <LockKeyhole size={18} />
-              </span>
-              <div>
-                <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("settings.unlockTitle")}</h2>
-                <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                  {t("statusPage.unlockDescription")}
-                </p>
-              </div>
-            </div>
-            <input
-              type="password"
-              value={unlockToken}
-              onChange={(event) => setUnlockToken(event.target.value)}
-              className={`${INPUT_CLASS} w-full`}
-              placeholder={t("settings.unlockPlaceholder")}
-              autoComplete="current-password"
-            />
-            {error ? (
-              <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                {error}
-              </div>
-            ) : null}
-            <div className="mt-5 flex justify-end">
-              <button type="submit" disabled={unlockMutation.isPending || !unlockToken.trim()} className={PRIMARY_BUTTON_CLASS}>
-                {unlockMutation.isPending ? (
-                  <Loader2 size={14} className="mr-2 animate-spin" />
-                ) : (
-                  <LockKeyhole size={14} className="mr-2" />
-                )}
-                {t("settings.unlock")}
-              </button>
-            </div>
-          </form>
-        ) : (
-          <div className="space-y-5">
+        <div className="space-y-5">
             <section className={`${PANEL_CLASS} p-5`}>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
@@ -398,7 +313,11 @@ export function StatusPage() {
               ) : null}
             </section>
 
-            {statusQuery.isError ? (
+            {statusQuery.isLoading ? (
+              <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
+                <Loader2 size={22} className="animate-spin" />
+              </div>
+            ) : statusQuery.isError ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
                 {statusQuery.error instanceof ApiError ? statusQuery.error.detail : t("statusPage.loadFailed")}
               </div>
@@ -473,8 +392,7 @@ export function StatusPage() {
                 )}
               </div>
             </section>
-          </div>
-        )}
+        </div>
       </main>
     </div>
   );

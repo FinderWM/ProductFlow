@@ -276,6 +276,7 @@ def default_title_for_type(node_type: WorkflowNodeType) -> str:
         WorkflowNodeType.REFERENCE_IMAGE: "参考图",
         WorkflowNodeType.COPY_GENERATION: "文案",
         WorkflowNodeType.IMAGE_GENERATION: "生图",
+        WorkflowNodeType.TAIL_SPLITTER: "尾巴节点",
     }[node_type]
 
 

@@ -350,6 +350,13 @@ class RunWorkflowRequest(BaseModel):
     start_node_id: str | None = None
 
 
+class ApplyTailSplitPlanRequest(BaseModel):
+    plan_id: str = Field(min_length=1, max_length=80)
+    item_ids: list[str] = Field(default_factory=list)
+    position_x: int | None = None
+    position_y: int | None = None
+
+
 def workflow_run_is_retryable(run: WorkflowRun) -> bool:
     return run.status == WorkflowRunStatus.FAILED and run.is_retryable
 

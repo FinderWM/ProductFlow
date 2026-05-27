@@ -184,6 +184,14 @@ Triggers image generation based on product details, copy, reference images, and 
 
 The image-generation card now distinguishes between "generate directly from product details" and "generate with copy/reference context": when upstream copy or reference images are connected, generation reads that context. Without connected copy, it can still try to generate from product details and the node's image requirements.
 
+### Tail Splitter
+
+The tail-splitter node turns long text, upstream copy, and upstream reference-image context into multiple executable image branches. Running the tail node first creates a persisted split plan. The plan stays on the node output, so you can refresh and confirm it later.
+
+When reviewing the split plan, you can remove items that should not be created. The graph changes only after confirmation, when ProductFlow creates ordinary public copy/reference nodes, image-trigger nodes, and output reference-image nodes. Cancelling the dialog leaves the canvas unchanged.
+
+When a full workflow run crosses a tail node, ProductFlow rebuilds only the generated branch that belongs to that tail batch. If you only changed public nodes or image-trigger prompts inside the current batch, prefer the current-batch image rerun path so the split is preserved.
+
 ---
 
 ## Reference: Connections and Runs
@@ -240,6 +248,18 @@ The top-navigation **Settings** page can also manage:
 - Upload file size limits.
 
 Provider profile secrets are not echoed back. Leaving API key blank while editing a profile preserves the old value; only entering a new value writes it to the database.
+
+## Reference: Roles and Permissions (RBAC)
+
+The current permission model separates menu permissions from API permissions. Menu permissions decide whether a navigation entry is visible. API permissions decide whether a backend route can actually be called. Manual requests still go through backend permission checks.
+
+The key boundaries for the current feature set are:
+
+- Workflow run, including node run and full run, requires `inspirations:generate`.
+- Tail split-plan apply requires `inspirations:write`.
+- Settings reads/writes, Status access, and RBAC management each use their own route permissions.
+
+After changing role grants, sign in again and confirm that navigation visibility and route permissions changed together. This catches the common mismatch where an entry is visible but the API still returns 403.
 
 ## Reference: Running State
 

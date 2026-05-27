@@ -44,6 +44,8 @@ API_STATUS_READ = "status:read"
 API_USAGE_STATS_READ = "usage_stats:read"
 API_SETTINGS_READ = "settings:read"
 API_SETTINGS_WRITE = "settings:write"
+API_SETTINGS_PROVIDER_WRITE = "settings:provider_write"
+API_SETTINGS_MIGRATE = "settings:migrate"
 API_RBAC_MANAGE = "rbac:manage"
 API_RESOURCES_MODERATE = "resources:moderate"
 API_GLOBAL_TEMPLATES_MANAGE = "templates:manage_global"
@@ -71,6 +73,20 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
     ApiPermissionDefinition(API_USAGE_STATS_READ, MENU_USAGE_STATS, "查看个人统计", "查看用户维度使用统计", 10),
     ApiPermissionDefinition(API_SETTINGS_READ, MENU_SETTINGS, "查看设置", "查看系统设置和供应商配置", 10),
     ApiPermissionDefinition(API_SETTINGS_WRITE, MENU_SETTINGS, "维护设置", "修改系统设置和供应商配置", 20),
+    ApiPermissionDefinition(
+        API_SETTINGS_PROVIDER_WRITE,
+        MENU_SETTINGS,
+        "维护供应商配置",
+        "修改供应商档案、绑定和密钥相关配置",
+        30,
+    ),
+    ApiPermissionDefinition(
+        API_SETTINGS_MIGRATE,
+        MENU_SETTINGS,
+        "迁移设置",
+        "执行设置导入预览和正式导入",
+        40,
+    ),
     ApiPermissionDefinition(API_RBAC_MANAGE, MENU_RBAC, "管理权限", "管理用户、角色和授权", 10),
     ApiPermissionDefinition(API_RESOURCES_MODERATE, MENU_RBAC, "治理资源", "屏蔽或恢复用户资源", 20),
     ApiPermissionDefinition(

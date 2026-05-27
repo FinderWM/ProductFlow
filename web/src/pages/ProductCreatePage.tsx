@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, ChevronRight, Eye, ImagePlus, LayoutTemplate, Loader2, Search, Tag, X } from "lucide-react";
+import { Check, ChevronRight, Eye, FileText, ImagePlus, LayoutTemplate, Loader2, Search, Sparkles, Tag, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Drawer } from "vaul";
 
@@ -14,7 +14,13 @@ import { api, ApiError } from "../lib/api";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import { useI18n } from "../lib/preferences";
 import type { TranslationKey } from "../lib/i18n";
-import type { CanvasTemplateScope, CanvasTemplateSummary, ModerationFields, WorkflowNodeType } from "../lib/types";
+import type {
+  CanvasTemplateScope,
+  CanvasTemplateSummary,
+  ModerationFields,
+  ProductInitialWorkflowEntry,
+  WorkflowNodeType,
+} from "../lib/types";
 
 interface PreviewNode {
   id: string;
@@ -23,7 +29,7 @@ interface PreviewNode {
   x: number;
   y: number;
   width?: number;
-  tone?: "input" | "copy" | "image" | "output" | "blank";
+  tone?: "input" | "copy" | "image" | "output" | "blank" | "tail";
 }
 
 interface PreviewPortUsage {
@@ -65,7 +71,19 @@ const NODE_TYPE_LABEL_KEYS: Record<WorkflowNodeType, TranslationKey> = {
   reference_image: "create.referenceImage",
   copy_generation: "create.copy",
   image_generation: "create.imageGeneration",
+  tail_splitter: "create.tailSplitter",
 };
+
+const INITIAL_WORKFLOW_ENTRY_OPTIONS: Array<{
+  value: ProductInitialWorkflowEntry;
+  labelKey: TranslationKey;
+  descriptionKey: TranslationKey;
+  icon: typeof ImagePlus;
+}> = [
+  { value: "image", labelKey: "create.entry.image", descriptionKey: "create.entry.imageHint", icon: ImagePlus },
+  { value: "copy", labelKey: "create.entry.copy", descriptionKey: "create.entry.copyHint", icon: FileText },
+  { value: "tail", labelKey: "create.entry.tail", descriptionKey: "create.entry.tailHint", icon: Sparkles },
+];
 
 const stageLabelKeys: Record<string, TranslationKey> = {
   blank: "create.stage.blank",
@@ -83,6 +101,7 @@ const toneClasses: Record<NonNullable<PreviewNode["tone"]>, string> = {
   copy: "border-violet-100 bg-violet-50/90 text-violet-900 dark:border-violet-400/40 dark:bg-violet-500/16 dark:text-violet-100",
   image: "border-emerald-100 bg-emerald-50/90 text-emerald-900 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100",
   output: "border-amber-100 bg-amber-50/90 text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-100",
+  tail: "border-fuchsia-100 bg-fuchsia-50/90 text-fuchsia-900 dark:border-fuchsia-400/35 dark:bg-fuchsia-500/12 dark:text-fuchsia-100",
   blank: "border-dashed border-zinc-300 bg-white/80 text-zinc-500 dark:border-slate-600 dark:bg-[#151f33]/80 dark:text-slate-300",
 };
 
@@ -95,6 +114,9 @@ function nodeTone(nodeType: WorkflowNodeType, outputNodeKeys: Set<string>, nodeK
   }
   if (nodeType === "image_generation") {
     return "image";
+  }
+  if (nodeType === "tail_splitter") {
+    return "tail";
   }
   return outputNodeKeys.has(nodeKey) ? "output" : "input";
 }
@@ -185,6 +207,7 @@ export function ProductCreatePage() {
   const mobilePreviewButtonRef = useRef<HTMLButtonElement | null>(null);
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [initialWorkflowEntry, setInitialWorkflowEntry] = useState<ProductInitialWorkflowEntry>("image");
   const [canvasTemplateKey, setCanvasTemplateKey] = useState<string>("");
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateCategoryId, setTemplateCategoryId] = useState("");
@@ -214,6 +237,23 @@ export function ProductCreatePage() {
   });
 
   const canvasPlanOptions = useMemo(() => {
+    const blankCanvasPreviewNodes: PreviewNode[] =
+      initialWorkflowEntry === "image"
+        ? [
+            { id: "product", title: t("create.productContext"), subtitle: t("create.productInfoNode"), x: 48, y: 120, tone: "input" },
+            { id: "entry-copy", title: t("create.copy"), subtitle: t("create.copy"), x: 368, y: 72, tone: "copy" },
+            { id: "entry-image", title: t("create.imageGeneration"), subtitle: t("create.entry.image"), x: 688, y: 104, tone: "image" },
+            { id: "entry-output", title: t("create.referenceImage"), subtitle: t("create.outputSlot"), x: 1008, y: 120, tone: "output" },
+          ]
+        : initialWorkflowEntry === "copy"
+          ? [
+              { id: "product", title: t("create.productContext"), subtitle: t("create.productInfoNode"), x: 48, y: 112, tone: "input" },
+              { id: "entry-copy", title: t("create.copy"), subtitle: t("create.entry.copy"), x: 368, y: 112, tone: "copy" },
+            ]
+          : [
+              { id: "product", title: t("create.productContext"), subtitle: t("create.productInfoNode"), x: 48, y: 112, tone: "input" },
+              { id: "entry-tail", title: t("create.tailSplitter"), subtitle: t("create.entry.tail"), x: 368, y: 112, tone: "tail" },
+            ];
     const blankCanvasPlan: CanvasPlanOption = {
       key: "",
       label: t("create.blankCanvas"),
@@ -223,11 +263,16 @@ export function ProductCreatePage() {
       stage: "blank",
       outputCount: 0,
       referenceCount: 0,
-      previewNodes: [
-        { id: "product", title: t("create.productContext"), subtitle: t("create.productInfoNode"), x: 48, y: 112, tone: "input" },
-        { id: "blank", title: t("create.freeLayout"), subtitle: t("create.addNode"), x: 368, y: 112, tone: "blank" },
-      ],
-      previewEdges: [{ from: "product", to: "blank" }],
+      previewNodes: blankCanvasPreviewNodes,
+      previewEdges:
+        initialWorkflowEntry === "image"
+          ? [
+              { from: "product", to: "entry-copy" },
+              { from: "product", to: "entry-image" },
+              { from: "entry-copy", to: "entry-image" },
+              { from: "entry-image", to: "entry-output" },
+            ]
+          : [{ from: "product", to: initialWorkflowEntry === "copy" ? "entry-copy" : "entry-tail" }],
     };
     const fullCanvasTemplates =
       templatesQuery.data?.items
@@ -235,10 +280,11 @@ export function ProductCreatePage() {
         .map((template) => localizeCanvasTemplateSummary(template, locale))
         .map((template) => canvasTemplateToPlan(template, t)) ?? [];
     return [blankCanvasPlan, ...sortPlans(fullCanvasTemplates)];
-  }, [locale, t, templatesQuery.data]);
+  }, [initialWorkflowEntry, locale, t, templatesQuery.data]);
 
   const selectedPlan =
     canvasPlanOptions.find((option) => option.key === canvasTemplateKey) ?? canvasPlanOptions[0];
+  const mainImageRequired = Boolean(selectedPlan.key) || initialWorkflowEntry === "image";
 
   const planGroups = useMemo(() => groupedPlans(canvasPlanOptions, t), [canvasPlanOptions, t]);
   const templateCategories = templateCategoriesQuery.data?.items ?? [];
@@ -250,14 +296,14 @@ export function ProductCreatePage() {
 
   const previewLabel = useMemo(() => {
     if (!file) {
-      return t("create.uploadIdle");
+      return mainImageRequired ? t("create.uploadIdle") : t("create.uploadOptional");
     }
     return file.name;
-  }, [file, t]);
+  }, [file, mainImageRequired, t]);
 
   const createProductMutation = useMutation({
     mutationFn: () => {
-      if (!file) {
+      if (mainImageRequired && !file) {
         throw new Error(t("create.requiredImage"));
       }
       if (isResourceBlocked(selectedPlan)) {
@@ -265,8 +311,9 @@ export function ProductCreatePage() {
       }
       return api.createProduct({
         name,
-        file,
+        file: file ?? undefined,
         canvas_template_key: selectedPlan.key,
+        initial_workflow_entry: initialWorkflowEntry,
       });
     },
     onSuccess: (product) => {
@@ -498,8 +545,41 @@ export function ProductCreatePage() {
             <h2 className="text-base font-semibold text-zinc-950 dark:text-white">{t("create.productInfo")}</h2>
 
             <div className="mt-5">
+              <div className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
+                {t("create.initialEntry")}
+              </div>
+              <div className="grid gap-2">
+                {INITIAL_WORKFLOW_ENTRY_OPTIONS.map((option) => {
+                  const active = initialWorkflowEntry === option.value;
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setInitialWorkflowEntry(option.value)}
+                      className={`flex items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${
+                        active
+                          ? "border-indigo-300 bg-indigo-50 text-indigo-900 dark:border-violet-400/60 dark:bg-violet-500/12 dark:text-violet-100"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200 dark:hover:border-slate-500"
+                      }`}
+                    >
+                      <span className="mt-0.5 rounded-lg border border-current/20 p-2 opacity-90">
+                        <Icon size={14} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold">{t(option.labelKey)}</span>
+                        <span className="mt-1 block text-xs leading-5 text-current/75">{t(option.descriptionKey)}</span>
+                      </span>
+                      {active ? <Check size={16} className="mt-1 shrink-0" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-5">
               <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
-                {t("create.mainImage")} <span className="text-red-500">*</span>
+                {t("create.mainImage")} {mainImageRequired ? <span className="text-red-500">*</span> : null}
               </label>
               <ImageDropZone
                 ariaLabel={t("create.uploadAria")}
@@ -510,7 +590,9 @@ export function ProductCreatePage() {
                   <>
                     <ImagePlus size={34} className="mb-3 text-zinc-400 dark:text-slate-500" />
                     <p className="text-sm font-medium text-zinc-700 dark:text-slate-200">{isDragging ? t("create.uploadDrop") : previewLabel}</p>
-                    <p className="mt-2 text-xs text-zinc-500 dark:text-slate-400">{t("create.uploadHint")}</p>
+                    <p className="mt-2 text-xs text-zinc-500 dark:text-slate-400">
+                      {mainImageRequired ? t("create.uploadHint") : t("create.uploadOptionalHint")}
+                    </p>
                   </>
                 )}
               </ImageDropZone>

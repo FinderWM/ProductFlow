@@ -1,4 +1,5 @@
 import type {
+  ApplyTailSplitPlanInput,
   ApplyWorkflowTemplateGroupInput,
   CanvasTemplateCategoryListResponse,
   CanvasTemplateScope,
@@ -40,9 +41,10 @@ import type {
   ProductWritebackResponse,
   ProductListResponse,
   RuntimeConfig,
+  RbacPermissionCatalog,
   RbacRole,
+  RbacRolePermissions,
   RbacUser,
-  SettingsLockState,
   SettingsExportPayload,
   SettingsImportCommitResponse,
   SettingsImportPreviewResponse,
@@ -152,6 +154,18 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  listRbacPermissionCatalog(): Promise<RbacPermissionCatalog> {
+    return request("/api/rbac/permissions");
+  },
+  getRbacRolePermissions(roleId: string): Promise<RbacRolePermissions> {
+    return request(`/api/rbac/roles/${roleId}/permissions`);
+  },
+  updateRbacRolePermissions(roleId: string, payload: Omit<RbacRolePermissions, "role_id">): Promise<RbacRolePermissions> {
+    return request(`/api/rbac/roles/${roleId}/permissions`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
   listProducts(input?: { page?: number; page_size?: number }): Promise<ProductListResponse> {
     const page = input?.page ?? 1;
     const pageSize = input?.page_size ?? 20;
@@ -254,20 +268,11 @@ export const api = {
   archiveGenerationConfig(configId: string): Promise<GenerationConfig> {
     return request(`/api/settings/generation-configs/${encodeURIComponent(configId)}`, { method: "DELETE" });
   },
-  getSettingsLockState(): Promise<SettingsLockState> {
-    return request("/api/settings/lock-state");
-  },
   getRuntimeConfig(): Promise<RuntimeConfig> {
     return request("/api/settings/runtime");
   },
   getGenerationQueueOverview(): Promise<GenerationQueueOverview> {
     return request("/api/generation-queue");
-  },
-  unlockSettings(token: string): Promise<SettingsLockState> {
-    return request("/api/settings/unlock", {
-      method: "POST",
-      body: JSON.stringify({ token }),
-    });
   },
   updateConfig(payload: ConfigUpdateRequest): Promise<ConfigResponse> {
     return request("/api/settings", {
@@ -293,7 +298,9 @@ export const api = {
   async createProduct(input: CreateProductInput): Promise<ProductDetail> {
     const formData = new FormData();
     formData.set("name", input.name);
-    formData.set("image", input.file);
+    if (input.file) {
+      formData.set("image", input.file);
+    }
     input.referenceFiles?.forEach((referenceFile) => {
       formData.append("reference_images", referenceFile);
     });
@@ -308,6 +315,9 @@ export const api = {
     }
     if (input.canvas_template_key !== undefined) {
       formData.set("canvas_template_key", input.canvas_template_key);
+    }
+    if (input.initial_workflow_entry !== undefined) {
+      formData.set("initial_workflow_entry", input.initial_workflow_entry);
     }
     return request("/api/products", {
       method: "POST",
@@ -529,6 +539,12 @@ export const api = {
   updateWorkflowNodeCopy(nodeId: string, payload: CopySetUpdateRequest): Promise<ProductWorkflow> {
     return request(`/api/workflow-nodes/${nodeId}/copy`, {
       method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  applyTailSplitPlan(nodeId: string, payload: ApplyTailSplitPlanInput): Promise<ProductWorkflow> {
+    return request(`/api/workflow-nodes/${nodeId}/tail-split-plan/apply`, {
+      method: "POST",
       body: JSON.stringify(payload),
     });
   },

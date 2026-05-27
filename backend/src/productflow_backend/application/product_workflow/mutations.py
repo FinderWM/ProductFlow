@@ -18,6 +18,10 @@ from productflow_backend.application.product_workflow.artifacts import (
     source_asset_for_poster_variant,
 )
 from productflow_backend.application.product_workflow.context import image_size_from_config, optional_config_text
+from productflow_backend.application.product_workflow.tail_splitter import (
+    apply_tail_split_plan as apply_tail_split_plan_to_graph,
+    normalize_tail_splitter_config,
+)
 from productflow_backend.application.product_workflow.templates import materialize_canvas_template_graph
 from productflow_backend.application.product_workflow.user_templates import (
     extract_reusable_node_config,
@@ -160,6 +164,11 @@ def normalize_workflow_node_config(node_type: WorkflowNodeType, config_json: dic
         except ValueError as exc:
             raise BusinessValidationError(str(exc)) from exc
         return {**config, **normalized_copy_config}
+    if node_type == WorkflowNodeType.TAIL_SPLITTER:
+        try:
+            return normalize_tail_splitter_config(config)
+        except ValueError as exc:
+            raise BusinessValidationError(str(exc)) from exc
     if node_type == WorkflowNodeType.IMAGE_GENERATION:
         try:
             normalized_size = image_size_from_config(config)
@@ -627,6 +636,29 @@ def bind_workflow_node_image(
     session.commit()
     session.expire_all()
     return product_workflow_graph.get_workflow_or_raise(session, workflow.id)
+
+
+def apply_tail_split_plan(
+    session: Session,
+    *,
+    node_id: str,
+    plan_id: str,
+    item_ids: list[str] | None,
+    position_x: int | None = None,
+    position_y: int | None = None,
+) -> ProductWorkflow:
+    node = product_workflow_graph.get_node_or_raise(session, node_id)
+    applied = apply_tail_split_plan_to_graph(
+        session,
+        tail_node=node,
+        plan_id=plan_id,
+        item_ids=item_ids,
+        position_x=position_x,
+        position_y=position_y,
+    )
+    session.commit()
+    session.expire_all()
+    return product_workflow_graph.get_workflow_or_raise(session, applied.workflow.id)
 
 
 def create_workflow_edge(

@@ -8,6 +8,9 @@ from productflow_backend.application.contracts import (
     CreativeBriefPayload,
     ProductInput,
     ReferenceImageInput,
+    TailSplitPlanDraft,
+    TailSplitPlanDraftItem,
+    TailSplitPlanInput,
     VisualGuidance,
 )
 from productflow_backend.infrastructure.text.base import TextProvider
@@ -96,3 +99,64 @@ class MockTextProvider(TextProvider):
             f"{normalized}。画面主体清晰，光线自然，构图干净，突出商品质感与可售卖细节。",
             "mock-polish-v1",
         )
+
+    def generate_tail_split_plan(self, payload: TailSplitPlanInput) -> tuple[TailSplitPlanDraft, str]:
+        source_summary_parts = [
+            f"商品：{payload.product_name}",
+            f"类目：{payload.category}" if payload.category else "",
+            f"补充：{payload.source_note[:32]}" if payload.source_note else "",
+            f"文本输入：{payload.source_text[:48]}" if payload.source_text else "",
+            f"节点描述：{payload.description[:48]}" if payload.description else "",
+            f"上游文案：{payload.upstream_text_contexts[0][:36]}" if payload.upstream_text_contexts else "",
+            (
+                f"参考图：{payload.reference_images[0].label or payload.reference_images[0].filename}"
+                if payload.reference_images
+                else ""
+            ),
+        ]
+        summary = "；".join(part for part in source_summary_parts if part) or "基于输入内容拆分"
+
+        base_candidates = [
+            TailSplitPlanDraftItem(
+                title=f"{payload.product_name} 主卖点图",
+                instruction=f"突出 {payload.product_name} 的核心用途与直接收益，画面干净，适合电商主图。",
+                visual_intent="单品居中，明确展示卖点和质感",
+                source_refs=["商品资料", "主卖点拆分"],
+            ),
+            TailSplitPlanDraftItem(
+                title=f"{payload.product_name} 场景使用图",
+                instruction="围绕真实使用场景构图，体现使用前后价值，避免空泛修饰词。",
+                visual_intent="生活化场景，突出功能触发时刻",
+                source_refs=["上游文案", "场景化表达"],
+            ),
+            TailSplitPlanDraftItem(
+                title=f"{payload.product_name} 细节特写图",
+                instruction="强调关键材质、工艺或结构细节，保证纹理和边缘清晰。",
+                visual_intent="近景特写，强调可信细节",
+                source_refs=["图片参考", "细节拆分"],
+            ),
+            TailSplitPlanDraftItem(
+                title=f"{payload.product_name} 规格信息图",
+                instruction="展示尺寸或参数重点，留出适合后期添加标注的空间。",
+                visual_intent="信息层级清晰，适合详情页参数区",
+                source_refs=["规格信息", "结构化输出"],
+            ),
+        ]
+        item_count = max(1, min(payload.max_items, len(base_candidates)))
+        image_ref = (
+            f"参考图：{payload.reference_images[0].label or payload.reference_images[0].filename}"
+            if payload.reference_images
+            else ""
+        )
+        text_ref = f"长文本：{payload.source_text[:20]}" if payload.source_text else ""
+        description_ref = f"节点描述：{payload.description[:20]}" if payload.description else ""
+        for item in base_candidates:
+            refs = [*item.source_refs]
+            if image_ref:
+                refs.append(image_ref)
+            if text_ref:
+                refs.append(text_ref)
+            if description_ref:
+                refs.append(description_ref)
+            item.source_refs = refs
+        return TailSplitPlanDraft(source_summary=summary, items=base_candidates[:item_count]), "mock-tail-split-v1"

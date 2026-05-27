@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal, cast
 
 from sqlalchemy import desc, exists, func, literal, select
 from sqlalchemy.orm import Session, selectinload
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from productflow_backend.application.copy_payloads import normalize_copy_payload
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
+from productflow_backend.application.product_workflow import graph as product_workflow_graph
 from productflow_backend.application.product_workflow.templates import (
     materialize_product_workflow_from_template,
     resolve_product_creation_canvas_template,
@@ -19,6 +20,7 @@ from productflow_backend.domain.enums import (
     CopyStatus,
     ProductWorkflowState,
     SourceAssetKind,
+    WorkflowNodeType,
 )
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import (
@@ -27,9 +29,13 @@ from productflow_backend.infrastructure.db.models import (
     Product,
     ProductWorkflow,
     SourceAsset,
+    WorkflowEdge,
+    WorkflowNode,
     WorkflowRun,
 )
 from productflow_backend.infrastructure.storage import LocalStorage
+
+InitialWorkflowEntry = Literal["image", "copy", "tail"]
 
 
 def _normalize_required_text(value: str, *, field_name: str, max_length: int) -> str:
@@ -64,6 +70,114 @@ def _normalize_price(value: str | None) -> Decimal | None:
     if abs(price.as_tuple().exponent) > 2:
         raise BusinessValidationError("价格最多保留两位小数")
     return price
+
+
+def _normalize_initial_workflow_entry(value: str | None) -> InitialWorkflowEntry:
+    normalized = (value or "image").strip() or "image"
+    if normalized not in {"image", "copy", "tail"}:
+        raise BusinessValidationError("初始工作台入口不支持")
+    return cast(InitialWorkflowEntry, normalized)
+
+
+def _materialize_initial_workflow(
+    session: Session,
+    *,
+    product: Product,
+    initial_workflow_entry: InitialWorkflowEntry,
+    source_asset: SourceAsset | None,
+) -> None:
+    workflow = ProductWorkflow(
+        product_id=product.id,
+        title=product_workflow_graph.DEFAULT_WORKFLOW_TITLE,
+        active=True,
+    )
+    session.add(workflow)
+    session.flush()
+
+    product_context_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.PRODUCT_CONTEXT,
+        title="商品",
+        position_x=40,
+        position_y=120,
+        config_json={},
+    )
+    session.add(product_context_node)
+    session.flush()
+
+    if initial_workflow_entry == "image":
+        if source_asset is None:
+            raise BusinessValidationError("图片入口需要上传灵感主图")
+        session.delete(product_context_node)
+        session.flush()
+
+        nodes_by_key: dict[str, WorkflowNode] = {}
+        for spec in product_workflow_graph.default_node_specs(product):
+            key = str(spec.pop("key"))
+            node = WorkflowNode(workflow_id=workflow.id, **spec)
+            session.add(node)
+            nodes_by_key[key] = node
+        session.flush()
+        for edge in product_workflow_graph.default_edges(nodes_by_key, workflow.id):
+            session.add(edge)
+        return
+
+    if initial_workflow_entry == "copy":
+        copy_node = WorkflowNode(
+            workflow_id=workflow.id,
+            node_type=WorkflowNodeType.COPY_GENERATION,
+            title="文案",
+            position_x=320,
+            position_y=100,
+            config_json={
+                "version": 2,
+                "instruction": f"围绕 {product.name} 生成一版适合商品图的文案",
+                "tone": "清晰可信",
+                "channel": "灵感图",
+                "output_mode": "blocks",
+                "generation_config_mode": "auto",
+                "generation_config_id": None,
+            },
+        )
+        session.add(copy_node)
+        session.flush()
+        session.add(
+            WorkflowEdge(
+                workflow_id=workflow.id,
+                source_node_id=product_context_node.id,
+                target_node_id=copy_node.id,
+                source_handle="output",
+                target_handle="input",
+            )
+        )
+        return
+
+    tail_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.TAIL_SPLITTER,
+        title="尾巴节点",
+        position_x=320,
+        position_y=100,
+        config_json={
+            "description": "",
+            "source_text": "",
+            "max_items": 8,
+            "generation_config_mode": "auto",
+            "generation_config_id": None,
+            "document_source": None,
+        },
+    )
+    session.add(tail_node)
+    session.flush()
+    session.add(
+        WorkflowEdge(
+            workflow_id=workflow.id,
+            source_node_id=product_context_node.id,
+            target_node_id=tail_node.id,
+            source_handle="output",
+            target_handle="input",
+        )
+    )
 
 
 def _product_query():
@@ -134,11 +248,12 @@ def create_product(
     category: str | None,
     price: str | None,
     source_note: str | None,
-    image_bytes: bytes,
-    filename: str,
-    content_type: str,
+    image_bytes: bytes | None,
+    filename: str | None,
+    content_type: str | None,
     reference_image_uploads: list[tuple[bytes, str, str]] | None = None,
     canvas_template_key: str | None = None,
+    initial_workflow_entry: str | None = None,
     owner_user_id: str | None = None,
     storage: LocalStorage | None = None,
 ) -> Product:
@@ -149,6 +264,10 @@ def create_product(
         canvas_template_key,
         actor_user_id=resolved_owner_user_id,
     )
+    explicit_initial_workflow_entry = initial_workflow_entry is not None
+    workflow_entry = _normalize_initial_workflow_entry(initial_workflow_entry)
+    if image_bytes is None and (canvas_template is not None or workflow_entry == "image"):
+        raise BusinessValidationError("请先上传灵感图")
     storage = storage or LocalStorage()
     product = Product(
         owner_user_id=resolved_owner_user_id,
@@ -160,16 +279,19 @@ def create_product(
     session.add(product)
     session.flush()
 
-    relative_path = storage.save_product_upload(product.id, filename, image_bytes)
-    session.add(
-        SourceAsset(
+    original_source_asset: SourceAsset | None = None
+    if image_bytes is not None:
+        resolved_filename = filename or "upload.bin"
+        relative_path = storage.save_product_upload(product.id, resolved_filename, image_bytes)
+        original_source_asset = SourceAsset(
             product_id=product.id,
             kind=SourceAssetKind.ORIGINAL_IMAGE,
-            original_filename=filename,
+            original_filename=resolved_filename,
             mime_type=content_type or "application/octet-stream",
             storage_path=relative_path,
         )
-    )
+        session.add(original_source_asset)
+        session.flush()
     for reference_bytes, reference_filename, reference_content_type in reference_image_uploads or []:
         reference_path = storage.save_reference_upload(product.id, reference_filename, reference_bytes)
         session.add(
@@ -186,6 +308,13 @@ def create_product(
             session,
             product_id=product.id,
             template=canvas_template,
+        )
+    elif explicit_initial_workflow_entry:
+        _materialize_initial_workflow(
+            session,
+            product=product,
+            initial_workflow_entry=workflow_entry,
+            source_asset=original_source_asset,
         )
     session.commit()
     session.expire_all()

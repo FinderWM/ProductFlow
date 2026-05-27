@@ -1186,6 +1186,92 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
 
 ---
 
+## Scenario: Tail splitter split-plan workflow and regeneration
+
+### 1. Scope / Trigger
+- Trigger: changes to `tail_splitter` node execution, split-plan output shape, split-plan apply endpoint, or workflow
+  full-run behavior that crosses a tail node.
+- This scenario captures graph-expansion behavior and permission boundaries so tail-plan apply does not drift into hidden
+  frontend-only logic.
+
+### 2. Signatures
+- Workflow node type includes `tail_splitter`.
+- Run API: `POST /api/products/{product_id}/workflow/run` with optional `start_node_id`.
+- Apply API: `POST /api/workflow-nodes/{node_id}/tail-split-plan/apply`.
+- Tail node `output_json` contains:
+  - `latest_plan` with `plan_id`, `status`, `items`, and metadata.
+  - `applied_batches` entries with `batch_id`, source `plan_id`, and created node metadata.
+
+### 3. Contracts
+- Tail execution is plan-generation only: running a tail node persists/refreshes a pending `latest_plan` and does not
+  create workflow nodes or edges by itself.
+- Tail split-plan apply accepts only a tail node with a pending `latest_plan` that matches request `plan_id`; at least one
+  plan item must be selected.
+- Applying a tail plan creates ordinary persisted workflow nodes and edges in one transaction:
+  - one public `copy_generation` node and one public `reference_image` node for shared constraints/visual input;
+  - one `image_generation` node plus one output `reference_image` node per selected plan item;
+  - edges `tail_splitter -> image_generation`, public copy/reference to each `image_generation`, and each
+    `image_generation -> output reference_image`.
+- Created nodes must carry `generated_by` metadata with at least `tail_node_id`, `plan_id`, `batch_id`, and role/item
+  fields so later cleanup can target only generated branches.
+- Successful apply marks `latest_plan.status = "applied"` and appends a batch entry to `applied_batches`.
+- Full workflow runs that include a tail node use tail-resplit mode: remove only that tail node's previous generated
+  branch, rerun tail split, auto-apply the new plan, and include new downstream image nodes in the same run.
+- Tail cleanup during full-run must never delete manual nodes/edges that lack matching tail batch metadata.
+- Current-batch image reruns must keep generated public nodes and image-trigger nodes, and rerun image outputs without
+  re-splitting.
+- RBAC boundary: workflow run requires `inspirations:generate`; tail split-plan apply requires `inspirations:write`.
+
+### 4. Validation & Error Matrix
+- Apply called on non-tail node -> `400` with a user-readable tail-node type validation message.
+- Apply with missing/stale/non-pending plan -> `400` with pending-plan validation message.
+- Apply with no selected valid item -> `400` with split-item selection validation message.
+- Authenticated user without `inspirations:generate` calling workflow run -> `403`, `{"detail": "没有接口权限"}`.
+- Authenticated user without `inspirations:write` calling tail apply -> `403`, `{"detail": "没有接口权限"}`.
+
+### 5. Good/Base/Bad Cases
+- Good: user runs tail, reviews pending plan, applies selected items, and sees ordinary image-trigger/output nodes that are
+  fully editable.
+- Good: full workflow run crossing tail removes only prior generated batch, regenerates plan, and continues into newly
+  created image nodes.
+- Base: tail plan can consume upstream copy/reference/image context but still keeps split output as explicit user-visible
+  confirmation data.
+- Bad: tail run auto-creates graph nodes without user confirmation in manual tail-run mode.
+- Bad: full-run tail cleanup deletes neighboring manual nodes because cleanup uses position/edge heuristics instead of batch
+  metadata.
+
+### 6. Tests Required
+- Tail execution regression for pending `latest_plan` persistence and schema.
+- Apply regression for selected-item filtering, node/edge creation, and batch metadata persistence.
+- Apply regression rejecting second apply of the same pending plan.
+- Full-run regression proving tail-branch regeneration and same-run downstream continuation.
+- Full-run regression proving manual nodes survive tail cleanup.
+- RBAC regression proving workflow run vs tail apply permission split.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
+    created = apply_tail_split_plan(node.id, plan_id=node.output_json["latest_plan"]["plan_id"], item_ids=None)
+```
+
+This silently mutates the graph during a normal tail run and skips user confirmation and selected-item control.
+
+#### Correct
+
+```python
+if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
+    plan = execute_tail_splitter(...)
+    persist_pending_plan(node, plan)
+    return
+```
+
+Tail run persists a pending plan first; graph expansion happens only through explicit apply or full-run regeneration mode.
+
+---
+
 ## Scenario: Product context singleton and direct image generation
 
 ### 1. Scope / Trigger

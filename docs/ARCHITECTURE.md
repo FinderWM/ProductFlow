@@ -192,12 +192,12 @@ Provider 选择由 `provider_profiles`、`provider_bindings` 和对应 factory �
 
 配置分为两类：
 
-1. Env-only 基础设施配置：`DATABASE_URL`、`REDIS_URL`、`SESSION_SECRET`、`ADMIN_ACCESS_KEY`、`SETTINGS_ACCESS_TOKEN` 等。这些配置在应用访问数据库前就必须可用，或用于保护登录/配置页二次解锁，因此不支持运行时 DB 覆盖。
-2. 运行时业务配置：provider、模型、图片尺寸、上传限制、任务重试、全局生成并发上限、海报模式、提示词模板、登录门禁开关、业务删除开关等。它们可由 `.env` / `.env.dev` 提供默认值，也可在登录并二次解锁设置页后通过 `/api/settings` 写入 `app_settings` 并覆盖。
+1. Env-only 基础设施配置：`DATABASE_URL`、`REDIS_URL`、`SESSION_SECRET`、`ADMIN_ACCESS_KEY` 等。这些配置在应用访问数据库前就必须可用，或属于部署级访问密钥，因此不支持运行时 DB 覆盖。
+2. 运行时业务配置：provider、模型、图片尺寸、上传限制、任务重试、全局生成并发上限、海报模式、提示词模板、登录门禁开关、业务删除开关等。它们可由 `.env` / `.env.dev` 提供默认值，也可在登录且具备 RBAC 配置权限后通过 `/api/settings` 写入 `app_settings` 并覆盖。
 
 Secret 类配置在 API 响应中不回显已有值。
 
-登录门禁开关 `admin_access_required` 默认开启；开启时私有 API 通过 `require_admin` 要求 Cookie session 中存在管理员登录标记，错误 `ADMIN_ACCESS_KEY` 仍返回 401。关闭时普通工作台和私有 API 可免管理员密钥访问，`GET /api/auth/session` 返回 `authenticated=true` 和 `access_required=false`；但 `/api/settings` 的完整配置读取/写入仍必须先通过独立的 `SETTINGS_ACCESS_TOKEN` 解锁。
+登录门禁开关 `admin_access_required` 保留为运行时配置项；当前访问控制以账号登录和 RBAC 权限为准。配置读取、配置写入、状态读取、资源治理和权限管理都在后端路由绑定对应 API 权限。
 
 业务删除开关 `deletion_enabled` 默认关闭；关闭时后端在路由边界拒绝商品整删和连续生图会话整删，避免体验站违规内容被整条删除后无法溯源。工作流节点/连线编辑和参考图删除不受该开关影响。`DELETE /api/auth/session` 和设置页恢复数据库覆盖值不属于业务删除保护范围。
 
@@ -217,11 +217,11 @@ Secret 类配置在 API 响应中不回显已有值。
 
 ## 10. 安全边界
 
-当前安全模型是“单管理员自托管”：
+当前安全模型是“单管理员种子账号 + 多用户 RBAC”：
 
-- 管理员密钥登录用于私有工作台访问控制。
-- `ADMIN_ACCESS_KEY` 只从环境变量读取，不进入数据库配置；登录门禁可通过 `admin_access_required` 运行时开关关闭，默认保持开启。
-- 配置页使用独立的 `SETTINGS_ACCESS_TOKEN` 二次解锁；session 只保存已解锁标记，不保存令牌明文。关闭登录门禁不会关闭这个二次解锁。
+- 初始管理员账号为 `libow`，管理员角色强制拥有所有菜单和 API 权限。
+- `ADMIN_ACCESS_KEY` 只从环境变量读取，不进入数据库配置；账号密码登录和 RBAC 权限决定可见页面与可调用接口。
+- 普通用户由管理员加入授信列表后设置密码；非管理员角色的菜单和 API 权限可由管理员配置。
 - Session cookie 由 `SESSION_SECRET` 签名。
 - CORS 由 `BACKEND_CORS_ORIGINS` 控制。
 - 上传文件有 MIME、大小、像素和数量限制。

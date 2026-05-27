@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import secrets
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -19,12 +18,19 @@ from productflow_backend.config import (
     RUNTIME_CONFIG_KEYS,
     build_settings_with_overrides,
     get_runtime_settings,
-    get_settings,
     normalize_config_values,
     normalize_image_generation_size,
     parse_image_tool_allowed_fields,
 )
-from productflow_backend.domain.rbac import API_SETTINGS_READ
+from productflow_backend.domain.rbac import (
+    API_IMAGE_CHAT_READ,
+    API_INSPIRATIONS_READ,
+    API_SETTINGS_MIGRATE,
+    API_SETTINGS_PROVIDER_WRITE,
+    API_SETTINGS_READ,
+    API_SETTINGS_WRITE,
+    API_STATUS_READ,
+)
 from productflow_backend.infrastructure.db.models import (
     AppSetting,
     GenerationConfig,
@@ -63,7 +69,7 @@ from productflow_backend.infrastructure.provider_models import (
     ProviderModelDiscoveryUnsupportedError,
     list_provider_models,
 )
-from productflow_backend.presentation.deps import get_session, require_api_permission
+from productflow_backend.presentation.deps import get_session, require_any_api_permission, require_api_permission
 from productflow_backend.presentation.schemas.settings import (
     ConfigItemResponse,
     ConfigOptionResponse,
@@ -92,19 +98,24 @@ from productflow_backend.presentation.schemas.settings import (
     SettingsGenerationConfigExport,
     SettingsImportCommitResponse,
     SettingsImportPreviewResponse,
-    SettingsLockStateResponse,
     SettingsProviderBindingExport,
     SettingsProviderProfileExport,
-    SettingsUnlockRequest,
 )
 
 router = APIRouter(
     prefix="/api/settings",
     tags=["settings"],
-    dependencies=[Depends(require_api_permission(API_SETTINGS_READ))],
 )
 SETTINGS_EXPORT_SCHEMA_VERSION = 1
 SETTINGS_EXPORT_COMPATIBILITY = "productflow-settings-v1"
+READ_SETTINGS_PERMISSION = Depends(require_api_permission(API_SETTINGS_READ))
+WRITE_SETTINGS_PERMISSION = Depends(require_api_permission(API_SETTINGS_WRITE))
+WRITE_PROVIDER_SETTINGS_PERMISSION = Depends(require_api_permission(API_SETTINGS_PROVIDER_WRITE))
+MIGRATE_SETTINGS_PERMISSION = Depends(require_api_permission(API_SETTINGS_MIGRATE))
+READ_STATUS_PERMISSION = Depends(require_api_permission(API_STATUS_READ))
+READ_GENERATION_RUNTIME_PERMISSION = Depends(
+    require_any_api_permission(API_INSPIRATIONS_READ, API_IMAGE_CHAT_READ, API_SETTINGS_READ)
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,18 +139,6 @@ class _GenerationConfigStatAggregate:
     freeze_count: int = 0
     last_success_at: datetime | None = None
     last_failure_at: datetime | None = None
-
-
-def _settings_token_configured() -> bool:
-    token = get_settings().settings_access_token
-    return bool(token and token.strip())
-
-
-def require_settings_unlocked(request: Request) -> None:
-    if not _settings_token_configured():
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="设置解锁令牌未配置，请联系管理员")
-    if not request.session.get("settings_unlocked"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="请先解锁系统配置")
 
 
 def _load_database_values(session: Session) -> dict[str, AppSetting]:
@@ -856,27 +855,7 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
     session.expire_all()
 
 
-@router.get("/lock-state", response_model=SettingsLockStateResponse)
-def get_settings_lock_state_endpoint(request: Request) -> SettingsLockStateResponse:
-    configured = _settings_token_configured()
-    return SettingsLockStateResponse(
-        unlocked=configured and bool(request.session.get("settings_unlocked")),
-        configured=configured,
-    )
-
-
-@router.post("/unlock", response_model=SettingsLockStateResponse)
-def unlock_settings_endpoint(payload: SettingsUnlockRequest, request: Request) -> SettingsLockStateResponse:
-    expected_token = (get_settings().settings_access_token or "").strip()
-    if not expected_token:
-        raise HTTPException(status_code=503, detail="设置解锁令牌未配置，请联系管理员")
-    if not secrets.compare_digest(payload.token, expected_token):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="设置解锁令牌不正确")
-    request.session["settings_unlocked"] = True
-    return SettingsLockStateResponse(unlocked=True, configured=True)
-
-
-@router.get("", response_model=ConfigResponse, dependencies=[Depends(require_settings_unlocked)])
+@router.get("", response_model=ConfigResponse, dependencies=[READ_SETTINGS_PERMISSION])
 def get_config_endpoint(session: Session = Depends(get_session)) -> ConfigResponse:
     return _serialize_config(session)
 
@@ -884,7 +863,7 @@ def get_config_endpoint(session: Session = Depends(get_session)) -> ConfigRespon
 @router.get(
     "/provider-config",
     response_model=ProviderConfigResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[READ_SETTINGS_PERMISSION],
 )
 def get_provider_config_endpoint(session: Session = Depends(get_session)) -> ProviderConfigResponse:
     ensure_provider_config_bootstrapped(session)
@@ -894,7 +873,7 @@ def get_provider_config_endpoint(session: Session = Depends(get_session)) -> Pro
 @router.get(
     "/generation-config-status",
     response_model=GenerationConfigStatusSummaryResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[READ_STATUS_PERMISSION],
 )
 def get_generation_config_status_endpoint(
     start_date: date | None = Query(default=None),
@@ -912,7 +891,7 @@ def get_generation_config_status_endpoint(
 @router.get(
     "/generation-configs",
     response_model=list[GenerationConfigResponse],
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[READ_SETTINGS_PERMISSION],
 )
 def list_generation_configs_endpoint(session: Session = Depends(get_session)) -> list[GenerationConfigResponse]:
     ensure_provider_config_bootstrapped(session)
@@ -923,7 +902,11 @@ def list_generation_configs_endpoint(session: Session = Depends(get_session)) ->
     ]
 
 
-@router.get("/generation-config-options", response_model=list[GenerationConfigOptionResponse])
+@router.get(
+    "/generation-config-options",
+    response_model=list[GenerationConfigOptionResponse],
+    dependencies=[READ_GENERATION_RUNTIME_PERMISSION],
+)
 def list_generation_config_options_endpoint(
     session: Session = Depends(get_session),
 ) -> list[GenerationConfigOptionResponse]:
@@ -937,7 +920,7 @@ def list_generation_config_options_endpoint(
 @router.post(
     "/generation-configs",
     response_model=GenerationConfigResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[WRITE_SETTINGS_PERMISSION],
 )
 def create_generation_config_endpoint(
     payload: GenerationConfigCreateRequest,
@@ -975,7 +958,7 @@ def create_generation_config_endpoint(
 @router.patch(
     "/generation-configs/{generation_config_id}",
     response_model=GenerationConfigResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[WRITE_SETTINGS_PERMISSION],
 )
 def update_generation_config_endpoint(
     generation_config_id: str,
@@ -1018,7 +1001,7 @@ def update_generation_config_endpoint(
 @router.delete(
     "/generation-configs/{generation_config_id}",
     response_model=GenerationConfigResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[WRITE_SETTINGS_PERMISSION],
 )
 def archive_generation_config_endpoint(
     generation_config_id: str,
@@ -1036,7 +1019,7 @@ def archive_generation_config_endpoint(
 @router.get(
     "/provider-profiles/{profile_id}/models",
     response_model=ProviderModelListResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[READ_SETTINGS_PERMISSION],
 )
 def list_provider_models_endpoint(
     profile_id: str,
@@ -1059,7 +1042,7 @@ def list_provider_models_endpoint(
 @router.get(
     "/export",
     response_model=SettingsExportDocument,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[READ_SETTINGS_PERMISSION],
 )
 def export_settings_endpoint(session: Session = Depends(get_session)) -> SettingsExportDocument:
     return _build_settings_export_document(session)
@@ -1068,7 +1051,7 @@ def export_settings_endpoint(session: Session = Depends(get_session)) -> Setting
 @router.post(
     "/import/preview",
     response_model=SettingsImportPreviewResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[MIGRATE_SETTINGS_PERMISSION],
 )
 def preview_settings_import_endpoint(payload: Any = Body(...)) -> SettingsImportPreviewResponse:
     try:
@@ -1081,7 +1064,7 @@ def preview_settings_import_endpoint(payload: Any = Body(...)) -> SettingsImport
 @router.post(
     "/import",
     response_model=SettingsImportCommitResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[MIGRATE_SETTINGS_PERMISSION],
 )
 def import_settings_endpoint(
     payload: Any = Body(...),
@@ -1103,7 +1086,7 @@ def import_settings_endpoint(
 @router.post(
     "/provider-profiles",
     response_model=ProviderProfileResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def create_provider_profile_endpoint(
     payload: ProviderProfileCreateRequest,
@@ -1130,7 +1113,7 @@ def create_provider_profile_endpoint(
 @router.patch(
     "/provider-profiles/{profile_id}",
     response_model=ProviderProfileResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def update_provider_profile_endpoint(
     profile_id: str,
@@ -1160,7 +1143,7 @@ def update_provider_profile_endpoint(
 @router.delete(
     "/provider-profiles/{profile_id}",
     response_model=ProviderProfileResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def archive_provider_profile_endpoint(
     profile_id: str,
@@ -1177,7 +1160,7 @@ def archive_provider_profile_endpoint(
 @router.patch(
     "/provider-bindings/{purpose}",
     response_model=ProviderBindingResponse,
-    dependencies=[Depends(require_settings_unlocked)],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def update_provider_binding_endpoint(
     purpose: str,
@@ -1205,7 +1188,7 @@ def update_provider_binding_endpoint(
     return _serialize_provider_binding(binding)
 
 
-@router.get("/runtime", response_model=RuntimeConfigResponse)
+@router.get("/runtime", response_model=RuntimeConfigResponse, dependencies=[READ_GENERATION_RUNTIME_PERMISSION])
 def get_runtime_config_endpoint() -> RuntimeConfigResponse:
     settings = get_runtime_settings()
     return RuntimeConfigResponse(
@@ -1216,7 +1199,7 @@ def get_runtime_config_endpoint() -> RuntimeConfigResponse:
     )
 
 
-@router.patch("", response_model=ConfigResponse, dependencies=[Depends(require_settings_unlocked)])
+@router.patch("", response_model=ConfigResponse, dependencies=[WRITE_SETTINGS_PERMISSION])
 def update_config_endpoint(
     payload: ConfigUpdateRequest,
     session: Session = Depends(get_session),

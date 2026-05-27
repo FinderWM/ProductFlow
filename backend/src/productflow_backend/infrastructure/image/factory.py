@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from productflow_backend.infrastructure.image.base import ImageProvider
 from productflow_backend.infrastructure.image.gemini_provider import GoogleGeminiImageProvider
 from productflow_backend.infrastructure.image.images_provider import OpenAIImagesImageProvider
@@ -8,9 +10,9 @@ from productflow_backend.infrastructure.image.responses_provider import OpenAIRe
 from productflow_backend.infrastructure.provider_config import resolve_image_provider_config
 
 
-def get_image_provider(generation_config_id: str | None = None) -> ImageProvider:
+def get_image_provider(generation_config_id: str | None = None, *, session: Session | None = None) -> ImageProvider:
     """根据统一供应商用途绑定选择图片生成供应商。"""
-    provider_config = resolve_image_provider_config(generation_config_id=generation_config_id)
+    provider_config = resolve_image_provider_config(generation_config_id=generation_config_id, session=session)
     if provider_config.provider_kind == "mock":
         return MockImageProvider()
     if provider_config.provider_kind == "openai_responses":

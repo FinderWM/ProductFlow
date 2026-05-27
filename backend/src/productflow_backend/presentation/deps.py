@@ -3,7 +3,11 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from productflow_backend.application.auth import ensure_auth_bootstrapped, user_has_api_permission
+from productflow_backend.application.auth import (
+    ensure_auth_bootstrapped,
+    user_has_any_api_permission,
+    user_has_api_permission,
+)
 from productflow_backend.config import get_runtime_settings
 from productflow_backend.infrastructure.db.models import AuthUser
 from productflow_backend.infrastructure.db.session import get_db_session, get_session_factory
@@ -45,6 +49,17 @@ def require_api_permission(permission_code: str):
         factory = get_session_factory()
         with factory() as session:
             if not user_has_api_permission(session, user, permission_code):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有接口权限")
+        return user
+
+    return dependency
+
+
+def require_any_api_permission(*permission_codes: str):
+    def dependency(user: AuthUser = Depends(require_authenticated)) -> AuthUser:
+        factory = get_session_factory()
+        with factory() as session:
+            if not user_has_any_api_permission(session, user, permission_codes):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有接口权限")
         return user
 

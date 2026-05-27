@@ -5,6 +5,7 @@ import {
   Image as ImageIcon,
   ImagePlus,
   Loader2,
+  Sparkles,
 } from "lucide-react";
 
 import { formatDateTime } from "../../lib/format";
@@ -52,6 +53,7 @@ export function WorkflowNodeCard({
     reference_image: ImagePlus,
     copy_generation: FileText,
     image_generation: ImageIcon,
+    tail_splitter: Sparkles,
   }[node.node_type];
   const Icon = icon;
   const displayTitle = workflowNodeDisplayTitle(node, t);

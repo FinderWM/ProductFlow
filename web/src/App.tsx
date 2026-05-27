@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useMemo } from "react";
+import { lazy, Suspense, useEffect, useMemo, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { api } from "./lib/api";
 import { PreferencesProvider, useI18n } from "./lib/preferences";
+import { hasSessionApiPermission, hasSessionMenu } from "./lib/rbac";
 import { SessionStateProvider } from "./lib/session";
 
 const GalleryPage = lazy(() =>
@@ -41,6 +42,16 @@ const UsageStatsPage = lazy(() =>
   import("./pages/UsageStatsPage").then((module) => ({ default: module.UsageStatsPage })),
 );
 
+const menuHomeRoutes: Array<{ code: string; to: string; requiredPermission?: string }> = [
+  { code: "inspirations", to: "/products" },
+  { code: "image_chat", to: "/image-chat" },
+  { code: "gallery", to: "/gallery" },
+  { code: "status", to: "/status" },
+  { code: "usage_stats", to: "/usage-stats" },
+  { code: "settings", to: "/settings", requiredPermission: "settings:read" },
+  { code: "rbac", to: "/rbac" },
+];
+
 function LoadingScreen() {
   const { t } = useI18n();
 
@@ -59,7 +70,19 @@ function AppRoutes() {
     retry: false,
   });
 
-  const authenticated = Boolean(sessionQuery.data?.authenticated);
+  const sessionState = sessionQuery.data ?? null;
+  const authenticated = Boolean(sessionState?.authenticated);
+  const hasMenuRouteAccess = (menuCode: string): boolean => {
+    const route = menuHomeRoutes.find((item) => item.code === menuCode);
+    if (!route) {
+      return false;
+    }
+    if (route.requiredPermission) {
+      return hasSessionMenu(sessionState, menuCode) && hasSessionApiPermission(sessionState, route.requiredPermission);
+    }
+    return hasSessionMenu(sessionState, menuCode);
+  };
+  const defaultAuthenticatedPath = menuHomeRoutes.find((route) => hasMenuRouteAccess(route.code))?.to ?? "/help";
 
   useEffect(() => {
     if (!authenticated) {
@@ -73,53 +96,43 @@ function AppRoutes() {
     return <LoadingScreen />;
   }
 
+  function authenticatedRoute(element: ReactNode): ReactNode {
+    return authenticated ? element : <Navigate to="/login" replace />;
+  }
+
+  function menuRoute(menuCode: string, element: ReactNode): ReactNode {
+    if (!authenticated) {
+      return <Navigate to="/login" replace />;
+    }
+    if (!hasMenuRouteAccess(menuCode)) {
+      return <Navigate to={defaultAuthenticatedPath} replace />;
+    }
+    return element;
+  }
+
   return (
-    <SessionStateProvider value={sessionQuery.data ?? null}>
+    <SessionStateProvider value={sessionState}>
       <Suspense fallback={<LoadingScreen />}>
         <Routes>
           <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
-          <Route
-            path="/products"
-            element={authenticated ? <ProductListPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/products/new"
-            element={authenticated ? <ProductCreatePage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/image-chat"
-            element={authenticated ? <ImageChatPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/gallery"
-            element={authenticated ? <GalleryPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/help"
-            element={authenticated ? <HelpPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/settings"
-            element={authenticated ? <SettingsPage /> : <Navigate to="/login" replace />}
-          />
-          <Route path="/rbac" element={authenticated ? <RbacPage /> : <Navigate to="/login" replace />} />
-          <Route
-            path="/status"
-            element={authenticated ? <StatusPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/usage-stats"
-            element={authenticated ? <UsageStatsPage /> : <Navigate to="/login" replace />}
-          />
+          <Route path="/products" element={menuRoute("inspirations", <ProductListPage />)} />
+          <Route path="/products/new" element={menuRoute("inspirations", <ProductCreatePage />)} />
+          <Route path="/image-chat" element={menuRoute("image_chat", <ImageChatPage />)} />
+          <Route path="/gallery" element={menuRoute("gallery", <GalleryPage />)} />
+          <Route path="/help" element={authenticatedRoute(<HelpPage />)} />
+          <Route path="/settings" element={menuRoute("settings", <SettingsPage />)} />
+          <Route path="/rbac" element={menuRoute("rbac", <RbacPage />)} />
+          <Route path="/status" element={menuRoute("status", <StatusPage />)} />
+          <Route path="/usage-stats" element={menuRoute("usage_stats", <UsageStatsPage />)} />
           <Route
             path="/products/:productId/image-chat"
-            element={authenticated ? <ImageChatPage /> : <Navigate to="/login" replace />}
+            element={menuRoute("image_chat", <ImageChatPage />)}
           />
           <Route
             path="/products/:productId"
-            element={authenticated ? <ProductDetailPage /> : <Navigate to="/login" replace />}
+            element={menuRoute("inspirations", <ProductDetailPage />)}
           />
-          <Route path="*" element={<Navigate to={authenticated ? "/products" : "/login"} replace />} />
+          <Route path="*" element={<Navigate to={authenticated ? defaultAuthenticatedPath : "/login"} replace />} />
         </Routes>
       </Suspense>
     </SessionStateProvider>

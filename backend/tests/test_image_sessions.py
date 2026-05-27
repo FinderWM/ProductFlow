@@ -111,15 +111,12 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     assert second_payload["rounds"][-1]["selected_reference_asset_ids"] == []
 
 
-def test_generation_config_options_do_not_require_settings_unlock(configured_env: Path) -> None:
+def test_generation_config_options_use_runtime_rbac_without_settings_permission(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
-
-    locked_settings = client.get("/api/settings")
-    assert locked_settings.status_code == 403
 
     options = client.get("/api/settings/generation-config-options")
     assert options.status_code == 200

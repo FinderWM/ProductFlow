@@ -14,7 +14,6 @@ import {
   Pencil,
   Plus,
   Loader2,
-  LockKeyhole,
   MessageSquareText,
   RefreshCw,
   RotateCcw,
@@ -2183,7 +2182,6 @@ export function SettingsPage() {
   const [resettingKey, setResettingKey] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
-  const [unlockToken, setUnlockToken] = useState("");
   const [activeSection, setActiveSection] = useState<SettingsSectionId>("providers");
   const [sectionSearch, setSectionSearch] = useState("");
   const [providerProfileForm, setProviderProfileForm] = useState<ProviderProfileFormState>(EMPTY_PROVIDER_FORM);
@@ -2198,21 +2196,14 @@ export function SettingsPage() {
   const [importPreview, setImportPreview] = useState<SettingsImportPreviewResponse | null>(null);
   const [importFileName, setImportFileName] = useState("");
 
-  const lockStateQuery = useQuery({
-    queryKey: ["settings-lock-state"],
-    queryFn: api.getSettingsLockState,
-  });
-
   const configQuery = useQuery({
     queryKey: ["config"],
     queryFn: api.getConfig,
-    enabled: Boolean(lockStateQuery.data?.unlocked),
   });
 
   const providerConfigQuery = useQuery({
     queryKey: ["provider-config"],
     queryFn: api.getProviderConfig,
-    enabled: Boolean(lockStateQuery.data?.unlocked),
   });
 
   const resetDraftsFromConfig = useCallback((config: ConfigResponse | undefined) => {
@@ -2241,14 +2232,6 @@ export function SettingsPage() {
     }
     setGenerationConfigDrafts(nextDrafts);
   }, [providerConfigQuery.data]);
-
-  useEffect(() => {
-    if (configQuery.error instanceof ApiError && configQuery.error.status === 403) {
-      queryClient.setQueryData(["settings-lock-state"], { unlocked: false, configured: true });
-      queryClient.removeQueries({ queryKey: ["config"] });
-      queryClient.removeQueries({ queryKey: ["provider-config"] });
-    }
-  }, [configQuery.error, queryClient]);
 
   const activeMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
   const activeItems = itemsForSection(configQuery.data, activeSection);
@@ -2386,22 +2369,6 @@ export function SettingsPage() {
     },
   });
 
-  const unlockMutation = useMutation({
-    mutationFn: () => api.unlockSettings(unlockToken),
-    onSuccess: (data) => {
-      queryClient.setQueryData(["settings-lock-state"], data);
-      setUnlockToken("");
-      setError("");
-      setSavedMessage(t("settings.unlocked"));
-      void queryClient.invalidateQueries({ queryKey: ["config"] });
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
-    },
-    onError: (mutationError) => {
-      setSavedMessage("");
-      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.unlockFailed"));
-    },
-  });
-
   const createProviderProfileMutation = useMutation({
     mutationFn: () => api.createProviderProfile(providerProfileCreatePayload(providerProfileForm)),
     onSuccess: () => {
@@ -2514,7 +2481,6 @@ export function SettingsPage() {
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
     onSuccess: async () => {
-      queryClient.removeQueries({ queryKey: ["settings-lock-state"] });
       queryClient.removeQueries({ queryKey: ["config"] });
       queryClient.removeQueries({ queryKey: ["provider-config"] });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
@@ -2527,13 +2493,6 @@ export function SettingsPage() {
     setError("");
     setSavedMessage("");
     saveMutation.mutate();
-  };
-
-  const handleUnlock = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError("");
-    setSavedMessage("");
-    unlockMutation.mutate();
   };
 
   const handleImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -2554,10 +2513,8 @@ export function SettingsPage() {
     updateProviderProfileEnabledMutation.isPending;
   const providerPending = providerProfilePending || saveGenerationConfigMutation.isPending;
 
-  const isCheckingLockState = lockStateQuery.isLoading || lockStateQuery.isFetching;
   const loadingMain = configQuery.isLoading || providerConfigQuery.isLoading;
   const genericSection = ["prompts", "upload", "queue", "security"].includes(activeSection);
-  const isUnlocked = Boolean(lockStateQuery.data?.unlocked);
 
   return (
     <div className="flex min-h-screen flex-col bg-white dark:bg-[#060a12] dark:text-slate-100">
@@ -2569,87 +2526,27 @@ export function SettingsPage() {
 
       <main className="mx-auto flex w-full max-w-[1440px] flex-1">
         <div className="w-full">
-          {!lockStateQuery.data?.unlocked ? (
-            <div className="mb-6 flex flex-col gap-3 px-5 py-8 md:flex-row md:items-end md:justify-between lg:px-8 lg:py-10">
-              <div>
-                <div className="mb-2 inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
-                  <SettingsIcon size={13} className="mr-1.5" />
-                  {t("settings.runtimeConfig")}
-                </div>
-                <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-                  {t("settings.title")}
-                </h1>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.description")}</p>
+          <div className="mb-6 flex flex-col gap-3 px-5 py-8 md:flex-row md:items-end md:justify-between lg:px-8 lg:py-10">
+            <div>
+              <div className="mb-2 inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
+                <SettingsIcon size={13} className="mr-1.5" />
+                {t("settings.runtimeConfig")}
               </div>
-              <button
-                type="button"
-                onClick={() => navigate("/products")}
-                className="text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-slate-400 dark:hover:text-white"
-              >
-                {t("settings.back")}
-              </button>
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
+                {t("settings.title")}
+              </h1>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.description")}</p>
             </div>
-          ) : null}
-
-          {isCheckingLockState ? (
-            <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
-              <Loader2 size={22} className="animate-spin" />
-            </div>
-          ) : lockStateQuery.isError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {t("settings.lockLoadFailed")}
-            </div>
-          ) : !lockStateQuery.data?.configured ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
-              {t("settings.tokenMissing")}
-            </div>
-          ) : !lockStateQuery.data.unlocked ? (
-            <form
-              onSubmit={handleUnlock}
-              className="mx-auto max-w-xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-[#0f1726]"
+            <button
+              type="button"
+              onClick={() => navigate("/products")}
+              className="text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-slate-400 dark:hover:text-white"
             >
-              <div className="mb-5 flex items-start gap-3">
-                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-100">
-                  <LockKeyhole size={18} />
-                </span>
-                <div>
-                  <h2 className="text-base font-semibold text-slate-950 dark:text-white">
-                    {t("settings.unlockTitle")}
-                  </h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-                    {t("settings.unlockDescription")}
-                  </p>
-                </div>
-              </div>
-              <input
-                type="password"
-                value={unlockToken}
-                onChange={(event) => setUnlockToken(event.target.value)}
-                className={INPUT_CLASS}
-                placeholder={t("settings.unlockPlaceholder")}
-                autoComplete="current-password"
-              />
-              {error ? (
-                <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
-              <div className="mt-5 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={unlockMutation.isPending || !unlockToken.trim()}
-                  className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 dark:bg-violet-500"
-                >
-                  {unlockMutation.isPending ? (
-                    <Loader2 size={14} className="mr-2 animate-spin" />
-                  ) : (
-                    <LockKeyhole size={14} className="mr-2" />
-                  )}
-                  {t("settings.unlock")}
-                </button>
-              </div>
-            </form>
-          ) : loadingMain ? (
+              {t("settings.back")}
+            </button>
+          </div>
+
+          {loadingMain ? (
             <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
               <Loader2 size={22} className="animate-spin" />
             </div>
@@ -2960,17 +2857,6 @@ export function SettingsPage() {
             </div>
           )}
 
-          {!isUnlocked && error ? (
-            <div className="mx-8 mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-              {error}
-            </div>
-          ) : null}
-          {!isUnlocked && savedMessage ? (
-            <div className="mx-8 mt-5 flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
-              <CheckCircle2 size={16} className="mr-2" />
-              {savedMessage}
-            </div>
-          ) : null}
         </div>
         <ConfirmDialog
           open={exportConfirmOpen}

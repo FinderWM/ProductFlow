@@ -50,16 +50,17 @@ router = APIRouter(
 @router.post("/products", response_model=ProductDetailResponse, status_code=status.HTTP_201_CREATED)
 async def create_product_endpoint(
     name: str = Form(...),
-    image: UploadFile = File(...),
+    image: UploadFile | None = File(default=None),
     reference_images: list[UploadFile] | None = File(default=None),
     category: str | None = Form(default=None),
     price: str | None = Form(default=None),
     source_note: str | None = Form(default=None),
     canvas_template_key: str | None = Form(default=None),
+    initial_workflow_entry: str | None = Form(default=None),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
 ) -> ProductDetailResponse:
-    main_image = await read_validated_image_upload(image, fallback_filename="upload.bin")
+    main_image = await read_validated_image_upload(image, fallback_filename="upload.bin") if image is not None else None
     reference_payloads: list[tuple[bytes, str, str]] = []
     validate_reference_image_count(len(reference_images or []))
     for reference_image in reference_images or []:
@@ -77,11 +78,12 @@ async def create_product_endpoint(
         category=category,
         price=price,
         source_note=source_note,
-        image_bytes=main_image.content,
-        filename=main_image.filename,
-        content_type=main_image.mime_type,
+        image_bytes=main_image.content if main_image is not None else None,
+        filename=main_image.filename if main_image is not None else None,
+        content_type=main_image.mime_type if main_image is not None else None,
         reference_image_uploads=reference_payloads,
         canvas_template_key=canvas_template_key,
+        initial_workflow_entry=initial_workflow_entry,
         owner_user_id=current_user.id,
     )
     return serialize_product_detail(product)

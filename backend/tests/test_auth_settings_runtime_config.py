@@ -7,10 +7,7 @@ from pathlib import Path
 import itsdangerous.timed
 import pytest
 from fastapi.testclient import TestClient
-from helpers import (
-    _login,
-    _unlock_settings,
-)
+from helpers import _login
 from sqlalchemy import select
 
 from productflow_backend.config import (
@@ -102,7 +99,6 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
     app = create_app()
     admin_client = TestClient(app)
     _login(admin_client)
-    _unlock_settings(admin_client)
 
     disabled = admin_client.patch("/api/settings", json={"values": {"admin_access_required": False}})
     assert disabled.status_code == 200
@@ -135,47 +131,35 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
     assert required_session.json()["access_required"] is True
 
 
-def test_settings_api_requires_secondary_unlock(configured_env: Path) -> None:
+def test_settings_api_uses_rbac_without_extra_unlock(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
 
-    locked_state = client.get("/api/settings/lock-state")
-    assert locked_state.status_code == 200
-    assert locked_state.json() == {"unlocked": False, "configured": True}
-
-    locked_config = client.get("/api/settings")
-    assert locked_config.status_code == 403
-    assert locked_config.json()["detail"] == "请先解锁系统配置"
-
-    wrong = client.post("/api/settings/unlock", json={"token": "wrong-token"})
-    assert wrong.status_code == 401
-    assert wrong.json()["detail"] == "设置解锁令牌不正确"
-
-    _unlock_settings(client)
-    unlocked_state = client.get("/api/settings/lock-state")
-    assert unlocked_state.status_code == 200
-    assert unlocked_state.json() == {"unlocked": True, "configured": True}
-
     config = client.get("/api/settings")
     assert config.status_code == 200
     payload = config.json()
-    assert "super-secret-settings-token" not in str(payload)
     assert "super-secret-admin-key" not in str(payload)
 
-    _login(client)
-    relogin_state = client.get("/api/settings/lock-state")
-    assert relogin_state.status_code == 200
-    assert relogin_state.json() == {"unlocked": False, "configured": True}
+    relogin = client.post(
+        "/api/auth/login",
+        json={
+            "username": "libow",
+            "client_password_md5": hashlib.md5(b"super-secret-admin-key", usedforsecurity=False).hexdigest(),
+        },
+    )
+    assert relogin.status_code == 200
+
+    relogin_config = client.get("/api/settings")
+    assert relogin_config.status_code == 200
 
 
 def test_runtime_config_registry_excludes_env_only_settings(configured_env: Path) -> None:
     assert RUNTIME_CONFIG_KEYS == set(CONFIG_DEFINITION_BY_KEY)
     assert {
         "admin_access_key",
-        "settings_access_token",
         "session_secret",
         "database_url",
         "redis_url",
@@ -186,7 +170,6 @@ def test_runtime_config_ignores_database_rows_for_env_only_settings(configured_e
     session = get_session_factory()()
     try:
         session.add(AppSetting(key="admin_access_key", value="database-admin-key"))
-        session.add(AppSetting(key="settings_access_token", value="database-settings-token"))
         session.add(AppSetting(key="session_secret", value="database-session-secret-123"))
         session.add(AppSetting(key="database_url", value="sqlite:///database-override.db"))
         session.add(AppSetting(key="redis_url", value="redis://database-override:6379/0"))
@@ -196,33 +179,22 @@ def test_runtime_config_ignores_database_rows_for_env_only_settings(configured_e
 
     settings = get_runtime_settings()
     assert settings.admin_access_key == "super-secret-admin-key"
-    assert settings.settings_access_token == "super-secret-settings-token"
     assert settings.session_secret == "super-secret-session-key-123"
     assert settings.database_url != "sqlite:///database-override.db"
     assert settings.redis_url == "redis://localhost:6379/9"
 
 
-def test_settings_unlock_does_not_bypass_missing_token_after_env_change(
+def test_settings_api_has_no_extra_unlock_dependency(
     configured_env: Path,
-    monkeypatch,
 ) -> None:
     from productflow_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
-
-    monkeypatch.setenv("SETTINGS_ACCESS_TOKEN", "")
-    get_settings.cache_clear()
-
-    lock_state = client.get("/api/settings/lock-state")
-    assert lock_state.status_code == 200
-    assert lock_state.json() == {"unlocked": False, "configured": False}
 
     config = client.get("/api/settings")
-    assert config.status_code == 503
-    assert config.json()["detail"] == "设置解锁令牌未配置，请联系管理员"
+    assert config.status_code == 200
 
 
 def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
@@ -231,7 +203,6 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     initial = client.get("/api/settings")
     assert initial.status_code == 200
@@ -316,7 +287,6 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     updated = client.patch(
         "/api/settings",
@@ -362,7 +332,6 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
     assert set(RUNTIME_CONFIG_KEYS).issubset(payload["runtime_config"])
     assert {
         "admin_access_key",
-        "settings_access_token",
         "session_secret",
         "database_url",
         "redis_url",
@@ -370,7 +339,6 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
         "app_port",
         "storage_root",
     }.isdisjoint(payload["runtime_config"])
-    assert "super-secret-settings-token" not in str(payload)
     assert "super-secret-admin-key" not in str(payload)
     assert "super-secret-session-key-123" not in str(payload)
     assert "sqlite:///" not in str(payload)
@@ -391,7 +359,6 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     exported = client.get("/api/settings/export")
     assert exported.status_code == 200
@@ -509,7 +476,6 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     exported = client.get("/api/settings/export")
     assert exported.status_code == 200
@@ -617,7 +583,6 @@ def test_provider_bootstrap_merges_matching_legacy_text_and_image_config(configu
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     response = client.get("/api/settings/provider-config")
     assert response.status_code == 200
@@ -681,7 +646,6 @@ def test_provider_bootstrap_splits_different_legacy_connections(configured_env: 
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     response = client.get("/api/settings/provider-config")
     assert response.status_code == 200
@@ -701,7 +665,6 @@ def test_generation_config_status_filters_date_range_and_splits_purpose_stats(co
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     provider_config = client.get("/api/settings/provider-config")
     assert provider_config.status_code == 200
@@ -778,7 +741,6 @@ def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bin
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     initial = client.get("/api/settings/provider-config")
     assert initial.status_code == 200
@@ -959,7 +921,6 @@ def test_real_image_binding_switches_visible_poster_mode_to_generated(configured
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     initial_config = client.get("/api/settings")
     assert initial_config.status_code == 200
@@ -1016,7 +977,6 @@ def test_provider_config_supports_google_gemini_profiles_bindings_and_import(con
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     created = client.post(
         "/api/settings/provider-profiles",
@@ -1124,7 +1084,6 @@ def test_provider_model_list_endpoint_fetches_openai_compatible_models(
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     created = client.post(
         "/api/settings/provider-profiles",
@@ -1190,7 +1149,6 @@ def test_provider_model_list_endpoint_validates_profile_and_maps_provider_failur
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     missing_key = client.post(
         "/api/settings/provider-profiles",
@@ -1400,7 +1358,6 @@ def test_settings_api_accepts_and_validates_optional_image_tool_fields(configure
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     initial = client.get("/api/settings")
     assert initial.status_code == 200
@@ -1484,7 +1441,6 @@ def test_prompt_settings_api_accepts_rejects_and_resets(configured_env: Path) ->
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     initial = client.get("/api/settings")
     assert initial.status_code == 200
@@ -1523,7 +1479,6 @@ def test_settings_api_rejects_invalid_effective_config(configured_env: Path) -> 
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     response = client.patch(
         "/api/settings",
@@ -1539,7 +1494,6 @@ def test_settings_api_rejects_malformed_image_sizes_before_persist(configured_en
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     response = client.patch(
         "/api/settings",
@@ -1567,7 +1521,6 @@ def test_settings_api_normalizes_custom_image_sizes_for_generation(configured_en
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     updated = client.patch(
         "/api/settings",
@@ -1612,7 +1565,6 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
     app = create_app()
     client = TestClient(app)
     _login(client)
-    _unlock_settings(client)
 
     runtime = client.get("/api/settings/runtime")
     assert runtime.status_code == 200

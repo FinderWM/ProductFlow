@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.product_workflows import (
+    apply_tail_split_plan,
     apply_node_group_template_to_workflow,
     archive_canvas_template_category,
     archive_global_canvas_template,
@@ -53,6 +54,7 @@ from productflow_backend.infrastructure.db.models import (
 )
 from productflow_backend.presentation.deps import get_session, require_api_permission
 from productflow_backend.presentation.schemas.product_workflows import (
+    ApplyTailSplitPlanRequest,
     ApplyWorkflowTemplateGroupRequest,
     BindWorkflowNodeImageRequest,
     CanvasTemplateCategoryListResponse,
@@ -610,6 +612,25 @@ def update_workflow_copy_set_endpoint(
         session,
         node_id=node_id,
         structured_payload=payload.structured_payload,
+    )
+    return serialize_product_workflow(workflow)
+
+
+@router.post("/workflow-nodes/{node_id}/tail-split-plan/apply", response_model=ProductWorkflowResponse)
+def apply_tail_split_plan_endpoint(
+    node_id: str,
+    payload: ApplyTailSplitPlanRequest,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
+) -> ProductWorkflowResponse:
+    _ensure_node_access(session, node_id, current_user, mutate=True)
+    workflow = apply_tail_split_plan(
+        session,
+        node_id=node_id,
+        plan_id=payload.plan_id,
+        item_ids=payload.item_ids,
+        position_x=payload.position_x,
+        position_y=payload.position_y,
     )
     return serialize_product_workflow(workflow)
 

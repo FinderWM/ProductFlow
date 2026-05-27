@@ -28,7 +28,8 @@
 ### 3. Contracts
 
 - Frontend keeps backend `snake_case` fields (`node_type`, `config_json`, `output_json`, `start_node_id`).
-- Supported user-facing node types are `product_context`, `reference_image`, `copy_generation`, and `image_generation`.
+- Supported user-facing node types are `product_context`, `reference_image`, `copy_generation`, `image_generation`, and
+  `tail_splitter`.
 - Product detail/workbench is canvas-first: product context, reference slots, copy, and image generation are graph nodes,
   not permanent fixed columns.
 - ProductDetail workbench uses ReactFlow / `@xyflow/react` as the frontend graph renderer and pointer interaction layer.
@@ -600,6 +601,73 @@ const structureBusy = layoutMutationBusy || workflowActive;
 
 Use persisted workflow activity to control polling and unsafe structural mutations. Use node status plus submission
 pending state for individual node run actions, while keeping layout dragging independent from provider execution.
+
+## Scenario: Tail splitter node and split-plan apply UX
+
+### 1. Scope / Trigger
+- Trigger: ProductDetail changes that introduce `tail_splitter` nodes, tail split-plan preview/apply flows, or tail-batch
+  rerun actions.
+
+### 2. Signatures
+- `WorkflowNode.node_type` includes `tail_splitter`.
+- API contracts:
+  - `api.runProductWorkflow(productId, { start_node_id? })`
+  - `api.applyTailSplitPlan(nodeId, { plan_id, item_ids, position_x?, position_y? })`
+- Tail node data:
+  - `config_json` carries editable split input fields (for example source text/description/max items).
+  - `output_json.latest_plan` carries pending/applied split-plan payload.
+
+### 3. Contracts
+- ProductDetail must expose tail nodes as first-class ordinary nodes in add-node, node labels, iconography, and inspector.
+- Running a tail node should produce a pending split plan that is visible and reviewable before graph expansion.
+- The split-plan dialog shows plan items with remove-selection controls; confirm applies only remaining items, cancel keeps
+  the graph unchanged.
+- Tail apply mutation invalidates/refreshes `["product-workflow", productId]` and selects a sensible post-apply focus
+  (applied tail node or newly generated branch anchor) without losing page context.
+- Manual tail apply path must not auto-apply all items when the dialog has explicit item removals.
+- UI must keep two rerun intents distinct:
+  - re-split tail branch (destructive to prior generated tail batch);
+  - rerun current tail batch image outputs (non-destructive to edited public nodes).
+- Workflow run and tail apply permission failures surface backend `ApiError.detail` clearly (for example `没有接口权限`)
+  near the action that failed.
+
+### 4. Validation & Error Matrix
+- Tail apply called with stale/non-pending plan -> show backend detail and keep dialog open for user correction/refresh.
+- Tail apply called with zero selected items -> prevent submit locally or show backend validation detail.
+- User lacks `inspirations:write` -> tail apply returns `403`; ProductDetail shows permission error without clearing current
+  tail plan view.
+- User lacks `inspirations:generate` -> run action returns `403`; ProductDetail shows permission error on run controls.
+
+### 5. Good/Base/Bad Cases
+- Good: user runs tail, deselects one plan item in dialog, confirms, and only selected image branches are created.
+- Good: user edits generated public copy node then chooses current-batch rerun and keeps public-node edits.
+- Base: user cancels dialog and the workflow graph remains unchanged.
+- Bad: opening tail plan dialog immediately creates nodes before confirmation.
+- Bad: using one generic rerun action that silently re-splits and discards edited public nodes.
+
+### 6. Tests Required
+- `defaultConfigForType("tail_splitter")` and node label/icon/display contract tests.
+- ProductDetail tests for pending-plan dialog open/cancel/confirm and selected-item payload.
+- API contract test for `applyTailSplitPlan` request shape.
+- Build gate: `just web-build`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```tsx
+onTailRunSuccess(() => applyTailSplitPlan(nodeId, { plan_id, item_ids: allItemIds }));
+```
+
+This removes user confirmation and item filtering.
+
+#### Correct
+
+```tsx
+onTailRunSuccess(() => setTailPlanDialogOpen(true));
+```
+
+Tail run exposes a pending plan first; apply happens only after explicit dialog confirmation.
 
 ## Scenario: Autosaved direct image workbench
 

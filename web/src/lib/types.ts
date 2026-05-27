@@ -9,7 +9,10 @@ export type WorkflowNodeType =
   | "product_context"
   | "reference_image"
   | "copy_generation"
-  | "image_generation";
+  | "image_generation"
+  | "tail_splitter";
+export type CanvasTemplateWorkflowNodeType = Exclude<WorkflowNodeType, "tail_splitter">;
+export type ProductInitialWorkflowEntry = "image" | "copy" | "tail";
 export type WorkflowNodeStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type WorkflowNodeRunStatusValue = WorkflowNodeStatus;
 export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "cancelled";
@@ -89,6 +92,33 @@ export interface RbacRole {
   name: string;
   is_admin: boolean;
   archived_at?: string | null;
+}
+
+export interface RbacMenuPermission {
+  code: string;
+  title: string;
+  sort_order: number;
+  enabled: boolean;
+}
+
+export interface RbacApiPermission {
+  code: string;
+  menu_code: string;
+  title: string;
+  description: string;
+  sort_order: number;
+  enabled: boolean;
+}
+
+export interface RbacPermissionCatalog {
+  menus: RbacMenuPermission[];
+  api_permissions: RbacApiPermission[];
+}
+
+export interface RbacRolePermissions {
+  role_id: string;
+  menu_codes: string[];
+  api_permission_codes: string[];
 }
 
 export interface CreateTrustedUserRequest {
@@ -253,8 +283,42 @@ export interface CreateProductInput {
   price?: string;
   source_note?: string;
   canvas_template_key?: string;
-  file: File;
+  initial_workflow_entry?: ProductInitialWorkflowEntry;
+  file?: File;
   referenceFiles?: File[];
+}
+
+export interface TailSplitPlanItem {
+  id: string;
+  order: number;
+  title: string;
+  instruction: string;
+  visual_intent: string;
+  source_refs: string[];
+}
+
+export interface TailSplitPlan {
+  version: 1;
+  plan_id: string;
+  status: "pending" | "applied";
+  source_summary: string;
+  items: TailSplitPlanItem[];
+  created_at: string;
+}
+
+export interface TailAppliedBatch {
+  batch_id: string;
+  plan_id: string;
+  item_ids: string[];
+  node_ids: string[];
+  created_at: string;
+}
+
+export interface TailSplitterOutput {
+  summary: string;
+  latest_plan: TailSplitPlan | null;
+  applied_batches: TailAppliedBatch[];
+  [key: string]: unknown;
 }
 
 export interface WorkflowNode {
@@ -424,7 +488,7 @@ export interface CanvasTemplateDefaultExternalConnection {
 
 export interface CanvasTemplatePreviewNode {
   key: string;
-  node_type: WorkflowNodeType;
+  node_type: CanvasTemplateWorkflowNodeType;
   title: string;
   position_x: number;
   position_y: number;
@@ -488,6 +552,13 @@ export interface ApplyWorkflowTemplateGroupInput {
   template_key: string;
   position_x: number;
   position_y: number;
+}
+
+export interface ApplyTailSplitPlanInput {
+  plan_id: string;
+  item_ids: string[];
+  position_x?: number;
+  position_y?: number;
 }
 
 export interface CreateUserTemplateGroupInput {
@@ -718,11 +789,6 @@ export interface GenerationQueueOverview {
 export interface ConfigUpdateRequest {
   values?: Record<string, string | number | boolean | string[] | null>;
   reset_keys?: string[];
-}
-
-export interface SettingsLockState {
-  unlocked: boolean;
-  configured: boolean;
 }
 
 export type ProviderCapability = "text_responses" | "image_responses" | "image_images" | "image_google_gemini";

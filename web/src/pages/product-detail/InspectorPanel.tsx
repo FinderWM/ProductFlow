@@ -10,10 +10,10 @@ import {
   OctagonX,
   Play,
   Plus,
-  Sparkles,
   Trash2,
   Upload,
   XCircle,
+  Sparkles,
 } from "lucide-react";
 
 import { ImageDropZone } from "../../components/ImageDropZone";
@@ -146,6 +146,7 @@ export function InspectorPanel({
     reference_image: ImagePlus,
     copy_generation: FileText,
     image_generation: ImageIcon,
+    tail_splitter: Sparkles,
   }[node.node_type];
   const InspectorIcon = icon;
   const displayTitle = workflowNodeDisplayTitle({ ...node, title: draft.title || node.title }, t);
@@ -329,6 +330,8 @@ export function InspectorPanel({
               ? t("detail.inspector.description.referenceImage")
               : node.node_type === "copy_generation"
                 ? t("detail.inspector.description.copyGeneration")
+                : node.node_type === "tail_splitter"
+                  ? t("detail.inspector.description.tailSplitter")
                 : t("detail.inspector.description.productContext")}
         </div>
 
@@ -356,6 +359,14 @@ export function InspectorPanel({
         {node.node_type === "copy_generation" ? (
           <CopyNodeInspector
             node={node}
+            draft={draft}
+            generationConfigs={generationConfigs.filter((config) => config.purpose === "text")}
+            onDraftChange={onDraftChange}
+            t={t}
+          />
+        ) : null}
+        {node.node_type === "tail_splitter" ? (
+          <TailSplitterInspector
             draft={draft}
             generationConfigs={generationConfigs.filter((config) => config.purpose === "text")}
             onDraftChange={onDraftChange}
@@ -732,6 +743,57 @@ function CopyNodeInspector({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function TailSplitterInspector({
+  draft,
+  generationConfigs,
+  onDraftChange,
+  t,
+}: {
+  draft: NodeConfigDraft;
+  generationConfigs: GenerationConfigOption[];
+  onDraftChange: (draft: NodeConfigDraft) => void;
+  t: TFunction;
+}) {
+  return (
+    <div className="space-y-3">
+      <TextArea
+        label={t("detail.inspector.tailSourceText")}
+        value={draft.sourceNote}
+        onChange={(sourceNote) => onDraftChange({ ...draft, sourceNote })}
+        minRows={4}
+        maxRows={14}
+      />
+      <TextArea
+        label={t("detail.inspector.tailDescription")}
+        value={draft.instruction}
+        onChange={(instruction) => onDraftChange({ ...draft, instruction })}
+        minRows={2}
+        maxRows={10}
+      />
+      <label className="block">
+        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+          {t("detail.inspector.tailMaxItems")}
+        </span>
+        <input
+          type="number"
+          min={1}
+          max={12}
+          value={draft.channel}
+          onChange={(event) => onDraftChange({ ...draft, channel: event.target.value })}
+          className="w-full px-3 py-2 text-xs outline-none input-premium"
+        />
+      </label>
+      <GenerationConfigSelector
+        label={t("detail.inspector.textGenerationConfig")}
+        draft={draft}
+        generationConfigs={generationConfigs}
+        onDraftChange={onDraftChange}
+        t={t}
+      />
     </div>
   );
 }

@@ -2,6 +2,8 @@ import { DEFAULT_LOCALE, translate, type TranslationKey, type TranslationParams 
 import type {
   ProductWorkflow,
   ProductWorkflowStatus,
+  TailSplitPlan,
+  TailSplitterOutput,
   WorkflowNode,
   WorkflowNodeRun,
   WorkflowRetryHint,
@@ -74,6 +76,31 @@ export function outputStringArray(node: WorkflowNode, key: string): string[] {
     return value.filter((item): item is string => typeof item === "string");
   }
   return [];
+}
+
+export function tailSplitterOutput(node: WorkflowNode | null): TailSplitterOutput | null {
+  if (!node || node.node_type !== "tail_splitter" || !node.output_json || typeof node.output_json !== "object") {
+    return null;
+  }
+  const summary = typeof node.output_json.summary === "string" ? node.output_json.summary : "";
+  const latestPlanRaw = node.output_json.latest_plan;
+  const latestPlan = latestPlanRaw && typeof latestPlanRaw === "object" ? (latestPlanRaw as TailSplitPlan) : null;
+  const appliedRaw = node.output_json.applied_batches;
+  const applied_batches = Array.isArray(appliedRaw) ? appliedRaw : [];
+  return {
+    ...(node.output_json as TailSplitterOutput),
+    summary,
+    latest_plan: latestPlan,
+    applied_batches,
+  };
+}
+
+export function pendingTailSplitPlan(node: WorkflowNode | null): TailSplitPlan | null {
+  const output = tailSplitterOutput(node);
+  if (!output?.latest_plan || output.latest_plan.status !== "pending") {
+    return null;
+  }
+  return output.latest_plan;
 }
 
 export function configString(
