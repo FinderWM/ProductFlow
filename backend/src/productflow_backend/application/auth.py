@@ -1,0 +1,441 @@
+from __future__ import annotations
+
+import hashlib
+import re
+import secrets
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from sqlalchemy import inspect, select
+from sqlalchemy.orm import Session
+
+from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
+from productflow_backend.domain.rbac import (
+    ADMIN_ROLE_CODE,
+    ADMIN_USER_ID,
+    ADMIN_USERNAME,
+    API_PERMISSION_DEFINITIONS,
+    DEFAULT_ROLE_API_PERMISSION_CODES,
+    DEFAULT_ROLE_CODE,
+    DEFAULT_ROLE_MENU_CODES,
+    MENU_DEFINITIONS,
+)
+from productflow_backend.infrastructure.db.models import (
+    AuthRole,
+    AuthUser,
+    RbacApiPermission,
+    RbacMenu,
+    RoleApiPermission,
+    RoleMenuPermission,
+    utcnow,
+)
+from productflow_backend.infrastructure.db.session import get_engine, get_session_factory
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+CLIENT_PASSWORD_MD5_RE = re.compile(r"^[0-9a-f]{32}$")
+SESSION_USER_KEYS = ("user_id", "username", "role_id", "is_admin")
+
+
+@dataclass(frozen=True, slots=True)
+class UserPermissionState:
+    menus: list[RbacMenu]
+    api_permission_codes: list[str]
+
+
+def normalize_username(username: str) -> str:
+    normalized = username.strip()
+    if not normalized:
+        raise BusinessValidationError("账号不能为空")
+    if len(normalized) > 80:
+        raise BusinessValidationError("账号不能超过 80 个字符")
+    return normalized
+
+
+def normalize_client_password_md5(client_password_md5: str) -> str:
+    normalized = client_password_md5.strip().lower()
+    if not CLIENT_PASSWORD_MD5_RE.fullmatch(normalized):
+        raise BusinessValidationError("密码摘要格式不正确")
+    return normalized
+
+
+def password_hash(client_password_md5: str, salt: str) -> str:
+    normalized = normalize_client_password_md5(client_password_md5)
+    return hashlib.md5(f"{normalized}:{salt}".encode(), usedforsecurity=False).hexdigest()
+
+
+def auth_tables_available() -> bool:
+    inspector = inspect(get_engine())
+    return all(inspector.has_table(table_name) for table_name in ("auth_users", "auth_roles", "rbac_menus"))
+
+
+def ensure_auth_bootstrapped(session: Session | None = None) -> None:
+    if session is None:
+        factory = get_session_factory()
+        with factory() as owned_session:
+            ensure_auth_bootstrapped(owned_session)
+        return
+
+    admin_role = _ensure_role(session, code=ADMIN_ROLE_CODE, name="管理员", is_admin=True)
+    default_role = _ensure_role(session, code=DEFAULT_ROLE_CODE, name="普通用户", is_admin=False)
+    _ensure_admin_user(session, admin_role)
+    _ensure_registry(session)
+    _ensure_default_role_permissions(session, default_role)
+    session.commit()
+
+
+def set_initial_password(session: Session, *, username: str, client_password_md5: str) -> AuthUser:
+    ensure_auth_bootstrapped(session)
+    user = get_user_by_username(session, username)
+    if user is None:
+        raise NotFoundError("账号不存在")
+    if not user.enabled or user.archived_at is not None:
+        raise BusinessValidationError("账号不可用")
+    if user.password_hash or user.password_salt:
+        raise BusinessValidationError("该账号已设置密码")
+
+    salt = secrets.token_hex(16)
+    user.password_salt = salt
+    user.password_hash = password_hash(client_password_md5, salt)
+    user.updated_at = utcnow()
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def authenticate_user(session: Session, *, username: str, client_password_md5: str) -> AuthUser | None:
+    ensure_auth_bootstrapped(session)
+    user = get_user_by_username(session, username)
+    if user is None or not user.enabled or user.archived_at is not None:
+        return None
+    if not user.password_hash or not user.password_salt:
+        return None
+    if secrets.compare_digest(user.password_hash, password_hash(client_password_md5, user.password_salt)):
+        return user
+    return None
+
+
+def get_user_by_username(session: Session, username: str) -> AuthUser | None:
+    normalized = normalize_username(username)
+    return session.scalar(select(AuthUser).where(AuthUser.username == normalized))
+
+
+def get_user_permission_state(session: Session, user: AuthUser) -> UserPermissionState:
+    ensure_auth_bootstrapped(session)
+    if user.is_admin:
+        menus = list(
+            session.scalars(select(RbacMenu).where(RbacMenu.enabled.is_(True)).order_by(RbacMenu.sort_order))
+        )
+        api_permission_codes = list(
+            session.scalars(
+                select(RbacApiPermission.code)
+                .where(RbacApiPermission.enabled.is_(True))
+                .order_by(RbacApiPermission.menu_code, RbacApiPermission.sort_order)
+            )
+        )
+        return UserPermissionState(menus=menus, api_permission_codes=api_permission_codes)
+
+    menus = list(
+        session.scalars(
+            select(RbacMenu)
+            .join(RoleMenuPermission, RoleMenuPermission.menu_code == RbacMenu.code)
+            .where(RoleMenuPermission.role_id == user.role_id, RbacMenu.enabled.is_(True))
+            .order_by(RbacMenu.sort_order)
+        )
+    )
+    api_permission_codes = list(
+        session.scalars(
+            select(RbacApiPermission.code)
+            .join(RoleApiPermission, RoleApiPermission.permission_code == RbacApiPermission.code)
+            .where(RoleApiPermission.role_id == user.role_id, RbacApiPermission.enabled.is_(True))
+            .order_by(RbacApiPermission.menu_code, RbacApiPermission.sort_order)
+        )
+    )
+    return UserPermissionState(menus=menus, api_permission_codes=api_permission_codes)
+
+
+def user_has_api_permission(session: Session, user: AuthUser, permission_code: str) -> bool:
+    if user.is_admin:
+        return True
+    return (
+        session.scalar(
+            select(RoleApiPermission.role_id)
+            .join(RbacApiPermission, RbacApiPermission.code == RoleApiPermission.permission_code)
+            .where(
+                RoleApiPermission.role_id == user.role_id,
+                RoleApiPermission.permission_code == permission_code,
+                RbacApiPermission.enabled.is_(True),
+            )
+        )
+        is not None
+    )
+
+
+def create_trusted_user(
+    session: Session,
+    *,
+    username: str,
+    display_name: str | None = None,
+    role_id: str | None = None,
+) -> AuthUser:
+    ensure_auth_bootstrapped(session)
+    normalized_username = normalize_username(username)
+    if get_user_by_username(session, normalized_username) is not None:
+        raise BusinessValidationError("账号已存在")
+    role = _get_role_or_default(session, role_id)
+    if role.is_admin:
+        raise BusinessValidationError("不能创建第二个管理员")
+    user = AuthUser(
+        username=normalized_username,
+        display_name=(display_name or normalized_username).strip() or normalized_username,
+        role_id=role.id,
+        is_admin=False,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def reset_user_password(session: Session, *, user_id: str, actor: AuthUser) -> AuthUser:
+    ensure_auth_bootstrapped(session)
+    user = _get_user_or_raise(session, user_id)
+    if user.is_admin:
+        raise BusinessValidationError("管理员密码重置请直接通过数据库处理")
+    if user.id == actor.id:
+        raise BusinessValidationError("不能重置自己的密码")
+    user.password_hash = None
+    user.password_salt = None
+    user.updated_at = utcnow()
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def set_user_enabled(session: Session, *, user_id: str, enabled: bool) -> AuthUser:
+    ensure_auth_bootstrapped(session)
+    user = _get_user_or_raise(session, user_id)
+    if user.is_admin and not enabled:
+        raise BusinessValidationError("不能禁用管理员")
+    user.enabled = enabled
+    user.updated_at = utcnow()
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def list_users(session: Session) -> list[AuthUser]:
+    ensure_auth_bootstrapped(session)
+    return list(session.scalars(select(AuthUser).order_by(AuthUser.is_admin.desc(), AuthUser.created_at)))
+
+
+def list_roles(session: Session) -> list[AuthRole]:
+    ensure_auth_bootstrapped(session)
+    return list(session.scalars(select(AuthRole).where(AuthRole.archived_at.is_(None)).order_by(AuthRole.created_at)))
+
+
+def create_role(session: Session, *, code: str, name: str) -> AuthRole:
+    ensure_auth_bootstrapped(session)
+    normalized_code = _normalize_role_code(code)
+    if session.scalar(select(AuthRole).where(AuthRole.code == normalized_code)) is not None:
+        raise BusinessValidationError("角色编码已存在")
+    role = AuthRole(code=normalized_code, name=_normalize_role_name(name), is_admin=False)
+    session.add(role)
+    session.commit()
+    session.refresh(role)
+    return role
+
+
+def update_role(session: Session, *, role_id: str, name: str) -> AuthRole:
+    ensure_auth_bootstrapped(session)
+    role = _get_role_or_raise(session, role_id)
+    if role.is_admin:
+        raise BusinessValidationError("管理员角色不可编辑")
+    role.name = _normalize_role_name(name)
+    role.updated_at = utcnow()
+    session.commit()
+    session.refresh(role)
+    return role
+
+
+def archive_role(session: Session, *, role_id: str) -> AuthRole:
+    ensure_auth_bootstrapped(session)
+    role = _get_role_or_raise(session, role_id)
+    if role.is_admin:
+        raise BusinessValidationError("管理员角色不可删除")
+    assigned_user = session.scalar(
+        select(AuthUser.id).where(AuthUser.role_id == role.id, AuthUser.archived_at.is_(None))
+    )
+    if assigned_user is not None:
+        raise BusinessValidationError("角色仍有用户使用")
+    role.archived_at = utcnow()
+    role.updated_at = utcnow()
+    session.commit()
+    session.refresh(role)
+    return role
+
+
+def get_role_permissions(session: Session, *, role_id: str) -> tuple[list[str], list[str]]:
+    ensure_auth_bootstrapped(session)
+    role = _get_role_or_raise(session, role_id)
+    if role.is_admin:
+        return (
+            [definition.code for definition in MENU_DEFINITIONS],
+            [definition.code for definition in API_PERMISSION_DEFINITIONS],
+        )
+    menu_codes = list(
+        session.scalars(select(RoleMenuPermission.menu_code).where(RoleMenuPermission.role_id == role.id))
+    )
+    api_permission_codes = list(
+        session.scalars(select(RoleApiPermission.permission_code).where(RoleApiPermission.role_id == role.id))
+    )
+    return menu_codes, api_permission_codes
+
+
+def replace_role_permissions(
+    session: Session,
+    *,
+    role_id: str,
+    menu_codes: Iterable[str],
+    api_permission_codes: Iterable[str],
+) -> tuple[list[str], list[str]]:
+    ensure_auth_bootstrapped(session)
+    role = _get_role_or_raise(session, role_id)
+    if role.is_admin:
+        raise BusinessValidationError("管理员角色不可编辑权限")
+    valid_menu_codes = {definition.code for definition in MENU_DEFINITIONS}
+    valid_api_codes = {definition.code for definition in API_PERMISSION_DEFINITIONS}
+    next_menu_codes = sorted(set(menu_codes) & valid_menu_codes)
+    next_api_codes = sorted(set(api_permission_codes) & valid_api_codes)
+
+    session.query(RoleMenuPermission).filter(RoleMenuPermission.role_id == role.id).delete()
+    session.query(RoleApiPermission).filter(RoleApiPermission.role_id == role.id).delete()
+    session.add_all(RoleMenuPermission(role_id=role.id, menu_code=code) for code in next_menu_codes)
+    session.add_all(RoleApiPermission(role_id=role.id, permission_code=code) for code in next_api_codes)
+    session.commit()
+    return next_menu_codes, next_api_codes
+
+
+def _ensure_role(session: Session, *, code: str, name: str, is_admin: bool) -> AuthRole:
+    role = session.scalar(select(AuthRole).where(AuthRole.code == code))
+    if role is not None:
+        return role
+    role = AuthRole(code=code, name=name, is_admin=is_admin)
+    session.add(role)
+    session.flush()
+    return role
+
+
+def _ensure_admin_user(session: Session, admin_role: AuthRole) -> AuthUser:
+    user = session.scalar(select(AuthUser).where(AuthUser.username == ADMIN_USERNAME))
+    if user is None:
+        user = AuthUser(
+            id=ADMIN_USER_ID,
+            username=ADMIN_USERNAME,
+            display_name=ADMIN_USERNAME,
+            role_id=admin_role.id,
+            is_admin=True,
+        )
+        session.add(user)
+        session.flush()
+        return user
+    if not user.is_admin or user.role_id != admin_role.id:
+        user.is_admin = True
+        user.role_id = admin_role.id
+    return user
+
+
+def _ensure_registry(session: Session) -> None:
+    for definition in MENU_DEFINITIONS:
+        menu = session.get(RbacMenu, definition.code)
+        if menu is None:
+            session.add(RbacMenu(code=definition.code, title=definition.title, sort_order=definition.sort_order))
+        else:
+            menu.title = definition.title
+            menu.sort_order = definition.sort_order
+            menu.enabled = True
+
+    for definition in API_PERMISSION_DEFINITIONS:
+        permission = session.get(RbacApiPermission, definition.code)
+        if permission is None:
+            session.add(
+                RbacApiPermission(
+                    code=definition.code,
+                    menu_code=definition.menu_code,
+                    title=definition.title,
+                    description=definition.description,
+                    sort_order=definition.sort_order,
+                )
+            )
+        else:
+            permission.menu_code = definition.menu_code
+            permission.title = definition.title
+            permission.description = definition.description
+            permission.sort_order = definition.sort_order
+            permission.enabled = True
+    session.flush()
+
+
+def _ensure_default_role_permissions(session: Session, default_role: AuthRole) -> None:
+    _ensure_role_menu_permissions(session, default_role.id, DEFAULT_ROLE_MENU_CODES)
+    _ensure_role_api_permissions(session, default_role.id, DEFAULT_ROLE_API_PERMISSION_CODES)
+
+
+def _ensure_role_menu_permissions(session: Session, role_id: str, menu_codes: Iterable[str]) -> None:
+    existing = set(session.scalars(select(RoleMenuPermission.menu_code).where(RoleMenuPermission.role_id == role_id)))
+    session.add_all(
+        RoleMenuPermission(role_id=role_id, menu_code=menu_code)
+        for menu_code in menu_codes
+        if menu_code not in existing
+    )
+
+
+def _ensure_role_api_permissions(session: Session, role_id: str, permission_codes: Iterable[str]) -> None:
+    existing = set(
+        session.scalars(select(RoleApiPermission.permission_code).where(RoleApiPermission.role_id == role_id))
+    )
+    session.add_all(
+        RoleApiPermission(role_id=role_id, permission_code=permission_code)
+        for permission_code in permission_codes
+        if permission_code not in existing
+    )
+
+
+def _get_role_or_default(session: Session, role_id: str | None) -> AuthRole:
+    if role_id:
+        return _get_role_or_raise(session, role_id)
+    default_role = session.scalar(select(AuthRole).where(AuthRole.code == DEFAULT_ROLE_CODE))
+    if default_role is None:
+        raise BusinessValidationError("默认角色未初始化")
+    return default_role
+
+
+def _get_role_or_raise(session: Session, role_id: str) -> AuthRole:
+    role = session.get(AuthRole, role_id)
+    if role is None or role.archived_at is not None:
+        raise NotFoundError("角色不存在")
+    return role
+
+
+def _get_user_or_raise(session: Session, user_id: str) -> AuthUser:
+    user = session.get(AuthUser, user_id)
+    if user is None or user.archived_at is not None:
+        raise NotFoundError("用户不存在")
+    return user
+
+
+def _normalize_role_code(code: str) -> str:
+    normalized = code.strip().lower()
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{1,39}", normalized):
+        raise BusinessValidationError("角色编码只能包含小写字母、数字、下划线和连字符")
+    return normalized
+
+
+def _normalize_role_name(name: str) -> str:
+    normalized = name.strip()
+    if not normalized:
+        raise BusinessValidationError("角色名称不能为空")
+    if len(normalized) > 80:
+        raise BusinessValidationError("角色名称不能超过 80 个字符")
+    return normalized

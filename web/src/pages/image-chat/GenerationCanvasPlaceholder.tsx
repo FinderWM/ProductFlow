@@ -17,6 +17,7 @@ interface GenerationCanvasPlaceholderProps {
   retrying: boolean;
   cancelling: boolean;
   regenerating: boolean;
+  actionBlockedTitle?: string | null;
   onRetry: (task: ImageSessionGenerationTask) => void;
   onCancel: (task: ImageSessionGenerationTask) => void;
   onRegenerate: (task: ImageSessionGenerationTask) => void;
@@ -28,6 +29,7 @@ export function GenerationCanvasPlaceholder({
   retrying,
   cancelling,
   regenerating,
+  actionBlockedTitle = null,
   onRetry,
   onCancel,
   onRegenerate,
@@ -95,7 +97,8 @@ export function GenerationCanvasPlaceholder({
           <button
             type="button"
             onClick={() => onRetry(candidate.task)}
-            disabled={retrying}
+            disabled={retrying || Boolean(actionBlockedTitle)}
+            title={actionBlockedTitle ?? t("chat.retryGeneration")}
             className="mt-5 inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-500/20 transition-colors hover:bg-red-500 disabled:opacity-60"
           >
             {retrying ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
@@ -115,7 +118,8 @@ export function GenerationCanvasPlaceholder({
               <button
                 type="button"
                 onClick={() => onRegenerate(candidate.task)}
-                disabled={regenerating}
+                disabled={regenerating || Boolean(actionBlockedTitle)}
+                title={actionBlockedTitle ?? t("chat.regenerateCancelled")}
                 className="mt-3 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
               >
                 {regenerating ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}

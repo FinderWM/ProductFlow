@@ -12,17 +12,17 @@ interface BuiltInCanvasTemplateText {
 }
 
 const DEFAULT_EXTERNAL_CONNECTION_LABELS: Record<string, string> = {
-  "自动接商品": "Auto-connect product",
+  "自动接商品": "Auto-connect inspiration",
 };
 
 const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
   "ecommerce-main-image-v1": {
     title: "E-commerce main image",
-    description: "Generate a product hero image with a clear subject, benefits, and composition.",
+    description: "Generate an inspiration hero image with a clear subject, benefits, and composition.",
     scenarioTitle: "Main image",
-    scenarioDescription: "For product listings and the first screen of the detail page.",
+    scenarioDescription: "For inspiration listings and the first screen of the detail page.",
     nodes: {
-      product: "Product info",
+      product: "Inspiration info",
       copy: "Main-image benefits",
       image: "Generate main image",
       output: "Main image output",
@@ -36,11 +36,11 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
   },
   "ecommerce-taobao-main-image-v1": {
     title: "Taobao main image",
-    description: "Generate a 1:1 product main image for Taobao search, recommendations, and detail entry.",
+    description: "Generate a 1:1 inspiration main image for Taobao search, recommendations, and detail entry.",
     scenarioTitle: "Taobao main image",
     scenarioDescription: "For Taobao listing traffic and the detail first screen, with a clear subject and benefits.",
     nodes: {
-      product: "Product info",
+      product: "Inspiration info",
       angle: "Search benefits",
       main: "Main image version",
       main_output: "Taobao main image",
@@ -59,7 +59,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For Xiaohongshu note covers, content seeding, and lifestyle display.",
     nodes: {
       style_reference: "Note style reference",
-      product: "Product info",
+      product: "Inspiration info",
       angle: "Cover angle",
       cover: "Vertical cover",
       cover_output: "Cover output",
@@ -80,7 +80,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioTitle: "Multi-angle",
     scenarioDescription: "For detail-page carousels that show appearance, structure, and back-side details.",
     nodes: {
-      product: "Product info",
+      product: "Inspiration info",
       angle_plan: "Angle plan",
       front_image: "Front angle",
       front_output: "Front output",
@@ -99,10 +99,10 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     title: "SKU / variant images",
     description: "Generate differentiated visuals for color, specification, or bundle SKUs.",
     scenarioTitle: "SKU / variant",
-    scenarioDescription: "For explaining specification differences in the product detail page.",
+    scenarioDescription: "For explaining specification differences on the detail page.",
     nodes: {
       sku_reference: "SKU reference",
-      product: "Product info",
+      product: "Inspiration info",
       variant_copy: "Variant differences",
       single_variant: "Single SKU image",
       single_variant_output: "SKU image output",
@@ -119,11 +119,11 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
   },
   "ecommerce-feature-infographic-v1": {
     title: "Feature infographic",
-    description: "Turn core product functions into a structured infographic for detail-page persuasion.",
+    description: "Turn core inspiration functions into a structured infographic for detail-page persuasion.",
     scenarioTitle: "Feature highlights",
     scenarioDescription: "For detail-page feature explanation, function entry points, and conversion support.",
     nodes: {
-      product: "Product info",
+      product: "Inspiration info",
       feature_copy: "Benefit extraction",
       layout_copy: "Information hierarchy",
       infographic: "Feature infographic",
@@ -139,7 +139,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioTitle: "Size / spec",
     scenarioDescription: "For explaining parameters, size, capacity, and specifications on the detail page.",
     nodes: {
-      product: "Product info",
+      product: "Inspiration info",
       spec_copy: "Spec organization",
       dimension_image: "Dimension annotation",
       dimension_output: "Dimension output",
@@ -158,7 +158,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For explaining size, thickness, capacity, and real-life fit or placement.",
     nodes: {
       scale_reference: "Scale reference",
-      product: "Product info",
+      product: "Inspiration info",
       scale_copy: "Scale notes",
       handheld_image: "Hand-held / worn reference",
       handheld_output: "Scale image output",
@@ -180,7 +180,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For detail-page included items, accessory counts, and gift-box display.",
     nodes: {
       package_reference: "Packaging reference",
-      product: "Product info",
+      product: "Inspiration info",
       checklist_copy: "Checklist copy",
       flatlay_image: "Package flat lay",
       flatlay_output: "Checklist output",
@@ -202,7 +202,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For installation guides, tutorials, cleaning maintenance, and pre-support guidance.",
     nodes: {
       step_reference: "Step reference",
-      product: "Product info",
+      product: "Inspiration info",
       step_copy: "Step breakdown",
       step_image: "Step instruction graphic",
       step_output: "Step output",
@@ -225,7 +225,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For explaining upgrades, bundle differences, and purchase-decision dimensions.",
     nodes: {
       compare_reference: "Comparison reference",
-      product: "Product info",
+      product: "Inspiration info",
       comparison_copy: "Comparison dimensions",
       comparison_image: "Comparison graphic",
       comparison_output: "Comparison output",
@@ -242,12 +242,12 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
   },
   "ecommerce-model-lifestyle-image-v1": {
     title: "Model / lifestyle image",
-    description: "Generate product scene images with people, outfits, or lifestyle atmosphere.",
+    description: "Generate inspiration scene images with people, outfits, or lifestyle atmosphere.",
     scenarioTitle: "Model / lifestyle",
     scenarioDescription: "For apparel, beauty, home, and other categories that need usage context.",
     nodes: {
       style: "Pose / style reference",
-      product: "Product info",
+      product: "Inspiration info",
       copy: "Audience and scene",
       half_body: "Half-body / usage image",
       half_body_output: "Lifestyle image",
@@ -264,12 +264,12 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
   },
   "ecommerce-scene-image-v1": {
     title: "Scene image",
-    description: "Place the product into an understandable usage space or business scene.",
+    description: "Place the inspiration into an understandable usage space or business scene.",
     scenarioTitle: "Scene",
     scenarioDescription: "For explaining usage environment, styling, and spatial relationships.",
     nodes: {
       scene_reference: "Scene reference",
-      product: "Product info",
+      product: "Inspiration info",
       copy: "Scene notes",
       wide_scene: "Wide scene",
       scene_output: "Scene image output",
@@ -288,7 +288,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For explaining material, craft, and key functions on the detail page.",
     nodes: {
       detail_reference: "Detail reference",
-      product: "Product info",
+      product: "Inspiration info",
       detail_copy: "Detail notes",
       macro_image: "Material close-up",
       macro_output: "Detail image output",
@@ -305,12 +305,12 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
   },
   "ecommerce-campaign-promotion-image-v1": {
     title: "Campaign / promotion image",
-    description: "Generate product images for campaign entry points, offer expression, and promotional atmosphere.",
+    description: "Generate inspiration images for campaign entry points, offer expression, and promotional atmosphere.",
     scenarioTitle: "Campaign / promotion",
     scenarioDescription: "For campaign pages, promotional placements, and in-site ad assets.",
     nodes: {
       campaign_style: "Campaign style reference",
-      product: "Product info",
+      product: "Inspiration info",
       offer_copy: "Offer information",
       visual_copy: "Visual hierarchy",
       banner: "Campaign banner",
@@ -330,7 +330,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For in-site short videos, content feeds, live previews, and ad entry points.",
     nodes: {
       cover_style: "Cover style reference",
-      product: "Product info",
+      product: "Inspiration info",
       hook_copy: "Cover hook",
       frame_copy: "Frame rhythm",
       vertical_cover: "Vertical cover",
@@ -348,12 +348,12 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
   },
   "ecommerce-white-background-image-v1": {
     title: "White-background image",
-    description: "Generate a white-background product image for marketplace rules, cutouts, or base displays.",
+    description: "Generate a white-background inspiration image for marketplace rules, cutouts, or base displays.",
     scenarioTitle: "White background",
-    scenarioDescription: "For platform base product images, spec graphics, and reusable assets.",
+    scenarioDescription: "For platform base inspiration images, spec graphics, and reusable assets.",
     nodes: {
       product_reference: "Subject reference",
-      product: "Product info",
+      product: "Inspiration info",
       clean_copy: "White-background requirements",
       white_image: "Standard white-background image",
       white_output: "White-background output",
@@ -634,30 +634,34 @@ for (const [templateKey, item] of Object.entries(BUILT_IN_TEMPLATE_TEXT)) {
   }
 }
 
-function shouldLocalizeTemplate(template: CanvasTemplateSummary, locale: Locale): boolean {
-  return locale !== DEFAULT_LOCALE && template.source === "builtin" && template.key in BUILT_IN_TEMPLATE_TEXT;
+function shouldLocalizeTemplate(template: CanvasTemplateSummary): boolean {
+  return template.source === "builtin" && template.key in BUILT_IN_TEMPLATE_TEXT;
+}
+
+function localizeDefaultChineseSource(value: string): string {
+  return value.replaceAll("商品", "灵感");
 }
 
 function localizedByKey(sourceValue: string, localizedValue: string | undefined, locale: Locale): string {
-  return locale === DEFAULT_LOCALE ? sourceValue : (localizedValue ?? sourceValue);
+  return locale === DEFAULT_LOCALE ? localizeDefaultChineseSource(sourceValue) : (localizedValue ?? sourceValue);
 }
 
 export function localizeCanvasTemplateSummary(
   template: CanvasTemplateSummary,
   locale: Locale = DEFAULT_LOCALE,
 ): CanvasTemplateSummary {
-  if (!shouldLocalizeTemplate(template, locale)) {
+  if (!shouldLocalizeTemplate(template)) {
     return template;
   }
   const localized = BUILT_IN_TEMPLATE_TEXT[template.key];
   return {
     ...template,
-    title: localized.title,
-    description: localized.description,
+    title: localizedByKey(template.title, localized.title, locale),
+    description: localizedByKey(template.description, localized.description, locale),
     scenario: {
       ...template.scenario,
-      title: localized.scenarioTitle,
-      description: localized.scenarioDescription,
+      title: localizedByKey(template.scenario.title, localized.scenarioTitle, locale),
+      description: localizedByKey(template.scenario.description, localized.scenarioDescription, locale),
     },
     preview_nodes: template.preview_nodes.map((node) => ({
       ...node,
@@ -666,10 +670,16 @@ export function localizeCanvasTemplateSummary(
     output_slots: template.output_slots.map((slot) => ({
       ...slot,
       label: localizedByKey(slot.label, localized.outputSlots[slot.node_key], locale),
+      description: localizedByKey(slot.description, undefined, locale),
     })),
     reference_input_hints: template.reference_input_hints.map((hint) => ({
       ...hint,
       label: localizedByKey(hint.label, localized.referenceInputHints?.[hint.node_key], locale),
+      description: localizedByKey(hint.description, undefined, locale),
+    })),
+    suggested_connections: template.suggested_connections.map((connection) => ({
+      ...connection,
+      reason: localizedByKey(connection.reason, undefined, locale),
     })),
     default_external_connections: template.default_external_connections.map((connection) => ({
       ...connection,
@@ -688,31 +698,45 @@ export function localizeBuiltInTemplateNodeTitle(
   locale: Locale = DEFAULT_LOCALE,
   configJson?: Record<string, unknown>,
 ): string | null {
-  if (locale === DEFAULT_LOCALE) {
-    return null;
-  }
   const templateMetadata = objectValue(configJson?._canvas_template);
   const templateKey = stringValue(templateMetadata?.template_key);
   const nodeKey = stringValue(templateMetadata?.node_key);
-  const localizedByMetadata = templateKey && nodeKey ? BUILT_IN_TEMPLATE_TEXT[templateKey]?.nodes[nodeKey] : null;
   const sourceNode = templateKey && nodeKey ? BUILT_IN_TEMPLATE_SOURCE_TEXT[templateKey]?.nodes[nodeKey] : null;
+  const localizedByMetadata = templateKey && nodeKey && sourceNode
+    ? localizedByKey(sourceNode.title, BUILT_IN_TEMPLATE_TEXT[templateKey]?.nodes[nodeKey], locale)
+    : null;
   const trimmed = title.trim();
-  if (localizedByMetadata && sourceNode?.nodeType === nodeType && (trimmed === sourceNode.title || trimmed === localizedByMetadata)) {
+  if (
+    localizedByMetadata &&
+    sourceNode?.nodeType === nodeType &&
+    (trimmed === sourceNode.title || trimmed === localizedByMetadata)
+  ) {
     return localizedByMetadata;
   }
   if (!trimmed) {
     return null;
   }
+  if (locale === DEFAULT_LOCALE) {
+    if (!BUILT_IN_NODE_TITLE_BY_TYPE.get(nodeType)?.has(trimmed)) {
+      return null;
+    }
+    const localized = localizeDefaultChineseSource(trimmed);
+    return localized === trimmed ? null : localized;
+  }
   return BUILT_IN_NODE_TITLE_BY_TYPE.get(nodeType)?.get(trimmed) ?? null;
 }
 
 export function localizeBuiltInTemplateLabel(label: string, locale: Locale = DEFAULT_LOCALE): string | null {
-  if (locale === DEFAULT_LOCALE) {
-    return null;
-  }
   const trimmed = label.trim();
   if (!trimmed) {
     return null;
+  }
+  if (locale === DEFAULT_LOCALE) {
+    if (!BUILT_IN_REFERENCE_LABELS.has(trimmed)) {
+      return null;
+    }
+    const localized = localizeDefaultChineseSource(trimmed);
+    return localized === trimmed ? null : localized;
   }
   return BUILT_IN_REFERENCE_LABELS.get(trimmed) ?? null;
 }

@@ -15,11 +15,13 @@ from productflow_backend.infrastructure.db.models import (
     ImageSessionRound,
 )
 from productflow_backend.presentation.image_variants import build_image_urls
+from productflow_backend.presentation.schemas.moderation import ResourceModerationFields, serialize_moderation_fields
 from productflow_backend.presentation.schemas.validators import validate_image_generation_size
 
 
-class ImageSessionAssetResponse(BaseModel):
+class ImageSessionAssetResponse(ResourceModerationFields):
     id: str
+    owner_user_id: str
     kind: ImageSessionAssetKind
     original_filename: str
     mime_type: str
@@ -89,8 +91,10 @@ class ImageSessionGenerationTaskResponse(BaseModel):
     queue_position: int | None = None
 
 
-class ImageSessionSummaryResponse(BaseModel):
+class ImageSessionSummaryResponse(ResourceModerationFields):
     id: str
+    owner_user_id: str
+    owner_username: str | None = None
     product_id: str | None = None
     title: str
     rounds_count: int
@@ -99,8 +103,10 @@ class ImageSessionSummaryResponse(BaseModel):
     updated_at: datetime
 
 
-class ImageSessionDetailResponse(BaseModel):
+class ImageSessionDetailResponse(ResourceModerationFields):
     id: str
+    owner_user_id: str
+    owner_username: str | None = None
     product_id: str | None = None
     title: str
     assets: list[ImageSessionAssetResponse]
@@ -110,8 +116,10 @@ class ImageSessionDetailResponse(BaseModel):
     updated_at: datetime
 
 
-class ImageSessionStatusResponse(BaseModel):
+class ImageSessionStatusResponse(ResourceModerationFields):
     id: str
+    owner_user_id: str
+    owner_username: str | None = None
     product_id: str | None = None
     title: str
     rounds_count: int
@@ -199,9 +207,11 @@ def serialize_image_session_asset(asset: ImageSessionAsset) -> ImageSessionAsset
     urls = build_image_urls(f"/api/image-session-assets/{asset.id}/download")
     return ImageSessionAssetResponse(
         id=asset.id,
+        owner_user_id=asset.owner_user_id,
         kind=asset.kind,
         original_filename=asset.original_filename,
         mime_type=asset.mime_type,
+        **serialize_moderation_fields(asset).model_dump(),
         **urls,
         created_at=asset.created_at,
     )
@@ -312,10 +322,13 @@ def serialize_image_session_summary(image_session: ImageSession) -> ImageSession
     latest_round = max(image_session.rounds, key=lambda item: item.created_at, default=None)
     return ImageSessionSummaryResponse(
         id=image_session.id,
+        owner_user_id=image_session.owner_user_id,
+        owner_username=image_session.owner.username if image_session.owner else None,
         product_id=image_session.product_id,
         title=image_session.title,
         rounds_count=len(image_session.rounds),
         latest_generated_asset=(serialize_image_session_asset(latest_round.generated_asset) if latest_round else None),
+        **serialize_moderation_fields(image_session).model_dump(),
         created_at=image_session.created_at,
         updated_at=image_session.updated_at,
     )
@@ -332,6 +345,8 @@ def serialize_image_session_detail(image_session: ImageSession) -> ImageSessionD
     }
     return ImageSessionDetailResponse(
         id=image_session.id,
+        owner_user_id=image_session.owner_user_id,
+        owner_username=image_session.owner.username if image_session.owner else None,
         product_id=image_session.product_id,
         title=image_session.title,
         assets=[serialize_image_session_asset(item) for item in assets],
@@ -343,6 +358,7 @@ def serialize_image_session_detail(image_session: ImageSession) -> ImageSessionD
             )
             for item in generation_tasks
         ],
+        **serialize_moderation_fields(image_session).model_dump(),
         created_at=image_session.created_at,
         updated_at=image_session.updated_at,
     )
@@ -357,6 +373,8 @@ def serialize_image_session_status(snapshot: ImageSessionStatusSnapshot) -> Imag
     }
     return ImageSessionStatusResponse(
         id=image_session.id,
+        owner_user_id=image_session.owner_user_id,
+        owner_username=image_session.owner.username if image_session.owner else None,
         product_id=image_session.product_id,
         title=image_session.title,
         rounds_count=snapshot.rounds_count,
@@ -372,6 +390,7 @@ def serialize_image_session_status(snapshot: ImageSessionStatusSnapshot) -> Imag
             )
             for item in generation_tasks
         ],
+        **serialize_moderation_fields(image_session).model_dump(),
         created_at=image_session.created_at,
         updated_at=image_session.updated_at,
     )

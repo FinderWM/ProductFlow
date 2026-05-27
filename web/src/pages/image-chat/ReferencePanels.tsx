@@ -1,6 +1,11 @@
 import { Check, Image as ImageIcon, ImagePlus, Loader2, Trash2 } from "lucide-react";
 
 import { ImageDropZone } from "../../components/ImageDropZone";
+import {
+  getResourceBlockedActionTitle,
+  isResourceBlocked,
+  ResourceMetaBadges,
+} from "../../components/ResourceGovernance";
 import { SelectField } from "../../components/SelectField";
 import { api } from "../../lib/api";
 import { formatImageSizeValue } from "../../lib/imageSizes";
@@ -58,6 +63,8 @@ export function SessionReferencePanel({
             const deleting = deletingAssetId === asset.id;
             const selected = selectedAssetIds.includes(asset.id);
             const selectionLimitReached = !selected && selectedAssetIds.length >= maxSelectedCount;
+            const assetBlocked = isResourceBlocked(asset);
+            const assetBlockedTitle = getResourceBlockedActionTitle(asset, t("resource.blockedAction"));
             return (
               <div
                 key={asset.id}
@@ -76,13 +83,18 @@ export function SessionReferencePanel({
                     className="h-20 w-full object-cover"
                   />
                 </a>
+                <ResourceMetaBadges
+                  resource={asset}
+                  className="absolute left-1 top-1 max-w-[calc(100%-2.5rem)]"
+                />
                 <label className="absolute bottom-1 left-1 inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/95 text-slate-700 shadow-sm ring-1 ring-slate-200 dark:bg-slate-950/90 dark:text-violet-100 dark:ring-violet-400/35">
                   <input
                     type="checkbox"
                     checked={selected}
-                    disabled={selectionLimitReached}
+                    disabled={disabled || selectionLimitReached || (assetBlocked && !selected)}
                     onChange={(event) => onToggle(asset.id, event.target.checked)}
                     aria-label={t("chat.useReference")}
+                    title={assetBlocked ? assetBlockedTitle : t("chat.useReference")}
                     className="h-3 w-3 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                   />
                   <span className="sr-only">{t("chat.useReference")}</span>
@@ -91,7 +103,8 @@ export function SessionReferencePanel({
                   type="button"
                   aria-label={t("chat.deleteSessionReference")}
                   onClick={() => onDelete(asset.id)}
-                  disabled={deleting}
+                  disabled={deleting || disabled || assetBlocked}
+                  title={assetBlocked ? assetBlockedTitle : t("chat.deleteSessionReference")}
                   className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/90 text-slate-500 opacity-100 shadow-sm ring-1 ring-slate-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/90 dark:text-slate-300 dark:ring-slate-700 dark:hover:text-red-300 md:opacity-0 md:group-hover:opacity-100"
                 >
                   {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
@@ -118,6 +131,7 @@ interface ProductAssociationPanelProps {
   onTargetProductChange: (value: string) => void;
   onDeleteReference: (assetId: string) => void;
   onAttach: (target: "reference" | "main_source") => void;
+  saveBlockedTitle?: string | null;
   t: ImageChatTranslate;
 }
 
@@ -134,9 +148,14 @@ export function ProductAssociationPanel({
   onTargetProductChange,
   onDeleteReference,
   onAttach,
+  saveBlockedTitle = null,
   t,
 }: ProductAssociationPanelProps) {
-  const saveDisabled = attachBusy || !selectedRound || (!isProductMode && !targetProductId);
+  const productBlocked = isResourceBlocked(product);
+  const productBlockedTitle = getResourceBlockedActionTitle(product, t("resource.blockedAction"));
+  const saveDisabled = attachBusy || !selectedRound || (!isProductMode && !targetProductId) || Boolean(saveBlockedTitle);
+  const saveDisabledTitle =
+    saveBlockedTitle ?? (!selectedRound ? t("chat.selectHistoryFirst") : !isProductMode && !targetProductId ? t("chat.selectProductFirst") : "");
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
@@ -148,6 +167,7 @@ export function ProductAssociationPanel({
             <div className="min-w-0 self-center">
               <div className="truncate text-sm font-medium text-zinc-900 dark:text-slate-100">{product.name}</div>
               <div className="mt-1 text-xs text-zinc-500 dark:text-slate-400">{t("chat.productReferenceCount", { count: referenceImages.length })}</div>
+              <ResourceMetaBadges resource={product} className="mt-1" showReason />
             </div>
           </div>
         ) : (
@@ -162,7 +182,11 @@ export function ProductAssociationPanel({
             value={targetProductId}
             options={
               products.length
-                ? products.map((item) => ({ value: item.id, label: item.name }))
+                ? products.map((item) => ({
+                    value: item.id,
+                    label: isResourceBlocked(item) ? `${item.name} · ${t("resource.disabled")}` : item.name,
+                    disabled: isResourceBlocked(item),
+                  }))
                 : [{ value: "", label: t("chat.noProducts"), disabled: true }]
             }
             onChange={onTargetProductChange}
@@ -174,6 +198,8 @@ export function ProductAssociationPanel({
         <div className="mt-3 grid grid-cols-4 gap-2">
           {referenceImages.slice(0, 4).map((asset) => {
             const deleting = deletingReferenceAssetId === asset.id;
+            const assetBlocked = productBlocked || isResourceBlocked(asset);
+            const assetBlockedTitle = productBlocked ? productBlockedTitle : getResourceBlockedActionTitle(asset, t("resource.blockedAction"));
             return (
               <div key={asset.id} className="group relative overflow-hidden rounded-md border border-zinc-200 bg-white dark:border-slate-700 dark:bg-slate-950/70">
                 <a href={api.toApiUrl(asset.preview_url)} target="_blank" rel="noreferrer" title={asset.original_filename}>
@@ -185,11 +211,16 @@ export function ProductAssociationPanel({
                     className="h-16 w-full object-cover"
                   />
                 </a>
+                <ResourceMetaBadges
+                  resource={assetBlocked && productBlocked ? product : asset}
+                  className="absolute left-1 top-1 max-w-[calc(100%-2rem)]"
+                />
                 <button
                   type="button"
                   aria-label={t("chat.deleteProductReference")}
                   onClick={() => onDeleteReference(asset.id)}
-                  disabled={deleting}
+                  disabled={deleting || assetBlocked}
+                  title={assetBlocked ? assetBlockedTitle : t("chat.deleteProductReference")}
                   className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded bg-white/90 text-zinc-500 opacity-100 shadow-sm ring-1 ring-zinc-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/90 dark:text-slate-300 dark:ring-slate-700 dark:hover:text-red-300 md:opacity-0 md:group-hover:opacity-100"
                 >
                   {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
@@ -215,6 +246,7 @@ export function ProductAssociationPanel({
             type="button"
             onClick={() => onAttach("reference")}
             disabled={saveDisabled}
+            title={saveDisabledTitle || t("chat.addReference")}
             className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
           >
             {attachBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
@@ -225,6 +257,7 @@ export function ProductAssociationPanel({
               type="button"
               onClick={() => onAttach("main_source")}
               disabled={saveDisabled}
+              title={saveDisabledTitle || t("chat.setMainSource")}
               className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500/20 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/35 dark:hover:bg-violet-500/30"
             >
               {attachBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <ImageIcon size={14} className="mr-2" />}

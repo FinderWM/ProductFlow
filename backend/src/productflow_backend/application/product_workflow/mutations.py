@@ -279,6 +279,8 @@ def apply_node_group_template_to_workflow(
     template_key: str,
     position_x: int,
     position_y: int,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> ProductWorkflow:
     applied = materialize_node_group_template_to_workflow(
         session,
@@ -286,6 +288,8 @@ def apply_node_group_template_to_workflow(
         template_key=template_key,
         position_x=position_x,
         position_y=position_y,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
     )
     session.commit()
     session.expire_all()
@@ -299,8 +303,15 @@ def materialize_node_group_template_to_workflow(
     template_key: str,
     position_x: int,
     position_y: int,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> AppliedWorkflowTemplateGroup:
-    template = get_canvas_template(session, template_key.strip())
+    template = get_canvas_template(
+        session,
+        template_key.strip(),
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
     workflow = product_workflow_graph.get_active_workflow(session, product_id)
     if workflow is None:
         product_workflow_graph.get_product_or_raise(session, product_id)

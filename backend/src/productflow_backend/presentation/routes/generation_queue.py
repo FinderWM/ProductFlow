@@ -4,13 +4,18 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from productflow_backend.application.admission import get_generation_queue_overview
-from productflow_backend.presentation.deps import get_session, require_admin
+from productflow_backend.domain.rbac import API_STATUS_READ
+from productflow_backend.presentation.deps import get_session, require_api_permission
 from productflow_backend.presentation.schemas.generation_queue import (
     GenerationQueueOverviewResponse,
     serialize_generation_queue_overview,
 )
 
-router = APIRouter(prefix="/api/generation-queue", tags=["generation-queue"], dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/api/generation-queue",
+    tags=["generation-queue"],
+    dependencies=[Depends(require_api_permission(API_STATUS_READ))],
+)
 
 
 @router.get("", response_model=GenerationQueueOverviewResponse)

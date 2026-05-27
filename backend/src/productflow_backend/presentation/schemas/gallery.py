@@ -11,14 +11,17 @@ from productflow_backend.presentation.schemas.image_sessions import (
     extract_provider_notes,
     serialize_image_session_asset,
 )
+from productflow_backend.presentation.schemas.moderation import ResourceModerationFields, serialize_moderation_fields
 
 
 class SaveGalleryEntryRequest(BaseModel):
     image_session_asset_id: str
 
 
-class GalleryEntryResponse(BaseModel):
+class GalleryEntryResponse(ResourceModerationFields):
     id: str
+    owner_user_id: str
+    owner_username: str | None = None
     image_session_asset_id: str
     image_session_round_id: str | None = None
     image_session_id: str
@@ -53,6 +56,8 @@ def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:
     product = image_session.product
     return GalleryEntryResponse(
         id=entry.id,
+        owner_user_id=entry.owner_user_id,
+        owner_username=entry.owner.username if entry.owner else None,
         image_session_asset_id=entry.image_session_asset_id,
         image_session_round_id=entry.image_session_round_id,
         image_session_id=image_session.id,
@@ -74,5 +79,6 @@ def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:
         base_asset_id=round_item.base_asset_id if round_item else None,
         selected_reference_asset_ids=round_item.selected_reference_asset_ids or [] if round_item else [],
         provider_notes=extract_provider_notes(round_item.provider_output_json) if round_item else [],
+        **serialize_moderation_fields(entry).model_dump(),
         created_at=entry.created_at,
     )

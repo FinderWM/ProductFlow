@@ -228,6 +228,10 @@
 
 - Built-in canvas templates are loaded through `api.listCanvasTemplates()` from `GET /api/workflow/canvas-templates`;
   ProductDetail should display built-in scenario templates and non-archived user templates for workbench insertion.
+- Template catalog filters use the central API client:
+  `api.listCanvasTemplates({ search?, category_id?, scope? })` and
+  `api.listCanvasTemplateCategories({ search?, scope? })`. Query keys must include every active filter value, for example
+  `["canvas-templates", search, categoryId, scope]` and `["canvas-template-categories", scope]`.
 - ProductDetail must present templates inside the inspector sidebar as a `templates` tab with the same rail
   behavior as Details, Runs, and Images. Do not open a canvas floating palette for templates.
 - The collapsed sidebar rail must include a Templates tab entry; clicking it expands the sidebar and switches to the
@@ -273,6 +277,87 @@
 - When a user or legacy node-group template declares default external connections, adding it should result in visible backend-returned
   workflow edges, for example from the existing product context node to newly created copy/image nodes. The frontend must
   render those edges from the normal workflow payload rather than from local template metadata.
+
+#### Scenario: Template Catalog Filters
+
+##### 1. Scope / Trigger
+
+- Trigger: editing ProductDetail templates tab, ProductCreate template selection, `api.listCanvasTemplates(...)`,
+  `api.listCanvasTemplateCategories(...)`, or frontend DTOs for canvas template categories.
+- Goal: keep template search/category/source filtering aligned with the backend catalog API and React Query cache keys.
+
+##### 2. Signatures
+
+- API method: `api.listCanvasTemplates(input?: { search?: string; category_id?: string; scope?: CanvasTemplateScope })`.
+- API method: `api.listCanvasTemplateCategories(input?: { search?: string; scope?: CanvasTemplateScope })`.
+- Type: `CanvasTemplateScope = "global" | "user"`.
+- Type: `CanvasTemplateCategory` mirrors backend fields `id`, `scope`, `owner_user_id`, `owner_username`, `name`,
+  `sort_order`, `enabled`, `effective_enabled`, `disabled_reason`, `created_at`, and `updated_at`.
+
+##### 3. Contracts
+
+- Keep backend query parameter names as `search`, `category_id`, and `scope`; do not camel-case them in `api.ts`.
+- Empty filter values are omitted from `URLSearchParams`.
+- `scope="global"` returns global templates/categories; `scope="user"` returns user-owned templates/categories visible to
+  the current actor; omitted scope returns both visible scopes.
+- ProductCreate keeps the blank canvas option local and always available, even when server-side template filters return no
+  full-canvas templates.
+- ProductDetail owns the server query state and passes filter state, category data, and filtered templates into
+  `TemplateGroupsPanel`; the panel remains API-free.
+- ProductDetail may keep its existing stage chips as a local secondary filter over the server-filtered results.
+- Template chips may display `scope` and `category_name`; operator-authored template/category names are source data and
+  must not be translated.
+
+##### 4. Validation & Error Matrix
+
+- Template list loading -> show the existing template loading state near the list.
+- Template list error -> show `detail.template.loadFailed`; do not clear user-entered filter state.
+- Category list loading -> disable the category select while preserving current search and scope controls.
+- Category list error -> show `templateFilter.categoriesLoadFailed` and keep template search/scope usable.
+- Scope change -> clear `category_id` because category ids are scoped.
+- Empty server result -> show the existing empty template state; ProductCreate still shows blank canvas.
+
+##### 5. Good/Base/Bad Cases
+
+- Good: ProductDetail query key includes `search`, `categoryId`, and `scope`, so changing any filter refetches and caches
+  the correct catalog response.
+- Good: ProductCreate submits the selected backend `canvas_template_key` unchanged and omits filters from product creation
+  payload.
+- Base: blank search, blank category, and scope `all` call `/api/workflow/canvas-templates` without a query string.
+- Bad: filtering only client-side after fetching all templates when backend `search`, `category_id`, and `scope` are
+  already available.
+- Bad: passing translated category names back to the API instead of the stable `category_id`.
+
+##### 6. Tests Required
+
+- Run `pnpm --dir web exec tsc --noEmit -p tsconfig.app.json` after DTO/API method changes.
+- Run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` for ProductCreate or ProductDetail UI changes.
+- Backend API tests remain authoritative for catalog permission, owner visibility, and invalid category/scope behavior.
+
+##### 7. Wrong vs Correct
+
+Wrong:
+
+```tsx
+useQuery({
+  queryKey: ["canvas-templates"],
+  queryFn: () => api.listCanvasTemplates(),
+});
+```
+
+Correct:
+
+```tsx
+useQuery({
+  queryKey: ["canvas-templates", search, categoryId, scope],
+  queryFn: () =>
+    api.listCanvasTemplates({
+      search: search || undefined,
+      category_id: categoryId || undefined,
+      scope: scope === "all" ? undefined : scope,
+    }),
+});
+```
 - Do not duplicate the backend template catalog in ProductDetail. The page may use merchant-facing labels from the API,
   but the submitted `template_key` must be the backend-recognized key.
 

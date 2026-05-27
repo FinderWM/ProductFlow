@@ -20,6 +20,7 @@ from productflow_backend.application.generation_config_runtime import (
     GenerationConfigWaitError,
     claim_runtime_generation_config,
     generation_config_selection_from_config,
+    generation_failure_is_throttled,
     generation_failure_is_timeout,
     generation_failure_reason,
     release_runtime_generation_config,
@@ -1018,12 +1019,19 @@ def _execute_copy_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=False,
+            user_id=product.owner_user_id,
             generated_unit_count=0,
             failure_reason=generation_failure_reason(exc),
             timeout=generation_failure_is_timeout(exc),
+            throttled=generation_failure_is_throttled(exc),
         )
         raise
-    release_runtime_generation_config(runtime_claim, success=True, generated_unit_count=2)
+    release_runtime_generation_config(
+        runtime_claim,
+        success=True,
+        user_id=product.owner_user_id,
+        generated_unit_count=2,
+    )
     brief = CreativeBrief(
         product_id=product.id,
         payload=brief_payload.model_dump(),

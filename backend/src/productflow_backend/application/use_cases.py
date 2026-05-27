@@ -7,6 +7,8 @@ from sqlalchemy import desc, exists, func, literal, select
 from sqlalchemy.orm import Session, selectinload
 
 from productflow_backend.application.copy_payloads import normalize_copy_payload
+from productflow_backend.application.moderation import ensure_resource_usable
+from productflow_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
 from productflow_backend.application.product_workflow.templates import (
     materialize_product_workflow_from_template,
     resolve_product_creation_canvas_template,
@@ -73,13 +75,23 @@ def _product_query():
             selectinload(Product.copy_sets),
             selectinload(Product.poster_variants),
             selectinload(Product.confirmed_copy_set),
+            selectinload(Product.owner),
         )
         .order_by(desc(Product.updated_at))
     )
 
 
-def _get_product_or_raise(session: Session, product_id: str) -> Product:
-    product = session.scalar(_product_query().where(Product.id == product_id))
+def _get_product_or_raise(
+    session: Session,
+    product_id: str,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> Product:
+    stmt = _product_query().where(Product.id == product_id)
+    if actor_user_id is not None and not actor_is_admin:
+        stmt = stmt.where(Product.owner_user_id == actor_user_id)
+    product = session.scalar(stmt)
     if product is None:
         raise NotFoundError("商品不存在")
     return product
@@ -127,12 +139,19 @@ def create_product(
     content_type: str,
     reference_image_uploads: list[tuple[bytes, str, str]] | None = None,
     canvas_template_key: str | None = None,
+    owner_user_id: str | None = None,
     storage: LocalStorage | None = None,
 ) -> Product:
     """创建商品，保存原始图和参考图到本地存储。"""
-    canvas_template = resolve_product_creation_canvas_template(canvas_template_key)
+    resolved_owner_user_id = resolve_owner_user_id(session, owner_user_id)
+    canvas_template = resolve_product_creation_canvas_template(
+        session,
+        canvas_template_key,
+        actor_user_id=resolved_owner_user_id,
+    )
     storage = storage or LocalStorage()
     product = Product(
+        owner_user_id=resolved_owner_user_id,
         name=_normalize_required_text(name, field_name="商品名", max_length=255),
         category=_normalize_optional_text(category, field_name="类目", max_length=120),
         price=_normalize_price(price),
@@ -178,9 +197,23 @@ def add_reference_images(
     *,
     product_id: str,
     reference_image_uploads: list[tuple[bytes, str, str]],
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
     storage: LocalStorage | None = None,
 ) -> Product:
-    product = _get_product_or_raise(session, product_id)
+    product = _get_product_or_raise(
+        session,
+        product_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
+    ensure_actor_can_mutate_owner(
+        owner_user_id=product.owner_user_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="商品不存在",
+    )
+    ensure_resource_usable(product)
     storage = storage or LocalStorage()
     for reference_bytes, reference_filename, reference_content_type in reference_image_uploads:
         reference_path = storage.save_reference_upload(product.id, reference_filename, reference_bytes)
@@ -202,13 +235,24 @@ def delete_reference_image(
     session: Session,
     *,
     asset_id: str,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
     storage: LocalStorage | None = None,
 ) -> Product:
-    asset = session.get(SourceAsset, asset_id)
+    asset = session.scalar(
+        select(SourceAsset).options(selectinload(SourceAsset.product)).where(SourceAsset.id == asset_id)
+    )
     if asset is None:
         raise NotFoundError("商品参考图不存在")
     if asset.kind != SourceAssetKind.REFERENCE_IMAGE:
         raise BusinessValidationError("只能删除商品参考图")
+    ensure_actor_can_mutate_owner(
+        owner_user_id=asset.product.owner_user_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="商品参考图不存在",
+    )
+    ensure_resource_usable(asset)
 
     product_id = asset.product_id
     storage_path = asset.storage_path
@@ -228,32 +272,59 @@ def list_products(
     status: ProductWorkflowState | None,
     page: int,
     page_size: int,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> tuple[list[Product], int]:
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
     start = (page - 1) * page_size
-    if status is None:
-        total = session.scalar(select(func.count()).select_from(Product)) or 0
-        products = session.scalars(_product_query().offset(start).limit(page_size)).all()
-        return list(products), total
+    filters = []
+    if actor_user_id is not None and not actor_is_admin:
+        filters.append(Product.owner_user_id == actor_user_id)
+    if status is not None:
+        filters.append(_product_status_filter(status))
 
-    status_filter = _product_status_filter(status)
-    total = session.scalar(select(func.count()).select_from(Product).where(status_filter)) or 0
-    products = session.scalars(_product_query().where(status_filter).offset(start).limit(page_size)).all()
+    total = session.scalar(select(func.count()).select_from(Product).where(*filters)) or 0
+    products = session.scalars(_product_query().where(*filters).offset(start).limit(page_size)).all()
     return list(products), total
 
 
-def get_product_detail(session: Session, product_id: str) -> Product:
-    return _get_product_or_raise(session, product_id)
+def get_product_detail(
+    session: Session,
+    product_id: str,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> Product:
+    return _get_product_or_raise(
+        session,
+        product_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
 
 
 def delete_product(
     session: Session,
     *,
     product_id: str,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
     storage: LocalStorage | None = None,
 ) -> None:
-    product = _get_product_or_raise(session, product_id)
+    product = _get_product_or_raise(
+        session,
+        product_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
+    ensure_actor_can_mutate_owner(
+        owner_user_id=product.owner_user_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="商品不存在",
+    )
+    ensure_resource_usable(product)
     active_workflow_run = session.scalar(
         select(WorkflowRun)
         .join(ProductWorkflow, WorkflowRun.workflow_id == ProductWorkflow.id)
@@ -275,8 +346,17 @@ def update_copy_set(
     *,
     copy_set_id: str,
     structured_payload: dict[str, Any],
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> CopySet:
     copy_set = _get_copy_set_or_raise(session, copy_set_id)
+    ensure_actor_can_mutate_owner(
+        owner_user_id=copy_set.product.owner_user_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="文案不存在",
+    )
+    ensure_resource_usable(copy_set.product)
     try:
         payload = normalize_copy_payload(structured_payload)
     except ValueError as exc:
@@ -288,9 +368,27 @@ def update_copy_set(
     return copy_set
 
 
-def confirm_copy_set(session: Session, *, copy_set_id: str) -> CopySet:
+def confirm_copy_set(
+    session: Session,
+    *,
+    copy_set_id: str,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> CopySet:
     copy_set = _get_copy_set_or_raise(session, copy_set_id)
-    product = _get_product_or_raise(session, copy_set.product_id)
+    product = _get_product_or_raise(
+        session,
+        copy_set.product_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
+    ensure_actor_can_mutate_owner(
+        owner_user_id=product.owner_user_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="文案不存在",
+    )
+    ensure_resource_usable(product)
     copy_set.status = CopyStatus.CONFIRMED
     copy_set.confirmed_at = now_utc()
     product.current_confirmed_copy_set_id = copy_set.id
@@ -299,8 +397,19 @@ def confirm_copy_set(session: Session, *, copy_set_id: str) -> CopySet:
     return copy_set
 
 
-def get_product_history(session: Session, product_id: str) -> dict[str, Any]:
-    product = _get_product_or_raise(session, product_id)
+def get_product_history(
+    session: Session,
+    product_id: str,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> dict[str, Any]:
+    product = _get_product_or_raise(
+        session,
+        product_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
     return {
         "copy_sets": sorted(product.copy_sets, key=lambda item: item.created_at, reverse=True),
         "poster_variants": sorted(product.poster_variants, key=lambda item: item.created_at, reverse=True),

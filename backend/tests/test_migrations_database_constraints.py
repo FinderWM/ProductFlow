@@ -20,6 +20,8 @@ from productflow_backend.domain.enums import (
     WorkflowRunStatus,
 )
 from productflow_backend.infrastructure.db.models import (
+    CanvasTemplate,
+    CanvasTemplateCategory,
     CopySet,
     ImageGalleryEntry,
     ImageSessionAsset,
@@ -71,6 +73,10 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
     assert table.c.image_session_asset_id.type.length == 36
     assert not table.c.image_session_asset_id.nullable
     assert table.c.image_session_round_id.nullable
+    assert not table.c.enabled.nullable
+    assert table.c.disabled_at.nullable
+    assert table.c.disabled_by_user_id.nullable
+    assert table.c.disabled_reason.nullable
     assert not table.c.created_at.nullable
     assert table.c.created_at.default is not None
     assert table.c.created_at.default.arg.__name__ == utcnow.__name__
@@ -78,12 +84,14 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
         "uq_image_gallery_entries_asset_id",
         "ix_image_gallery_entries_round_id",
         "ix_image_gallery_entries_created_at",
+        "ix_image_gallery_entries_enabled",
     }
     foreign_keys = {fk.parent.name: fk for fk in table.foreign_keys}
     assert foreign_keys["image_session_asset_id"].constraint.name == "fk_image_gallery_entries_image_session_asset_id"
     assert foreign_keys["image_session_asset_id"].ondelete == "CASCADE"
     assert foreign_keys["image_session_round_id"].constraint.name == "fk_image_gallery_entries_image_session_round_id"
     assert foreign_keys["image_session_round_id"].ondelete == "SET NULL"
+    assert foreign_keys["disabled_by_user_id"].ondelete == "SET NULL"
 
 
 def test_user_canvas_template_model_matches_migration_contract() -> None:
@@ -108,6 +116,48 @@ def test_user_canvas_template_model_matches_migration_contract() -> None:
         None
     }
     assert {index.name for index in table.indexes} == {"ix_user_canvas_templates_archived_at"}
+
+
+def test_canvas_template_models_match_migration_contract() -> None:
+    category_table = CanvasTemplateCategory.__table__
+    assert category_table.c.id.type.length == 36
+    assert category_table.c.scope.type.length == 20
+    assert category_table.c.owner_user_id.nullable
+    assert category_table.c.name.type.length == 120
+    assert not category_table.c.name.nullable
+    assert not category_table.c.enabled.nullable
+    assert category_table.c.archived_at.nullable
+    assert category_table.c.disabled_at.nullable
+    assert category_table.c.disabled_by_user_id.nullable
+    assert category_table.c.disabled_reason.nullable
+    assert {index.name for index in category_table.indexes} == {
+        "ix_canvas_template_categories_enabled",
+        "ix_canvas_template_categories_scope",
+        "uq_canvas_template_categories_global_name",
+        "uq_canvas_template_categories_user_owner_name",
+    }
+
+    template_table = CanvasTemplate.__table__
+    assert template_table.c.id.type.length == 36
+    assert template_table.c.key.type.length == 120
+    assert not template_table.c.key.nullable
+    assert template_table.c.scope.type.length == 20
+    assert template_table.c.owner_user_id.nullable
+    assert template_table.c.category_id.nullable
+    assert template_table.c.kind.type.length == 40
+    assert not template_table.c.template_json.nullable
+    assert not template_table.c.enabled.nullable
+    assert template_table.c.archived_at.nullable
+    assert template_table.c.disabled_at.nullable
+    assert template_table.c.disabled_by_user_id.nullable
+    assert template_table.c.disabled_reason.nullable
+    assert {index.name for index in template_table.indexes} == {
+        "ix_canvas_templates_archived_at",
+        "ix_canvas_templates_category_id",
+        "ix_canvas_templates_enabled",
+        "ix_canvas_templates_scope",
+        "uq_canvas_templates_key",
+    }
 
 
 def test_alembic_upgrade_head_supports_sqlite(tmp_path: Path, monkeypatch) -> None:

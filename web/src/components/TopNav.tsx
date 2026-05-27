@@ -1,5 +1,6 @@
 import {
   Activity,
+  BarChart3,
   BookOpen,
   GalleryHorizontalEnd,
   Languages,
@@ -9,6 +10,7 @@ import {
   Monitor,
   Moon,
   Settings,
+  ShieldCheck,
   Sun,
   Wand2,
 } from "lucide-react";
@@ -16,6 +18,7 @@ import { Link, useLocation } from "react-router-dom";
 
 import { LOCALES, type Locale, type TranslationKey } from "../lib/i18n";
 import { usePreferences } from "../lib/preferences";
+import { useSessionState } from "../lib/session";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
 
 interface TopNavProps {
@@ -28,38 +31,58 @@ const navItems = [
   {
     labelKey: "nav.products",
     to: "/products",
+    menuCode: "inspirations",
     icon: LayoutGrid,
     match: (pathname: string) => pathname.startsWith("/products") && !pathname.endsWith("/image-chat"),
   },
   {
     labelKey: "nav.imageChat",
     to: "/image-chat",
+    menuCode: "image_chat",
     icon: MessagesSquare,
     match: (pathname: string) => pathname.includes("image-chat"),
   },
   {
     labelKey: "nav.gallery",
     to: "/gallery",
+    menuCode: "gallery",
     icon: GalleryHorizontalEnd,
     match: (pathname: string) => pathname.startsWith("/gallery"),
   },
   {
     labelKey: "nav.help",
     to: "/help",
+    menuCode: null,
     icon: BookOpen,
     match: (pathname: string) => pathname.startsWith("/help"),
   },
   {
     labelKey: "nav.status",
     to: "/status",
+    menuCode: "status",
     icon: Activity,
     match: (pathname: string) => pathname.startsWith("/status"),
   },
   {
+    labelKey: "nav.usageStats",
+    to: "/usage-stats",
+    menuCode: "usage_stats",
+    icon: BarChart3,
+    match: (pathname: string) => pathname.startsWith("/usage-stats"),
+  },
+  {
     labelKey: "nav.settings",
     to: "/settings",
+    menuCode: "settings",
     icon: Settings,
     match: (pathname: string) => pathname.startsWith("/settings"),
+  },
+  {
+    labelKey: "nav.rbac",
+    to: "/rbac",
+    menuCode: "rbac",
+    icon: ShieldCheck,
+    match: (pathname: string) => pathname.startsWith("/rbac"),
   },
 ] as const;
 
@@ -87,6 +110,9 @@ function navItemClassName(active: boolean) {
 export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const location = useLocation();
   const { locale, setLocale, t, themePreference, setThemePreference } = usePreferences();
+  const session = useSessionState();
+  const allowedMenuCodes = new Set(session?.menus?.map((menu) => menu.code) ?? []);
+  const visibleNavItems = navItems.filter((item) => item.menuCode === null || allowedMenuCodes.has(item.menuCode));
   const CurrentThemeIcon = themeIcons[themePreference];
   const nextThemePreference =
     THEME_PREFERENCES[(THEME_PREFERENCES.indexOf(themePreference) + 1) % THEME_PREFERENCES.length];
@@ -138,7 +164,7 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
 
         <div className="hidden min-w-0 justify-start overflow-x-auto lg:flex lg:justify-center">
           <div className="flex min-w-max items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/80 p-1 shadow-inner shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-none">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const active = item.match(location.pathname);
               const label = t(item.labelKey);
@@ -217,8 +243,8 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
         aria-label={t("nav.mobile")}
         className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/96 px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.4rem)] shadow-[0_-10px_30px_rgba(15,23,42,0.12)] backdrop-blur dark:border-slate-800 dark:bg-slate-950/94 dark:shadow-[0_-18px_40px_rgba(0,0,0,0.35)] lg:hidden"
       >
-        <div className="mx-auto grid w-full max-w-lg grid-cols-6 gap-1">
-          {navItems.map((item) => {
+        <div className="mx-auto grid w-full max-w-lg grid-cols-[repeat(auto-fit,minmax(3.25rem,1fr))] gap-1">
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const active = item.match(location.pathname);
             const label = t(item.labelKey);

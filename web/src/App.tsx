@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { api } from "./lib/api";
 import { PreferencesProvider, useI18n } from "./lib/preferences";
+import { SessionStateProvider } from "./lib/session";
 
 const GalleryPage = lazy(() =>
   import("./pages/GalleryPage").then((module) => ({ default: module.GalleryPage })),
@@ -27,11 +28,17 @@ const ProductDetailPage = lazy(() =>
 const loadProductListPage = () =>
   import("./pages/ProductListPage").then((module) => ({ default: module.ProductListPage }));
 const ProductListPage = lazy(loadProductListPage);
+const RbacPage = lazy(() =>
+  import("./pages/RbacPage").then((module) => ({ default: module.RbacPage })),
+);
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })),
 );
 const StatusPage = lazy(() =>
   import("./pages/StatusPage").then((module) => ({ default: module.StatusPage })),
+);
+const UsageStatsPage = lazy(() =>
+  import("./pages/UsageStatsPage").then((module) => ({ default: module.UsageStatsPage })),
 );
 
 function LoadingScreen() {
@@ -67,48 +74,55 @@ function AppRoutes() {
   }
 
   return (
-    <Suspense fallback={<LoadingScreen />}>
-      <Routes>
-        <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
-        <Route
-          path="/products"
-          element={authenticated ? <ProductListPage /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/products/new"
-          element={authenticated ? <ProductCreatePage /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/image-chat"
-          element={authenticated ? <ImageChatPage /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/gallery"
-          element={authenticated ? <GalleryPage /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/help"
-          element={authenticated ? <HelpPage /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/settings"
-          element={authenticated ? <SettingsPage /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/status"
-          element={authenticated ? <StatusPage /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/products/:productId/image-chat"
-          element={authenticated ? <ImageChatPage /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="/products/:productId"
-          element={authenticated ? <ProductDetailPage /> : <Navigate to="/login" replace />}
-        />
-        <Route path="*" element={<Navigate to={authenticated ? "/products" : "/login"} replace />} />
-      </Routes>
-    </Suspense>
+    <SessionStateProvider value={sessionQuery.data ?? null}>
+      <Suspense fallback={<LoadingScreen />}>
+        <Routes>
+          <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
+          <Route
+            path="/products"
+            element={authenticated ? <ProductListPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/products/new"
+            element={authenticated ? <ProductCreatePage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/image-chat"
+            element={authenticated ? <ImageChatPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/gallery"
+            element={authenticated ? <GalleryPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/help"
+            element={authenticated ? <HelpPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/settings"
+            element={authenticated ? <SettingsPage /> : <Navigate to="/login" replace />}
+          />
+          <Route path="/rbac" element={authenticated ? <RbacPage /> : <Navigate to="/login" replace />} />
+          <Route
+            path="/status"
+            element={authenticated ? <StatusPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/usage-stats"
+            element={authenticated ? <UsageStatsPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/products/:productId/image-chat"
+            element={authenticated ? <ImageChatPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/products/:productId"
+            element={authenticated ? <ProductDetailPage /> : <Navigate to="/login" replace />}
+          />
+          <Route path="*" element={<Navigate to={authenticated ? "/products" : "/login"} replace />} />
+        </Routes>
+      </Suspense>
+    </SessionStateProvider>
   );
 }
 

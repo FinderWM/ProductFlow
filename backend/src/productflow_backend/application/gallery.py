@@ -6,6 +6,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from productflow_backend.application.moderation import ensure_resource_usable, moderation_state_for_resource
+from productflow_backend.application.ownership import ensure_actor_can_mutate_owner
 from productflow_backend.domain.enums import ImageSessionAssetKind
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import (
@@ -29,14 +31,28 @@ def _gallery_entry_query():
             selectinload(ImageGalleryEntry.asset)
             .selectinload(ImageSessionAsset.session)
             .selectinload(ImageSession.product),
+            selectinload(ImageGalleryEntry.owner),
+            selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.owner),
             selectinload(ImageGalleryEntry.round),
         )
         .order_by(desc(ImageGalleryEntry.created_at))
     )
 
 
-def list_gallery_entries(session: Session) -> list[ImageGalleryEntry]:
-    return list(session.scalars(_gallery_entry_query()).all())
+def list_gallery_entries(
+    session: Session,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> list[ImageGalleryEntry]:
+    entries = list(session.scalars(_gallery_entry_query()).all())
+    if actor_is_admin or actor_user_id is None:
+        return entries
+    return [
+        entry
+        for entry in entries
+        if entry.owner_user_id == actor_user_id or moderation_state_for_resource(entry).effective_enabled
+    ]
 
 
 def _get_gallery_entry_by_asset_id(session: Session, image_session_asset_id: str) -> ImageGalleryEntry | None:
@@ -45,26 +61,44 @@ def _get_gallery_entry_by_asset_id(session: Session, image_session_asset_id: str
     )
 
 
-def save_generated_asset_to_gallery(session: Session, *, image_session_asset_id: str) -> GallerySaveResult:
-    existing = _get_gallery_entry_by_asset_id(session, image_session_asset_id)
-    if existing is not None:
-        return GallerySaveResult(entry=existing, created=False)
-
+def save_generated_asset_to_gallery(
+    session: Session,
+    *,
+    image_session_asset_id: str,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> GallerySaveResult:
     asset = session.scalar(
         select(ImageSessionAsset)
-        .options(selectinload(ImageSessionAsset.session).selectinload(ImageSession.product))
+        .options(
+            selectinload(ImageSessionAsset.owner),
+            selectinload(ImageSessionAsset.session).selectinload(ImageSession.product),
+        )
         .where(ImageSessionAsset.id == image_session_asset_id)
     )
     if asset is None:
         raise NotFoundError("会话图片不存在")
+    ensure_actor_can_mutate_owner(
+        owner_user_id=asset.owner_user_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="会话图片不存在",
+    )
     if asset.kind != ImageSessionAssetKind.GENERATED_IMAGE:
         raise BusinessValidationError("只有生成结果可以保存到画廊")
+    ensure_resource_usable(asset)
+
+    existing = _get_gallery_entry_by_asset_id(session, image_session_asset_id)
+    if existing is not None:
+        ensure_resource_usable(existing)
+        return GallerySaveResult(entry=existing, created=False)
 
     round_item = session.scalar(select(ImageSessionRound).where(ImageSessionRound.generated_asset_id == asset.id))
     if round_item is None:
         raise NotFoundError("生成记录不存在")
 
     entry = ImageGalleryEntry(
+        owner_user_id=asset.owner_user_id,
         image_session_asset_id=asset.id,
         image_session_round_id=round_item.id,
     )

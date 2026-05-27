@@ -11,6 +11,11 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  getResourceBlockedActionTitle,
+  isResourceBlocked,
+  ResourceMetaBadges,
+} from "../components/ResourceGovernance";
 import { StatusPill } from "../components/StatusPill";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
@@ -82,6 +87,10 @@ export function ProductListPage() {
   const handleDeleteProduct = (product: ProductSummary) => {
     if (!deletionEnabled) {
       setDeleteError(t("products.deleteDisabled"));
+      return;
+    }
+    if (isResourceBlocked(product)) {
+      setDeleteError(t("resource.blockedAction"));
       return;
     }
     setPendingDeleteProduct(product);
@@ -255,6 +264,7 @@ export function ProductListPage() {
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-slate-800">
                     {products.map((product) => {
+                      const productBlocked = isResourceBlocked(product);
                       return (
                         <tr key={product.id} className="group transition-colors hover:bg-indigo-50/30 dark:hover:bg-violet-500/10">
                           <td className="px-5 py-4">
@@ -269,6 +279,7 @@ export function ProductListPage() {
                                 >
                                   {product.name}
                                 </button>
+                                <ResourceMetaBadges resource={product} className="mt-1" />
                                 <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-slate-400">
                                   {product.category ? (
                                     <span className="min-w-0 max-w-full truncate">{product.category}</span>
@@ -294,8 +305,14 @@ export function ProductListPage() {
                               <button
                                 type="button"
                                 onClick={() => handleDeleteProduct(product)}
-                                disabled={deleteProductMutation.isPending || !deletionEnabled}
-                                title={deletionEnabled ? t("products.delete") : t("products.deleteDisabled")}
+                                disabled={deleteProductMutation.isPending || !deletionEnabled || productBlocked}
+                                title={
+                                  productBlocked
+                                    ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
+                                    : deletionEnabled
+                                      ? t("products.delete")
+                                      : t("products.deleteDisabled")
+                                }
                                 className="inline-flex items-center text-sm font-medium text-red-500 transition-colors hover:text-red-700 disabled:opacity-50"
                               >
                                 <Trash2 size={14} className="mr-1" /> {t("products.delete")}
@@ -377,6 +394,7 @@ function ProductMobileCard({
   onDelete: () => void;
 }) {
   const { t } = useI18n();
+  const productBlocked = isResourceBlocked(product);
   const metadata = [
     product.category,
     product.price ? formatPrice(product.price) : null,
@@ -399,6 +417,7 @@ function ProductMobileCard({
               <span className="block truncate text-sm font-semibold text-slate-950 dark:text-slate-100" title={product.name}>
                 {product.name}
               </span>
+              <ResourceMetaBadges resource={product} className="mt-1" />
               <span className="mt-1 flex items-center gap-1.5 text-xs text-zinc-500 dark:text-slate-400">
                 <span>{t("products.table.updated")}</span>
                 <span className="font-mono tabular-nums">{formatShortDate(product.updated_at)}</span>
@@ -430,13 +449,21 @@ function ProductMobileCard({
         <button
           type="button"
           onClick={onDelete}
-          disabled={isDeleting || !deletionEnabled}
+          disabled={isDeleting || !deletionEnabled || productBlocked}
           aria-label={
-            deletionEnabled
+            productBlocked
+              ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
+              : deletionEnabled
               ? t("products.deleteProduct", { name: product.name })
               : t("products.deleteDisabled")
           }
-          title={deletionEnabled ? t("products.delete") : t("products.deleteDisabled")}
+          title={
+            productBlocked
+              ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
+              : deletionEnabled
+                ? t("products.delete")
+                : t("products.deleteDisabled")
+          }
           className="inline-flex min-h-11 min-w-[5.75rem] items-center justify-center rounded-xl border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-600 transition-colors active:scale-[0.98] hover:border-red-300 hover:bg-red-100 disabled:opacity-45 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-300/50 dark:hover:bg-red-500/18"
         >
           <Trash2 size={16} className="mr-1.5 shrink-0" aria-hidden="true" />

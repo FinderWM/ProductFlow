@@ -54,14 +54,14 @@ describe("canvas template localization", () => {
     const localized = localizeCanvasTemplateSummary(builtInTemplate, "en-US");
 
     expect(localized.title).toBe("E-commerce main image");
-    expect(localized.description).toContain("product hero image");
+    expect(localized.description).toContain("inspiration hero image");
     expect(localized.scenario.title).toBe("Main image");
     expect(localized.preview_nodes.map((node) => node.title)).toEqual(["Main-image benefits", "Main image output"]);
     expect(localized.output_slots[0]?.label).toBe("Main image output");
-    expect(localized.default_external_connections[0]?.label).toBe("Auto-connect product");
+    expect(localized.default_external_connections[0]?.label).toBe("Auto-connect inspiration");
   });
 
-  it("keeps user templates and Chinese locale source text unchanged", () => {
+  it("localizes built-in source terms and keeps user templates unchanged", () => {
     const userTemplate = {
       ...builtInTemplate,
       key: "user-template-1",
@@ -70,7 +70,11 @@ describe("canvas template localization", () => {
       title: "我的活动模板",
     } satisfies CanvasTemplateSummary;
 
-    expect(localizeCanvasTemplateSummary(builtInTemplate, "zh-CN")).toBe(builtInTemplate);
+    const zhLocalized = localizeCanvasTemplateSummary(builtInTemplate, "zh-CN");
+
+    expect(zhLocalized.description).toContain("灵感首图");
+    expect(zhLocalized.output_slots[0]?.description).toContain("灵感列表");
+    expect(zhLocalized.default_external_connections[0]?.label).toBe("自动接灵感");
     expect(localizeCanvasTemplateSummary(userTemplate, "en-US")).toBe(userTemplate);
   });
 
@@ -95,5 +99,19 @@ describe("canvas template localization", () => {
 
     expect(localizeBuiltInTemplateNodeTitle("copy_generation", "我的文案节点", "en-US")).toBeNull();
     expect(localizeBuiltInTemplateLabel("我的输出", "en-US")).toBeNull();
+  });
+
+  it("keeps default-locale built-in labels aligned with inspiration wording", () => {
+    expect(localizeBuiltInTemplateNodeTitle("product_context", "商品资料", "zh-CN", {
+      _canvas_template: {
+        source: "builtin",
+        template_key: "ecommerce-main-image-v1",
+        node_key: "product",
+      },
+    })).toBe("灵感资料");
+    expect(localizeBuiltInTemplateLabel("自动接商品", "zh-CN")).toBe("自动接灵感");
+
+    expect(localizeBuiltInTemplateNodeTitle("copy_generation", "我的商品文案", "zh-CN")).toBeNull();
+    expect(localizeBuiltInTemplateLabel("我的商品输出", "zh-CN")).toBeNull();
   });
 });

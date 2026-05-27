@@ -4,15 +4,17 @@ import { Image as ImageIcon, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
+import { ResourceBlockedNotice, ResourceMetaBadges } from "../components/ResourceGovernance";
 import { TopNav } from "../components/TopNav";
 import { api } from "../lib/api";
 import { formatDateTime } from "../lib/format";
+import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import type { GalleryEntry } from "../lib/types";
 import { galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
 
 function metadataRows(entry: GalleryEntry, locale: ReturnType<typeof useI18n>["locale"], t: ReturnType<typeof useI18n>["t"]) {
-  return [
+  const rows = [
     ["gallery.meta.size", galleryEntrySizeLabel(entry, locale)],
     ["gallery.meta.model", [entry.provider_name, entry.model_name].filter(Boolean).join(" / ") || t("common.unknown")],
     ["gallery.meta.session", entry.image_session_title],
@@ -24,7 +26,11 @@ function metadataRows(entry: GalleryEntry, locale: ReturnType<typeof useI18n>["l
         : t("common.unknown"),
     ],
     ["gallery.meta.savedAt", formatDateTime(entry.created_at)],
-  ] as const;
+  ] as Array<readonly [TranslationKey, string]>;
+  if (entry.owner_username) {
+    rows.splice(4, 0, ["gallery.meta.owner", entry.owner_username]);
+  }
+  return rows;
 }
 
 export function GalleryPage() {
@@ -170,6 +176,7 @@ export function GalleryPage() {
                             <span>{galleryEntrySizeLabel(entry, locale)}</span>
                             <span>{formatDateTime(entry.created_at)}</span>
                           </div>
+                          <ResourceMetaBadges resource={entry} className="mt-2" />
                         </div>
                       </div>
                     </button>
@@ -195,7 +202,12 @@ export function GalleryPage() {
           imageAlt={previewEntry.prompt ?? previewEntry.image.original_filename}
           title={t("gallery.prompt")}
           subtitle={previewEntry.image.original_filename}
-          body={previewEntry.prompt ?? t("gallery.noPrompt")}
+          body={
+            <div className="space-y-3">
+              <ResourceBlockedNotice resource={previewEntry} />
+              <div>{previewEntry.prompt ?? t("gallery.noPrompt")}</div>
+            </div>
+          }
           metadataRows={metadataRows(previewEntry, locale, t).map(([label, value]) => ({ label: t(label), value }))}
           providerNotes={previewEntry.provider_notes}
           providerNotesTitle={t("gallery.providerNotes")}

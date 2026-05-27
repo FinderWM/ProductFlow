@@ -1,15 +1,20 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, ChevronRight, Eye, ImagePlus, LayoutTemplate, Loader2, Tag, X } from "lucide-react";
+import { Check, ChevronRight, Eye, ImagePlus, LayoutTemplate, Loader2, Search, Tag, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Drawer } from "vaul";
 
 import { ImageDropZone } from "../components/ImageDropZone";
+import {
+  getResourceBlockedActionTitle,
+  isResourceBlocked,
+  ResourceMetaBadges,
+} from "../components/ResourceGovernance";
 import { api, ApiError } from "../lib/api";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import { useI18n } from "../lib/preferences";
 import type { TranslationKey } from "../lib/i18n";
-import type { CanvasTemplateSummary, WorkflowNodeType } from "../lib/types";
+import type { CanvasTemplateScope, CanvasTemplateSummary, ModerationFields, WorkflowNodeType } from "../lib/types";
 
 interface PreviewNode {
   id: string;
@@ -31,18 +36,24 @@ interface PreviewEdge {
   to: string;
 }
 
-interface CanvasPlanOption {
+interface CanvasPlanOption extends ModerationFields {
   key: string;
   label: string;
   shortLabel: string;
   description: string;
   badge: string;
   stage: string;
+  scope?: CanvasTemplateScope | null;
+  categoryName?: string | null;
+  owner_user_id?: string | null;
+  owner_username?: string | null;
   outputCount: number;
   referenceCount: number;
   previewNodes: PreviewNode[];
   previewEdges: PreviewEdge[];
 }
+
+type TemplateScopeFilter = CanvasTemplateScope | "all";
 
 const PREVIEW_MIN_WIDTH = 920;
 const PREVIEW_NODE_WIDTH = 248;
@@ -111,6 +122,13 @@ function canvasTemplateToPlan(template: CanvasTemplateSummary, t: ReturnType<typ
     description: template.description,
     badge: template.scenario.title || t("create.template"),
     stage: template.scenario.ecommerce_stage,
+    scope: template.scope,
+    categoryName: template.category_name,
+    owner_user_id: template.owner_user_id,
+    owner_username: template.owner_username,
+    enabled: template.enabled,
+    effective_enabled: template.effective_enabled,
+    disabled_reason: template.disabled_reason,
     outputCount: template.output_slots.length,
     referenceCount: template.reference_input_hints.length,
     previewNodes: template.preview_nodes.map((node) => ({
@@ -168,13 +186,31 @@ export function ProductCreatePage() {
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [canvasTemplateKey, setCanvasTemplateKey] = useState<string>("");
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [templateCategoryId, setTemplateCategoryId] = useState("");
+  const [templateScope, setTemplateScope] = useState<TemplateScopeFilter>("all");
   const [error, setError] = useState("");
   const [mobileTemplateSheetOpen, setMobileTemplateSheetOpen] = useState(false);
   const [mobilePreviewSheetOpen, setMobilePreviewSheetOpen] = useState(false);
+  const normalizedTemplateSearch = templateSearch.trim();
+  const templateScopeParam = templateScope === "all" ? undefined : templateScope;
 
   const templatesQuery = useQuery({
-    queryKey: ["canvas-templates"],
-    queryFn: () => api.listCanvasTemplates(),
+    queryKey: ["canvas-templates", normalizedTemplateSearch, templateCategoryId, templateScope],
+    queryFn: () =>
+      api.listCanvasTemplates({
+        search: normalizedTemplateSearch || undefined,
+        category_id: templateCategoryId || undefined,
+        scope: templateScopeParam,
+      }),
+  });
+
+  const templateCategoriesQuery = useQuery({
+    queryKey: ["canvas-template-categories", templateScope],
+    queryFn: () =>
+      api.listCanvasTemplateCategories({
+        scope: templateScopeParam,
+      }),
   });
 
   const canvasPlanOptions = useMemo(() => {
@@ -205,6 +241,12 @@ export function ProductCreatePage() {
     canvasPlanOptions.find((option) => option.key === canvasTemplateKey) ?? canvasPlanOptions[0];
 
   const planGroups = useMemo(() => groupedPlans(canvasPlanOptions, t), [canvasPlanOptions, t]);
+  const templateCategories = templateCategoriesQuery.data?.items ?? [];
+
+  const handleTemplateScopeChange = (nextScope: TemplateScopeFilter) => {
+    setTemplateScope(nextScope);
+    setTemplateCategoryId("");
+  };
 
   const previewLabel = useMemo(() => {
     if (!file) {
@@ -217,6 +259,9 @@ export function ProductCreatePage() {
     mutationFn: () => {
       if (!file) {
         throw new Error(t("create.requiredImage"));
+      }
+      if (isResourceBlocked(selectedPlan)) {
+        throw new Error(getResourceBlockedActionTitle(selectedPlan, t("resource.blockedAction")));
       }
       return api.createProduct({
         name,
@@ -263,6 +308,77 @@ export function ProductCreatePage() {
         </div>
       ) : null}
 
+      <div className="mt-4 space-y-3">
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-zinc-500 dark:text-slate-400">
+            {t("templateFilter.search")}
+          </span>
+          <span className="relative block">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-slate-500" />
+            <input
+              value={templateSearch}
+              onChange={(event) => setTemplateSearch(event.target.value)}
+              maxLength={120}
+              className="h-9 w-full rounded-md border border-zinc-200 bg-white pl-8 pr-3 text-xs text-zinc-900 outline-none transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+              placeholder={t("templateFilter.searchPlaceholder")}
+            />
+          </span>
+        </label>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-1">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-zinc-500 dark:text-slate-400">
+              {t("templateFilter.category")}
+            </span>
+            <select
+              value={templateCategoryId}
+              onChange={(event) => setTemplateCategoryId(event.target.value)}
+              disabled={templateCategoriesQuery.isLoading || templateCategoriesQuery.isError}
+              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs text-zinc-900 outline-none transition-shadow focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+            >
+              <option value="">{t("templateFilter.allCategories")}</option>
+              {templateCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-zinc-500 dark:text-slate-400">
+              {t("templateFilter.scope")}
+            </div>
+            <div className="inline-flex h-9 overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 p-0.5 dark:border-slate-700 dark:bg-[#0b1220]">
+              {(["all", "global", "user"] as const).map((scope) => {
+                const active = templateScope === scope;
+                const labelKey =
+                  scope === "all"
+                    ? "templateFilter.scopeAll"
+                    : scope === "global"
+                      ? "templateFilter.scopeGlobal"
+                      : "templateFilter.scopeUser";
+                return (
+                  <button
+                    key={scope}
+                    type="button"
+                    onClick={() => handleTemplateScopeChange(scope)}
+                    className={`rounded px-2.5 text-xs font-medium transition-colors ${
+                      active
+                        ? "bg-white text-zinc-950 shadow-sm dark:bg-slate-800 dark:text-white"
+                        : "text-zinc-500 hover:text-zinc-900 dark:text-slate-400 dark:hover:text-slate-100"
+                    }`}
+                  >
+                    {t(labelKey)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        {templateCategoriesQuery.isError ? (
+          <div className="text-xs text-red-600 dark:text-red-300">{t("templateFilter.categoriesLoadFailed")}</div>
+        ) : null}
+      </div>
+
       <div className="mt-4 space-y-5 pr-1 lg:max-h-[610px] lg:overflow-y-auto">
         {planGroups.map((group) => (
           <div key={group.stage}>
@@ -273,15 +389,23 @@ export function ProductCreatePage() {
             <div className="space-y-2">
               {group.plans.map((option) => {
                 const selected = selectedPlan.key === option.key;
+                const optionBlocked = isResourceBlocked(option);
+                const optionBlockedTitle = getResourceBlockedActionTitle(option, t("resource.blockedAction"));
                 return (
                   <button
                     key={option.key || "blank"}
                     type="button"
                     onClick={() => {
+                      if (optionBlocked) {
+                        setError(optionBlockedTitle);
+                        return;
+                      }
                       setCanvasTemplateKey(option.key);
                       setMobileTemplateSheetOpen(false);
                     }}
-                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                    disabled={optionBlocked}
+                    title={optionBlocked ? optionBlockedTitle : option.label}
+                    className={`w-full rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                       selected
                         ? "border-blue-500 bg-blue-50/50 shadow-[0_0_0_1px_rgb(59_130_246)] dark:border-violet-400 dark:bg-violet-500/18 dark:shadow-[0_0_0_1px_rgba(167,139,250,0.65)]"
                         : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700/80 dark:bg-[#151f33] dark:hover:border-violet-400/45 dark:hover:bg-violet-500/12"
@@ -300,9 +424,16 @@ export function ProductCreatePage() {
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       <TemplateChip>{option.shortLabel}</TemplateChip>
+                      {option.scope ? (
+                        <TemplateChip>
+                          {option.scope === "global" ? t("templateFilter.scopeGlobal") : t("templateFilter.scopeUser")}
+                        </TemplateChip>
+                      ) : null}
+                      {option.categoryName ? <TemplateChip>{option.categoryName}</TemplateChip> : null}
                       {option.outputCount ? <TemplateChip>{t("create.outputCount", { count: option.outputCount })}</TemplateChip> : null}
                       {option.referenceCount ? <TemplateChip>{t("create.referenceCount", { count: option.referenceCount })}</TemplateChip> : null}
                     </div>
+                    <ResourceMetaBadges resource={option} className="mt-2" showReason />
                   </button>
                 );
               })}
@@ -324,6 +455,7 @@ export function ProductCreatePage() {
             </span>
           </div>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-slate-400">{selectedPlan.description}</p>
+          <ResourceMetaBadges resource={selectedPlan} className="mt-2" showReason />
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-slate-300">
           <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 dark:border-slate-700 dark:bg-[#151f33]">

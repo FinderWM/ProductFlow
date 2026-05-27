@@ -7,6 +7,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from productflow_backend.application.auth import auth_tables_available, ensure_auth_bootstrapped
+from productflow_backend.application.product_workflow.user_templates import (
+    canvas_template_tables_available,
+    ensure_canvas_templates_bootstrapped,
+)
 from productflow_backend.config import get_settings
 from productflow_backend.infrastructure.logging import (
     cleanup_old_logs,
@@ -28,9 +33,13 @@ from productflow_backend.presentation.routes.auth import router as auth_router
 from productflow_backend.presentation.routes.gallery import router as gallery_router
 from productflow_backend.presentation.routes.generation_queue import router as generation_queue_router
 from productflow_backend.presentation.routes.image_sessions import router as image_sessions_router
+from productflow_backend.presentation.routes.moderation import router as moderation_router
 from productflow_backend.presentation.routes.product_workflows import router as product_workflows_router
 from productflow_backend.presentation.routes.products import router as products_router
+from productflow_backend.presentation.routes.rbac import router as rbac_router
+from productflow_backend.presentation.routes.resource_moderation import router as resource_moderation_router
 from productflow_backend.presentation.routes.settings import router as settings_router
+from productflow_backend.presentation.routes.usage_stats import router as usage_stats_router
 from productflow_backend.presentation.session import ClockStableSessionMiddleware
 
 REQUEST_ID_HEADER = b"x-request-id"
@@ -44,6 +53,10 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         cleanup_old_logs(settings)
+        if auth_tables_available():
+            ensure_auth_bootstrapped()
+        if canvas_template_tables_available():
+            ensure_canvas_templates_bootstrapped()
         if provider_config_tables_available():
             ensure_provider_config_bootstrapped()
         recover_unfinished_workflow_runs()
@@ -77,7 +90,11 @@ def create_app() -> FastAPI:
     app.include_router(products_router)
     app.include_router(product_workflows_router)
     app.include_router(image_sessions_router)
+    app.include_router(moderation_router)
+    app.include_router(resource_moderation_router)
     app.include_router(settings_router)
+    app.include_router(rbac_router)
+    app.include_router(usage_stats_router)
     return app
 
 

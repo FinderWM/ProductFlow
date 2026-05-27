@@ -1,11 +1,15 @@
 import type {
   ApplyWorkflowTemplateGroupInput,
+  CanvasTemplateCategoryListResponse,
+  CanvasTemplateScope,
   CanvasTemplateSummary,
   CanvasTemplateListResponse,
   ConfigResponse,
   ConfigUpdateRequest,
   CopySet,
   CopySetUpdateRequest,
+  CreateRoleRequest,
+  CreateTrustedUserRequest,
   DuplicateWorkflowNodeGroupInput,
   GalleryEntry,
   GalleryEntryListResponse,
@@ -36,13 +40,17 @@ import type {
   ProductWritebackResponse,
   ProductListResponse,
   RuntimeConfig,
+  RbacRole,
+  RbacUser,
   SettingsLockState,
   SettingsExportPayload,
   SettingsImportCommitResponse,
   SettingsImportPreviewResponse,
   SessionState,
   UpdateUserTemplateGroupInput,
+  UserUsageStatsResponse,
 } from "./types";
+import { md5Hex } from "./md5";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
@@ -96,14 +104,53 @@ export const api = {
   getSessionState(): Promise<SessionState> {
     return request<SessionState>("/api/auth/session");
   },
-  createSession(adminKey: string): Promise<{ ok: boolean }> {
+  createSession(username: string, password: string): Promise<{ ok: boolean }> {
     return request("/api/auth/session", {
       method: "POST",
-      body: JSON.stringify({ admin_key: adminKey }),
+      body: JSON.stringify({ username, client_password_md5: md5Hex(password) }),
+    });
+  },
+  login(username: string, password: string): Promise<{ ok: boolean }> {
+    return request("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, client_password_md5: md5Hex(password) }),
+    });
+  },
+  setPassword(username: string, password: string): Promise<{ ok: boolean }> {
+    return request("/api/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ username, client_password_md5: md5Hex(password) }),
     });
   },
   destroySession(): Promise<{ ok: boolean }> {
     return request("/api/auth/session", { method: "DELETE" });
+  },
+  listRbacUsers(): Promise<RbacUser[]> {
+    return request("/api/rbac/users");
+  },
+  createRbacUser(payload: CreateTrustedUserRequest): Promise<RbacUser> {
+    return request("/api/rbac/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateRbacUser(userId: string, payload: { enabled: boolean }): Promise<RbacUser> {
+    return request(`/api/rbac/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  resetRbacUserPassword(userId: string): Promise<RbacUser> {
+    return request(`/api/rbac/users/${userId}/reset-password`, { method: "POST" });
+  },
+  listRbacRoles(): Promise<RbacRole[]> {
+    return request("/api/rbac/roles");
+  },
+  createRbacRole(payload: CreateRoleRequest): Promise<RbacRole> {
+    return request("/api/rbac/roles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
   listProducts(input?: { page?: number; page_size?: number }): Promise<ProductListResponse> {
     const page = input?.page ?? 1;
@@ -163,6 +210,28 @@ export const api = {
     }
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/settings/generation-config-status${suffix}`);
+  },
+  getUsageStats(input?: {
+    start_date?: string;
+    end_date?: string;
+    user_id?: string;
+    username?: string;
+  }): Promise<UserUsageStatsResponse> {
+    const params = new URLSearchParams();
+    if (input?.start_date) {
+      params.set("start_date", input.start_date);
+    }
+    if (input?.end_date) {
+      params.set("end_date", input.end_date);
+    }
+    if (input?.user_id) {
+      params.set("user_id", input.user_id);
+    }
+    if (input?.username) {
+      params.set("username", input.username);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/usage-stats${suffix}`);
   },
   listGenerationConfigs(): Promise<GenerationConfig[]> {
     return request("/api/settings/generation-configs");
@@ -364,8 +433,37 @@ export const api = {
   getProductWorkflowStatus(productId: string): Promise<ProductWorkflowStatus> {
     return request(`/api/products/${productId}/workflow/status`);
   },
-  listCanvasTemplates(): Promise<CanvasTemplateListResponse> {
-    return request("/api/workflow/canvas-templates");
+  listCanvasTemplates(input?: {
+    search?: string;
+    category_id?: string;
+    scope?: CanvasTemplateScope;
+  }): Promise<CanvasTemplateListResponse> {
+    const params = new URLSearchParams();
+    if (input?.search) {
+      params.set("search", input.search);
+    }
+    if (input?.category_id) {
+      params.set("category_id", input.category_id);
+    }
+    if (input?.scope) {
+      params.set("scope", input.scope);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/workflow/canvas-templates${suffix}`);
+  },
+  listCanvasTemplateCategories(input?: {
+    search?: string;
+    scope?: CanvasTemplateScope;
+  }): Promise<CanvasTemplateCategoryListResponse> {
+    const params = new URLSearchParams();
+    if (input?.search) {
+      params.set("search", input.search);
+    }
+    if (input?.scope) {
+      params.set("scope", input.scope);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/workflow/canvas-template-categories${suffix}`);
   },
   applyWorkflowTemplateGroup(productId: string, input: ApplyWorkflowTemplateGroupInput): Promise<ProductWorkflow> {
     return request(`/api/products/${productId}/workflow/template-groups`, {

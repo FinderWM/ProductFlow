@@ -15,6 +15,7 @@ interface ImageChatMainStageProps {
   retryingTaskId: string | null;
   cancellingTaskId: string | null;
   regenerating: boolean;
+  generationBlockedTitle?: string | null;
   onPreviewRound: (round: ImageSessionRound) => void;
   onRetryGenerationTask: (task: ImageSessionGenerationTask) => void;
   onCancelGenerationTask: (task: ImageSessionGenerationTask) => void;
@@ -29,6 +30,7 @@ export function ImageChatMainStage({
   retryingTaskId,
   cancellingTaskId,
   regenerating,
+  generationBlockedTitle = null,
   onPreviewRound,
   onRetryGenerationTask,
   onCancelGenerationTask,
@@ -85,6 +87,7 @@ export function ImageChatMainStage({
           retrying={retryingTaskId === selectedPlaceholder.task_id}
           cancelling={cancellingTaskId === selectedPlaceholder.task_id}
           regenerating={regenerating}
+          actionBlockedTitle={generationBlockedTitle}
           onRetry={onRetryGenerationTask}
           onCancel={onCancelGenerationTask}
           onRegenerate={onRegenerateGenerationTask}

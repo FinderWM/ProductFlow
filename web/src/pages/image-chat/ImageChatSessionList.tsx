@@ -1,5 +1,10 @@
 import { History, Loader2, MessagesSquare, Trash2 } from "lucide-react";
 
+import {
+  getResourceBlockedActionTitle,
+  isResourceBlocked,
+  ResourceMetaBadges,
+} from "../../components/ResourceGovernance";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
 import type { ImageSessionSummary } from "../../lib/types";
@@ -112,6 +117,8 @@ function ImageChatSessionCard({
     variant === "desktop"
       ? "absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/95 text-slate-400 opacity-100 shadow-sm ring-1 ring-slate-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/88 dark:text-slate-400 dark:ring-slate-700 dark:hover:text-red-300 md:opacity-0 md:group-hover:opacity-100"
       : "absolute right-2 top-2 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-white/95 text-slate-400 shadow-sm ring-1 ring-slate-200 transition-colors active:scale-[0.98] hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/88 dark:text-slate-400 dark:ring-slate-700 dark:hover:text-red-300";
+  const blocked = isResourceBlocked(item);
+  const blockedTitle = getResourceBlockedActionTitle(item, t("resource.blockedAction"));
 
   return (
     <div className={cardClassName}>
@@ -139,14 +146,15 @@ function ImageChatSessionCard({
             <span>{t("chat.roundCount", { count: item.rounds_count })}</span>
           </div>
           <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500">{formatDateTime(item.updated_at)}</div>
+          <ResourceMetaBadges resource={item} className="mt-1" />
         </div>
       </button>
       <button
         type="button"
         aria-label={t("chat.deleteSession")}
         onClick={() => onDeleteSession(item.id)}
-        disabled={deleting || !deletionEnabled}
-        title={deletionEnabled ? t("chat.deleteSession") : t("chat.deleteDisabled")}
+        disabled={deleting || !deletionEnabled || blocked}
+        title={blocked ? blockedTitle : deletionEnabled ? t("chat.deleteSession") : t("chat.deleteDisabled")}
         className={deleteClassName}
       >
         {deleting ? <Loader2 size={variant === "desktop" ? 13 : 14} className="animate-spin" /> : <Trash2 size={variant === "desktop" ? 13 : 15} />}

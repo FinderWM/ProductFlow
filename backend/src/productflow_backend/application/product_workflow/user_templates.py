@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import inspect, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, selectinload
 
 from productflow_backend.application.canvas_templates import (
     CanvasTemplate,
@@ -12,19 +13,42 @@ from productflow_backend.application.canvas_templates import (
     CanvasTemplateNodeSpec,
     CanvasTemplateScenario,
     CanvasTemplateScenarioMetadata,
+    TemplateKind,
+    list_builtin_canvas_templates,
 )
 from productflow_backend.application.copy_payloads import normalize_copy_node_config
 from productflow_backend.application.image_generation_core import normalize_image_generation_tool_options
+from productflow_backend.application.moderation import (
+    ensure_resource_usable,
+    moderation_state_for_resource,
+)
+from productflow_backend.application.ownership import (
+    ensure_actor_can_mutate_owner,
+    resolve_owner_user_id,
+)
 from productflow_backend.application.product_workflow import graph as product_workflow_graph
 from productflow_backend.application.product_workflow.context import image_size_from_config
 from productflow_backend.application.time import now_utc
 from productflow_backend.domain.enums import WorkflowNodeType
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
-from productflow_backend.infrastructure.db.models import UserCanvasTemplate, WorkflowEdge, WorkflowNode, new_id
+from productflow_backend.infrastructure.db.models import (
+    CanvasTemplate as DbCanvasTemplate,
+)
+from productflow_backend.infrastructure.db.models import (
+    CanvasTemplateCategory,
+    UserCanvasTemplate,
+    WorkflowEdge,
+    WorkflowNode,
+    new_id,
+)
+from productflow_backend.infrastructure.db.session import get_engine, get_session_factory
 
 USER_TEMPLATE_KEY_PREFIX = "user:"
 USER_TEMPLATE_SCHEMA_VERSION = 1
 USER_TEMPLATE_SCENARIO = CanvasTemplateScenario.MAIN_IMAGE
+BUILTIN_TEMPLATE_CATEGORY_ID = "00000000-0000-0000-0000-000000000020"
+BUILTIN_TEMPLATE_CATEGORY_NAME = "电商场景"
+TemplateScope = Literal["global", "user"]
 
 ARTIFACT_SPECIFIC_CONFIG_KEYS = frozenset(
     {
@@ -88,16 +112,683 @@ class UserCanvasTemplatePayload(BaseModel):
     edges: tuple[UserCanvasTemplateEdgePayload, ...] = ()
 
 
-def user_canvas_template_to_canvas_template(row: UserCanvasTemplate) -> CanvasTemplate:
-    payload = _parse_template_payload(row)
+def canvas_template_tables_available() -> bool:
+    inspector = inspect(get_engine())
+    return all(
+        inspector.has_table(table_name)
+        for table_name in ("canvas_templates", "canvas_template_categories")
+    )
+
+
+def ensure_canvas_templates_bootstrapped(session: Session | None = None) -> None:
+    if session is None:
+        factory = get_session_factory()
+        with factory() as owned_session:
+            ensure_canvas_templates_bootstrapped(owned_session)
+        return
+
+    _seed_builtin_canvas_templates(session)
+    _migrate_legacy_user_canvas_templates(session)
+    session.commit()
+
+
+def canvas_template_row_to_canvas_template(row: DbCanvasTemplate) -> CanvasTemplate:
+    template = _parse_db_template_payload(row)
+    category = row.category
+    owner = row.owner
+    state = moderation_state_for_resource(row)
     return CanvasTemplate(
         key=row.key,
-        version=payload.version,
-        kind="node_group",
+        template_id=row.id,
+        version=row.schema_version,
+        kind=_template_kind(row.kind),
         title=row.title,
         description=row.description or "",
+        source="user" if row.scope == "user" else "builtin",
+        user_template_id=row.id if row.scope == "user" else None,
+        scope=_template_scope(row.scope),
+        category_id=row.category_id,
+        category_name=category.name if category is not None else None,
+        owner_user_id=row.owner_user_id,
+        owner_username=owner.username if owner is not None else None,
+        enabled=row.enabled,
+        effective_enabled=state.effective_enabled,
+        disabled_reason=row.disabled_reason,
+        scenario=template.scenario,
+        nodes=template.nodes,
+        edges=template.edges,
+        prompt_seeds=template.prompt_seeds,
+        instruction_seeds=template.instruction_seeds,
+        output_slots=template.output_slots,
+        reference_input_hints=template.reference_input_hints,
+        suggested_connections=template.suggested_connections,
+        default_external_connections=template.default_external_connections,
+    )
+
+
+def user_canvas_template_to_canvas_template(row: UserCanvasTemplate) -> CanvasTemplate:
+    return _legacy_user_canvas_template_to_canvas_template(row)
+
+
+def list_canvas_templates(
+    session: Session,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = True,
+    search: str | None = None,
+    category_id: str | None = None,
+    scope: str | None = None,
+) -> list[CanvasTemplate]:
+    ensure_canvas_templates_bootstrapped(session)
+    normalized_scope = _normalize_optional_scope(scope)
+    stmt = _canvas_template_query().where(DbCanvasTemplate.archived_at.is_(None))
+    if normalized_scope is not None:
+        stmt = stmt.where(DbCanvasTemplate.scope == normalized_scope)
+    if category_id:
+        stmt = stmt.where(DbCanvasTemplate.category_id == category_id)
+    normalized_search = _normalize_search(search)
+    if normalized_search:
+        pattern = f"%{normalized_search.lower()}%"
+        stmt = stmt.where(
+            or_(
+                DbCanvasTemplate.key.ilike(pattern),
+                DbCanvasTemplate.title.ilike(pattern),
+                DbCanvasTemplate.description.ilike(pattern),
+            )
+        )
+    if not actor_is_admin:
+        stmt = stmt.where(
+            or_(
+                DbCanvasTemplate.scope == "global",
+                DbCanvasTemplate.owner_user_id == actor_user_id,
+            )
+        )
+    rows = session.scalars(
+        stmt.order_by(DbCanvasTemplate.scope, DbCanvasTemplate.title, DbCanvasTemplate.created_at)
+    ).all()
+    return [
+        canvas_template_row_to_canvas_template(row)
+        for row in rows
+        if _template_visible_to_actor(row, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+    ]
+
+
+def get_canvas_template(
+    session: Session,
+    template_key: str,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+    require_usable: bool = True,
+) -> CanvasTemplate:
+    ensure_canvas_templates_bootstrapped(session)
+    key = template_key.strip()
+    row = session.scalar(
+        _canvas_template_query().where(
+            DbCanvasTemplate.key == key,
+            DbCanvasTemplate.archived_at.is_(None),
+        )
+    )
+    if row is None or not _template_visible_to_actor(row, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin):
+        raise BusinessValidationError("画布模板不存在")
+    if require_usable:
+        ensure_resource_usable(row)
+    return canvas_template_row_to_canvas_template(row)
+
+
+def list_canvas_template_categories(
+    session: Session,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = True,
+    search: str | None = None,
+    scope: str | None = None,
+) -> list[CanvasTemplateCategory]:
+    ensure_canvas_templates_bootstrapped(session)
+    normalized_scope = _normalize_optional_scope(scope)
+    stmt = _canvas_template_category_query().where(CanvasTemplateCategory.archived_at.is_(None))
+    if normalized_scope is not None:
+        stmt = stmt.where(CanvasTemplateCategory.scope == normalized_scope)
+    normalized_search = _normalize_search(search)
+    if normalized_search:
+        stmt = stmt.where(CanvasTemplateCategory.name.ilike(f"%{normalized_search.lower()}%"))
+    if not actor_is_admin:
+        stmt = stmt.where(
+            or_(
+                CanvasTemplateCategory.scope == "global",
+                CanvasTemplateCategory.owner_user_id == actor_user_id,
+            )
+        )
+    rows = session.scalars(
+        stmt.order_by(CanvasTemplateCategory.scope, CanvasTemplateCategory.sort_order, CanvasTemplateCategory.name)
+    ).all()
+    return [
+        row
+        for row in rows
+        if _category_visible_to_actor(row, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+    ]
+
+
+def create_canvas_template_category(
+    session: Session,
+    *,
+    scope: TemplateScope,
+    name: str,
+    sort_order: int = 100,
+    actor_user_id: str | None,
+) -> CanvasTemplateCategory:
+    ensure_canvas_templates_bootstrapped(session)
+    owner_user_id = actor_user_id if scope == "user" else None
+    category = CanvasTemplateCategory(
+        id=new_id(),
+        scope=scope,
+        owner_user_id=owner_user_id,
+        name=_normalize_category_name(name),
+        sort_order=sort_order,
+    )
+    session.add(category)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise BusinessValidationError("画布模板分类已存在") from exc
+    session.expire_all()
+    return _get_canvas_template_category_or_raise(session, category.id)
+
+
+def update_canvas_template_category(
+    session: Session,
+    *,
+    category_id: str,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+    expected_scope: TemplateScope | None = None,
+    name: str | None = None,
+    sort_order: int | None = None,
+) -> CanvasTemplateCategory:
+    category = _get_canvas_template_category_or_raise(session, category_id)
+    _ensure_category_scope(category, expected_scope)
+    _ensure_category_mutable(category, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+    if name is not None:
+        category.name = _normalize_category_name(name)
+    if sort_order is not None:
+        category.sort_order = sort_order
+    category.updated_at = now_utc()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise BusinessValidationError("画布模板分类已存在") from exc
+    session.expire_all()
+    return _get_canvas_template_category_or_raise(session, category_id)
+
+
+def archive_canvas_template_category(
+    session: Session,
+    *,
+    category_id: str,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+    expected_scope: TemplateScope | None = None,
+) -> None:
+    category = _get_canvas_template_category_or_raise(session, category_id)
+    _ensure_category_scope(category, expected_scope)
+    _ensure_category_mutable(category, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+    if category.archived_at is None:
+        category.archived_at = now_utc()
+        category.updated_at = category.archived_at
+        session.commit()
+
+
+def restore_canvas_template_category(
+    session: Session,
+    *,
+    category_id: str,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+    expected_scope: TemplateScope | None = None,
+) -> CanvasTemplateCategory:
+    category = _get_canvas_template_category_or_raise(session, category_id, include_archived=True)
+    _ensure_category_scope(category, expected_scope)
+    _ensure_category_mutable(category, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+    category.archived_at = None
+    category.updated_at = now_utc()
+    session.commit()
+    session.expire_all()
+    return _get_canvas_template_category_or_raise(session, category_id)
+
+
+def create_global_canvas_template(
+    session: Session,
+    *,
+    key: str,
+    title: str,
+    description: str | None,
+    kind: TemplateKind,
+    template_json: dict[str, Any],
+    category_id: str | None = None,
+) -> DbCanvasTemplate:
+    ensure_canvas_templates_bootstrapped(session)
+    clean_key = _normalize_template_key(key)
+    clean_title = _normalize_template_title(title)
+    _validate_template_category(session, scope="global", owner_user_id=None, category_id=category_id)
+    template = _global_template_contract(
+        key=clean_key,
+        title=clean_title,
+        description=description,
+        kind=kind,
+        template_json=template_json,
+    )
+    row = DbCanvasTemplate(
+        id=new_id(),
+        key=clean_key,
+        scope="global",
+        owner_user_id=None,
+        category_id=category_id,
+        title=clean_title,
+        description=(description or "").strip() or None,
+        kind=kind,
+        schema_version=template.version,
+        template_json=template.model_dump(mode="json"),
+    )
+    session.add(row)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise BusinessValidationError("画布模板 key 已存在") from exc
+    session.expire_all()
+    return _get_global_canvas_template_or_raise(session, row.id)
+
+
+def update_global_canvas_template(
+    session: Session,
+    *,
+    template_id: str,
+    title: str | None = None,
+    description: str | None = None,
+    kind: TemplateKind | None = None,
+    template_json: dict[str, Any] | None = None,
+    category_id: str | None = None,
+) -> DbCanvasTemplate:
+    row = _get_global_canvas_template_or_raise(session, template_id)
+    next_title = _normalize_template_title(title) if title is not None else row.title
+    next_description = (description or "").strip() if description is not None else row.description
+    next_kind = kind or _template_kind(row.kind)
+    next_template_json = template_json if template_json is not None else dict(row.template_json or {})
+    if category_id is not None:
+        _validate_template_category(session, scope="global", owner_user_id=None, category_id=category_id)
+        row.category_id = category_id
+    template = _global_template_contract(
+        key=row.key,
+        title=next_title,
+        description=next_description,
+        kind=next_kind,
+        template_json=next_template_json,
+    )
+    row.title = next_title
+    row.description = next_description or None
+    row.kind = next_kind
+    row.schema_version = template.version
+    row.template_json = template.model_dump(mode="json")
+    row.updated_at = now_utc()
+    session.commit()
+    session.expire_all()
+    return _get_global_canvas_template_or_raise(session, template_id)
+
+
+def archive_global_canvas_template(session: Session, *, template_id: str) -> None:
+    row = _get_global_canvas_template_or_raise(session, template_id)
+    if row.archived_at is None:
+        row.archived_at = now_utc()
+        row.updated_at = row.archived_at
+        session.commit()
+
+
+def restore_global_canvas_template(session: Session, *, template_id: str) -> DbCanvasTemplate:
+    row = _get_global_canvas_template_or_raise(session, template_id, include_archived=True)
+    row.archived_at = None
+    row.updated_at = now_utc()
+    session.commit()
+    session.expire_all()
+    return _get_global_canvas_template_or_raise(session, template_id)
+
+
+def create_user_canvas_template_from_workflow_nodes(
+    session: Session,
+    *,
+    product_id: str,
+    owner_user_id: str,
+    title: str,
+    description: str | None,
+    node_ids: list[str],
+    category_id: str | None = None,
+) -> DbCanvasTemplate:
+    ensure_canvas_templates_bootstrapped(session)
+    clean_title = title.strip()
+    if not clean_title:
+        raise BusinessValidationError("模板名称不能为空")
+    if not node_ids:
+        raise BusinessValidationError("请选择要保存的节点")
+    if len(set(node_ids)) != len(node_ids):
+        raise BusinessValidationError("保存模板的节点不能重复")
+
+    workflow = product_workflow_graph.get_active_workflow(session, product_id)
+    if workflow is None:
+        product_workflow_graph.get_product_or_raise(session, product_id)
+        raise BusinessValidationError("需要先创建或打开画布后才能保存模板")
+
+    workflow_nodes_by_id = {node.id: node for node in workflow.nodes}
+    unknown_node_ids = [node_id for node_id in node_ids if node_id not in workflow_nodes_by_id]
+    if unknown_node_ids:
+        raise BusinessValidationError("保存模板包含不属于当前画布的节点")
+
+    selected_nodes = [workflow_nodes_by_id[node_id] for node_id in node_ids]
+    if any(node.node_type == WorkflowNodeType.PRODUCT_CONTEXT for node in selected_nodes):
+        raise BusinessValidationError("节点组模板不能包含商品资料节点")
+    _validate_template_category(
+        session,
+        scope="user",
+        owner_user_id=owner_user_id,
+        category_id=category_id,
+    )
+
+    min_x = min(node.position_x for node in selected_nodes)
+    min_y = min(node.position_y for node in selected_nodes)
+    node_keys_by_id = {node.id: f"node_{index + 1}" for index, node in enumerate(selected_nodes)}
+    payload = UserCanvasTemplatePayload(
+        nodes=tuple(
+            UserCanvasTemplateNodePayload(
+                key=node_keys_by_id[node.id],
+                node_type=node.node_type,
+                title=node.title,
+                position_x=node.position_x - min_x,
+                position_y=node.position_y - min_y,
+                config_json=extract_reusable_node_config(node),
+            )
+            for node in selected_nodes
+        ),
+        edges=tuple(_selected_internal_edges(workflow.edges, node_keys_by_id)),
+    )
+    template_id = new_id()
+    template_key = f"{USER_TEMPLATE_KEY_PREFIX}{template_id}"
+    canvas_template = _user_payload_to_canvas_template(
+        payload,
+        template_id=template_id,
+        key=template_key,
+        title=clean_title,
+        description=(description or "").strip() or None,
+        owner_user_id=owner_user_id,
+    )
+    template = DbCanvasTemplate(
+        id=template_id,
+        key=template_key,
+        scope="user",
+        owner_user_id=owner_user_id,
+        category_id=category_id,
+        title=clean_title,
+        description=(description or "").strip() or None,
+        kind="node_group",
+        schema_version=USER_TEMPLATE_SCHEMA_VERSION,
+        template_json=canvas_template.model_dump(mode="json"),
+    )
+    session.add(template)
+    _upsert_legacy_user_template_mirror(session, template, payload)
+    session.flush()
+
+    canvas_template_row_to_canvas_template(template)
+    session.commit()
+    session.expire_all()
+    return _get_user_template_or_raise(session, template.id)
+
+
+def rename_user_canvas_template(
+    session: Session,
+    *,
+    template_id: str,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+    title: str | None,
+    description: str | None,
+) -> DbCanvasTemplate:
+    template = _get_user_template_or_raise(session, template_id)
+    if template.archived_at is not None:
+        raise NotFoundError("用户模板不存在")
+    _ensure_user_template_mutable(template, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+    if title is not None:
+        clean_title = title.strip()
+        if not clean_title:
+            raise BusinessValidationError("模板名称不能为空")
+        template.title = clean_title
+    if description is not None:
+        template.description = description.strip() or None
+    template.template_json = _template_json_with_row_metadata(template)
+    template.updated_at = now_utc()
+    _sync_legacy_user_template_mirror(session, template)
+    session.commit()
+    session.expire_all()
+    return _get_user_template_or_raise(session, template_id)
+
+
+def archive_user_canvas_template(
+    session: Session,
+    *,
+    template_id: str,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> None:
+    template = _get_user_template_or_raise(session, template_id)
+    _ensure_user_template_mutable(template, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+    if template.archived_at is None:
+        template.archived_at = now_utc()
+        template.updated_at = template.archived_at
+        _sync_legacy_user_template_mirror(session, template)
+        session.commit()
+
+
+def restore_user_canvas_template(
+    session: Session,
+    *,
+    template_id: str,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> DbCanvasTemplate:
+    template = _get_user_template_or_raise(session, template_id, include_archived=True)
+    _ensure_user_template_mutable(template, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+    template.archived_at = None
+    template.updated_at = now_utc()
+    _sync_legacy_user_template_mirror(session, template)
+    session.commit()
+    session.expire_all()
+    return _get_user_template_or_raise(session, template_id)
+
+
+def _parse_legacy_template_payload(row: UserCanvasTemplate) -> UserCanvasTemplatePayload:
+    if row.kind != "node_group" or row.schema_version != USER_TEMPLATE_SCHEMA_VERSION:
+        raise BusinessValidationError("用户模板版本不支持")
+    payload = UserCanvasTemplatePayload.model_validate(row.template_json)
+    if payload.version != USER_TEMPLATE_SCHEMA_VERSION or payload.kind != "node_group":
+        raise BusinessValidationError("用户模板版本不支持")
+    return payload
+
+
+def _get_user_template_or_raise(
+    session: Session,
+    template_id: str,
+    *,
+    include_archived: bool = False,
+) -> DbCanvasTemplate:
+    stmt = _canvas_template_query().where(DbCanvasTemplate.id == template_id, DbCanvasTemplate.scope == "user")
+    if not include_archived:
+        stmt = stmt.where(DbCanvasTemplate.archived_at.is_(None))
+    template = session.scalar(stmt)
+    if template is None:
+        raise NotFoundError("用户模板不存在")
+    return template
+
+
+def _legacy_user_canvas_template_to_canvas_template(row: UserCanvasTemplate) -> CanvasTemplate:
+    return _user_payload_to_canvas_template(
+        _parse_legacy_template_payload(row),
+        template_id=row.id,
+        key=row.key,
+        title=row.title,
+        description=row.description,
+        owner_user_id=None,
+    )
+
+
+def _canvas_template_query():
+    return select(DbCanvasTemplate).options(
+        selectinload(DbCanvasTemplate.owner),
+        selectinload(DbCanvasTemplate.category).selectinload(CanvasTemplateCategory.disabled_by),
+        selectinload(DbCanvasTemplate.category).selectinload(CanvasTemplateCategory.owner),
+        selectinload(DbCanvasTemplate.disabled_by),
+    )
+
+
+def _canvas_template_category_query():
+    return select(CanvasTemplateCategory).options(
+        selectinload(CanvasTemplateCategory.owner),
+        selectinload(CanvasTemplateCategory.disabled_by),
+    )
+
+
+def _seed_builtin_canvas_templates(session: Session) -> None:
+    category = _ensure_builtin_template_category(session)
+    for template in list_builtin_canvas_templates():
+        existing = session.scalar(select(DbCanvasTemplate.id).where(DbCanvasTemplate.key == template.key))
+        if existing is not None:
+            continue
+        row = DbCanvasTemplate(
+            id=new_id(),
+            key=template.key,
+            scope="global",
+            owner_user_id=None,
+            category_id=category.id,
+            title=template.title,
+            description=template.description,
+            kind=template.kind,
+            schema_version=template.version,
+            template_json=template.model_copy(
+                update={
+                    "scope": "global",
+                    "category_id": category.id,
+                    "category_name": category.name,
+                    "enabled": True,
+                    "effective_enabled": True,
+                }
+            ).model_dump(mode="json"),
+        )
+        session.add(row)
+
+
+def _ensure_builtin_template_category(session: Session) -> CanvasTemplateCategory:
+    category = session.scalar(
+        select(CanvasTemplateCategory).where(
+            CanvasTemplateCategory.scope == "global",
+            CanvasTemplateCategory.name == BUILTIN_TEMPLATE_CATEGORY_NAME,
+        )
+    )
+    if category is not None:
+        return category
+    category = CanvasTemplateCategory(
+        id=BUILTIN_TEMPLATE_CATEGORY_ID,
+        scope="global",
+        owner_user_id=None,
+        name=BUILTIN_TEMPLATE_CATEGORY_NAME,
+        sort_order=10,
+    )
+    session.add(category)
+    session.flush()
+    return category
+
+
+def _migrate_legacy_user_canvas_templates(session: Session) -> None:
+    owner_user_id = resolve_owner_user_id(session, None)
+    legacy_rows = session.scalars(select(UserCanvasTemplate)).all()
+    for legacy in legacy_rows:
+        exists = session.scalar(select(DbCanvasTemplate.id).where(DbCanvasTemplate.key == legacy.key))
+        if exists is not None:
+            continue
+        template = _legacy_user_canvas_template_to_canvas_template(legacy).model_copy(
+            update={
+                "template_id": legacy.id,
+                "scope": "user",
+                "owner_user_id": owner_user_id,
+            }
+        )
+        session.add(
+            DbCanvasTemplate(
+                id=legacy.id,
+                key=legacy.key,
+                scope="user",
+                owner_user_id=owner_user_id,
+                category_id=None,
+                title=legacy.title,
+                description=legacy.description,
+                kind=legacy.kind,
+                schema_version=legacy.schema_version,
+                template_json=template.model_dump(mode="json"),
+                archived_at=legacy.archived_at,
+            )
+        )
+
+
+def _parse_db_template_payload(row: DbCanvasTemplate) -> CanvasTemplate:
+    try:
+        raw_payload = dict(row.template_json or {})
+    except TypeError as exc:
+        raise BusinessValidationError("画布模板版本不支持") from exc
+    if "scenario" in raw_payload:
+        raw_payload.update(
+            {
+                "key": row.key,
+                "template_id": row.id,
+                "version": row.schema_version,
+                "kind": row.kind,
+                "title": row.title,
+                "description": row.description or "",
+                "source": "user" if row.scope == "user" else "builtin",
+                "user_template_id": row.id if row.scope == "user" else None,
+            }
+        )
+        return CanvasTemplate.model_validate(raw_payload)
+    if row.scope == "user":
+        payload = UserCanvasTemplatePayload.model_validate(raw_payload)
+        return _user_payload_to_canvas_template(
+            payload,
+            template_id=row.id,
+            key=row.key,
+            title=row.title,
+            description=row.description,
+            owner_user_id=row.owner_user_id,
+        )
+    raise BusinessValidationError("画布模板版本不支持")
+
+
+def _user_payload_to_canvas_template(
+    payload: UserCanvasTemplatePayload,
+    *,
+    template_id: str,
+    key: str,
+    title: str,
+    description: str | None,
+    owner_user_id: str | None,
+) -> CanvasTemplate:
+    if payload.version != USER_TEMPLATE_SCHEMA_VERSION or payload.kind != "node_group":
+        raise BusinessValidationError("用户模板版本不支持")
+    return CanvasTemplate(
+        key=key,
+        template_id=template_id,
+        version=payload.version,
+        kind="node_group",
+        title=title,
+        description=description or "",
         source="user",
-        user_template_id=row.id,
+        user_template_id=template_id,
+        scope="user",
+        owner_user_id=owner_user_id,
         scenario=CanvasTemplateScenarioMetadata(
             scenario=USER_TEMPLATE_SCENARIO,
             title="用户模板",
@@ -129,150 +820,272 @@ def user_canvas_template_to_canvas_template(row: UserCanvasTemplate) -> CanvasTe
     )
 
 
-def list_canvas_templates(session: Session) -> list[CanvasTemplate]:
-    from productflow_backend.application.canvas_templates import list_builtin_canvas_templates
-
-    user_templates = session.scalars(
-        select(UserCanvasTemplate)
-        .where(UserCanvasTemplate.archived_at.is_(None))
-        .order_by(UserCanvasTemplate.created_at.desc(), UserCanvasTemplate.id.desc())
-    ).all()
-    return [*list_builtin_canvas_templates(), *(user_canvas_template_to_canvas_template(row) for row in user_templates)]
-
-
-def get_canvas_template(session: Session, template_key: str) -> CanvasTemplate:
-    from productflow_backend.application.canvas_templates import get_builtin_canvas_template
-
-    key = template_key.strip()
-    if key.startswith(USER_TEMPLATE_KEY_PREFIX):
-        row = _get_active_user_template_by_key(session, key)
-        return user_canvas_template_to_canvas_template(row)
-    return get_builtin_canvas_template(key)
-
-
-def create_user_canvas_template_from_workflow_nodes(
-    session: Session,
+def _template_visible_to_actor(
+    row: DbCanvasTemplate,
     *,
-    product_id: str,
-    title: str,
-    description: str | None,
-    node_ids: list[str],
-) -> UserCanvasTemplate:
-    clean_title = title.strip()
-    if not clean_title:
-        raise BusinessValidationError("模板名称不能为空")
-    if not node_ids:
-        raise BusinessValidationError("请选择要保存的节点")
-    if len(set(node_ids)) != len(node_ids):
-        raise BusinessValidationError("保存模板的节点不能重复")
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+) -> bool:
+    if row.archived_at is not None:
+        return False
+    if row.category is not None and row.category.archived_at is not None:
+        return False
+    if actor_is_admin:
+        return True
+    if row.scope == "user":
+        return row.owner_user_id == actor_user_id
+    return moderation_state_for_resource(row).effective_enabled
 
-    workflow = product_workflow_graph.get_active_workflow(session, product_id)
-    if workflow is None:
-        product_workflow_graph.get_product_or_raise(session, product_id)
-        raise BusinessValidationError("需要先创建或打开画布后才能保存模板")
 
-    workflow_nodes_by_id = {node.id: node for node in workflow.nodes}
-    unknown_node_ids = [node_id for node_id in node_ids if node_id not in workflow_nodes_by_id]
-    if unknown_node_ids:
-        raise BusinessValidationError("保存模板包含不属于当前画布的节点")
+def _category_visible_to_actor(
+    row: CanvasTemplateCategory,
+    *,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+) -> bool:
+    if row.archived_at is not None:
+        return False
+    if actor_is_admin:
+        return True
+    if row.scope == "user":
+        return row.owner_user_id == actor_user_id
+    return moderation_state_for_resource(row).effective_enabled
 
-    selected_nodes = [workflow_nodes_by_id[node_id] for node_id in node_ids]
-    if any(node.node_type == WorkflowNodeType.PRODUCT_CONTEXT for node in selected_nodes):
-        raise BusinessValidationError("节点组模板不能包含商品资料节点")
 
-    min_x = min(node.position_x for node in selected_nodes)
-    min_y = min(node.position_y for node in selected_nodes)
-    node_keys_by_id = {node.id: f"node_{index + 1}" for index, node in enumerate(selected_nodes)}
-    payload = UserCanvasTemplatePayload(
+def _template_json_with_row_metadata(row: DbCanvasTemplate) -> dict[str, Any]:
+    template = canvas_template_row_to_canvas_template(row)
+    return template.model_dump(mode="json")
+
+
+def _upsert_legacy_user_template_mirror(
+    session: Session,
+    template: DbCanvasTemplate,
+    payload: UserCanvasTemplatePayload,
+) -> None:
+    legacy = session.get(UserCanvasTemplate, template.id)
+    if legacy is None:
+        legacy = UserCanvasTemplate(id=template.id, key=template.key)
+        session.add(legacy)
+    legacy.title = template.title
+    legacy.description = template.description
+    legacy.kind = template.kind
+    legacy.schema_version = template.schema_version
+    legacy.template_json = payload.model_dump(mode="json")
+    legacy.archived_at = template.archived_at
+
+
+def _sync_legacy_user_template_mirror(session: Session, template: DbCanvasTemplate) -> None:
+    if template.scope != "user":
+        return
+    legacy = session.get(UserCanvasTemplate, template.id)
+    if legacy is None:
+        payload = _legacy_payload_from_canvas_template(canvas_template_row_to_canvas_template(template))
+        _upsert_legacy_user_template_mirror(session, template, payload)
+        return
+    legacy.title = template.title
+    legacy.description = template.description
+    legacy.kind = template.kind
+    legacy.schema_version = template.schema_version
+    legacy.archived_at = template.archived_at
+
+
+def _legacy_payload_from_canvas_template(template: CanvasTemplate) -> UserCanvasTemplatePayload:
+    return UserCanvasTemplatePayload(
+        version=template.version,
+        kind=template.kind,
         nodes=tuple(
             UserCanvasTemplateNodePayload(
-                key=node_keys_by_id[node.id],
+                key=node.key,
                 node_type=node.node_type,
                 title=node.title,
-                position_x=node.position_x - min_x,
-                position_y=node.position_y - min_y,
-                config_json=extract_reusable_node_config(node),
+                position_x=node.position_x,
+                position_y=node.position_y,
+                config_json=node.config_json,
             )
-            for node in selected_nodes
+            for node in template.nodes
         ),
-        edges=tuple(_selected_internal_edges(workflow.edges, node_keys_by_id)),
+        edges=tuple(
+            UserCanvasTemplateEdgePayload(
+                source_node_key=edge.source_node_key,
+                target_node_key=edge.target_node_key,
+                source_handle=edge.source_handle,
+                target_handle=edge.target_handle,
+            )
+            for edge in template.edges
+        ),
     )
 
-    template = UserCanvasTemplate(
-        id=new_id(),
-        title=clean_title,
-        description=(description or "").strip() or None,
-        kind="node_group",
-        schema_version=USER_TEMPLATE_SCHEMA_VERSION,
-        template_json=payload.model_dump(mode="json"),
+
+def _ensure_user_template_mutable(
+    template: DbCanvasTemplate,
+    *,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+) -> None:
+    ensure_actor_can_mutate_owner(
+        owner_user_id=template.owner_user_id or "",
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="用户模板不存在",
     )
-    template.key = f"{USER_TEMPLATE_KEY_PREFIX}{template.id}"
-    session.add(template)
-    session.flush()
-
-    user_canvas_template_to_canvas_template(template)
-    session.commit()
-    session.expire_all()
-    return _get_user_template_or_raise(session, template.id)
 
 
-def rename_user_canvas_template(
+def _ensure_category_mutable(
+    category: CanvasTemplateCategory,
+    *,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+) -> None:
+    if category.scope == "global":
+        return
+    ensure_actor_can_mutate_owner(
+        owner_user_id=category.owner_user_id or "",
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="画布模板分类不存在",
+    )
+
+
+def _ensure_category_scope(category: CanvasTemplateCategory, expected_scope: TemplateScope | None) -> None:
+    if expected_scope is not None and category.scope != expected_scope:
+        raise NotFoundError("画布模板分类不存在")
+
+
+def _validate_template_category(
     session: Session,
     *,
+    scope: TemplateScope,
+    owner_user_id: str | None,
+    category_id: str | None,
+) -> CanvasTemplateCategory | None:
+    if category_id is None:
+        return None
+    category = session.get(CanvasTemplateCategory, category_id)
+    if category is None or category.archived_at is not None:
+        raise BusinessValidationError("画布模板分类不存在")
+    if category.scope != scope:
+        raise BusinessValidationError("画布模板分类范围不匹配")
+    if scope == "user" and category.owner_user_id != owner_user_id:
+        raise BusinessValidationError("画布模板分类不存在")
+    if scope == "global" and category.owner_user_id is not None:
+        raise BusinessValidationError("画布模板分类范围不匹配")
+    ensure_resource_usable(category)
+    return category
+
+
+def _get_canvas_template_category_or_raise(
+    session: Session,
+    category_id: str,
+    *,
+    include_archived: bool = False,
+) -> CanvasTemplateCategory:
+    stmt = _canvas_template_category_query().where(CanvasTemplateCategory.id == category_id)
+    if not include_archived:
+        stmt = stmt.where(CanvasTemplateCategory.archived_at.is_(None))
+    category = session.scalar(stmt)
+    if category is None:
+        raise NotFoundError("画布模板分类不存在")
+    return category
+
+
+def _get_global_canvas_template_or_raise(
+    session: Session,
     template_id: str,
-    title: str | None,
+    *,
+    include_archived: bool = False,
+) -> DbCanvasTemplate:
+    stmt = _canvas_template_query().where(DbCanvasTemplate.id == template_id, DbCanvasTemplate.scope == "global")
+    if not include_archived:
+        stmt = stmt.where(DbCanvasTemplate.archived_at.is_(None))
+    row = session.scalar(stmt)
+    if row is None:
+        raise NotFoundError("画布模板不存在")
+    return row
+
+
+def _global_template_contract(
+    *,
+    key: str,
+    title: str,
     description: str | None,
-) -> UserCanvasTemplate:
-    template = _get_user_template_or_raise(session, template_id)
-    if template.archived_at is not None:
-        raise NotFoundError("用户模板不存在")
-    if title is not None:
-        clean_title = title.strip()
-        if not clean_title:
-            raise BusinessValidationError("模板名称不能为空")
-        template.title = clean_title
-    if description is not None:
-        template.description = description.strip() or None
-    template.updated_at = now_utc()
-    session.commit()
-    session.expire_all()
-    return _get_user_template_or_raise(session, template_id)
-
-
-def archive_user_canvas_template(session: Session, *, template_id: str) -> None:
-    template = _get_user_template_or_raise(session, template_id)
-    if template.archived_at is None:
-        template.archived_at = now_utc()
-        template.updated_at = template.archived_at
-        session.commit()
-
-
-def _parse_template_payload(row: UserCanvasTemplate) -> UserCanvasTemplatePayload:
-    if row.kind != "node_group" or row.schema_version != USER_TEMPLATE_SCHEMA_VERSION:
-        raise BusinessValidationError("用户模板版本不支持")
-    payload = UserCanvasTemplatePayload.model_validate(row.template_json)
-    if payload.version != USER_TEMPLATE_SCHEMA_VERSION or payload.kind != "node_group":
-        raise BusinessValidationError("用户模板版本不支持")
-    return payload
-
-
-def _get_user_template_or_raise(session: Session, template_id: str) -> UserCanvasTemplate:
-    template = session.get(UserCanvasTemplate, template_id)
-    if template is None:
-        raise NotFoundError("用户模板不存在")
-    return template
-
-
-def _get_active_user_template_by_key(session: Session, key: str) -> UserCanvasTemplate:
-    template = session.scalar(
-        select(UserCanvasTemplate).where(
-            UserCanvasTemplate.key == key,
-            UserCanvasTemplate.archived_at.is_(None),
-        )
+    kind: TemplateKind,
+    template_json: dict[str, Any],
+) -> CanvasTemplate:
+    raw_payload = dict(template_json or {})
+    raw_payload.update(
+        {
+            "key": key,
+            "kind": kind,
+            "title": title,
+            "description": (description or "").strip(),
+            "source": "builtin",
+            "user_template_id": None,
+            "scope": "global",
+            "owner_user_id": None,
+        }
     )
-    if template is None:
-        raise BusinessValidationError("画布模板不存在")
-    return template
+    raw_payload.setdefault("version", USER_TEMPLATE_SCHEMA_VERSION)
+    try:
+        return CanvasTemplate.model_validate(raw_payload)
+    except BusinessValidationError:
+        raise
+    except ValueError as exc:
+        raise BusinessValidationError("画布模板内容不合法") from exc
+
+
+def _normalize_category_name(name: str) -> str:
+    normalized = name.strip()
+    if not normalized:
+        raise BusinessValidationError("画布模板分类名称不能为空")
+    if len(normalized) > 120:
+        raise BusinessValidationError("画布模板分类名称不能超过 120 个字符")
+    return normalized
+
+
+def _normalize_template_key(key: str) -> str:
+    normalized = key.strip()
+    if not normalized:
+        raise BusinessValidationError("画布模板 key 不能为空")
+    if normalized.startswith(USER_TEMPLATE_KEY_PREFIX):
+        raise BusinessValidationError("全局画布模板 key 不能使用 user: 前缀")
+    if len(normalized) > 120:
+        raise BusinessValidationError("画布模板 key 不能超过 120 个字符")
+    return normalized
+
+
+def _normalize_template_title(title: str) -> str:
+    normalized = title.strip()
+    if not normalized:
+        raise BusinessValidationError("画布模板名称不能为空")
+    if len(normalized) > 255:
+        raise BusinessValidationError("画布模板名称不能超过 255 个字符")
+    return normalized
+
+
+def _normalize_optional_scope(scope: str | None) -> TemplateScope | None:
+    normalized = (scope or "").strip().lower()
+    if not normalized or normalized == "all":
+        return None
+    if normalized not in {"global", "user"}:
+        raise BusinessValidationError("画布模板范围不支持")
+    return normalized  # type: ignore[return-value]
+
+
+def _normalize_search(search: str | None) -> str | None:
+    normalized = (search or "").strip()
+    return normalized or None
+
+
+def _template_scope(value: str) -> TemplateScope:
+    if value not in {"global", "user"}:
+        raise BusinessValidationError("画布模板范围不支持")
+    return value  # type: ignore[return-value]
+
+
+def _template_kind(value: str) -> TemplateKind:
+    if value not in {"full_canvas", "node_group"}:
+        raise BusinessValidationError("画布模板类型不支持")
+    return value  # type: ignore[return-value]
 
 
 def _node_size(node_type: WorkflowNodeType, config_json: dict[str, Any]) -> str | None:

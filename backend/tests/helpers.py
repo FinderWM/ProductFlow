@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import time
 from io import BytesIO
 from typing import TYPE_CHECKING
@@ -35,7 +36,11 @@ def _read_image_size(image_bytes: bytes) -> tuple[int, int]:
 
 
 def _login(client: TestClient) -> None:
-    login = client.post("/api/auth/session", json={"admin_key": "super-secret-admin-key"})
+    password_md5 = hashlib.md5(b"super-secret-admin-key", usedforsecurity=False).hexdigest()
+    password = client.post("/api/auth/password", json={"username": "libow", "client_password_md5": password_md5})
+    if password.status_code not in {200, 400}:
+        raise AssertionError(f"password setup failed: {password.status_code}: {password.text}")
+    login = client.post("/api/auth/login", json={"username": "libow", "client_password_md5": password_md5})
     assert login.status_code == 200
     assert "session" in client.cookies, "login did not persist session cookie"
     state = client.get("/api/auth/session")

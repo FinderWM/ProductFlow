@@ -24,6 +24,7 @@ from productflow_backend.config import (
     normalize_image_generation_size,
     parse_image_tool_allowed_fields,
 )
+from productflow_backend.domain.rbac import API_SETTINGS_READ
 from productflow_backend.infrastructure.db.models import (
     AppSetting,
     GenerationConfig,
@@ -62,7 +63,7 @@ from productflow_backend.infrastructure.provider_models import (
     ProviderModelDiscoveryUnsupportedError,
     list_provider_models,
 )
-from productflow_backend.presentation.deps import get_session, require_admin
+from productflow_backend.presentation.deps import get_session, require_api_permission
 from productflow_backend.presentation.schemas.settings import (
     ConfigItemResponse,
     ConfigOptionResponse,
@@ -97,7 +98,11 @@ from productflow_backend.presentation.schemas.settings import (
     SettingsUnlockRequest,
 )
 
-router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/api/settings",
+    tags=["settings"],
+    dependencies=[Depends(require_api_permission(API_SETTINGS_READ))],
+)
 SETTINGS_EXPORT_SCHEMA_VERSION = 1
 SETTINGS_EXPORT_COMPATIBILITY = "productflow-settings-v1"
 

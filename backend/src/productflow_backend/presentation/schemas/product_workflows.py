@@ -10,6 +10,7 @@ from productflow_backend.application.canvas_templates import (
     CanvasTemplateScenario,
     TemplateKind,
 )
+from productflow_backend.application.moderation import moderation_state_for_resource
 from productflow_backend.application.product_workflow.graph import ProductWorkflowStatusSnapshot
 from productflow_backend.application.product_workflow.run_state import (
     WORKFLOW_CANCELLED_REASON,
@@ -19,8 +20,11 @@ from productflow_backend.application.product_workflows import latest_workflow_ru
 from productflow_backend.domain.durable_generation_tasks import WORKFLOW_RUN_GENERATION_TASK_CONTRACT
 from productflow_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType, WorkflowRunStatus
 from productflow_backend.infrastructure.db.models import (
+    CanvasTemplate as DbCanvasTemplate,
+)
+from productflow_backend.infrastructure.db.models import (
+    CanvasTemplateCategory,
     ProductWorkflow,
-    UserCanvasTemplate,
     WorkflowEdge,
     WorkflowNode,
     WorkflowNodeRun,
@@ -212,12 +216,21 @@ class CanvasTemplatePreviewEdgeResponse(BaseModel):
 
 class CanvasTemplateSummaryResponse(BaseModel):
     key: str
+    template_id: str | None = None
     version: int
     kind: TemplateKind
     title: str
     description: str
     source: str
     user_template_id: str | None = None
+    scope: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
+    owner_user_id: str | None = None
+    owner_username: str | None = None
+    enabled: bool = True
+    effective_enabled: bool = True
+    disabled_reason: str | None = None
     scenario: CanvasTemplateScenarioResponse
     preview_nodes: list[CanvasTemplatePreviewNodeResponse]
     preview_edges: list[CanvasTemplatePreviewEdgeResponse]
@@ -229,6 +242,51 @@ class CanvasTemplateSummaryResponse(BaseModel):
 
 class CanvasTemplateListResponse(BaseModel):
     items: list[CanvasTemplateSummaryResponse]
+
+
+class CanvasTemplateCategoryResponse(BaseModel):
+    id: str
+    scope: str
+    owner_user_id: str | None = None
+    owner_username: str | None = None
+    name: str
+    sort_order: int
+    enabled: bool
+    effective_enabled: bool
+    disabled_reason: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CanvasTemplateCategoryListResponse(BaseModel):
+    items: list[CanvasTemplateCategoryResponse]
+
+
+class CreateCanvasTemplateCategoryRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    sort_order: int = 100
+
+
+class UpdateCanvasTemplateCategoryRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    sort_order: int | None = None
+
+
+class CreateGlobalCanvasTemplateRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=4000)
+    kind: TemplateKind
+    category_id: str | None = None
+    template_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpdateGlobalCanvasTemplateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=4000)
+    kind: TemplateKind | None = None
+    category_id: str | None = None
+    template_json: dict[str, Any] | None = None
 
 
 class CreateWorkflowNodeRequest(BaseModel):
@@ -280,6 +338,7 @@ class CreateUserTemplateGroupRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=1000)
     node_ids: list[str] = Field(default_factory=list)
+    category_id: str | None = None
 
 
 class UpdateUserTemplateGroupRequest(BaseModel):
@@ -519,12 +578,21 @@ def serialize_product_workflow(workflow: ProductWorkflow) -> ProductWorkflowResp
 def serialize_canvas_template_summary(template: CanvasTemplate) -> CanvasTemplateSummaryResponse:
     return CanvasTemplateSummaryResponse(
         key=template.key,
+        template_id=template.template_id,
         version=template.version,
         kind=template.kind,
         title=template.title,
         description=template.description,
         source=template.source,
         user_template_id=template.user_template_id,
+        scope=template.scope,
+        category_id=template.category_id,
+        category_name=template.category_name,
+        owner_user_id=template.owner_user_id,
+        owner_username=template.owner_username,
+        enabled=template.enabled,
+        effective_enabled=template.effective_enabled,
+        disabled_reason=template.disabled_reason,
         scenario=CanvasTemplateScenarioResponse(
             scenario=template.scenario.scenario,
             title=template.scenario.title,
@@ -587,10 +655,28 @@ def serialize_canvas_template_summary(template: CanvasTemplate) -> CanvasTemplat
     )
 
 
-def serialize_user_canvas_template_summary(template: UserCanvasTemplate) -> CanvasTemplateSummaryResponse:
-    from productflow_backend.application.product_workflow.user_templates import user_canvas_template_to_canvas_template
+def serialize_canvas_template_category(category: CanvasTemplateCategory) -> CanvasTemplateCategoryResponse:
+    state = moderation_state_for_resource(category)
+    owner = category.owner
+    return CanvasTemplateCategoryResponse(
+        id=category.id,
+        scope=category.scope,
+        owner_user_id=category.owner_user_id,
+        owner_username=owner.username if owner is not None else None,
+        name=category.name,
+        sort_order=category.sort_order,
+        enabled=category.enabled,
+        effective_enabled=state.effective_enabled,
+        disabled_reason=category.disabled_reason,
+        created_at=category.created_at,
+        updated_at=category.updated_at,
+    )
 
-    return serialize_canvas_template_summary(user_canvas_template_to_canvas_template(template))
+
+def serialize_user_canvas_template_summary(template: DbCanvasTemplate) -> CanvasTemplateSummaryResponse:
+    from productflow_backend.application.product_workflow.user_templates import canvas_template_row_to_canvas_template
+
+    return serialize_canvas_template_summary(canvas_template_row_to_canvas_template(template))
 
 
 def serialize_product_workflow_status(snapshot: ProductWorkflowStatusSnapshot) -> ProductWorkflowStatusResponse:

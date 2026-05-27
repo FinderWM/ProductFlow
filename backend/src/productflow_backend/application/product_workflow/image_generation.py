@@ -15,6 +15,7 @@ from productflow_backend.application.generation_config_runtime import (
     GenerationConfigSelection,
     claim_runtime_generation_config,
     generation_config_selection_from_config,
+    generation_failure_is_throttled,
     generation_failure_is_timeout,
     generation_failure_reason,
     release_runtime_generation_config,
@@ -237,6 +238,7 @@ def execute_workflow_image_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=poster_generation_mode == "generated",
+            user_id=product.owner_user_id,
             generated_unit_count=len(downstream_nodes) if poster_generation_mode == "generated" else 0,
             record_result=poster_generation_mode == "generated",
         )
@@ -329,9 +331,11 @@ def execute_workflow_image_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=False,
+            user_id=product.owner_user_id,
             generated_unit_count=0,
             failure_reason=generation_failure_reason(exc) if provider_invoked else None,
             timeout=generation_failure_is_timeout(exc),
+            throttled=generation_failure_is_throttled(exc),
             record_result=provider_invoked,
         )
         raise

@@ -4,8 +4,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
+from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.use_cases import (
     add_reference_images,
     confirm_copy_set,
@@ -18,9 +20,10 @@ from productflow_backend.application.use_cases import (
     update_copy_set,
 )
 from productflow_backend.domain.enums import ProductWorkflowState
-from productflow_backend.infrastructure.db.models import PosterVariant, SourceAsset
+from productflow_backend.domain.rbac import API_INSPIRATIONS_READ, API_INSPIRATIONS_WRITE
+from productflow_backend.infrastructure.db.models import AuthUser, PosterVariant, SourceAsset
 from productflow_backend.infrastructure.storage import ImageVariantName, LocalStorage
-from productflow_backend.presentation.deps import get_session, require_admin, require_deletion_enabled
+from productflow_backend.presentation.deps import get_session, require_api_permission, require_deletion_enabled
 from productflow_backend.presentation.image_variants import build_variant_filename
 from productflow_backend.presentation.schemas.products import (
     CopySetResponse,
@@ -38,7 +41,10 @@ from productflow_backend.presentation.upload_validation import (
     validate_reference_image_count,
 )
 
-router = APIRouter(prefix="/api", tags=["products"], dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/api",
+    tags=["products"],
+)
 
 
 @router.post("/products", response_model=ProductDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -51,6 +57,7 @@ async def create_product_endpoint(
     source_note: str | None = Form(default=None),
     canvas_template_key: str | None = Form(default=None),
     session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
 ) -> ProductDetailResponse:
     main_image = await read_validated_image_upload(image, fallback_filename="upload.bin")
     reference_payloads: list[tuple[bytes, str, str]] = []
@@ -75,6 +82,7 @@ async def create_product_endpoint(
         content_type=main_image.mime_type,
         reference_image_uploads=reference_payloads,
         canvas_template_key=canvas_template_key,
+        owner_user_id=current_user.id,
     )
     return serialize_product_detail(product)
 
@@ -85,8 +93,16 @@ def list_products_endpoint(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
 ) -> ProductListResponse:
-    items, total = list_products(session, status=status, page=page, page_size=page_size)
+    items, total = list_products(
+        session,
+        status=status,
+        page=page,
+        page_size=page_size,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
     return ProductListResponse(
         items=[serialize_product_summary(item) for item in items],
         total=total,
@@ -96,8 +112,19 @@ def list_products_endpoint(
 
 
 @router.get("/products/{product_id}", response_model=ProductDetailResponse)
-def get_product_detail_endpoint(product_id: str, session: Session = Depends(get_session)) -> ProductDetailResponse:
-    return serialize_product_detail(get_product_detail(session, product_id))
+def get_product_detail_endpoint(
+    product_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
+) -> ProductDetailResponse:
+    return serialize_product_detail(
+        get_product_detail(
+            session,
+            product_id,
+            actor_user_id=current_user.id,
+            actor_is_admin=current_user.is_admin,
+        )
+    )
 
 
 @router.delete(
@@ -105,8 +132,17 @@ def get_product_detail_endpoint(product_id: str, session: Session = Depends(get_
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_deletion_enabled)],
 )
-def delete_product_endpoint(product_id: str, session: Session = Depends(get_session)) -> None:
-    delete_product(session, product_id=product_id)
+def delete_product_endpoint(
+    product_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
+) -> None:
+    delete_product(
+        session,
+        product_id=product_id,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
 
 
 @router.post("/products/{product_id}/reference-images", response_model=ProductDetailResponse)
@@ -114,6 +150,7 @@ async def upload_reference_images_endpoint(
     product_id: str,
     reference_images: list[UploadFile] = File(...),
     session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
 ) -> ProductDetailResponse:
     reference_payloads: list[tuple[bytes, str, str]] = []
     validate_reference_image_count(len(reference_images))
@@ -130,6 +167,8 @@ async def upload_reference_images_endpoint(
         session,
         product_id=product_id,
         reference_image_uploads=reference_payloads,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
     )
     return serialize_product_detail(product)
 
@@ -139,18 +178,30 @@ def update_copy_set_endpoint(
     copy_set_id: str,
     payload: CopySetUpdateRequest,
     session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
 ) -> CopySetResponse:
     copy_set = update_copy_set(
         session,
         copy_set_id=copy_set_id,
         structured_payload=payload.structured_payload,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
     )
     return serialize_copy_set(copy_set)
 
 
 @router.post("/copy-sets/{copy_set_id}/confirm", response_model=CopySetResponse)
-def confirm_copy_set_endpoint(copy_set_id: str, session: Session = Depends(get_session)) -> CopySetResponse:
-    copy_set = confirm_copy_set(session, copy_set_id=copy_set_id)
+def confirm_copy_set_endpoint(
+    copy_set_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
+) -> CopySetResponse:
+    copy_set = confirm_copy_set(
+        session,
+        copy_set_id=copy_set_id,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
     return serialize_copy_set(copy_set)
 
 
@@ -159,10 +210,14 @@ def download_poster_endpoint(
     poster_id: str,
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
 ) -> FileResponse:
-    poster = session.get(PosterVariant, poster_id)
-    if poster is None:
+    poster = session.scalar(
+        select(PosterVariant).options(selectinload(PosterVariant.product)).where(PosterVariant.id == poster_id)
+    )
+    if poster is None or (not current_user.is_admin and poster.product.owner_user_id != current_user.id):
         raise HTTPException(status_code=404, detail="海报不存在")
+    ensure_resource_usable(poster)
     storage = LocalStorage()
     try:
         path, media_type = storage.resolve_for_variant(
@@ -187,10 +242,14 @@ def download_source_asset_endpoint(
     asset_id: str,
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
 ) -> FileResponse:
-    asset = session.get(SourceAsset, asset_id)
-    if asset is None:
+    asset = session.scalar(
+        select(SourceAsset).options(selectinload(SourceAsset.product)).where(SourceAsset.id == asset_id)
+    )
+    if asset is None or (not current_user.is_admin and asset.product.owner_user_id != current_user.id):
         raise HTTPException(status_code=404, detail="源图不存在")
+    ensure_resource_usable(asset)
     storage = LocalStorage()
     try:
         path, media_type = storage.resolve_for_variant(
@@ -210,14 +269,29 @@ def download_source_asset_endpoint(
 def delete_source_asset_endpoint(
     asset_id: str,
     session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
 ) -> ProductDetailResponse:
-    product = delete_reference_image(session, asset_id=asset_id)
+    product = delete_reference_image(
+        session,
+        asset_id=asset_id,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
     return serialize_product_detail(product)
 
 
 @router.get("/products/{product_id}/history", response_model=ProductHistoryResponse)
-def get_product_history_endpoint(product_id: str, session: Session = Depends(get_session)) -> ProductHistoryResponse:
-    history = get_product_history(session, product_id)
+def get_product_history_endpoint(
+    product_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
+) -> ProductHistoryResponse:
+    history = get_product_history(
+        session,
+        product_id,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
     return ProductHistoryResponse(
         copy_sets=[serialize_copy_set(item) for item in history["copy_sets"]],
         poster_variants=[serialize_poster_variant(item) for item in history["poster_variants"]],

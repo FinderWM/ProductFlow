@@ -25,6 +25,12 @@ import { ImageGenerationSettingsPanel } from "../components/ImageGenerationSetti
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../components/ImageGenerationSettingsTabs";
 import { ImageToolControls } from "../components/ImageToolControls";
 import { PromptPreviewDialog, type PromptPreview } from "../components/PromptPreviewDialog";
+import {
+  getResourceBlockedActionTitle,
+  isResourceBlocked,
+  ResourceBlockedNotice,
+  ResourceMetaBadges,
+} from "../components/ResourceGovernance";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
@@ -86,6 +92,7 @@ import type {
   ImageToolOptions,
   GenerationConfigOption,
   GenerationConfigSelectionMode,
+  ModerationFields,
 } from "../lib/types";
 
 const DUPLICATE_GENERATION_SUBMIT_WINDOW_MS = 1800;
@@ -143,6 +150,10 @@ function writeImageChatRouteState(scope: string, state: ImageChatRouteState) {
 
 function getSessionReferenceAssets(imageSession: ImageSessionDetail | undefined): ImageSessionAsset[] {
   return imageSession?.assets.filter((asset) => asset.kind === "reference_upload") ?? [];
+}
+
+function firstBlockedResource(resources: Array<ModerationFields | null | undefined>): ModerationFields | null {
+  return resources.find((resource) => isResourceBlocked(resource)) ?? null;
 }
 
 function generationConfigOptionLabel(config: GenerationConfigOption, disabledLabel: string, frozenLabel: string): string {
@@ -357,6 +368,14 @@ export function ImageChatPage() {
     () => generationConfigOptionsQuery.data?.filter((config) => config.purpose === "text") ?? [],
     [generationConfigOptionsQuery.data],
   );
+  const currentProduct = isProductMode
+    ? (productQuery.data ?? null)
+    : (products.find((product) => product.id === targetProductId) ?? null);
+  const currentProductBlocked = isResourceBlocked(currentProduct);
+
+  function blockedActionMessage(resource: ModerationFields | null | undefined) {
+    return getResourceBlockedActionTitle(resource, t("resource.blockedAction"));
+  }
 
   useEffect(() => {
     if (
@@ -400,7 +419,12 @@ export function ImageChatPage() {
   }, [isProductMode, products, targetProductId]);
 
   const createSessionMutation = useMutation({
-    mutationFn: () => api.createImageSession(productId ? { product_id: productId } : {}),
+    mutationFn: () => {
+      if (isProductMode && currentProductBlocked) {
+        throw new Error(blockedActionMessage(currentProduct));
+      }
+      return api.createImageSession(productId ? { product_id: productId } : {});
+    },
     onSuccess: async (imageSession) => {
       setSelectedSessionId(imageSession.id);
       resetImageSessionSelection();
@@ -409,7 +433,13 @@ export function ImageChatPage() {
       setErrorMessage("");
     },
     onError: (error) => {
-      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.createFailed"));
+      setErrorMessage(
+        error instanceof ApiError
+          ? error.detail
+          : error instanceof Error
+            ? error.message
+            : t("chat.createFailed"),
+      );
     },
   });
 
@@ -419,6 +449,10 @@ export function ImageChatPage() {
     }
     if (sessionItems.length === 0 && !autoCreateTriggered.current) {
       autoCreateTriggered.current = true;
+      if (isProductMode && currentProductBlocked) {
+        setErrorMessage(blockedActionMessage(currentProduct));
+        return;
+      }
       createSessionMutation.mutate();
       return;
     }
@@ -429,7 +463,15 @@ export function ImageChatPage() {
       setSelectedSessionId(sessionItems[0].id);
       resetImageSessionSelection();
     }
-  }, [createSessionMutation, selectedSessionId, sessionItems, sessionsQuery.isLoading]);
+  }, [
+    createSessionMutation,
+    currentProduct,
+    currentProductBlocked,
+    isProductMode,
+    selectedSessionId,
+    sessionItems,
+    sessionsQuery.isLoading,
+  ]);
 
   const sessionDetailQuery = useQuery({
     queryKey: ["image-session", selectedSessionId],
@@ -573,6 +615,28 @@ export function ImageChatPage() {
     () => productQuery.data?.source_assets.filter((asset) => asset.kind === "reference_image") ?? [],
     [productQuery.data],
   );
+  const selectedReferenceBlockedResource = firstBlockedResource(
+    sessionReferenceAssets.filter((asset) => selectedReferenceAssetIds.includes(asset.id)),
+  );
+  const generationBlockedResource = firstBlockedResource([
+    imageSession,
+    isProductMode ? currentProduct : null,
+    requiresGenerationBase ? branchBaseRound?.generated_asset : null,
+    selectedReferenceBlockedResource,
+  ]);
+  const selectedResultBlockedResource = firstBlockedResource([
+    imageSession,
+    selectedRound?.generated_asset,
+  ]);
+  const sessionEditBlockedResource = firstBlockedResource([imageSession, isProductMode ? currentProduct : null]);
+  const productAttachBlockedResource = firstBlockedResource([imageSession, selectedRound?.generated_asset, currentProduct]);
+  const sessionOrProductBlockedResource = firstBlockedResource([imageSession, isProductMode ? currentProduct : null]);
+  const createSessionBlockedTitle =
+    isProductMode && currentProductBlocked ? blockedActionMessage(currentProduct) : null;
+  const generationBlockedTitle = generationBlockedResource ? blockedActionMessage(generationBlockedResource) : null;
+  const sessionEditBlockedTitle = sessionEditBlockedResource ? blockedActionMessage(sessionEditBlockedResource) : null;
+  const selectedResultBlockedTitle = selectedResultBlockedResource ? blockedActionMessage(selectedResultBlockedResource) : null;
+  const productAttachBlockedTitle = productAttachBlockedResource ? blockedActionMessage(productAttachBlockedResource) : null;
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -770,6 +834,7 @@ export function ImageChatPage() {
     !imageSession ||
     !draft.trim() ||
     generateMutation.isPending ||
+    Boolean(generationBlockedResource) ||
     Boolean(baseRequirementMessage || imageGenerationConfigRequirementMessage);
 
   const attachMutation = useMutation({
@@ -819,9 +884,17 @@ export function ImageChatPage() {
     },
   });
 
+  const createSessionDisabled = createSessionMutation.isPending || Boolean(createSessionBlockedTitle);
+  const renameSessionDisabled = !selectedSessionId || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle);
+  const saveSelectedGalleryDisabled = saveGalleryMutation.isPending || Boolean(selectedResultBlockedTitle);
+
   function handleGenerate() {
     const prompt = draft.trim();
     if (!selectedSessionId || !imageSession || !prompt || generateMutation.isPending) {
+      return;
+    }
+    if (generationBlockedResource) {
+      setErrorMessage(blockedActionMessage(generationBlockedResource));
       return;
     }
     if (baseRequirementMessage) {
@@ -870,6 +943,10 @@ export function ImageChatPage() {
     if (!prompt || polishPromptMutation.isPending) {
       return;
     }
+    if (sessionEditBlockedResource) {
+      setErrorMessage(blockedActionMessage(sessionEditBlockedResource));
+      return;
+    }
     if (promptPolishConfigRequirementMessage) {
       setErrorMessage(promptPolishConfigRequirementMessage);
       return;
@@ -889,6 +966,10 @@ export function ImageChatPage() {
 
   function handleRetryGenerationTask(task: ImageSessionGenerationTask) {
     if (!selectedSessionId || retryGenerationTaskMutation.isPending || !isImageSessionGenerationTaskRetryable(task)) {
+      return;
+    }
+    if (generationBlockedResource) {
+      setErrorMessage(blockedActionMessage(generationBlockedResource));
       return;
     }
     pendingGeneratedRoundCountRef.current = imageSession?.rounds.length ?? 0;
@@ -915,6 +996,10 @@ export function ImageChatPage() {
     ) {
       return;
     }
+    if (generationBlockedResource) {
+      setErrorMessage(blockedActionMessage(generationBlockedResource));
+      return;
+    }
     pendingGeneratedRoundCountRef.current = imageSession.rounds.length;
     generateMutation.mutate(imageGenerationTaskSubmitPayload(task));
   }
@@ -923,6 +1008,10 @@ export function ImageChatPage() {
     const nextTitle = titleDraft.trim();
     if (!selectedSessionId || !nextTitle || nextTitle === imageSession?.title) {
       setRenameEnabled(false);
+      return;
+    }
+    if (sessionEditBlockedResource) {
+      setErrorMessage(blockedActionMessage(sessionEditBlockedResource));
       return;
     }
     renameSessionMutation.mutate(nextTitle);
@@ -936,6 +1025,10 @@ export function ImageChatPage() {
       setErrorMessage(t("chat.selectProductFirst"));
       return;
     }
+    if (productAttachBlockedResource) {
+      setErrorMessage(blockedActionMessage(productAttachBlockedResource));
+      return;
+    }
     attachMutation.mutate({
       assetId: selectedRound.generated_asset.id,
       target,
@@ -945,6 +1038,10 @@ export function ImageChatPage() {
 
   function handleSaveSelectedToGallery() {
     if (!selectedRound || saveGalleryMutation.isPending) {
+      return;
+    }
+    if (selectedResultBlockedResource) {
+      setErrorMessage(blockedActionMessage(selectedResultBlockedResource));
       return;
     }
     saveGalleryMutation.mutate(selectedRound.generated_asset.id);
@@ -971,6 +1068,11 @@ export function ImageChatPage() {
       setErrorMessage(t("chat.deleteDisabled"));
       return;
     }
+    const session = sessionItems.find((item) => item.id === sessionId) ?? imageSession;
+    if (isResourceBlocked(session)) {
+      setErrorMessage(blockedActionMessage(session));
+      return;
+    }
     setMobileSessionDrawerOpen(false);
     setPendingDeleteAction({ kind: "session", sessionId });
   }
@@ -983,10 +1085,22 @@ export function ImageChatPage() {
       setErrorMessage(t("chat.deleteDisabled"));
       return;
     }
+    const asset = productReferenceImages.find((referenceImage) => referenceImage.id === assetId) ?? null;
+    const blockedResource = firstBlockedResource([currentProduct, asset]);
+    if (blockedResource) {
+      setErrorMessage(blockedActionMessage(blockedResource));
+      return;
+    }
     setPendingDeleteAction({ kind: "productReference", assetId });
   }
 
   function handleReferenceToggle(assetId: string, checked: boolean) {
+    const asset = sessionReferenceAssets.find((referenceAsset) => referenceAsset.id === assetId) ?? null;
+    const blockedResource = firstBlockedResource([sessionEditBlockedResource, asset]);
+    if (checked && blockedResource) {
+      setErrorMessage(blockedActionMessage(blockedResource));
+      return;
+    }
     setSelectedReferenceAssetIds((current) => {
       const next = checked ? [...current, assetId] : current.filter((id) => id !== assetId);
       return pruneSelectedReferenceIds(
@@ -1005,11 +1119,21 @@ export function ImageChatPage() {
       setErrorMessage(t("chat.deleteDisabled"));
       return;
     }
+    const asset = sessionReferenceAssets.find((referenceAsset) => referenceAsset.id === assetId) ?? null;
+    const blockedResource = firstBlockedResource([sessionEditBlockedResource, asset]);
+    if (blockedResource) {
+      setErrorMessage(blockedActionMessage(blockedResource));
+      return;
+    }
     setPendingDeleteAction({ kind: "sessionReference", sessionId: selectedSessionId, assetId });
   }
 
   function handleUploadReferenceFiles(files: File[]) {
     if (!selectedSessionId || uploadReferenceMutation.isPending || files.length === 0) {
+      return;
+    }
+    if (sessionEditBlockedResource) {
+      setErrorMessage(blockedActionMessage(sessionEditBlockedResource));
       return;
     }
     uploadReferenceMutation.mutate({ sessionId: selectedSessionId, files });
@@ -1156,6 +1280,7 @@ export function ImageChatPage() {
           onTargetProductChange={setTargetProductId}
           onDeleteReference={handleDeleteProductReference}
           onAttach={handleAttach}
+          saveBlockedTitle={productAttachBlockedTitle}
           t={t}
         />
       </section>
@@ -1244,7 +1369,7 @@ export function ImageChatPage() {
                   ? (deleteSessionReferenceMutation.variables?.assetId ?? null)
                   : null
               }
-              disabled={!selectedSessionId}
+              disabled={!selectedSessionId || Boolean(sessionEditBlockedTitle)}
               onFiles={handleUploadReferenceFiles}
               onToggle={handleReferenceToggle}
               onDelete={handleDeleteSessionReference}
@@ -1262,6 +1387,8 @@ export function ImageChatPage() {
                   setDraft(event.target.value);
                   setPolishedPrompt("");
                 }}
+                disabled={Boolean(sessionEditBlockedTitle)}
+                title={sessionEditBlockedTitle ?? t("chat.prompt")}
                 rows={6}
                 placeholder={isProductMode ? t("chat.productPromptPlaceholder") : t("chat.freePromptPlaceholder")}
                 className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
@@ -1278,7 +1405,8 @@ export function ImageChatPage() {
                 <button
                   type="button"
                   onClick={handlePolishPrompt}
-                  disabled={!draft.trim() || polishPromptMutation.isPending}
+                  disabled={!draft.trim() || polishPromptMutation.isPending || Boolean(sessionEditBlockedTitle)}
+                  title={sessionEditBlockedTitle ?? t("chat.polishPrompt")}
                   className="inline-flex w-full items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25"
                 >
                   {polishPromptMutation.isPending ? (
@@ -1427,7 +1555,8 @@ export function ImageChatPage() {
               <button
                 type="button"
                 onClick={() => createSessionMutation.mutate()}
-                disabled={createSessionMutation.isPending}
+                disabled={createSessionDisabled}
+                title={createSessionBlockedTitle ?? t("chat.newSession")}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                 aria-label={t("chat.newSession")}
               >
@@ -1475,7 +1604,8 @@ export function ImageChatPage() {
                         setTitleDraft(imageSession?.title ?? "");
                       }
                     }}
-                    disabled={renameSessionMutation.isPending}
+                    disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
+                    title={sessionEditBlockedTitle ?? t("chat.rename")}
                     aria-label={t("chat.rename")}
                     className="h-10 w-full rounded-xl border border-indigo-200 bg-white px-3 text-center text-sm font-semibold text-slate-950 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-500 dark:border-violet-400/45 dark:bg-slate-950/80 dark:text-white dark:focus:border-violet-300 dark:focus:ring-violet-400/20"
                   />
@@ -1497,7 +1627,8 @@ export function ImageChatPage() {
                     }
                     setRenameEnabled(true);
                   }}
-                  disabled={!selectedSessionId || renameSessionMutation.isPending}
+                  disabled={renameSessionDisabled}
+                  title={sessionEditBlockedTitle ?? (renameEnabled ? t("chat.saveSessionName") : t("chat.rename"))}
                   aria-label={renameEnabled ? t("chat.saveSessionName") : t("chat.rename")}
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
                 >
@@ -1535,9 +1666,11 @@ export function ImageChatPage() {
                 <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
                   {imageSession?.title ?? t("chat.workbench")}
                 </h1>
+                <ResourceMetaBadges resource={imageSession} className="mt-1" showReason />
                 {selectedRound ? (
                   <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400 md:hidden">
                     {imageRoundSizeLabel(selectedRound, t)} · {t("chat.candidate", { index: selectedRound.candidate_index, count: selectedRound.candidate_count })}
+                    <ResourceMetaBadges resource={selectedRound.generated_asset} className="mt-1" showReason />
                   </div>
                 ) : selectedPlaceholder ? (
                   <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400 md:hidden">
@@ -1555,17 +1688,24 @@ export function ImageChatPage() {
                       href={api.toApiUrl(selectedRound.generated_asset.download_url)}
                       target="_blank"
                       rel="noreferrer"
-                      title={t("chat.downloadCurrent")}
+                      title={selectedResultBlockedTitle ?? t("chat.downloadCurrent")}
                       aria-label={t("chat.downloadCurrent")}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100"
+                      onClick={(event) => {
+                        if (selectedResultBlockedTitle) {
+                          event.preventDefault();
+                          setErrorMessage(selectedResultBlockedTitle);
+                        }
+                      }}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100"
+                      aria-disabled={Boolean(selectedResultBlockedResource)}
                     >
                       <Download size={15} />
                     </a>
                     <button
                       type="button"
                       onClick={handleSaveSelectedToGallery}
-                      disabled={saveGalleryMutation.isPending}
-                      title={t("chat.saveSelectedGallery")}
+                      disabled={saveSelectedGalleryDisabled}
+                      title={selectedResultBlockedTitle ?? t("chat.saveSelectedGallery")}
                       aria-label={t("chat.saveSelectedGallery")}
                       className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 ring-1 ring-indigo-500 transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-violet-300/35"
                     >
@@ -1584,6 +1724,9 @@ export function ImageChatPage() {
                 ) : null}
               </div>
             </div>
+            {sessionOrProductBlockedResource ? (
+              <ResourceBlockedNotice resource={sessionOrProductBlockedResource} className="mb-3" />
+            ) : null}
 
             <ImageChatMainStage
               selectedRound={selectedRound}
@@ -1592,12 +1735,19 @@ export function ImageChatPage() {
               retryingTaskId={retryGenerationTaskMutation.isPending ? (retryGenerationTaskMutation.variables?.taskId ?? null) : null}
               cancellingTaskId={cancelGenerationTaskMutation.isPending ? (cancelGenerationTaskMutation.variables?.taskId ?? null) : null}
               regenerating={generateMutation.isPending}
+              generationBlockedTitle={generationBlockedTitle}
               onPreviewRound={setPreviewRound}
               onRetryGenerationTask={handleRetryGenerationTask}
               onCancelGenerationTask={handleCancelGenerationTask}
               onRegenerateGenerationTask={handleRegenerateGenerationTask}
               t={t}
             />
+            {selectedRound ? (
+              <ResourceMetaBadges resource={selectedRound.generated_asset} className="mt-2" showReason />
+            ) : null}
+            {selectedResultBlockedResource ? (
+              <ResourceBlockedNotice resource={selectedResultBlockedResource} className="mt-2" />
+            ) : null}
             {selectedRound?.provider_notes.length ? (
               <div className="mt-2 flex flex-wrap gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
                 {selectedRound.provider_notes.map((note) => (
@@ -1656,7 +1806,9 @@ export function ImageChatPage() {
                 <button
                   type="button"
                   onClick={() => setRenameEnabled((current) => !current)}
-                  className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                  disabled={renameSessionDisabled}
+                  title={sessionEditBlockedTitle ?? t("chat.rename")}
+                  className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
                 >
                   <Pencil size={12} className="mr-1.5" /> {t("chat.rename")}
                 </button>
@@ -1665,14 +1817,17 @@ export function ImageChatPage() {
                 <input
                   value={titleDraft}
                   onChange={(event) => setTitleDraft(event.target.value)}
-                  disabled={!renameEnabled || renameSessionMutation.isPending}
+                  disabled={!renameEnabled || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
+                  title={sessionEditBlockedTitle ?? t("chat.rename")}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
                 />
                 {renameEnabled ? (
                   <button
                     type="button"
                     onClick={handleRename}
-                    className="inline-flex items-center rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 dark:bg-violet-500 dark:hover:bg-violet-400"
+                    disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
+                    title={sessionEditBlockedTitle ?? t("chat.saveSessionName")}
+                    className="inline-flex items-center rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
                     aria-label={t("chat.saveSessionName")}
                   >
                     {renameSessionMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
@@ -1696,6 +1851,9 @@ export function ImageChatPage() {
           </div>
 
           <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-[0_-8px_24px_rgba(15,23,42,0.10)] backdrop-blur dark:border-slate-800 dark:bg-slate-950/90 dark:shadow-[0_-18px_40px_rgba(0,0,0,0.32)] lg:sticky lg:inset-x-auto lg:bottom-0 lg:p-4">
+            {generationBlockedResource ? (
+              <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
+            ) : null}
             {baseRequirementMessage || imageGenerationConfigRequirementMessage ? (
               <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
                 {baseRequirementMessage || imageGenerationConfigRequirementMessage}
@@ -1747,7 +1905,8 @@ export function ImageChatPage() {
                 <button
                   type="button"
                   onClick={() => createSessionMutation.mutate()}
-                  disabled={createSessionMutation.isPending}
+                  disabled={createSessionDisabled}
+                  title={createSessionBlockedTitle ?? t("chat.newSession")}
                   className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                   aria-label={t("chat.newSession")}
                 >
@@ -1835,9 +1994,16 @@ export function ImageChatPage() {
                 href={api.toApiUrl(selectedRound.generated_asset.download_url)}
                 target="_blank"
                 rel="noreferrer"
-                title={t("chat.downloadCurrent")}
+                title={selectedResultBlockedTitle ?? t("chat.downloadCurrent")}
                 aria-label={t("chat.downloadCurrent")}
-                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+                onClick={(event) => {
+                  if (selectedResultBlockedTitle) {
+                    event.preventDefault();
+                    setErrorMessage(selectedResultBlockedTitle);
+                  }
+                }}
+                aria-disabled={Boolean(selectedResultBlockedResource)}
+                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
               >
                 <Download size={15} className="shrink-0" />
                 <span>{t("chat.downloadShort")}</span>
@@ -1845,8 +2011,8 @@ export function ImageChatPage() {
               <button
                 type="button"
                 onClick={handleSaveSelectedToGallery}
-                disabled={saveGalleryMutation.isPending}
-                title={t("chat.saveSelectedGallery")}
+                disabled={saveSelectedGalleryDisabled}
+                title={selectedResultBlockedTitle ?? t("chat.saveSelectedGallery")}
                 aria-label={t("chat.saveSelectedGallery")}
                 className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-indigo-200 bg-indigo-50 px-2.5 text-xs font-semibold text-indigo-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-300 hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25 dark:focus-visible:ring-violet-400"
               >
@@ -1906,6 +2072,9 @@ export function ImageChatPage() {
               </div>
             </div>
             <div className="border-t border-slate-200 bg-white/96 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] dark:border-slate-800 dark:bg-slate-950/94">
+              {generationBlockedResource ? (
+                <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
+              ) : null}
               {baseRequirementMessage || imageGenerationConfigRequirementMessage ? (
                 <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
                   {baseRequirementMessage || imageGenerationConfigRequirementMessage}

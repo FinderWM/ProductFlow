@@ -9,6 +9,7 @@ import {
   Maximize2,
   Pencil,
   Plus,
+  Search,
   Trash2,
   X,
   type LucideIcon,
@@ -16,10 +17,15 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import {
+  getResourceBlockedActionTitle,
+  isResourceBlocked,
+  ResourceMetaBadges,
+} from "../../components/ResourceGovernance";
 import { localizeCanvasTemplateSummary } from "../../lib/canvasTemplateLocalization";
 import type { TranslationKey } from "../../lib/i18n";
 import { useI18n } from "../../lib/preferences";
-import type { CanvasTemplateSummary } from "../../lib/types";
+import type { CanvasTemplateCategory, CanvasTemplateScope, CanvasTemplateSummary } from "../../lib/types";
 import { localizedWorkflowNodeTypeLabel } from "./nodeDisplay";
 
 const PREVIEW_METRICS = {
@@ -63,12 +69,22 @@ const TEMPLATE_CATEGORY_ORDER = [
 ] as const;
 
 type TemplateCategoryKey = (typeof TEMPLATE_CATEGORY_ORDER)[number]["key"];
+type TemplateScopeFilter = CanvasTemplateScope | "all";
 type TFunction = (key: TranslationKey, params?: Record<string, string | number>) => string;
 
 interface TemplateGroupsPanelProps {
   templates: CanvasTemplateSummary[];
+  categories: CanvasTemplateCategory[];
   isLoading: boolean;
   isError: boolean;
+  categoriesLoading: boolean;
+  categoriesError: boolean;
+  templateSearch: string;
+  selectedCategoryId: string;
+  templateScope: TemplateScopeFilter;
+  onTemplateSearchChange: (value: string) => void;
+  onSelectedCategoryIdChange: (value: string) => void;
+  onTemplateScopeChange: (value: TemplateScopeFilter) => void;
   structureBusy: boolean;
   applyBusy: boolean;
   applyingTemplateKey: string | null;
@@ -647,8 +663,17 @@ function TemplatePreviewDialog({
 
 export function TemplateGroupsPanel({
   templates,
+  categories,
   isLoading,
   isError,
+  categoriesLoading,
+  categoriesError,
+  templateSearch,
+  selectedCategoryId,
+  templateScope,
+  onTemplateSearchChange,
+  onSelectedCategoryIdChange,
+  onTemplateScopeChange,
   structureBusy,
   applyBusy,
   applyingTemplateKey,
@@ -663,6 +688,11 @@ export function TemplateGroupsPanel({
   const [activeCategory, setActiveCategory] = useState<TemplateCategoryKey>("all");
   const [expandedTemplateKey, setExpandedTemplateKey] = useState<string | null>(templates[0]?.key ?? null);
   const [previewTemplate, setPreviewTemplate] = useState<CanvasTemplateSummary | null>(null);
+
+  const handleScopeChange = (nextScope: TemplateScopeFilter) => {
+    onTemplateScopeChange(nextScope);
+    onSelectedCategoryIdChange("");
+  };
 
   useEffect(() => {
     if (!templates.length) {
@@ -682,31 +712,6 @@ export function TemplateGroupsPanel({
     }
   }, [activeCategory, expandedTemplateKey, templates]);
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-[180px] items-center justify-center text-zinc-400 dark:text-slate-500">
-        <Loader2 size={20} className="animate-spin" />
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-        {t("detail.template.loadFailed")}
-      </div>
-    );
-  }
-
-  if (!templates.length) {
-    return (
-      <div className="glass-empty-state flex min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-zinc-500 dark:text-slate-400">
-        <Layers3 size={18} className="text-indigo-500 opacity-80 dark:text-violet-400" />
-        <div>{t("detail.template.empty")}</div>
-      </div>
-    );
-  }
-
   const categoryCounts = templateCategoryCounts(templates);
   const visibleTemplates = templates.filter(
     (template) => activeCategory === "all" || templateCategoryKey(template) === activeCategory,
@@ -714,11 +719,98 @@ export function TemplateGroupsPanel({
 
   return (
     <section className="space-y-3">
-      <div className="flex gap-1 overflow-x-auto border-b border-slate-200/50 pb-2 dark:border-slate-800">
-        {TEMPLATE_CATEGORY_ORDER.filter((category) => category.key === "all" || categoryCounts[category.key] > 0).map(
-          (category) => {
-            const active = activeCategory === category.key;
-            return (
+      <div className="space-y-3 rounded-xl border border-slate-200/70 bg-white/70 p-3 dark:border-slate-700/70 dark:bg-[#0b1220]/70">
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
+            {t("templateFilter.search")}
+          </span>
+          <span className="relative block">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+            <input
+              value={templateSearch}
+              onChange={(event) => onTemplateSearchChange(event.target.value)}
+              maxLength={120}
+              className="h-9 w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 text-xs text-slate-900 outline-none transition-shadow placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+              placeholder={t("templateFilter.searchPlaceholder")}
+            />
+          </span>
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
+            {t("templateFilter.category")}
+          </span>
+          <select
+            value={selectedCategoryId}
+            onChange={(event) => onSelectedCategoryIdChange(event.target.value)}
+            disabled={categoriesLoading || categoriesError}
+            className="h-9 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none transition-shadow focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+          >
+            <option value="">{t("templateFilter.allCategories")}</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div>
+          <div className="mb-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+            {t("templateFilter.scope")}
+          </div>
+          <div className="inline-flex h-9 overflow-hidden rounded-md border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-[#151f33]">
+            {(["all", "global", "user"] as const).map((scope) => {
+              const active = templateScope === scope;
+              const labelKey =
+                scope === "all"
+                  ? "templateFilter.scopeAll"
+                  : scope === "global"
+                    ? "templateFilter.scopeGlobal"
+                    : "templateFilter.scopeUser";
+              return (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => handleScopeChange(scope)}
+                  className={`rounded px-2.5 text-xs font-medium transition-colors ${
+                    active
+                      ? "bg-white text-slate-950 shadow-sm dark:bg-slate-800 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                  }`}
+                >
+                  {t(labelKey)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {categoriesError ? (
+          <div className="text-xs text-red-600 dark:text-red-300">{t("templateFilter.categoriesLoadFailed")}</div>
+        ) : null}
+      </div>
+
+      {isLoading ? (
+        <div className="flex min-h-[180px] items-center justify-center text-zinc-400 dark:text-slate-500">
+          <Loader2 size={20} className="animate-spin" />
+        </div>
+      ) : isError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+          {t("detail.template.loadFailed")}
+        </div>
+      ) : !templates.length ? (
+        <div className="glass-empty-state flex min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-zinc-500 dark:text-slate-400">
+          <Layers3 size={18} className="text-indigo-500 opacity-80 dark:text-violet-400" />
+          <div>{t("detail.template.empty")}</div>
+        </div>
+      ) : (
+        <>
+          <div className="flex gap-1 overflow-x-auto border-b border-slate-200/50 pb-2 dark:border-slate-800">
+            {TEMPLATE_CATEGORY_ORDER.filter((category) => category.key === "all" || categoryCounts[category.key] > 0).map(
+              (category) => {
+                const active = activeCategory === category.key;
+                return (
               <button
                 key={category.key}
                 type="button"
@@ -740,19 +832,19 @@ export function TemplateGroupsPanel({
                   {categoryCounts[category.key]}
                 </span>
               </button>
-            );
-          },
-        )}
-      </div>
+                );
+              },
+            )}
+          </div>
 
-      {visibleTemplates.length ? null : (
-        <div className="glass-empty-state flex min-h-[120px] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-zinc-500 dark:text-slate-400">
-          <Layers3 size={18} className="text-indigo-500 opacity-80 dark:text-violet-400" />
-          <div>{t("detail.template.emptyCategory")}</div>
-        </div>
-      )}
+          {visibleTemplates.length ? null : (
+            <div className="glass-empty-state flex min-h-[120px] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-zinc-500 dark:text-slate-400">
+              <Layers3 size={18} className="text-indigo-500 opacity-80 dark:text-violet-400" />
+              <div>{t("detail.template.emptyCategory")}</div>
+            </div>
+          )}
 
-      <div className="space-y-2">
+          <div className="space-y-2">
       {visibleTemplates.map((template) => {
         const displayTemplate = localizeCanvasTemplateSummary(template, locale);
         const templateBusy = applyBusy && applyingTemplateKey === template.key;
@@ -761,6 +853,8 @@ export function TemplateGroupsPanel({
         const isUserTemplate = template.source === "user" && Boolean(template.user_template_id);
         const editing = editingTemplateKey === template.key;
         const expanded = expandedTemplateKey === template.key;
+        const templateBlocked = isResourceBlocked(template);
+        const templateBlockedTitle = getResourceBlockedActionTitle(template, t("resource.blockedAction"));
         return (
           <article
             key={template.key}
@@ -788,6 +882,16 @@ export function TemplateGroupsPanel({
                       {t("detail.template.custom")}
                     </span>
                   ) : null}
+                  {displayTemplate.scope ? (
+                    <span className="rounded-sm border border-zinc-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:border-slate-600 dark:bg-[#0b1220] dark:text-slate-300">
+                      {displayTemplate.scope === "global" ? t("templateFilter.scopeGlobal") : t("templateFilter.scopeUser")}
+                    </span>
+                  ) : null}
+                  {displayTemplate.category_name ? (
+                    <span className="max-w-full truncate rounded-sm border border-zinc-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:border-slate-600 dark:bg-[#0b1220] dark:text-slate-300">
+                      {displayTemplate.category_name}
+                    </span>
+                  ) : null}
                   <span className="max-w-full truncate rounded-sm border border-emerald-100 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200">
                     {summarizeOutput(displayTemplate, t)}
                   </span>
@@ -805,6 +909,7 @@ export function TemplateGroupsPanel({
                     </span>
                   ))}
                 </div>
+                <ResourceMetaBadges resource={template} showReason />
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 {isUserTemplate ? (
@@ -815,20 +920,20 @@ export function TemplateGroupsPanel({
                         setEditingTemplateKey(template.key);
                         setEditingTitle(template.title);
                       }}
-                      disabled={userTemplateBusy}
+                      disabled={userTemplateBusy || templateBlocked}
                       className="btn-secondary-spring inline-flex h-8 w-8 items-center justify-center rounded-md"
                       aria-label={t("detail.template.rename")}
-                      title={t("detail.template.rename")}
+                      title={templateBlocked ? templateBlockedTitle : t("detail.template.rename")}
                     >
                       <Pencil size={13} />
                     </button>
                     <button
                       type="button"
                       onClick={() => onArchiveUserTemplate(template)}
-                      disabled={userTemplateBusy}
+                      disabled={userTemplateBusy || templateBlocked}
                       className="btn-danger-spring inline-flex h-8 w-8 items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-50"
                       aria-label={t("detail.template.delete")}
-                      title={t("detail.template.delete")}
+                      title={templateBlocked ? templateBlockedTitle : t("detail.template.delete")}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -837,7 +942,9 @@ export function TemplateGroupsPanel({
                 <button
                   type="button"
                   onClick={() => onApplyTemplate(template)}
-                  disabled={structureBusy || applyBusy}
+                  disabled={structureBusy || applyBusy || templateBlocked}
+                  title={templateBlocked ? templateBlockedTitle : t("detail.template.add")}
+                  aria-label={templateBlocked ? templateBlockedTitle : t("detail.template.add")}
                   className="btn-primary-spring inline-flex h-8 items-center rounded-xl px-3 text-xs font-semibold"
                 >
                   {templateBusy ? (
@@ -870,6 +977,7 @@ export function TemplateGroupsPanel({
                 <input
                   value={editingTitle}
                   onChange={(event) => setEditingTitle(event.target.value)}
+                  disabled={templateBlocked}
                   className="h-8 min-w-0 flex-1 px-2 text-xs outline-none input-premium"
                   maxLength={255}
                 />
@@ -882,7 +990,8 @@ export function TemplateGroupsPanel({
                 </button>
                 <button
                   type="submit"
-                  disabled={userTemplateBusy || !editingTitle.trim()}
+                  disabled={userTemplateBusy || templateBlocked || !editingTitle.trim()}
+                  title={templateBlocked ? templateBlockedTitle : t("detail.save")}
                   className="btn-primary-spring h-8 rounded-md px-3 text-xs font-medium"
                 >
                   {t("detail.save")}
@@ -892,7 +1001,9 @@ export function TemplateGroupsPanel({
           </article>
         );
       })}
-      </div>
+          </div>
+        </>
+      )}
       {previewTemplate ? (
         <TemplatePreviewDialog template={previewTemplate} onClose={() => setPreviewTemplate(null)} />
       ) : null}

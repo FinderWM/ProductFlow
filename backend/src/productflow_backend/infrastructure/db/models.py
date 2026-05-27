@@ -5,7 +5,20 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -19,6 +32,7 @@ from productflow_backend.domain.enums import (
     WorkflowNodeType,
     WorkflowRunStatus,
 )
+from productflow_backend.domain.rbac import ADMIN_USER_ID
 
 
 def utcnow() -> datetime:
@@ -58,6 +72,244 @@ class AppSetting(Base, TimestampMixin):
 
     key: Mapped[str] = mapped_column(String(120), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+class AuthRole(Base, TimestampMixin):
+    """账号角色；管理员角色由 is_admin 固定表达全权限。"""
+
+    __tablename__ = "auth_roles"
+    __table_args__ = (
+        Index("uq_auth_roles_code", "code", unique=True),
+        Index("ix_auth_roles_archived_at", "archived_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    users: Mapped[list[AuthUser]] = relationship(back_populates="role")
+
+
+class AuthUser(Base, TimestampMixin):
+    """可登录账号；password_hash 为空表示待设置密码。"""
+
+    __tablename__ = "auth_users"
+    __table_args__ = (
+        Index("uq_auth_users_username", "username", unique=True),
+        Index("ix_auth_users_role_id", "role_id"),
+        Index("ix_auth_users_archived_at", "archived_at"),
+        Index(
+            "uq_auth_users_single_active_admin",
+            "is_admin",
+            unique=True,
+            postgresql_where=text("is_admin = true AND archived_at IS NULL"),
+            sqlite_where=text("is_admin = 1 AND archived_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    username: Mapped[str] = mapped_column(String(80), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    role_id: Mapped[str] = mapped_column(String(36), ForeignKey("auth_roles.id", ondelete="RESTRICT"))
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    password_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    password_salt: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    role: Mapped[AuthRole] = relationship(back_populates="users")
+
+
+class RbacMenu(Base):
+    """前端一级入口权限。"""
+
+    __tablename__ = "rbac_menus"
+
+    code: Mapped[str] = mapped_column(String(80), primary_key=True)
+    title: Mapped[str] = mapped_column(String(80), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    api_permissions: Mapped[list[RbacApiPermission]] = relationship(back_populates="menu")
+
+
+class RbacApiPermission(Base):
+    """接口权限；挂在菜单下展示，后端独立校验 code。"""
+
+    __tablename__ = "rbac_api_permissions"
+    __table_args__ = (
+        Index("ix_rbac_api_permissions_menu_code", "menu_code"),
+        Index("ix_rbac_api_permissions_enabled", "enabled"),
+    )
+
+    code: Mapped[str] = mapped_column(String(120), primary_key=True)
+    menu_code: Mapped[str] = mapped_column(String(80), ForeignKey("rbac_menus.code", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    menu: Mapped[RbacMenu] = relationship(back_populates="api_permissions")
+
+
+class RoleMenuPermission(Base):
+    __tablename__ = "role_menu_permissions"
+
+    role_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("auth_roles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    menu_code: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("rbac_menus.code", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+class RoleApiPermission(Base):
+    __tablename__ = "role_api_permissions"
+
+    role_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("auth_roles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    permission_code: Mapped[str] = mapped_column(
+        String(120),
+        ForeignKey("rbac_api_permissions.code", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+class UserDailyUsageStat(Base, TimestampMixin):
+    """用户维度每日生成统计。"""
+
+    __tablename__ = "user_daily_usage_stats"
+    __table_args__ = (
+        Index("uq_user_daily_usage_stats_user_date_purpose", "user_id", "stat_date", "purpose", unique=True),
+        Index("ix_user_daily_usage_stats_stat_date", "stat_date"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("auth_users.id", ondelete="RESTRICT"))
+    stat_date: Mapped[date] = mapped_column(Date, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(40), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    timeout_count: Mapped[int] = mapped_column(Integer, default=0)
+    throttled_count: Mapped[int] = mapped_column(Integer, default=0)
+    generated_unit_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[AuthUser] = relationship()
+
+
+class CanvasTemplateCategory(Base, TimestampMixin):
+    """数据库化画布模板分类，支持全局和用户个人范围。"""
+
+    __tablename__ = "canvas_template_categories"
+    __table_args__ = (
+        CheckConstraint("scope IN ('global', 'user')", name="ck_canvas_template_categories_scope"),
+        CheckConstraint(
+            "(scope = 'global' AND owner_user_id IS NULL) OR (scope = 'user' AND owner_user_id IS NOT NULL)",
+            name="ck_canvas_template_categories_owner_scope",
+        ),
+        Index(
+            "uq_canvas_template_categories_global_name",
+            "name",
+            unique=True,
+            postgresql_where=text("scope = 'global'"),
+            sqlite_where=text("scope = 'global'"),
+        ),
+        Index(
+            "uq_canvas_template_categories_user_owner_name",
+            "owner_user_id",
+            "name",
+            unique=True,
+            postgresql_where=text("scope = 'user'"),
+            sqlite_where=text("scope = 'user'"),
+        ),
+        Index("ix_canvas_template_categories_scope", "scope"),
+        Index("ix_canvas_template_categories_enabled", "enabled"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    owner: Mapped[AuthUser | None] = relationship(foreign_keys=[owner_user_id])
+    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
+
+
+class CanvasTemplate(Base, TimestampMixin):
+    """数据库化画布模板，支持全局模板和用户个人模板。"""
+
+    __tablename__ = "canvas_templates"
+    __table_args__ = (
+        CheckConstraint("scope IN ('global', 'user')", name="ck_canvas_templates_scope"),
+        CheckConstraint(
+            "(scope = 'global' AND owner_user_id IS NULL) OR (scope = 'user' AND owner_user_id IS NOT NULL)",
+            name="ck_canvas_templates_owner_scope",
+        ),
+        Index("uq_canvas_templates_key", "key", unique=True),
+        Index("ix_canvas_templates_scope", "scope"),
+        Index("ix_canvas_templates_category_id", "category_id"),
+        Index("ix_canvas_templates_enabled", "enabled"),
+        Index("ix_canvas_templates_archived_at", "archived_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    key: Mapped[str] = mapped_column(String(120), nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    category_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("canvas_template_categories.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(40), default="full_canvas")
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    template_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    owner: Mapped[AuthUser | None] = relationship(foreign_keys=[owner_user_id])
+    category: Mapped[CanvasTemplateCategory | None] = relationship(foreign_keys=[category_id])
+    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
 
 
 class ProviderProfile(Base, TimestampMixin):
@@ -218,12 +470,29 @@ class UserCanvasTemplate(Base, TimestampMixin):
 
 class Product(Base, TimestampMixin):
     __tablename__ = "products"
+    __table_args__ = (
+        Index("ix_products_owner_user_id", "owner_user_id"),
+        Index("ix_products_enabled", "enabled"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="RESTRICT"),
+        default=ADMIN_USER_ID,
+    )
     name: Mapped[str] = mapped_column(String(255))
     category: Mapped[str | None] = mapped_column(String(120), nullable=True)
     price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     source_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_confirmed_copy_set_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey(
@@ -235,6 +504,8 @@ class Product(Base, TimestampMixin):
         nullable=True,
     )
 
+    owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
+    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
     source_assets: Mapped[list[SourceAsset]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
@@ -434,6 +705,7 @@ class SourceAsset(Base):
             postgresql_where=text("kind = 'original_image'"),
             sqlite_where=text("kind = 'original_image'"),
         ),
+        Index("ix_source_assets_enabled", "enabled"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -443,9 +715,18 @@ class SourceAsset(Base):
     mime_type: Mapped[str] = mapped_column(String(100))
     storage_path: Mapped[str] = mapped_column(String(500))
     source_poster_variant_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     product: Mapped[Product] = relationship(back_populates="source_assets", foreign_keys=[product_id])
+    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
 
 
 class CreativeBrief(Base):
@@ -500,6 +781,7 @@ class PosterVariant(Base):
     """已生成的海报变体，关联文案和存储路径。"""
 
     __tablename__ = "poster_variants"
+    __table_args__ = (Index("ix_poster_variants_enabled", "enabled"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id", ondelete="CASCADE"))
@@ -510,25 +792,53 @@ class PosterVariant(Base):
     storage_path: Mapped[str] = mapped_column(String(500))
     width: Mapped[int] = mapped_column()
     height: Mapped[int] = mapped_column()
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     product: Mapped[Product] = relationship(back_populates="poster_variants")
     copy_set: Mapped[CopySet] = relationship(back_populates="poster_variants")
+    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
 
 
 class ImageSession(Base, TimestampMixin):
     """连续生图会话，含多轮对话历史与生成结果。"""
 
     __tablename__ = "image_sessions"
+    __table_args__ = (
+        Index("ix_image_sessions_owner_user_id", "owner_user_id"),
+        Index("ix_image_sessions_enabled", "enabled"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="RESTRICT"),
+        default=ADMIN_USER_ID,
+    )
     product_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("products.id", ondelete="CASCADE"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(255))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
+    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
     product: Mapped[Product | None] = relationship(back_populates="image_sessions")
     assets: Mapped[list[ImageSessionAsset]] = relationship(
         back_populates="session",
@@ -548,15 +858,34 @@ class ImageSession(Base, TimestampMixin):
 
 class ImageSessionAsset(Base):
     __tablename__ = "image_session_assets"
+    __table_args__ = (
+        Index("ix_image_session_assets_owner_user_id", "owner_user_id"),
+        Index("ix_image_session_assets_enabled", "enabled"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="RESTRICT"),
+        default=ADMIN_USER_ID,
+    )
     session_id: Mapped[str] = mapped_column(String(36), ForeignKey("image_sessions.id", ondelete="CASCADE"))
     kind: Mapped[ImageSessionAssetKind] = mapped_column(enum_value_column(ImageSessionAssetKind))
     original_filename: Mapped[str] = mapped_column(String(255))
     mime_type: Mapped[str] = mapped_column(String(100))
     storage_path: Mapped[str] = mapped_column(String(500))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+    owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
+    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
     session: Mapped[ImageSession] = relationship(back_populates="assets")
     generated_in_round: Mapped[ImageSessionRound | None] = relationship(
         back_populates="generated_asset",
@@ -677,9 +1006,15 @@ class ImageGalleryEntry(Base):
         Index("uq_image_gallery_entries_asset_id", "image_session_asset_id", unique=True),
         Index("ix_image_gallery_entries_round_id", "image_session_round_id"),
         Index("ix_image_gallery_entries_created_at", "created_at"),
+        Index("ix_image_gallery_entries_enabled", "enabled"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="RESTRICT"),
+        default=ADMIN_USER_ID,
+    )
     image_session_asset_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey(
@@ -697,7 +1032,17 @@ class ImageGalleryEntry(Base):
         ),
         nullable=True,
     )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+    owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
+    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
     asset: Mapped[ImageSessionAsset] = relationship(foreign_keys=[image_session_asset_id])
     round: Mapped[ImageSessionRound | None] = relationship(foreign_keys=[image_session_round_id])

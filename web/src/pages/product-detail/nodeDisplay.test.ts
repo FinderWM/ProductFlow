@@ -46,7 +46,7 @@ function stubEnT(values: Partial<Record<TranslationKey, string>>) {
 
 describe("node display helpers", () => {
   it("uses business-facing labels for internal node types", () => {
-    expect(workflowNodeDisplayLabel({ ...baseNode, node_type: "product_context" })).toBe("商品资料");
+    expect(workflowNodeDisplayLabel({ ...baseNode, node_type: "product_context" })).toBe("灵感资料");
     expect(workflowNodeDisplayLabel(baseNode)).toBe("承载图片节点");
     expect(workflowNodeDisplayLabel({ ...baseNode, node_type: "copy_generation" })).toBe("文案生成节点");
     expect(workflowNodeDisplayLabel({ ...baseNode, node_type: "image_generation" })).toBe("生图触发器节点");

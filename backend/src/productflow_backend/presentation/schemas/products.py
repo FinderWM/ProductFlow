@@ -22,9 +22,10 @@ from productflow_backend.infrastructure.db.models import (
     SourceAsset,
 )
 from productflow_backend.presentation.image_variants import build_image_urls
+from productflow_backend.presentation.schemas.moderation import ResourceModerationFields, serialize_moderation_fields
 
 
-class SourceAssetResponse(BaseModel):
+class SourceAssetResponse(ResourceModerationFields):
     id: str
     kind: SourceAssetKind
     original_filename: str
@@ -60,7 +61,7 @@ class CopySetResponse(BaseModel):
     confirmed_at: datetime | None = None
 
 
-class PosterVariantResponse(BaseModel):
+class PosterVariantResponse(ResourceModerationFields):
     id: str
     product_id: str
     copy_set_id: str
@@ -75,8 +76,10 @@ class PosterVariantResponse(BaseModel):
     created_at: datetime
 
 
-class ProductSummaryResponse(BaseModel):
+class ProductSummaryResponse(ResourceModerationFields):
     id: str
+    owner_user_id: str
+    owner_username: str | None = None
     name: str
     category: str | None = None
     price: Decimal | None = None
@@ -98,8 +101,10 @@ class ProductListResponse(BaseModel):
     page_size: int
 
 
-class ProductDetailResponse(BaseModel):
+class ProductDetailResponse(ResourceModerationFields):
     id: str
+    owner_user_id: str
+    owner_username: str | None = None
     name: str
     category: str | None = None
     price: Decimal | None = None
@@ -131,6 +136,7 @@ def serialize_source_asset(asset: SourceAsset) -> SourceAssetResponse:
         original_filename=asset.original_filename,
         mime_type=asset.mime_type,
         source_poster_variant_id=asset.source_poster_variant_id,
+        **serialize_moderation_fields(asset).model_dump(),
         **urls,
         created_at=asset.created_at,
     )
@@ -175,6 +181,7 @@ def serialize_poster_variant(poster: PosterVariant) -> PosterVariantResponse:
         mime_type=poster.mime_type,
         width=poster.width,
         height=poster.height,
+        **serialize_moderation_fields(poster).model_dump(),
         **urls,
         created_at=poster.created_at,
     )
@@ -187,6 +194,8 @@ def serialize_product_summary(product: Product) -> ProductSummaryResponse:
     source_urls = build_image_urls(f"/api/source-assets/{source.id}/download") if source else {}
     return ProductSummaryResponse(
         id=product.id,
+        owner_user_id=product.owner_user_id,
+        owner_username=product.owner.username if product.owner else None,
         name=product.name,
         category=product.category,
         price=product.price,
@@ -197,6 +206,7 @@ def serialize_product_summary(product: Product) -> ProductSummaryResponse:
         source_image_download_url=source_urls.get("download_url"),
         source_image_preview_url=source_urls.get("preview_url"),
         source_image_thumbnail_url=source_urls.get("thumbnail_url"),
+        **serialize_moderation_fields(product).model_dump(),
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
@@ -208,6 +218,8 @@ def serialize_product_detail(product: Product) -> ProductDetailResponse:
     poster_variants = sorted(product.poster_variants, key=lambda item: item.created_at, reverse=True)
     return ProductDetailResponse(
         id=product.id,
+        owner_user_id=product.owner_user_id,
+        owner_username=product.owner.username if product.owner else None,
         name=product.name,
         category=product.category,
         price=product.price,
@@ -220,6 +232,7 @@ def serialize_product_detail(product: Product) -> ProductDetailResponse:
         ),
         copy_sets=[serialize_copy_set(item) for item in copy_sets],
         poster_variants=[serialize_poster_variant(item) for item in poster_variants],
+        **serialize_moderation_fields(product).model_dump(),
         created_at=product.created_at,
         updated_at=product.updated_at,
     )

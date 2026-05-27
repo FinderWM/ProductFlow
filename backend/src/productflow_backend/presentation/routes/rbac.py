@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from productflow_backend.application.auth import (
+    archive_role,
+    create_role,
+    create_trusted_user,
+    get_role_permissions,
+    list_roles,
+    list_users,
+    replace_role_permissions,
+    reset_user_password,
+    set_user_enabled,
+    update_role,
+)
+from productflow_backend.domain.rbac import API_RBAC_MANAGE
+from productflow_backend.infrastructure.db.models import AuthUser, RbacApiPermission, RbacMenu
+from productflow_backend.presentation.deps import get_current_user, get_session, require_admin, require_api_permission
+from productflow_backend.presentation.schemas.rbac import (
+    CreateRoleRequest,
+    CreateTrustedUserRequest,
+    RbacPermissionCatalogResponse,
+    RbacRoleResponse,
+    RbacUserResponse,
+    RolePermissionResponse,
+    UpdateRolePermissionRequest,
+    UpdateRoleRequest,
+    UpdateTrustedUserRequest,
+    serialize_api_permission,
+    serialize_menu,
+    serialize_role,
+    serialize_user,
+)
+
+router = APIRouter(
+    prefix="/api/rbac",
+    tags=["rbac"],
+    dependencies=[Depends(require_admin), Depends(require_api_permission(API_RBAC_MANAGE))],
+)
+
+
+@router.get("/permissions", response_model=RbacPermissionCatalogResponse)
+def list_permission_catalog_endpoint(session: Session = Depends(get_session)) -> RbacPermissionCatalogResponse:
+    menus = list(session.scalars(select(RbacMenu).order_by(RbacMenu.sort_order)))
+    api_permissions = list(
+        session.scalars(select(RbacApiPermission).order_by(RbacApiPermission.menu_code, RbacApiPermission.sort_order))
+    )
+    return RbacPermissionCatalogResponse(
+        menus=[serialize_menu(menu) for menu in menus],
+        api_permissions=[serialize_api_permission(permission) for permission in api_permissions],
+    )
+
+
+@router.get("/users", response_model=list[RbacUserResponse])
+def list_users_endpoint(session: Session = Depends(get_session)) -> list[RbacUserResponse]:
+    users = list(
+        session.scalars(
+            select(AuthUser)
+            .options(selectinload(AuthUser.role))
+            .order_by(AuthUser.is_admin.desc(), AuthUser.created_at)
+        )
+    )
+    if not users:
+        users = list_users(session)
+    return [serialize_user(user) for user in users]
+
+
+@router.post("/users", response_model=RbacUserResponse, status_code=status.HTTP_201_CREATED)
+def create_user_endpoint(
+    payload: CreateTrustedUserRequest,
+    session: Session = Depends(get_session),
+) -> RbacUserResponse:
+    user = create_trusted_user(
+        session,
+        username=payload.username,
+        display_name=payload.display_name,
+        role_id=payload.role_id,
+    )
+    return serialize_user(user)
+
+
+@router.patch("/users/{user_id}", response_model=RbacUserResponse)
+def update_user_endpoint(
+    user_id: str,
+    payload: UpdateTrustedUserRequest,
+    session: Session = Depends(get_session),
+) -> RbacUserResponse:
+    return serialize_user(set_user_enabled(session, user_id=user_id, enabled=payload.enabled))
+
+
+@router.post("/users/{user_id}/reset-password", response_model=RbacUserResponse)
+def reset_user_password_endpoint(
+    user_id: str,
+    actor: AuthUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> RbacUserResponse:
+    return serialize_user(reset_user_password(session, user_id=user_id, actor=actor))
+
+
+@router.get("/roles", response_model=list[RbacRoleResponse])
+def list_roles_endpoint(session: Session = Depends(get_session)) -> list[RbacRoleResponse]:
+    return [serialize_role(role) for role in list_roles(session)]
+
+
+@router.post("/roles", response_model=RbacRoleResponse, status_code=status.HTTP_201_CREATED)
+def create_role_endpoint(payload: CreateRoleRequest, session: Session = Depends(get_session)) -> RbacRoleResponse:
+    return serialize_role(create_role(session, code=payload.code, name=payload.name))
+
+
+@router.patch("/roles/{role_id}", response_model=RbacRoleResponse)
+def update_role_endpoint(
+    role_id: str,
+    payload: UpdateRoleRequest,
+    session: Session = Depends(get_session),
+) -> RbacRoleResponse:
+    return serialize_role(update_role(session, role_id=role_id, name=payload.name))
+
+
+@router.delete("/roles/{role_id}", response_model=RbacRoleResponse)
+def archive_role_endpoint(role_id: str, session: Session = Depends(get_session)) -> RbacRoleResponse:
+    return serialize_role(archive_role(session, role_id=role_id))
+
+
+@router.get("/roles/{role_id}/permissions", response_model=RolePermissionResponse)
+def get_role_permissions_endpoint(role_id: str, session: Session = Depends(get_session)) -> RolePermissionResponse:
+    menu_codes, api_permission_codes = get_role_permissions(session, role_id=role_id)
+    return RolePermissionResponse(
+        role_id=role_id,
+        menu_codes=menu_codes,
+        api_permission_codes=api_permission_codes,
+    )
+
+
+@router.put("/roles/{role_id}/permissions", response_model=RolePermissionResponse)
+def replace_role_permissions_endpoint(
+    role_id: str,
+    payload: UpdateRolePermissionRequest,
+    session: Session = Depends(get_session),
+) -> RolePermissionResponse:
+    menu_codes, api_permission_codes = replace_role_permissions(
+        session,
+        role_id=role_id,
+        menu_codes=payload.menu_codes,
+        api_permission_codes=payload.api_permission_codes,
+    )
+    return RolePermissionResponse(
+        role_id=role_id,
+        menu_codes=menu_codes,
+        api_permission_codes=api_permission_codes,
+    )

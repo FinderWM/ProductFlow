@@ -5,11 +5,8 @@ from copy import deepcopy
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from productflow_backend.application.canvas_templates import (
-    CanvasTemplate,
-    get_builtin_canvas_template,
-    validate_canvas_template,
-)
+from productflow_backend.application.canvas_templates import CanvasTemplate, validate_canvas_template
+from productflow_backend.application.product_workflow.user_templates import get_canvas_template
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import Product, ProductWorkflow, WorkflowEdge, WorkflowNode
 
@@ -17,12 +14,23 @@ DEFAULT_PRODUCT_CREATION_CANVAS_TEMPLATE_KEYS = frozenset({"", "default", "basic
 TEMPLATE_METADATA_CONFIG_KEY = "_canvas_template"
 
 
-def resolve_product_creation_canvas_template(canvas_template_key: str | None) -> CanvasTemplate | None:
+def resolve_product_creation_canvas_template(
+    session: Session,
+    canvas_template_key: str | None,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> CanvasTemplate | None:
     template_key = (canvas_template_key or "").strip()
     if template_key in DEFAULT_PRODUCT_CREATION_CANVAS_TEMPLATE_KEYS:
         return None
 
-    template = get_builtin_canvas_template(template_key)
+    template = get_canvas_template(
+        session,
+        template_key,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
     if template.kind != "full_canvas":
         raise BusinessValidationError("商品创建只支持完整画布模板，节点组模板请在画布内添加")
     return template

@@ -26,7 +26,7 @@ const LEGACY_TITLE_PREFIX_KEYS: Record<WorkflowNodeType, TranslationKey> = {
 
 const EXTRA_LEGACY_TITLE_PREFIXES: Partial<Record<WorkflowNodeType, string[]>> = {
   reference_image: ["图片节点", "图片输入", "Image node", "Image input"],
-  copy_generation: ["商品文案", "文案生成", "Product copy", "Copy generation"],
+  copy_generation: ["商品文案", "灵感文案", "文案生成", "Product copy", "Inspiration copy", "Copy generation"],
   image_generation: ["生成图片", "图片生成", "Generate image", "Image generation"],
 };
 

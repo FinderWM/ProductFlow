@@ -15,6 +15,7 @@ export type WorkflowNodeRunStatusValue = WorkflowNodeStatus;
 export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "cancelled";
 export type WorkflowRetryHint = "retry_later" | "revise_input" | "check_settings";
 export type CanvasTemplateKind = "full_canvas" | "node_group";
+export type CanvasTemplateScope = "global" | "user";
 export type CanvasTemplateScenario =
   | "main_image"
   | "taobao_main_image"
@@ -34,12 +35,74 @@ export type CanvasTemplateScenario =
   | "short_video_cover"
   | "white_background";
 
+export interface ModerationFields {
+  enabled?: boolean;
+  disabled_at?: string | null;
+  disabled_by_user_id?: string | null;
+  disabled_by_username?: string | null;
+  disabled_reason?: string | null;
+  effective_enabled?: boolean;
+  effective_disabled_resource_type?: string | null;
+  effective_disabled_resource_id?: string | null;
+  effective_disabled_reason?: string | null;
+}
+
 export interface SessionState {
   authenticated: boolean;
   access_required: boolean;
+  user?: SessionUser | null;
+  menus?: SessionMenu[];
+  api_permissions?: string[];
 }
 
-export interface SourceAsset {
+export interface SessionUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role_id: string;
+  is_admin: boolean;
+  enabled: boolean;
+  password_pending: boolean;
+}
+
+export interface SessionMenu {
+  code: string;
+  title: string;
+  sort_order: number;
+}
+
+export interface RbacUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role_id: string;
+  role_name: string;
+  is_admin: boolean;
+  enabled: boolean;
+  password_pending: boolean;
+  archived_at?: string | null;
+}
+
+export interface RbacRole {
+  id: string;
+  code: string;
+  name: string;
+  is_admin: boolean;
+  archived_at?: string | null;
+}
+
+export interface CreateTrustedUserRequest {
+  username: string;
+  display_name?: string | null;
+  role_id?: string | null;
+}
+
+export interface CreateRoleRequest {
+  code: string;
+  name: string;
+}
+
+export interface SourceAsset extends ModerationFields {
   id: string;
   kind: SourceAssetKind;
   original_filename: string;
@@ -121,7 +184,7 @@ export interface CopySet {
   confirmed_at: string | null;
 }
 
-export interface PosterVariant {
+export interface PosterVariant extends ModerationFields {
   id: string;
   product_id: string;
   copy_set_id: string;
@@ -136,8 +199,10 @@ export interface PosterVariant {
   created_at: string;
 }
 
-export interface ProductSummary {
+export interface ProductSummary extends ModerationFields {
   id: string;
+  owner_user_id?: string;
+  owner_username?: string | null;
   name: string;
   category: string | null;
   price: string | null;
@@ -159,8 +224,10 @@ export interface ProductListResponse {
   page_size: number;
 }
 
-export interface ProductDetail {
+export interface ProductDetail extends ModerationFields {
   id: string;
+  owner_user_id?: string;
+  owner_username?: string | null;
   name: string;
   category: string | null;
   price: string | null;
@@ -371,12 +438,21 @@ export interface CanvasTemplatePreviewEdge {
 
 export interface CanvasTemplateSummary {
   key: string;
+  template_id?: string | null;
   version: number;
   kind: CanvasTemplateKind;
   title: string;
   description: string;
   source: "builtin" | "user";
   user_template_id: string | null;
+  scope?: CanvasTemplateScope | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  owner_user_id?: string | null;
+  owner_username?: string | null;
+  enabled?: boolean;
+  effective_enabled?: boolean;
+  disabled_reason?: string | null;
   scenario: CanvasTemplateScenarioMetadata;
   preview_nodes: CanvasTemplatePreviewNode[];
   preview_edges: CanvasTemplatePreviewEdge[];
@@ -388,6 +464,24 @@ export interface CanvasTemplateSummary {
 
 export interface CanvasTemplateListResponse {
   items: CanvasTemplateSummary[];
+}
+
+export interface CanvasTemplateCategory {
+  id: string;
+  scope: CanvasTemplateScope;
+  owner_user_id: string | null;
+  owner_username: string | null;
+  name: string;
+  sort_order: number;
+  enabled: boolean;
+  effective_enabled: boolean;
+  disabled_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CanvasTemplateCategoryListResponse {
+  items: CanvasTemplateCategory[];
 }
 
 export interface ApplyWorkflowTemplateGroupInput {
@@ -411,8 +505,9 @@ export interface CopySetUpdateRequest {
   structured_payload: CopyPayloadV2;
 }
 
-export interface ImageSessionAsset {
+export interface ImageSessionAsset extends ModerationFields {
   id: string;
+  owner_user_id?: string;
   kind: ImageSessionAssetKind;
   original_filename: string;
   mime_type: string;
@@ -497,8 +592,10 @@ export interface ImageSessionGenerationTask {
   queue_position: number | null;
 }
 
-export interface ImageSessionSummary {
+export interface ImageSessionSummary extends ModerationFields {
   id: string;
+  owner_user_id?: string;
+  owner_username?: string | null;
   product_id: string | null;
   title: string;
   rounds_count: number;
@@ -507,8 +604,10 @@ export interface ImageSessionSummary {
   updated_at: string;
 }
 
-export interface ImageSessionDetail {
+export interface ImageSessionDetail extends ModerationFields {
   id: string;
+  owner_user_id?: string;
+  owner_username?: string | null;
   product_id: string | null;
   title: string;
   assets: ImageSessionAsset[];
@@ -518,8 +617,10 @@ export interface ImageSessionDetail {
   updated_at: string;
 }
 
-export interface ImageSessionStatus {
+export interface ImageSessionStatus extends ModerationFields {
   id: string;
+  owner_user_id?: string;
+  owner_username?: string | null;
   product_id: string | null;
   title: string;
   rounds_count: number;
@@ -540,8 +641,10 @@ export interface ProductWritebackResponse {
   message: string;
 }
 
-export interface GalleryEntry {
+export interface GalleryEntry extends ModerationFields {
   id: string;
+  owner_user_id?: string;
+  owner_username?: string | null;
   image_session_asset_id: string;
   image_session_round_id: string | null;
   image_session_id: string;
@@ -782,6 +885,56 @@ export interface GenerationConfigStatusSummary {
   today_text_attempt_count: number;
   today_image_attempt_count: number;
   configs: GenerationConfigStatusConfig[];
+}
+
+export interface UserUsageStatsUser {
+  id: string;
+  username: string;
+  display_name: string;
+  is_admin: boolean;
+}
+
+export interface UserUsageStatsSummary {
+  attempt_count: number;
+  success_count: number;
+  failure_count: number;
+  timeout_count: number;
+  throttled_count: number;
+  generated_unit_count: number;
+  total_latency_ms: number;
+  text_attempt_count: number;
+  image_attempt_count: number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
+
+export interface UserUsageStat {
+  id: string;
+  user_id: string;
+  username: string;
+  display_name: string;
+  stat_date: string;
+  purpose: ProviderPurpose;
+  attempt_count: number;
+  success_count: number;
+  failure_count: number;
+  timeout_count: number;
+  throttled_count: number;
+  generated_unit_count: number;
+  total_latency_ms: number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserUsageStatsResponse {
+  start_date: string;
+  end_date: string;
+  selected_user_id: string | null;
+  items: UserUsageStat[];
+  summary: UserUsageStatsSummary;
+  users: UserUsageStatsUser[];
 }
 
 export interface GenerationConfigCreateRequest {

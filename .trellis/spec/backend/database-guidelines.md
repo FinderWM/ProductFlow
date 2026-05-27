@@ -96,6 +96,12 @@ Use `sessionmaker(..., autoflush=False, autocommit=False, expire_on_commit=False
 `infrastructure/db/session.py`. After writes, existing use cases call `session.commit()`, often `session.expire_all()`, and
 then reload a fully populated object.
 
+Authentication and RBAC dependencies must not reuse the endpoint business `Session` for permission lookups. Some routes
+open explicit transaction scopes with `session.begin()` after dependency resolution; if a permission dependency has already
+started an implicit transaction on the same `Session`, those routes fail with a nested transaction error. Use a short
+independent session from `get_session_factory()` for auth/permission checks, then return only loaded scalar identity data
+to the request dependency chain.
+
 ### Select and eager loading
 
 Use `select(...)`, `session.scalar(...)`, and `session.scalars(...)`. When a response needs related data, define a query
@@ -1216,6 +1222,411 @@ runtime_config = {definition.key: getattr(settings, definition.key) for definiti
 
 Export the frontend-operable runtime settings and provider configuration only; keep deployment secrets outside the
 migration file.
+
+---
+
+## Scenario: Core resource ownership
+
+### 1. Scope / Trigger
+
+- Trigger: changing auth/RBAC resource isolation, owner filters, admin resource visibility, or migrations for user-owned
+  product/image/gallery rows.
+- Applies to `products`, `image_sessions`, `image_session_assets`, `image_gallery_entries`, route dependencies, response
+  serializers, and ownership tests.
+
+### 2. Signatures
+
+- DB columns:
+  - `products.owner_user_id -> auth_users.id`
+  - `image_sessions.owner_user_id -> auth_users.id`
+  - `image_session_assets.owner_user_id -> auth_users.id`
+  - `image_gallery_entries.owner_user_id -> auth_users.id`
+- Application use cases accept scalar actor context, not FastAPI objects:
+  - `actor_user_id: str | None`
+  - `actor_is_admin: bool`
+- Response DTOs expose owner display fields where admin views need attribution:
+  - `owner_user_id`
+  - `owner_username`
+
+### 3. Contracts
+
+- New products and standalone image sessions are owned by the current authenticated user.
+- Product-scoped image sessions must use the same owner as the product.
+- Image-session assets inherit `ImageSession.owner_user_id`; gallery entries inherit the generated asset owner.
+- Historical data migrates to the seeded `libow` admin id.
+- Admin users can read all owned resources, but content mutations for resources owned by another user must fail.
+- Ordinary users should receive `404` for another user's resource rather than a visible ownership detail.
+
+### 4. Validation & Error Matrix
+
+- Ordinary user lists products/sessions -> only rows where `owner_user_id == current_user.id`.
+- Ordinary user reads/downloads another user's product, session, source asset, or session asset -> `404`.
+- Admin reads another user's product/session/gallery entry -> `200` with `owner_username`.
+- Admin edits/deletes/generates/saves/writes back another user's resource -> `400`, `管理员不能直接编辑其他用户资源`.
+- Saving a gallery entry for an asset not owned by the actor -> `404` for ordinary users, `400` for admin cross-owner edits.
+
+### 5. Good/Base/Bad Cases
+
+- Good: route handlers pass `current_user.id` and `current_user.is_admin` into application use cases.
+- Good: worker/internal execution paths omit actor context and operate only on durable rows created after user validation.
+- Base: direct test helpers that create resources without actor context resolve to the seeded `libow` owner.
+- Bad: route code checks menu/API permission but then calls an unfiltered application detail/download lookup.
+- Bad: adding owner columns in an Alembic SQLite batch and dropping the server default in the same batch; SQLite copies old
+  rows into the recreated table without the new value and hits `NOT NULL`.
+
+### 6. Tests Required
+
+- API regression: ordinary user cannot list/read/download another user's product or image-session asset.
+- API regression: admin can list/read all resources and sees `owner_username`.
+- API regression: admin cannot content-edit, delete, generate, save gallery, or write back another user's resource.
+- Migration regression: Alembic head assigns existing product/image/gallery rows to `libow`.
+- Frontend gate: when owner fields are added to DTOs, run `just web-build`.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+product = session.get(Product, product_id)
+```
+
+Correct:
+
+```python
+product = get_product_detail(
+    session,
+    product_id,
+    actor_user_id=current_user.id,
+    actor_is_admin=current_user.is_admin,
+)
+```
+
+Wrong:
+
+```python
+with op.batch_alter_table("products") as batch_op:
+    batch_op.add_column(sa.Column("owner_user_id", sa.String(36), nullable=False, server_default=ADMIN_USER_ID))
+    batch_op.alter_column("owner_user_id", server_default=None)
+```
+
+Correct:
+
+```python
+with op.batch_alter_table("products") as batch_op:
+    batch_op.add_column(sa.Column("owner_user_id", sa.String(36), nullable=False, server_default=ADMIN_USER_ID))
+
+with op.batch_alter_table("products") as batch_op:
+    batch_op.alter_column("owner_user_id", existing_type=sa.String(36), nullable=False, server_default=None)
+```
+
+---
+
+## Scenario: Core resource moderation
+
+### 1. Scope / Trigger
+
+- Trigger: changing admin resource governance, disabled/enabled columns, effective availability checks, or serializers for
+  user-generated product/image/gallery resources.
+- Applies to `products`, `source_assets`, `poster_variants`, `image_sessions`, `image_session_assets`,
+  `image_gallery_entries`, moderation APIs, download/use actions, and API DTOs.
+
+### 2. Signatures
+
+- DB columns on each core resource:
+  - `enabled: bool`
+  - `disabled_at: datetime | null`
+  - `disabled_by_user_id -> auth_users.id`
+  - `disabled_reason: text | null`
+- Admin APIs:
+  - `POST /api/resources/{resource_type}/{resource_id}/disable`
+  - `POST /api/resources/{resource_type}/{resource_id}/restore`
+  - `GET /api/resource-moderation/{resource_type}/{resource_id}`
+  - `PATCH /api/resource-moderation/{resource_type}/{resource_id}`
+- Resource type values use backend model/resource names such as `product`, `source_asset`, `poster_variant`,
+  `image_session`, `image_session_asset`, and `image_gallery_entry`.
+
+### 3. Contracts
+
+- A resource can be visible to its owner while unavailable for continued use.
+- Effective availability cascades through parent resources:
+  - Source assets and poster variants follow their product.
+  - Image sessions follow their optional product.
+  - Image-session assets follow their session and product.
+  - Gallery entries follow their asset, session, and product.
+- Parent disablement must not bulk-update child rows. Runtime checks compute `effective_enabled` from the chain.
+- Download, generation, save-to-gallery, writeback, copy edits, workflow mutation, and image binding must check effective
+  availability before using the resource.
+- Admin users can read all disabled resources and see `disabled_by_username`; ordinary users can see their own disabled
+  resources, while global gallery hides disabled entries from non-owners.
+
+### 4. Validation & Error Matrix
+
+- Owner reads a disabled product/session/gallery entry -> `200` with `enabled=false` and `effective_enabled=false`.
+- Owner tries to download or continue using a disabled resource -> `400`, `资源已被管理员屏蔽，暂不可使用`.
+- Admin disables/restores a supported resource type -> `200` with moderation state.
+- Ordinary user calls moderation endpoints -> `403`, `需要管理员权限`.
+- Existing gallery entry disabled -> repeated save must not bypass the disabled entry through idempotency.
+
+### 5. Tests Required
+
+- API regression for product disable/restore, parent cascade to source asset, and blocked download/mutation.
+- API regression for image-session asset disable, blocked gallery save, gallery-entry disable, owner visibility, and
+  non-owner gallery hiding.
+- Migration/model regression proving moderation columns and indexes exist.
+- Full backend gate plus frontend build when moderation fields are added to DTOs.
+
+## Scenario: Database-backed canvas template catalog
+
+### 1. Scope / Trigger
+
+- Trigger: changing canvas template storage, template category storage, built-in template seeding, personal template
+  create/list/apply behavior, or global template management APIs.
+- Applies to `canvas_templates`, `canvas_template_categories`, the legacy compatibility table
+  `user_canvas_templates`, product creation template selection, workbench template panels, and moderation checks for
+  template/category usage.
+
+### 2. Signatures
+
+- DB table: `canvas_template_categories`
+  - `scope: "global" | "user"`
+  - `owner_user_id: str | null`
+  - `name: str`
+  - `sort_order: int`
+  - `enabled`, `archived_at`, `disabled_at`, `disabled_by_user_id`, `disabled_reason`
+- DB table: `canvas_templates`
+  - `key: str` unique
+  - `scope: "global" | "user"`
+  - `owner_user_id: str | null`
+  - `category_id -> canvas_template_categories.id | null`
+  - `title`, `description`, `kind`, `schema_version`, `template_json`
+  - `enabled`, `archived_at`, `disabled_at`, `disabled_by_user_id`, `disabled_reason`
+- Bootstrap:
+  - `ensure_canvas_templates_bootstrapped(session=None) -> None`
+  - Seeds built-in templates into `canvas_templates(scope="global")`.
+  - Mirrors legacy `user_canvas_templates` rows into `canvas_templates(scope="user")` with `libow` owner.
+- Read APIs:
+  - `GET /api/workflow/canvas-template-categories`
+  - `GET /api/workflow/canvas-templates?search=&category_id=&scope=`
+- Personal write APIs:
+  - `POST /api/workflow/user-template-categories`
+  - `PATCH /api/workflow/user-template-categories/{category_id}`
+  - `DELETE /api/workflow/user-template-categories/{category_id}`
+  - `POST /api/workflow/user-template-categories/{category_id}/restore`
+  - `POST /api/products/{product_id}/workflow/user-template-groups`
+  - `PATCH /api/workflow/user-template-groups/{template_id}`
+  - `DELETE /api/workflow/user-template-groups/{template_id}`
+  - `POST /api/workflow/user-template-groups/{template_id}/restore`
+- Global write APIs:
+  - `POST /api/workflow/global-template-categories`
+  - `PATCH /api/workflow/global-template-categories/{category_id}`
+  - `DELETE /api/workflow/global-template-categories/{category_id}`
+  - `POST /api/workflow/global-template-categories/{category_id}/restore`
+  - `POST /api/workflow/global-canvas-templates`
+  - `PATCH /api/workflow/global-canvas-templates/{template_id}`
+  - `DELETE /api/workflow/global-canvas-templates/{template_id}`
+  - `POST /api/workflow/global-canvas-templates/{template_id}/restore`
+
+### 3. Contracts
+
+- Built-in ecommerce templates remain defined as `CanvasTemplate` constants, but runtime catalog reads use database rows
+  after bootstrap.
+- Built-in rows are seeded once by `key`; bootstrap must be idempotent and must not overwrite operator-managed database
+  rows with the same key.
+- `canvas_templates.template_json` stores the existing `CanvasTemplate` payload contract for global templates and
+  converted personal templates. The schema must keep `full_canvas` and `node_group` compatible with template
+  materialization.
+- `user_canvas_templates` is compatibility storage only. New personal template queries and application paths read
+  `canvas_templates`; new personal template writes mirror a legacy row so old tests/tools that inspect the old table keep
+  working during the migration window.
+- Ordinary users read enabled global templates plus their own personal templates. Admin users read all active templates
+  and categories.
+- Personal category/template writes are owner scoped. Admin users can view another user's personal templates but must not
+  edit, archive, restore, or apply them on behalf of that user.
+- Global category/template writes require API permission `templates:manage_global`.
+- Applying or creating from a template calls `ensure_resource_usable(...)` so disabled templates or disabled categories
+  cannot be used. Disabling a category effectively disables templates assigned to it without bulk-updating child rows.
+- A personal template can reference only a personal category owned by the same user. A global template can reference only a
+  global category.
+
+### 4. Validation & Error Matrix
+
+- Unknown template key -> `400`, `画布模板不存在`.
+- Personal template owned by another ordinary user -> `400` for apply by key, `404` for direct personal mutation.
+- Admin mutating another user's personal template -> `400`, `管理员不能直接编辑其他用户资源`.
+- Global template/category management without `templates:manage_global` -> `403`, `没有接口权限`.
+- Personal template using another user's category -> `400`, `画布模板分类不存在`.
+- Template using a category from the wrong scope -> `400`, `画布模板分类范围不匹配`.
+- Template or category disabled -> use/create/apply path returns `400`, `资源已被管理员屏蔽，暂不可使用`.
+- Duplicate category name in the same uniqueness scope -> `400`, `画布模板分类已存在`.
+- Duplicate global template key -> `400`, `画布模板 key 已存在`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `GET /api/workflow/canvas-templates?search=淘宝&scope=global` returns the seeded Taobao built-in template from
+  `canvas_templates`.
+- Good: a user saves selected workflow nodes, sees that personal template under `scope=user`, then applies it through the
+  normal template materialization path.
+- Good: an admin creates a global category and a global `full_canvas` template from a valid `CanvasTemplate` payload; a
+  regular user can read and use it without RBAC management permission.
+- Base: old `user_canvas_templates` rows are mirrored to user-scoped `canvas_templates` owned by `libow` during bootstrap.
+- Bad: calling `list_builtin_canvas_templates()` directly from route catalog handlers after database tables exist.
+- Bad: applying a template without checking its category effective availability.
+- Bad: allowing admin users to edit another user's personal node-group template.
+
+### 6. Tests Required
+
+- Bootstrap test proving built-in templates seed into database, list through API, and remain searchable/filterable by
+  category.
+- Owner-isolation test proving personal templates and categories are visible only to the owner plus admin read views.
+- Mutation-boundary test proving another ordinary user gets `404` and admin cross-owner personal mutation gets
+  `管理员不能直接编辑其他用户资源`.
+- RBAC test proving global category/template write endpoints require `templates:manage_global`.
+- Moderation test proving disabled template categories cannot be reused for new templates and disabled templates cannot be
+  applied.
+- Migration/model test proving `canvas_templates` and `canvas_template_categories` expose owner, enabled, archived, and
+  moderation fields.
+- Frontend build must pass when `CanvasTemplateSummary` response fields change.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+templates = [*list_builtin_canvas_templates(), *list_legacy_user_templates(session)]
+```
+
+Correct:
+
+```python
+templates = list_canvas_templates(
+    session,
+    actor_user_id=current_user.id,
+    actor_is_admin=current_user.is_admin,
+    search=search,
+    category_id=category_id,
+    scope=scope,
+)
+```
+
+Wrong:
+
+```python
+template = get_canvas_template(session, template_key)
+materialize_canvas_template_graph(session, workflow=workflow, template=template)
+```
+
+Correct:
+
+```python
+template = get_canvas_template(
+    session,
+    template_key,
+    actor_user_id=current_user.id,
+    actor_is_admin=current_user.is_admin,
+)
+materialize_canvas_template_graph(session, workflow=workflow, template=template)
+```
+
+## Scenario: User daily usage stats
+
+### 1. Scope / Trigger
+
+- Trigger: changing generation result release paths, user-level usage stats, generation config daily stats, or
+  `/api/usage-stats`.
+- Applies to text prompt polish, workflow copy generation, workflow image generation, continuous image-session generation,
+  `user_daily_usage_stats`, `generation_config_daily_stats`, and frontend usage-stat DTOs.
+
+### 2. Signatures
+
+- DB table: `user_daily_usage_stats`
+  - unique `(user_id, stat_date, purpose)`
+  - `purpose: "text" | "image"`
+  - `attempt_count`, `success_count`, `failure_count`, `timeout_count`, `throttled_count`
+  - `generated_unit_count`, `total_latency_ms`, `last_success_at`, `last_failure_at`
+- Application write:
+  - `record_user_usage_result(session, *, user_id, purpose, success, latency_ms=0, generated_unit_count=1, timeout=False, throttled=False, now) -> None`
+  - `release_runtime_generation_config(runtime_claim, *, success, user_id=None, generated_unit_count=1, failure_reason=None, timeout=False, throttled=False, record_result=True) -> None`
+- Application read:
+  - `list_user_usage_stats(session, *, start_date, end_date, user_id=None) -> UserUsageStatsResult`
+  - `resolve_usage_stat_user(session, *, user_id=None, username=None) -> AuthUser | None`
+- API:
+  - `GET /api/usage-stats?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&user_id=&username=`
+  - requires API permission `usage_stats:read`
+
+### 3. Contracts
+
+- User stats are written only when `release_runtime_generation_config(..., record_result=True)` and `user_id` is present.
+- The same stats transaction must write user stats before calling `release_generation_config_claim(...)`, so
+  `user_daily_usage_stats` is updated before `generation_config_daily_stats`.
+- `record_result=False` paths release generation config capacity only; they must not update user stats or global daily
+  result stats. Use this for queue wait, generation-config wait, user cancellation, and provider construction failures
+  before a real provider result attempt is counted.
+- Stat dates use the running machine's local calendar date, matching `generation_config_daily_stats`.
+- Text purpose covers prompt polish and workflow copy generation. Image purpose covers workflow image generation and
+  continuous image-session generation.
+- Failure paths should pass `timeout=True` for time limit/provider timeout failures and `throttled=True` for rate-limit or
+  quota failures. `generation_failure_is_throttled(...)` recognizes `failure_category in {"rate_limit", "quota"}`, HTTP
+  429 status, and common rate-limit/quota message text.
+- Ordinary users always read only their own stats, ignoring any attempt to query another user. Admin users may read all
+  users, filter by `user_id`, or filter by `username`.
+- API responses expose backend snake_case fields. Frontend DTOs in `web/src/lib/types.ts` must mirror the Pydantic schema
+  without camelCase conversion.
+
+### 4. Validation & Error Matrix
+
+- `end_date < start_date` -> `400`, `日期范围无效`.
+- Ordinary user passes another `user_id` or `username` -> `403`, `只能查看自己的统计`.
+- Admin filters by missing `user_id` or `username` -> `404`, `用户不存在`.
+- Missing date range -> defaults to today's local stat date.
+- Unknown stats purpose passed to `record_user_usage_result(...)` -> `ValueError("用途必须是 text 或 image")`.
+- `runtime_claim is None` -> no-op release, no stats write.
+- `record_result=False` with `user_id` present -> no user stats write.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a successful workflow copy generation records one text attempt, one success, two generated units, then records the
+  global generation-config result.
+- Good: a continuous image generation failure caused by provider 429 records one image failure with `throttled_count += 1`.
+- Good: an admin opens `/usage-stats?username=alice` and receives only Alice rows plus the user selector list.
+- Base: an admin opens `/usage-stats` without user filters and receives all users' rows for the selected range.
+- Bad: a provider construction failure before a real provider call increments user usage stats.
+- Bad: user stats are written after global generation-config stats; this breaks the required write ordering.
+- Bad: frontend computes aggregate usage from rows when the backend already returns `summary`.
+
+### 6. Tests Required
+
+- Unit test `release_runtime_generation_config(...)` calls `record_user_usage_result(...)` before
+  `release_generation_config_claim(...)`.
+- Unit test `record_result=False` skips user stats while still releasing the generation config claim.
+- Aggregation test covering text/image split, timeout, throttled, generated units, latency, latest success/failure.
+- API test proving ordinary users are self-only and admin filters by `username` and `user_id`.
+- Run backend ruff and full backend tests after changing release paths because generation config scheduler and worker
+  recovery paths share the release helper.
+- Run frontend type-check/build after changing `UserUsageStats*` DTOs or i18n keys.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+release_generation_config_claim(session, config_id, success=True)
+record_user_usage_result(session, user_id=user_id, purpose="text", success=True, now=now)
+```
+
+Correct:
+
+```python
+record_user_usage_result(session, user_id=user_id, purpose="text", success=True, now=now)
+release_generation_config_claim(session, config_id, success=True, now=now)
+```
+
+Wrong:
+
+```python
+release_runtime_generation_config(runtime_claim, success=False, user_id=user_id, record_result=False)
+```
+
+Expecting this to count a user failure is wrong; `record_result=False` intentionally skips result stats.
 
 ---
 

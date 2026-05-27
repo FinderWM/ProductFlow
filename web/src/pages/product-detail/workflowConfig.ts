@@ -51,7 +51,7 @@ export function draftFromNode(
     role: configString(node, "role", "reference"),
     label: configString(node, "label"),
     tone: configString(node, "tone", "转化清晰"),
-    channel: configString(node, "channel", "商品主图"),
+    channel: configString(node, "channel", "灵感主图"),
     size: configString(node, "size", "1024x1024"),
     toolOptions: imageToolOptionsFromUnknown(node?.config_json?.tool_options),
     generationConfigMode: generationConfigModeFromNode(node),
@@ -112,9 +112,9 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
   if (type === "copy_generation") {
     return {
       version: 2,
-      instruction: "生成商品文案",
+      instruction: "生成灵感文案",
       tone: "清晰可信",
-      channel: "商品图",
+      channel: "灵感图",
       output_mode: "blocks",
       generation_config_mode: "auto",
       generation_config_id: null,

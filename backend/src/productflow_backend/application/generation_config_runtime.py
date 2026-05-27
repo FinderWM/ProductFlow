@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Literal
 
 from dramatiq.middleware.time_limit import TimeLimitExceeded
 
+from productflow_backend.application.usage_stats import record_user_usage_result
 from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
@@ -91,6 +93,7 @@ def release_runtime_generation_config(
     runtime_claim: RuntimeGenerationConfigClaim | None,
     *,
     success: bool,
+    user_id: str | None = None,
     generated_unit_count: int = 1,
     failure_reason: str | None = None,
     timeout: bool = False,
@@ -102,6 +105,19 @@ def release_runtime_generation_config(
     latency_ms = int(max(0.0, perf_counter() - runtime_claim.started_perf_counter) * 1000)
     session = get_session_factory()()
     try:
+        now = datetime.now(UTC)
+        if user_id is not None and record_result:
+            record_user_usage_result(
+                session,
+                user_id=user_id,
+                purpose=runtime_claim.purpose,
+                success=success,
+                latency_ms=latency_ms,
+                generated_unit_count=generated_unit_count,
+                timeout=timeout,
+                throttled=throttled,
+                now=now,
+            )
         release_generation_config_claim(
             session,
             runtime_claim.generation_config_id,
@@ -112,6 +128,7 @@ def release_runtime_generation_config(
             timeout=timeout,
             throttled=throttled,
             record_result=record_result,
+            now=now,
         )
         session.commit()
     except Exception:
@@ -127,6 +144,33 @@ def generation_failure_reason(exc: BaseException) -> str:
 
 def generation_failure_is_timeout(exc: BaseException) -> bool:
     return isinstance(exc, TimeLimitExceeded)
+
+
+def generation_failure_is_throttled(exc: BaseException) -> bool:
+    for current in _iter_exception_chain(exc):
+        category = getattr(current, "failure_category", None)
+        if category in {"rate_limit", "quota"}:
+            return True
+        status_code = getattr(current, "status_code", None)
+        response = getattr(current, "response", None)
+        response_status_code = getattr(response, "status_code", None)
+        if status_code == 429 or response_status_code == 429:
+            return True
+        message = str(current).lower()
+        if any(token in message for token in ("rate limit", "rate_limit", "too many requests", "quota")):
+            return True
+        if "限流" in message or "配额" in message:
+            return True
+    return False
+
+
+def _iter_exception_chain(exc: BaseException):
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
 
 
 def _optional_text(value: Any) -> str | None:

@@ -120,12 +120,21 @@ class CanvasTemplate(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     key: str
+    template_id: str | None = None
     version: int = 1
     kind: TemplateKind
     title: str
     description: str
     source: Literal["builtin", "user"] = "builtin"
     user_template_id: str | None = None
+    scope: Literal["global", "user"] | None = None
+    category_id: str | None = None
+    category_name: str | None = None
+    owner_user_id: str | None = None
+    owner_username: str | None = None
+    enabled: bool = True
+    effective_enabled: bool = True
+    disabled_reason: str | None = None
     scenario: CanvasTemplateScenarioMetadata
     nodes: tuple[CanvasTemplateNodeSpec, ...]
     edges: tuple[CanvasTemplateEdgeSpec, ...] = ()

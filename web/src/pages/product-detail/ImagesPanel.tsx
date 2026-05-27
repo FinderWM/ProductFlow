@@ -1,4 +1,9 @@
 import { Image as ImageIcon } from "lucide-react";
+import {
+  isResourceBlocked,
+  ResourceBlockedNotice,
+  ResourceMetaBadges,
+} from "../../components/ResourceGovernance";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
 import type { PosterVariant, ProductDetail, SourceAsset, WorkflowNode } from "../../lib/types";
@@ -33,10 +38,12 @@ export function ImagesPanel({
 }: ImagesPanelProps) {
   const { t } = useI18n();
   const canFillReference = Boolean(selectedReferenceNode);
+  const productBlocked = isResourceBlocked(product);
   const selectedReferenceLabel = selectedReferenceNode ? workflowNodeDisplayTitle(selectedReferenceNode, t) : "";
   return (
     <section>
-      <div className="mb-3 space-y-1 text-xs text-zinc-500 dark:text-slate-400">
+      <div className="mb-3 space-y-2 text-xs text-zinc-500 dark:text-slate-400">
+        <ResourceBlockedNotice resource={product} />
         <div>{artifactCount ? t("detail.downloadableCount", { count: artifactCount }) : t("detail.waitingAssets")}</div>
         {canFillReference ? (
           <div className="text-indigo-600 dark:text-violet-400 font-semibold">
@@ -50,43 +57,51 @@ export function ImagesPanel({
         <div className="grid grid-cols-2 gap-2">
           {posters.map((poster) => {
             const sourceAssetId = posterSourceAssetIds.get(poster.id);
+            const posterBlocked = productBlocked || isResourceBlocked(poster);
             return (
-              <PosterThumb
-                key={poster.id}
-                poster={poster}
-                productName={product.name}
-                onPreview={onPreviewImage}
-                onUseAsReference={
-                  canFillReference
-                    ? () => {
-                        if (sourceAssetId) {
-                          onFillFromSourceAsset(sourceAssetId);
-                          return;
+              <div key={poster.id} className="space-y-1.5">
+                <PosterThumb
+                  poster={poster}
+                  productName={product.name}
+                  onPreview={onPreviewImage}
+                  onUseAsReference={
+                    canFillReference
+                      ? () => {
+                          if (sourceAssetId) {
+                            onFillFromSourceAsset(sourceAssetId);
+                            return;
+                          }
+                          onFillFromPoster(poster.id);
                         }
-                        onFillFromPoster(poster.id);
-                      }
-                    : undefined
-                }
-                useAsReferenceDisabled={!canFillReference}
-                useAsReferenceBusy={fillReferenceBusy}
-              />
+                      : undefined
+                  }
+                  useAsReferenceDisabled={!canFillReference || posterBlocked}
+                  useAsReferenceBusy={fillReferenceBusy}
+                />
+                <ResourceMetaBadges resource={poster} showReason />
+              </div>
             );
           })}
-          {referenceAssets.map((asset) => (
-            <SourceAssetThumb
-              key={asset.id}
-              asset={asset}
-              product={product}
-              onPreview={onPreviewImage}
-              onUseAsReference={
-                canFillReference
-                  ? () => onFillFromSourceAsset(asset.id)
-                  : undefined
-              }
-              useAsReferenceDisabled={!canFillReference}
-              useAsReferenceBusy={fillReferenceBusy}
-            />
-          ))}
+          {referenceAssets.map((asset) => {
+            const assetBlocked = productBlocked || isResourceBlocked(asset);
+            return (
+              <div key={asset.id} className="space-y-1.5">
+                <SourceAssetThumb
+                  asset={asset}
+                  product={product}
+                  onPreview={onPreviewImage}
+                  onUseAsReference={
+                    canFillReference
+                      ? () => onFillFromSourceAsset(asset.id)
+                      : undefined
+                  }
+                  useAsReferenceDisabled={!canFillReference || assetBlocked}
+                  useAsReferenceBusy={fillReferenceBusy}
+                />
+                <ResourceMetaBadges resource={asset} showReason />
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="glass-empty-state flex min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center text-xs leading-relaxed text-zinc-500 dark:text-slate-400">
