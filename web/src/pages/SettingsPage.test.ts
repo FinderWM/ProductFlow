@@ -363,6 +363,36 @@ describe("SettingsPage provider profile helpers", () => {
     });
   });
 
+  it("leaves blank scheduler policy fields as runtime defaults", () => {
+    expect(
+      generationConfigPayloadFromDraft({
+        id: null,
+        purpose: "text",
+        name: "Default policy text",
+        provider_kind: "mock",
+        provider_profile_id: "",
+        brief_model: "mock-brief",
+        copy_model: "mock-copy",
+        model: "",
+        images_quality: "",
+        images_style: "",
+        responses_background_enabled: true,
+        gemini_api_version: "v1beta",
+        gemini_output_mime_type: "",
+        priority: "100",
+        max_concurrency: "1",
+        enabled: true,
+        availability_window_minutes: "",
+        failure_threshold: "",
+        cooldown_minutes: "",
+      }),
+    ).toMatchObject({
+      availability_window_minutes: null,
+      failure_threshold: null,
+      cooldown_minutes: null,
+    });
+  });
+
   it("blocks disabling an enabled provider that is currently used by a generation config", () => {
     expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: true, image: false })).toBe(true);
     expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: false, image: false })).toBe(false);
@@ -429,6 +459,7 @@ describe("SettingsPage import/export helpers", () => {
       runtimeConfigCount: 12,
       providerProfileCount: 2,
       providerBindingCount: 2,
+      generationConfigCount: 2,
       providerProfilesWithApiKeyCount: 1,
     });
   });

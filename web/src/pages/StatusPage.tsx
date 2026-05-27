@@ -87,6 +87,14 @@ function successRate(stat: GenerationConfigStatAggregate | null | undefined): st
   return `${Math.round((stat.success_count / stat.attempt_count) * 100)}%`;
 }
 
+function isActiveFrozenUntil(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+}
+
 function purposeClassName(purpose: string): string {
   return purpose === "text"
     ? "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-400/35 dark:bg-sky-500/12 dark:text-sky-200"
@@ -94,7 +102,7 @@ function purposeClassName(purpose: string): string {
 }
 
 function statusClassName(config: GenerationConfigStatusConfig): string {
-  if (config.state?.frozen_until) {
+  if (isActiveFrozenUntil(config.state?.frozen_until)) {
     return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200";
   }
   if (!config.enabled) {
@@ -130,7 +138,8 @@ function MetricCard({
 
 function ConfigStatusRow({ config }: { config: GenerationConfigStatusConfig }) {
   const { t } = useI18n();
-  const statusText = config.state?.frozen_until
+  const activeFrozen = isActiveFrozenUntil(config.state?.frozen_until);
+  const statusText = activeFrozen && config.state?.frozen_until
     ? t("statusPage.table.frozenUntil", { time: formatDateTime(config.state.frozen_until) })
     : config.enabled
       ? t("settings.generation.healthy")

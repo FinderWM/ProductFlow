@@ -468,9 +468,9 @@ function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfig
     priority: "100",
     max_concurrency: "1",
     enabled: true,
-    availability_window_minutes: "10",
-    failure_threshold: "3",
-    cooldown_minutes: "10",
+    availability_window_minutes: "",
+    failure_threshold: "",
+    cooldown_minutes: "",
   };
 }
 
@@ -513,6 +513,15 @@ function numberDraftValue(value: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function optionalNumberDraftValue(value: string): number | null {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function generationConfigPayloadFromDraft(
   draft: GenerationConfigDraft,
 ): GenerationConfigCreateRequest | GenerationConfigUpdateRequest {
@@ -551,9 +560,9 @@ export function generationConfigPayloadFromDraft(
     priority: numberDraftValue(draft.priority, 100),
     max_concurrency: numberDraftValue(draft.max_concurrency, 1),
     enabled: draft.enabled,
-    availability_window_minutes: numberDraftValue(draft.availability_window_minutes, 10),
-    failure_threshold: numberDraftValue(draft.failure_threshold, 3),
-    cooldown_minutes: numberDraftValue(draft.cooldown_minutes, 10),
+    availability_window_minutes: optionalNumberDraftValue(draft.availability_window_minutes),
+    failure_threshold: optionalNumberDraftValue(draft.failure_threshold),
+    cooldown_minutes: optionalNumberDraftValue(draft.cooldown_minutes),
   };
 }
 
@@ -589,12 +598,14 @@ export function settingsImportSummaryCounts(preview: SettingsImportPreviewRespon
   runtimeConfigCount: number;
   providerProfileCount: number;
   providerBindingCount: number;
+  generationConfigCount: number;
   providerProfilesWithApiKeyCount: number;
 } {
   return {
     runtimeConfigCount: preview.runtime_config_count,
     providerProfileCount: preview.provider_profile_count,
     providerBindingCount: preview.provider_binding_count,
+    generationConfigCount: preview.generation_config_count,
     providerProfilesWithApiKeyCount: preview.provider_profiles_with_api_key_count,
   };
 }
@@ -623,7 +634,8 @@ function isSettingsExportPayload(value: unknown): value is SettingsExportPayload
     isRecord(value.metadata) &&
     isRecord(value.runtime_config) &&
     Array.isArray(value.provider_profiles) &&
-    Array.isArray(value.provider_bindings)
+    Array.isArray(value.provider_bindings) &&
+    Array.isArray(value.generation_configs)
   );
 }
 
@@ -739,12 +751,15 @@ function SettingsMigrationPanel({
               </button>
             </div>
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
               {t("settings.migration.runtimeCount", { count: counts.runtimeConfigCount })}
             </div>
             <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
               {t("settings.migration.profileCount", { count: counts.providerProfileCount })}
+            </div>
+            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+              {t("settings.migration.generationConfigCount", { count: counts.generationConfigCount })}
             </div>
             <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
               {t("settings.migration.bindingCount", { count: counts.providerBindingCount })}
@@ -1778,6 +1793,7 @@ interface GenerationConfigPoolSectionProps {
   onChange: (key: string, next: GenerationConfigDraft) => void;
   onSave: (draft: GenerationConfigDraft) => void;
   onArchive: (configId: string) => void;
+  onRefreshSort: () => void;
 }
 
 function generationConfigDraftKey(draft: GenerationConfigDraft): string {
@@ -1809,6 +1825,14 @@ function generationConfigSuccessRate(config: GenerationConfig): string {
   return `${Math.round((stat.success_count / stat.attempt_count) * 100)}%`;
 }
 
+function isActiveFrozenUntil(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+}
+
 function GenerationConfigPoolSection({
   data,
   purpose,
@@ -1818,6 +1842,7 @@ function GenerationConfigPoolSection({
   onChange,
   onSave,
   onArchive,
+  onRefreshSort,
 }: GenerationConfigPoolSectionProps) {
   const { t } = useI18n();
   const configs = generationConfigsForPurpose(data, purpose);
@@ -1842,7 +1867,7 @@ function GenerationConfigPoolSection({
         </div>
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={onRefreshSort}
           className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:hover:bg-slate-800"
         >
           <RefreshCw size={14} className="mr-2" />
@@ -1909,7 +1934,7 @@ function GenerationConfigCard({ config, draft, profiles, pending, onChange, onSa
             >
               {draft.enabled ? t("settings.provider.enabled") : t("settings.provider.disabled")}
             </span>
-            {config?.state?.frozen_until ? (
+            {isActiveFrozenUntil(config?.state?.frozen_until) ? (
               <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200">
                 {t("settings.generation.frozen")}
               </span>
@@ -2020,13 +2045,13 @@ function GenerationConfigCard({ config, draft, profiles, pending, onChange, onSa
           <input value={draft.max_concurrency} onChange={(event) => onChange({ ...draft, max_concurrency: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.availabilityWindow")}>
-          <input value={draft.availability_window_minutes} onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+          <input value={draft.availability_window_minutes} onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.failureThreshold")}>
-          <input value={draft.failure_threshold} onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+          <input value={draft.failure_threshold} onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.cooldownMinutes")}>
-          <input value={draft.cooldown_minutes} onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+          <input value={draft.cooldown_minutes} onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
       </div>
 
@@ -2827,6 +2852,9 @@ export function SettingsPage() {
                         onArchive={(configId) => {
                           archiveGenerationConfigMutation.mutate(configId);
                         }}
+                        onRefreshSort={() => {
+                          void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+                        }}
                       />
                     ) : null}
 
@@ -2848,6 +2876,9 @@ export function SettingsPage() {
                         }}
                         onArchive={(configId) => {
                           archiveGenerationConfigMutation.mutate(configId);
+                        }}
+                        onRefreshSort={() => {
+                          void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
                         }}
                       />
                     ) : null}
