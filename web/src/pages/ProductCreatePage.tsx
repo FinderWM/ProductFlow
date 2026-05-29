@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, ChevronRight, Eye, FileText, ImagePlus, LayoutTemplate, Loader2, Search, Sparkles, Tag, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -64,6 +64,7 @@ type TemplateScopeFilter = CanvasTemplateScope | "all";
 const PREVIEW_MIN_WIDTH = 920;
 const PREVIEW_NODE_WIDTH = 248;
 const NODE_HEIGHT = 92;
+const PREVIEW_HEIGHT = 560;
 const PRODUCT_CREATE_FORM_ID = "product-create-form";
 
 const NODE_TYPE_LABEL_KEYS: Record<WorkflowNodeType, TranslationKey> = {
@@ -518,9 +519,9 @@ export function ProductCreatePage() {
   );
 
   return (
-    <div className="min-h-screen bg-zinc-100 px-4 pb-[calc(6.25rem+env(safe-area-inset-bottom))] pt-4 text-zinc-900 dark:bg-[#060a12] dark:text-slate-100 sm:px-6 lg:px-8 lg:pb-8">
+    <div className="pf-workspace px-4 pb-[calc(6.25rem+env(safe-area-inset-bottom))] pt-4 text-zinc-900 dark:text-slate-100 sm:px-6 lg:px-8 lg:pb-8">
       <main className="mx-auto max-w-[1480px]">
-        <div className="mb-5 flex items-start justify-between gap-4 border-b border-zinc-200 pb-4 dark:border-slate-800">
+        <div className="mb-5 flex items-start justify-between gap-4 border-b border-slate-200/80 pb-4 dark:border-slate-800">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-md bg-blue-50 text-blue-600 dark:border dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
               <Tag size={21} />
@@ -540,8 +541,12 @@ export function ProductCreatePage() {
           </button>
         </div>
 
-        <form id={PRODUCT_CREATE_FORM_ID} onSubmit={handleSubmit} className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[0_16px_48px_rgba(0,0,0,0.22)]">
+        <form
+          id={PRODUCT_CREATE_FORM_ID}
+          onSubmit={handleSubmit}
+          className="grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]"
+        >
+          <section className="pf-panel min-w-0 p-5">
             <h2 className="text-base font-semibold text-zinc-950 dark:text-white">{t("create.productInfo")}</h2>
 
             <div className="mt-5">
@@ -655,12 +660,12 @@ export function ProductCreatePage() {
             </div>
           </section>
 
-          <section className="hidden min-h-[720px] gap-5 lg:grid xl:grid-cols-[320px_minmax(0,1fr)]">
-            <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[0_16px_48px_rgba(0,0,0,0.22)]">
+          <section className="hidden min-h-[720px] min-w-0 gap-5 lg:grid lg:grid-cols-1 2xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+            <div className="pf-panel min-w-0 p-4">
               {templatePanelContent}
             </div>
 
-            <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[0_16px_48px_rgba(0,0,0,0.22)]">
+            <div className="pf-panel min-w-0 p-4">
               {previewPanelContent}
             </div>
           </section>
@@ -766,8 +771,12 @@ function TemplateChip({ children }: { children: ReactNode }) {
 }
 
 function WorkflowPreview({ plan }: { plan: CanvasPlanOption }) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
   const nodeById = new Map(plan.previewNodes.map((node) => [node.id, node]));
   const width = previewWidth(plan);
+  const scale = viewportWidth > 0 ? Math.min(1, viewportWidth / width) : 1;
+  const frameHeight = Math.max(320, Math.ceil(PREVIEW_HEIGHT * scale));
   const portUsage = plan.previewEdges.reduce<PreviewPortUsage>(
     (usage, edge) => {
       usage.outputs.add(edge.from);
@@ -776,13 +785,30 @@ function WorkflowPreview({ plan }: { plan: CanvasPlanOption }) {
     },
     { inputs: new Set<string>(), outputs: new Set<string>() },
   );
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const updateWidth = () => setViewportWidth(viewport.clientWidth);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="relative h-[560px] overflow-x-auto overflow-y-hidden rounded-md border border-zinc-100 bg-zinc-50 dark:border-slate-700/80 dark:bg-[#0b1220]">
+    <div
+      ref={viewportRef}
+      className="relative overflow-hidden rounded-md border border-zinc-100 bg-zinc-50 dark:border-slate-700/80 dark:bg-[#0b1220]"
+      style={{ height: frameHeight }}
+    >
       <div
         className="relative h-full bg-[radial-gradient(circle_at_1px_1px,rgb(212_212_216)_1px,transparent_0)] bg-[length:16px_16px] dark:bg-[radial-gradient(circle_at_1px_1px,rgba(148,163,184,0.2)_1px,transparent_0)]"
-        style={{ width }}
+        style={{ width, height: PREVIEW_HEIGHT, transform: `scale(${scale})`, transformOrigin: "top left" }}
       >
-        <svg className="pointer-events-none absolute inset-0 z-0 h-full w-full" viewBox={`0 0 ${width} 560`} aria-hidden="true">
+        <svg className="pointer-events-none absolute inset-0 z-0 h-full w-full" viewBox={`0 0 ${width} ${PREVIEW_HEIGHT}`} aria-hidden="true">
           {plan.previewEdges.map((edge) => {
             const from = nodeById.get(edge.from);
             const to = nodeById.get(edge.to);

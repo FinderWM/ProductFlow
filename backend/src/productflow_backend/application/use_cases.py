@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, cast
 
@@ -56,6 +57,15 @@ def _normalize_optional_text(value: str | None, *, field_name: str, max_length: 
     if len(normalized) > max_length:
         raise BusinessValidationError(f"{field_name}不能超过 {max_length} 个字符")
     return normalized
+
+
+def _normalize_optional_search_text(value: str | None, *, max_length: int) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.strip().split())
+    if not normalized:
+        return None
+    return normalized[:max_length]
 
 
 def _normalize_price(value: str | None) -> Decimal | None:
@@ -401,6 +411,10 @@ def list_products(
     status: ProductWorkflowState | None,
     page: int,
     page_size: int,
+    title: str | None = None,
+    updated_from: datetime | None = None,
+    updated_to: datetime | None = None,
+    owner_user_id: str | None = None,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
 ) -> tuple[list[Product], int]:
@@ -410,8 +424,17 @@ def list_products(
     filters = []
     if actor_user_id is not None and not actor_is_admin:
         filters.append(Product.owner_user_id == actor_user_id)
+    if actor_is_admin and owner_user_id:
+        filters.append(Product.owner_user_id == owner_user_id)
     if status is not None:
         filters.append(_product_status_filter(status))
+    normalized_title = _normalize_optional_search_text(title, max_length=120)
+    if normalized_title is not None:
+        filters.append(Product.name.ilike(f"%{normalized_title}%"))
+    if updated_from is not None:
+        filters.append(Product.updated_at >= updated_from)
+    if updated_to is not None:
+        filters.append(Product.updated_at < updated_to + timedelta(days=1))
 
     total = session.scalar(select(func.count()).select_from(Product).where(*filters)) or 0
     products = session.scalars(_product_query().where(*filters).offset(start).limit(page_size)).all()

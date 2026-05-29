@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 from helpers import _enable_deletion, _login, _make_demo_image_bytes
+
+from productflow_backend.infrastructure.db.models import Product
 
 RESOURCE_DISABLED_MESSAGE = "资源已被管理员屏蔽，暂不可使用"
 
@@ -38,6 +41,13 @@ def _create_product(client: TestClient, name: str) -> dict:
     )
     assert created.status_code == 201
     return created.json()
+
+
+def _set_product_updated_at(db_session, product_id: str, value: datetime) -> None:
+    product = db_session.get(Product, product_id)
+    assert product is not None
+    product.updated_at = value
+    db_session.commit()
 
 
 def test_product_owner_isolation_and_admin_read_only_view(configured_env: Path) -> None:
@@ -75,6 +85,54 @@ def test_product_owner_isolation_and_admin_read_only_view(configured_env: Path) 
     admin_delete_other = admin_client.delete(f"/api/products/{alice_product['id']}")
     assert admin_delete_other.status_code == 400
     assert admin_delete_other.json()["detail"] == "管理员不能直接编辑其他用户资源"
+
+
+def test_product_list_filters_by_title_update_time_and_owner(configured_env: Path, db_session) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+    alice_client = _create_user_client(app, admin_client, "alice")
+    bob_client = _create_user_client(app, admin_client, "bob")
+
+    admin_product = _create_product(admin_client, "管理员夏季杯")
+    alice_match = _create_product(alice_client, "Alice 夏季托特包")
+    alice_outside_range = _create_product(alice_client, "Alice 夏季围巾")
+    bob_match = _create_product(bob_client, "Bob 夏季托特包")
+
+    _set_product_updated_at(db_session, admin_product["id"], datetime(2026, 5, 9, 12, 0, 0, tzinfo=UTC))
+    _set_product_updated_at(db_session, alice_match["id"], datetime(2026, 5, 10, 10, 11, 12, tzinfo=UTC))
+    _set_product_updated_at(db_session, alice_outside_range["id"], datetime(2026, 5, 12, 9, 0, 0, tzinfo=UTC))
+    _set_product_updated_at(db_session, bob_match["id"], datetime(2026, 5, 10, 18, 30, 45, tzinfo=UTC))
+
+    admin_filtered = admin_client.get(
+        "/api/products",
+        params={
+            "title": "托特",
+            "updated_from": "2026-05-10",
+            "updated_to": "2026-05-10",
+            "owner_user_id": alice_match["owner_user_id"],
+        },
+    )
+
+    assert admin_filtered.status_code == 200
+    assert admin_filtered.json()["total"] == 1
+    assert [item["id"] for item in admin_filtered.json()["items"]] == [alice_match["id"]]
+
+    alice_filtered = alice_client.get(
+        "/api/products",
+        params={
+            "title": "托特",
+            "updated_from": "2026-05-10",
+            "updated_to": "2026-05-10",
+            "owner_user_id": bob_match["owner_user_id"],
+        },
+    )
+
+    assert alice_filtered.status_code == 200
+    assert alice_filtered.json()["total"] == 1
+    assert [item["id"] for item in alice_filtered.json()["items"]] == [alice_match["id"]]
 
 
 def test_image_session_owner_isolation_and_gallery_owner(configured_env: Path) -> None:

@@ -3,7 +3,31 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-sans: "Geist", "Outfit", "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+:root {
+  --pf-bg: #f6f7fb;
+  --pf-bg-soft: #eef2f7;
+  --pf-panel: #ffffff;
+  --pf-panel-soft: #f8fafc;
+  --pf-border: rgb(203 213 225 / 0.86);
+  --pf-border-soft: rgb(226 232 240 / 0.86);
+  --pf-text: #0f172a;
+  --pf-muted: #64748b;
+  --pf-shadow: 0 18px 52px rgb(15 23 42 / 0.08);
+}
+
+:root.dark {
+  --pf-bg: #070b13;
+  --pf-bg-soft: #0b1220;
+  --pf-panel: #0f1726;
+  --pf-panel-soft: #111b2d;
+  --pf-border: rgb(71 85 105 / 0.7);
+  --pf-border-soft: rgb(51 65 85 / 0.7);
+  --pf-text: #e2e8f0;
+  --pf-muted: #94a3b8;
+  --pf-shadow: 0 24px 70px rgb(0 0 0 / 0.28);
 }
 
 html,
@@ -39,12 +63,12 @@ html::-webkit-scrollbar-thumb:hover {
 
 body {
   margin: 0;
-  background: white;
+  background: var(--pf-bg);
   color: rgb(24 24 27);
 }
 
 :root.dark body {
-  background: rgb(2 6 23);
+  background: var(--pf-bg);
   color: rgb(226 232 240);
 }
 
@@ -164,6 +188,163 @@ textarea {
 :root.dark .shadow-xl,
 :root.dark .shadow-2xl {
   --tw-shadow-color: rgb(0 0 0 / 0.35);
+}
+
+.pf-app {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--pf-bg-soft) 46%, transparent) 0, transparent 18rem),
+    var(--pf-bg);
+  color: var(--pf-text);
+}
+
+.pf-page {
+  width: 100%;
+  max-width: 1320px;
+  margin-inline: auto;
+  padding: 1.5rem 1rem calc(6.25rem + env(safe-area-inset-bottom));
+}
+
+.pf-page-wide {
+  max-width: 1440px;
+}
+
+.pf-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.pf-eyebrow {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--pf-border) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pf-panel-soft) 84%, transparent);
+  padding: 0.25rem 0.7rem;
+  color: var(--pf-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.pf-panel {
+  border: 1px solid var(--pf-border);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--pf-panel) 96%, transparent);
+  box-shadow: var(--pf-shadow);
+}
+
+.pf-panel-soft {
+  border: 1px solid var(--pf-border-soft);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--pf-panel-soft) 92%, transparent);
+}
+
+.pf-table-panel {
+  overflow: hidden;
+  border: 1px solid var(--pf-border);
+  border-radius: 0.75rem;
+  background: var(--pf-panel);
+  box-shadow: var(--pf-shadow);
+}
+
+.pf-side-shell {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding-bottom: calc(6.25rem + env(safe-area-inset-bottom));
+}
+
+.pf-side-rail {
+  border-bottom: 1px solid var(--pf-border-soft);
+  background: color-mix(in srgb, var(--pf-panel) 76%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.pf-side-content {
+  min-width: 0;
+  background: color-mix(in srgb, var(--pf-panel) 72%, transparent);
+}
+
+.pf-side-toc {
+  border-left: 1px solid var(--pf-border-soft);
+  background: color-mix(in srgb, var(--pf-panel-soft) 78%, transparent);
+}
+
+.pf-workspace {
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--pf-panel-soft) 68%, transparent), transparent 28rem),
+    var(--pf-bg);
+  color: var(--pf-text);
+}
+
+.pf-workspace-stage {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-panel) 62%, transparent), transparent 42%),
+    color-mix(in srgb, var(--pf-bg-soft) 72%, transparent);
+}
+
+.pf-gallery-feed {
+  background:
+    radial-gradient(circle at top right, rgb(29 78 216 / 0.18), transparent 26rem),
+    #07111d;
+}
+
+:root.dark .pf-gallery-feed {
+  background:
+    radial-gradient(circle at top right, rgb(129 140 248 / 0.16), transparent 26rem),
+    var(--pf-bg);
+}
+
+@media (min-width: 640px) {
+  .pf-page {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .pf-page {
+    padding-bottom: 2.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .pf-page {
+    padding: 2rem 2rem 3rem;
+  }
+
+  .pf-page-header {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .pf-side-shell {
+    grid-template-columns: 280px minmax(0, 1fr);
+    padding-bottom: 0;
+  }
+
+  .pf-side-shell-with-toc {
+    grid-template-columns: 280px minmax(0, 1fr) 220px;
+  }
+
+  .pf-side-rail {
+    position: sticky;
+    top: 4.1rem;
+    height: calc(100dvh - 4.1rem);
+    border-right: 1px solid var(--pf-border-soft);
+    border-bottom: 0;
+  }
+
+  .pf-side-toc-inner {
+    position: sticky;
+    top: 6rem;
+  }
 }
 
 .image-chat-history-scroll {

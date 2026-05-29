@@ -2517,7 +2517,7 @@ export function SettingsPage() {
   const genericSection = ["prompts", "upload", "queue", "security"].includes(activeSection);
 
   return (
-    <div className="flex min-h-screen flex-col bg-white dark:bg-[#060a12] dark:text-slate-100">
+    <div className="pf-app flex flex-col dark:text-slate-100">
       <TopNav
         breadcrumbs={t("settings.breadcrumb")}
         onHome={() => navigate("/products")}
@@ -2526,9 +2526,9 @@ export function SettingsPage() {
 
       <main className="mx-auto flex w-full max-w-[1440px] flex-1">
         <div className="w-full">
-          <div className="mb-6 flex flex-col gap-3 px-5 py-8 md:flex-row md:items-end md:justify-between lg:px-8 lg:py-10">
+          <div className="pf-page-header mx-auto mb-0 w-full max-w-[1440px] px-5 py-6 md:flex-row md:items-end md:justify-between lg:px-8 lg:py-8">
             <div>
-              <div className="mb-2 inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
+              <div className="pf-eyebrow mb-2 gap-1.5">
                 <SettingsIcon size={13} className="mr-1.5" />
                 {t("settings.runtimeConfig")}
               </div>
@@ -2555,8 +2555,8 @@ export function SettingsPage() {
               {configQuery.error instanceof ApiError ? configQuery.error.detail : t("settings.loadFailed")}
             </div>
           ) : (
-            <div className="grid min-h-full lg:grid-cols-[280px_minmax(0,1fr)]">
-              <aside className="border-b border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-[#0f1726] lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
+            <div className="pf-side-shell min-h-full">
+              <aside className="pf-side-rail">
                 <div className="border-b border-slate-200 px-5 py-7 dark:border-slate-800">
                   <div className="flex items-center gap-3 text-lg font-semibold text-slate-950 dark:text-white">
                     <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">
@@ -2630,7 +2630,7 @@ export function SettingsPage() {
                 </div>
               </aside>
 
-              <section className="min-w-0 bg-white px-5 py-8 dark:bg-[#0b1220] sm:px-8 lg:px-12 lg:py-12">
+              <section className="pf-side-content px-5 py-8 sm:px-8 lg:px-12 lg:py-10">
                 <div className="mx-auto max-w-4xl">
                   <div className="mb-10">
                     <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">

@@ -235,19 +235,20 @@ export function RbacPage() {
   const permissionsLoading = permissionCatalogQuery.isLoading || rolePermissionsQuery.isLoading;
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24 text-slate-950 dark:bg-[#060a12] dark:text-slate-100 lg:pb-0">
+    <div className="pf-app">
       <TopNav
         breadcrumbs={t("rbac.breadcrumb")}
         onHome={() => navigate("/products")}
         onLogout={() => logoutMutation.mutate()}
       />
 
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <section className="flex flex-col gap-3">
-          <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-white shadow-sm dark:bg-violet-500">
-            <ShieldCheck size={20} />
-          </div>
+      <main className="pf-page flex flex-col gap-6">
+        <section className="pf-page-header">
           <div>
+            <div className="pf-eyebrow mb-2 gap-1.5">
+              <ShieldCheck size={13} />
+              {t("rbac.breadcrumb")}
+            </div>
             <h1 className="text-2xl font-semibold tracking-tight">{t("rbac.title")}</h1>
             <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">{t("rbac.description")}</p>
           </div>
@@ -276,7 +277,7 @@ export function RbacPage() {
         ) : (
           <>
             <section className="grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
-              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+              <div className="pf-panel p-4">
                 <div className="mb-4 flex items-center gap-2">
                   <UserPlus size={18} className="text-slate-500 dark:text-slate-400" />
                   <h2 className="text-sm font-semibold">{t("rbac.createUser")}</h2>
@@ -316,7 +317,7 @@ export function RbacPage() {
                 </form>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+              <div className="pf-panel p-4">
                 <div className="mb-4 flex items-center gap-2">
                   <ShieldCheck size={18} className="text-slate-500 dark:text-slate-400" />
                   <h2 className="text-sm font-semibold">{t("rbac.createRole")}</h2>
@@ -347,7 +348,7 @@ export function RbacPage() {
             </section>
 
             <section className="grid gap-4 lg:grid-cols-[280px_1fr]">
-              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+              <div className="pf-panel p-4">
                 <div className="mb-4 flex items-center justify-between gap-2">
                   <h2 className="text-sm font-semibold">{t("rbac.rolePermissions")}</h2>
                   <span className="text-xs text-slate-500 dark:text-slate-400">{roles.length}</span>
@@ -381,7 +382,7 @@ export function RbacPage() {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+              <div className="pf-panel p-4">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-sm font-semibold">{t("rbac.permissionEditor")}</h2>
@@ -503,7 +504,7 @@ export function RbacPage() {
               </div>
             </section>
 
-            <section className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <section className="pf-table-panel">
               <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
                 <h2 className="text-sm font-semibold">{t("rbac.users")}</h2>
               </div>

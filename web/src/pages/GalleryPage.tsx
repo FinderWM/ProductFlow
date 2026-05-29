@@ -81,7 +81,7 @@ export function GalleryPage() {
   });
 
   return (
-    <div className="min-h-screen bg-[#07111d] text-slate-950">
+    <div className="pf-app min-h-screen text-slate-950">
       <TopNav breadcrumbs={t("gallery.title")} onHome={() => navigate("/products")} onLogout={() => logoutMutation.mutate()} />
 
       <main className="w-full">
@@ -132,7 +132,7 @@ export function GalleryPage() {
               </div>
             </section>
 
-            <section className="bg-[#07111d] px-4 py-8 sm:px-6 lg:px-10">
+            <section className="pf-gallery-feed px-4 py-8 sm:px-6 lg:px-10">
               <div className="mx-auto mb-6 flex max-w-7xl items-end justify-between gap-4 border-b border-white/10 pb-5">
                 <div>
                   <div className="text-xs font-bold uppercase text-indigo-300">{t("gallery.feed")}</div>

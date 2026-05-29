@@ -1942,7 +1942,7 @@ export function ProductDetailPage() {
 
   if (productQuery.isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white text-zinc-400 dark:bg-[#060a12] dark:text-slate-400">
+      <div className="pf-workspace flex min-h-[100dvh] items-center justify-center text-zinc-400 dark:text-slate-400">
         <Loader2 size={24} className="animate-spin" />
       </div>
     );
@@ -1950,7 +1950,7 @@ export function ProductDetailPage() {
 
   if (productQuery.isError || !productQuery.data) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white dark:bg-[#060a12]">
+      <div className="pf-workspace flex min-h-[100dvh] items-center justify-center">
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
           {t("detail.loadFailed")}
         </div>
@@ -2314,10 +2314,10 @@ export function ProductDetailPage() {
   );
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-white text-sm text-zinc-900 dark:bg-[#060a12] dark:text-slate-100">
+    <div className="pf-workspace flex h-[100dvh] flex-col overflow-hidden text-sm text-zinc-900 dark:text-slate-100">
       {!topChromeCollapsed ? <TopNav onHome={() => navigate("/products")} breadcrumbs={product.name} /> : null}
 
-      <main className="flex min-h-0 flex-1 flex-col border-t border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-[#060a12]">
+      <main className="flex min-h-0 flex-1 flex-col border-t border-slate-200 bg-transparent dark:border-slate-800">
         {error ? (
           <div className="z-20 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
             <AlertCircle size={14} className="mr-2 inline" /> {error}
@@ -2345,7 +2345,7 @@ export function ProductDetailPage() {
           </div>
         ) : null}
 
-        <div className="relative flex min-h-0 flex-1 overflow-hidden bg-slate-50 dark:bg-[#0b1220]">
+        <div className="pf-workspace-stage relative flex min-h-0 flex-1 overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-white/60 via-transparent to-indigo-50/40 dark:from-[#060a12]/78 dark:via-transparent dark:to-[#151f33]/70" />
           <section
             className="relative z-10 min-w-0 flex-1 overflow-hidden transition-[padding] duration-300 ease-out"

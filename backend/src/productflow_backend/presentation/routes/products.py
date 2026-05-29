@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -92,6 +93,10 @@ async def create_product_endpoint(
 @router.get("/products", response_model=ProductListResponse)
 def list_products_endpoint(
     status: ProductWorkflowState | None = None,
+    title: str | None = Query(default=None, max_length=120),
+    updated_from: date | None = Query(default=None),
+    updated_to: date | None = Query(default=None),
+    owner_user_id: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     session: Session = Depends(get_session),
@@ -102,6 +107,10 @@ def list_products_endpoint(
         status=status,
         page=page,
         page_size=page_size,
+        title=title,
+        updated_from=_start_of_day(updated_from),
+        updated_to=_start_of_day(updated_to),
+        owner_user_id=owner_user_id,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
     )
@@ -111,6 +120,10 @@ def list_products_endpoint(
         page=page,
         page_size=page_size,
     )
+
+
+def _start_of_day(value: date | None) -> datetime | None:
+    return datetime.combine(value, time.min, tzinfo=UTC) if value is not None else None
 
 
 @router.get("/products/{product_id}", response_model=ProductDetailResponse)

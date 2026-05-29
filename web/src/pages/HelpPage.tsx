@@ -2481,11 +2481,11 @@ export function HelpPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-white dark:bg-[#060a12] dark:text-slate-100">
+    <div className="pf-app flex flex-col dark:text-slate-100">
       <TopNav breadcrumbs={t("help.breadcrumb")} onHome={() => navigate("/products")} />
 
-      <main className="mx-auto grid w-full max-w-[1440px] flex-1 grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)_220px]">
-        <aside className="border-b border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-[#0f1726] lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
+      <main className="pf-side-shell pf-side-shell-with-toc flex-1">
+        <aside className="pf-side-rail">
           <div className="border-b border-slate-200 px-5 py-5 dark:border-slate-800">
             <button
               type="button"
@@ -2598,7 +2598,7 @@ export function HelpPage() {
           </div>
         </aside>
 
-        <article className="min-w-0 bg-white px-5 py-8 dark:bg-[#0b1220] sm:px-8 lg:px-12 lg:py-12">
+        <article className="pf-side-content px-5 py-8 sm:px-8 lg:px-12 lg:py-10">
           <header className="max-w-3xl">
             <div className="mb-4 flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
               <span>{page.category}</span>
@@ -2650,8 +2650,8 @@ export function HelpPage() {
           </footer>
         </article>
 
-        <aside className="hidden border-l border-slate-200 bg-slate-50/70 px-5 py-12 dark:border-slate-800 dark:bg-[#0f1726] lg:block">
-          <div className="sticky top-8">
+        <aside className="pf-side-toc hidden px-5 py-10 lg:block">
+          <div className="pf-side-toc-inner">
             <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("help.onThisPage")}</div>
             <nav className="mt-3 space-y-2" aria-label={t("help.onThisPage")}>
               {page.sections.map((section) => (

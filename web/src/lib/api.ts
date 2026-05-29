@@ -166,10 +166,31 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  listProducts(input?: { page?: number; page_size?: number }): Promise<ProductListResponse> {
-    const page = input?.page ?? 1;
-    const pageSize = input?.page_size ?? 20;
-    return request(`/api/products?page=${encodeURIComponent(page)}&page_size=${encodeURIComponent(pageSize)}`);
+  listProducts(input?: {
+    page?: number;
+    page_size?: number;
+    title?: string;
+    updated_from?: string;
+    updated_to?: string;
+    owner_user_id?: string;
+  }): Promise<ProductListResponse> {
+    const params = new URLSearchParams({
+      page: String(input?.page ?? 1),
+      page_size: String(input?.page_size ?? 20),
+    });
+    if (input?.title) {
+      params.set("title", input.title);
+    }
+    if (input?.updated_from) {
+      params.set("updated_from", input.updated_from);
+    }
+    if (input?.updated_to) {
+      params.set("updated_to", input.updated_to);
+    }
+    if (input?.owner_user_id) {
+      params.set("owner_user_id", input.owner_user_id);
+    }
+    return request(`/api/products?${params.toString()}`);
   },
   getProduct(productId: string): Promise<ProductDetail> {
     return request(`/api/products/${productId}`);

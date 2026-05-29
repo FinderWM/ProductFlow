@@ -1522,7 +1522,7 @@ export function ImageChatPage() {
     : null;
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-100 text-slate-900 dark:bg-[#060a12] dark:text-slate-100 lg:h-screen lg:overflow-hidden">
+    <div className="pf-workspace flex flex-col text-slate-900 dark:text-slate-100 lg:h-[100dvh] lg:overflow-hidden">
       <TopNav
         breadcrumbs={isProductMode ? `${productQuery.data?.name ?? t("chat.productFallback")} / ${t("chat.breadcrumb")}` : t("chat.breadcrumb")}
         onHome={() => navigate(isProductMode && productId ? `/products/${productId}` : "/products")}
@@ -1578,7 +1578,7 @@ export function ImageChatPage() {
           />
         </aside>
 
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-slate-100 dark:bg-[#0b1220] lg:overflow-hidden">
+        <section className="pf-workspace-stage flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col p-3 pb-2">
             <div className="mb-3 flex items-center justify-between gap-1.5 lg:hidden">
               <button

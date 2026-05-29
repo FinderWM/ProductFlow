@@ -41,8 +41,7 @@ const INPUT_CLASS =
   "dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400";
 
 const PANEL_CLASS =
-  "rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60 " +
-  "dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25";
+  "pf-panel";
 
 const PRIMARY_BUTTON_CLASS =
   "inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white " +
@@ -216,16 +215,16 @@ export function StatusPage() {
   });
 
   return (
-    <div className="flex min-h-screen flex-col bg-white dark:bg-[#060a12] dark:text-slate-100">
+    <div className="pf-app flex flex-col">
       <TopNav
         breadcrumbs={t("statusPage.breadcrumb")}
         onHome={() => navigate("/products")}
         onLogout={() => logoutMutation.mutate()}
       />
-      <main className="mx-auto w-full max-w-[1440px] flex-1 px-5 py-8 pb-24 sm:px-8 lg:px-10 lg:py-10">
-        <div className="mb-8">
+      <main className="pf-page pf-page-wide flex-1">
+        <div className="pf-page-header">
           <div>
-            <div className="mb-2 inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
+            <div className="pf-eyebrow mb-2 gap-1.5">
               <Activity size={13} className="mr-1.5" />
               {t("statusPage.eyebrow")}
             </div>
@@ -239,34 +238,34 @@ export function StatusPage() {
         </div>
 
         <div className="space-y-5">
-            <section className={`${PANEL_CLASS} p-5`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-950 dark:text-white">
-                    <CalendarDays size={16} />
-                    {t("statusPage.rangeTitle")}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {QUICK_RANGE_IDS.map((id) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => {
-                          setRange(quickDateRange(id));
-                          setActiveQuickRange(id);
-                        }}
-                        className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-sm font-semibold transition ${
-                          activeQuickRange === id
-                            ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/18 dark:text-violet-100"
-                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:bg-slate-800"
-                        }`}
-                      >
-                        {t(QUICK_RANGE_LABEL_KEYS[id])}
-                      </button>
-                    ))}
-                  </div>
+          <section className={`${PANEL_CLASS} p-5`}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-950 dark:text-white">
+                  <CalendarDays size={16} />
+                  {t("statusPage.rangeTitle")}
                 </div>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {QUICK_RANGE_IDS.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setRange(quickDateRange(id));
+                        setActiveQuickRange(id);
+                      }}
+                      className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-sm font-semibold transition ${
+                        activeQuickRange === id
+                          ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/18 dark:text-violet-100"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:bg-slate-800"
+                      }`}
+                    >
+                      {t(QUICK_RANGE_LABEL_KEYS[id])}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                     {t("statusPage.startDate")}
                     <input

@@ -298,6 +298,40 @@ Correct:
 
 The shared nav itself exposes the settings/image-chat/product/gallery links; pages only add page-specific actions.
 
+### Global Shell and Navigation Density
+
+Use the product shell classes in `web/src/index.css` before inventing page-local wrappers for authenticated pages.
+
+- `pf-app` is the default app background for standard pages that render `TopNav`.
+- `pf-page` and `pf-page-wide` are the standard dashboard containers for list, status, usage, and RBAC pages.
+- `pf-page-header` and `pf-eyebrow` are the shared compact page title pattern.
+- `pf-panel`, `pf-panel-soft`, and `pf-table-panel` are the shared elevated and inset surfaces.
+- `pf-side-shell`, `pf-side-rail`, `pf-side-content`, and `pf-side-toc` are the shared side-navigation shell for help and settings style pages.
+- `pf-workspace` and `pf-workspace-stage` are the shared immersive shell for canvas/image workbench pages.
+
+`TopNav` must protect the brand and right-side controls from being squeezed by the first-level menu. At `xl` and wider,
+keep a top navigation bar instead of falling back to the mobile bottom bar. At `xl` to below `1440px`, use the compact
+desktop state: keep high-frequency primary items visible, put lower-frequency items behind the `nav.more` overflow menu,
+and compress locale/theme/logout controls. At `1440px` and wider, the full desktop menu may be visible. Below `xl`, keep
+the bottom navigation to one row with primary items plus a single `More` entry; secondary items and logout belong in the
+`More` panel. The mobile top-left brand text must remain visible, with truncation rather than hiding the product name.
+
+Wrong:
+
+```tsx
+<main className="mx-auto w-full max-w-6xl px-4 py-8">
+  <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">...</section>
+</main>
+```
+
+Correct:
+
+```tsx
+<main className="pf-page flex flex-1">
+  <section className="pf-panel px-5 py-4">...</section>
+</main>
+```
+
 ## Scenario: Global gallery display page
 
 ### 1. Scope / Trigger
