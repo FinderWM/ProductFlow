@@ -113,8 +113,8 @@ const stageLabelKeys: Record<string, TranslationKey> = {
   campaign: "create.stage.campaign",
 };
 
-const stageOrder = ["blank", "listing", "detail", "gallery", "content", "campaign"];
-const blankStageOrder = ["blank", "image", "copy", "tail", "listing", "detail", "gallery", "content", "campaign"];
+const stageOrder = ["image", "copy", "tail", "blank", "listing", "detail", "gallery", "content", "campaign"];
+const blankStageOrder = ["image", "copy", "tail", "blank", "listing", "detail", "gallery", "content", "campaign"];
 
 const toneClasses: Record<NonNullable<PreviewNode["tone"]>, string> = {
   input: "border-sky-100 bg-sky-50/90 text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/12 dark:text-sky-100",
@@ -403,7 +403,8 @@ export function ProductCreatePage() {
     return "";
   };
 
-  const handleMobileDetailsNext = () => {
+  const handleMobileDetailsNext = (event?: React.MouseEvent<HTMLButtonElement>) => {
+    event?.preventDefault();
     const validationError = validateCreateDraft({ checkResource: false });
     if (validationError) {
       setError(validationError);
@@ -505,7 +506,7 @@ export function ProductCreatePage() {
             />
           </span>
         </label>
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="grid gap-2">
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-zinc-500 dark:text-slate-400">
               {t("templateFilter.category")}
@@ -560,7 +561,7 @@ export function ProductCreatePage() {
         ) : null}
       </div>
 
-      <div className="mt-4 space-y-5 pr-1 md:max-h-[520px] md:overflow-y-auto xl:max-h-[610px]">
+      <div className="mt-4 max-h-[42dvh] space-y-5 overflow-y-auto pr-1 md:max-h-[420px] xl:max-h-[520px]">
         {planGroups.map((group) => (
           <div key={group.stage}>
             <div className="mb-2 flex items-center justify-between">
@@ -646,24 +647,6 @@ export function ProductCreatePage() {
           </span>
         </div>
       </div>
-      <div className="mb-4 hidden gap-2 md:flex">
-        <button
-          type="button"
-          onClick={() => navigate("/products")}
-          className="rounded-md border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-700 transition-colors active:scale-[0.99] hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
-        >
-          {t("create.cancel")}
-        </button>
-        <button
-          type="submit"
-          form={PRODUCT_CREATE_FORM_ID}
-          disabled={createProductMutation.isPending}
-          className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors active:scale-[0.99] hover:bg-blue-700 disabled:opacity-50 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
-        >
-          {createProductMutation.isPending ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
-          {t("create.submit")}
-        </button>
-      </div>
       <WorkflowPreview plan={selectedPlan} />
     </>
   );
@@ -703,20 +686,24 @@ export function ProductCreatePage() {
         <form
           id={PRODUCT_CREATE_FORM_ID}
           onSubmit={handleSubmit}
-          className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]"
+          className="grid min-w-0 gap-5 md:grid-cols-[minmax(0,300px)_minmax(0,1fr)] lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]"
         >
-          <div className="grid min-w-0 content-start gap-5">
+          <div
+            className={`min-w-0 content-start gap-5 md:grid ${
+              mobileStep === "details" ? "hidden" : "grid"
+            } order-1 md:order-none`}
+          >
             <section className={`pf-panel min-w-0 p-5 ${mobileStep === "entry" ? "block" : "hidden"} md:block`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-base font-semibold text-zinc-950 dark:text-white">{t("create.initialEntry")}</h2>
-                  <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("create.initialEntryDescription")}</p>
+                  <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400 md:line-clamp-1 xl:line-clamp-2">{t("create.initialEntryDescription")}</p>
                 </div>
                 <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-medium text-zinc-500 dark:border dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-300 md:hidden">
                   1 / 3
                 </span>
               </div>
-              <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-1">
+              <div className="mt-4 grid gap-2">
                 {INITIAL_WORKFLOW_ENTRY_OPTIONS.map((option) => {
                   const active = initialWorkflowEntry === option.value;
                   const Icon = option.icon;
@@ -725,18 +712,18 @@ export function ProductCreatePage() {
                       key={option.value}
                       type="button"
                       onClick={() => handleInitialWorkflowEntryChange(option.value)}
-                      className={`group flex items-start gap-3 rounded-xl border px-3 py-3 text-left transition-all active:scale-[0.99] ${
+                      className={`group flex items-start gap-3 rounded-xl border px-3 py-3 text-left transition-all active:scale-[0.99] md:items-center md:py-2.5 xl:items-start xl:py-3 ${
                         active
                           ? "border-indigo-300 bg-indigo-50 text-indigo-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] dark:border-violet-400/60 dark:bg-violet-500/12 dark:text-violet-100"
                           : "border-zinc-200 bg-white text-zinc-700 hover:-translate-y-0.5 hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200 dark:hover:border-slate-500"
                       }`}
                     >
-                      <span className="mt-0.5 rounded-lg border border-current/20 p-2 opacity-90 transition-transform group-active:scale-95">
+                      <span className="mt-0.5 rounded-lg border border-current/20 p-2 opacity-90 transition-transform group-active:scale-95 md:mt-0 xl:mt-0.5">
                         <Icon size={14} />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-semibold">{t(option.labelKey)}</span>
-                        <span className="mt-1 block text-xs leading-5 text-current/75">{t(option.descriptionKey)}</span>
+                        <span className="mt-1 block text-xs leading-5 text-current/75 md:line-clamp-1 xl:line-clamp-2">{t(option.descriptionKey)}</span>
                       </span>
                       {active ? <Check size={16} className="mt-1 shrink-0" /> : null}
                     </button>
@@ -745,6 +732,16 @@ export function ProductCreatePage() {
               </div>
             </section>
 
+            <section className={`pf-panel min-w-0 p-4 ${mobileStep === "template" ? "block" : "hidden"} md:block`}>
+              {templatePanelContent}
+            </section>
+          </div>
+
+          <div
+            className={`order-2 min-w-0 content-start gap-5 md:order-none md:grid xl:grid-cols-[minmax(320px,360px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,380px)_minmax(0,1fr)] ${
+              mobileStep === "entry" ? "hidden" : "grid"
+            }`}
+          >
             <section className={`pf-panel min-w-0 p-5 ${mobileStep === "details" ? "block" : "hidden"} md:block`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -800,7 +797,7 @@ export function ProductCreatePage() {
                   </label>
                   <ImageDropZone
                     ariaLabel={t("create.uploadAria")}
-                    className="flex aspect-[1.9] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/40 p-5 text-zinc-500 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10 md:aspect-[2.5] lg:aspect-[1.55]"
+                    className="flex aspect-[1.9] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/40 p-5 text-zinc-500 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10 md:aspect-[2.8] xl:aspect-[1.55]"
                     onFiles={handleImageFiles}
                   >
                     {({ isDragging }) => (
@@ -840,17 +837,11 @@ export function ProductCreatePage() {
                 </button>
               </div>
             </section>
-          </div>
 
-          <section className={`min-w-0 gap-5 ${mobileStep === "template" ? "grid" : "hidden"} md:grid lg:grid-cols-1 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)]`}>
-            <div className="pf-panel order-2 min-w-0 p-4 xl:order-1">
-              {templatePanelContent}
-            </div>
-
-            <div className="pf-panel order-1 min-w-0 p-4 lg:sticky lg:top-4 lg:self-start xl:order-2">
+            <section className={`pf-panel min-w-0 p-4 ${mobileStep === "template" ? "block" : "hidden"} md:block xl:sticky xl:top-4 xl:self-start`}>
               {previewPanelContent}
-            </div>
-          </section>
+            </section>
+          </div>
         </form>
       </main>
 
@@ -882,6 +873,7 @@ export function ProductCreatePage() {
           </div>
           {mobileStep === "entry" ? (
             <button
+              key="mobile-entry-next"
               type="button"
               onClick={() => {
                 setError("");
@@ -894,6 +886,7 @@ export function ProductCreatePage() {
             </button>
           ) : mobileStep === "details" ? (
             <button
+              key="mobile-details-next"
               type="button"
               onClick={handleMobileDetailsNext}
               className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-md shadow-indigo-600/16 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
@@ -903,6 +896,7 @@ export function ProductCreatePage() {
             </button>
           ) : (
             <button
+              key="mobile-submit"
               type="submit"
               form={PRODUCT_CREATE_FORM_ID}
               disabled={createProductMutation.isPending}

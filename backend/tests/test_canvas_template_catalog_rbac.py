@@ -69,25 +69,52 @@ def test_builtin_templates_seed_to_database_and_support_search_category_filter(c
 
     categories = admin_client.get("/api/workflow/canvas-template-categories")
     assert categories.status_code == 200
-    builtin_category = next(item for item in categories.json()["items"] if item["name"] == "电商场景")
-    assert builtin_category["scope"] == "global"
+    builtin_categories = {item["name"]: item for item in categories.json()["items"] if item["scope"] == "global"}
+    expected_category_keys = {
+        "平台首图": {
+            "ecommerce-main-image-v1",
+            "ecommerce-taobao-main-image-v1",
+            "ecommerce-white-background-image-v1",
+        },
+        "详情说服": {
+            "ecommerce-sku-variant-image-v1",
+            "ecommerce-feature-infographic-v1",
+            "ecommerce-size-spec-image-v1",
+            "ecommerce-scale-reference-image-v1",
+            "ecommerce-package-checklist-image-v1",
+            "ecommerce-usage-steps-image-v1",
+            "ecommerce-comparison-image-v1",
+            "ecommerce-detail-material-image-v1",
+        },
+        "场景图册": {
+            "ecommerce-multi-angle-image-v1",
+            "ecommerce-model-lifestyle-image-v1",
+            "ecommerce-scene-image-v1",
+        },
+        "内容种草": {
+            "ecommerce-xiaohongshu-image-v1",
+            "ecommerce-short-video-cover-v1",
+        },
+        "活动投放": {"ecommerce-campaign-promotion-image-v1"},
+    }
+    assert set(builtin_categories) == set(expected_category_keys)
 
     search = admin_client.get("/api/workflow/canvas-templates", params={"search": "淘宝"})
     assert search.status_code == 200
     assert {item["key"] for item in search.json()["items"]} == {"ecommerce-taobao-main-image-v1"}
 
-    filtered = admin_client.get(
-        "/api/workflow/canvas-templates",
-        params={"category_id": builtin_category["id"], "scope": "global"},
-    )
-    assert filtered.status_code == 200
-    payload = filtered.json()
-    assert {item["key"] for item in payload["items"]} >= {
-        "ecommerce-main-image-v1",
-        "ecommerce-taobao-main-image-v1",
-    }
-    assert {item["category_id"] for item in payload["items"]} == {builtin_category["id"]}
-    assert {item["entry_mode"] for item in payload["items"]} == {"image"}
+    for category_name, expected_keys in expected_category_keys.items():
+        category = builtin_categories[category_name]
+        filtered = admin_client.get(
+            "/api/workflow/canvas-templates",
+            params={"category_id": category["id"], "scope": "global"},
+        )
+        assert filtered.status_code == 200
+        payload = filtered.json()
+        assert {item["key"] for item in payload["items"]} == expected_keys
+        assert {item["category_id"] for item in payload["items"]} == {category["id"]}
+        assert {item["category_name"] for item in payload["items"]} == {category_name}
+        assert {item["entry_mode"] for item in payload["items"]} == {"image"}
 
 
 def test_canvas_template_catalog_filters_by_initial_entry_mode(configured_env: Path) -> None:

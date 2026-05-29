@@ -47,8 +47,14 @@ from productflow_backend.infrastructure.db.session import get_engine, get_sessio
 USER_TEMPLATE_KEY_PREFIX = "user:"
 USER_TEMPLATE_SCHEMA_VERSION = 1
 USER_TEMPLATE_SCENARIO = CanvasTemplateScenario.MAIN_IMAGE
-BUILTIN_TEMPLATE_CATEGORY_ID = "00000000-0000-0000-0000-000000000020"
-BUILTIN_TEMPLATE_CATEGORY_NAME = "电商场景"
+LEGACY_BUILTIN_TEMPLATE_CATEGORY_NAME = "电商场景"
+BUILTIN_TEMPLATE_CATEGORIES_BY_STAGE: dict[str, tuple[str, str, int]] = {
+    "listing": ("00000000-0000-0000-0000-000000000021", "平台首图", 10),
+    "detail": ("00000000-0000-0000-0000-000000000022", "详情说服", 20),
+    "gallery": ("00000000-0000-0000-0000-000000000023", "场景图册", 30),
+    "content": ("00000000-0000-0000-0000-000000000024", "内容种草", 40),
+    "campaign": ("00000000-0000-0000-0000-000000000025", "活动投放", 50),
+}
 TemplateScope = Literal["global", "user"]
 InitialWorkflowEntry = Literal["image", "copy", "tail", "blank"]
 
@@ -835,10 +841,17 @@ def _canvas_template_category_query():
 
 
 def _seed_builtin_canvas_templates(session: Session) -> None:
-    category = _ensure_builtin_template_category(session)
+    categories_by_stage = _ensure_builtin_template_categories(session)
+    seeded_template_keys: set[str] = set()
     for template in list_builtin_canvas_templates():
-        existing = session.scalar(select(DbCanvasTemplate.id).where(DbCanvasTemplate.key == template.key))
+        seeded_template_keys.add(template.key)
+        category = _builtin_template_category_for_stage(categories_by_stage, template.scenario.ecommerce_stage)
+        existing = session.scalar(
+            select(DbCanvasTemplate).where(DbCanvasTemplate.key == template.key, DbCanvasTemplate.scope == "global")
+        )
         if existing is not None:
+            existing.category_id = category.id
+            existing.template_json = _template_payload_with_category_metadata(existing.template_json, category)
             continue
         row = DbCanvasTemplate(
             id=new_id(),
@@ -852,38 +865,97 @@ def _seed_builtin_canvas_templates(session: Session) -> None:
             entry_mode=template.entry_mode,
             sort_order=template.sort_order,
             schema_version=template.version,
-            template_json=template.model_copy(
-                update={
-                    "scope": "global",
-                    "category_id": category.id,
-                    "category_name": category.name,
-                    "enabled": True,
-                    "effective_enabled": True,
-                }
-            ).model_dump(mode="json"),
+            template_json=_builtin_template_payload(template, category),
         )
         session.add(row)
+    _archive_empty_legacy_builtin_category(session, seeded_template_keys)
 
 
-def _ensure_builtin_template_category(session: Session) -> CanvasTemplateCategory:
-    category = session.scalar(
+def _ensure_builtin_template_categories(session: Session) -> dict[str, CanvasTemplateCategory]:
+    categories_by_stage: dict[str, CanvasTemplateCategory] = {}
+    for stage, (category_id, category_name, sort_order) in BUILTIN_TEMPLATE_CATEGORIES_BY_STAGE.items():
+        category = session.scalar(
+            select(CanvasTemplateCategory).where(
+                CanvasTemplateCategory.scope == "global",
+                CanvasTemplateCategory.name == category_name,
+            )
+        )
+        if category is None:
+            category = CanvasTemplateCategory(
+                id=category_id,
+                scope="global",
+                owner_user_id=None,
+                name=category_name,
+                sort_order=sort_order,
+            )
+            session.add(category)
+        else:
+            category.sort_order = sort_order
+        categories_by_stage[stage] = category
+    session.flush()
+    return categories_by_stage
+
+
+def _builtin_template_category_for_stage(
+    categories_by_stage: dict[str, CanvasTemplateCategory],
+    stage: str,
+) -> CanvasTemplateCategory:
+    category = categories_by_stage.get(stage)
+    if category is None:
+        raise BusinessValidationError("画布模板分类未配置")
+    return category
+
+
+def _builtin_template_payload(template: CanvasTemplate, category: CanvasTemplateCategory) -> dict[str, Any]:
+    return template.model_copy(
+        update={
+            "scope": "global",
+            "category_id": category.id,
+            "category_name": category.name,
+            "enabled": True,
+            "effective_enabled": True,
+        }
+    ).model_dump(mode="json")
+
+
+def _template_payload_with_category_metadata(
+    template_json: dict[str, Any] | None,
+    category: CanvasTemplateCategory,
+) -> dict[str, Any]:
+    payload = dict(template_json or {})
+    payload.update(
+        {
+            "scope": "global",
+            "category_id": category.id,
+            "category_name": category.name,
+            "enabled": True,
+            "effective_enabled": True,
+        }
+    )
+    return payload
+
+
+def _archive_empty_legacy_builtin_category(session: Session, seeded_template_keys: set[str]) -> None:
+    legacy_category = session.scalar(
         select(CanvasTemplateCategory).where(
             CanvasTemplateCategory.scope == "global",
-            CanvasTemplateCategory.name == BUILTIN_TEMPLATE_CATEGORY_NAME,
+            CanvasTemplateCategory.name == LEGACY_BUILTIN_TEMPLATE_CATEGORY_NAME,
+            CanvasTemplateCategory.archived_at.is_(None),
         )
     )
-    if category is not None:
-        return category
-    category = CanvasTemplateCategory(
-        id=BUILTIN_TEMPLATE_CATEGORY_ID,
-        scope="global",
-        owner_user_id=None,
-        name=BUILTIN_TEMPLATE_CATEGORY_NAME,
-        sort_order=10,
+    if legacy_category is None:
+        return
+    remaining_template_id = session.scalar(
+        select(DbCanvasTemplate.id).where(
+            DbCanvasTemplate.category_id == legacy_category.id,
+            DbCanvasTemplate.archived_at.is_(None),
+            DbCanvasTemplate.key.not_in(seeded_template_keys),
+        )
     )
-    session.add(category)
-    session.flush()
-    return category
+    if remaining_template_id is not None:
+        return
+    legacy_category.archived_at = now_utc()
+    legacy_category.updated_at = legacy_category.archived_at
 
 
 def _migrate_legacy_user_canvas_templates(session: Session) -> None:
