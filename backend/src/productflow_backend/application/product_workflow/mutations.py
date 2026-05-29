@@ -20,6 +20,8 @@ from productflow_backend.application.product_workflow.artifacts import (
 from productflow_backend.application.product_workflow.context import image_size_from_config, optional_config_text
 from productflow_backend.application.product_workflow.tail_splitter import (
     apply_tail_split_plan as apply_tail_split_plan_to_graph,
+)
+from productflow_backend.application.product_workflow.tail_splitter import (
     normalize_tail_splitter_config,
 )
 from productflow_backend.application.product_workflow.templates import materialize_canvas_template_graph
@@ -224,6 +226,7 @@ def get_or_create_product_workflow(session: Session, product_id: str) -> Product
         product_id=product.id,
         title=product_workflow_graph.DEFAULT_WORKFLOW_TITLE,
         active=True,
+        initial_entry_mode="image",
     )
     session.add(workflow)
     session.flush()
@@ -746,7 +749,7 @@ def _normalize_product_context_singleton(session: Session, workflow: ProductWork
         context = WorkflowNode(
             workflow_id=workflow.id,
             node_type=WorkflowNodeType.PRODUCT_CONTEXT,
-            title="商品",
+            title="灵感",
             position_x=40,
             position_y=120,
             config_json={},

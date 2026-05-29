@@ -58,8 +58,10 @@ describe("node display helpers", () => {
 
   it("derives reference slot labels from explicit labels and merchant roles", () => {
     expect(referenceSlotLabel({ ...baseNode, config_json: { label: "活动图" } })).toBe("活动图");
+    expect(referenceSlotLabel({ ...baseNode, config_json: { role: "scene_image", label: "活动图" } })).toBe("场景图");
     expect(referenceSlotLabel({ ...baseNode, config_json: { role: "model_image" } })).toBe("模特图");
     expect(referenceSlotLabel({ ...baseNode, config_json: { role: "scene_image" } })).toBe("场景图");
+    expect(referenceSlotLabel({ ...baseNode, config_json: { role: "自定义构图参考", label: "活动图" } })).toBe("自定义构图参考");
     expect(referenceSlotLabel(baseNode)).toBe("承载图片节点");
     expect(referenceSlotLabel({ ...baseNode, config_json: { role: "model_image" } }, stubT({
       "detail.referenceRole.modelImage": "Model image",

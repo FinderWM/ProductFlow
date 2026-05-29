@@ -80,13 +80,17 @@ export function localizedWorkflowNodeTypeLabel(type: WorkflowNodeType, t: Transl
 }
 
 export function referenceSlotLabel(node: Pick<WorkflowNode, "config_json" | "title" | "node_type">, t: TranslateFunction = defaultT): string {
-  const explicitLabel = stringConfig(node, "label");
-  if (explicitLabel) {
-    return localizeBuiltInTemplateLabel(explicitLabel, (t as LocaleAwareTranslateFunction).locale) ?? explicitLabel;
-  }
   const roleLabelKey = REFERENCE_ROLE_LABEL_KEYS[stringConfig(node, "role")];
   if (roleLabelKey) {
     return t(roleLabelKey);
+  }
+  const customRole = stringConfig(node, "role");
+  if (customRole) {
+    return customRole;
+  }
+  const explicitLabel = stringConfig(node, "label");
+  if (explicitLabel) {
+    return localizeBuiltInTemplateLabel(explicitLabel, (t as LocaleAwareTranslateFunction).locale) ?? explicitLabel;
   }
   const title = node.title.trim();
   if (title && !legacyDefaultTitle(node.node_type, title, t)) {

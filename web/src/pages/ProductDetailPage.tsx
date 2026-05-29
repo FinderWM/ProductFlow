@@ -34,6 +34,7 @@ import {
   ResourceBlockedNotice,
   ResourceMetaBadges,
 } from "../components/ResourceGovernance";
+import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
@@ -172,6 +173,11 @@ export function ProductDetailPage() {
   const [templateSaveTitle, setTemplateSaveTitle] = useState("");
   const [templateSaveDescription, setTemplateSaveDescription] = useState("");
   const [templateSaveOpen, setTemplateSaveOpen] = useState(false);
+  const [canvasTemplateSaveOpen, setCanvasTemplateSaveOpen] = useState(false);
+  const [canvasTemplateSaveTitle, setCanvasTemplateSaveTitle] = useState("");
+  const [canvasTemplateSaveDescription, setCanvasTemplateSaveDescription] = useState("");
+  const [canvasTemplateSaveCategoryId, setCanvasTemplateSaveCategoryId] = useState("");
+  const [canvasTemplateRetainPromptText, setCanvasTemplateRetainPromptText] = useState(true);
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateCategoryId, setTemplateCategoryId] = useState("");
   const [templateScope, setTemplateScope] = useState<TemplateScopeFilter>("all");
@@ -264,6 +270,10 @@ export function ProductDetailPage() {
       api.listCanvasTemplateCategories({
         scope: templateScopeParam,
       }),
+  });
+  const userCanvasTemplateCategoriesQuery = useQuery({
+    queryKey: ["canvas-template-categories", "user"],
+    queryFn: () => api.listCanvasTemplateCategories({ scope: "user" }),
   });
   const workflowActive = hasActiveWorkflow(workflow);
   const workflowStatusQuery = useQuery({
@@ -1133,6 +1143,48 @@ export function ProductDetailPage() {
     },
   });
 
+  const createUserCanvasTemplateMutation = useMutation({
+    mutationFn: async () => {
+      assertProductUsable();
+      const title = canvasTemplateSaveTitle.trim();
+      if (!title) {
+        throw new Error(t("detail.error.templateNameRequired"));
+      }
+      if (!canvasTemplateSaveCategoryId) {
+        throw new Error(t("detail.saveCanvasTemplateCategoryRequired"));
+      }
+      await flushSelectedDraft();
+      return api.createUserCanvasTemplate(productId, {
+        title,
+        description: canvasTemplateSaveDescription.trim() || undefined,
+        category_id: canvasTemplateSaveCategoryId,
+        retain_prompt_text: canvasTemplateRetainPromptText,
+      });
+    },
+    onSuccess: async () => {
+      setError("");
+      setNotice(t("detail.notice.savedCanvasTemplate"));
+      setCanvasTemplateSaveOpen(false);
+      setCanvasTemplateSaveTitle("");
+      setCanvasTemplateSaveDescription("");
+      setCanvasTemplateSaveCategoryId("");
+      setCanvasTemplateRetainPromptText(true);
+      await queryClient.invalidateQueries({ queryKey: ["canvas-templates"] });
+      setActiveSidebarTab("templates");
+      setSidebarCollapsed(false);
+    },
+    onError: (mutationError) => {
+      setNotice("");
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.detail
+          : mutationError instanceof Error
+            ? mutationError.message
+            : t("detail.error.saveCanvasTemplate"),
+      );
+    },
+  });
+
   const updateUserTemplateGroupMutation = useMutation({
     mutationFn: ({ templateId, title }: { templateId: string; title: string }) => {
       assertProductUsable();
@@ -1634,6 +1686,7 @@ export function ProductDetailPage() {
     deleteSelectedNodesMutation.isPending ||
     uploadNodeImageMutation.isPending ||
     bindNodeImageMutation.isPending ||
+    createUserCanvasTemplateMutation.isPending ||
     updateNodeCopyMutation.isPending;
   const structureBusy = layoutMutationBusy || workflowActive || productBlocked;
   const runSubmissionPending = runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending;
@@ -1834,7 +1887,8 @@ export function ProductDetailPage() {
         previewImage ||
         pendingDeleteAction ||
         pendingHistoryAction ||
-        templateSaveOpen
+        templateSaveOpen ||
+        canvasTemplateSaveOpen
       ) {
         return;
       }
@@ -1917,6 +1971,7 @@ export function ProductDetailPage() {
     showBlockedProductError,
     structureBusy,
     t,
+    canvasTemplateSaveOpen,
     templateSaveOpen,
     workflow,
   ]);
@@ -1981,14 +2036,20 @@ export function ProductDetailPage() {
     !previewImage &&
     !pendingDeleteAction &&
     !pendingHistoryAction &&
-    !templateSaveOpen;
+    !templateSaveOpen &&
+    !canvasTemplateSaveOpen;
   const fillReferenceBusy = bindNodeImageMutation.isPending;
   const queueOverview = queueOverviewQuery.data ?? null;
   const showQueueOverview = Boolean(queueOverview && queueOverview.active_count > 0);
   const canvasTemplates = canvasTemplatesQuery.data?.items ?? [];
   const canvasTemplateCategories: CanvasTemplateCategory[] = canvasTemplateCategoriesQuery.data?.items ?? [];
+  const userCanvasTemplateCategories: CanvasTemplateCategory[] = userCanvasTemplateCategoriesQuery.data?.items ?? [];
+  const workflowInitialEntryMode = workflow?.initial_entry_mode ?? "image";
+  const canvasTemplateSaveDisabled = workflowInitialEntryMode === "blank" || productBlocked || !workflow;
+  const canvasTemplateHasTailNode = Boolean(workflow?.nodes.some((node) => node.node_type === "tail_splitter"));
   const userTemplateMutationBusy =
     createUserTemplateGroupMutation.isPending ||
+    createUserCanvasTemplateMutation.isPending ||
     updateUserTemplateGroupMutation.isPending ||
     archiveUserTemplateGroupMutation.isPending;
   const autoLayoutBusy = structureBusy || !workflow || workflow.nodes.length === 0;
@@ -1998,6 +2059,40 @@ export function ProductDetailPage() {
       <span className="w-full text-center text-[10px] font-semibold leading-none text-slate-500">
         {t("detail.toolbar.runSection")}
       </span>
+      <button
+        type="button"
+        onClick={() => {
+          if (canvasTemplateSaveDisabled) {
+            setNotice("");
+            setError(
+              workflowInitialEntryMode === "blank"
+                ? t("detail.saveCanvasTemplateBlankDisabled")
+                : blockedProductActionTitle || t("detail.error.workflowNotLoaded"),
+            );
+            return;
+          }
+          setCanvasTemplateSaveTitle(product.name);
+          setCanvasTemplateSaveDescription("");
+          setCanvasTemplateSaveCategoryId(userCanvasTemplateCategories[0]?.id ?? "");
+          setCanvasTemplateRetainPromptText(true);
+          setCanvasTemplateSaveOpen(true);
+        }}
+        disabled={createUserCanvasTemplateMutation.isPending || productBlocked || !workflow}
+        className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold"
+        title={
+          workflowInitialEntryMode === "blank"
+            ? t("detail.saveCanvasTemplateBlankDisabled")
+            : t("detail.saveCanvasTemplate")
+        }
+        aria-label={
+          workflowInitialEntryMode === "blank"
+            ? t("detail.saveCanvasTemplateBlankDisabled")
+            : t("detail.saveCanvasTemplate")
+        }
+      >
+        {createUserCanvasTemplateMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Layers3 size={16} />}
+        <span className="mt-1 leading-tight">{t("detail.saveCanvasTemplate")}</span>
+      </button>
       <button
         type="button"
         onClick={() => void handleRunWorkflow(undefined)}
@@ -2709,6 +2804,95 @@ export function ProductDetailPage() {
         onClose={() => setTailPlanDialogOpen(false)}
         onConfirm={(itemIds) => void handleConfirmTailSplitPlan(itemIds)}
       />
+      {canvasTemplateSaveOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
+          <form
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createUserCanvasTemplateMutation.mutate();
+            }}
+          >
+            <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+              <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+                {t("detail.saveCanvasTemplateTitle")}
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                {t("detail.saveCanvasTemplateDescription")}
+              </p>
+              {canvasTemplateHasTailNode ? (
+                <div className="mt-3 rounded-xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-xs leading-5 text-fuchsia-900 dark:border-fuchsia-400/35 dark:bg-fuchsia-500/10 dark:text-fuchsia-100">
+                  {t("detail.saveCanvasTemplateTailHint")}
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <input
+                value={canvasTemplateSaveTitle}
+                onChange={(event) => setCanvasTemplateSaveTitle(event.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+                placeholder={t("detail.templateName")}
+                maxLength={255}
+              />
+              <textarea
+                value={canvasTemplateSaveDescription}
+                onChange={(event) => setCanvasTemplateSaveDescription(event.target.value)}
+                className="min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+                placeholder={t("detail.templateDescription")}
+                maxLength={1000}
+              />
+              <SelectField
+                value={canvasTemplateSaveCategoryId}
+                options={[
+                  { value: "", label: t("detail.saveCanvasTemplateCategoryRequired") },
+                  ...userCanvasTemplateCategories.map((category) => ({ value: category.id, label: category.name })),
+                ]}
+                onChange={setCanvasTemplateSaveCategoryId}
+                ariaLabel={t("detail.saveCanvasTemplateCategoryRequired")}
+                disabled={userCanvasTemplateCategoriesQuery.isLoading}
+                radius="lg"
+              />
+              <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={canvasTemplateRetainPromptText}
+                  onChange={(event) => setCanvasTemplateRetainPromptText(event.target.checked)}
+                  className="h-4 w-4 accent-indigo-600"
+                />
+                {t("detail.saveCanvasTemplateRetainPrompt")}
+              </label>
+              {workflowInitialEntryMode === "blank" ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
+                  {t("detail.saveCanvasTemplateBlankDisabled")}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
+              <button
+                type="button"
+                onClick={() => setCanvasTemplateSaveOpen(false)}
+                disabled={createUserCanvasTemplateMutation.isPending}
+                className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  createUserCanvasTemplateMutation.isPending ||
+                  canvasTemplateSaveDisabled ||
+                  !canvasTemplateSaveTitle.trim() ||
+                  !canvasTemplateSaveCategoryId
+                }
+                className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+              >
+                {createUserCanvasTemplateMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
+                {t("detail.save")}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
       <ConfirmDialog
         open={Boolean(pendingDeleteDialog)}
         title={pendingDeleteDialog?.title ?? ""}

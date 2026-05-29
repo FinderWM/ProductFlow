@@ -1,8 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, ChevronRight, Eye, FileText, ImagePlus, LayoutTemplate, Loader2, Search, Sparkles, Tag, X } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Eye,
+  FileText,
+  ImagePlus,
+  LayoutTemplate,
+  Loader2,
+  Search,
+  Settings2,
+  Sparkles,
+  Tag,
+  X,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { Drawer } from "vaul";
 
 import { ImageDropZone } from "../components/ImageDropZone";
 import {
@@ -49,6 +61,7 @@ interface CanvasPlanOption extends ModerationFields {
   description: string;
   badge: string;
   stage: string;
+  entryMode?: ProductInitialWorkflowEntry;
   scope?: CanvasTemplateScope | null;
   categoryName?: string | null;
   owner_user_id?: string | null;
@@ -66,6 +79,7 @@ const PREVIEW_NODE_WIDTH = 248;
 const NODE_HEIGHT = 92;
 const PREVIEW_HEIGHT = 560;
 const PRODUCT_CREATE_FORM_ID = "product-create-form";
+type MobileCreateStep = "entry" | "details" | "template";
 
 const NODE_TYPE_LABEL_KEYS: Record<WorkflowNodeType, TranslationKey> = {
   product_context: "create.productContext",
@@ -84,10 +98,14 @@ const INITIAL_WORKFLOW_ENTRY_OPTIONS: Array<{
   { value: "image", labelKey: "create.entry.image", descriptionKey: "create.entry.imageHint", icon: ImagePlus },
   { value: "copy", labelKey: "create.entry.copy", descriptionKey: "create.entry.copyHint", icon: FileText },
   { value: "tail", labelKey: "create.entry.tail", descriptionKey: "create.entry.tailHint", icon: Sparkles },
+  { value: "blank", labelKey: "create.entry.blank", descriptionKey: "create.entry.blankHint", icon: LayoutTemplate },
 ];
 
 const stageLabelKeys: Record<string, TranslationKey> = {
   blank: "create.stage.blank",
+  image: "create.entry.image",
+  copy: "create.entry.copy",
+  tail: "create.entry.tail",
   listing: "create.stage.listing",
   detail: "create.stage.detail",
   content: "create.stage.content",
@@ -96,6 +114,7 @@ const stageLabelKeys: Record<string, TranslationKey> = {
 };
 
 const stageOrder = ["blank", "listing", "detail", "gallery", "content", "campaign"];
+const blankStageOrder = ["blank", "image", "copy", "tail", "listing", "detail", "gallery", "content", "campaign"];
 
 const toneClasses: Record<NonNullable<PreviewNode["tone"]>, string> = {
   input: "border-sky-100 bg-sky-50/90 text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/12 dark:text-sky-100",
@@ -144,7 +163,8 @@ function canvasTemplateToPlan(template: CanvasTemplateSummary, t: ReturnType<typ
     shortLabel: template.output_slots.map((slot) => slot.label).join(" / ") || template.scenario.title,
     description: template.description,
     badge: template.scenario.title || t("create.template"),
-    stage: template.scenario.ecommerce_stage,
+    stage: template.entry_mode,
+    entryMode: template.entry_mode,
     scope: template.scope,
     categoryName: template.category_name,
     owner_user_id: template.owner_user_id,
@@ -189,14 +209,18 @@ function previewWidth(plan: CanvasPlanOption): number {
   );
 }
 
-function groupedPlans(plans: CanvasPlanOption[], t: ReturnType<typeof useI18n>["t"]) {
+function groupedPlans(
+  plans: CanvasPlanOption[],
+  t: ReturnType<typeof useI18n>["t"],
+  order: string[] = stageOrder,
+) {
   const groups = new Map<string, CanvasPlanOption[]>();
   for (const plan of plans) {
     const items = groups.get(plan.stage) ?? [];
     items.push(plan);
     groups.set(plan.stage, items);
   }
-  return stageOrder
+  return order
     .filter((stage) => groups.has(stage))
     .map((stage) => ({ stage, label: stageLabelKeys[stage] ? t(stageLabelKeys[stage]) : stage, plans: groups.get(stage) ?? [] }));
 }
@@ -204,28 +228,50 @@ function groupedPlans(plans: CanvasPlanOption[], t: ReturnType<typeof useI18n>["
 export function ProductCreatePage() {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
-  const mobileTemplateButtonRef = useRef<HTMLButtonElement | null>(null);
-  const mobilePreviewButtonRef = useRef<HTMLButtonElement | null>(null);
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [initialWorkflowEntry, setInitialWorkflowEntry] = useState<ProductInitialWorkflowEntry>("image");
+  const [entryTextDrafts, setEntryTextDrafts] = useState({ copy: "", tail: "" });
   const [canvasTemplateKey, setCanvasTemplateKey] = useState<string>("");
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateCategoryId, setTemplateCategoryId] = useState("");
   const [templateScope, setTemplateScope] = useState<TemplateScopeFilter>("all");
   const [error, setError] = useState("");
-  const [mobileTemplateSheetOpen, setMobileTemplateSheetOpen] = useState(false);
-  const [mobilePreviewSheetOpen, setMobilePreviewSheetOpen] = useState(false);
+  const [mobileStep, setMobileStep] = useState<MobileCreateStep>("entry");
   const normalizedTemplateSearch = templateSearch.trim();
   const templateScopeParam = templateScope === "all" ? undefined : templateScope;
+  const entryTextValue =
+    initialWorkflowEntry === "copy" ? entryTextDrafts.copy : initialWorkflowEntry === "tail" ? entryTextDrafts.tail : "";
+  const showEntryTextInput = initialWorkflowEntry === "copy" || initialWorkflowEntry === "tail";
+  const showImageDropZone = initialWorkflowEntry !== "blank";
+  const mainImageRequired = initialWorkflowEntry === "image";
+  const entryTextLabelKey: TranslationKey | null =
+    initialWorkflowEntry === "copy"
+      ? "create.entryText.copyLabel"
+      : initialWorkflowEntry === "tail"
+        ? "create.entryText.tailLabel"
+        : null;
+  const entryTextPlaceholderKey: TranslationKey | null =
+    initialWorkflowEntry === "copy"
+      ? "create.entryText.copyPlaceholder"
+      : initialWorkflowEntry === "tail"
+        ? "create.entryText.tailPlaceholder"
+        : null;
+  const entryTextHelpKey: TranslationKey | null =
+    initialWorkflowEntry === "copy"
+      ? "create.entryText.copyHelp"
+      : initialWorkflowEntry === "tail"
+        ? "create.entryText.tailHelp"
+        : null;
 
   const templatesQuery = useQuery({
-    queryKey: ["canvas-templates", normalizedTemplateSearch, templateCategoryId, templateScope],
+    queryKey: ["canvas-templates", normalizedTemplateSearch, templateCategoryId, templateScope, initialWorkflowEntry],
     queryFn: () =>
       api.listCanvasTemplates({
         search: normalizedTemplateSearch || undefined,
         category_id: templateCategoryId || undefined,
         scope: templateScopeParam,
+        initial_workflow_entry: initialWorkflowEntry,
       }),
   });
 
@@ -251,18 +297,36 @@ export function ProductCreatePage() {
               { id: "product", title: t("create.productContext"), subtitle: t("create.productInfoNode"), x: 48, y: 112, tone: "input" },
               { id: "entry-copy", title: t("create.copy"), subtitle: t("create.entry.copy"), x: 368, y: 112, tone: "copy" },
             ]
-          : [
-              { id: "product", title: t("create.productContext"), subtitle: t("create.productInfoNode"), x: 48, y: 112, tone: "input" },
-              { id: "entry-tail", title: t("create.tailSplitter"), subtitle: t("create.entry.tail"), x: 368, y: 112, tone: "tail" },
-            ];
+          : initialWorkflowEntry === "tail"
+            ? [
+                { id: "product", title: t("create.productContext"), subtitle: t("create.productInfoNode"), x: 48, y: 112, tone: "input" },
+                { id: "entry-tail", title: t("create.tailSplitter"), subtitle: t("create.entry.tail"), x: 368, y: 112, tone: "tail" },
+              ]
+            : [{ id: "product", title: t("create.productContext"), subtitle: t("create.productInfoNode"), x: 48, y: 112, tone: "input" }];
+    const planTitleKey: TranslationKey =
+      initialWorkflowEntry === "image"
+        ? "create.plan.imageBaseTitle"
+        : initialWorkflowEntry === "copy"
+          ? "create.plan.copyBaseTitle"
+          : initialWorkflowEntry === "tail"
+            ? "create.plan.tailBaseTitle"
+            : "create.blankCanvas";
+    const planDescriptionKey: TranslationKey =
+      initialWorkflowEntry === "image"
+        ? "create.plan.imageBaseDescription"
+        : initialWorkflowEntry === "copy"
+          ? "create.plan.copyBaseDescription"
+          : initialWorkflowEntry === "tail"
+            ? "create.plan.tailBaseDescription"
+            : "create.blankDescription";
     const blankCanvasPlan: CanvasPlanOption = {
       key: "",
-      label: t("create.blankCanvas"),
+      label: t(planTitleKey),
       shortLabel: t("create.freeLayout"),
-      description: t("create.blankDescription"),
+      description: t(planDescriptionKey),
       badge: t("create.basic"),
       stage: "blank",
-      outputCount: 0,
+      outputCount: initialWorkflowEntry === "image" ? 1 : 0,
       referenceCount: 0,
       previewNodes: blankCanvasPreviewNodes,
       previewEdges:
@@ -273,7 +337,11 @@ export function ProductCreatePage() {
               { from: "entry-copy", to: "entry-image" },
               { from: "entry-image", to: "entry-output" },
             ]
-          : [{ from: "product", to: initialWorkflowEntry === "copy" ? "entry-copy" : "entry-tail" }],
+          : initialWorkflowEntry === "copy"
+            ? [{ from: "product", to: "entry-copy" }]
+            : initialWorkflowEntry === "tail"
+              ? [{ from: "product", to: "entry-tail" }]
+              : [],
     };
     const fullCanvasTemplates =
       templatesQuery.data?.items
@@ -285,10 +353,24 @@ export function ProductCreatePage() {
 
   const selectedPlan =
     canvasPlanOptions.find((option) => option.key === canvasTemplateKey) ?? canvasPlanOptions[0];
-  const mainImageRequired = Boolean(selectedPlan.key) || initialWorkflowEntry === "image";
 
-  const planGroups = useMemo(() => groupedPlans(canvasPlanOptions, t), [canvasPlanOptions, t]);
+  const planGroups = useMemo(
+    () => groupedPlans(canvasPlanOptions, t, initialWorkflowEntry === "blank" ? blankStageOrder : stageOrder),
+    [canvasPlanOptions, initialWorkflowEntry, t],
+  );
   const templateCategories = templateCategoriesQuery.data?.items ?? [];
+
+  useEffect(() => {
+    if (!canvasPlanOptions.some((option) => option.key === canvasTemplateKey)) {
+      setCanvasTemplateKey("");
+    }
+  }, [canvasPlanOptions, canvasTemplateKey]);
+
+  const handleInitialWorkflowEntryChange = (value: ProductInitialWorkflowEntry) => {
+    setInitialWorkflowEntry(value);
+    setCanvasTemplateKey("");
+    setError("");
+  };
 
   const handleTemplateScopeChange = (nextScope: TemplateScopeFilter) => {
     setTemplateScope(nextScope);
@@ -302,19 +384,47 @@ export function ProductCreatePage() {
     return file.name;
   }, [file, mainImageRequired, t]);
 
+  const validateCreateDraft = (options?: { checkResource?: boolean }) => {
+    if (!name.trim()) {
+      return t("create.requiredName");
+    }
+    if (mainImageRequired && !file) {
+      return t("create.requiredImage");
+    }
+    if (initialWorkflowEntry === "copy" && !entryTextValue.trim()) {
+      return t("create.requiredCopyText");
+    }
+    if (initialWorkflowEntry === "tail" && !entryTextValue.trim()) {
+      return t("create.requiredTailText");
+    }
+    if (options?.checkResource !== false && isResourceBlocked(selectedPlan)) {
+      return getResourceBlockedActionTitle(selectedPlan, t("resource.blockedAction"));
+    }
+    return "";
+  };
+
+  const handleMobileDetailsNext = () => {
+    const validationError = validateCreateDraft({ checkResource: false });
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setError("");
+    setMobileStep("template");
+  };
+
   const createProductMutation = useMutation({
     mutationFn: () => {
-      if (mainImageRequired && !file) {
-        throw new Error(t("create.requiredImage"));
-      }
-      if (isResourceBlocked(selectedPlan)) {
-        throw new Error(getResourceBlockedActionTitle(selectedPlan, t("resource.blockedAction")));
+      const validationError = validateCreateDraft();
+      if (validationError) {
+        throw new Error(validationError);
       }
       return api.createProduct({
-        name,
+        name: name.trim(),
         file: file ?? undefined,
-        canvas_template_key: selectedPlan.key,
+        canvas_template_key: selectedPlan.key || undefined,
         initial_workflow_entry: initialWorkflowEntry,
+        entry_text: showEntryTextInput ? entryTextValue.trim() : undefined,
       });
     },
     onSuccess: (product) => {
@@ -340,14 +450,37 @@ export function ProductCreatePage() {
     setError("");
   };
 
+  const handleEntryTextChange = (value: string) => {
+    if (initialWorkflowEntry === "copy") {
+      setEntryTextDrafts((current) => ({ ...current, copy: value }));
+    }
+    if (initialWorkflowEntry === "tail") {
+      setEntryTextDrafts((current) => ({ ...current, tail: value }));
+    }
+    setError("");
+  };
+
   const templatePanelContent = (
     <>
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-zinc-950 dark:text-white">{t("create.templateTitle")}</h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("create.templateDescription")}</p>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">
+            {t("create.templateDescription")}
+          </p>
         </div>
-        {templatesQuery.isLoading ? <Loader2 size={16} className="animate-spin text-zinc-400" /> : null}
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate("/workflow/templates")}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-500 transition-colors hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+            aria-label={t("templateManage.personalTitle")}
+            title={t("templateManage.personalTitle")}
+          >
+            <Settings2 size={14} />
+          </button>
+          {templatesQuery.isLoading ? <Loader2 size={16} className="animate-spin text-zinc-400" /> : null}
+        </div>
       </div>
 
       {templatesQuery.isError ? (
@@ -372,7 +505,7 @@ export function ProductCreatePage() {
             />
           </span>
         </label>
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-1">
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_auto]">
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-zinc-500 dark:text-slate-400">
               {t("templateFilter.category")}
@@ -427,7 +560,7 @@ export function ProductCreatePage() {
         ) : null}
       </div>
 
-      <div className="mt-4 space-y-5 pr-1 lg:max-h-[610px] lg:overflow-y-auto">
+      <div className="mt-4 space-y-5 pr-1 md:max-h-[520px] md:overflow-y-auto xl:max-h-[610px]">
         {planGroups.map((group) => (
           <div key={group.stage}>
             <div className="mb-2 flex items-center justify-between">
@@ -449,7 +582,6 @@ export function ProductCreatePage() {
                         return;
                       }
                       setCanvasTemplateKey(option.key);
-                      setMobileTemplateSheetOpen(false);
                     }}
                     disabled={optionBlocked}
                     title={optionBlocked ? optionBlockedTitle : option.label}
@@ -514,12 +646,30 @@ export function ProductCreatePage() {
           </span>
         </div>
       </div>
+      <div className="mb-4 hidden gap-2 md:flex">
+        <button
+          type="button"
+          onClick={() => navigate("/products")}
+          className="rounded-md border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-700 transition-colors active:scale-[0.99] hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
+        >
+          {t("create.cancel")}
+        </button>
+        <button
+          type="submit"
+          form={PRODUCT_CREATE_FORM_ID}
+          disabled={createProductMutation.isPending}
+          className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors active:scale-[0.99] hover:bg-blue-700 disabled:opacity-50 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+        >
+          {createProductMutation.isPending ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
+          {t("create.submit")}
+        </button>
+      </div>
       <WorkflowPreview plan={selectedPlan} />
     </>
   );
 
   return (
-    <div className="pf-workspace px-4 pb-[calc(6.25rem+env(safe-area-inset-bottom))] pt-4 text-zinc-900 dark:text-slate-100 sm:px-6 lg:px-8 lg:pb-8">
+    <div className="pf-workspace px-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-4 text-zinc-900 dark:text-slate-100 sm:px-6 md:pb-8 lg:px-8">
       <main className="mx-auto max-w-[1480px]">
         <div className="mb-5 flex items-start justify-between gap-4 border-b border-slate-200/80 pb-4 dark:border-slate-800">
           <div className="flex items-center gap-3">
@@ -527,6 +677,9 @@ export function ProductCreatePage() {
               <Tag size={21} />
             </div>
             <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-400 dark:text-slate-500 md:hidden">
+                ProductFlow
+              </div>
               <h1 className="text-xl font-semibold text-zinc-950 dark:text-white">{t("create.title")}</h1>
               <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("create.description")}</p>
             </div>
@@ -541,19 +694,29 @@ export function ProductCreatePage() {
           </button>
         </div>
 
+        {error ? (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200 md:hidden">
+            {error}
+          </div>
+        ) : null}
+
         <form
           id={PRODUCT_CREATE_FORM_ID}
           onSubmit={handleSubmit}
-          className="grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]"
+          className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]"
         >
-          <section className="pf-panel min-w-0 p-5">
-            <h2 className="text-base font-semibold text-zinc-950 dark:text-white">{t("create.productInfo")}</h2>
-
-            <div className="mt-5">
-              <div className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
-                {t("create.initialEntry")}
+          <div className="grid min-w-0 content-start gap-5">
+            <section className={`pf-panel min-w-0 p-5 ${mobileStep === "entry" ? "block" : "hidden"} md:block`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-zinc-950 dark:text-white">{t("create.initialEntry")}</h2>
+                  <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("create.initialEntryDescription")}</p>
+                </div>
+                <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-medium text-zinc-500 dark:border dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-300 md:hidden">
+                  1 / 3
+                </span>
               </div>
-              <div className="grid gap-2">
+              <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-1">
                 {INITIAL_WORKFLOW_ENTRY_OPTIONS.map((option) => {
                   const active = initialWorkflowEntry === option.value;
                   const Icon = option.icon;
@@ -561,14 +724,14 @@ export function ProductCreatePage() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setInitialWorkflowEntry(option.value)}
-                      className={`flex items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${
+                      onClick={() => handleInitialWorkflowEntryChange(option.value)}
+                      className={`group flex items-start gap-3 rounded-xl border px-3 py-3 text-left transition-all active:scale-[0.99] ${
                         active
-                          ? "border-indigo-300 bg-indigo-50 text-indigo-900 dark:border-violet-400/60 dark:bg-violet-500/12 dark:text-violet-100"
-                          : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200 dark:hover:border-slate-500"
+                          ? "border-indigo-300 bg-indigo-50 text-indigo-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] dark:border-violet-400/60 dark:bg-violet-500/12 dark:text-violet-100"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:-translate-y-0.5 hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200 dark:hover:border-slate-500"
                       }`}
                     >
-                      <span className="mt-0.5 rounded-lg border border-current/20 p-2 opacity-90">
+                      <span className="mt-0.5 rounded-lg border border-current/20 p-2 opacity-90 transition-transform group-active:scale-95">
                         <Icon size={14} />
                       </span>
                       <span className="min-w-0 flex-1">
@@ -580,184 +743,177 @@ export function ProductCreatePage() {
                   );
                 })}
               </div>
-            </div>
+            </section>
 
-            <div className="mt-5">
-              <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
-                {t("create.mainImage")} {mainImageRequired ? <span className="text-red-500">*</span> : null}
-              </label>
-              <ImageDropZone
-                ariaLabel={t("create.uploadAria")}
-                className="flex aspect-[1.55] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/40 p-7 text-zinc-500 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10"
-                onFiles={handleImageFiles}
-              >
-                {({ isDragging }) => (
-                  <>
-                    <ImagePlus size={34} className="mb-3 text-zinc-400 dark:text-slate-500" />
-                    <p className="text-sm font-medium text-zinc-700 dark:text-slate-200">{isDragging ? t("create.uploadDrop") : previewLabel}</p>
-                    <p className="mt-2 text-xs text-zinc-500 dark:text-slate-400">
-                      {mainImageRequired ? t("create.uploadHint") : t("create.uploadOptionalHint")}
-                    </p>
-                  </>
-                )}
-              </ImageDropZone>
-            </div>
-
-            <div className="mt-6">
-              <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
-                {t("create.productName")} <span className="text-red-500">*</span>
-              </label>
-              <input
-                required
-                type="text"
-                maxLength={60}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
-                placeholder={t("create.namePlaceholder")}
-              />
-              <div className="mt-1 text-right text-xs text-zinc-400 dark:text-slate-500">{name.length} / 60</div>
-            </div>
-
-            <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-3 dark:border-slate-700 dark:bg-[#0b1220] lg:hidden">
+            <section className={`pf-panel min-w-0 p-5 ${mobileStep === "details" ? "block" : "hidden"} md:block`}>
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-xs font-medium text-zinc-500 dark:text-slate-400">{t("create.templateTitle")}</div>
-                  <div className="mt-1 truncate text-sm font-semibold text-zinc-950 dark:text-white">{selectedPlan.label}</div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    <TemplateChip>{selectedPlan.shortLabel}</TemplateChip>
-                    <TemplateChip>{t("create.nodeCount", { count: selectedPlan.previewNodes.length })}</TemplateChip>
+                <div>
+                  <h2 className="text-base font-semibold text-zinc-950 dark:text-white">{t("create.productInfo")}</h2>
+                  <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("create.contentDescription")}</p>
+                </div>
+                <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-medium text-zinc-500 dark:border dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-300 md:hidden">
+                  2 / 3
+                </span>
+              </div>
+
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
+                  {t("create.productName")} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  maxLength={60}
+                  value={name}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    setError("");
+                  }}
+                  className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                  placeholder={t("create.namePlaceholder")}
+                />
+                <div className="mt-1 text-right text-xs text-zinc-400 dark:text-slate-500">{name.length} / 60</div>
+              </div>
+
+              {showEntryTextInput && entryTextLabelKey && entryTextPlaceholderKey ? (
+                <div className="mt-5">
+                  <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
+                    {t(entryTextLabelKey)} <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={entryTextValue}
+                    maxLength={4000}
+                    onChange={(event) => handleEntryTextChange(event.target.value)}
+                    className="min-h-32 w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm leading-6 transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                    placeholder={t(entryTextPlaceholderKey)}
+                  />
+                  <div className="mt-1 flex items-start justify-between gap-3 text-xs text-zinc-400 dark:text-slate-500">
+                    <span>{entryTextHelpKey ? t(entryTextHelpKey) : null}</span>
+                    <span className="shrink-0">{entryTextValue.length} / 4000</span>
                   </div>
                 </div>
+              ) : null}
+
+              {showImageDropZone ? (
+                <div className="mt-5">
+                  <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
+                    {t("create.mainImage")} {mainImageRequired ? <span className="text-red-500">*</span> : null}
+                  </label>
+                  <ImageDropZone
+                    ariaLabel={t("create.uploadAria")}
+                    className="flex aspect-[1.9] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/40 p-5 text-zinc-500 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10 md:aspect-[2.5] lg:aspect-[1.55]"
+                    onFiles={handleImageFiles}
+                  >
+                    {({ isDragging }) => (
+                      <>
+                        <ImagePlus size={28} className="mb-2 text-zinc-400 dark:text-slate-500" />
+                        <p className="text-sm font-medium text-zinc-700 dark:text-slate-200">{isDragging ? t("create.uploadDrop") : previewLabel}</p>
+                        <p className="mt-1.5 text-xs text-zinc-500 dark:text-slate-400">
+                          {mainImageRequired ? t("create.uploadHint") : t("create.uploadOptionalHint")}
+                        </p>
+                      </>
+                    )}
+                  </ImageDropZone>
+                </div>
+              ) : (
+                <div className="mt-5 rounded-xl border border-dashed border-zinc-200 bg-zinc-50/70 p-4 text-sm leading-6 text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
+                  {t("create.blankNoInputHint")}
+                </div>
+              )}
+
+              {error ? <div className="mt-4 hidden text-sm text-red-600 dark:text-red-300 md:block">{error}</div> : null}
+
+              <div className="mt-6 hidden gap-3 md:flex">
                 <button
                   type="button"
-                  onClick={() => setMobileTemplateSheetOpen(true)}
-                  className="inline-flex min-h-11 shrink-0 items-center rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:border-blue-200 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+                  onClick={() => navigate("/products")}
+                  className="flex-1 rounded-md border border-zinc-200 px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors active:scale-[0.99] hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
                 >
-                  {t("create.changeTemplate")}
+                  {t("create.cancel")}
+                </button>
+                <button
+                  type="submit"
+                  disabled={createProductMutation.isPending}
+                  className="flex flex-1 items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors active:scale-[0.99] hover:bg-blue-700 disabled:opacity-50 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+                >
+                  {createProductMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : null}
+                  {t("create.submit")}
                 </button>
               </div>
-            </div>
+            </section>
+          </div>
 
-            {error ? <div className="mt-4 text-sm text-red-600">{error}</div> : null}
-
-            <div className="mt-6 hidden gap-3 lg:flex">
-              <button
-                type="button"
-                onClick={() => navigate("/products")}
-                className="flex-1 rounded-md border border-zinc-200 px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
-              >
-                {t("create.cancel")}
-              </button>
-              <button
-                type="submit"
-                disabled={createProductMutation.isPending}
-                className="flex flex-1 items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
-              >
-                {createProductMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : null}
-                {t("create.submit")}
-              </button>
-            </div>
-          </section>
-
-          <section className="hidden min-h-[720px] min-w-0 gap-5 lg:grid lg:grid-cols-1 2xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
-            <div className="pf-panel min-w-0 p-4">
+          <section className={`min-w-0 gap-5 ${mobileStep === "template" ? "grid" : "hidden"} md:grid lg:grid-cols-1 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)]`}>
+            <div className="pf-panel order-2 min-w-0 p-4 xl:order-1">
               {templatePanelContent}
             </div>
 
-            <div className="pf-panel min-w-0 p-4">
+            <div className="pf-panel order-1 min-w-0 p-4 lg:sticky lg:top-4 lg:self-start xl:order-2">
               {previewPanelContent}
             </div>
           </section>
         </form>
       </main>
 
-      <div className="fixed inset-x-0 z-40 px-3 lg:hidden" style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+      <div className="fixed inset-x-0 z-40 px-3 md:hidden" style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
         <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_-6px_18px_rgba(15,23,42,0.12)] dark:border-slate-700 dark:bg-slate-950 dark:shadow-[0_-12px_28px_rgba(0,0,0,0.30)]">
-          <button
-            ref={mobileTemplateButtonRef}
-            type="button"
-            onClick={() => setMobileTemplateSheetOpen(true)}
-            className="inline-flex min-h-11 min-w-0 flex-1 items-center rounded-xl border border-slate-200 bg-white px-3 text-left text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
-            aria-label={t("create.openTemplateSheet")}
-          >
-            <LayoutTemplate size={16} className="mr-2 shrink-0 text-indigo-600 dark:text-violet-200" />
-            <span className="min-w-0 flex-1 truncate">{selectedPlan.shortLabel}</span>
-            <ChevronRight size={16} className="ml-2 shrink-0 text-slate-400" />
-          </button>
-          <button
-            ref={mobilePreviewButtonRef}
-            type="button"
-            onClick={() => setMobilePreviewSheetOpen(true)}
-            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
-            aria-label={t("create.openPreviewSheet")}
-            title={t("create.openPreviewSheet")}
-          >
-            <Eye size={17} />
-          </button>
-          <button
-            type="submit"
-            form={PRODUCT_CREATE_FORM_ID}
-            disabled={createProductMutation.isPending}
-            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/16 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
-          >
-            {createProductMutation.isPending ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : null}
-            {t("create.submitShort")}
-          </button>
+          {mobileStep !== "entry" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setError("");
+                setMobileStep(mobileStep === "template" ? "details" : "entry");
+              }}
+              className="inline-flex min-h-11 shrink-0 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+            >
+              {t("create.mobileBack")}
+            </button>
+          ) : null}
+          <div className="min-w-0 flex-1 px-1">
+            <div className="truncate text-[11px] font-medium text-slate-400 dark:text-slate-500">
+              {mobileStep === "entry"
+                ? t("create.mobileStep.entry")
+                : mobileStep === "details"
+                  ? t("create.mobileStep.details")
+                  : t("create.mobileStep.template")}
+            </div>
+            <div className="mt-0.5 truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+              {mobileStep === "template" ? selectedPlan.label : t(INITIAL_WORKFLOW_ENTRY_OPTIONS.find((option) => option.value === initialWorkflowEntry)?.labelKey ?? "create.entry.image")}
+            </div>
+          </div>
+          {mobileStep === "entry" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setError("");
+                setMobileStep("details");
+              }}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-md shadow-indigo-600/16 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+            >
+              {t("create.mobileNext")}
+              <ChevronRight size={16} className="ml-1" />
+            </button>
+          ) : mobileStep === "details" ? (
+            <button
+              type="button"
+              onClick={handleMobileDetailsNext}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-md shadow-indigo-600/16 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+            >
+              <Eye size={16} className="mr-1.5" />
+              {t("create.mobilePreview")}
+            </button>
+          ) : (
+            <button
+              type="submit"
+              form={PRODUCT_CREATE_FORM_ID}
+              disabled={createProductMutation.isPending}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/16 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+            >
+              {createProductMutation.isPending ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : null}
+              {t("create.submitShort")}
+            </button>
+          )}
         </div>
       </div>
-
-      <Drawer.Root
-        direction="bottom"
-        handleOnly
-        open={mobileTemplateSheetOpen}
-        onOpenChange={(open) => {
-          setMobileTemplateSheetOpen(open);
-          if (!open) {
-            mobileTemplateButtonRef.current?.focus();
-          }
-        }}
-      >
-        <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/42 lg:hidden" />
-          <Drawer.Content className="fixed inset-x-0 bottom-0 z-[71] flex max-h-[80dvh] flex-col overflow-hidden rounded-t-[1.5rem] border-t border-slate-200 bg-white shadow-[0_-12px_34px_rgba(15,23,42,0.16)] outline-none dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-[0_-18px_42px_rgba(0,0,0,0.34)] lg:hidden">
-            <Drawer.Title className="sr-only">{t("create.mobileTemplateSheet")}</Drawer.Title>
-            <Drawer.Description className="sr-only">{t("create.templateDescription")}</Drawer.Description>
-            <Drawer.Handle className="mx-auto mt-2 flex h-7 w-24 items-center justify-center rounded-full text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-500 dark:focus-visible:ring-violet-400">
-              <span className="h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
-            </Drawer.Handle>
-            <div data-vaul-no-drag className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-2 [-webkit-overflow-scrolling:touch]">
-              {templatePanelContent}
-            </div>
-          </Drawer.Content>
-        </Drawer.Portal>
-      </Drawer.Root>
-
-      <Drawer.Root
-        direction="bottom"
-        handleOnly
-        open={mobilePreviewSheetOpen}
-        onOpenChange={(open) => {
-          setMobilePreviewSheetOpen(open);
-          if (!open) {
-            mobilePreviewButtonRef.current?.focus();
-          }
-        }}
-      >
-        <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/42 lg:hidden" />
-          <Drawer.Content className="fixed inset-x-0 bottom-0 z-[71] flex max-h-[80dvh] flex-col overflow-hidden rounded-t-[1.5rem] border-t border-slate-200 bg-white shadow-[0_-12px_34px_rgba(15,23,42,0.16)] outline-none dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-[0_-18px_42px_rgba(0,0,0,0.34)] lg:hidden">
-            <Drawer.Title className="sr-only">{t("create.mobilePreviewSheet")}</Drawer.Title>
-            <Drawer.Description className="sr-only">{selectedPlan.description}</Drawer.Description>
-            <Drawer.Handle className="mx-auto mt-2 flex h-7 w-24 items-center justify-center rounded-full text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-500 dark:focus-visible:ring-violet-400">
-              <span className="h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
-            </Drawer.Handle>
-            <div data-vaul-no-drag className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-2 [-webkit-overflow-scrolling:touch]">
-              {previewPanelContent}
-            </div>
-          </Drawer.Content>
-        </Drawer.Portal>
-      </Drawer.Root>
     </div>
   );
 }

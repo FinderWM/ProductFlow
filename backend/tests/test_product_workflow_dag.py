@@ -1379,6 +1379,121 @@ def test_user_template_group_ignores_node_outputs_when_saving(configured_env: Pa
         session.close()
 
 
+def test_user_canvas_template_from_workflow_rejects_blank_and_trims_tail_outputs(configured_env: Path) -> None:
+    from productflow_backend.infrastructure.db.models import CanvasTemplate, WorkflowNode
+    from productflow_backend.infrastructure.db.session import get_session_factory
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    category = client.post("/api/workflow/user-template-categories", json={"name": "整画布分类"})
+    assert category.status_code == 201
+
+    blank = client.post(
+        "/api/products",
+        data={"name": "空白画布灵感", "initial_workflow_entry": "blank"},
+    )
+    assert blank.status_code == 201
+    blank_save = client.post(
+        f"/api/products/{blank.json()['id']}/workflow/user-canvas-templates",
+        json={"title": "空白不能存", "category_id": category.json()["id"]},
+    )
+    assert blank_save.status_code == 400
+    assert blank_save.json()["detail"] == "空白画布不能保存为模板"
+
+    tail = client.post(
+        "/api/products",
+        data={
+            "name": "尾巴画布灵感",
+            "initial_workflow_entry": "tail",
+            "entry_text": "拆出主图、详情、场景三类视觉方向",
+        },
+    )
+    assert tail.status_code == 201
+    workflow = client.get(f"/api/products/{tail.json()['id']}/workflow").json()
+    tail_node = next(node for node in workflow["nodes"] if node["node_type"] == "tail_splitter")
+    created_image = client.post(
+        f"/api/products/{tail.json()['id']}/workflow/nodes",
+        json={
+            "node_type": "image_generation",
+            "title": "尾巴后生图",
+            "position_x": 640,
+            "position_y": 100,
+            "config_json": {"instruction": "这个节点不应该进入模板", "source_asset_ids": ["asset-1"]},
+        },
+    )
+    assert created_image.status_code == 201
+    image_node = next(node for node in created_image.json()["nodes"] if node["title"] == "尾巴后生图")
+    connected = client.post(
+        f"/api/products/{tail.json()['id']}/workflow/edges",
+        json={"source_node_id": tail_node["id"], "target_node_id": image_node["id"]},
+    )
+    assert connected.status_code == 201
+
+    saved = client.post(
+        f"/api/products/{tail.json()['id']}/workflow/user-canvas-templates",
+        json={
+            "title": "尾巴整画布",
+            "category_id": category.json()["id"],
+            "retain_prompt_text": False,
+        },
+    )
+    assert saved.status_code == 201
+    summary = saved.json()
+    assert summary["kind"] == "full_canvas"
+    assert summary["entry_mode"] == "tail"
+    assert {node["node_type"] for node in summary["preview_nodes"]} == {"product_context", "tail_splitter"}
+
+    session = get_session_factory()()
+    try:
+        row = session.get(CanvasTemplate, summary["template_id"])
+        assert row is not None
+        assert row.entry_mode == "tail"
+        assert row.kind == "full_canvas"
+        assert not _contains_value(row.template_json, "这个节点不应该进入模板")
+        assert not _contains_key(row.template_json, "source_asset_ids")
+        assert not _contains_key(row.template_json, "source_text")
+        assert session.get(WorkflowNode, image_node["id"]) is not None
+    finally:
+        session.close()
+
+
+def test_admin_can_copy_user_canvas_template_to_global_with_global_category(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    user_category = client.post("/api/workflow/user-template-categories", json={"name": "个人分类"})
+    assert user_category.status_code == 201
+    global_category = client.post("/api/workflow/global-template-categories", json={"name": "全局分类"})
+    assert global_category.status_code == 201
+    product = client.post(
+        "/api/products",
+        data={"name": "可复制模板", "initial_workflow_entry": "copy", "entry_text": "生成主图卖点文案"},
+    )
+    assert product.status_code == 201
+    saved = client.post(
+        f"/api/products/{product.json()['id']}/workflow/user-canvas-templates",
+        json={"title": "个人整画布模板", "category_id": user_category.json()["id"]},
+    )
+    assert saved.status_code == 201
+
+    copied = client.post(
+        f"/api/workflow/user-template-groups/{saved.json()['template_id']}/copy-to-global",
+        json={"category_id": global_category.json()["id"], "title": "全局复制模板"},
+    )
+    assert copied.status_code == 201
+    payload = copied.json()
+    assert payload["source"] == "builtin"
+    assert payload["scope"] == "global"
+    assert payload["category_id"] == global_category.json()["id"]
+    assert payload["entry_mode"] == "copy"
+    assert payload["title"] == "全局复制模板"
+
+
 def _contains_key(value: object, key: str) -> bool:
     if isinstance(value, dict):
         return key in value or any(_contains_key(item, key) for item in value.values())

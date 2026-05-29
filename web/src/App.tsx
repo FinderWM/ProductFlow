@@ -38,6 +38,9 @@ const SettingsPage = lazy(() =>
 const StatusPage = lazy(() =>
   import("./pages/StatusPage").then((module) => ({ default: module.StatusPage })),
 );
+const TemplateManagementPage = lazy(() =>
+  import("./pages/TemplateManagementPage").then((module) => ({ default: module.TemplateManagementPage })),
+);
 const UsageStatsPage = lazy(() =>
   import("./pages/UsageStatsPage").then((module) => ({ default: module.UsageStatsPage })),
 );
@@ -110,6 +113,16 @@ function AppRoutes() {
     return element;
   }
 
+  function permissionRoute(menuCode: string, permissionCode: string, element: ReactNode): ReactNode {
+    if (!authenticated) {
+      return <Navigate to="/login" replace />;
+    }
+    if (!hasSessionMenu(sessionState, menuCode) || !hasSessionApiPermission(sessionState, permissionCode)) {
+      return <Navigate to={defaultAuthenticatedPath} replace />;
+    }
+    return element;
+  }
+
   return (
     <SessionStateProvider value={sessionState}>
       <Suspense fallback={<LoadingScreen />}>
@@ -117,10 +130,15 @@ function AppRoutes() {
           <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
           <Route path="/products" element={menuRoute("inspirations", <ProductListPage />)} />
           <Route path="/products/new" element={menuRoute("inspirations", <ProductCreatePage />)} />
+          <Route path="/workflow/templates" element={menuRoute("inspirations", <TemplateManagementPage mode="personal" />)} />
           <Route path="/image-chat" element={menuRoute("image_chat", <ImageChatPage />)} />
           <Route path="/gallery" element={menuRoute("gallery", <GalleryPage />)} />
           <Route path="/help" element={authenticatedRoute(<HelpPage />)} />
           <Route path="/settings" element={menuRoute("settings", <SettingsPage />)} />
+          <Route
+            path="/settings/global-templates"
+            element={permissionRoute("settings", "templates:manage_global", <TemplateManagementPage mode="global" />)}
+          />
           <Route path="/rbac" element={menuRoute("rbac", <RbacPage />)} />
           <Route path="/status" element={menuRoute("status", <StatusPage />)} />
           <Route path="/usage-stats" element={menuRoute("usage_stats", <UsageStatsPage />)} />

@@ -58,6 +58,7 @@ async def create_product_endpoint(
     source_note: str | None = Form(default=None),
     canvas_template_key: str | None = Form(default=None),
     initial_workflow_entry: str | None = Form(default=None),
+    entry_text: str | None = Form(default=None),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
 ) -> ProductDetailResponse:
@@ -85,6 +86,7 @@ async def create_product_endpoint(
         reference_image_uploads=reference_payloads,
         canvas_template_key=canvas_template_key,
         initial_workflow_entry=initial_workflow_entry,
+        entry_text=entry_text,
         owner_user_id=current_user.id,
     )
     return serialize_product_detail(product)

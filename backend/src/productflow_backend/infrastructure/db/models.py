@@ -268,15 +268,26 @@ class CanvasTemplate(Base, TimestampMixin):
     __tablename__ = "canvas_templates"
     __table_args__ = (
         CheckConstraint("scope IN ('global', 'user')", name="ck_canvas_templates_scope"),
+        CheckConstraint("entry_mode IN ('image', 'copy', 'tail')", name="ck_canvas_templates_entry_mode"),
         CheckConstraint(
             "(scope = 'global' AND owner_user_id IS NULL) OR (scope = 'user' AND owner_user_id IS NOT NULL)",
             name="ck_canvas_templates_owner_scope",
         ),
         Index("uq_canvas_templates_key", "key", unique=True),
         Index("ix_canvas_templates_scope", "scope"),
+        Index("ix_canvas_templates_entry_mode", "entry_mode"),
         Index("ix_canvas_templates_category_id", "category_id"),
         Index("ix_canvas_templates_enabled", "enabled"),
         Index("ix_canvas_templates_archived_at", "archived_at"),
+        Index("ix_canvas_templates_sort_order", "sort_order"),
+        Index(
+            "ix_canvas_templates_scope_owner_entry_category_sort",
+            "scope",
+            "owner_user_id",
+            "entry_mode",
+            "category_id",
+            "sort_order",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -295,6 +306,8 @@ class CanvasTemplate(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     kind: Mapped[str] = mapped_column(String(40), default="full_canvas")
+    entry_mode: Mapped[str] = mapped_column(String(20), default="image")
+    sort_order: Mapped[int] = mapped_column(Integer, default=100)
     schema_version: Mapped[int] = mapped_column(Integer, default=1)
     template_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -543,6 +556,10 @@ class ProductWorkflow(Base, TimestampMixin):
 
     __tablename__ = "product_workflows"
     __table_args__ = (
+        CheckConstraint(
+            "initial_entry_mode IN ('image', 'copy', 'tail', 'blank')",
+            name="ck_product_workflows_initial_entry_mode",
+        ),
         Index(
             "uq_product_workflows_one_active_per_product",
             "product_id",
@@ -550,12 +567,14 @@ class ProductWorkflow(Base, TimestampMixin):
             postgresql_where=text("active = true"),
             sqlite_where=text("active = 1"),
         ),
+        Index("ix_product_workflows_initial_entry_mode", "initial_entry_mode"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(255), default="商品创意工作流")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    initial_entry_mode: Mapped[str] = mapped_column(String(20), default="image")
 
     product: Mapped[Product] = relationship(back_populates="workflows")
     nodes: Mapped[list[WorkflowNode]] = relationship(

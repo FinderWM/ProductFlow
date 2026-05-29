@@ -27,6 +27,7 @@ from productflow_backend.infrastructure.db.models import (
     ImageSessionAsset,
     ImageSessionGenerationTask,
     PosterVariant,
+    ProductWorkflow,
     SourceAsset,
     UserCanvasTemplate,
     WorkflowNode,
@@ -145,6 +146,9 @@ def test_canvas_template_models_match_migration_contract() -> None:
     assert template_table.c.owner_user_id.nullable
     assert template_table.c.category_id.nullable
     assert template_table.c.kind.type.length == 40
+    assert template_table.c.entry_mode.type.length == 20
+    assert not template_table.c.entry_mode.nullable
+    assert not template_table.c.sort_order.nullable
     assert not template_table.c.template_json.nullable
     assert not template_table.c.enabled.nullable
     assert template_table.c.archived_at.nullable
@@ -155,9 +159,17 @@ def test_canvas_template_models_match_migration_contract() -> None:
         "ix_canvas_templates_archived_at",
         "ix_canvas_templates_category_id",
         "ix_canvas_templates_enabled",
+        "ix_canvas_templates_entry_mode",
         "ix_canvas_templates_scope",
+        "ix_canvas_templates_scope_owner_entry_category_sort",
+        "ix_canvas_templates_sort_order",
         "uq_canvas_templates_key",
     }
+
+    workflow_table = ProductWorkflow.__table__
+    assert workflow_table.c.initial_entry_mode.type.length == 20
+    assert not workflow_table.c.initial_entry_mode.nullable
+    assert "ix_product_workflows_initial_entry_mode" in {index.name for index in workflow_table.indexes}
 
 
 def test_alembic_upgrade_head_supports_sqlite(tmp_path: Path, monkeypatch) -> None:

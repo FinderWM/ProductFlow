@@ -11,6 +11,8 @@ const builtInTemplate: CanvasTemplateSummary = {
   key: "ecommerce-main-image-v1",
   version: 1,
   kind: "full_canvas",
+  entry_mode: "image",
+  sort_order: 100,
   title: "电商主图",
   description: "生成商品首图，突出主体、利益点和清晰构图。",
   source: "builtin",

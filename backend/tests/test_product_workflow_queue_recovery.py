@@ -466,6 +466,7 @@ def test_workflow_run_retry_creates_new_run_from_failed_run_without_duplicate_ac
         "last_failure_reason": "图片生成失败，请稍后重试",
         "last_failure_retryable": True,
         "retry_hint": "retry_later",
+        "run_mode": "full",
         "source_run_id": failed_run_id,
         "manual_retry": True,
     }

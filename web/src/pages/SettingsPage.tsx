@@ -11,6 +11,7 @@ import {
   Image,
   KeyRound,
   Link2,
+  Layers3,
   Pencil,
   Plus,
   Loader2,
@@ -61,6 +62,7 @@ export type SettingsSectionId =
   | "prompts"
   | "upload"
   | "queue"
+  | "globalTemplates"
   | "security"
   | "migration";
 
@@ -198,6 +200,13 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: SettingsIcon,
   },
   {
+    id: "globalTemplates",
+    labelKey: "settings.section.globalTemplates",
+    descriptionKey: "settings.section.globalTemplatesDescription",
+    groupKey: "settings.groupWorkflow",
+    icon: Layers3,
+  },
+  {
     id: "security",
     labelKey: "settings.section.security",
     descriptionKey: "settings.section.securityDescription",
@@ -221,6 +230,10 @@ export function settingsSectionIds(): SettingsSectionId[] {
 
 export function shouldShowSettingsMigrationPanel(section: SettingsSectionId): boolean {
   return section === "migration";
+}
+
+export function shouldShowGlobalTemplatesPanel(section: SettingsSectionId): boolean {
+  return section === "globalTemplates";
 }
 
 const PROVIDER_CAPABILITY_OPTIONS: Array<{ value: ProviderCapability; labelKey: TranslationKey }> = [
@@ -2667,6 +2680,26 @@ export function SettingsPage() {
                         setImportFileName("");
                       }}
                     />
+                  ) : null}
+                  {shouldShowGlobalTemplatesPanel(activeSection) ? (
+                    <div className={`${PANEL_CLASS} flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between`}>
+                      <div>
+                        <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+                          {t("settings.section.globalTemplates")}
+                        </h2>
+                        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+                          {t("settings.section.globalTemplatesDescription")}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => navigate("/settings/global-templates")}
+                        className={SETTINGS_MAIN_ACTION_CLASS}
+                      >
+                        <Layers3 size={14} className="mr-2" />
+                        {t("nav.globalTemplates")}
+                      </button>
+                    </div>
                   ) : null}
                   {error ? (
                     <div className="mb-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">

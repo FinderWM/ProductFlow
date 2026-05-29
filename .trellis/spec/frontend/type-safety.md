@@ -93,20 +93,29 @@ multipart boundary.
 - API method: `api.createProduct(input: CreateProductInput): Promise<ProductDetail>`.
 - Multipart fields currently mirrored from the backend:
   - `name: string`
-  - `file: File` -> form field `image`
+  - `file?: File` -> form field `image`
   - `referenceFiles?: File[]` -> repeated form field `reference_images`
   - `category?: string`
   - `price?: string`
   - `source_note?: string`
   - `canvas_template_key?: string`
+  - `initial_workflow_entry?: "image" | "copy" | "tail" | "blank"`
+  - `entry_text?: string`
 
 #### 3. Contracts
 
 - Keep backend field names in the DTO for optional form values such as `source_note` and `canvas_template_key`.
+- Keep `initial_workflow_entry` and `entry_text` in backend snake_case. Do not rename them to
+  `initialWorkflowEntry` or `entryText` in the shared DTO.
+- `image` entry requires a main image before submit. `copy` and `tail` entries require `entry_text`. `blank` requires
+  neither image nor `entry_text`.
 - `canvas_template_key` is the backend-recognized key. UI labels should be merchant-facing output plans, but the submitted
   value remains the key.
-- Blank/default product-creation plans may submit an empty string or omit `canvas_template_key`; the backend owns default
-  alias handling.
+- Blank/default product-creation plans may submit an empty string or omit `canvas_template_key`; this is independent from
+  `initial_workflow_entry="blank"`.
+- When `initial_workflow_entry="blank"` and a backend template is selected, the backend may initialize from any non-blank
+  template but must persist the workflow source as blank. The frontend must not infer later template-save eligibility from
+  selected template type.
 - Product creation large previews for backend-recognized built-in plans must mirror the backend `full_canvas` template
   layout for the same key. When changing preview node titles, edges, or coordinates, update the backend template and
   backend regression tests in the same change.
@@ -116,17 +125,22 @@ multipart boundary.
 
 #### 4. Validation & Error Matrix
 
-- Missing `file` is handled by the page before calling the API and should produce the existing `请先上传商品图` message.
-- Invalid/unknown `canvas_template_key` is backend validation and surfaces through `ApiError.detail`.
+- Missing `file` for `image` entry is handled by the page before calling the API.
+- Missing `entry_text` for `copy` or `tail` entry is handled by the page before calling the API.
+- Invalid/unknown `canvas_template_key`, unknown `initial_workflow_entry`, or mismatched template entry is backend
+  validation and surfaces through `ApiError.detail`.
 - Upload MIME/size errors are backend upload-validation errors and surface through the same `ApiError.detail` path.
 
 #### 5. Good/Base/Bad Cases
 
 - Good: `ProductCreatePage` stores a selected plan key in component state, displays merchant-facing labels, and passes
-  `canvas_template_key` into `api.createProduct`.
-- Base: a blank/basic option can use `""` while still sharing the typed DTO.
+  `canvas_template_key` plus `initial_workflow_entry` into `api.createProduct`.
+- Good: `copy` entry submits `{ initial_workflow_entry: "copy", entry_text }` without `file`.
+- Good: `blank` entry can submit no `file` and no `entry_text`, and may still pass a non-empty `canvas_template_key`.
+- Base: a no-template/basic option can use `""` while still sharing the typed DTO.
 - Bad: `ProductCreatePage` creates `FormData` directly and bypasses the typed API helper.
 - Bad: frontend renames `canvas_template_key` to `canvasTemplateKey` without an explicit mapping layer.
+- Bad: treating `canvas_template_key="blank"` as equivalent to `initial_workflow_entry="blank"`.
 
 #### 6. Tests Required
 

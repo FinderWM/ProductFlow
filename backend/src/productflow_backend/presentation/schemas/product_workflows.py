@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from productflow_backend.application.canvas_templates import (
     CanvasTemplate,
+    CanvasTemplateEntryMode,
     CanvasTemplateScenario,
     TemplateKind,
 )
@@ -147,6 +148,7 @@ class ProductWorkflowResponse(BaseModel):
     product_id: str
     title: str
     active: bool
+    initial_entry_mode: str
     nodes: list[WorkflowNodeResponse]
     edges: list[WorkflowEdgeResponse]
     runs: list[WorkflowRunResponse]
@@ -159,6 +161,7 @@ class ProductWorkflowStatusResponse(BaseModel):
     product_id: str
     title: str
     active: bool
+    initial_entry_mode: str
     has_active_workflow: bool
     nodes: list[WorkflowNodeStatusResponse]
     runs: list[WorkflowRunStatusResponse]
@@ -219,6 +222,8 @@ class CanvasTemplateSummaryResponse(BaseModel):
     template_id: str | None = None
     version: int
     kind: TemplateKind
+    entry_mode: CanvasTemplateEntryMode
+    sort_order: int
     title: str
     description: str
     source: str
@@ -277,6 +282,8 @@ class CreateGlobalCanvasTemplateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=4000)
     kind: TemplateKind
+    entry_mode: CanvasTemplateEntryMode = "image"
+    sort_order: int = 100
     category_id: str | None = None
     template_json: dict[str, Any] = Field(default_factory=dict)
 
@@ -285,6 +292,8 @@ class UpdateGlobalCanvasTemplateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=4000)
     kind: TemplateKind | None = None
+    entry_mode: CanvasTemplateEntryMode | None = None
+    sort_order: int | None = None
     category_id: str | None = None
     template_json: dict[str, Any] | None = None
 
@@ -341,9 +350,27 @@ class CreateUserTemplateGroupRequest(BaseModel):
     category_id: str | None = None
 
 
+class CreateUserCanvasTemplateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+    category_id: str = Field(min_length=1, max_length=36)
+    retain_prompt_text: bool = True
+    sort_order: int = 100
+
+
 class UpdateUserTemplateGroupRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=1000)
+    category_id: str | None = None
+    sort_order: int | None = None
+    enabled: bool | None = None
+
+
+class CopyUserTemplateToGlobalRequest(BaseModel):
+    category_id: str = Field(min_length=1, max_length=36)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+    sort_order: int | None = None
 
 
 class RunWorkflowRequest(BaseModel):
@@ -574,6 +601,7 @@ def serialize_product_workflow(workflow: ProductWorkflow) -> ProductWorkflowResp
         product_id=workflow.product_id,
         title=workflow.title,
         active=workflow.active,
+        initial_entry_mode=workflow.initial_entry_mode,
         nodes=[serialize_workflow_node(item, node_context_runs) for item in nodes],
         edges=[serialize_workflow_edge(item) for item in edges],
         runs=[serialize_workflow_run(item) for item in runs],
@@ -588,6 +616,8 @@ def serialize_canvas_template_summary(template: CanvasTemplate) -> CanvasTemplat
         template_id=template.template_id,
         version=template.version,
         kind=template.kind,
+        entry_mode=template.entry_mode,
+        sort_order=template.sort_order,
         title=template.title,
         description=template.description,
         source=template.source,
@@ -694,6 +724,7 @@ def serialize_product_workflow_status(snapshot: ProductWorkflowStatusSnapshot) -
         product_id=workflow.product_id,
         title=workflow.title,
         active=workflow.active,
+        initial_entry_mode=workflow.initial_entry_mode,
         has_active_workflow=any(WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_active(item.status) for item in snapshot.runs)
         or any(
             WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_queued(item.status)

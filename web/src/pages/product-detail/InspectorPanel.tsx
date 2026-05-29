@@ -87,6 +87,10 @@ const REFERENCE_ROLE_OPTIONS: Array<{ value: string; labelKey: TranslationKey }>
   { value: "background", labelKey: "detail.referenceRole.background" },
 ];
 
+function referenceRolePresetValue(role: string): string {
+  return REFERENCE_ROLE_OPTIONS.some((option) => option.value === role) ? role : "__custom__";
+}
+
 function generationConfigOptionLabel(config: GenerationConfigOption, t: TFunction): string {
   const markers = [
     !config.enabled ? t("detail.inspector.generationConfigDisabled") : "",
@@ -556,6 +560,39 @@ function ReferenceImageInspector({
       ) : null}
       <label className="block">
         <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+          {t("detail.inspector.role")}
+        </span>
+        <div className="space-y-2">
+          <SelectField
+            value={referenceRolePresetValue(draft.role)}
+            options={[
+              ...REFERENCE_ROLE_OPTIONS.map((option) => ({
+                value: option.value,
+                label: t(option.labelKey),
+              })),
+              { value: "__custom__", label: t("detail.referenceRole.custom") },
+            ]}
+            onChange={(nextValue) =>
+              onDraftChange({
+                ...draft,
+                role: nextValue === "__custom__" ? "" : nextValue,
+              })
+            }
+            radius="lg"
+            visualSize="sm"
+          />
+          <input
+            value={draft.role}
+            onChange={(event) =>
+              onDraftChange({ ...draft, role: event.target.value })
+            }
+            className="w-full px-3 py-2 text-xs outline-none input-premium"
+            placeholder={t("detail.referenceRole.customPlaceholder")}
+          />
+        </div>
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
           {t("detail.inspector.label")}
         </span>
         <input
@@ -564,21 +601,7 @@ function ReferenceImageInspector({
             onDraftChange({ ...draft, label: event.target.value })
           }
           className="w-full px-3 py-2 text-xs outline-none input-premium"
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-          {t("detail.inspector.role")}
-        </span>
-        <SelectField
-          value={draft.role}
-          options={REFERENCE_ROLE_OPTIONS.map((option) => ({
-            value: option.value,
-            label: t(option.labelKey),
-          }))}
-          onChange={(nextValue) => onDraftChange({ ...draft, role: nextValue })}
-          radius="lg"
-          visualSize="sm"
+          placeholder={t("detail.inspector.labelCompatPlaceholder")}
         />
       </label>
       <ImageDropZone

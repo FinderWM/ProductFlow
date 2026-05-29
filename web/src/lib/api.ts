@@ -7,10 +7,15 @@ import type {
   CanvasTemplateListResponse,
   ConfigResponse,
   ConfigUpdateRequest,
+  CreateCanvasTemplateCategoryInput,
+  CreateGlobalCanvasTemplateInput,
   CopySet,
   CopySetUpdateRequest,
+  CopyUserTemplateToGlobalInput,
+  CreateProductInput,
   CreateRoleRequest,
   CreateTrustedUserRequest,
+  CreateUserCanvasTemplateInput,
   DuplicateWorkflowNodeGroupInput,
   GalleryEntry,
   GalleryEntryListResponse,
@@ -22,13 +27,13 @@ import type {
   GenerationConfigUpdateRequest,
   GenerationQueueOverview,
   CreateUserTemplateGroupInput,
-  CreateProductInput,
   ImageSessionDetail,
   ImageSessionListResponse,
   ImageSessionStatus,
   ImageToolOptions,
   ProductDetail,
   ProductHistory,
+  ProductInitialWorkflowEntry,
   ProviderBinding,
   ProviderBindingUpdateRequest,
   ProviderConfigResponse,
@@ -49,6 +54,8 @@ import type {
   SettingsImportCommitResponse,
   SettingsImportPreviewResponse,
   SessionState,
+  UpdateCanvasTemplateCategoryInput,
+  UpdateGlobalCanvasTemplateInput,
   UpdateUserTemplateGroupInput,
   UserUsageStatsResponse,
 } from "./types";
@@ -340,6 +347,9 @@ export const api = {
     if (input.initial_workflow_entry !== undefined) {
       formData.set("initial_workflow_entry", input.initial_workflow_entry);
     }
+    if (input.entry_text) {
+      formData.set("entry_text", input.entry_text);
+    }
     return request("/api/products", {
       method: "POST",
       body: formData,
@@ -468,6 +478,7 @@ export const api = {
     search?: string;
     category_id?: string;
     scope?: CanvasTemplateScope;
+    initial_workflow_entry?: ProductInitialWorkflowEntry;
   }): Promise<CanvasTemplateListResponse> {
     const params = new URLSearchParams();
     if (input?.search) {
@@ -478,6 +489,9 @@ export const api = {
     }
     if (input?.scope) {
       params.set("scope", input.scope);
+    }
+    if (input?.initial_workflow_entry) {
+      params.set("initial_workflow_entry", input.initial_workflow_entry);
     }
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/workflow/canvas-templates${suffix}`);
@@ -495,6 +509,53 @@ export const api = {
     }
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/workflow/canvas-template-categories${suffix}`);
+  },
+  createCanvasTemplateCategory(scope: CanvasTemplateScope, input: CreateCanvasTemplateCategoryInput) {
+    return request<CanvasTemplateCategoryListResponse["items"][number]>(
+      `/api/workflow/${scope === "global" ? "global" : "user"}-template-categories`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  updateCanvasTemplateCategory(
+    scope: CanvasTemplateScope,
+    categoryId: string,
+    input: UpdateCanvasTemplateCategoryInput,
+  ) {
+    return request<CanvasTemplateCategoryListResponse["items"][number]>(
+      `/api/workflow/${scope === "global" ? "global" : "user"}-template-categories/${encodeURIComponent(categoryId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      },
+    );
+  },
+  archiveCanvasTemplateCategory(scope: CanvasTemplateScope, categoryId: string): Promise<void> {
+    return request(
+      `/api/workflow/${scope === "global" ? "global" : "user"}-template-categories/${encodeURIComponent(categoryId)}`,
+      {
+        method: "DELETE",
+      },
+    );
+  },
+  createGlobalCanvasTemplate(input: CreateGlobalCanvasTemplateInput): Promise<CanvasTemplateSummary> {
+    return request("/api/workflow/global-canvas-templates", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updateGlobalCanvasTemplate(templateId: string, input: UpdateGlobalCanvasTemplateInput): Promise<CanvasTemplateSummary> {
+    return request(`/api/workflow/global-canvas-templates/${encodeURIComponent(templateId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  archiveGlobalCanvasTemplate(templateId: string): Promise<void> {
+    return request(`/api/workflow/global-canvas-templates/${encodeURIComponent(templateId)}`, {
+      method: "DELETE",
+    });
   },
   applyWorkflowTemplateGroup(productId: string, input: ApplyWorkflowTemplateGroupInput): Promise<ProductWorkflow> {
     return request(`/api/products/${productId}/workflow/template-groups`, {
@@ -517,9 +578,27 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  createUserCanvasTemplate(
+    productId: string,
+    input: CreateUserCanvasTemplateInput,
+  ): Promise<CanvasTemplateSummary> {
+    return request(`/api/products/${productId}/workflow/user-canvas-templates`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
   updateUserTemplateGroup(templateId: string, input: UpdateUserTemplateGroupInput): Promise<CanvasTemplateSummary> {
     return request(`/api/workflow/user-template-groups/${templateId}`, {
       method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  copyUserTemplateToGlobal(
+    templateId: string,
+    input: CopyUserTemplateToGlobalInput,
+  ): Promise<CanvasTemplateSummary> {
+    return request(`/api/workflow/user-template-groups/${templateId}/copy-to-global`, {
+      method: "POST",
       body: JSON.stringify(input),
     });
   },

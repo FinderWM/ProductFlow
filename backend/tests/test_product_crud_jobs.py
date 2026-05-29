@@ -100,7 +100,7 @@ def test_default_product_create_preserves_lazy_workflow_behavior(configured_env:
     workflow = workflow_response.json()
     assert len(workflow["nodes"]) == 4
     assert len(workflow["edges"]) == 4
-    assert {node["title"] for node in workflow["nodes"]} == {"商品", "文案", "生图", "参考图"}
+    assert {node["title"] for node in workflow["nodes"]} == {"灵感", "文案", "生图", "参考图"}
 
     default_key = client.post(
         "/api/products",
@@ -131,6 +131,7 @@ def test_product_create_materializes_full_canvas_template(configured_env: Path, 
     db_session.expire_all()
     workflow = db_session.query(ProductWorkflow).filter_by(product_id=product_id, active=True).one()
     assert workflow.title == template.title
+    assert workflow.initial_entry_mode == "image"
 
     nodes = db_session.query(WorkflowNode).filter_by(workflow_id=workflow.id).all()
     edges = db_session.query(WorkflowEdge).filter_by(workflow_id=workflow.id).all()
@@ -197,6 +198,53 @@ def test_product_create_rejects_invalid_canvas_template_key(configured_env: Path
 
     assert response.status_code == 400
     assert "画布模板不存在" in response.json()["detail"]
+
+
+def test_product_create_filters_canvas_template_by_entry_mode(configured_env: Path, db_session) -> None:
+    from productflow_backend.application.product_workflow.user_templates import create_global_canvas_template
+    from productflow_backend.presentation.api import create_app
+
+    template = get_builtin_canvas_template("ecommerce-main-image-v1").model_copy(update={"entry_mode": "copy"})
+    create_global_canvas_template(
+        db_session,
+        key="copy-entry-global-template",
+        title="文案入口模板",
+        description="只允许文案入口使用",
+        kind="full_canvas",
+        entry_mode="copy",
+        template_json=template.model_dump(mode="json"),
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    rejected = client.post(
+        "/api/products",
+        data={
+            "name": "入口不匹配",
+            "canvas_template_key": "copy-entry-global-template",
+            "initial_workflow_entry": "image",
+        },
+        files={"image": ("entry.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "画布模板入口类型与开始方式不匹配"
+
+    accepted = client.post(
+        "/api/products",
+        data={
+            "name": "文案入口模板",
+            "canvas_template_key": "copy-entry-global-template",
+            "initial_workflow_entry": "copy",
+            "entry_text": "这是一段用于文案入口的起始内容",
+        },
+        files={"image": ("entry-copy.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert accepted.status_code == 201
+    db_session.expire_all()
+    workflow = db_session.query(ProductWorkflow).filter_by(product_id=accepted.json()["id"], active=True).one()
+    assert workflow.initial_entry_mode == "copy"
 
 
 def test_product_create_accepts_broad_builtin_canvas_template_key(configured_env: Path, db_session) -> None:

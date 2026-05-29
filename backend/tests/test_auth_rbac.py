@@ -349,7 +349,11 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
 
     created_product = user_client.post(
         "/api/products",
-        data={"name": "Tail RBAC 商品", "initial_workflow_entry": "tail"},
+        data={
+            "name": "Tail RBAC 商品",
+            "initial_workflow_entry": "tail",
+            "entry_text": "免安装、收纳整洁、细节材质、不同场景摆放。",
+        },
     )
     assert created_product.status_code == 201
     product_id = created_product.json()["id"]

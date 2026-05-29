@@ -1391,20 +1391,29 @@ with op.batch_alter_table("products") as batch_op:
   - `owner_user_id: str | null`
   - `category_id -> canvas_template_categories.id | null`
   - `title`, `description`, `kind`, `schema_version`, `template_json`
+  - `entry_mode: "image" | "copy" | "tail"`
+  - `sort_order: int`
   - `enabled`, `archived_at`, `disabled_at`, `disabled_by_user_id`, `disabled_reason`
+- DB table: `product_workflows`
+  - `initial_entry_mode: "image" | "copy" | "tail" | "blank"`
+  - Records the workflow creation entry. This is not derived from current nodes, because a blank workflow can later add
+    image/copy/tail nodes but still must not be saved as a personal full-canvas template.
 - Bootstrap:
   - `ensure_canvas_templates_bootstrapped(session=None) -> None`
   - Seeds built-in templates into `canvas_templates(scope="global")`.
-  - Mirrors legacy `user_canvas_templates` rows into `canvas_templates(scope="user")` with `libow` owner.
+  - Seeds existing built-in full-canvas templates with `entry_mode="image"`.
+  - Mirrors legacy `user_canvas_templates` rows into `canvas_templates(scope="user", entry_mode="image")` with `libow`
+    owner.
 - Read APIs:
   - `GET /api/workflow/canvas-template-categories`
-  - `GET /api/workflow/canvas-templates?search=&category_id=&scope=`
+  - `GET /api/workflow/canvas-templates?search=&category_id=&scope=&initial_workflow_entry=`
 - Personal write APIs:
   - `POST /api/workflow/user-template-categories`
   - `PATCH /api/workflow/user-template-categories/{category_id}`
   - `DELETE /api/workflow/user-template-categories/{category_id}`
   - `POST /api/workflow/user-template-categories/{category_id}/restore`
   - `POST /api/products/{product_id}/workflow/user-template-groups`
+  - `POST /api/products/{product_id}/workflow/user-canvas-templates`
   - `PATCH /api/workflow/user-template-groups/{template_id}`
   - `DELETE /api/workflow/user-template-groups/{template_id}`
   - `POST /api/workflow/user-template-groups/{template_id}/restore`
@@ -1417,6 +1426,7 @@ with op.batch_alter_table("products") as batch_op:
   - `PATCH /api/workflow/global-canvas-templates/{template_id}`
   - `DELETE /api/workflow/global-canvas-templates/{template_id}`
   - `POST /api/workflow/global-canvas-templates/{template_id}/restore`
+  - `POST /api/workflow/user-template-groups/{template_id}/copy-to-global`
 
 ### 3. Contracts
 
@@ -1424,12 +1434,24 @@ with op.batch_alter_table("products") as batch_op:
   after bootstrap.
 - Built-in rows are seeded once by `key`; bootstrap must be idempotent and must not overwrite operator-managed database
   rows with the same key.
+- `canvas_templates.entry_mode` is a single entry type, not an array. Full-canvas templates may be selected only by a
+  matching product creation entry, except `initial_workflow_entry=blank`, which may initialize from any non-blank template.
+- `GET /api/workflow/canvas-templates?initial_workflow_entry=image|copy|tail` returns templates with matching
+  `entry_mode`. `initial_workflow_entry=blank` returns all non-blank template entry modes.
 - `canvas_templates.template_json` stores the existing `CanvasTemplate` payload contract for global templates and
   converted personal templates. The schema must keep `full_canvas` and `node_group` compatible with template
   materialization.
 - `user_canvas_templates` is compatibility storage only. New personal template queries and application paths read
   `canvas_templates`; new personal template writes mirror a legacy row so old tests/tools that inspect the old table keep
   working during the migration window.
+- Saving a personal full-canvas template uses `product_workflows.initial_entry_mode` as the new template `entry_mode`.
+  `initial_entry_mode="blank"` must fail even if the graph now contains non-blank nodes.
+- Saving a personal full-canvas template from a graph with no `tail_splitter` copies all current nodes and internal edges.
+  If any `tail_splitter` exists, save only the tail node and its ancestors; downstream AI-expanded image branches are
+  intentionally excluded.
+- Reusable template configs must strip artifact-specific ids, URLs, paths, outputs, generated asset fields, and real image
+  carriers. Copy/image prompt text is retained only when the caller sets `retain_prompt_text=true`; tail source text is
+  always cleared.
 - Ordinary users read enabled global templates plus their own personal templates. Admin users read all active templates
   and categories.
 - Personal category/template writes are owner scoped. Admin users can view another user's personal templates but must not
@@ -1451,19 +1473,32 @@ with op.batch_alter_table("products") as batch_op:
 - Template or category disabled -> use/create/apply path returns `400`, `资源已被管理员屏蔽，暂不可使用`.
 - Duplicate category name in the same uniqueness scope -> `400`, `画布模板分类已存在`.
 - Duplicate global template key -> `400`, `画布模板 key 已存在`.
+- Product creation with a non-blank entry and mismatched template entry -> `400`, `画布模板入口类型与开始方式不匹配`.
+- Product creation with unknown `initial_workflow_entry` -> `400`, `初始工作台入口不支持`.
+- Saving a personal full-canvas template from a blank-entry workflow -> `400`, `空白入口画布不能保存为模板`.
+- Copying a personal template to global without a global category -> `400`, `画布模板分类不存在`.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `GET /api/workflow/canvas-templates?search=淘宝&scope=global` returns the seeded Taobao built-in template from
   `canvas_templates`.
+- Good: `GET /api/workflow/canvas-templates?initial_workflow_entry=blank` returns `image`, `copy`, and `tail` templates
+  for blank-canvas initialization, while the created workflow still persists `initial_entry_mode="blank"`.
 - Good: a user saves selected workflow nodes, sees that personal template under `scope=user`, then applies it through the
   normal template materialization path.
+- Good: a user saves the active non-blank workflow as a personal full-canvas template; if a tail node exists, only the
+  tail node and its ancestors are persisted in the template.
 - Good: an admin creates a global category and a global `full_canvas` template from a valid `CanvasTemplate` payload; a
   regular user can read and use it without RBAC management permission.
+- Good: an admin copies a user's personal full-canvas template into a global category; the copied global row keeps the
+  source template `entry_mode`.
 - Base: old `user_canvas_templates` rows are mirrored to user-scoped `canvas_templates` owned by `libow` during bootstrap.
 - Bad: calling `list_builtin_canvas_templates()` directly from route catalog handlers after database tables exist.
 - Bad: applying a template without checking its category effective availability.
 - Bad: allowing admin users to edit another user's personal node-group template.
+- Bad: deciding template-save eligibility by current node types instead of the persisted `initial_entry_mode`.
+- Bad: saving tail-generated downstream branches into a reusable template; those branches depend on a previous AI split
+  result and are not deterministic template structure.
 
 ### 6. Tests Required
 
@@ -1477,6 +1512,10 @@ with op.batch_alter_table("products") as batch_op:
   applied.
 - Migration/model test proving `canvas_templates` and `canvas_template_categories` expose owner, enabled, archived, and
   moderation fields.
+- Migration/model test proving `product_workflows.initial_entry_mode`, `canvas_templates.entry_mode`, and
+  `canvas_templates.sort_order` exist with check constraints and indexes.
+- API tests for entry-mode template filtering, blank entry template initialization, mismatched entry rejection, blank
+  workflow save rejection, tail-node ancestor-only save, artifact stripping, and user-template copy-to-global.
 - Frontend build must pass when `CanvasTemplateSummary` response fields change.
 
 ### 7. Wrong vs Correct

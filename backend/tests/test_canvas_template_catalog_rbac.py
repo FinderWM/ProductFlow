@@ -87,6 +87,45 @@ def test_builtin_templates_seed_to_database_and_support_search_category_filter(c
         "ecommerce-taobao-main-image-v1",
     }
     assert {item["category_id"] for item in payload["items"]} == {builtin_category["id"]}
+    assert {item["entry_mode"] for item in payload["items"]} == {"image"}
+
+
+def test_canvas_template_catalog_filters_by_initial_entry_mode(configured_env: Path) -> None:
+    from productflow_backend.application.product_workflow.user_templates import create_global_canvas_template
+    from productflow_backend.infrastructure.db.session import get_session_factory
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+    session = get_session_factory()()
+    try:
+        template = get_builtin_canvas_template("ecommerce-main-image-v1").model_copy(update={"entry_mode": "copy"})
+        create_global_canvas_template(
+            session,
+            key="copy-entry-catalog-template",
+            title="文案入口目录模板",
+            description="目录过滤用",
+            kind="full_canvas",
+            entry_mode="copy",
+            template_json=template.model_dump(mode="json"),
+        )
+    finally:
+        session.close()
+
+    image_templates = admin_client.get("/api/workflow/canvas-templates", params={"initial_workflow_entry": "image"})
+    assert image_templates.status_code == 200
+    assert "copy-entry-catalog-template" not in {item["key"] for item in image_templates.json()["items"]}
+
+    copy_templates = admin_client.get("/api/workflow/canvas-templates", params={"initial_workflow_entry": "copy"})
+    assert copy_templates.status_code == 200
+    assert {item["key"] for item in copy_templates.json()["items"]} == {"copy-entry-catalog-template"}
+
+    blank_templates = admin_client.get("/api/workflow/canvas-templates", params={"initial_workflow_entry": "blank"})
+    assert blank_templates.status_code == 200
+    payload = blank_templates.json()["items"]
+    assert "copy-entry-catalog-template" in {item["key"] for item in payload}
+    assert {item["entry_mode"] for item in payload} >= {"image", "copy"}
 
 
 def test_user_template_categories_and_templates_are_owner_scoped(configured_env: Path) -> None:
@@ -194,6 +233,8 @@ def test_global_template_management_requires_rbac_and_archives_restore(configure
             "title": "运营主图模板",
             "description": "运营维护的全局模板",
             "kind": "full_canvas",
+            "entry_mode": "image",
+            "sort_order": 9,
             "category_id": category.json()["id"],
             "template_json": builtin.model_dump(mode="json"),
         },
@@ -214,6 +255,7 @@ def test_global_template_management_requires_rbac_and_archives_restore(configure
     restored = admin_client.post(f"/api/workflow/global-canvas-templates/{template_id}/restore")
     assert restored.status_code == 200
     assert restored.json()["key"] == "custom-global-main-v1"
+    assert restored.json()["sort_order"] == 9
 
 
 def test_disabled_template_category_cannot_be_reused(configured_env: Path) -> None:

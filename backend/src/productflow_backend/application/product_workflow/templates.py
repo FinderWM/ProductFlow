@@ -12,12 +12,14 @@ from productflow_backend.infrastructure.db.models import Product, ProductWorkflo
 
 DEFAULT_PRODUCT_CREATION_CANVAS_TEMPLATE_KEYS = frozenset({"", "default", "basic", "blank", "minimal"})
 TEMPLATE_METADATA_CONFIG_KEY = "_canvas_template"
+InitialWorkflowEntry = str
 
 
 def resolve_product_creation_canvas_template(
     session: Session,
     canvas_template_key: str | None,
     *,
+    initial_workflow_entry: InitialWorkflowEntry = "image",
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
 ) -> CanvasTemplate | None:
@@ -33,6 +35,8 @@ def resolve_product_creation_canvas_template(
     )
     if template.kind != "full_canvas":
         raise BusinessValidationError("商品创建只支持完整画布模板，节点组模板请在画布内添加")
+    if initial_workflow_entry != "blank" and template.entry_mode != initial_workflow_entry:
+        raise BusinessValidationError("画布模板入口类型与开始方式不匹配")
     return template
 
 
@@ -41,6 +45,7 @@ def materialize_product_workflow_from_template(
     *,
     product_id: str,
     template: CanvasTemplate,
+    initial_entry_mode: InitialWorkflowEntry = "image",
 ) -> ProductWorkflow:
     validate_canvas_template(template)
     if template.kind != "full_canvas":
@@ -63,6 +68,7 @@ def materialize_product_workflow_from_template(
         product_id=product_id,
         title=template.title,
         active=True,
+        initial_entry_mode=initial_entry_mode,
     )
     session.add(workflow)
     session.flush()

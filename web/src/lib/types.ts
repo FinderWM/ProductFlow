@@ -11,8 +11,9 @@ export type WorkflowNodeType =
   | "copy_generation"
   | "image_generation"
   | "tail_splitter";
-export type CanvasTemplateWorkflowNodeType = Exclude<WorkflowNodeType, "tail_splitter">;
-export type ProductInitialWorkflowEntry = "image" | "copy" | "tail";
+export type CanvasTemplateWorkflowNodeType = WorkflowNodeType;
+export type ProductInitialWorkflowEntry = "image" | "copy" | "tail" | "blank";
+export type CanvasTemplateEntryMode = Exclude<ProductInitialWorkflowEntry, "blank">;
 export type WorkflowNodeStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type WorkflowNodeRunStatusValue = WorkflowNodeStatus;
 export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "cancelled";
@@ -284,6 +285,7 @@ export interface CreateProductInput {
   source_note?: string;
   canvas_template_key?: string;
   initial_workflow_entry?: ProductInitialWorkflowEntry;
+  entry_text?: string;
   file?: File;
   referenceFiles?: File[];
 }
@@ -433,6 +435,7 @@ export interface ProductWorkflow {
   product_id: string;
   title: string;
   active: boolean;
+  initial_entry_mode?: ProductInitialWorkflowEntry;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   runs: WorkflowRun[];
@@ -445,6 +448,7 @@ export interface ProductWorkflowStatus {
   product_id: string;
   title: string;
   active: boolean;
+  initial_entry_mode?: ProductInitialWorkflowEntry;
   has_active_workflow: boolean;
   nodes: WorkflowNodeStatusSummary[];
   runs: WorkflowRunStatusSummary[];
@@ -505,6 +509,8 @@ export interface CanvasTemplateSummary {
   template_id?: string | null;
   version: number;
   kind: CanvasTemplateKind;
+  entry_mode: CanvasTemplateEntryMode;
+  sort_order: number;
   title: string;
   description: string;
   source: "builtin" | "user";
@@ -548,6 +554,37 @@ export interface CanvasTemplateCategoryListResponse {
   items: CanvasTemplateCategory[];
 }
 
+export interface CreateCanvasTemplateCategoryInput {
+  name: string;
+  sort_order?: number;
+}
+
+export interface UpdateCanvasTemplateCategoryInput {
+  name?: string;
+  sort_order?: number;
+}
+
+export interface CreateGlobalCanvasTemplateInput {
+  key: string;
+  title: string;
+  description?: string;
+  kind: CanvasTemplateKind;
+  entry_mode?: CanvasTemplateEntryMode;
+  sort_order?: number;
+  category_id?: string | null;
+  template_json?: Record<string, unknown>;
+}
+
+export interface UpdateGlobalCanvasTemplateInput {
+  title?: string;
+  description?: string;
+  kind?: CanvasTemplateKind;
+  entry_mode?: CanvasTemplateEntryMode;
+  sort_order?: number;
+  category_id?: string | null;
+  template_json?: Record<string, unknown>;
+}
+
 export interface ApplyWorkflowTemplateGroupInput {
   template_key: string;
   position_x: number;
@@ -565,11 +602,30 @@ export interface CreateUserTemplateGroupInput {
   title: string;
   description?: string;
   node_ids: string[];
+  category_id?: string | null;
+}
+
+export interface CreateUserCanvasTemplateInput {
+  title: string;
+  description?: string;
+  category_id: string;
+  retain_prompt_text?: boolean;
+  sort_order?: number;
 }
 
 export interface UpdateUserTemplateGroupInput {
   title?: string;
   description?: string;
+  category_id?: string | null;
+  sort_order?: number;
+  enabled?: boolean;
+}
+
+export interface CopyUserTemplateToGlobalInput {
+  category_id: string;
+  title?: string;
+  description?: string;
+  sort_order?: number;
 }
 
 export interface CopySetUpdateRequest {

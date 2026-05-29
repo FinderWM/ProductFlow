@@ -6,15 +6,17 @@ from sqlalchemy.orm import Session
 
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.product_workflows import (
-    apply_tail_split_plan,
     apply_node_group_template_to_workflow,
+    apply_tail_split_plan,
     archive_canvas_template_category,
     archive_global_canvas_template,
     archive_user_canvas_template,
     bind_workflow_node_image,
     cancel_product_workflow_run,
+    copy_user_canvas_template_to_global,
     create_canvas_template_category,
     create_global_canvas_template,
+    create_user_canvas_template_from_active_workflow,
     create_user_canvas_template_from_workflow_nodes,
     create_workflow_edge,
     create_workflow_node,
@@ -61,8 +63,10 @@ from productflow_backend.presentation.schemas.product_workflows import (
     CanvasTemplateCategoryResponse,
     CanvasTemplateListResponse,
     CanvasTemplateSummaryResponse,
+    CopyUserTemplateToGlobalRequest,
     CreateCanvasTemplateCategoryRequest,
     CreateGlobalCanvasTemplateRequest,
+    CreateUserCanvasTemplateRequest,
     CreateUserTemplateGroupRequest,
     CreateWorkflowEdgeRequest,
     CreateWorkflowNodeRequest,
@@ -190,6 +194,7 @@ def list_canvas_templates_endpoint(
     search: str | None = Query(default=None, max_length=120),
     category_id: str | None = Query(default=None),
     scope: str | None = Query(default=None),
+    initial_workflow_entry: str | None = Query(default=None),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
 ) -> CanvasTemplateListResponse:
@@ -202,6 +207,7 @@ def list_canvas_templates_endpoint(
             search=search,
             category_id=category_id,
             scope=scope,
+            initial_workflow_entry=initial_workflow_entry,
         )
     ]
     return CanvasTemplateListResponse(items=templates)
@@ -394,6 +400,8 @@ def create_global_canvas_template_endpoint(
         title=payload.title,
         description=payload.description,
         kind=payload.kind,
+        entry_mode=payload.entry_mode,
+        sort_order=payload.sort_order,
         category_id=payload.category_id,
         template_json=payload.template_json,
     )
@@ -413,6 +421,8 @@ def update_global_canvas_template_endpoint(
         title=payload.title,
         description=payload.description,
         kind=payload.kind,
+        entry_mode=payload.entry_mode,
+        sort_order=payload.sort_order,
         category_id=payload.category_id,
         template_json=payload.template_json,
     )
@@ -462,6 +472,31 @@ def create_user_template_group_endpoint(
     return serialize_user_canvas_template_summary(template)
 
 
+@router.post(
+    "/products/{product_id}/workflow/user-canvas-templates",
+    response_model=CanvasTemplateSummaryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_user_canvas_template_endpoint(
+    product_id: str,
+    payload: CreateUserCanvasTemplateRequest,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
+) -> CanvasTemplateSummaryResponse:
+    _ensure_product_access(session, product_id, current_user, mutate=True)
+    template = create_user_canvas_template_from_active_workflow(
+        session,
+        product_id=product_id,
+        title=payload.title,
+        description=payload.description,
+        category_id=payload.category_id,
+        retain_prompt_text=payload.retain_prompt_text,
+        sort_order=payload.sort_order,
+        owner_user_id=current_user.id,
+    )
+    return serialize_user_canvas_template_summary(template)
+
+
 @router.patch("/workflow/user-template-groups/{template_id}", response_model=CanvasTemplateSummaryResponse)
 def update_user_template_group_endpoint(
     template_id: str,
@@ -476,6 +511,31 @@ def update_user_template_group_endpoint(
         actor_is_admin=current_user.is_admin,
         title=payload.title,
         description=payload.description,
+        category_id=payload.category_id,
+        sort_order=payload.sort_order,
+        enabled=payload.enabled,
+    )
+    return serialize_user_canvas_template_summary(template)
+
+
+@router.post(
+    "/workflow/user-template-groups/{template_id}/copy-to-global",
+    response_model=CanvasTemplateSummaryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def copy_user_template_to_global_endpoint(
+    template_id: str,
+    payload: CopyUserTemplateToGlobalRequest,
+    session: Session = Depends(get_session),
+    _current_user: AuthUser = Depends(require_api_permission(API_GLOBAL_TEMPLATES_MANAGE)),
+) -> CanvasTemplateSummaryResponse:
+    template = copy_user_canvas_template_to_global(
+        session,
+        template_id=template_id,
+        category_id=payload.category_id,
+        title=payload.title,
+        description=payload.description,
+        sort_order=payload.sort_order,
     )
     return serialize_user_canvas_template_summary(template)
 

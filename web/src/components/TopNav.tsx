@@ -6,6 +6,7 @@ import {
   GalleryHorizontalEnd,
   Languages,
   LayoutGrid,
+  Layers3,
   LogOut,
   MoreHorizontal,
   MessagesSquare,
@@ -95,6 +96,14 @@ const navItems: Array<{
     priority: "primary",
     icon: Settings,
     match: (pathname: string) => pathname.startsWith("/settings"),
+  },
+  {
+    labelKey: "nav.templates",
+    to: "/workflow/templates",
+    menuCode: "inspirations",
+    priority: "secondary",
+    icon: Layers3,
+    match: (pathname: string) => pathname.startsWith("/workflow/templates"),
   },
   {
     labelKey: "nav.rbac",

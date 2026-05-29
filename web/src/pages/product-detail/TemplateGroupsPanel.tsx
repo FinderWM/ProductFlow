@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Sparkles,
   Trash2,
   X,
   type LucideIcon,
@@ -252,12 +253,14 @@ function previewNodeMeta(nodeType: CanvasTemplateSummary["preview_nodes"][number
     reference_image: ImagePlus,
     copy_generation: FileText,
     image_generation: ImageIcon,
+    tail_splitter: Sparkles,
   };
   const statusByType: Record<CanvasTemplateSummary["preview_nodes"][number]["node_type"], string> = {
     product_context: t("detail.nodeStatus.available"),
     reference_image: t("detail.nodeStatus.available"),
     copy_generation: t("detail.nodeStatus.idle"),
     image_generation: t("detail.nodeStatus.idle"),
+    tail_splitter: t("detail.nodeStatus.idle"),
   };
   if (nodeType === "copy_generation") {
     return { icon: iconByType[nodeType], label: localizedWorkflowNodeTypeLabel(nodeType, t), status: statusByType[nodeType] };
@@ -277,6 +280,7 @@ function compactPreviewNodeLabel(nodeType: CanvasTemplateSummary["preview_nodes"
     reference_image: "detail.template.compact.referenceImage",
     copy_generation: "detail.template.compact.copyGeneration",
     image_generation: "detail.template.compact.imageGeneration",
+    tail_splitter: "detail.template.compact.tailSplitter",
   };
   return t(labelByType[nodeType]);
 }

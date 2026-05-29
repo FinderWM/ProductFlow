@@ -23,7 +23,7 @@ from productflow_backend.infrastructure.db.models import (
     WorkflowRun,
 )
 
-DEFAULT_WORKFLOW_TITLE = "商品创意工作流"
+DEFAULT_WORKFLOW_TITLE = "灵感创意工作流"
 DEFAULT_IMAGE_SIZE = "1024x1024"
 
 
@@ -55,6 +55,7 @@ def workflow_status_query():
             ProductWorkflow.product_id,
             ProductWorkflow.title,
             ProductWorkflow.active,
+            ProductWorkflow.initial_entry_mode,
             ProductWorkflow.created_at,
             ProductWorkflow.updated_at,
         ),
@@ -216,7 +217,7 @@ def default_node_specs(product: Product) -> list[dict[str, Any]]:
         {
             "key": "context",
             "node_type": WorkflowNodeType.PRODUCT_CONTEXT,
-            "title": "商品",
+            "title": "灵感",
             "position_x": 40,
             "position_y": 120,
             "config_json": {},
@@ -272,7 +273,7 @@ def default_edges(nodes_by_key: dict[str, WorkflowNode], workflow_id: str) -> li
 
 def default_title_for_type(node_type: WorkflowNodeType) -> str:
     return {
-        WorkflowNodeType.PRODUCT_CONTEXT: "商品",
+        WorkflowNodeType.PRODUCT_CONTEXT: "灵感",
         WorkflowNodeType.REFERENCE_IMAGE: "参考图",
         WorkflowNodeType.COPY_GENERATION: "文案",
         WorkflowNodeType.IMAGE_GENERATION: "生图",

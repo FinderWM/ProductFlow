@@ -10,12 +10,14 @@ from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.domain.workflow_rules import WorkflowRuleEdge, WorkflowRuleNode, topological_node_ids
 
 TemplateKind = Literal["full_canvas", "node_group"]
+CanvasTemplateEntryMode = Literal["image", "copy", "tail"]
 SUPPORTED_CANVAS_TEMPLATE_NODE_TYPES = frozenset(
     {
         WorkflowNodeType.PRODUCT_CONTEXT,
         WorkflowNodeType.REFERENCE_IMAGE,
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.TAIL_SPLITTER,
     }
 )
 FULL_CANVAS_TEMPLATE_COLUMN_GAP = 380
@@ -123,6 +125,8 @@ class CanvasTemplate(BaseModel):
     template_id: str | None = None
     version: int = 1
     kind: TemplateKind
+    entry_mode: CanvasTemplateEntryMode = "image"
+    sort_order: int = 100
     title: str
     description: str
     source: Literal["builtin", "user"] = "builtin"
@@ -156,6 +160,8 @@ def validate_canvas_template(template: CanvasTemplate) -> None:
         raise BusinessValidationError("画布模板版本必须是 v1")
     if template.kind not in ("full_canvas", "node_group"):
         raise BusinessValidationError("画布模板类型不支持")
+    if template.entry_mode not in ("image", "copy", "tail"):
+        raise BusinessValidationError("画布模板入口类型不支持")
     if not template.nodes:
         raise BusinessValidationError("画布模板至少需要一个节点")
 

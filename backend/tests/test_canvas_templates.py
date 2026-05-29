@@ -455,4 +455,5 @@ def test_template_node_type_allowlist_matches_current_workflow_node_types() -> N
         WorkflowNodeType.REFERENCE_IMAGE,
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.TAIL_SPLITTER,
     }

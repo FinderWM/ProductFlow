@@ -285,27 +285,46 @@
 
 - Trigger: editing ProductDetail templates tab, ProductCreate template selection, `api.listCanvasTemplates(...)`,
   `api.listCanvasTemplateCategories(...)`, or frontend DTOs for canvas template categories.
-- Goal: keep template search/category/source filtering aligned with the backend catalog API and React Query cache keys.
+- Goal: keep template search/category/source/entry filtering aligned with the backend catalog API and React Query cache
+  keys.
 
 ##### 2. Signatures
 
-- API method: `api.listCanvasTemplates(input?: { search?: string; category_id?: string; scope?: CanvasTemplateScope })`.
+- API method:
+  `api.listCanvasTemplates(input?: { search?: string; category_id?: string; scope?: CanvasTemplateScope; initial_workflow_entry?: ProductInitialWorkflowEntry })`.
 - API method: `api.listCanvasTemplateCategories(input?: { search?: string; scope?: CanvasTemplateScope })`.
+- API method: `api.createUserCanvasTemplate(productId, { title, description?, category_id, retain_prompt_text?, sort_order? })`.
+- API method: `api.copyUserTemplateToGlobal(templateId, { category_id, title?, description?, sort_order? })`.
+- Type: `ProductInitialWorkflowEntry = "image" | "copy" | "tail" | "blank"`.
+- Type: `CanvasTemplateEntryMode = "image" | "copy" | "tail"`.
 - Type: `CanvasTemplateScope = "global" | "user"`.
+- Type: `CanvasTemplateSummary` includes `entry_mode`, `sort_order`, `scope`, `category_id`, `category_name`,
+  `owner_user_id`, `owner_username`, `enabled`, `effective_enabled`, and `disabled_reason`.
 - Type: `CanvasTemplateCategory` mirrors backend fields `id`, `scope`, `owner_user_id`, `owner_username`, `name`,
   `sort_order`, `enabled`, `effective_enabled`, `disabled_reason`, `created_at`, and `updated_at`.
 
 ##### 3. Contracts
 
-- Keep backend query parameter names as `search`, `category_id`, and `scope`; do not camel-case them in `api.ts`.
+- Keep backend query parameter names as `search`, `category_id`, `scope`, and `initial_workflow_entry`; do not camel-case
+  them in `api.ts`.
 - Empty filter values are omitted from `URLSearchParams`.
 - `scope="global"` returns global templates/categories; `scope="user"` returns user-owned templates/categories visible to
   the current actor; omitted scope returns both visible scopes.
+- ProductCreate must include `initial_workflow_entry` in both the React Query key and `api.listCanvasTemplates(...)`.
+  `image/copy/tail` entries show matching `entry_mode`; `blank` may show all non-blank entry templates grouped by entry.
 - ProductCreate keeps the blank canvas option local and always available, even when server-side template filters return no
   full-canvas templates.
 - ProductDetail owns the server query state and passes filter state, category data, and filtered templates into
   `TemplateGroupsPanel`; the panel remains API-free.
 - ProductDetail may keep its existing stage chips as a local secondary filter over the server-filtered results.
+- ProductDetail can save the active workflow as a personal full-canvas template only through
+  `api.createUserCanvasTemplate(...)`. The form must require a personal category, expose `retain_prompt_text`, and disable
+  blank-entry workflows based on `workflow.initial_entry_mode`.
+- Personal template management filters user templates by entry/category/search and can edit title, description, category,
+  sort, enabled state, and archival. Global template management can edit only global templates; user templates shown there
+  are copy sources and expose only “copy to global”.
+- In global template management, a global category filter must not hide user templates that are only available as copy
+  sources; apply the category filter to global templates while keeping user templates visible for copying.
 - Template chips may display `scope` and `category_name`; operator-authored template/category names are source data and
   must not be translated.
 
@@ -317,22 +336,41 @@
 - Category list error -> show `templateFilter.categoriesLoadFailed` and keep template search/scope usable.
 - Scope change -> clear `category_id` because category ids are scoped.
 - Empty server result -> show the existing empty template state; ProductCreate still shows blank canvas.
+- Entry change on ProductCreate -> reset incompatible selected template and refetch templates with the new
+  `initial_workflow_entry`.
+- Blank-entry workflow in ProductDetail save-template flow -> disable submit and show the backend-aligned blank-entry
+  reason.
+- Missing personal category when saving a full-canvas template -> disable submit or show the category-required error near
+  the dialog action.
+- Copying a user template to global without a global category -> disable submit; backend remains authoritative.
 
 ##### 5. Good/Base/Bad Cases
 
 - Good: ProductDetail query key includes `search`, `categoryId`, and `scope`, so changing any filter refetches and caches
   the correct catalog response.
+- Good: ProductCreate query key includes `initialWorkflowEntry`; switching from `image` to `tail` refetches the catalog
+  instead of reusing image-entry templates.
 - Good: ProductCreate submits the selected backend `canvas_template_key` unchanged and omits filters from product creation
   payload.
+- Good: blank ProductCreate entry shows the local blank canvas option plus any database templates returned for
+  `initial_workflow_entry=blank`, grouped by entry.
+- Good: global template management lists global templates for editing and user templates for copy-to-global, without
+  enabling user-template save/archive controls in the global page.
 - Base: blank search, blank category, and scope `all` call `/api/workflow/canvas-templates` without a query string.
 - Bad: filtering only client-side after fetching all templates when backend `search`, `category_id`, and `scope` are
   already available.
 - Bad: passing translated category names back to the API instead of the stable `category_id`.
+- Bad: using a global category id as a request `category_id` while also expecting user templates to be visible for
+  copy-to-global.
+- Bad: allowing blank-entry workflows to open a save-full-canvas-template submit path because the current graph happens to
+  contain image/copy/tail nodes.
 
 ##### 6. Tests Required
 
 - Run `pnpm --dir web exec tsc --noEmit -p tsconfig.app.json` after DTO/API method changes.
 - Run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` for ProductCreate or ProductDetail UI changes.
+- Add/update helper tests when changing reference-image role/label fallback or template localization fixture fields such
+  as `entry_mode` and `sort_order`.
 - Backend API tests remain authoritative for catalog permission, owner visibility, and invalid category/scope behavior.
 
 ##### 7. Wrong vs Correct
@@ -350,12 +388,13 @@ Correct:
 
 ```tsx
 useQuery({
-  queryKey: ["canvas-templates", search, categoryId, scope],
+  queryKey: ["canvas-templates", search, categoryId, scope, initialWorkflowEntry],
   queryFn: () =>
     api.listCanvasTemplates({
       search: search || undefined,
       category_id: categoryId || undefined,
       scope: scope === "all" ? undefined : scope,
+      initial_workflow_entry: initialWorkflowEntry,
     }),
 });
 ```

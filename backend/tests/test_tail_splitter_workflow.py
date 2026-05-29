@@ -29,7 +29,11 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
 
     copy_created = client.post(
         "/api/products",
-        data={"name": "文案入口商品", "initial_workflow_entry": "copy"},
+        data={
+            "name": "文案入口商品",
+            "initial_workflow_entry": "copy",
+            "entry_text": "强调免安装、整洁收纳和家居场景适配。",
+        },
     )
     assert copy_created.status_code == 201
     copy_product_id = copy_created.json()["id"]
@@ -41,11 +45,18 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
         "product_context",
         "copy_generation",
     }
+    copy_node = _workflow_node(copy_payload, "copy_generation")
+    assert copy_node["config_json"]["source_note"] == "强调免安装、整洁收纳和家居场景适配。"
+    assert "强调免安装" in copy_node["config_json"]["instruction"]
     assert [(edge["source_node_id"], edge["target_node_id"]) for edge in copy_payload["edges"]]
 
     tail_created = client.post(
         "/api/products",
-        data={"name": "尾巴入口商品", "initial_workflow_entry": "tail"},
+        data={
+            "name": "尾巴入口商品",
+            "initial_workflow_entry": "tail",
+            "entry_text": "免安装、收纳整洁、细节材质、不同场景摆放。",
+        },
     )
     assert tail_created.status_code == 201
     tail_product_id = tail_created.json()["id"]
@@ -57,7 +68,23 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
         "product_context",
         "tail_splitter",
     }
+    tail_node = _workflow_node(tail_payload, "tail_splitter")
+    assert tail_node["config_json"]["source_text"] == "免安装、收纳整洁、细节材质、不同场景摆放。"
     assert len(tail_payload["edges"]) == 1
+
+    blank_created = client.post(
+        "/api/products",
+        data={"name": "空白入口灵感", "initial_workflow_entry": "blank"},
+    )
+    assert blank_created.status_code == 201
+    blank_product_id = blank_created.json()["id"]
+
+    blank_workflow = client.get(f"/api/products/{blank_product_id}/workflow")
+    assert blank_workflow.status_code == 200
+    blank_payload = blank_workflow.json()
+    assert [node["node_type"] for node in blank_payload["nodes"]] == ["product_context"]
+    assert blank_payload["nodes"][0]["title"] == "灵感"
+    assert blank_payload["edges"] == []
 
     image_missing = client.post(
         "/api/products",
@@ -65,6 +92,20 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
     )
     assert image_missing.status_code == 400
     assert image_missing.json()["detail"] == "请先上传灵感图"
+
+    copy_missing_text = client.post(
+        "/api/products",
+        data={"name": "缺内容文案入口", "initial_workflow_entry": "copy"},
+    )
+    assert copy_missing_text.status_code == 400
+    assert copy_missing_text.json()["detail"] == "入口内容不能为空"
+
+    tail_missing_text = client.post(
+        "/api/products",
+        data={"name": "缺内容尾巴入口", "initial_workflow_entry": "tail"},
+    )
+    assert tail_missing_text.status_code == 400
+    assert tail_missing_text.json()["detail"] == "入口内容不能为空"
 
 
 def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(configured_env: Path) -> None:
@@ -77,7 +118,11 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
 
     created = client.post(
         "/api/products",
-        data={"name": "尾巴拆分商品", "initial_workflow_entry": "tail"},
+        data={
+            "name": "尾巴拆分商品",
+            "initial_workflow_entry": "tail",
+            "entry_text": "主打免安装、收纳整洁、细节材质、不同场景摆放。",
+        },
     )
     assert created.status_code == 201
     product_id = created.json()["id"]
@@ -191,6 +236,7 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
         filename=None,
         content_type=None,
         initial_workflow_entry="tail",
+        entry_text="主打免安装、收纳整洁、细节材质、不同场景摆放。",
     )
     workflow = get_or_create_product_workflow(db_session, product.id)
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from productflow_backend.application.canvas_templates import (
     CanvasTemplate,
     CanvasTemplateEdgeSpec,
+    CanvasTemplateEntryMode,
     CanvasTemplateNodeSpec,
     CanvasTemplateScenario,
     CanvasTemplateScenarioMetadata,
@@ -49,6 +50,7 @@ USER_TEMPLATE_SCENARIO = CanvasTemplateScenario.MAIN_IMAGE
 BUILTIN_TEMPLATE_CATEGORY_ID = "00000000-0000-0000-0000-000000000020"
 BUILTIN_TEMPLATE_CATEGORY_NAME = "电商场景"
 TemplateScope = Literal["global", "user"]
+InitialWorkflowEntry = Literal["image", "copy", "tail", "blank"]
 
 ARTIFACT_SPECIFIC_CONFIG_KEYS = frozenset(
     {
@@ -74,8 +76,10 @@ ARTIFACT_SPECIFIC_CONFIG_KEYS = frozenset(
     }
 )
 SYSTEM_TEMPLATE_CONFIG_KEYS = frozenset({"_canvas_template"})
+REUSABLE_SUFFIX_CONFIG_KEYS = frozenset({"generation_config_id"})
 
 ARTIFACT_SPECIFIC_KEY_SUFFIXES = ("_id", "_ids", "_url", "_path")
+PROMPT_TEXT_CONFIG_KEYS = frozenset({"instruction", "prompt", "source_note"})
 
 
 class UserCanvasTemplateNodePayload(BaseModel):
@@ -142,6 +146,8 @@ def canvas_template_row_to_canvas_template(row: DbCanvasTemplate) -> CanvasTempl
         template_id=row.id,
         version=row.schema_version,
         kind=_template_kind(row.kind),
+        entry_mode=_template_entry_mode(row.entry_mode),
+        sort_order=row.sort_order,
         title=row.title,
         description=row.description or "",
         source="user" if row.scope == "user" else "builtin",
@@ -178,12 +184,18 @@ def list_canvas_templates(
     search: str | None = None,
     category_id: str | None = None,
     scope: str | None = None,
+    initial_workflow_entry: str | None = None,
 ) -> list[CanvasTemplate]:
     ensure_canvas_templates_bootstrapped(session)
     normalized_scope = _normalize_optional_scope(scope)
+    normalized_entry = _normalize_optional_initial_workflow_entry(initial_workflow_entry)
     stmt = _canvas_template_query().where(DbCanvasTemplate.archived_at.is_(None))
     if normalized_scope is not None:
         stmt = stmt.where(DbCanvasTemplate.scope == normalized_scope)
+    if normalized_entry == "blank":
+        stmt = stmt.where(DbCanvasTemplate.entry_mode.in_(("image", "copy", "tail")))
+    elif normalized_entry is not None:
+        stmt = stmt.where(DbCanvasTemplate.entry_mode == normalized_entry)
     if category_id:
         stmt = stmt.where(DbCanvasTemplate.category_id == category_id)
     normalized_search = _normalize_search(search)
@@ -204,7 +216,13 @@ def list_canvas_templates(
             )
         )
     rows = session.scalars(
-        stmt.order_by(DbCanvasTemplate.scope, DbCanvasTemplate.title, DbCanvasTemplate.created_at)
+        stmt.order_by(
+            DbCanvasTemplate.entry_mode,
+            DbCanvasTemplate.scope,
+            DbCanvasTemplate.sort_order,
+            DbCanvasTemplate.title,
+            DbCanvasTemplate.created_at,
+        )
     ).all()
     return [
         canvas_template_row_to_canvas_template(row)
@@ -365,6 +383,8 @@ def create_global_canvas_template(
     title: str,
     description: str | None,
     kind: TemplateKind,
+    entry_mode: CanvasTemplateEntryMode = "image",
+    sort_order: int = 100,
     template_json: dict[str, Any],
     category_id: str | None = None,
 ) -> DbCanvasTemplate:
@@ -377,6 +397,8 @@ def create_global_canvas_template(
         title=clean_title,
         description=description,
         kind=kind,
+        entry_mode=entry_mode,
+        sort_order=sort_order,
         template_json=template_json,
     )
     row = DbCanvasTemplate(
@@ -388,6 +410,8 @@ def create_global_canvas_template(
         title=clean_title,
         description=(description or "").strip() or None,
         kind=kind,
+        entry_mode=entry_mode,
+        sort_order=sort_order,
         schema_version=template.version,
         template_json=template.model_dump(mode="json"),
     )
@@ -408,6 +432,8 @@ def update_global_canvas_template(
     title: str | None = None,
     description: str | None = None,
     kind: TemplateKind | None = None,
+    entry_mode: CanvasTemplateEntryMode | None = None,
+    sort_order: int | None = None,
     template_json: dict[str, Any] | None = None,
     category_id: str | None = None,
 ) -> DbCanvasTemplate:
@@ -415,6 +441,8 @@ def update_global_canvas_template(
     next_title = _normalize_template_title(title) if title is not None else row.title
     next_description = (description or "").strip() if description is not None else row.description
     next_kind = kind or _template_kind(row.kind)
+    next_entry_mode = entry_mode or _template_entry_mode(row.entry_mode)
+    next_sort_order = sort_order if sort_order is not None else row.sort_order
     next_template_json = template_json if template_json is not None else dict(row.template_json or {})
     if category_id is not None:
         _validate_template_category(session, scope="global", owner_user_id=None, category_id=category_id)
@@ -424,11 +452,15 @@ def update_global_canvas_template(
         title=next_title,
         description=next_description,
         kind=next_kind,
+        entry_mode=next_entry_mode,
+        sort_order=next_sort_order,
         template_json=next_template_json,
     )
     row.title = next_title
     row.description = next_description or None
     row.kind = next_kind
+    row.entry_mode = next_entry_mode
+    row.sort_order = next_sort_order
     row.schema_version = template.version
     row.template_json = template.model_dump(mode="json")
     row.updated_at = now_utc()
@@ -519,6 +551,7 @@ def create_user_canvas_template_from_workflow_nodes(
         title=clean_title,
         description=(description or "").strip() or None,
         owner_user_id=owner_user_id,
+        entry_mode="image",
     )
     template = DbCanvasTemplate(
         id=template_id,
@@ -529,6 +562,7 @@ def create_user_canvas_template_from_workflow_nodes(
         title=clean_title,
         description=(description or "").strip() or None,
         kind="node_group",
+        entry_mode="image",
         schema_version=USER_TEMPLATE_SCHEMA_VERSION,
         template_json=canvas_template.model_dump(mode="json"),
     )
@@ -542,6 +576,137 @@ def create_user_canvas_template_from_workflow_nodes(
     return _get_user_template_or_raise(session, template.id)
 
 
+def create_user_canvas_template_from_active_workflow(
+    session: Session,
+    *,
+    product_id: str,
+    owner_user_id: str,
+    title: str,
+    description: str | None,
+    category_id: str,
+    retain_prompt_text: bool,
+    sort_order: int = 100,
+) -> DbCanvasTemplate:
+    ensure_canvas_templates_bootstrapped(session)
+    clean_title = _normalize_template_title(title)
+    _validate_template_category(
+        session,
+        scope="user",
+        owner_user_id=owner_user_id,
+        category_id=category_id,
+    )
+    workflow = product_workflow_graph.get_active_workflow(session, product_id)
+    if workflow is None:
+        product_workflow_graph.get_product_or_raise(session, product_id)
+        raise BusinessValidationError("需要先创建或打开画布后才能保存模板")
+    entry_mode = _workflow_template_entry_mode(workflow.initial_entry_mode)
+    selected_nodes = _full_canvas_template_nodes(workflow)
+    node_keys_by_id = {node.id: f"node_{index + 1}" for index, node in enumerate(selected_nodes)}
+    payload = UserCanvasTemplatePayload(
+        kind="full_canvas",
+        nodes=tuple(
+            UserCanvasTemplateNodePayload(
+                key=node_keys_by_id[node.id],
+                node_type=node.node_type,
+                title=node.title,
+                position_x=node.position_x,
+                position_y=node.position_y,
+                config_json=extract_reusable_node_config(node, retain_prompt_text=retain_prompt_text),
+            )
+            for node in selected_nodes
+        ),
+        edges=tuple(_selected_internal_edges(workflow.edges, node_keys_by_id)),
+    )
+    template_id = new_id()
+    template_key = f"{USER_TEMPLATE_KEY_PREFIX}{template_id}"
+    canvas_template = _user_payload_to_canvas_template(
+        payload,
+        template_id=template_id,
+        key=template_key,
+        title=clean_title,
+        description=(description or "").strip() or None,
+        owner_user_id=owner_user_id,
+        entry_mode=entry_mode,
+        sort_order=sort_order,
+    )
+    template = DbCanvasTemplate(
+        id=template_id,
+        key=template_key,
+        scope="user",
+        owner_user_id=owner_user_id,
+        category_id=category_id,
+        title=clean_title,
+        description=(description or "").strip() or None,
+        kind="full_canvas",
+        entry_mode=entry_mode,
+        sort_order=sort_order,
+        schema_version=USER_TEMPLATE_SCHEMA_VERSION,
+        template_json=canvas_template.model_dump(mode="json"),
+    )
+    session.add(template)
+    session.flush()
+    canvas_template_row_to_canvas_template(template)
+    session.commit()
+    session.expire_all()
+    return _get_user_template_or_raise(session, template.id)
+
+
+def copy_user_canvas_template_to_global(
+    session: Session,
+    *,
+    template_id: str,
+    category_id: str,
+    title: str | None = None,
+    description: str | None = None,
+    sort_order: int | None = None,
+) -> DbCanvasTemplate:
+    ensure_canvas_templates_bootstrapped(session)
+    _validate_template_category(session, scope="global", owner_user_id=None, category_id=category_id)
+    source = _get_user_template_or_raise(session, template_id)
+    source_template = canvas_template_row_to_canvas_template(source)
+    next_title = _normalize_template_title(title) if title is not None else source.title
+    next_description = (description or "").strip() if description is not None else source.description
+    copied_id = new_id()
+    copied_key = f"global:{copied_id}"
+    global_template = source_template.model_copy(
+        update={
+            "key": copied_key,
+            "template_id": copied_id,
+            "title": next_title,
+            "description": next_description or "",
+            "source": "builtin",
+            "user_template_id": None,
+            "scope": "global",
+            "category_id": category_id,
+            "category_name": None,
+            "owner_user_id": None,
+            "owner_username": None,
+            "sort_order": sort_order if sort_order is not None else source.sort_order,
+            "enabled": True,
+            "effective_enabled": True,
+            "disabled_reason": None,
+        }
+    )
+    row = DbCanvasTemplate(
+        id=copied_id,
+        key=copied_key,
+        scope="global",
+        owner_user_id=None,
+        category_id=category_id,
+        title=next_title,
+        description=next_description or None,
+        kind=source.kind,
+        entry_mode=source.entry_mode,
+        sort_order=sort_order if sort_order is not None else source.sort_order,
+        schema_version=source.schema_version,
+        template_json=global_template.model_dump(mode="json"),
+    )
+    session.add(row)
+    session.commit()
+    session.expire_all()
+    return _get_global_canvas_template_or_raise(session, copied_id)
+
+
 def rename_user_canvas_template(
     session: Session,
     *,
@@ -550,6 +715,9 @@ def rename_user_canvas_template(
     actor_is_admin: bool = False,
     title: str | None,
     description: str | None,
+    category_id: str | None = None,
+    sort_order: int | None = None,
+    enabled: bool | None = None,
 ) -> DbCanvasTemplate:
     template = _get_user_template_or_raise(session, template_id)
     if template.archived_at is not None:
@@ -562,6 +730,18 @@ def rename_user_canvas_template(
         template.title = clean_title
     if description is not None:
         template.description = description.strip() or None
+    if category_id is not None:
+        _validate_template_category(
+            session,
+            scope="user",
+            owner_user_id=template.owner_user_id,
+            category_id=category_id,
+        )
+        template.category_id = category_id
+    if sort_order is not None:
+        template.sort_order = sort_order
+    if enabled is not None:
+        template.enabled = enabled
     template.template_json = _template_json_with_row_metadata(template)
     template.updated_at = now_utc()
     _sync_legacy_user_template_mirror(session, template)
@@ -604,10 +784,10 @@ def restore_user_canvas_template(
 
 
 def _parse_legacy_template_payload(row: UserCanvasTemplate) -> UserCanvasTemplatePayload:
-    if row.kind != "node_group" or row.schema_version != USER_TEMPLATE_SCHEMA_VERSION:
+    if row.kind not in {"full_canvas", "node_group"} or row.schema_version != USER_TEMPLATE_SCHEMA_VERSION:
         raise BusinessValidationError("用户模板版本不支持")
     payload = UserCanvasTemplatePayload.model_validate(row.template_json)
-    if payload.version != USER_TEMPLATE_SCHEMA_VERSION or payload.kind != "node_group":
+    if payload.version != USER_TEMPLATE_SCHEMA_VERSION or payload.kind not in {"full_canvas", "node_group"}:
         raise BusinessValidationError("用户模板版本不支持")
     return payload
 
@@ -669,6 +849,8 @@ def _seed_builtin_canvas_templates(session: Session) -> None:
             title=template.title,
             description=template.description,
             kind=template.kind,
+            entry_mode=template.entry_mode,
+            sort_order=template.sort_order,
             schema_version=template.version,
             template_json=template.model_copy(
                 update={
@@ -728,6 +910,7 @@ def _migrate_legacy_user_canvas_templates(session: Session) -> None:
                 title=legacy.title,
                 description=legacy.description,
                 kind=legacy.kind,
+                entry_mode="image",
                 schema_version=legacy.schema_version,
                 template_json=template.model_dump(mode="json"),
                 archived_at=legacy.archived_at,
@@ -747,6 +930,8 @@ def _parse_db_template_payload(row: DbCanvasTemplate) -> CanvasTemplate:
                 "template_id": row.id,
                 "version": row.schema_version,
                 "kind": row.kind,
+                "entry_mode": row.entry_mode,
+                "sort_order": row.sort_order,
                 "title": row.title,
                 "description": row.description or "",
                 "source": "user" if row.scope == "user" else "builtin",
@@ -763,6 +948,8 @@ def _parse_db_template_payload(row: DbCanvasTemplate) -> CanvasTemplate:
             title=row.title,
             description=row.description,
             owner_user_id=row.owner_user_id,
+            entry_mode=_template_entry_mode(row.entry_mode),
+            sort_order=row.sort_order,
         )
     raise BusinessValidationError("画布模板版本不支持")
 
@@ -775,14 +962,18 @@ def _user_payload_to_canvas_template(
     title: str,
     description: str | None,
     owner_user_id: str | None,
+    entry_mode: CanvasTemplateEntryMode = "image",
+    sort_order: int = 100,
 ) -> CanvasTemplate:
-    if payload.version != USER_TEMPLATE_SCHEMA_VERSION or payload.kind != "node_group":
+    if payload.version != USER_TEMPLATE_SCHEMA_VERSION or payload.kind not in {"full_canvas", "node_group"}:
         raise BusinessValidationError("用户模板版本不支持")
     return CanvasTemplate(
         key=key,
         template_id=template_id,
         version=payload.version,
-        kind="node_group",
+        kind=_template_kind(payload.kind),
+        entry_mode=entry_mode,
+        sort_order=sort_order,
         title=title,
         description=description or "",
         source="user",
@@ -792,7 +983,7 @@ def _user_payload_to_canvas_template(
         scenario=CanvasTemplateScenarioMetadata(
             scenario=USER_TEMPLATE_SCENARIO,
             title="用户模板",
-            description="用户保存的节点组",
+            description="用户保存的画布模板",
             ecommerce_stage="自定义",
             tags=("用户模板",),
         ),
@@ -1009,6 +1200,8 @@ def _global_template_contract(
     title: str,
     description: str | None,
     kind: TemplateKind,
+    entry_mode: CanvasTemplateEntryMode,
+    sort_order: int,
     template_json: dict[str, Any],
 ) -> CanvasTemplate:
     raw_payload = dict(template_json or {})
@@ -1016,6 +1209,8 @@ def _global_template_contract(
         {
             "key": key,
             "kind": kind,
+            "entry_mode": entry_mode,
+            "sort_order": sort_order,
             "title": title,
             "description": (description or "").strip(),
             "source": "builtin",
@@ -1076,6 +1271,15 @@ def _normalize_search(search: str | None) -> str | None:
     return normalized or None
 
 
+def _normalize_optional_initial_workflow_entry(value: str | None) -> InitialWorkflowEntry | None:
+    normalized = (value or "").strip().lower()
+    if not normalized or normalized == "all":
+        return None
+    if normalized not in {"image", "copy", "tail", "blank"}:
+        raise BusinessValidationError("初始工作台入口不支持")
+    return normalized  # type: ignore[return-value]
+
+
 def _template_scope(value: str) -> TemplateScope:
     if value not in {"global", "user"}:
         raise BusinessValidationError("画布模板范围不支持")
@@ -1085,6 +1289,12 @@ def _template_scope(value: str) -> TemplateScope:
 def _template_kind(value: str) -> TemplateKind:
     if value not in {"full_canvas", "node_group"}:
         raise BusinessValidationError("画布模板类型不支持")
+    return value  # type: ignore[return-value]
+
+
+def _template_entry_mode(value: str) -> CanvasTemplateEntryMode:
+    if value not in {"image", "copy", "tail"}:
+        raise BusinessValidationError("画布模板入口类型不支持")
     return value  # type: ignore[return-value]
 
 
@@ -1116,8 +1326,12 @@ def _selected_internal_edges(
     return template_edges
 
 
-def extract_reusable_node_config(node: WorkflowNode) -> dict[str, Any]:
+def extract_reusable_node_config(node: WorkflowNode, *, retain_prompt_text: bool = True) -> dict[str, Any]:
     reusable_config = _sanitize_reusable_config(node.config_json or {})
+    if not retain_prompt_text:
+        reusable_config = _strip_prompt_text_config(node.node_type, reusable_config)
+    if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
+        reusable_config.pop("source_text", None)
     return _normalize_template_node_config(node.node_type, reusable_config)
 
 
@@ -1143,6 +1357,44 @@ def _normalize_template_node_config(node_type: WorkflowNodeType, config_json: di
     return config
 
 
+def _workflow_template_entry_mode(value: str) -> CanvasTemplateEntryMode:
+    if value == "blank":
+        raise BusinessValidationError("空白画布不能保存为模板")
+    return _template_entry_mode(value)
+
+
+def _full_canvas_template_nodes(workflow) -> list[WorkflowNode]:
+    nodes = sorted(workflow.nodes, key=lambda item: (item.position_x, item.position_y, item.created_at))
+    tail_nodes = [node for node in nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER]
+    if not tail_nodes:
+        return nodes
+    tail_node = tail_nodes[0]
+    predecessor_ids = _transitive_predecessor_node_ids(workflow.edges, tail_node.id)
+    allowed_ids = predecessor_ids | {tail_node.id}
+    return [node for node in nodes if node.id in allowed_ids]
+
+
+def _transitive_predecessor_node_ids(edges: list[WorkflowEdge], node_id: str) -> set[str]:
+    incoming_by_target: dict[str, set[str]] = {}
+    for edge in edges:
+        incoming_by_target.setdefault(edge.target_node_id, set()).add(edge.source_node_id)
+    pending = list(incoming_by_target.get(node_id, set()))
+    seen: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(incoming_by_target.get(current, set()) - seen)
+    return seen
+
+
+def _strip_prompt_text_config(node_type: WorkflowNodeType, config_json: dict[str, Any]) -> dict[str, Any]:
+    if node_type not in {WorkflowNodeType.COPY_GENERATION, WorkflowNodeType.IMAGE_GENERATION}:
+        return config_json
+    return {key: value for key, value in config_json.items() if key not in PROMPT_TEXT_CONFIG_KEYS}
+
+
 def _sanitize_reusable_config(value: Any, *, path: tuple[str, ...] = ()) -> Any:
     if isinstance(value, dict):
         sanitized: dict[str, Any] = {}
@@ -1153,6 +1405,9 @@ def _sanitize_reusable_config(value: Any, *, path: tuple[str, ...] = ()) -> Any:
                 continue
             normalized_key = key.lower()
             if normalized_key in ARTIFACT_SPECIFIC_CONFIG_KEYS:
+                continue
+            if normalized_key in REUSABLE_SUFFIX_CONFIG_KEYS:
+                sanitized[key] = _sanitize_reusable_config(nested_value, path=(*path, key))
                 continue
             if normalized_key.endswith(ARTIFACT_SPECIFIC_KEY_SUFFIXES):
                 raise BusinessValidationError("模板配置包含不可复用的产物数据")
