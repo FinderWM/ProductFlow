@@ -144,6 +144,7 @@ def _image_session_query():
             selectinload(ImageSession.rounds).selectinload(ImageSessionRound.generated_asset),
             selectinload(ImageSession.generation_tasks),
             selectinload(ImageSession.owner),
+            selectinload(ImageSession.deleted_by),
             selectinload(ImageSession.product).selectinload(Product.source_assets),
             selectinload(ImageSession.product).selectinload(Product.owner),
         )
@@ -164,7 +165,7 @@ def _get_image_session_or_raise(
 ) -> ImageSession:
     stmt = _image_session_query().where(ImageSession.id == image_session_id)
     if actor_user_id is not None and not actor_is_admin:
-        stmt = stmt.where(ImageSession.owner_user_id == actor_user_id)
+        stmt = stmt.where(ImageSession.owner_user_id == actor_user_id, ImageSession.deleted_at.is_(None))
     image_session = session.scalar(stmt)
     if image_session is None:
         raise NotFoundError("连续生图会话不存在")
@@ -198,7 +199,7 @@ def _get_product_or_raise(
         .where(Product.id == product_id)
     )
     if actor_user_id is not None and not actor_is_admin:
-        stmt = stmt.where(Product.owner_user_id == actor_user_id)
+        stmt = stmt.where(Product.owner_user_id == actor_user_id, Product.deleted_at.is_(None))
     product = session.scalar(stmt)
     if product is None:
         raise NotFoundError("商品不存在")
@@ -439,6 +440,7 @@ def list_image_sessions(
     stmt = _image_session_query()
     if actor_user_id is not None and not actor_is_admin:
         stmt = stmt.where(ImageSession.owner_user_id == actor_user_id)
+        stmt = stmt.where(ImageSession.deleted_at.is_(None))
     if product_id is None:
         stmt = stmt.where(ImageSession.product_id.is_(None))
     else:
@@ -470,7 +472,7 @@ def get_image_session_status(
 ) -> ImageSessionStatusSnapshot:
     stmt = _image_session_status_query().where(ImageSession.id == image_session_id)
     if actor_user_id is not None and not actor_is_admin:
-        stmt = stmt.where(ImageSession.owner_user_id == actor_user_id)
+        stmt = stmt.where(ImageSession.owner_user_id == actor_user_id, ImageSession.deleted_at.is_(None))
     image_session = session.scalar(stmt)
     if image_session is None:
         raise NotFoundError("连续生图会话不存在")
@@ -592,10 +594,10 @@ def delete_image_session(
         missing_message="连续生图会话不存在",
     )
     ensure_resource_usable(image_session)
-    storage = storage or LocalStorage()
-    session.delete(image_session)
+    image_session.deleted_at = now_utc()
+    image_session.deleted_by_user_id = actor_user_id
+    image_session.updated_at = image_session.deleted_at
     session.commit()
-    storage.delete_image_session_tree(image_session_id)
 
 
 def add_image_session_reference_images(

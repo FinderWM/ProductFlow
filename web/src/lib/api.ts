@@ -45,6 +45,7 @@ import type {
   ProductWorkflowStatus,
   ProductWritebackResponse,
   ProductListResponse,
+  ReviewUserTemplateGroupInput,
   RuntimeConfig,
   RbacPermissionCatalog,
   RbacRole,
@@ -54,6 +55,8 @@ import type {
   SettingsImportCommitResponse,
   SettingsImportPreviewResponse,
   SessionState,
+  TextGenerationConfigTestRequest,
+  TextGenerationConfigTestResponse,
   UpdateCanvasTemplateCategoryInput,
   UpdateGlobalCanvasTemplateInput,
   UpdateUserTemplateGroupInput,
@@ -296,6 +299,12 @@ export const api = {
   archiveGenerationConfig(configId: string): Promise<GenerationConfig> {
     return request(`/api/settings/generation-configs/${encodeURIComponent(configId)}`, { method: "DELETE" });
   },
+  testTextGenerationConfig(payload: TextGenerationConfigTestRequest): Promise<TextGenerationConfigTestResponse> {
+    return request("/api/settings/generation-configs/test-text", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   getRuntimeConfig(): Promise<RuntimeConfig> {
     return request("/api/settings/runtime");
   },
@@ -496,6 +505,28 @@ export const api = {
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/workflow/canvas-templates${suffix}`);
   },
+  listManageCanvasTemplates(input?: {
+    search?: string;
+    category_id?: string;
+    scope?: CanvasTemplateScope;
+    initial_workflow_entry?: ProductInitialWorkflowEntry;
+  }): Promise<CanvasTemplateListResponse> {
+    const params = new URLSearchParams();
+    if (input?.search) {
+      params.set("search", input.search);
+    }
+    if (input?.category_id) {
+      params.set("category_id", input.category_id);
+    }
+    if (input?.scope) {
+      params.set("scope", input.scope);
+    }
+    if (input?.initial_workflow_entry) {
+      params.set("initial_workflow_entry", input.initial_workflow_entry);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/workflow/canvas-templates/manage${suffix}`);
+  },
   listCanvasTemplateCategories(input?: {
     search?: string;
     scope?: CanvasTemplateScope;
@@ -509,6 +540,20 @@ export const api = {
     }
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/workflow/canvas-template-categories${suffix}`);
+  },
+  listManageCanvasTemplateCategories(input?: {
+    search?: string;
+    scope?: CanvasTemplateScope;
+  }): Promise<CanvasTemplateCategoryListResponse> {
+    const params = new URLSearchParams();
+    if (input?.search) {
+      params.set("search", input.search);
+    }
+    if (input?.scope) {
+      params.set("scope", input.scope);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/workflow/canvas-template-categories/manage${suffix}`);
   },
   createCanvasTemplateCategory(scope: CanvasTemplateScope, input: CreateCanvasTemplateCategoryInput) {
     return request<CanvasTemplateCategoryListResponse["items"][number]>(
@@ -590,6 +635,15 @@ export const api = {
   updateUserTemplateGroup(templateId: string, input: UpdateUserTemplateGroupInput): Promise<CanvasTemplateSummary> {
     return request(`/api/workflow/user-template-groups/${templateId}`, {
       method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  reviewUserTemplateGroup(
+    templateId: string,
+    input: ReviewUserTemplateGroupInput,
+  ): Promise<CanvasTemplateSummary> {
+    return request(`/api/workflow/user-template-groups/${templateId}/review`, {
+      method: "POST",
       body: JSON.stringify(input),
     });
   },

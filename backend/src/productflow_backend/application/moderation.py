@@ -186,11 +186,19 @@ def set_resource_moderation(
         resource.disabled_at = None
         resource.disabled_by_user_id = None
         resource.disabled_reason = None
+        if normalized_type == "canvas_template":
+            resource.review_status = "approved" if getattr(resource, "review_status", "none") == "pending" else "none"
+            resource.reviewed_at = now_utc()
+            resource.reviewed_by_user_id = actor_user_id
     else:
         resource.enabled = False
         resource.disabled_at = now_utc()
         resource.disabled_by_user_id = actor_user_id
         resource.disabled_reason = _normalize_reason(reason)
+        if normalized_type == "canvas_template":
+            resource.review_status = "rejected" if getattr(resource, "review_status", "none") == "pending" else "none"
+            resource.reviewed_at = now_utc()
+            resource.reviewed_by_user_id = actor_user_id
 
     session.commit()
     session.expire_all()

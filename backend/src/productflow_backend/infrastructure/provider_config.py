@@ -648,6 +648,75 @@ def resolve_text_provider_config(
         owned_session.close()
 
 
+def resolve_text_provider_config_from_draft(
+    session: Session,
+    *,
+    name: str,
+    provider_kind: str,
+    provider_profile_id: str | None,
+    model_settings: dict[str, Any],
+    config: dict[str, Any],
+) -> ResolvedTextProviderConfig:
+    """Resolve an unsaved text generation config without creating scheduler rows."""
+
+    normalized_model_settings = _normalize_binding_model_settings(
+        purpose=TEXT_PURPOSE,
+        model_settings=model_settings,
+    )
+    normalized_config = _normalize_binding_config(
+        purpose=TEXT_PURPOSE,
+        provider_kind=provider_kind,
+        config=config,
+    )
+    _validate_binding_payload(
+        session,
+        purpose=TEXT_PURPOSE,
+        provider_kind=provider_kind,
+        provider_profile_id=provider_profile_id,
+        model_settings=normalized_model_settings,
+        config=normalized_config,
+    )
+    if provider_kind == "mock":
+        return ResolvedTextProviderConfig(
+            provider_kind="mock",
+            brief_model=_require_text_value(
+                normalized_model_settings,
+                "brief_model",
+                "文案商品理解模型未配置",
+            ),
+            copy_model=_require_text_value(
+                normalized_model_settings,
+                "copy_model",
+                "文案生成模型未配置",
+            ),
+            generation_config_name=name,
+        )
+    if provider_kind != "openai":
+        raise RuntimeError(f"暂不支持的文案 provider: {provider_kind}")
+    profile = session.get(ProviderProfile, provider_profile_id) if provider_profile_id else None
+    if profile is None or profile.archived_at is not None:
+        raise RuntimeError("供应商不存在")
+    return ResolvedTextProviderConfig(
+        provider_kind="openai",
+        brief_model=_require_text_value(
+            normalized_model_settings,
+            "brief_model",
+            "文案商品理解模型未配置",
+            fallback_values=profile.default_models_json,
+        ),
+        copy_model=_require_text_value(
+            normalized_model_settings,
+            "copy_model",
+            "文案生成模型未配置",
+            fallback_values=profile.default_models_json,
+        ),
+        provider_profile_id=profile.id,
+        api_key=profile.api_key,
+        base_url=profile.base_url,
+        generation_config_name=name,
+    )
+
+
 def resolve_image_provider_config(
     generation_config_id: str | None = None,
     *,

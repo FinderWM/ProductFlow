@@ -24,8 +24,8 @@ Server state is loaded through `web/src/lib/api.ts` and cached by TanStack Query
 
 Current query key patterns:
 
-- Session: `['session']` in `App.tsx`. `GET /api/auth/session` returns both `authenticated` and `access_required`; when
-  login is disabled server-side, `authenticated` is true even without a login cookie.
+- Session: `['session']` in `App.tsx`. `GET /api/auth/session` returns both `authenticated` and `access_required`;
+  private routes require account login and no runtime setting can disable this boundary.
 - Product list: `['products']` in `ProductListPage.tsx` and `ImageChatPage.tsx`.
 - Product detail/history: `['product', productId]` and `['product-history', productId]` in `ProductDetailPage.tsx`.
 - Product workbench: `['product-workflow', productId]` and `['product-workflow-status', productId]` in
@@ -34,8 +34,9 @@ Current query key patterns:
   `ImageChatPage.tsx`.
 - Runtime config: `['runtime-config']` in `ProductDetailPage.tsx`, `ProductListPage.tsx`, and `ImageChatPage.tsx`.
 - Full settings config: `['config']` in `SettingsPage.tsx`; successful settings saves/resets must invalidate
-  `['runtime-config']` when they can affect public runtime behavior, and `['session']` because settings can toggle
-  `admin_access_required`.
+  `['runtime-config']` when they can affect public runtime behavior.
+- Settings import/export: successful import must refresh or invalidate settings/provider/runtime queries plus
+  `['canvas-templates']` and `['canvas-template-categories']` because import can replace template governance data.
 - Generation config status: `['generation-config-status', startDate, endDate]` in `StatusPage.tsx`; fetch
   `GET /api/settings/generation-config-status` when the date range is valid. Backend RBAC enforces `status:read`.
 

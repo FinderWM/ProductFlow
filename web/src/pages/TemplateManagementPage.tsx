@@ -51,6 +51,8 @@ interface TemplateDraft {
   category_id: string;
   sort_order: string;
   enabled: boolean;
+  disabled_reason: string;
+  review_note: string;
 }
 
 interface PendingDelete {
@@ -96,6 +98,8 @@ function templateDraft(template: CanvasTemplateSummary): TemplateDraft {
     category_id: template.category_id ?? "",
     sort_order: String(template.sort_order ?? 100),
     enabled: template.enabled ?? true,
+    disabled_reason: template.disabled_reason ?? "",
+    review_note: "",
   };
 }
 
@@ -106,6 +110,23 @@ function parseSortOrder(value: string): number {
 
 function apiErrorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.detail : fallback;
+}
+
+function templateAvailabilityLabelKey(template: CanvasTemplateSummary): TranslationKey {
+  if (template.review_status === "pending") {
+    return "templateManage.statusPending";
+  }
+  return template.effective_enabled === false ? "templateManage.statusDisabled" : "templateManage.statusEnabled";
+}
+
+function templateAvailabilityClassName(template: CanvasTemplateSummary): string {
+  if (template.review_status === "pending") {
+    return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200";
+  }
+  if (template.effective_enabled === false) {
+    return "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200";
+  }
+  return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200";
 }
 
 export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
@@ -126,21 +147,21 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const normalizedSearch = search.trim();
 
   const templatesQuery = useQuery({
-    queryKey: ["canvas-templates", normalizedSearch, categoryFilter, scope, mode],
+    queryKey: ["canvas-templates", "manage", normalizedSearch, categoryFilter, scope, mode],
     queryFn: () =>
-      api.listCanvasTemplates({
+      api.listManageCanvasTemplates({
         search: normalizedSearch || undefined,
         category_id: mode === "personal" ? categoryFilter || undefined : undefined,
         scope: mode === "global" ? undefined : scope,
       }),
   });
   const categoriesQuery = useQuery({
-    queryKey: ["canvas-template-categories", scope],
-    queryFn: () => api.listCanvasTemplateCategories({ scope }),
+    queryKey: ["canvas-template-categories", "manage", scope],
+    queryFn: () => api.listManageCanvasTemplateCategories({ scope }),
   });
   const globalCategoriesQuery = useQuery({
-    queryKey: ["canvas-template-categories", "global"],
-    queryFn: () => api.listCanvasTemplateCategories({ scope: "global" }),
+    queryKey: ["canvas-template-categories", "manage", "global"],
+    queryFn: () => api.listManageCanvasTemplateCategories({ scope: "global" }),
     enabled: mode === "global",
   });
 
@@ -197,14 +218,25 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
         description: draft.description.trim(),
         category_id: draft.category_id || null,
         sort_order: parseSortOrder(draft.sort_order),
+        enabled: draft.enabled,
       };
       if (mode === "global") {
-        const globalPayload: UpdateGlobalCanvasTemplateInput = payload;
-        return api.updateGlobalCanvasTemplate(draft.id, globalPayload);
+        if (template.scope === "global") {
+          const globalPayload: UpdateGlobalCanvasTemplateInput = {
+            ...payload,
+            disabled_reason: draft.enabled ? null : draft.disabled_reason.trim() || null,
+          };
+          return api.updateGlobalCanvasTemplate(draft.id, globalPayload);
+        }
+        const userPayload: UpdateUserTemplateGroupInput = {
+          enabled: draft.enabled,
+          disabled_reason: draft.enabled ? null : draft.disabled_reason.trim() || null,
+        };
+        return api.updateUserTemplateGroup(template.user_template_id ?? draft.id, userPayload);
       }
       const userPayload: UpdateUserTemplateGroupInput = {
         ...payload,
-        enabled: draft.enabled,
+        review_note: draft.review_note.trim() || null,
       };
       return api.updateUserTemplateGroup(template.user_template_id ?? draft.id, userPayload);
     },
@@ -266,6 +298,27 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
     },
     onSuccess: async () => {
       setCopyGlobalDraft(null);
+      setSavedMessage(t("templateManage.saved"));
+      setError("");
+      await invalidateTemplateData();
+    },
+    onError: (mutationError) => {
+      setSavedMessage("");
+      setError(apiErrorMessage(mutationError, t("templateManage.failed")));
+    },
+  });
+
+  const reviewTemplateMutation = useMutation({
+    mutationFn: ({ template, approved }: { template: CanvasTemplateSummary; approved: boolean }) =>
+      api.reviewUserTemplateGroup(template.user_template_id ?? template.template_id ?? "", {
+        approved,
+        disabled_reason: approved
+          ? null
+          : (templateDrafts[template.key] ?? templateDraft(template)).disabled_reason.trim() ||
+            template.disabled_reason ||
+            null,
+      }),
+    onSuccess: async () => {
       setSavedMessage(t("templateManage.saved"));
       setError("");
       await invalidateTemplateData();
@@ -488,6 +541,9 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   const templateId = template.user_template_id ?? template.template_id ?? template.key;
                   const isUserTemplate = template.scope === "user" && Boolean(template.user_template_id);
                   const canEditTemplate = mode === "personal" ? isUserTemplate : template.scope === "global";
+                  const canManageAvailability = mode === "global";
+                  const requiresReviewNote =
+                    mode === "personal" && isUserTemplate && template.effective_enabled === false;
                   return (
                     <article
                       key={template.key}
@@ -510,7 +566,27 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                           <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
                             {t("templateManage.edgeCount", { count: template.preview_edges.length })}
                           </span>
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${templateAvailabilityClassName(template)}`}
+                          >
+                            {t(templateAvailabilityLabelKey(template))}
+                          </span>
+                          {template.owner_username ? (
+                            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
+                              {t("templateManage.owner", { name: template.owner_username })}
+                            </span>
+                          ) : null}
                         </div>
+                        {template.disabled_reason ? (
+                          <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700 dark:border-red-400/25 dark:bg-red-500/10 dark:text-red-200">
+                            {t("templateManage.disabledReason", { reason: template.disabled_reason })}
+                          </div>
+                        ) : null}
+                        {template.review_note ? (
+                          <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100">
+                            {t("templateManage.reviewNote", { note: template.review_note })}
+                          </div>
+                        ) : null}
                         <input
                           value={draft.title}
                           onChange={(event) =>
@@ -569,21 +645,51 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                             placeholder={t("templateManage.templateSort")}
                           />
                         </div>
-                        {mode === "personal" ? (
-                          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                            <input
-                              type="checkbox"
-                              checked={draft.enabled}
-                              onChange={(event) =>
-                                setTemplateDrafts((current) => ({
-                                  ...current,
-                                  [template.key]: { ...draft, enabled: event.target.checked },
-                                }))
-                              }
-                              className="h-4 w-4 accent-indigo-600"
-                            />
-                            {t("templateManage.templateEnabled")}
-                          </label>
+                        {canManageAvailability ? (
+                          <div className="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-[#111b2d]">
+                            <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                              <input
+                                type="checkbox"
+                                checked={draft.enabled}
+                                onChange={(event) =>
+                                  setTemplateDrafts((current) => ({
+                                    ...current,
+                                    [template.key]: { ...draft, enabled: event.target.checked },
+                                  }))
+                                }
+                                className="h-4 w-4 accent-indigo-600"
+                              />
+                              {t("templateManage.templateEnabled")}
+                            </label>
+                            {!draft.enabled ? (
+                              <textarea
+                                value={draft.disabled_reason}
+                                onChange={(event) =>
+                                  setTemplateDrafts((current) => ({
+                                    ...current,
+                                    [template.key]: { ...draft, disabled_reason: event.target.value },
+                                  }))
+                                }
+                                className="min-h-16 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400"
+                                placeholder={t("templateManage.disabledReasonPlaceholder")}
+                                maxLength={1000}
+                              />
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {requiresReviewNote ? (
+                          <textarea
+                            value={draft.review_note}
+                            onChange={(event) =>
+                              setTemplateDrafts((current) => ({
+                                ...current,
+                                [template.key]: { ...draft, review_note: event.target.value },
+                              }))
+                            }
+                            className="min-h-16 w-full resize-y rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-950 outline-none focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                            placeholder={t("templateManage.reviewNotePlaceholder")}
+                            maxLength={1000}
+                          />
                         ) : null}
                         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
                           {mode === "global" && isUserTemplate ? (
@@ -604,19 +710,61 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                               {t("templateManage.copyGlobal")}
                             </button>
                           ) : null}
-                          {canEditTemplate ? (
+                          {mode === "global" && isUserTemplate && template.review_status === "pending" ? (
                             <>
                               <button
                                 type="button"
-                                onClick={() => setPendingDelete({ kind: "template", id: template.key, name: template.title })}
-                                className="inline-flex h-9 items-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-400/35 dark:bg-[#111b2d] dark:text-red-200 dark:hover:bg-red-500/10"
+                                disabled={reviewTemplateMutation.isPending || !templateId}
+                                onClick={() => reviewTemplateMutation.mutate({ template, approved: false })}
+                                className="inline-flex h-9 items-center rounded-lg border border-amber-200 bg-white px-3 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:border-amber-400/35 dark:bg-[#111b2d] dark:text-amber-100 dark:hover:bg-amber-500/10"
                               >
-                                <Trash2 size={13} className="mr-1.5" />
-                                {t("templateManage.templateDelete")}
+                                {t("templateManage.reviewReject")}
                               </button>
                               <button
                                 type="button"
-                                disabled={saveTemplateMutation.isPending || !draft.title.trim() || !templateId}
+                                disabled={reviewTemplateMutation.isPending || !templateId}
+                                onClick={() => reviewTemplateMutation.mutate({ template, approved: true })}
+                                className="inline-flex h-9 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100"
+                              >
+                                {t("templateManage.reviewApprove")}
+                              </button>
+                            </>
+                          ) : null}
+                          {canManageAvailability && !canEditTemplate ? (
+                            <button
+                              type="button"
+                              disabled={saveTemplateMutation.isPending || !templateId}
+                              onClick={() => saveTemplateMutation.mutate({ template, draft })}
+                              className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                            >
+                              {saveTemplateMutation.isPending ? (
+                                <Loader2 size={13} className="mr-1.5 animate-spin" />
+                              ) : (
+                                <Save size={13} className="mr-1.5" />
+                              )}
+                              {t("templateManage.templateSave")}
+                            </button>
+                          ) : null}
+                          {canEditTemplate ? (
+                            <>
+                              {mode === "personal" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setPendingDelete({ kind: "template", id: template.key, name: template.title })}
+                                  className="inline-flex h-9 items-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-400/35 dark:bg-[#111b2d] dark:text-red-200 dark:hover:bg-red-500/10"
+                                >
+                                  <Trash2 size={13} className="mr-1.5" />
+                                  {t("templateManage.templateDelete")}
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                disabled={
+                                  saveTemplateMutation.isPending ||
+                                  !draft.title.trim() ||
+                                  !templateId ||
+                                  (requiresReviewNote && !draft.review_note.trim())
+                                }
                                 onClick={() => saveTemplateMutation.mutate({ template, draft })}
                                 className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
                               >
@@ -659,7 +807,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
             ? t("templateManage.confirmDeleteCategory", { name: pendingDelete.name })
             : t("templateManage.confirmDeleteTemplate", { name: pendingDelete?.name ?? "" })
         }
-        confirmLabel={t("confirm.delete.confirm")}
+        confirmLabel={t("templateManage.confirmRemove")}
         cancelLabel={t("common.cancel")}
         busy={archiveCategoryMutation.isPending || archiveTemplateMutation.isPending}
         onClose={() => setPendingDelete(null)}

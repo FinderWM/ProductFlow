@@ -395,54 +395,63 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 ### 1. Scope / Trigger
 
 - Trigger: changing login/session auth, RBAC permissions, settings persistence, `/api/auth/session`,
-  `/api/settings/runtime`, or the settings page security section.
+  `/api/settings/runtime`, settings export/import, or the settings page security section.
 - This is a cross-layer contract because `Settings`, config serialization, route dependencies, session responses, RBAC
   catalogs, frontend DTOs, and route gating must agree on the same security boundary.
 
 ### 2. Signatures
 
 - Env-only secret: `Settings.admin_access_key: str` remains required and must not be stored in `app_settings`.
-- Runtime setting: `Settings.admin_access_required: bool = True`.
-- Config definition key: `admin_access_required`, non-secret, boolean, category `安全与运维`.
-- Runtime API response: `GET /api/settings/runtime` includes `admin_access_required`.
-- Session state response: `GET /api/auth/session` returns `authenticated: bool` and `access_required: bool`.
+- Legacy env parsing field: `Settings.admin_access_required: bool = True` may remain only for compatibility.
+- Removed runtime config key: `admin_access_required` must not be in `CONFIG_DEFINITIONS`, `/api/settings`,
+  `/api/settings/runtime`, settings export/import documents, or frontend `RuntimeConfig`.
+- Session state response: `GET /api/auth/session` returns `authenticated: bool` and `access_required: bool`; private
+  workspace access always requires a valid account session.
 - Guard helpers: `presentation.deps.require_authenticated`, `require_api_permission(...)`, and
   `require_any_api_permission(...)`.
 
 ### 3. Contracts
 
-- Account login is required for private workspace routes even if `admin_access_required` is changed at runtime.
+- Account login is required for private workspace routes; runtime settings can no longer disable this boundary.
 - Backend route access is controlled by API permission codes, not by frontend-only menu hiding.
 - Frontend route visibility is controlled by RBAC menu codes from `GET /api/auth/session`.
 - Full settings reads require `settings:read`; settings mutations require `settings:write`.
 - Status APIs require `status:read`. Non-secret generation runtime selectors require a matching workbench/image-chat
   read permission or `settings:read`.
 - `DELETE /api/auth/session` clears the browser session and subsequent private route calls return `401` until login.
+- Settings import must ignore/drop a legacy `runtime_config.admin_access_required` value instead of reintroducing a
+  database-controlled login bypass.
 
 ### 4. Validation & Error Matrix
 
 - No login cookie -> private route returns `401`, `{"detail": "请先登录"}`.
+- Admin-key login attempts -> `401`, `{"detail": "请使用账号密码登录"}`.
 - Wrong account password -> `POST /api/auth/login` returns `401`, `{"detail": "账号或密码不正确"}`.
 - Logged-in user without a route's API permission -> `403`, `{"detail": "没有接口权限"}`.
 - Logged-in non-admin user calling admin-only RBAC management -> `403`, `{"detail": "需要管理员权限"}`.
 - User with `status:read` can call status APIs but cannot call settings read/write APIs.
+- `PATCH /api/settings` with `admin_access_required` -> `400`, `{"detail": "未知配置项: admin_access_required"}`.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: default member roles can use inspiration/image-chat/status APIs but cannot read settings or manage RBAC.
 - Base: the seeded `libow` admin role has every menu and API permission.
 - Bad: storing `ADMIN_ACCESS_KEY` in DB settings; it is an env-only secret.
+- Bad: adding `admin_access_required` back to runtime config, settings UI, or export/import payloads.
 - Bad: relying on frontend navigation hiding while backend endpoints accept any authenticated user.
 - Bad: letting runtime config endpoints bypass RBAC because they return only non-secret data.
 
 ### 6. Tests Required
 
 - Unauthenticated private route returns 401.
+- Admin-key session creation remains rejected.
 - Wrong account password returns 401 with the documented detail.
 - Default member role cannot call settings or RBAC management APIs.
 - Default member role can call status and non-secret generation runtime selector APIs.
 - A custom status-only role cannot call runtime selector APIs unless it has a matching workbench/image-chat/settings
   permission.
+- Settings runtime/config/export tests assert `admin_access_required` is absent, while legacy import payloads containing it
+  do not restore a configurable login bypass.
 
 ### 7. Wrong vs Correct
 
@@ -477,6 +486,9 @@ def get_runtime_config_endpoint():
 - Runtime API response: `GET /api/settings/runtime` returns `deletion_enabled` alongside
   `image_generation_max_dimension`.
 - Guard helper: `presentation.deps.require_deletion_enabled() -> None`.
+- Soft-delete columns:
+  - `products.deleted_at`, `products.deleted_by_user_id`
+  - `image_sessions.deleted_at`, `image_sessions.deleted_by_user_id`
 
 ### 3. Contracts
 
@@ -485,6 +497,10 @@ def get_runtime_config_endpoint():
 - The guard applies only to high-risk whole-record deletion routes:
   - `DELETE /api/products/{product_id}`
   - `DELETE /api/image-sessions/{image_session_id}`
+- When the guard allows deletion, these routes perform logical deletion only: set `deleted_at` and
+  `deleted_by_user_id`, keep database rows, child rows, and storage files.
+- Ordinary users cannot list or read their own soft-deleted products/sessions; they receive the same not-found behavior as
+  for missing rows. Admin users may list and read soft-deleted rows for traceability.
 - The guard must not apply to workflow editing or reference-image cleanup:
   - `DELETE /api/workflow-edges/{edge_id}`
   - `DELETE /api/workflow-nodes/{node_id}`
@@ -496,22 +512,26 @@ def get_runtime_config_endpoint():
 
 - `deletion_enabled == False` and product delete -> `403`, `{"detail": "删除功能已关闭，请联系管理员"}`.
 - `deletion_enabled == False` and image-session delete -> `403`, same detail.
-- `deletion_enabled == True` and product/session delete -> original application behavior, including existing busy-state
-  validation.
+- `deletion_enabled == True` and product/session delete -> `204` plus soft-delete metadata update; storage files remain.
+- Ordinary user lists or reads a soft-deleted product/session -> omitted from list or `404`.
+- Admin lists or reads a soft-deleted product/session -> `200` with the same owner attribution as active rows.
 - Reference-image deletion and workflow node/edge deletion -> original behavior regardless of `deletion_enabled`.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: public demo keeps generated content traceable by disabling whole product and whole image-session deletion.
-- Base: admin temporarily enables deletion from settings, deletes a whole product/session, then disables it again.
+- Base: admin temporarily enables deletion from settings, soft-deletes a whole product/session, then disables it again.
+- Base: admins can inspect soft-deleted product/session rows and retained files when investigating abuse or audit history.
 - Bad: blocking workflow node/edge deletion; this breaks normal workbench editing and is outside the traceability goal.
 - Bad: blocking reference-image deletion; image-library cleanup is not the high-risk traceability gap this toggle targets.
+- Bad: deleting product/session rows or storage trees from the whole-record delete endpoints.
 
 ### 6. Tests Required
 
 - Route test for default-disabled product delete preserving database row and storage files.
 - Route test for default-disabled image-session delete preserving database row and storage files.
-- Existing product/session delete success tests must explicitly enable deletion first.
+- Enabled product/session delete tests must assert soft-delete metadata is set, ordinary user lists hide the row, admin
+  lists can still see it, and storage files remain.
 - Existing workflow node/edge and reference-image delete tests must continue to pass without enabling deletion.
 - Runtime config test must assert `deletion_enabled` appears in `/api/settings/runtime` and settings persistence.
 
@@ -925,6 +945,8 @@ failures into safe persisted failure reasons instead of leaking provider details
 - `image_tool_allowed_fields` controls frontend visibility, backend task/config persistence, and provider payload fields.
   Its default excludes `background` because OpenAI-compatible providers may reject it, while operators can explicitly
   enable it for providers that support tool-level `background`.
+- For `gpt-image-2` tool-model requests, provider payload normalization must strip `background="transparent"` and
+  `input_fidelity` even when those fields are allowed or present in runtime/request options.
 - `n` is not an editable image tool field. If old database/settings payloads include `n` in `image_tool_allowed_fields`,
   parsing must accept it for compatibility and normalize it away.
 - Continuous image session `tool_options` override only the matching tool fields for that generation; omitted request
@@ -970,6 +992,10 @@ failures into safe persisted failure reasons instead of leaking provider details
 - Per-request `tool_options.output_compression < 0` or `> 100` -> `/api/image-sessions/{id}/generate` returns `422`.
 - Per-request `tool_options.partial_images < 0` or `> 3` -> `/api/image-sessions/{id}/generate` returns `422`.
 - Per-request `tool_options.n < 1` or `> 10` -> `/api/image-sessions/{id}/generate` returns `422`.
+- `image_tool_model == "gpt-image-2"` and tool `background == "transparent"` -> omit `background` from the Responses tool
+  payload.
+- `image_tool_model == "gpt-image-2"` and tool/request/default `input_fidelity` is set -> omit `input_fidelity` from the
+  Responses tool payload.
 - Unknown select value such as `image_tool_quality="ultra"` -> `/api/settings` returns `400`.
 - Unknown per-request select value such as `tool_options.quality="ultra"` -> request validation returns `422`.
 - OpenAI SDK/provider request exception -> raise a generic sanitized runtime error; do not expose API keys, raw request
@@ -984,6 +1010,8 @@ failures into safe persisted failure reasons instead of leaking provider details
   those two fields inside the tool object and no `tool_choice`.
 - Good: operator enables `background` in `image_tool_allowed_fields`; only then do the UI and provider payload allow the
   tool-level `background` field.
+- Good: an older config allows `background` and `input_fidelity`, but a `gpt-image-2` request still omits
+  `background="transparent"` and `input_fidelity`.
 - Good: operator sets per-generation `tool_options.output_format=webp`; that round uses WebP while workflow/poster
   generation still follows runtime defaults.
 - Good: provider rejects optional fields, fallback with `{"type":"image_generation","size": size}` succeeds, and the
@@ -1011,6 +1039,7 @@ failures into safe persisted failure reasons instead of leaking provider details
 - Image-session test that candidate count drives Images API `n`, while `tool_options.n` is discarded before persistence.
 - Workflow image-generation test that downstream receiver count drives Images API batch `n` and fills receivers in order.
 - Provider test that configured optional fields are included inside the tool object and only there.
+- Provider test that `gpt-image-2` strips unsupported `background="transparent"` and `input_fidelity` from the tool object.
 - API/schema test that image-session `tool_options` are accepted, validated, persisted on the generation task, and passed
   into `ImageChatService`.
 - Provider fallback test that optional-field request failure triggers exactly one basic-tool retry and exposes only a
@@ -1145,23 +1174,31 @@ system_prompt = settings.prompt_copy_system
 - Import preview API: `POST /api/settings/import/preview -> SettingsImportPreviewResponse`.
 - Import commit API: `POST /api/settings/import -> SettingsImportCommitResponse`.
 - All three routes are under `/api/settings` and require the matching settings read/write API permission.
-- Export document sections: `metadata`, `runtime_config`, `provider_profiles`, and `provider_bindings`.
+- Export document sections: `metadata`, `runtime_config`, `provider_profiles`, `provider_bindings`,
+  `generation_configs`, `canvas_template_categories`, and `canvas_templates`.
 
 ### 3. Contracts
 - Export is for frontend-operation settings only. It includes effective runtime values from every `CONFIG_DEFINITIONS`
-  key, plus active provider profiles and provider bindings.
+  key, plus active provider profiles, provider bindings, generation configs, and active canvas template/category
+  governance rows.
 - Export must include provider API keys because the migration file is meant to let another machine use the same configured
   providers. Normal non-export settings reads still must not echo secret values.
 - Export must not include deployment/infrastructure environment settings such as `DATABASE_URL`, `REDIS_URL`,
-  `SESSION_SECRET`, `ADMIN_ACCESS_KEY`, CORS origins, ports, or storage paths.
+  `SESSION_SECRET`, `ADMIN_ACCESS_KEY`, CORS origins, ports, storage paths, or legacy `admin_access_required`.
 - `runtime_config` must contain the current effective value, not only database override rows, so a clean target machine can
   import the same frontend-visible behavior.
+- Import must ignore a legacy `runtime_config.admin_access_required` key for backward compatibility while rejecting other
+  unknown runtime config keys.
 - Import preview must validate the whole document and return counts/names/flags for confirmation without mutating the
   database.
-- Import commit must validate the same document and apply it atomically: runtime settings, provider profiles, and bindings
-  all change together or not at all.
+- Import preview must expose flat counts and names for runtime config, provider profiles, provider bindings, generation
+  configs, canvas template categories, and canvas templates.
+- Import commit must validate the same document and apply it atomically: runtime settings, provider profiles, bindings,
+  generation configs, canvas template categories, and canvas templates all change together or not at all.
 - Provider bindings must be validated after imported profiles are normalized so non-mock bindings never point to missing,
   disabled, or capability-incompatible profiles.
+- Template import must preserve operator-managed governance fields such as `enabled`, `disabled_reason`, review metadata,
+  `scope`, owner references, category assignment, entry mode, and sort order.
 
 ### 4. Validation & Error Matrix
 - Malformed document -> `400` with `配置文件格式不正确`.
@@ -1169,6 +1206,7 @@ system_prompt = settings.prompt_copy_system
 - Unsupported compatibility marker -> `400` with `配置文件兼容标识不支持`.
 - Unknown runtime config key -> `400` with `未知配置项: ...`.
 - Missing runtime config key -> `400` with `配置文件缺少配置项: ...`.
+- Legacy `admin_access_required` runtime config key -> ignored during preview/commit.
 - Duplicate provider profile id -> `400` with `供应商档案不能重复`.
 - Empty provider name -> `400` with `供应商名称不能为空`.
 - Unsupported provider type/capability/kind/purpose -> `400` with a concise provider configuration error.
@@ -1176,10 +1214,13 @@ system_prompt = settings.prompt_copy_system
 
 ### 5. Good/Base/Bad Cases
 - Good: export from a configured workspace, import into a clean workspace, and see the same settings page values,
-  provider profiles, bindings, and provider API keys.
+  provider profiles, bindings, generation configs, template categories/templates, and provider API keys.
 - Good: preview an import file and show counts plus whether API keys are present before commit.
+- Good: importing an older file that contains `runtime_config.admin_access_required` succeeds without adding that key back
+  to settings.
 - Base: importing a `mock` text/image binding uses no provider profile id.
 - Bad: exporting `ADMIN_ACCESS_KEY`; it protects access and belongs to deployment setup.
+- Bad: exporting or importing `admin_access_required` as an operator setting.
 - Bad: writing runtime rows before discovering a broken provider binding, leaving a half-imported state.
 
 ### 6. Tests Required
@@ -1187,7 +1228,10 @@ system_prompt = settings.prompt_copy_system
 - Export regression asserting provider API keys are present only in the export document, not in ordinary settings/profile
   reads.
 - Import preview regression asserting no database mutation.
-- Import commit regression asserting runtime config, provider profiles, and bindings update together.
+- Import preview/commit regression asserting generation config and template category/template counts and key/name summaries
+  round-trip.
+- Import commit regression asserting runtime config, provider profiles, bindings, generation configs, and templates update
+  together.
 - Import failure regression asserting invalid version/config/binding keeps existing settings and providers unchanged.
 - Keep `uv run --directory backend ruff check .`, `uv run --directory backend pytest`, and frontend build/type checks green
   after changing import/export DTOs.
@@ -1394,6 +1438,8 @@ with op.batch_alter_table("products") as batch_op:
   - `entry_mode: "image" | "copy" | "tail"`
   - `sort_order: int`
   - `enabled`, `archived_at`, `disabled_at`, `disabled_by_user_id`, `disabled_reason`
+  - `review_status: "none" | "pending" | "approved" | "rejected"`
+  - `review_note`, `review_submitted_at`, `reviewed_at`, `reviewed_by_user_id`
 - DB table: `product_workflows`
   - `initial_entry_mode: "image" | "copy" | "tail" | "blank"`
   - Records the workflow creation entry. This is not derived from current nodes, because a blank workflow can later add
@@ -1407,6 +1453,7 @@ with op.batch_alter_table("products") as batch_op:
 - Read APIs:
   - `GET /api/workflow/canvas-template-categories`
   - `GET /api/workflow/canvas-templates?search=&category_id=&scope=&initial_workflow_entry=`
+  - `GET /api/workflow/canvas-templates/manage?search=&category_id=&scope=&initial_workflow_entry=`
 - Personal write APIs:
   - `POST /api/workflow/user-template-categories`
   - `PATCH /api/workflow/user-template-categories/{category_id}`
@@ -1415,6 +1462,7 @@ with op.batch_alter_table("products") as batch_op:
   - `POST /api/products/{product_id}/workflow/user-template-groups`
   - `POST /api/products/{product_id}/workflow/user-canvas-templates`
   - `PATCH /api/workflow/user-template-groups/{template_id}`
+  - `POST /api/workflow/user-template-groups/{template_id}/review`
   - `DELETE /api/workflow/user-template-groups/{template_id}`
   - `POST /api/workflow/user-template-groups/{template_id}/restore`
 - Global write APIs:
@@ -1452,15 +1500,25 @@ with op.batch_alter_table("products") as batch_op:
 - Reusable template configs must strip artifact-specific ids, URLs, paths, outputs, generated asset fields, and real image
   carriers. Copy/image prompt text is retained only when the caller sets `retain_prompt_text=true`; tail source text is
   always cleared.
-- Ordinary users read enabled global templates plus their own personal templates. Admin users read all active templates
-  and categories.
+- Operational catalog reads (`/canvas-templates`) return only effectively enabled templates/categories visible to the
+  actor. This is the only query mode used for product creation and workbench initialization/application.
+- Management reads (`/canvas-templates/manage`) return disabled and pending-review rows visible to the actor. Admin users
+  can see all active global and personal templates/categories; ordinary users can see their own disabled personal
+  templates with status and reason.
 - Personal category/template writes are owner scoped. Admin users can view another user's personal templates but must not
-  edit, archive, restore, or apply them on behalf of that user.
+  edit, archive, restore, or apply them on behalf of that user except through explicit admin governance/review actions.
 - Global category/template writes require API permission `templates:manage_global`.
 - Applying or creating from a template calls `ensure_resource_usable(...)` so disabled templates or disabled categories
   cannot be used. Disabling a category effectively disables templates assigned to it without bulk-updating child rows.
 - A personal template can reference only a personal category owned by the same user. A global template can reference only a
   global category.
+- Global templates are editable by admins through the global template update endpoint.
+- Admins can copy any visible personal template into a global category with `copy-to-global`; the new global row is
+  independent from the source row.
+- Owner edits to a disabled personal template must include `review_note` and set `review_status="pending"`. The template
+  remains unavailable to operational catalog/application until an admin approves it.
+- Admin review approval enables the personal template and marks `review_status="approved"`; rejection/keep-disabled keeps
+  `enabled=false`, stores or updates `disabled_reason`, and marks `review_status="rejected"`.
 
 ### 4. Validation & Error Matrix
 
@@ -1468,6 +1526,9 @@ with op.batch_alter_table("products") as batch_op:
 - Personal template owned by another ordinary user -> `400` for apply by key, `404` for direct personal mutation.
 - Admin mutating another user's personal template -> `400`, `管理员不能直接编辑其他用户资源`.
 - Global template/category management without `templates:manage_global` -> `403`, `没有接口权限`.
+- Owner edits a disabled personal template without `review_note` -> `400`, `模板被禁用后修改需要填写修改说明`.
+- Admin approves a pending personal template -> template becomes enabled and usable.
+- Admin rejects/keeps disabled pending template without a reason when disabling -> `400`, `禁用模板需要填写原因`.
 - Personal template using another user's category -> `400`, `画布模板分类不存在`.
 - Template using a category from the wrong scope -> `400`, `画布模板分类范围不匹配`.
 - Template or category disabled -> use/create/apply path returns `400`, `资源已被管理员屏蔽，暂不可使用`.
@@ -1490,10 +1551,18 @@ with op.batch_alter_table("products") as batch_op:
   tail node and its ancestors are persisted in the template.
 - Good: an admin creates a global category and a global `full_canvas` template from a valid `CanvasTemplate` payload; a
   regular user can read and use it without RBAC management permission.
+- Good: an admin edits an existing global template's metadata, category, sort order, enabled state, and template payload
+  without creating a duplicate row.
 - Good: an admin copies a user's personal full-canvas template into a global category; the copied global row keeps the
   source template `entry_mode`.
+- Good: an owner sees a disabled personal template in management view, submits an edit with a review note, and the admin
+  can approve or keep it disabled from the management view.
+- Base: disabled global templates and disabled personal templates never appear in product creation/workbench operational
+  catalog results.
 - Base: old `user_canvas_templates` rows are mirrored to user-scoped `canvas_templates` owned by `libow` during bootstrap.
 - Bad: calling `list_builtin_canvas_templates()` directly from route catalog handlers after database tables exist.
+- Bad: using the management list endpoint for workbench template selection, because disabled templates would leak into the
+  operational flow.
 - Bad: applying a template without checking its category effective availability.
 - Bad: allowing admin users to edit another user's personal node-group template.
 - Bad: deciding template-save eligibility by current node types instead of the persisted `initial_entry_mode`.
@@ -1512,6 +1581,10 @@ with op.batch_alter_table("products") as batch_op:
   applied.
 - Migration/model test proving `canvas_templates` and `canvas_template_categories` expose owner, enabled, archived, and
   moderation fields.
+- Migration/model test proving `canvas_templates.review_status`, review-note/reviewer timestamp fields, and the
+  `ix_canvas_templates_review_status` index exist.
+- API tests for owner edit-with-review-note, pending review visibility, admin approve, admin keep-disabled, and
+  operational catalog hiding disabled/pending templates.
 - Migration/model test proving `product_workflows.initial_entry_mode`, `canvas_templates.entry_mode`, and
   `canvas_templates.sort_order` exist with check constraints and indexes.
 - API tests for entry-mode template filtering, blank entry template initialization, mismatched entry rejection, blank

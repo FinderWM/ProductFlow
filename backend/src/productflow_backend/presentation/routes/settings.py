@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from productflow_backend import __version__
+from productflow_backend.application.canvas_templates import CanvasTemplate as CanvasTemplatePayload
+from productflow_backend.application.contracts import CopyNodeConfigV2, ProductInput
 from productflow_backend.application.time import now_utc
 from productflow_backend.config import (
     CONFIG_DEFINITION_BY_KEY,
@@ -39,6 +43,12 @@ from productflow_backend.infrastructure.db.models import (
     ProviderBinding,
     ProviderProfile,
 )
+from productflow_backend.infrastructure.db.models import (
+    CanvasTemplate as DbCanvasTemplate,
+)
+from productflow_backend.infrastructure.db.models import (
+    CanvasTemplateCategory as DbCanvasTemplateCategory,
+)
 from productflow_backend.infrastructure.provider_config import (
     IMAGE_PROVIDER_KINDS,
     PROVIDER_PURPOSES,
@@ -58,6 +68,7 @@ from productflow_backend.infrastructure.provider_config import (
     list_provider_profiles,
     normalize_provider_binding_model_settings,
     normalize_provider_binding_runtime_config,
+    resolve_text_provider_config_from_draft,
     update_generation_config,
     update_provider_binding,
     update_provider_profile,
@@ -69,6 +80,8 @@ from productflow_backend.infrastructure.provider_models import (
     ProviderModelDiscoveryUnsupportedError,
     list_provider_models,
 )
+from productflow_backend.infrastructure.text.mock_provider import MockTextProvider
+from productflow_backend.infrastructure.text.openai_provider import OpenAITextProvider
 from productflow_backend.presentation.deps import get_session, require_any_api_permission, require_api_permission
 from productflow_backend.presentation.schemas.settings import (
     ConfigItemResponse,
@@ -93,6 +106,8 @@ from productflow_backend.presentation.schemas.settings import (
     ProviderProfileResponse,
     ProviderProfileUpdateRequest,
     RuntimeConfigResponse,
+    SettingsCanvasTemplateCategoryExport,
+    SettingsCanvasTemplateExport,
     SettingsExportDocument,
     SettingsExportMetadataResponse,
     SettingsGenerationConfigExport,
@@ -100,12 +115,15 @@ from productflow_backend.presentation.schemas.settings import (
     SettingsImportPreviewResponse,
     SettingsProviderBindingExport,
     SettingsProviderProfileExport,
+    TextGenerationConfigTestRequest,
+    TextGenerationConfigTestResponse,
 )
 
 router = APIRouter(
     prefix="/api/settings",
     tags=["settings"],
 )
+logger = logging.getLogger(__name__)
 SETTINGS_EXPORT_SCHEMA_VERSION = 1
 SETTINGS_EXPORT_COMPATIBILITY = "productflow-settings-v1"
 READ_SETTINGS_PERMISSION = Depends(require_api_permission(API_SETTINGS_READ))
@@ -124,6 +142,8 @@ class _SettingsImportBundle:
     provider_profiles: list[dict[str, Any]]
     provider_bindings: list[dict[str, Any]]
     generation_configs: list[dict[str, Any]]
+    canvas_template_categories: list[dict[str, Any]]
+    canvas_templates: list[dict[str, Any]]
     preview: SettingsImportPreviewResponse
 
 
@@ -489,6 +509,41 @@ def _export_config_value(value: Any, *, input_type: str) -> str | int | bool | l
     return value
 
 
+def _serialize_canvas_template_category_export(
+    category: DbCanvasTemplateCategory,
+) -> SettingsCanvasTemplateCategoryExport:
+    return SettingsCanvasTemplateCategoryExport(
+        id=category.id,
+        scope=category.scope,
+        owner_user_id=category.owner_user_id,
+        name=category.name,
+        sort_order=category.sort_order,
+        enabled=category.enabled,
+        disabled_reason=category.disabled_reason,
+    )
+
+
+def _serialize_canvas_template_export(template: DbCanvasTemplate) -> SettingsCanvasTemplateExport:
+    return SettingsCanvasTemplateExport(
+        id=template.id,
+        key=template.key,
+        scope=template.scope,
+        owner_user_id=template.owner_user_id,
+        category_id=template.category_id,
+        title=template.title,
+        description=template.description,
+        kind=template.kind,
+        entry_mode=template.entry_mode,
+        sort_order=template.sort_order,
+        schema_version=template.schema_version,
+        template_json=dict(template.template_json or {}),
+        enabled=template.enabled,
+        disabled_reason=template.disabled_reason,
+        review_status=template.review_status,
+        review_note=template.review_note,
+    )
+
+
 def _build_settings_export_document(session: Session) -> SettingsExportDocument:
     ensure_provider_config_bootstrapped(session)
     settings = get_runtime_settings()
@@ -503,6 +558,22 @@ def _build_settings_export_document(session: Session) -> SettingsExportDocument:
     ).all()
     bindings = session.scalars(select(ProviderBinding).order_by(ProviderBinding.purpose)).all()
     generation_configs = list_generation_configs(session)
+    template_categories = session.scalars(
+        select(DbCanvasTemplateCategory)
+        .where(DbCanvasTemplateCategory.archived_at.is_(None))
+        .order_by(DbCanvasTemplateCategory.scope, DbCanvasTemplateCategory.sort_order, DbCanvasTemplateCategory.name)
+    ).all()
+    templates = session.scalars(
+        select(DbCanvasTemplate)
+        .where(DbCanvasTemplate.archived_at.is_(None))
+        .order_by(
+            DbCanvasTemplate.scope,
+            DbCanvasTemplate.entry_mode,
+            DbCanvasTemplate.sort_order,
+            DbCanvasTemplate.title,
+            DbCanvasTemplate.created_at,
+        )
+    ).all()
     return SettingsExportDocument(
         metadata=SettingsExportMetadataResponse(
             schema_version=SETTINGS_EXPORT_SCHEMA_VERSION,
@@ -554,6 +625,10 @@ def _build_settings_export_document(session: Session) -> SettingsExportDocument:
             )
             for generation_config in generation_configs
         ],
+        canvas_template_categories=[
+            _serialize_canvas_template_category_export(category) for category in template_categories
+        ],
+        canvas_templates=[_serialize_canvas_template_export(template) for template in templates],
     )
 
 
@@ -570,13 +645,14 @@ def _parse_settings_import_document(payload: Any) -> SettingsExportDocument:
 
 
 def _normalize_runtime_import_config(document: SettingsExportDocument) -> dict[str, str]:
-    unknown_keys = set(document.runtime_config) - RUNTIME_CONFIG_KEYS
+    runtime_config = {key: value for key, value in document.runtime_config.items() if key != "admin_access_required"}
+    unknown_keys = set(runtime_config) - RUNTIME_CONFIG_KEYS
     if unknown_keys:
         raise ValueError(f"未知配置项: {', '.join(sorted(unknown_keys))}")
-    missing_keys = RUNTIME_CONFIG_KEYS - set(document.runtime_config)
+    missing_keys = RUNTIME_CONFIG_KEYS - set(runtime_config)
     if missing_keys:
         raise ValueError(f"配置文件缺少配置项: {', '.join(sorted(missing_keys))}")
-    normalized_values = normalize_config_values(document.runtime_config)
+    normalized_values = normalize_config_values(runtime_config)
     _validate_runtime_settings(normalized_values)
     return normalized_values
 
@@ -772,12 +848,145 @@ def _normalize_import_generation_configs(
     return generation_configs
 
 
+def _normalize_import_canvas_template_categories(document: SettingsExportDocument) -> list[dict[str, Any]]:
+    seen_ids: set[str] = set()
+    seen_global_names: set[str] = set()
+    seen_user_names: set[tuple[str, str]] = set()
+    categories: list[dict[str, Any]] = []
+    for item in document.canvas_template_categories:
+        category_id = item.id.strip()
+        if category_id in seen_ids:
+            raise ValueError("画布模板分类不能重复")
+        seen_ids.add(category_id)
+        if item.scope not in {"global", "user"}:
+            raise ValueError("画布模板分类范围不支持")
+        owner_user_id = _normalize_optional_text(item.owner_user_id)
+        if item.scope == "global":
+            owner_user_id = None
+            normalized_name_key = item.name.strip()
+            if normalized_name_key in seen_global_names:
+                raise ValueError("全局画布模板分类名称不能重复")
+            seen_global_names.add(normalized_name_key)
+        elif owner_user_id is None:
+            raise ValueError("用户画布模板分类缺少 owner_user_id")
+        else:
+            user_name_key = (owner_user_id, item.name.strip())
+            if user_name_key in seen_user_names:
+                raise ValueError("用户画布模板分类名称不能重复")
+            seen_user_names.add(user_name_key)
+        name = item.name.strip()
+        if not name:
+            raise ValueError("画布模板分类名称不能为空")
+        categories.append(
+            {
+                "id": category_id,
+                "scope": item.scope,
+                "owner_user_id": owner_user_id,
+                "name": name,
+                "sort_order": item.sort_order,
+                "enabled": item.enabled,
+                "disabled_reason": _normalize_optional_text(item.disabled_reason),
+            }
+        )
+    return categories
+
+
+def _normalize_import_canvas_templates(
+    document: SettingsExportDocument,
+    categories: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    category_ids = {category["id"] for category in categories}
+    seen_ids: set[str] = set()
+    seen_keys: set[str] = set()
+    templates: list[dict[str, Any]] = []
+    for item in document.canvas_templates:
+        template_id = item.id.strip()
+        if template_id in seen_ids:
+            raise ValueError("画布模板不能重复")
+        seen_ids.add(template_id)
+        key = item.key.strip()
+        if key in seen_keys:
+            raise ValueError("画布模板 key 不能重复")
+        seen_keys.add(key)
+        if item.scope not in {"global", "user"}:
+            raise ValueError("画布模板范围不支持")
+        owner_user_id = _normalize_optional_text(item.owner_user_id)
+        if item.scope == "global":
+            owner_user_id = None
+        elif owner_user_id is None:
+            raise ValueError("用户画布模板缺少 owner_user_id")
+        category_id = _normalize_optional_text(item.category_id)
+        if category_id is not None and category_id not in category_ids:
+            raise ValueError("画布模板分类不存在")
+        if item.kind not in {"full_canvas", "node_group"}:
+            raise ValueError("画布模板类型不支持")
+        if item.entry_mode not in {"image", "copy", "tail"}:
+            raise ValueError("画布模板入口类型不支持")
+        title = item.title.strip()
+        if not title:
+            raise ValueError("画布模板名称不能为空")
+        payload = dict(item.template_json)
+        try:
+            CanvasTemplatePayload.model_validate(
+                {
+                    **payload,
+                    "key": key,
+                    "template_id": template_id,
+                    "version": item.schema_version,
+                    "kind": item.kind,
+                    "entry_mode": item.entry_mode,
+                    "sort_order": item.sort_order,
+                    "title": title,
+                    "description": item.description or "",
+                    "source": "user" if item.scope == "user" else "builtin",
+                    "user_template_id": template_id if item.scope == "user" else None,
+                    "scope": item.scope,
+                    "owner_user_id": owner_user_id,
+                    "category_id": category_id,
+                    "enabled": item.enabled,
+                    "effective_enabled": item.enabled,
+                    "disabled_reason": item.disabled_reason,
+                    "review_status": item.review_status,
+                    "review_note": item.review_note,
+                }
+            )
+        except ValueError as exc:
+            raise ValueError(f"画布模板 {title} 格式不正确") from exc
+        templates.append(
+            {
+                "id": template_id,
+                "key": key,
+                "scope": item.scope,
+                "owner_user_id": owner_user_id,
+                "category_id": category_id,
+                "title": title,
+                "description": _normalize_optional_text(item.description),
+                "kind": item.kind,
+                "entry_mode": item.entry_mode,
+                "sort_order": item.sort_order,
+                "schema_version": item.schema_version,
+                "template_json": payload,
+                "enabled": item.enabled,
+                "disabled_reason": _normalize_optional_text(item.disabled_reason),
+                "review_status": (
+                    item.review_status
+                    if item.review_status in {"none", "pending", "approved", "rejected"}
+                    else "none"
+                ),
+                "review_note": _normalize_optional_text(item.review_note),
+            }
+        )
+    return templates
+
+
 def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
     document = _parse_settings_import_document(payload)
     normalized_runtime_config = _normalize_runtime_import_config(document)
     profiles = _normalize_import_profiles(document)
     bindings = _normalize_import_bindings(document, profiles)
     generation_configs = _normalize_import_generation_configs(document, profiles, bindings)
+    canvas_template_categories = _normalize_import_canvas_template_categories(document)
+    canvas_templates = _normalize_import_canvas_templates(document, canvas_template_categories)
     if any(
         generation_config["purpose"] == "image" and is_real_image_provider_kind(generation_config["provider_kind"])
         for generation_config in generation_configs
@@ -789,18 +998,76 @@ def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
         provider_profile_count=len(profiles),
         provider_binding_count=len(bindings),
         generation_config_count=len(generation_configs),
+        canvas_template_category_count=len(canvas_template_categories),
+        canvas_template_count=len(canvas_templates),
         provider_profile_names=[profile["name"] for profile in profiles],
         provider_binding_purposes=sorted({generation_config["purpose"] for generation_config in generation_configs}),
         includes_api_keys=any(bool(profile["api_key"]) for profile in profiles),
         provider_profiles_with_api_key_count=sum(1 for profile in profiles if profile["api_key"]),
+        canvas_template_keys=[template["key"] for template in canvas_templates],
+        canvas_template_category_names=[category["name"] for category in canvas_template_categories],
     )
     return _SettingsImportBundle(
         normalized_runtime_config=normalized_runtime_config,
         provider_profiles=profiles,
         provider_bindings=bindings,
         generation_configs=generation_configs,
+        canvas_template_categories=canvas_template_categories,
+        canvas_templates=canvas_templates,
         preview=preview,
     )
+
+
+def _upsert_canvas_template_category(session: Session, category: dict[str, Any]) -> None:
+    row = session.get(DbCanvasTemplateCategory, category["id"])
+    if row is None:
+        row = DbCanvasTemplateCategory(id=category["id"], scope=category["scope"])
+        session.add(row)
+    row.scope = category["scope"]
+    row.owner_user_id = category["owner_user_id"]
+    row.name = category["name"]
+    row.sort_order = category["sort_order"]
+    row.enabled = category["enabled"]
+    if category["enabled"]:
+        row.disabled_at = None
+        row.disabled_by_user_id = None
+        row.disabled_reason = None
+    else:
+        row.disabled_at = row.disabled_at or now_utc()
+        row.disabled_by_user_id = None
+        row.disabled_reason = category["disabled_reason"]
+    row.archived_at = None
+
+
+def _upsert_canvas_template(session: Session, template: dict[str, Any]) -> None:
+    row = session.get(DbCanvasTemplate, template["id"])
+    if row is None:
+        row = DbCanvasTemplate(id=template["id"], key=template["key"], scope=template["scope"])
+        session.add(row)
+    row.key = template["key"]
+    row.scope = template["scope"]
+    row.owner_user_id = template["owner_user_id"]
+    row.category_id = template["category_id"]
+    row.title = template["title"]
+    row.description = template["description"]
+    row.kind = template["kind"]
+    row.entry_mode = template["entry_mode"]
+    row.sort_order = template["sort_order"]
+    row.schema_version = template["schema_version"]
+    row.template_json = template["template_json"]
+    row.enabled = template["enabled"]
+    if template["enabled"]:
+        row.disabled_at = None
+        row.disabled_by_user_id = None
+        row.disabled_reason = None
+        row.review_status = template["review_status"]
+    else:
+        row.disabled_at = row.disabled_at or now_utc()
+        row.disabled_by_user_id = None
+        row.disabled_reason = template["disabled_reason"]
+        row.review_status = template["review_status"]
+    row.review_note = template["review_note"]
+    row.archived_at = None
 
 
 def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundle) -> None:
@@ -852,6 +1119,12 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
                 cooldown_minutes=generation_config["cooldown_minutes"],
                 commit=False,
             )
+
+        for category in bundle.canvas_template_categories:
+            _upsert_canvas_template_category(session, category)
+        session.flush()
+        for template in bundle.canvas_templates:
+            _upsert_canvas_template(session, template)
     session.expire_all()
 
 
@@ -915,6 +1188,89 @@ def list_generation_config_options_endpoint(
         _serialize_generation_config_option(generation_config)
         for generation_config in list_generation_configs(session)
     ]
+
+
+@router.post(
+    "/generation-configs/test-text",
+    response_model=TextGenerationConfigTestResponse,
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
+)
+def test_text_generation_config_endpoint(
+    payload: TextGenerationConfigTestRequest,
+    session: Session = Depends(get_session),
+) -> TextGenerationConfigTestResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        if payload.generation_config is not None:
+            draft = payload.generation_config
+            resolved_config = resolve_text_provider_config_from_draft(
+                session,
+                name=draft.name,
+                provider_kind=draft.provider_kind,
+                provider_profile_id=draft.provider_profile_id,
+                model_settings=draft.model_settings,
+                config=draft.config,
+            )
+        elif payload.generation_config_id is not None:
+            generation_config = session.scalar(
+                select(GenerationConfig)
+                .options(selectinload(GenerationConfig.provider_profile))
+                .where(
+                    GenerationConfig.id == payload.generation_config_id,
+                    GenerationConfig.purpose == "text",
+                    GenerationConfig.archived_at.is_(None),
+                )
+            )
+            if generation_config is None:
+                raise ValueError("生成配置不存在")
+            resolved_config = resolve_text_provider_config_from_draft(
+                session,
+                name=generation_config.name,
+                provider_kind=generation_config.provider_kind,
+                provider_profile_id=generation_config.provider_profile_id,
+                model_settings=dict(generation_config.model_settings_json or {}),
+                config=dict(generation_config.config_json or {}),
+            )
+        else:
+            raise ValueError("请提供文案生成配置")
+        if resolved_config.provider_kind == "mock":
+            text_provider = MockTextProvider()
+        elif resolved_config.provider_kind == "openai":
+            text_provider = OpenAITextProvider(resolved_config)
+        else:
+            raise ValueError(f"暂不支持的文案 provider: {resolved_config.provider_kind}")
+        product_input = ProductInput(
+            name=payload.product.name,
+            category=payload.product.category,
+            price=payload.product.price,
+            source_note=payload.product.source_note,
+            image_path="",
+        )
+        brief_start = perf_counter()
+        brief, brief_model = text_provider.generate_brief(product_input)
+        copy_config = CopyNodeConfigV2(
+            instruction=payload.copy_request.instruction,
+            purpose=payload.copy_request.purpose,
+            channel=payload.copy_request.channel,
+            tone=payload.copy_request.tone,
+            output_mode=payload.copy_request.output_mode,
+        )
+        copy, copy_model = text_provider.generate_copy(product_input, brief, copy_config)
+        duration_ms = int((perf_counter() - brief_start) * 1000)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("文案生成配置测试失败")
+        raise HTTPException(status_code=502, detail="文案生成配置测试失败，请稍后重试") from exc
+    return TextGenerationConfigTestResponse(
+        generation_config_id=payload.generation_config_id,
+        provider_kind=resolved_config.provider_kind,
+        brief_model=brief_model,
+        copy_model=copy_model,
+        brief=brief.model_dump(mode="json"),
+        copy_result=copy.model_dump(mode="json"),
+        duration_ms=duration_ms,
+    )
 
 
 @router.post(
@@ -1194,7 +1550,6 @@ def get_runtime_config_endpoint() -> RuntimeConfigResponse:
     return RuntimeConfigResponse(
         image_generation_max_dimension=settings.image_generation_max_dimension,
         image_tool_allowed_fields=list(parse_image_tool_allowed_fields(settings.image_tool_allowed_fields)),
-        admin_access_required=settings.admin_access_required,
         deletion_enabled=settings.deletion_enabled,
     )
 

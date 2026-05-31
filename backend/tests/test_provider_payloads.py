@@ -1168,13 +1168,13 @@ def test_openai_responses_image_tool_optional_fields_are_omitted_until_configure
             "quality": "high",
             "output_format": "jpeg",
             "output_compression": 80,
-            "background": "transparent",
             "moderation": "low",
             "action": "generate",
-            "input_fidelity": "high",
             "partial_images": 2,
         }
     ]
+    assert "background" not in calls[-1]["tools"][0]
+    assert "input_fidelity" not in calls[-1]["tools"][0]
     assert "tool_choice" not in calls[-1]
 
 

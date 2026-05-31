@@ -292,6 +292,8 @@
 
 - API method:
   `api.listCanvasTemplates(input?: { search?: string; category_id?: string; scope?: CanvasTemplateScope; initial_workflow_entry?: ProductInitialWorkflowEntry })`.
+- API method:
+  `api.listCanvasTemplatesForManagement(input?: { search?: string; category_id?: string; scope?: CanvasTemplateScope; initial_workflow_entry?: ProductInitialWorkflowEntry })`.
 - API method: `api.listCanvasTemplateCategories(input?: { search?: string; scope?: CanvasTemplateScope })`.
 - API method: `api.createUserCanvasTemplate(productId, { title, description?, category_id, retain_prompt_text?, sort_order? })`.
 - API method: `api.copyUserTemplateToGlobal(templateId, { category_id, title?, description?, sort_order? })`.
@@ -299,7 +301,8 @@
 - Type: `CanvasTemplateEntryMode = "image" | "copy" | "tail"`.
 - Type: `CanvasTemplateScope = "global" | "user"`.
 - Type: `CanvasTemplateSummary` includes `entry_mode`, `sort_order`, `scope`, `category_id`, `category_name`,
-  `owner_user_id`, `owner_username`, `enabled`, `effective_enabled`, and `disabled_reason`.
+  `owner_user_id`, `owner_username`, `enabled`, `effective_enabled`, `disabled_reason`, `review_status`, `review_note`,
+  `review_submitted_at`, `reviewed_at`, and reviewer display fields.
 - Type: `CanvasTemplateCategory` mirrors backend fields `id`, `scope`, `owner_user_id`, `owner_username`, `name`,
   `sort_order`, `enabled`, `effective_enabled`, `disabled_reason`, `created_at`, and `updated_at`.
 
@@ -308,8 +311,12 @@
 - Keep backend query parameter names as `search`, `category_id`, `scope`, and `initial_workflow_entry`; do not camel-case
   them in `api.ts`.
 - Empty filter values are omitted from `URLSearchParams`.
+- Operational `api.listCanvasTemplates(...)` is for product creation and workbench insertion. It returns only effectively
+  enabled templates/categories; do not use it for admin governance screens that need disabled rows.
+- Management `api.listCanvasTemplatesForManagement(...)` is for template management screens. Admins can see all global and
+  user templates; ordinary users can see their own disabled personal templates with status/reason/review fields.
 - `scope="global"` returns global templates/categories; `scope="user"` returns user-owned templates/categories visible to
-  the current actor; omitted scope returns both visible scopes.
+  the current actor in the selected query mode; omitted scope returns both visible scopes.
 - ProductCreate must include `initial_workflow_entry` in both the React Query key and `api.listCanvasTemplates(...)`.
   `image/copy/tail` entries show matching `entry_mode`; `blank` may show all non-blank entry templates grouped by entry.
 - ProductCreate keeps the blank canvas option local and always available, even when server-side template filters return no
@@ -321,10 +328,14 @@
   `api.createUserCanvasTemplate(...)`. The form must require a personal category, expose `retain_prompt_text`, and disable
   blank-entry workflows based on `workflow.initial_entry_mode`.
 - Personal template management filters user templates by entry/category/search and can edit title, description, category,
-  sort, enabled state, and archival. Global template management can edit only global templates; user templates shown there
-  are copy sources and expose only “copy to global”.
+  sort, status visibility, disabled reason, review note, and archival according to role. Global template management can
+  edit global templates and use user templates as copy sources.
 - In global template management, a global category filter must not hide user templates that are only available as copy
   sources; apply the category filter to global templates while keeping user templates visible for copying.
+- Disabled personal templates can be edited by their owner only with a modification note; after submit the row is marked
+  pending review and remains hidden from operational catalog results until an admin approves it.
+- Admin review actions must be explicit: approve enables the template, keep-disabled stores/updates disabled reason and
+  keeps it unavailable.
 - Template chips may display `scope` and `category_name`; operator-authored template/category names are source data and
   must not be translated.
 
@@ -338,11 +349,14 @@
 - Empty server result -> show the existing empty template state; ProductCreate still shows blank canvas.
 - Entry change on ProductCreate -> reset incompatible selected template and refetch templates with the new
   `initial_workflow_entry`.
+- Disabled or pending-review template in ProductCreate/workbench operational catalog -> hidden and not selectable.
 - Blank-entry workflow in ProductDetail save-template flow -> disable submit and show the backend-aligned blank-entry
   reason.
 - Missing personal category when saving a full-canvas template -> disable submit or show the category-required error near
   the dialog action.
 - Copying a user template to global without a global category -> disable submit; backend remains authoritative.
+- Owner submits disabled-template edits without review note -> show `ApiError.detail` near the form.
+- Admin keeps a template disabled without a reason -> show `ApiError.detail` and preserve the row state.
 
 ##### 5. Good/Base/Bad Cases
 

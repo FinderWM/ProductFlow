@@ -91,10 +91,10 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
     ApiPermissionDefinition(API_RESOURCES_MODERATE, MENU_RBAC, "治理资源", "屏蔽或恢复用户资源", 20),
     ApiPermissionDefinition(
         API_GLOBAL_TEMPLATES_MANAGE,
-        MENU_RBAC,
+        MENU_SETTINGS,
         "管理全局模板",
         "维护全局画布模板和分类",
-        30,
+        50,
     ),
 )
 

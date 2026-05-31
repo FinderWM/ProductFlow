@@ -20,7 +20,8 @@ IMAGE_GENERATION_DIMENSION_MULTIPLE = 16
 IMAGE_GENERATION_MIN_MAX_DIMENSION = 512
 IMAGE_GENERATION_MAX_MAX_DIMENSION = 8192
 IMAGE_GENERATION_MAX_DIMENSION = DEFAULT_IMAGE_GENERATION_MAX_DIMENSION
-IMAGE_GENERATION_MAX_PIXELS = DEFAULT_IMAGE_GENERATION_MAX_DIMENSION * DEFAULT_IMAGE_GENERATION_MAX_DIMENSION
+IMAGE_GENERATION_MAX_PIXELS = 8_294_400
+IMAGE_GENERATION_MAX_ASPECT_RATIO = 3.0
 DEFAULT_IMAGE_SESSION_IDLE_TIMEOUT_MINUTES = 90
 IMAGE_SESSION_IDLE_TIMEOUT_MIN_MINUTES = 1
 IMAGE_SESSION_IDLE_TIMEOUT_MAX_MINUTES = 24 * 60
@@ -37,6 +38,8 @@ PROMPT_CONFIG_KEYS = {
     "prompt_poster_image_edit_template",
     "prompt_poster_image_reference_policy",
     "prompt_image_chat_template",
+    "prompt_image_prompt_polish_system",
+    "prompt_tail_split_system",
 }
 IMAGE_TOOL_FIELD_KEYS: tuple[str, ...] = (
     "model",
@@ -81,6 +84,14 @@ DEFAULT_PROMPT_IMAGE_CHAT_TEMPLATE = """请根据本轮用户要求生成图片�
 {history_block}
 本轮用户要求：{prompt}
 请直接生成图片，不要返回说明文字。"""
+DEFAULT_PROMPT_IMAGE_PROMPT_POLISH_SYSTEM = (
+    "你是电商图片生成提示词编辑器。只输出润色后的中文画面描述，不要输出 markdown、标题或解释。"
+    "保留原始商品、风格、构图和禁忌要求，补充清晰主体、光线、材质、背景和电商可售卖细节。"
+)
+DEFAULT_PROMPT_TAIL_SPLIT_SYSTEM = (
+    "你是电商工作台的尾巴节点拆分器。把输入拆成多条彼此独立、适合后续单独生图的方向。"
+    "只输出 JSON 对象，不要输出 markdown。"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +187,8 @@ class Settings(BaseSettings):
     prompt_poster_image_edit_template: str = DEFAULT_PROMPT_POSTER_IMAGE_EDIT_TEMPLATE
     prompt_poster_image_reference_policy: str = DEFAULT_PROMPT_POSTER_IMAGE_REFERENCE_POLICY
     prompt_image_chat_template: str = DEFAULT_PROMPT_IMAGE_CHAT_TEMPLATE
+    prompt_image_prompt_polish_system: str = DEFAULT_PROMPT_IMAGE_PROMPT_POLISH_SYSTEM
+    prompt_tail_split_system: str = DEFAULT_PROMPT_TAIL_SPLIT_SYSTEM
 
     upload_max_image_bytes: int = 10 * 1024 * 1024
     upload_max_reference_images: int = 6
@@ -381,7 +394,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         label="生图最大单边",
         category="图片生成",
         input_type="number",
-        description="文/图生图和工作流生图的最大宽/高像素；最大面积同步使用该值的平方。",
+        description="文/图生图和工作流生图的最大宽/高像素；总面积同时受 GPT Image 当前上限约束。",
         minimum=IMAGE_GENERATION_MIN_MAX_DIMENSION,
         maximum=IMAGE_GENERATION_MAX_MAX_DIMENSION,
     ),
@@ -471,6 +484,20 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         description="用于文/图生图对话。可用占位符：prompt、size、history_block。",
     ),
     ConfigDefinition(
+        key="prompt_image_prompt_polish_system",
+        label="画面描述润色系统提示词",
+        category="提示词",
+        input_type="textarea",
+        description="用于文/图生图的画面描述润色。只应输出润色后的提示词。",
+    ),
+    ConfigDefinition(
+        key="prompt_tail_split_system",
+        label="尾巴节点拆分系统提示词",
+        category="提示词",
+        input_type="textarea",
+        description="用于尾巴节点把长文本或上游内容拆分为多条可执行生图方向。",
+    ),
+    ConfigDefinition(
         key="upload_max_image_bytes",
         label="单图最大字节数",
         category="海报与上传",
@@ -556,13 +583,6 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         maximum=24 * 60 * 60,
     ),
     ConfigDefinition(
-        key="admin_access_required",
-        label="要求账号登录",
-        category="安全与运维",
-        input_type="boolean",
-        description="默认开启，普通工作台和私有 API 需要账号登录；系统配置查看和修改由 RBAC 权限控制。",
-    ),
-    ConfigDefinition(
         key="deletion_enabled",
         label="启用业务删除",
         category="安全与运维",
@@ -611,6 +631,17 @@ def _nearest_image_generation_dimension_multiple(value: int, *, max_dimension: i
     return max_dimension
 
 
+def _constrain_image_generation_aspect_ratio(width: int, height: int) -> tuple[int, int]:
+    if width <= 0 or height <= 0:
+        return width, height
+    ratio = max(width, height) / min(width, height)
+    if ratio <= IMAGE_GENERATION_MAX_ASPECT_RATIO:
+        return width, height
+    if width >= height:
+        return width, max(height, round(width / IMAGE_GENERATION_MAX_ASPECT_RATIO))
+    return max(width, round(height / IMAGE_GENERATION_MAX_ASPECT_RATIO)), height
+
+
 def normalize_image_generation_size(
     value: Any,
     *,
@@ -628,20 +659,38 @@ def normalize_image_generation_size(
             f"生图最大单边必须在 {IMAGE_GENERATION_MIN_MAX_DIMENSION}-{IMAGE_GENERATION_MAX_MAX_DIMENSION} 之间"
         )
     effective_max_dimension = _image_generation_max_dimension_multiple(resolved_max_dimension)
-    max_pixels = effective_max_dimension * effective_max_dimension
-    width, height = (int(part) for part in normalized.split("x", maxsplit=1))
+    max_pixels = min(IMAGE_GENERATION_MAX_PIXELS, effective_max_dimension * effective_max_dimension)
+    width, height = _constrain_image_generation_aspect_ratio(
+        *(int(part) for part in normalized.split("x", maxsplit=1))
+    )
     scale = min(1.0, effective_max_dimension / width, effective_max_dimension / height)
-    resolved_width = min(effective_max_dimension, max(IMAGE_GENERATION_MIN_DIMENSION, round(width * scale)))
-    resolved_height = min(effective_max_dimension, max(IMAGE_GENERATION_MIN_DIMENSION, round(height * scale)))
+    resolved_width = max(IMAGE_GENERATION_MIN_DIMENSION, round(width * scale))
+    resolved_height = max(IMAGE_GENERATION_MIN_DIMENSION, round(height * scale))
     if resolved_width * resolved_height > max_pixels:
         pixel_scale = (max_pixels / (resolved_width * resolved_height)) ** 0.5
-        resolved_width = max(1, int(resolved_width * pixel_scale))
-        resolved_height = max(1, int(resolved_height * pixel_scale))
+        resolved_width = max(IMAGE_GENERATION_MIN_DIMENSION, int(resolved_width * pixel_scale))
+        resolved_height = max(IMAGE_GENERATION_MIN_DIMENSION, int(resolved_height * pixel_scale))
     resolved_width = _nearest_image_generation_dimension_multiple(resolved_width, max_dimension=effective_max_dimension)
     resolved_height = _nearest_image_generation_dimension_multiple(
         resolved_height,
         max_dimension=effective_max_dimension,
     )
+    if resolved_width * resolved_height > max_pixels:
+        pixel_scale = (max_pixels / (resolved_width * resolved_height)) ** 0.5
+        resolved_width = max(
+            IMAGE_GENERATION_MIN_DIMENSION,
+            _nearest_image_generation_dimension_multiple(
+                int(resolved_width * pixel_scale),
+                max_dimension=effective_max_dimension,
+            ),
+        )
+        resolved_height = max(
+            IMAGE_GENERATION_MIN_DIMENSION,
+            _nearest_image_generation_dimension_multiple(
+                int(resolved_height * pixel_scale),
+                max_dimension=effective_max_dimension,
+            ),
+        )
     return f"{resolved_width}x{resolved_height}"
 
 

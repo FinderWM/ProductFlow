@@ -6,7 +6,6 @@ import {
   GalleryHorizontalEnd,
   Languages,
   LayoutGrid,
-  Layers3,
   LogOut,
   MoreHorizontal,
   MessagesSquare,
@@ -65,14 +64,6 @@ const navItems: Array<{
     match: (pathname: string) => pathname.startsWith("/gallery"),
   },
   {
-    labelKey: "nav.help",
-    to: "/help",
-    menuCode: null,
-    priority: "secondary",
-    icon: BookOpen,
-    match: (pathname: string) => pathname.startsWith("/help"),
-  },
-  {
     labelKey: "nav.status",
     to: "/status",
     menuCode: "status",
@@ -98,20 +89,20 @@ const navItems: Array<{
     match: (pathname: string) => pathname.startsWith("/settings"),
   },
   {
-    labelKey: "nav.templates",
-    to: "/workflow/templates",
-    menuCode: "inspirations",
-    priority: "secondary",
-    icon: Layers3,
-    match: (pathname: string) => pathname.startsWith("/workflow/templates"),
-  },
-  {
     labelKey: "nav.rbac",
     to: "/rbac",
     menuCode: "rbac",
     priority: "secondary",
     icon: ShieldCheck,
     match: (pathname: string) => pathname.startsWith("/rbac"),
+  },
+  {
+    labelKey: "nav.help",
+    to: "/help",
+    menuCode: null,
+    priority: "secondary",
+    icon: BookOpen,
+    match: (pathname: string) => pathname.startsWith("/help"),
   },
 ];
 
@@ -153,6 +144,12 @@ function mobileNavItemClassName(active: boolean) {
       : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100",
   ].join(" ");
 }
+
+const preferenceButtonClassName =
+  "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 " +
+  "text-sm font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:bg-white hover:text-slate-950 " +
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-800 dark:bg-slate-900 " +
+  "dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-slate-800 dark:hover:text-slate-100";
 
 export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -285,58 +282,21 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
               onClick={() => setLocale(nextLocale)}
               aria-label={`${t("nav.language")}: ${t(localeLabelKey[locale])}`}
               title={t(localeLabelKey[locale])}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600 transition-colors hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-slate-100 min-[1440px]:hidden"
+              className={preferenceButtonClassName}
             >
               <Languages size={14} aria-hidden="true" />
+              <span className="hidden lg:inline">{t(localeLabelKey[locale])}</span>
             </button>
-            <div className="hidden items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900 min-[1440px]:inline-flex">
-              <Languages size={14} className="ml-1 text-slate-400" aria-hidden="true" />
-              {LOCALES.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setLocale(item)}
-                  aria-label={`${t("nav.language")}: ${t(localeLabelKey[item])}`}
-                  className={`h-7 rounded-md px-2 text-xs font-semibold transition-colors ${
-                    locale === item
-                      ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-800 dark:text-indigo-300"
-                      : "text-slate-500 hover:text-slate-950 dark:text-slate-400 dark:hover:text-slate-100"
-                  }`}
-                >
-                  {t(localeLabelKey[item])}
-                </button>
-              ))}
-            </div>
             <button
               type="button"
               onClick={() => setThemePreference(nextThemePreference)}
               aria-label={`${t("nav.theme")}: ${t(`theme.${themePreference}`)}`}
               title={t(`theme.${themePreference}`)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600 transition-colors hover:text-slate-950 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-slate-100 min-[1440px]:hidden"
+              className={preferenceButtonClassName}
             >
               <CurrentThemeIcon size={14} aria-hidden="true" />
+              <span className="hidden lg:inline">{t(`theme.${themePreference}`)}</span>
             </button>
-            <div className="hidden items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900 min-[1440px]:inline-flex">
-              {THEME_PREFERENCES.map((item) => {
-                const Icon = themeIcons[item];
-                return (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setThemePreference(item)}
-                    aria-label={`${t("nav.theme")}: ${t(`theme.${item}`)}`}
-                    title={t(`theme.${item}`)}
-                    className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-                      themePreference === item
-                        ? "bg-white text-indigo-700 shadow-sm dark:bg-slate-800 dark:text-indigo-300"
-                        : "text-slate-500 hover:text-slate-950 dark:text-slate-400 dark:hover:text-slate-100"
-                    }`}
-                  >
-                    <Icon size={14} />
-                  </button>
-                );
-              })}
-            </div>
             {onLogout ? (
               <button
                 type="button"

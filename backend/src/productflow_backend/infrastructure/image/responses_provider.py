@@ -83,6 +83,10 @@ def _get_value(item: Any, key: str, default: Any = None) -> Any:
     return getattr(item, key, default)
 
 
+def _is_gpt_image_2_model(value: Any) -> bool:
+    return str(value or "").strip().lower() == "gpt-image-2"
+
+
 def _jsonable(item: Any) -> Any:
     if item is None or isinstance(item, str | int | float | bool):
         return item
@@ -611,6 +615,16 @@ class OpenAIResponsesImageClient:
             {**runtime_options, **(tool_options or {})},
             allowed_fields=self.tool_allowed_fields,
         )
+        effective_tool_model = (
+            (merged_options or {}).get("model")
+            or self.tool_model
+            or self.model
+        )
+        if _is_gpt_image_2_model(effective_tool_model):
+            merged_options = dict(merged_options or {})
+            if str(merged_options.get("background") or "").strip().lower() == "transparent":
+                merged_options.pop("background", None)
+            merged_options.pop("input_fidelity", None)
         for key in IMAGE_TOOL_OPTIONAL_FIELD_KEYS:
             value = (merged_options or {}).get(key)
             if value is None:

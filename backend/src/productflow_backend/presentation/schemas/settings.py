@@ -37,7 +37,6 @@ class ConfigResponse(BaseModel):
 class RuntimeConfigResponse(BaseModel):
     image_generation_max_dimension: int
     image_tool_allowed_fields: list[str]
-    admin_access_required: bool
     deletion_enabled: bool
 
 
@@ -252,6 +251,38 @@ class GenerationConfigUpdateRequest(BaseModel):
     cooldown_minutes: int | None = Field(default=None, ge=1)
 
 
+class TextGenerationConfigTestProductRequest(BaseModel):
+    name: str = Field(default="测试商品", min_length=1, max_length=255)
+    category: str | None = Field(default="电商商品", max_length=120)
+    price: str | None = Field(default=None, max_length=40)
+    source_note: str | None = Field(default="用于验证当前文案生成配置的测试输入。", max_length=1000)
+
+
+class TextGenerationConfigTestCopyRequest(BaseModel):
+    instruction: str = Field(default="输出适合主图的短文案。", max_length=1000)
+    purpose: str | None = Field(default="main_image", max_length=80)
+    channel: str | None = Field(default="电商", max_length=80)
+    tone: str | None = Field(default="清晰直接", max_length=80)
+    output_mode: str = "blocks"
+
+
+class TextGenerationConfigTestRequest(BaseModel):
+    generation_config_id: str | None = Field(default=None, max_length=36)
+    generation_config: GenerationConfigCreateRequest | None = None
+    product: TextGenerationConfigTestProductRequest = Field(default_factory=TextGenerationConfigTestProductRequest)
+    copy_request: TextGenerationConfigTestCopyRequest = Field(default_factory=TextGenerationConfigTestCopyRequest)
+
+
+class TextGenerationConfigTestResponse(BaseModel):
+    generation_config_id: str | None = None
+    provider_kind: str
+    brief_model: str
+    copy_model: str
+    brief: dict[str, Any]
+    copy_result: dict[str, Any]
+    duration_ms: int
+
+
 class SettingsExportMetadataResponse(BaseModel):
     schema_version: int
     exported_at: datetime
@@ -296,12 +327,43 @@ class SettingsGenerationConfigExport(BaseModel):
     cooldown_minutes: int | None = Field(default=None, ge=1)
 
 
+class SettingsCanvasTemplateCategoryExport(BaseModel):
+    id: str = Field(min_length=1, max_length=36)
+    scope: str = Field(min_length=1, max_length=20)
+    owner_user_id: str | None = Field(default=None, max_length=36)
+    name: str = Field(min_length=1, max_length=120)
+    sort_order: int = 100
+    enabled: bool = True
+    disabled_reason: str | None = Field(default=None, max_length=1000)
+
+
+class SettingsCanvasTemplateExport(BaseModel):
+    id: str = Field(min_length=1, max_length=36)
+    key: str = Field(min_length=1, max_length=120)
+    scope: str = Field(min_length=1, max_length=20)
+    owner_user_id: str | None = Field(default=None, max_length=36)
+    category_id: str | None = Field(default=None, max_length=36)
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None)
+    kind: str = Field(min_length=1, max_length=40)
+    entry_mode: str = Field(min_length=1, max_length=20)
+    sort_order: int = 100
+    schema_version: int = 1
+    template_json: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+    disabled_reason: str | None = Field(default=None, max_length=1000)
+    review_status: str = "none"
+    review_note: str | None = Field(default=None, max_length=1000)
+
+
 class SettingsExportDocument(BaseModel):
     metadata: SettingsExportMetadataResponse
     runtime_config: dict[str, Any]
     provider_profiles: list[SettingsProviderProfileExport] = Field(default_factory=list)
     provider_bindings: list[SettingsProviderBindingExport] = Field(default_factory=list)
     generation_configs: list[SettingsGenerationConfigExport] = Field(default_factory=list)
+    canvas_template_categories: list[SettingsCanvasTemplateCategoryExport] = Field(default_factory=list)
+    canvas_templates: list[SettingsCanvasTemplateExport] = Field(default_factory=list)
 
 
 class SettingsImportPreviewResponse(BaseModel):
@@ -310,10 +372,14 @@ class SettingsImportPreviewResponse(BaseModel):
     provider_profile_count: int
     provider_binding_count: int
     generation_config_count: int = 0
+    canvas_template_category_count: int = 0
+    canvas_template_count: int = 0
     provider_profile_names: list[str]
     provider_binding_purposes: list[str]
     includes_api_keys: bool
     provider_profiles_with_api_key_count: int
+    canvas_template_keys: list[str] = Field(default_factory=list)
+    canvas_template_category_names: list[str] = Field(default_factory=list)
 
 
 class SettingsImportCommitResponse(BaseModel):

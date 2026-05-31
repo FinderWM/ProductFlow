@@ -92,7 +92,7 @@ function generationConfig(overrides: Partial<GenerationConfig> & Pick<Generation
 describe("SettingsPage draft helpers", () => {
   it("only submits changed non-secret values instead of rewriting the whole config page", () => {
     const items = [
-      configItem({ key: "admin_access_required", input_type: "boolean", value: true }),
+      configItem({ key: "deletion_enabled", input_type: "boolean", value: true }),
       configItem({ key: "image_main_image_size", value: "1024x1024" }),
       configItem({ key: "image_tool_allowed_fields", input_type: "multi_select", value: ["model", "quality"] }),
     ];
@@ -449,10 +449,14 @@ describe("SettingsPage import/export helpers", () => {
       provider_profile_count: 2,
       provider_binding_count: 2,
       generation_config_count: 2,
+      canvas_template_category_count: 3,
+      canvas_template_count: 7,
       provider_profile_names: ["主供应商", "备用供应商"],
       provider_binding_purposes: ["image", "text"],
       includes_api_keys: true,
       provider_profiles_with_api_key_count: 1,
+      canvas_template_keys: ["global:one"],
+      canvas_template_category_names: ["平台首图"],
     };
 
     expect(settingsImportSummaryCounts(preview)).toEqual({
@@ -460,6 +464,8 @@ describe("SettingsPage import/export helpers", () => {
       providerProfileCount: 2,
       providerBindingCount: 2,
       generationConfigCount: 2,
+      canvasTemplateCategoryCount: 3,
+      canvasTemplateCount: 7,
       providerProfilesWithApiKeyCount: 1,
     });
   });

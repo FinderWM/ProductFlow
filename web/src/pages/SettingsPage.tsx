@@ -52,6 +52,8 @@ import type {
   ProviderType,
   SettingsExportPayload,
   SettingsImportPreviewResponse,
+  TextGenerationConfigTestRequest,
+  TextGenerationConfigTestResponse,
 } from "../lib/types";
 
 type DraftValue = string | boolean | string[];
@@ -123,6 +125,21 @@ export interface GenerationConfigDraft {
   availability_window_minutes: string;
   failure_threshold: string;
   cooldown_minutes: string;
+}
+
+interface TextConfigTestDraft {
+  productName: string;
+  category: string;
+  price: string;
+  sourceNote: string;
+  instruction: string;
+}
+
+interface TextConfigTestState {
+  draft: TextConfigTestDraft;
+  testingKey: string | null;
+  result: TextGenerationConfigTestResponse | null;
+  error: string;
 }
 
 type TextProviderKind = "mock" | "openai";
@@ -257,6 +274,14 @@ const EMPTY_PROVIDER_FORM: ProviderProfileFormState = {
   api_key: "",
   capabilities: ["text_responses", "image_images"],
   enabled: true,
+};
+
+const DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
+  productName: "测试商品",
+  category: "电商商品",
+  price: "",
+  sourceNote: "用于验证当前文案生成配置的测试输入。",
+  instruction: "输出适合主图的短文案。",
 };
 
 function multiSelectValue(value: ConfigItem["value"]): string[] {
@@ -578,6 +603,30 @@ export function generationConfigPayloadFromDraft(
   };
 }
 
+function textGenerationConfigTestPayload(
+  generationConfigDraft: GenerationConfigDraft,
+  testDraft: TextConfigTestDraft,
+): TextGenerationConfigTestRequest {
+  const generationConfig = generationConfigPayloadFromDraft(generationConfigDraft) as GenerationConfigCreateRequest;
+  return {
+    generation_config_id: generationConfigDraft.id,
+    generation_config: generationConfig,
+    product: {
+      name: testDraft.productName.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.productName,
+      category: testDraft.category.trim() || null,
+      price: testDraft.price.trim() || null,
+      source_note: testDraft.sourceNote.trim() || null,
+    },
+    copy_request: {
+      instruction: testDraft.instruction.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.instruction,
+      purpose: "main_image",
+      channel: "电商",
+      tone: "清晰直接",
+      output_mode: "blocks",
+    },
+  };
+}
+
 function itemsForSection(config: ConfigResponse | undefined, section: SettingsSectionId): ConfigItem[] {
   const items = config?.items ?? [];
   if (section === "prompts") {
@@ -611,6 +660,8 @@ export function settingsImportSummaryCounts(preview: SettingsImportPreviewRespon
   providerProfileCount: number;
   providerBindingCount: number;
   generationConfigCount: number;
+  canvasTemplateCategoryCount: number;
+  canvasTemplateCount: number;
   providerProfilesWithApiKeyCount: number;
 } {
   return {
@@ -618,6 +669,8 @@ export function settingsImportSummaryCounts(preview: SettingsImportPreviewRespon
     providerProfileCount: preview.provider_profile_count,
     providerBindingCount: preview.provider_binding_count,
     generationConfigCount: preview.generation_config_count,
+    canvasTemplateCategoryCount: preview.canvas_template_category_count,
+    canvasTemplateCount: preview.canvas_template_count,
     providerProfilesWithApiKeyCount: preview.provider_profiles_with_api_key_count,
   };
 }
@@ -647,7 +700,9 @@ function isSettingsExportPayload(value: unknown): value is SettingsExportPayload
     isRecord(value.runtime_config) &&
     Array.isArray(value.provider_profiles) &&
     Array.isArray(value.provider_bindings) &&
-    Array.isArray(value.generation_configs)
+    Array.isArray(value.generation_configs) &&
+    Array.isArray(value.canvas_template_categories) &&
+    Array.isArray(value.canvas_templates)
   );
 }
 
@@ -763,7 +818,7 @@ function SettingsMigrationPanel({
               </button>
             </div>
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
             <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
               {t("settings.migration.runtimeCount", { count: counts.runtimeConfigCount })}
             </div>
@@ -777,9 +832,33 @@ function SettingsMigrationPanel({
               {t("settings.migration.bindingCount", { count: counts.providerBindingCount })}
             </div>
             <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+              {t("settings.migration.templateCategoryCount", { count: counts.canvasTemplateCategoryCount })}
+            </div>
+            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+              {t("settings.migration.templateCount", { count: counts.canvasTemplateCount })}
+            </div>
+            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
               {t("settings.migration.keyCount", { count: counts.providerProfilesWithApiKeyCount })}
             </div>
           </div>
+          {importPreview.canvas_template_keys.length || importPreview.canvas_template_category_names.length ? (
+            <div className="mt-3 space-y-1 text-xs leading-5 text-indigo-700/85 dark:text-violet-100/75">
+              {importPreview.canvas_template_category_names.length ? (
+                <p>
+                  {t("settings.migration.templateCategories", {
+                    names: importPreview.canvas_template_category_names.slice(0, 8).join(", "),
+                  })}
+                </p>
+              ) : null}
+              {importPreview.canvas_template_keys.length ? (
+                <p>
+                  {t("settings.migration.templateKeys", {
+                    keys: importPreview.canvas_template_keys.slice(0, 8).join(", "),
+                  })}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -1802,9 +1881,12 @@ interface GenerationConfigPoolSectionProps {
   drafts: Record<string, GenerationConfigDraft>;
   pending: boolean;
   archivingConfigId: string | null;
+  textTestState?: TextConfigTestState;
   onChange: (key: string, next: GenerationConfigDraft) => void;
   onSave: (draft: GenerationConfigDraft) => void;
   onArchive: (configId: string) => void;
+  onTextTestDraftChange?: (draft: TextConfigTestDraft) => void;
+  onTestTextConfig?: (draft: GenerationConfigDraft) => void;
   onRefreshSort: () => void;
 }
 
@@ -1845,15 +1927,102 @@ function isActiveFrozenUntil(value: string | null | undefined): boolean {
   return Number.isFinite(timestamp) && timestamp > Date.now();
 }
 
+function TextConfigTestPanel({
+  state,
+  onDraftChange,
+}: {
+  state: TextConfigTestState;
+  onDraftChange: (draft: TextConfigTestDraft) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <section className={`${PANEL_CLASS} space-y-4`}>
+      <div>
+        <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+          {t("settings.generation.testTitle")}
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+          {t("settings.generation.testDescription")}
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <SettingsFormField label={t("settings.generation.testProductName")}>
+          <input
+            value={state.draft.productName}
+            onChange={(event) => onDraftChange({ ...state.draft, productName: event.target.value })}
+            className={INPUT_CLASS}
+          />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.testCategory")}>
+          <input
+            value={state.draft.category}
+            onChange={(event) => onDraftChange({ ...state.draft, category: event.target.value })}
+            className={INPUT_CLASS}
+          />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.testPrice")}>
+          <input
+            value={state.draft.price}
+            onChange={(event) => onDraftChange({ ...state.draft, price: event.target.value })}
+            className={INPUT_CLASS}
+          />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.testInstruction")}>
+          <input
+            value={state.draft.instruction}
+            onChange={(event) => onDraftChange({ ...state.draft, instruction: event.target.value })}
+            className={INPUT_CLASS}
+          />
+        </SettingsFormField>
+      </div>
+      <SettingsFormField label={t("settings.generation.testSourceNote")}>
+        <textarea
+          value={state.draft.sourceNote}
+          onChange={(event) => onDraftChange({ ...state.draft, sourceNote: event.target.value })}
+          className={`${TEXTAREA_CLASS} min-h-24 resize-y`}
+        />
+      </SettingsFormField>
+      {state.error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+          {state.error}
+        </div>
+      ) : null}
+      {state.result ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {t("settings.generation.testBriefResult", { model: state.result.brief_model })}
+            </div>
+            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+              {JSON.stringify(state.result.brief, null, 2)}
+            </pre>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {t("settings.generation.testCopyResult", { model: state.result.copy_model })}
+            </div>
+            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+              {JSON.stringify(state.result.copy_result, null, 2)}
+            </pre>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function GenerationConfigPoolSection({
   data,
   purpose,
   drafts,
   pending,
   archivingConfigId,
+  textTestState,
   onChange,
   onSave,
   onArchive,
+  onTextTestDraftChange,
+  onTestTextConfig,
   onRefreshSort,
 }: GenerationConfigPoolSectionProps) {
   const { t } = useI18n();
@@ -1868,6 +2037,9 @@ function GenerationConfigPoolSection({
 
   return (
     <div className="space-y-4">
+      {purpose === "text" && textTestState && onTextTestDraftChange ? (
+        <TextConfigTestPanel state={textTestState} onDraftChange={onTextTestDraftChange} />
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">
@@ -1896,6 +2068,12 @@ function GenerationConfigPoolSection({
           onChange={(next) => onChange(generationConfigDraftKey(next), next)}
           onSave={() => onSave(draft)}
           onArchive={config ? () => onArchive(config.id) : undefined}
+          onTest={
+            purpose === "text" && onTestTextConfig
+              ? () => onTestTextConfig(draft)
+              : undefined
+          }
+          testing={textTestState?.testingKey === key}
         />
       ))}
     </div>
@@ -1910,9 +2088,21 @@ interface GenerationConfigCardProps {
   onChange: (next: GenerationConfigDraft) => void;
   onSave: () => void;
   onArchive?: () => void;
+  onTest?: () => void;
+  testing?: boolean;
 }
 
-function GenerationConfigCard({ config, draft, profiles, pending, onChange, onSave, onArchive }: GenerationConfigCardProps) {
+function GenerationConfigCard({
+  config,
+  draft,
+  profiles,
+  pending,
+  onChange,
+  onSave,
+  onArchive,
+  onTest,
+  testing = false,
+}: GenerationConfigCardProps) {
   const { t } = useI18n();
   const isNew = !config;
   const providerKindOptions =
@@ -1963,17 +2153,30 @@ function GenerationConfigCard({ config, draft, profiles, pending, onChange, onSa
             </p>
           ) : null}
         </div>
-        {onArchive ? (
-          <button
-            type="button"
-            onClick={onArchive}
-            disabled={busy}
-            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
-          >
-            {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-            {t("settings.generation.archive")}
-          </button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {onTest ? (
+            <button
+              type="button"
+              onClick={onTest}
+              disabled={busy || testing || !draft.name.trim() || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100 dark:hover:bg-violet-500/20"
+            >
+              {testing ? <Loader2 size={14} className="mr-2 animate-spin" /> : <MessageSquareText size={14} className="mr-2" />}
+              {t("settings.generation.test")}
+            </button>
+          ) : null}
+          {onArchive ? (
+            <button
+              type="button"
+              onClick={onArchive}
+              disabled={busy}
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
+            >
+              {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
+              {t("settings.generation.archive")}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -2208,6 +2411,12 @@ export function SettingsPage() {
   const [importPayload, setImportPayload] = useState<SettingsExportPayload | null>(null);
   const [importPreview, setImportPreview] = useState<SettingsImportPreviewResponse | null>(null);
   const [importFileName, setImportFileName] = useState("");
+  const [textConfigTestState, setTextConfigTestState] = useState<TextConfigTestState>({
+    draft: DEFAULT_TEXT_CONFIG_TEST_DRAFT,
+    testingKey: null,
+    result: null,
+    error: "",
+  });
 
   const configQuery = useQuery({
     queryKey: ["config"],
@@ -2364,6 +2573,8 @@ export function SettingsPage() {
       await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
       await queryClient.invalidateQueries({ queryKey: ["runtime-config"] });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
+      await queryClient.invalidateQueries({ queryKey: ["canvas-templates"] });
+      await queryClient.invalidateQueries({ queryKey: ["canvas-template-categories"] });
       setImportPayload(null);
       setImportPreview(null);
       setImportFileName("");
@@ -2489,6 +2700,37 @@ export function SettingsPage() {
       setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.archiveFailed"));
     },
     onSettled: () => setArchivingGenerationConfigId(null),
+  });
+
+  const testTextGenerationConfigMutation = useMutation({
+    mutationFn: (draft: GenerationConfigDraft) =>
+      api.testTextGenerationConfig(textGenerationConfigTestPayload(draft, textConfigTestState.draft)),
+    onMutate: (draft) => {
+      setTextConfigTestState((current) => ({
+        ...current,
+        testingKey: generationConfigDraftKey(draft),
+        result: null,
+        error: "",
+      }));
+      setSavedMessage("");
+      setError("");
+    },
+    onSuccess: (result) => {
+      setTextConfigTestState((current) => ({
+        ...current,
+        testingKey: null,
+        result,
+        error: "",
+      }));
+    },
+    onError: (mutationError) => {
+      setTextConfigTestState((current) => ({
+        ...current,
+        testingKey: null,
+        result: null,
+        error: mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.testFailed"),
+      }));
+    },
   });
 
   const logoutMutation = useMutation({
@@ -2770,6 +3012,7 @@ export function SettingsPage() {
                         drafts={generationConfigDrafts}
                         pending={providerPending}
                         archivingConfigId={archivingGenerationConfigId}
+                        textTestState={textConfigTestState}
                         onChange={(key, next) => {
                           setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
@@ -2781,6 +3024,12 @@ export function SettingsPage() {
                         }}
                         onArchive={(configId) => {
                           archiveGenerationConfigMutation.mutate(configId);
+                        }}
+                        onTextTestDraftChange={(draft) => {
+                          setTextConfigTestState((current) => ({ ...current, draft }));
+                        }}
+                        onTestTextConfig={(draft) => {
+                          testTextGenerationConfigMutation.mutate(draft);
                         }}
                         onRefreshSort={() => {
                           void queryClient.invalidateQueries({ queryKey: ["provider-config"] });

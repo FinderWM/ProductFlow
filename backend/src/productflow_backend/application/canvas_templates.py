@@ -139,6 +139,12 @@ class CanvasTemplate(BaseModel):
     enabled: bool = True
     effective_enabled: bool = True
     disabled_reason: str | None = None
+    review_status: Literal["none", "pending", "approved", "rejected"] = "none"
+    review_note: str | None = None
+    review_submitted_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
+    reviewed_by_username: str | None = None
     scenario: CanvasTemplateScenarioMetadata
     nodes: tuple[CanvasTemplateNodeSpec, ...]
     edges: tuple[CanvasTemplateEdgeSpec, ...] = ()

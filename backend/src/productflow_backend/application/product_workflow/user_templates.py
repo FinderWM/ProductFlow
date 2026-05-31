@@ -57,6 +57,7 @@ BUILTIN_TEMPLATE_CATEGORIES_BY_STAGE: dict[str, tuple[str, str, int]] = {
 }
 TemplateScope = Literal["global", "user"]
 InitialWorkflowEntry = Literal["image", "copy", "tail", "blank"]
+TemplateReviewStatus = Literal["none", "pending", "approved", "rejected"]
 
 ARTIFACT_SPECIFIC_CONFIG_KEYS = frozenset(
     {
@@ -166,6 +167,12 @@ def canvas_template_row_to_canvas_template(row: DbCanvasTemplate) -> CanvasTempl
         enabled=row.enabled,
         effective_enabled=state.effective_enabled,
         disabled_reason=row.disabled_reason,
+        review_status=_template_review_status(row.review_status),
+        review_note=row.review_note,
+        review_submitted_at=row.review_submitted_at.isoformat() if row.review_submitted_at is not None else None,
+        reviewed_at=row.reviewed_at.isoformat() if row.reviewed_at is not None else None,
+        reviewed_by_user_id=row.reviewed_by_user_id,
+        reviewed_by_username=row.reviewed_by.username if row.reviewed_by is not None else None,
         scenario=template.scenario,
         nodes=template.nodes,
         edges=template.edges,
@@ -192,6 +199,51 @@ def list_canvas_templates(
     scope: str | None = None,
     initial_workflow_entry: str | None = None,
 ) -> list[CanvasTemplate]:
+    return _list_canvas_templates(
+        session,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        search=search,
+        category_id=category_id,
+        scope=scope,
+        initial_workflow_entry=initial_workflow_entry,
+        management=False,
+    )
+
+
+def list_canvas_templates_for_management(
+    session: Session,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = True,
+    search: str | None = None,
+    category_id: str | None = None,
+    scope: str | None = None,
+    initial_workflow_entry: str | None = None,
+) -> list[CanvasTemplate]:
+    return _list_canvas_templates(
+        session,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        search=search,
+        category_id=category_id,
+        scope=scope,
+        initial_workflow_entry=initial_workflow_entry,
+        management=True,
+    )
+
+
+def _list_canvas_templates(
+    session: Session,
+    *,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+    search: str | None,
+    category_id: str | None,
+    scope: str | None,
+    initial_workflow_entry: str | None,
+    management: bool,
+) -> list[CanvasTemplate]:
     ensure_canvas_templates_bootstrapped(session)
     normalized_scope = _normalize_optional_scope(scope)
     normalized_entry = _normalize_optional_initial_workflow_entry(initial_workflow_entry)
@@ -214,7 +266,7 @@ def list_canvas_templates(
                 DbCanvasTemplate.description.ilike(pattern),
             )
         )
-    if not actor_is_admin:
+    if not actor_is_admin or not management:
         stmt = stmt.where(
             or_(
                 DbCanvasTemplate.scope == "global",
@@ -233,7 +285,12 @@ def list_canvas_templates(
     return [
         canvas_template_row_to_canvas_template(row)
         for row in rows
-        if _template_visible_to_actor(row, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+        if _template_visible_to_actor(
+            row,
+            actor_user_id=actor_user_id,
+            actor_is_admin=actor_is_admin,
+            management=management,
+        )
     ]
 
 
@@ -253,7 +310,12 @@ def get_canvas_template(
             DbCanvasTemplate.archived_at.is_(None),
         )
     )
-    if row is None or not _template_visible_to_actor(row, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin):
+    if row is None or not _template_visible_to_actor(
+        row,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        management=not require_usable,
+    ):
         raise BusinessValidationError("画布模板不存在")
     if require_usable:
         ensure_resource_usable(row)
@@ -268,6 +330,43 @@ def list_canvas_template_categories(
     search: str | None = None,
     scope: str | None = None,
 ) -> list[CanvasTemplateCategory]:
+    return _list_canvas_template_categories(
+        session,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        search=search,
+        scope=scope,
+        management=False,
+    )
+
+
+def list_canvas_template_categories_for_management(
+    session: Session,
+    *,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = True,
+    search: str | None = None,
+    scope: str | None = None,
+) -> list[CanvasTemplateCategory]:
+    return _list_canvas_template_categories(
+        session,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        search=search,
+        scope=scope,
+        management=True,
+    )
+
+
+def _list_canvas_template_categories(
+    session: Session,
+    *,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+    search: str | None,
+    scope: str | None,
+    management: bool,
+) -> list[CanvasTemplateCategory]:
     ensure_canvas_templates_bootstrapped(session)
     normalized_scope = _normalize_optional_scope(scope)
     stmt = _canvas_template_category_query().where(CanvasTemplateCategory.archived_at.is_(None))
@@ -276,7 +375,7 @@ def list_canvas_template_categories(
     normalized_search = _normalize_search(search)
     if normalized_search:
         stmt = stmt.where(CanvasTemplateCategory.name.ilike(f"%{normalized_search.lower()}%"))
-    if not actor_is_admin:
+    if not actor_is_admin or not management:
         stmt = stmt.where(
             or_(
                 CanvasTemplateCategory.scope == "global",
@@ -289,7 +388,12 @@ def list_canvas_template_categories(
     return [
         row
         for row in rows
-        if _category_visible_to_actor(row, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin)
+        if _category_visible_to_actor(
+            row,
+            actor_user_id=actor_user_id,
+            actor_is_admin=actor_is_admin,
+            management=management,
+        )
     ]
 
 
@@ -393,6 +497,7 @@ def create_global_canvas_template(
     sort_order: int = 100,
     template_json: dict[str, Any],
     category_id: str | None = None,
+    enabled: bool = True,
 ) -> DbCanvasTemplate:
     ensure_canvas_templates_bootstrapped(session)
     clean_key = _normalize_template_key(key)
@@ -418,6 +523,7 @@ def create_global_canvas_template(
         kind=kind,
         entry_mode=entry_mode,
         sort_order=sort_order,
+        enabled=enabled,
         schema_version=template.version,
         template_json=template.model_dump(mode="json"),
     )
@@ -442,6 +548,9 @@ def update_global_canvas_template(
     sort_order: int | None = None,
     template_json: dict[str, Any] | None = None,
     category_id: str | None = None,
+    enabled: bool | None = None,
+    disabled_reason: str | None = None,
+    actor_user_id: str | None = None,
 ) -> DbCanvasTemplate:
     row = _get_global_canvas_template_or_raise(session, template_id)
     next_title = _normalize_template_title(title) if title is not None else row.title
@@ -467,6 +576,8 @@ def update_global_canvas_template(
     row.kind = next_kind
     row.entry_mode = next_entry_mode
     row.sort_order = next_sort_order
+    if enabled is not None:
+        _set_template_enabled(row, enabled=enabled, actor_user_id=actor_user_id, disabled_reason=disabled_reason)
     row.schema_version = template.version
     row.template_json = template.model_dump(mode="json")
     row.updated_at = now_utc()
@@ -724,6 +835,8 @@ def rename_user_canvas_template(
     category_id: str | None = None,
     sort_order: int | None = None,
     enabled: bool | None = None,
+    disabled_reason: str | None = None,
+    review_note: str | None = None,
 ) -> DbCanvasTemplate:
     template = _get_user_template_or_raise(session, template_id)
     if template.archived_at is not None:
@@ -746,10 +859,46 @@ def rename_user_canvas_template(
         template.category_id = category_id
     if sort_order is not None:
         template.sort_order = sort_order
-    if enabled is not None:
-        template.enabled = enabled
+    if enabled is not None and actor_is_admin:
+        _set_template_enabled(template, enabled=enabled, actor_user_id=actor_user_id, disabled_reason=disabled_reason)
+    elif enabled is not None and enabled != template.enabled:
+        raise BusinessValidationError("用户不能直接修改模板可用状态")
+    if _owner_edit_requires_review(template, actor_user_id=actor_user_id, actor_is_admin=actor_is_admin):
+        note = _normalize_review_note(review_note)
+        if note is None:
+            raise BusinessValidationError("模板被禁用后修改需要填写修改说明")
+        template.review_status = "pending"
+        template.review_note = note
+        template.review_submitted_at = now_utc()
+        template.reviewed_at = None
+        template.reviewed_by_user_id = None
     template.template_json = _template_json_with_row_metadata(template)
     template.updated_at = now_utc()
+    _sync_legacy_user_template_mirror(session, template)
+    session.commit()
+    session.expire_all()
+    return _get_user_template_or_raise(session, template_id)
+
+
+def review_user_canvas_template(
+    session: Session,
+    *,
+    template_id: str,
+    approved: bool,
+    actor_user_id: str,
+    disabled_reason: str | None = None,
+) -> DbCanvasTemplate:
+    template = _get_user_template_or_raise(session, template_id)
+    if approved:
+        _set_template_enabled(template, enabled=True, actor_user_id=actor_user_id, disabled_reason=None)
+        template.review_status = "approved"
+    else:
+        _set_template_enabled(template, enabled=False, actor_user_id=actor_user_id, disabled_reason=disabled_reason)
+        template.review_status = "rejected"
+    template.reviewed_at = now_utc()
+    template.reviewed_by_user_id = actor_user_id
+    template.updated_at = template.reviewed_at
+    template.template_json = _template_json_with_row_metadata(template)
     _sync_legacy_user_template_mirror(session, template)
     session.commit()
     session.expire_all()
@@ -830,6 +979,7 @@ def _canvas_template_query():
         selectinload(DbCanvasTemplate.category).selectinload(CanvasTemplateCategory.disabled_by),
         selectinload(DbCanvasTemplate.category).selectinload(CanvasTemplateCategory.owner),
         selectinload(DbCanvasTemplate.disabled_by),
+        selectinload(DbCanvasTemplate.reviewed_by),
     )
 
 
@@ -914,6 +1064,7 @@ def _builtin_template_payload(template: CanvasTemplate, category: CanvasTemplate
             "category_name": category.name,
             "enabled": True,
             "effective_enabled": True,
+            "review_status": "none",
         }
     ).model_dump(mode="json")
 
@@ -930,6 +1081,7 @@ def _template_payload_with_category_metadata(
             "category_name": category.name,
             "enabled": True,
             "effective_enabled": True,
+            "review_status": "none",
         }
     )
     return payload
@@ -1052,6 +1204,7 @@ def _user_payload_to_canvas_template(
         user_template_id=template_id,
         scope="user",
         owner_user_id=owner_user_id,
+        review_status="none",
         scenario=CanvasTemplateScenarioMetadata(
             scenario=USER_TEMPLATE_SCENARIO,
             title="用户模板",
@@ -1088,15 +1241,18 @@ def _template_visible_to_actor(
     *,
     actor_user_id: str | None,
     actor_is_admin: bool,
+    management: bool,
 ) -> bool:
     if row.archived_at is not None:
         return False
     if row.category is not None and row.category.archived_at is not None:
         return False
-    if actor_is_admin:
+    if management and actor_is_admin:
         return True
     if row.scope == "user":
-        return row.owner_user_id == actor_user_id
+        return row.owner_user_id == actor_user_id and (
+            management or moderation_state_for_resource(row).effective_enabled
+        )
     return moderation_state_for_resource(row).effective_enabled
 
 
@@ -1105,19 +1261,79 @@ def _category_visible_to_actor(
     *,
     actor_user_id: str | None,
     actor_is_admin: bool,
+    management: bool,
 ) -> bool:
     if row.archived_at is not None:
         return False
-    if actor_is_admin:
+    if management and actor_is_admin:
         return True
     if row.scope == "user":
-        return row.owner_user_id == actor_user_id
+        return row.owner_user_id == actor_user_id and (
+            management or moderation_state_for_resource(row).effective_enabled
+        )
     return moderation_state_for_resource(row).effective_enabled
 
 
 def _template_json_with_row_metadata(row: DbCanvasTemplate) -> dict[str, Any]:
     template = canvas_template_row_to_canvas_template(row)
     return template.model_dump(mode="json")
+
+
+def _set_template_enabled(
+    row: DbCanvasTemplate,
+    *,
+    enabled: bool,
+    actor_user_id: str | None,
+    disabled_reason: str | None,
+) -> None:
+    if enabled:
+        row.enabled = True
+        row.disabled_at = None
+        row.disabled_by_user_id = None
+        row.disabled_reason = None
+        if row.review_status == "pending":
+            row.review_status = "approved"
+            row.reviewed_at = now_utc()
+            row.reviewed_by_user_id = actor_user_id
+        return
+    row.enabled = False
+    row.disabled_at = now_utc()
+    row.disabled_by_user_id = actor_user_id
+    row.disabled_reason = _normalize_optional_long_text(disabled_reason)
+
+
+def _owner_edit_requires_review(
+    row: DbCanvasTemplate,
+    *,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+) -> bool:
+    return (
+        row.scope == "user"
+        and not actor_is_admin
+        and row.owner_user_id == actor_user_id
+        and not moderation_state_for_resource(row).effective_enabled
+    )
+
+
+def _normalize_review_note(value: str | None) -> str | None:
+    normalized = _normalize_optional_long_text(value)
+    if normalized is None:
+        return None
+    if len(normalized) > 1000:
+        raise BusinessValidationError("修改说明不能超过 1000 个字符")
+    return normalized
+
+
+def _normalize_optional_long_text(value: str | None) -> str | None:
+    normalized = "" if value is None else str(value).strip()
+    return normalized or None
+
+
+def _template_review_status(value: str | None) -> TemplateReviewStatus:
+    if value in {"none", "pending", "approved", "rejected"}:
+        return value
+    return "none"
 
 
 def _upsert_legacy_user_template_mirror(

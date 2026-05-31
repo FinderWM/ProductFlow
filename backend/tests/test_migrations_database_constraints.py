@@ -155,11 +155,18 @@ def test_canvas_template_models_match_migration_contract() -> None:
     assert template_table.c.disabled_at.nullable
     assert template_table.c.disabled_by_user_id.nullable
     assert template_table.c.disabled_reason.nullable
+    assert template_table.c.review_status.type.length == 20
+    assert not template_table.c.review_status.nullable
+    assert template_table.c.review_note.nullable
+    assert template_table.c.review_submitted_at.nullable
+    assert template_table.c.reviewed_at.nullable
+    assert template_table.c.reviewed_by_user_id.nullable
     assert {index.name for index in template_table.indexes} == {
         "ix_canvas_templates_archived_at",
         "ix_canvas_templates_category_id",
         "ix_canvas_templates_enabled",
         "ix_canvas_templates_entry_mode",
+        "ix_canvas_templates_review_status",
         "ix_canvas_templates_scope",
         "ix_canvas_templates_scope_owner_entry_category_sort",
         "ix_canvas_templates_sort_order",

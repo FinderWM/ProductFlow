@@ -29,6 +29,7 @@ from productflow_backend.domain.enums import (
 from productflow_backend.infrastructure.db.models import (
     CopySet,
     PosterVariant,
+    Product,
     ProductWorkflow,
     SourceAsset,
     WorkflowEdge,
@@ -295,7 +296,7 @@ def test_legacy_jobrun_routes_are_removed(configured_env: Path) -> None:
     assert set(history.json()) == {"copy_sets", "poster_variants"}
 
 
-def test_product_can_be_deleted_from_api(configured_env: Path) -> None:
+def test_product_can_be_deleted_from_api(configured_env: Path, db_session) -> None:
     from productflow_backend.presentation.api import create_app
 
     app = create_app()
@@ -327,10 +328,15 @@ def test_product_can_be_deleted_from_api(configured_env: Path) -> None:
 
     listed = client.get("/api/products")
     assert listed.status_code == 200
-    assert product_id not in {item["id"] for item in listed.json()["items"]}
-    missing = client.get(f"/api/products/{product_id}")
-    assert missing.status_code == 404
-    assert not product_root.exists()
+    assert product_id in {item["id"] for item in listed.json()["items"]}
+    visible_to_admin = client.get(f"/api/products/{product_id}")
+    assert visible_to_admin.status_code == 200
+
+    db_session.expire_all()
+    persisted = db_session.get(Product, product_id)
+    assert persisted is not None
+    assert persisted.deleted_at is not None
+    assert product_root.exists()
 
 def test_reference_images_can_be_attached_to_product(db_session, configured_env: Path) -> None:
     product = create_product(

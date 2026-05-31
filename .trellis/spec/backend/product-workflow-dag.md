@@ -216,8 +216,8 @@ Keep the template as node and edge specs so application code can persist visible
 ### 1. Scope / Trigger
 
 - Trigger: changes to `POST /api/products`, product creation use cases, or creation-time canvas template application.
-- Product creation may initialize a complete ecommerce output plan, but only by materializing a built-in `full_canvas`
-  template into normal persisted workflow rows.
+- Product creation may initialize a complete ecommerce output plan, but only by materializing a usable database-backed
+  `full_canvas` template into normal persisted workflow rows.
 - Creation-time template selection must not implement user-saved template storage, result actions, or material lineage.
   Those are separate product-workbench capabilities.
 
@@ -237,18 +237,19 @@ Keep the template as node and edge specs so application code can persist visible
 - Application entrypoint:
   - `create_product(..., canvas_template_key: str | None = None, ...) -> Product`
 - Application helper:
-  - `resolve_product_creation_canvas_template(canvas_template_key: str | None) -> CanvasTemplate | None`
+  - `resolve_product_creation_canvas_template(session, canvas_template_key: str | None, *, initial_workflow_entry, actor_user_id) -> CanvasTemplate | None`
   - `materialize_product_workflow_from_template(session, *, product_id: str, template: CanvasTemplate) -> ProductWorkflow`
 
 ### 3. Contracts
 
 - Missing, blank, and approved default aliases such as `default`, `basic`, `blank`, or `minimal` preserve the existing lazy
   default workflow behavior. Do not eagerly create a default workflow during product creation for those values.
-- Any other key must resolve through the built-in template catalog. Do not accept frontend-only template payloads or
-  browser-local template definitions for product creation.
+- Any other key must resolve through the database-backed canvas template catalog with `require_usable=True`. Do not accept
+  frontend-only template payloads, browser-local template definitions, disabled templates, or disabled template
+  categories for product creation.
 - Only `CanvasTemplate.kind == "full_canvas"` is valid at product creation time.
-- Built-in ecommerce templates are complete `full_canvas` templates. Product creation may materialize any built-in
-  ecommerce template directly.
+- Built-in/global ecommerce templates are complete `full_canvas` templates. Product creation may materialize any usable
+  catalog full-canvas template visible to the actor.
 - `create_product` owns the SQLAlchemy transaction. Template materialization helpers may `flush` rows to resolve ids, but
   must not `commit` independently.
 - Materialized `WorkflowNode` rows copy template `node_type`, `title`, `position_x`, `position_y`, and `config_json`.
@@ -266,6 +267,8 @@ Keep the template as node and edge specs so application code can persist visible
 
 - `canvas_template_key` missing/blank/default alias -> create product, no eager workflow row.
 - Unknown non-default key -> `BusinessValidationError("画布模板不存在")` or equivalent template-missing `400`.
+- Disabled/unavailable template key -> `BusinessValidationError("画布模板不存在")` for catalog-hidden rows or
+  `BusinessValidationError("资源已被管理员屏蔽，暂不可使用")` when resolved but not usable.
 - Built-in key whose template kind is not `full_canvas` -> `BusinessValidationError` with a message explaining product
   creation supports only complete canvas templates.
 - Product id missing during materialization -> `NotFoundError("商品不存在")`.

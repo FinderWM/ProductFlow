@@ -211,6 +211,9 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 - Pages pass built-in preset options into the component; `ImageSizePicker` must not call the API.
 - Runtime config filters built-in size preset buttons by maximum single edge. It must not provide an arbitrary backend
   allowlist; a custom value may be valid even when it is not present in the preset list.
+- Built-in generated-image presets must also stay within max total pixels `8,294,400`, max aspect ratio `3:1`, and 16px
+  multiple dimensions. Do not offer 4K square presets such as `3840x3840`; custom oversized square inputs should calibrate
+  down to a safe value such as `2880x2880`.
 - The picker should preserve and round-trip unknown valid values by switching to custom width/height mode instead of
   resetting to the first preset.
 - Preset labels should include the human tier/aspect and the exact pixel string so users know what will be submitted.
@@ -220,6 +223,8 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 - Invalid local text such as missing width/height -> keep the custom inputs visible and avoid emitting a malformed size.
 - Existing value not found in presets -> show it as custom dimensions when parseable.
 - Custom inputs with uppercase separators or oversized values -> normalize/calibrate in the shared helper before emitting.
+- Custom inputs exceeding total-pixel or aspect-ratio bounds -> normalize/calibrate in the shared helper before emitting
+  or leave invalid local input unsubmitted until the backend validates it.
 - Custom inputs with either side not divisible by 16 -> normalize/calibrate in the shared helper before emitting.
 - Backend rejection still remains authoritative; frontend validation only improves UX.
 
@@ -227,7 +232,8 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 
 - Good: `3840x2160` from workflow node config opens the inspector with custom dimensions `3840` and `2160`, then submits
   `3840x2160` unchanged.
-- Base: `1024x1024`, `2048x2048`, and `3840x3840` appear as preset buttons when present in the derived presets.
+- Base: `1024x1024`, `2048x2048`, and `3840x2160` appear as preset buttons when present in the derived presets.
+- Bad: `3840x3840` appears as a default preset even though the backend will calibrate it down.
 - Bad: `ImageChatPage` accepts custom dimensions while `InspectorPanel` still exposes a raw text field.
 - Bad: `ImageChatPage` supports provider quality/format/fidelity fields while `InspectorPanel` has a separate partial
   implementation or sends raw unnormalized `tool_options`.

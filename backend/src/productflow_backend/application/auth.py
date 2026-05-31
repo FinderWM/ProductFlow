@@ -14,6 +14,7 @@ from productflow_backend.domain.rbac import (
     ADMIN_ROLE_CODE,
     ADMIN_USER_ID,
     ADMIN_USERNAME,
+    API_GLOBAL_TEMPLATES_MANAGE,
     API_PERMISSION_DEFINITIONS,
     API_SETTINGS_MIGRATE,
     API_SETTINGS_PROVIDER_WRITE,
@@ -372,7 +373,12 @@ def _ensure_admin_user(session: Session, admin_role: AuthRole) -> AuthUser:
 
 def _normalize_role_api_permission_codes(permission_codes: set[str]) -> list[str]:
     next_api_codes = set(permission_codes)
-    if next_api_codes & {API_SETTINGS_WRITE, API_SETTINGS_PROVIDER_WRITE, API_SETTINGS_MIGRATE}:
+    if next_api_codes & {
+        API_SETTINGS_WRITE,
+        API_SETTINGS_PROVIDER_WRITE,
+        API_SETTINGS_MIGRATE,
+        API_GLOBAL_TEMPLATES_MANAGE,
+    }:
         next_api_codes.add(API_SETTINGS_READ)
     return sorted(next_api_codes)
 

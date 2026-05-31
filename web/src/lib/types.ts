@@ -20,6 +20,7 @@ export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 export type WorkflowRetryHint = "retry_later" | "revise_input" | "check_settings";
 export type CanvasTemplateKind = "full_canvas" | "node_group";
 export type CanvasTemplateScope = "global" | "user";
+export type CanvasTemplateReviewStatus = "none" | "pending" | "approved" | "rejected";
 export type CanvasTemplateScenario =
   | "main_image"
   | "taobao_main_image"
@@ -523,6 +524,12 @@ export interface CanvasTemplateSummary {
   enabled?: boolean;
   effective_enabled?: boolean;
   disabled_reason?: string | null;
+  review_status?: CanvasTemplateReviewStatus;
+  review_note?: string | null;
+  review_submitted_at?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: string | null;
+  reviewed_by_username?: string | null;
   scenario: CanvasTemplateScenarioMetadata;
   preview_nodes: CanvasTemplatePreviewNode[];
   preview_edges: CanvasTemplatePreviewEdge[];
@@ -573,6 +580,7 @@ export interface CreateGlobalCanvasTemplateInput {
   sort_order?: number;
   category_id?: string | null;
   template_json?: Record<string, unknown>;
+  enabled?: boolean;
 }
 
 export interface UpdateGlobalCanvasTemplateInput {
@@ -583,6 +591,8 @@ export interface UpdateGlobalCanvasTemplateInput {
   sort_order?: number;
   category_id?: string | null;
   template_json?: Record<string, unknown>;
+  enabled?: boolean;
+  disabled_reason?: string | null;
 }
 
 export interface ApplyWorkflowTemplateGroupInput {
@@ -619,6 +629,8 @@ export interface UpdateUserTemplateGroupInput {
   category_id?: string | null;
   sort_order?: number;
   enabled?: boolean;
+  disabled_reason?: string | null;
+  review_note?: string | null;
 }
 
 export interface CopyUserTemplateToGlobalInput {
@@ -626,6 +638,11 @@ export interface CopyUserTemplateToGlobalInput {
   title?: string;
   description?: string;
   sort_order?: number;
+}
+
+export interface ReviewUserTemplateGroupInput {
+  approved: boolean;
+  disabled_reason?: string | null;
 }
 
 export interface CopySetUpdateRequest {
@@ -831,7 +848,6 @@ export interface ConfigResponse {
 export interface RuntimeConfig {
   image_generation_max_dimension: number;
   image_tool_allowed_fields: ImageToolOptionKey[];
-  admin_access_required: boolean;
   deletion_enabled: boolean;
 }
 
@@ -1089,6 +1105,38 @@ export interface GenerationConfigUpdateRequest {
   cooldown_minutes?: number | null;
 }
 
+export interface TextGenerationConfigTestProductRequest {
+  name: string;
+  category?: string | null;
+  price?: string | null;
+  source_note?: string | null;
+}
+
+export interface TextGenerationConfigTestCopyRequest {
+  instruction?: string;
+  purpose?: string | null;
+  channel?: string | null;
+  tone?: string | null;
+  output_mode?: "freeform" | "blocks" | "layout_brief";
+}
+
+export interface TextGenerationConfigTestRequest {
+  generation_config_id?: string | null;
+  generation_config?: GenerationConfigCreateRequest | null;
+  product?: TextGenerationConfigTestProductRequest;
+  copy_request?: TextGenerationConfigTestCopyRequest;
+}
+
+export interface TextGenerationConfigTestResponse {
+  generation_config_id: string | null;
+  provider_kind: string;
+  brief_model: string;
+  copy_model: string;
+  brief: Record<string, unknown>;
+  copy_result: Record<string, unknown>;
+  duration_ms: number;
+}
+
 export interface ProviderConfigResponse {
   profiles: ProviderProfile[];
   bindings: ProviderBinding[];
@@ -1152,12 +1200,43 @@ export interface SettingsExportGenerationConfig {
   cooldown_minutes?: number | null;
 }
 
+export interface SettingsExportCanvasTemplateCategory {
+  id: string;
+  scope: CanvasTemplateScope;
+  owner_user_id?: string | null;
+  name: string;
+  sort_order: number;
+  enabled: boolean;
+  disabled_reason?: string | null;
+}
+
+export interface SettingsExportCanvasTemplate {
+  id: string;
+  key: string;
+  scope: CanvasTemplateScope;
+  owner_user_id?: string | null;
+  category_id?: string | null;
+  title: string;
+  description?: string | null;
+  kind: CanvasTemplateKind;
+  entry_mode: CanvasTemplateEntryMode;
+  sort_order: number;
+  schema_version: number;
+  template_json: Record<string, unknown>;
+  enabled: boolean;
+  disabled_reason?: string | null;
+  review_status?: CanvasTemplateReviewStatus;
+  review_note?: string | null;
+}
+
 export interface SettingsExportPayload {
   metadata: SettingsExportMetadata;
   runtime_config: Record<string, string | number | boolean | string[] | null>;
   provider_profiles: SettingsExportProviderProfile[];
   provider_bindings: SettingsExportProviderBinding[];
   generation_configs: SettingsExportGenerationConfig[];
+  canvas_template_categories: SettingsExportCanvasTemplateCategory[];
+  canvas_templates: SettingsExportCanvasTemplate[];
 }
 
 export interface SettingsImportPreviewResponse {
@@ -1166,10 +1245,14 @@ export interface SettingsImportPreviewResponse {
   provider_profile_count: number;
   provider_binding_count: number;
   generation_config_count: number;
+  canvas_template_category_count: number;
+  canvas_template_count: number;
   provider_profile_names: string[];
   provider_binding_purposes: ProviderPurpose[];
   includes_api_keys: boolean;
   provider_profiles_with_api_key_count: number;
+  canvas_template_keys: string[];
+  canvas_template_category_names: string[];
 }
 
 export interface SettingsImportCommitResponse {

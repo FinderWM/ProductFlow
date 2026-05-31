@@ -19,7 +19,6 @@ describe("image size helpers", () => {
       "2048x2048",
       "2048x3072",
       "3072x2048",
-      "3840x3840",
       "2160x3840",
       "3840x2160",
     ]);
@@ -51,9 +50,15 @@ describe("image size helpers", () => {
       calibrated: true,
     });
     expect(resolveImageSize(4000, 4000)).toEqual({
+      width: 2880,
+      height: 2880,
+      value: "2880x2880",
+      calibrated: true,
+    });
+    expect(resolveImageSize(9999, 1000)).toEqual({
       width: 3840,
-      height: 3840,
-      value: "3840x3840",
+      height: 1280,
+      value: "3840x1280",
       calibrated: true,
     });
     expect(resolveImageSize(100, 0)).toBeNull();
@@ -102,7 +107,6 @@ describe("image size helpers", () => {
       { aspectLabel: "1:1", tierLabel: "2K", dimensionLabel: "2048×2048" },
       { aspectLabel: "2:3", tierLabel: "2K", dimensionLabel: "2048×3072" },
       { aspectLabel: "3:2", tierLabel: "2K", dimensionLabel: "3072×2048" },
-      { aspectLabel: "1:1", tierLabel: "4K", dimensionLabel: "3840×3840" },
       { aspectLabel: "9:16", tierLabel: "4K", dimensionLabel: "2160×3840" },
       { aspectLabel: "16:9", tierLabel: "4K", dimensionLabel: "3840×2160" },
     ]);

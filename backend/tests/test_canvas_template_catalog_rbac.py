@@ -194,7 +194,11 @@ def test_user_template_categories_and_templates_are_owner_scoped(configured_env:
     assert admin_update.status_code == 400
     assert admin_update.json()["detail"] == "管理员不能直接编辑其他用户资源"
 
-    admin_templates = admin_client.get("/api/workflow/canvas-templates", params={"scope": "user"})
+    admin_catalog_templates = admin_client.get("/api/workflow/canvas-templates", params={"scope": "user"})
+    assert admin_catalog_templates.status_code == 200
+    assert template["key"] not in {item["key"] for item in admin_catalog_templates.json()["items"]}
+
+    admin_templates = admin_client.get("/api/workflow/canvas-templates/manage", params={"scope": "user"})
     assert admin_templates.status_code == 200
     assert template["key"] in {item["key"] for item in admin_templates.json()["items"]}
 
@@ -273,6 +277,33 @@ def test_global_template_management_requires_rbac_and_archives_restore(configure
     assert alice_search.status_code == 200
     assert {item["key"] for item in alice_search.json()["items"]} == {"custom-global-main-v1"}
 
+    disabled = admin_client.patch(
+        f"/api/workflow/global-canvas-templates/{template_id}",
+        json={"enabled": False},
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["enabled"] is False
+    hidden_by_config = alice_client.get("/api/workflow/canvas-templates", params={"search": "运营主图"})
+    assert hidden_by_config.status_code == 200
+    assert hidden_by_config.json()["items"] == []
+    admin_catalog_hidden = admin_client.get("/api/workflow/canvas-templates", params={"search": "运营主图"})
+    assert admin_catalog_hidden.status_code == 200
+    assert admin_catalog_hidden.json()["items"] == []
+    admin_manage_visible = admin_client.get("/api/workflow/canvas-templates/manage", params={"search": "运营主图"})
+    assert admin_manage_visible.status_code == 200
+    assert admin_manage_visible.json()["items"][0]["key"] == "custom-global-main-v1"
+    assert admin_manage_visible.json()["items"][0]["enabled"] is False
+
+    enabled = admin_client.patch(
+        f"/api/workflow/global-canvas-templates/{template_id}",
+        json={"enabled": True},
+    )
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+    visible_again = alice_client.get("/api/workflow/canvas-templates", params={"search": "运营主图"})
+    assert visible_again.status_code == 200
+    assert {item["key"] for item in visible_again.json()["items"]} == {"custom-global-main-v1"}
+
     archived = admin_client.delete(f"/api/workflow/global-canvas-templates/{template_id}")
     assert archived.status_code == 204
     hidden = alice_client.get("/api/workflow/canvas-templates", params={"search": "运营主图"})
@@ -304,6 +335,13 @@ def test_disabled_template_category_cannot_be_reused(configured_env: Path) -> No
         json={"reason": "分类暂不可用"},
     )
     assert disabled.status_code == 200
+    category_catalog = alice_client.get("/api/workflow/canvas-template-categories", params={"scope": "user"})
+    assert category_catalog.status_code == 200
+    assert category.json()["id"] not in {item["id"] for item in category_catalog.json()["items"]}
+    category_manage = alice_client.get("/api/workflow/canvas-template-categories/manage", params={"scope": "user"})
+    assert category_manage.status_code == 200
+    assert category_manage.json()["items"][0]["id"] == category.json()["id"]
+    assert category_manage.json()["items"][0]["disabled_reason"] == "分类暂不可用"
 
     product = _create_product(alice_client, "分类屏蔽灵感")
     workflow = alice_client.get(f"/api/products/{product['id']}/workflow")

@@ -171,6 +171,34 @@ def test_role_permission_save_auto_adds_settings_menu_and_read_permission(config
     assert fetched_payload["api_permission_codes"] == ["settings:migrate", "settings:provider_write", "settings:read"]
 
 
+def test_global_template_permission_lives_under_settings_menu(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    catalog = admin_client.get("/api/rbac/permissions")
+    assert catalog.status_code == 200
+    template_permission = next(
+        item for item in catalog.json()["api_permissions"] if item["code"] == "templates:manage_global"
+    )
+    assert template_permission["menu_code"] == "settings"
+
+    created_role = admin_client.post("/api/rbac/roles", json={"code": "template_ops", "name": "模板配置"})
+    assert created_role.status_code == 201
+    role_id = created_role.json()["id"]
+
+    permissions = admin_client.put(
+        f"/api/rbac/roles/{role_id}/permissions",
+        json={"menu_codes": [], "api_permission_codes": ["templates:manage_global"]},
+    )
+    assert permissions.status_code == 200
+    payload = permissions.json()
+    assert payload["menu_codes"] == ["settings"]
+    assert payload["api_permission_codes"] == ["settings:read", "templates:manage_global"]
+
+
 def test_settings_provider_write_permission_is_separate_from_runtime_write(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 

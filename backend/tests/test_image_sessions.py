@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from base64 import b64encode
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,26 @@ from productflow_backend.infrastructure.db.models import (
     ProviderProfile,
 )
 from productflow_backend.infrastructure.db.session import get_session_factory
+
+
+def _password_md5(value: str) -> str:
+    return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
+
+
+def _create_user_client(app, admin_client: TestClient, username: str) -> TestClient:
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": username, "display_name": username.title()},
+    )
+    assert created_user.status_code == 201
+    client = TestClient(app)
+    password_md5 = _password_md5(f"{username}-password")
+    set_password = client.post(
+        "/api/auth/password",
+        json={"username": username, "client_password_md5": password_md5},
+    )
+    assert set_password.status_code == 200
+    return client
 
 
 @pytest.fixture(autouse=True)
@@ -2218,7 +2239,7 @@ def test_image_session_generation_accepts_custom_size_and_rejects_invalid_dimens
         json={"prompt": "尺寸过大", "size": "5000x5000", "base_asset_id": generated_asset_id},
     )
     assert oversized.status_code == 202
-    assert oversized.json()["rounds"][-1]["size"] == "3840x3840"
+    assert oversized.json()["rounds"][-1]["size"] == "2880x2880"
 
 
 def test_image_session_reference_image_can_be_deleted(configured_env: Path, db_session) -> None:
@@ -2256,8 +2277,10 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
     from productflow_backend.presentation.api import create_app
 
     app = create_app()
-    client = TestClient(app)
-    _login(client)
+    admin_client = TestClient(app)
+    _login(admin_client)
+    _enable_deletion(admin_client)
+    client = _create_user_client(app, admin_client, "image-owner")
 
     created = client.post("/api/image-sessions", json={"title": "整会话删除"})
     assert created.status_code == 201
@@ -2283,7 +2306,6 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
     session_root = Path(configured_env) / "image_sessions" / session_id
     assert session_root.exists()
 
-    _enable_deletion(client)
     deleted = client.delete(f"/api/image-sessions/{session_id}")
     assert deleted.status_code == 204
 
@@ -2291,10 +2313,16 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
     assert listed.status_code == 200
     assert all(item["id"] != session_id for item in listed.json()["items"])
 
+    admin_listed = admin_client.get("/api/image-sessions")
+    assert admin_listed.status_code == 200
+    assert session_id in {item["id"] for item in admin_listed.json()["items"]}
+
     db_session.expire_all()
-    assert db_session.get(ImageSession, session_id) is None
-    assert all(not path.exists() for path in asset_paths)
-    assert not session_root.exists()
+    persisted = db_session.get(ImageSession, session_id)
+    assert persisted is not None
+    assert persisted.deleted_at is not None
+    assert all(path.exists() for path in asset_paths)
+    assert session_root.exists()
 
 def test_image_session_result_can_write_back_to_product(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app

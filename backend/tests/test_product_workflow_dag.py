@@ -1568,7 +1568,7 @@ def test_image_generation_node_normalizes_custom_size_and_rejects_unsafe_dimensi
     )
     assert oversized.status_code == 200
     oversized_image_node = next(node for node in oversized.json()["nodes"] if node["id"] == image_node["id"])
-    assert oversized_image_node["config_json"]["size"] == "3840x3840"
+    assert oversized_image_node["config_json"]["size"] == "2880x2880"
 
 
 def test_product_workflow_singleton_context_and_direct_image_run(configured_env: Path) -> None:

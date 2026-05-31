@@ -86,4 +86,4 @@ def test_image_generation_calibrates_oversized_size(configured_env: Path) -> Non
         json={"prompt": "生成一张图", "size": "99999x99999"},
     )
     assert generated.status_code == 202
-    assert generated.json()["rounds"][-1]["size"] == "3840x3840"
+    assert generated.json()["rounds"][-1]["size"] == "2880x2880"

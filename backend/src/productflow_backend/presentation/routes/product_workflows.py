@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from productflow_backend.application.auth import user_has_api_permission
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.product_workflows import (
     apply_node_group_template_to_workflow,
@@ -26,12 +27,15 @@ from productflow_backend.application.product_workflows import (
     get_or_create_product_workflow,
     get_product_workflow_status,
     list_canvas_template_categories,
+    list_canvas_template_categories_for_management,
     list_canvas_templates,
+    list_canvas_templates_for_management,
     rename_user_canvas_template,
     restore_canvas_template_category,
     restore_global_canvas_template,
     restore_user_canvas_template,
     retry_product_workflow_run,
+    review_user_canvas_template,
     submit_product_workflow_run,
     update_canvas_template_category,
     update_global_canvas_template,
@@ -54,7 +58,7 @@ from productflow_backend.infrastructure.db.models import (
     WorkflowEdge,
     WorkflowNode,
 )
-from productflow_backend.presentation.deps import get_session, require_api_permission
+from productflow_backend.presentation.deps import get_session, require_any_api_permission, require_api_permission
 from productflow_backend.presentation.schemas.product_workflows import (
     ApplyTailSplitPlanRequest,
     ApplyWorkflowTemplateGroupRequest,
@@ -73,6 +77,7 @@ from productflow_backend.presentation.schemas.product_workflows import (
     DuplicateWorkflowNodeGroupRequest,
     ProductWorkflowResponse,
     ProductWorkflowStatusResponse,
+    ReviewUserTemplateGroupRequest,
     RunWorkflowRequest,
     UpdateCanvasTemplateCategoryRequest,
     UpdateGlobalCanvasTemplateRequest,
@@ -102,8 +107,14 @@ def _ensure_product_access(
     require_usable: bool = True,
 ) -> Product:
     product = session.get(Product, product_id)
-    if product is None or (not current_user.is_admin and product.owner_user_id != current_user.id):
+    if (
+        product is None
+        or (not current_user.is_admin and product.owner_user_id != current_user.id)
+        or (not current_user.is_admin and product.deleted_at is not None)
+    ):
         raise HTTPException(status_code=404, detail="商品不存在")
+    if mutate and product.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="商品已删除")
     if mutate and current_user.is_admin and product.owner_user_id != current_user.id:
         raise HTTPException(status_code=400, detail="管理员不能直接编辑其他用户资源")
     if mutate and require_usable:
@@ -213,6 +224,33 @@ def list_canvas_templates_endpoint(
     return CanvasTemplateListResponse(items=templates)
 
 
+@router.get("/workflow/canvas-templates/manage", response_model=CanvasTemplateListResponse)
+def list_canvas_templates_for_management_endpoint(
+    search: str | None = Query(default=None, max_length=120),
+    category_id: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+    initial_workflow_entry: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_any_api_permission(API_INSPIRATIONS_READ, API_GLOBAL_TEMPLATES_MANAGE)),
+) -> CanvasTemplateListResponse:
+    can_manage_global_templates = user_has_api_permission(session, current_user, API_GLOBAL_TEMPLATES_MANAGE)
+    if not can_manage_global_templates and scope != "user":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有接口权限")
+    templates = [
+        serialize_canvas_template_summary(template)
+        for template in list_canvas_templates_for_management(
+            session,
+            actor_user_id=current_user.id,
+            actor_is_admin=can_manage_global_templates,
+            search=search,
+            category_id=category_id,
+            scope=scope,
+            initial_workflow_entry=initial_workflow_entry,
+        )
+    ]
+    return CanvasTemplateListResponse(items=templates)
+
+
 @router.get("/workflow/canvas-template-categories", response_model=CanvasTemplateCategoryListResponse)
 def list_canvas_template_categories_endpoint(
     search: str | None = Query(default=None, max_length=120),
@@ -224,6 +262,28 @@ def list_canvas_template_categories_endpoint(
         session,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
+        search=search,
+        scope=scope,
+    )
+    return CanvasTemplateCategoryListResponse(
+        items=[serialize_canvas_template_category(category) for category in categories]
+    )
+
+
+@router.get("/workflow/canvas-template-categories/manage", response_model=CanvasTemplateCategoryListResponse)
+def list_canvas_template_categories_for_management_endpoint(
+    search: str | None = Query(default=None, max_length=120),
+    scope: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_any_api_permission(API_INSPIRATIONS_READ, API_GLOBAL_TEMPLATES_MANAGE)),
+) -> CanvasTemplateCategoryListResponse:
+    can_manage_global_templates = user_has_api_permission(session, current_user, API_GLOBAL_TEMPLATES_MANAGE)
+    if not can_manage_global_templates and scope != "user":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有接口权限")
+    categories = list_canvas_template_categories_for_management(
+        session,
+        actor_user_id=current_user.id,
+        actor_is_admin=can_manage_global_templates,
         search=search,
         scope=scope,
     )
@@ -404,6 +464,7 @@ def create_global_canvas_template_endpoint(
         sort_order=payload.sort_order,
         category_id=payload.category_id,
         template_json=payload.template_json,
+        enabled=payload.enabled,
     )
     return serialize_user_canvas_template_summary(template)
 
@@ -413,7 +474,7 @@ def update_global_canvas_template_endpoint(
     template_id: str,
     payload: UpdateGlobalCanvasTemplateRequest,
     session: Session = Depends(get_session),
-    _current_user: AuthUser = Depends(require_api_permission(API_GLOBAL_TEMPLATES_MANAGE)),
+    current_user: AuthUser = Depends(require_api_permission(API_GLOBAL_TEMPLATES_MANAGE)),
 ) -> CanvasTemplateSummaryResponse:
     template = update_global_canvas_template(
         session,
@@ -425,6 +486,9 @@ def update_global_canvas_template_endpoint(
         sort_order=payload.sort_order,
         category_id=payload.category_id,
         template_json=payload.template_json,
+        enabled=payload.enabled,
+        disabled_reason=payload.disabled_reason,
+        actor_user_id=current_user.id,
     )
     return serialize_user_canvas_template_summary(template)
 
@@ -514,6 +578,25 @@ def update_user_template_group_endpoint(
         category_id=payload.category_id,
         sort_order=payload.sort_order,
         enabled=payload.enabled,
+        disabled_reason=payload.disabled_reason,
+        review_note=payload.review_note,
+    )
+    return serialize_user_canvas_template_summary(template)
+
+
+@router.post("/workflow/user-template-groups/{template_id}/review", response_model=CanvasTemplateSummaryResponse)
+def review_user_template_group_endpoint(
+    template_id: str,
+    payload: ReviewUserTemplateGroupRequest,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_GLOBAL_TEMPLATES_MANAGE)),
+) -> CanvasTemplateSummaryResponse:
+    template = review_user_canvas_template(
+        session,
+        template_id=template_id,
+        approved=payload.approved,
+        actor_user_id=current_user.id,
+        disabled_reason=payload.disabled_reason,
     )
     return serialize_user_canvas_template_summary(template)
 

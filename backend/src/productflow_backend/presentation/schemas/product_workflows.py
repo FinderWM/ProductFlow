@@ -236,6 +236,12 @@ class CanvasTemplateSummaryResponse(BaseModel):
     enabled: bool = True
     effective_enabled: bool = True
     disabled_reason: str | None = None
+    review_status: str = "none"
+    review_note: str | None = None
+    review_submitted_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
+    reviewed_by_username: str | None = None
     scenario: CanvasTemplateScenarioResponse
     preview_nodes: list[CanvasTemplatePreviewNodeResponse]
     preview_edges: list[CanvasTemplatePreviewEdgeResponse]
@@ -286,6 +292,7 @@ class CreateGlobalCanvasTemplateRequest(BaseModel):
     sort_order: int = 100
     category_id: str | None = None
     template_json: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
 
 
 class UpdateGlobalCanvasTemplateRequest(BaseModel):
@@ -296,6 +303,8 @@ class UpdateGlobalCanvasTemplateRequest(BaseModel):
     sort_order: int | None = None
     category_id: str | None = None
     template_json: dict[str, Any] | None = None
+    enabled: bool | None = None
+    disabled_reason: str | None = Field(default=None, max_length=1000)
 
 
 class CreateWorkflowNodeRequest(BaseModel):
@@ -364,6 +373,13 @@ class UpdateUserTemplateGroupRequest(BaseModel):
     category_id: str | None = None
     sort_order: int | None = None
     enabled: bool | None = None
+    disabled_reason: str | None = Field(default=None, max_length=1000)
+    review_note: str | None = Field(default=None, max_length=1000)
+
+
+class ReviewUserTemplateGroupRequest(BaseModel):
+    approved: bool
+    disabled_reason: str | None = Field(default=None, max_length=1000)
 
 
 class CopyUserTemplateToGlobalRequest(BaseModel):
@@ -630,6 +646,12 @@ def serialize_canvas_template_summary(template: CanvasTemplate) -> CanvasTemplat
         enabled=template.enabled,
         effective_enabled=template.effective_enabled,
         disabled_reason=template.disabled_reason,
+        review_status=template.review_status,
+        review_note=template.review_note,
+        review_submitted_at=template.review_submitted_at,
+        reviewed_at=template.reviewed_at,
+        reviewed_by_user_id=template.reviewed_by_user_id,
+        reviewed_by_username=template.reviewed_by_username,
         scenario=CanvasTemplateScenarioResponse(
             scenario=template.scenario.scenario,
             title=template.scenario.title,

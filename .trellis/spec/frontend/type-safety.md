@@ -32,7 +32,6 @@ including `snake_case`:
 - `ImageSessionGenerationTask.failure_reason`
 - `ImageSessionRound.provider_response_id`
 - `SessionState.access_required`
-- `RuntimeConfig.admin_access_required`
 - `ConfigUpdateRequest.reset_keys`
 
 Do not silently convert these to camelCase in frontend types unless the API layer also performs explicit mapping.
@@ -194,12 +193,15 @@ return api.createProduct({
   - `SettingsProviderProfileExport`
   - `SettingsProviderBindingExport`
   - `SettingsGenerationConfigExport`
+  - `SettingsCanvasTemplateCategoryExport`
+  - `SettingsCanvasTemplateExport`
   - `SettingsImportPreview`
   - `SettingsImportCommitResponse`
   - `GenerationConfig`, `GenerationConfigOption`, `GenerationConfigStatus`
 
 #### 3. Contracts
 - `runtime_config` is a map of config key to JSON scalar/list values from the backend export.
+- `runtime_config` must not include legacy `admin_access_required`; account login is always required by the backend.
 - `provider_profiles` may include `api_key`; SettingsPage must treat exported files as sensitive and show confirmation
   copy before download.
 - `generation_configs` is the runtime provider-selection payload. It includes `purpose`, `name`, `provider_kind`,
@@ -207,12 +209,15 @@ return api.createProduct({
   `availability_window_minutes`, `failure_threshold`, and `cooldown_minutes`.
 - `provider_bindings` is compatibility data only. New UI and workflow/image-chat selectors should read
   `generation_configs` or `generation-config-options`.
+- `canvas_template_categories` and `canvas_templates` mirror backend export rows and preserve backend `snake_case` fields,
+  including `scope`, `owner_user_id`, `enabled`, `disabled_reason`, `review_status`, `review_note`, and timestamps.
 - Import preview response fields are flat DTO fields such as `runtime_config_count`,
-  `provider_profile_count`, `provider_binding_count`, `generation_config_count`, `includes_api_keys`, and
-  `provider_profiles_with_api_key_count`; do not invent a nested `metadata.summary` layer unless the backend schema changes
-  in the same commit.
+  `provider_profile_count`, `provider_binding_count`, `generation_config_count`, `canvas_template_category_count`,
+  `canvas_template_count`, `includes_api_keys`, and `provider_profiles_with_api_key_count`; do not invent a nested
+  `metadata.summary` layer unless the backend schema changes in the same commit.
 - Import commit returns refreshed settings/provider config data or enough data for SettingsPage to invalidate and refetch
-  `['config']`, `['provider-config']`, `['runtime-config']`, and `['session']`.
+  `['config']`, `['provider-config']`, `['runtime-config']`, `['canvas-templates']`, and
+  `['canvas-template-categories']`.
 - `GET /api/settings/generation-config-options` requires backend RBAC and intentionally returns only non-secret selection
   fields: `id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`, `frozen_until`.
 - `GET /api/settings/generation-config-status` requires `status:read` and accepts optional `start_date` / `end_date`
@@ -233,9 +238,11 @@ return api.createProduct({
 #### 5. Good/Base/Bad Cases
 - Good: export downloads exactly the typed backend payload, including `generation_configs`, then importing that JSON
   previews the same counts.
+- Good: export/import previews include template category/template counts and key/name summaries.
 - Good: preview with `includes_api_keys=true` shows sensitive-file warning before commit.
 - Good: workflow and image-chat selectors use `GenerationConfigOption[]` filtered by `purpose`.
 - Base: import file contains `mock` generation configs and no provider API keys.
+- Bad: adding `admin_access_required` back to `RuntimeConfig` or SettingsPage security controls.
 - Bad: frontend reads `preview.metadata.summary` when backend returns flat preview fields.
 - Bad: converting DTO fields to camelCase in `types.ts` without an explicit API mapping layer.
 - Bad: reusing provider profile DTOs for generation config selectors and accidentally exposing `api_key`.

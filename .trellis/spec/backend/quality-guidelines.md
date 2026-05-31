@@ -308,6 +308,8 @@ Do not duplicate these checks in multiple pages/routes.
 - Store and pass image size as a provider-neutral lowercase `WIDTHxHEIGHT` string, for example `1024x1024` or `3840x2160`.
 - Each side is calibrated to the nearest provider-safe 16-pixel multiple before provider dispatch, for example `1500x800`
   becomes `1504x800`.
+- Generated-image sizes must also respect the current GPT Image safety envelope: max single edge from
+  `image_generation_max_dimension`, max total pixels `8,294,400`, and max aspect ratio `3:1`.
 - Preset buttons are built-in ratio/tier shortcuts filtered by the runtime max single-edge setting; they are not a backend
   allowlist and are not loaded as arbitrary database-configured options.
 - `normalize_image_generation_size(...)` must use `get_runtime_settings().image_generation_max_dimension` unless a focused
@@ -321,6 +323,10 @@ Do not duplicate these checks in multiple pages/routes.
 - Bad syntax such as `1024`, `1024*1024`, or missing dimensions -> request/config validation error.
 - Non-positive dimensions such as `0x1024` or `1024x-1` -> request/config validation error.
 - Dimensions above the project safety bounds -> normalize to a safe calibrated `WIDTHxHEIGHT` before provider dispatch.
+- Dimensions above `8,294,400` total pixels, such as `4000x4000` or `3840x3840`, are normalized down to the largest safe
+  16-pixel multiple that also respects the max aspect-ratio rule.
+- Dimensions with long/short side ratio greater than `3:1` -> request/config validation error or normalization to a safe
+  supported ratio when the helper owns calibration.
 - Dimensions that are not divisible by 16 -> normalize to the nearest safe 16-pixel multiple before provider dispatch.
 - Uppercase separators/digits such as `3840X2160` -> normalize to lowercase `3840x2160`.
 - `image_generation_max_dimension < 512` or `> 8192` -> settings validation error.
@@ -329,7 +335,9 @@ Do not duplicate these checks in multiple pages/routes.
 #### 5. Good/Base/Bad Cases
 
 - Good: `3840x2160` entered in the workflow Inspector is saved as `3840x2160` and reaches the image provider as `image_size="3840x2160"`.
-- Base: built-in presets such as `1024x1024`, `2048x2048`, and `3840x3840` render as picker buttons and submit the same canonical string.
+- Base: built-in presets such as `1024x1024`, `2048x2048`, and `3840x2160` render as picker buttons and submit the same
+  canonical string.
+- Bad: offering `3840x3840` as a built-in preset; it exceeds the current generated-image max-pixel envelope.
 - Bad: continuous image sessions accept custom sizes while workflow nodes only apply a loose string normalizer.
 - Bad: frontend checks dimensions but backend forwards an oversized custom value to the provider.
 

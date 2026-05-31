@@ -27,7 +27,8 @@ export const IMAGE_GENERATION_DIMENSION_MULTIPLE = 16;
 export const IMAGE_GENERATION_MIN_MAX_DIMENSION = 512;
 export const IMAGE_GENERATION_MAX_MAX_DIMENSION = 8192;
 export const IMAGE_GENERATION_MAX_DIMENSION = DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
-export const IMAGE_GENERATION_MAX_PIXELS = DEFAULT_IMAGE_GENERATION_MAX_DIMENSION * DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
+export const IMAGE_GENERATION_MAX_PIXELS = 8_294_400;
+export const IMAGE_GENERATION_MAX_ASPECT_RATIO = 3;
 
 const BUILT_IN_IMAGE_SIZE_OPTIONS: ImageSizeOption[] = [
   { label: "方图 · 1K", description: "1:1 · 1024×1024", aspect: "1:1", value: "1024x1024" },
@@ -65,6 +66,20 @@ function nearestImageGenerationDimensionMultiple(value: number, maxDimension: nu
   return value < IMAGE_GENERATION_MIN_DIMENSION ? IMAGE_GENERATION_MIN_DIMENSION : maxDimension;
 }
 
+function constrainImageGenerationAspectRatio(width: number, height: number): { width: number; height: number } {
+  if (width <= 0 || height <= 0) {
+    return { width, height };
+  }
+  const ratio = Math.max(width, height) / Math.min(width, height);
+  if (ratio <= IMAGE_GENERATION_MAX_ASPECT_RATIO) {
+    return { width, height };
+  }
+  if (width >= height) {
+    return { width, height: Math.max(height, Math.round(width / IMAGE_GENERATION_MAX_ASPECT_RATIO)) };
+  }
+  return { width: Math.max(width, Math.round(height / IMAGE_GENERATION_MAX_ASPECT_RATIO)), height };
+}
+
 export function normalizeImageSizeValue(value: string, maxDimension?: number): string | null {
   const normalized = value.trim().toLowerCase();
   return IMAGE_SIZE_PATTERN.test(normalized) ? normalizeImageSizeDimensions(normalized, maxDimension) : null;
@@ -92,12 +107,19 @@ export function resolveImageSize(width: number, height: number, maxDimension?: n
     return null;
   }
   const resolvedMaxDimension = imageGenerationMaxDimensionMultiple(normalizeMaxDimension(maxDimension));
-  const maxPixels = resolvedMaxDimension * resolvedMaxDimension;
+  const maxPixels = Math.min(IMAGE_GENERATION_MAX_PIXELS, resolvedMaxDimension * resolvedMaxDimension);
 
-  let scale = Math.min(1, resolvedMaxDimension / requestedWidth, resolvedMaxDimension / requestedHeight);
+  const aspectConstrained = constrainImageGenerationAspectRatio(requestedWidth, requestedHeight);
+  let scale = Math.min(1, resolvedMaxDimension / aspectConstrained.width, resolvedMaxDimension / aspectConstrained.height);
   const dimensionCalibrated = scale < 1;
-  let resolvedWidth = Math.min(resolvedMaxDimension, Math.max(IMAGE_GENERATION_MIN_DIMENSION, Math.round(requestedWidth * scale)));
-  let resolvedHeight = Math.min(resolvedMaxDimension, Math.max(IMAGE_GENERATION_MIN_DIMENSION, Math.round(requestedHeight * scale)));
+  let resolvedWidth = Math.min(
+    resolvedMaxDimension,
+    Math.max(IMAGE_GENERATION_MIN_DIMENSION, Math.round(aspectConstrained.width * scale)),
+  );
+  let resolvedHeight = Math.min(
+    resolvedMaxDimension,
+    Math.max(IMAGE_GENERATION_MIN_DIMENSION, Math.round(aspectConstrained.height * scale)),
+  );
 
   const resolvedPixels = resolvedWidth * resolvedHeight;
   let pixelCalibrated = false;
@@ -109,13 +131,29 @@ export function resolveImageSize(width: number, height: number, maxDimension?: n
   }
   resolvedWidth = nearestImageGenerationDimensionMultiple(resolvedWidth, resolvedMaxDimension);
   resolvedHeight = nearestImageGenerationDimensionMultiple(resolvedHeight, resolvedMaxDimension);
+  if (resolvedWidth * resolvedHeight > maxPixels) {
+    scale = Math.sqrt(maxPixels / (resolvedWidth * resolvedHeight));
+    resolvedWidth = nearestImageGenerationDimensionMultiple(
+      Math.max(IMAGE_GENERATION_MIN_DIMENSION, Math.floor(resolvedWidth * scale)),
+      resolvedMaxDimension,
+    );
+    resolvedHeight = nearestImageGenerationDimensionMultiple(
+      Math.max(IMAGE_GENERATION_MIN_DIMENSION, Math.floor(resolvedHeight * scale)),
+      resolvedMaxDimension,
+    );
+  }
 
   const value = `${resolvedWidth}x${resolvedHeight}`;
   return {
     width: resolvedWidth,
     height: resolvedHeight,
     value,
-    calibrated: dimensionCalibrated || pixelCalibrated || value !== `${requestedWidth}x${requestedHeight}`,
+    calibrated:
+      dimensionCalibrated ||
+      pixelCalibrated ||
+      aspectConstrained.width !== requestedWidth ||
+      aspectConstrained.height !== requestedHeight ||
+      value !== `${requestedWidth}x${requestedHeight}`,
   };
 }
 

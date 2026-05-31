@@ -188,9 +188,9 @@ password hash and raise:
 
 - `401` with detail `"账号或密码不正确"` for invalid credentials.
 
-When login is disabled, `POST /api/auth/session` is a harmless no-op success and leaves the current session untouched. `GET
-/api/auth/session` returns `authenticated=true` and `access_required=false`; after login is re-enabled, an unauthenticated
-session again returns `authenticated=false` and `access_required=true`.
+Account login is always required for private workspace routes. Legacy admin-key session creation must return `401` with
+detail `"请使用账号密码登录"`, and unauthenticated `GET /api/auth/session` returns `authenticated=false` plus
+`access_required=true`.
 
 Routes that require auth bind explicit RBAC permissions at the route boundary. Examples include inspiration routes using
 `API_INSPIRATIONS_*`, image-chat routes using `API_IMAGE_CHAT_*`, status routes using `API_STATUS_READ`, and settings

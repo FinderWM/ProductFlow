@@ -19,6 +19,7 @@ from productflow_backend.config import (
 )
 from productflow_backend.infrastructure.db.models import (
     AppSetting,
+    GenerationConfig,
     GenerationConfigDailyStat,
     ProviderBinding,
     ProviderProfile,
@@ -101,10 +102,8 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
     _login(admin_client)
 
     disabled = admin_client.patch("/api/settings", json={"values": {"admin_access_required": False}})
-    assert disabled.status_code == 200
-    disabled_items = {item["key"]: item for item in disabled.json()["items"]}
-    assert disabled_items["admin_access_required"]["value"] is False
-    assert get_runtime_settings().admin_access_required is False
+    assert disabled.status_code == 400
+    assert "未知配置项" in disabled.json()["detail"]
 
     public_client = TestClient(app)
     public_products = public_client.get("/api/products")
@@ -231,8 +230,7 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["category"] == "生成队列"
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["minimum"] == 1
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["maximum"] == 24 * 60 * 60
-    assert initial_items["admin_access_required"]["value"] is True
-    assert initial_items["admin_access_required"]["category"] == "安全与运维"
+    assert "admin_access_required" not in initial_items
     assert initial_items["deletion_enabled"]["value"] is False
     assert initial_items["deletion_enabled"]["category"] == "安全与运维"
 
@@ -438,10 +436,14 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
         "provider_profile_count": 1,
         "provider_binding_count": 2,
         "generation_config_count": 2,
+        "canvas_template_category_count": len(document["canvas_template_categories"]),
+        "canvas_template_count": len(document["canvas_templates"]),
         "provider_profile_names": ["导入网关"],
         "provider_binding_purposes": ["image", "text"],
         "includes_api_keys": True,
         "provider_profiles_with_api_key_count": 1,
+        "canvas_template_keys": [template["key"] for template in document["canvas_templates"]],
+        "canvas_template_category_names": [category["name"] for category in document["canvas_template_categories"]],
     }
 
     imported = client.post("/api/settings/import", json=document)
@@ -913,6 +915,77 @@ def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bin
     archived = client.delete(f"/api/settings/provider-profiles/{profile_id}")
     assert archived.status_code == 200
     assert archived.json()["archived_at"] is not None
+
+
+def test_text_generation_config_test_api_runs_mock_without_persistence(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.post(
+        "/api/settings/generation-configs/test-text",
+        json={
+            "generation_config": {
+                "name": "测试文案配置",
+                "purpose": "text",
+                "provider_kind": "mock",
+                "provider_profile_id": None,
+                "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+                "config": {},
+                "priority": 100,
+                "max_concurrency": 1,
+                "enabled": True,
+            },
+            "product": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
+            "copy_request": {"instruction": "突出保温和便携", "output_mode": "blocks"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generation_config_id"] is None
+    assert payload["provider_kind"] == "mock"
+    assert payload["brief_model"] == "mock-brief-v1"
+    assert payload["copy_model"] == "mock-copy-v2"
+    assert payload["brief"]["positioning"]
+    assert payload["copy_result"]["summary"]
+
+    session = get_session_factory()()
+    try:
+        configs = session.scalars(select(GenerationConfig).where(GenerationConfig.name == "测试文案配置")).all()
+    finally:
+        session.close()
+    assert configs == []
+
+
+def test_text_generation_config_test_api_reports_missing_real_provider_config(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.post(
+        "/api/settings/generation-configs/test-text",
+        json={
+            "generation_config": {
+                "name": "缺失供应商",
+                "purpose": "text",
+                "provider_kind": "openai",
+                "provider_profile_id": None,
+                "model_settings": {"brief_model": "gpt-4.1", "copy_model": "gpt-4.1"},
+                "config": {},
+                "priority": 100,
+                "max_concurrency": 1,
+                "enabled": True,
+            }
+        },
+    )
+
+    assert response.status_code == 400
+    assert "真实供应商必须选择供应商档案" in response.json()["detail"]
 
 
 def test_real_image_binding_switches_visible_poster_mode_to_generated(configured_env: Path) -> None:
@@ -1555,7 +1628,7 @@ def test_runtime_image_size_env_defaults_are_generation_bounded(configured_env: 
 
     settings = get_runtime_settings()
 
-    assert settings.image_main_image_size == "3840x3840"
+    assert settings.image_main_image_size == "2880x2880"
     assert settings.image_promo_poster_size == "3840x1920"
 
 
@@ -1580,7 +1653,6 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
             "input_fidelity",
             "partial_images",
         ],
-        "admin_access_required": True,
         "deletion_enabled": False,
     }
 

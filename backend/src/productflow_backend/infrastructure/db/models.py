@@ -279,6 +279,7 @@ class CanvasTemplate(Base, TimestampMixin):
         Index("ix_canvas_templates_category_id", "category_id"),
         Index("ix_canvas_templates_enabled", "enabled"),
         Index("ix_canvas_templates_archived_at", "archived_at"),
+        Index("ix_canvas_templates_review_status", "review_status"),
         Index("ix_canvas_templates_sort_order", "sort_order"),
         Index(
             "ix_canvas_templates_scope_owner_entry_category_sort",
@@ -319,10 +320,20 @@ class CanvasTemplate(Base, TimestampMixin):
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_status: Mapped[str] = mapped_column(String(20), default="none")
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     owner: Mapped[AuthUser | None] = relationship(foreign_keys=[owner_user_id])
     category: Mapped[CanvasTemplateCategory | None] = relationship(foreign_keys=[category_id])
     disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
+    reviewed_by: Mapped[AuthUser | None] = relationship(foreign_keys=[reviewed_by_user_id])
 
 
 class ProviderProfile(Base, TimestampMixin):
@@ -486,6 +497,7 @@ class Product(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_products_owner_user_id", "owner_user_id"),
         Index("ix_products_enabled", "enabled"),
+        Index("ix_products_deleted_at", "deleted_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -506,6 +518,12 @@ class Product(Base, TimestampMixin):
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     current_confirmed_copy_set_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey(
@@ -519,6 +537,7 @@ class Product(Base, TimestampMixin):
 
     owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
     disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
+    deleted_by: Mapped[AuthUser | None] = relationship(foreign_keys=[deleted_by_user_id])
     source_assets: Mapped[list[SourceAsset]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
@@ -833,6 +852,7 @@ class ImageSession(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_image_sessions_owner_user_id", "owner_user_id"),
         Index("ix_image_sessions_enabled", "enabled"),
+        Index("ix_image_sessions_deleted_at", "deleted_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -855,9 +875,16 @@ class ImageSession(Base, TimestampMixin):
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("auth_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
     disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
+    deleted_by: Mapped[AuthUser | None] = relationship(foreign_keys=[deleted_by_user_id])
     product: Mapped[Product | None] = relationship(back_populates="image_sessions")
     assets: Mapped[list[ImageSessionAsset]] = relationship(
         back_populates="session",

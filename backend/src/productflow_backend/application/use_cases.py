@@ -217,6 +217,7 @@ def _product_query():
             selectinload(Product.poster_variants),
             selectinload(Product.confirmed_copy_set),
             selectinload(Product.owner),
+            selectinload(Product.deleted_by),
         )
         .order_by(desc(Product.updated_at))
     )
@@ -231,7 +232,7 @@ def _get_product_or_raise(
 ) -> Product:
     stmt = _product_query().where(Product.id == product_id)
     if actor_user_id is not None and not actor_is_admin:
-        stmt = stmt.where(Product.owner_user_id == actor_user_id)
+        stmt = stmt.where(Product.owner_user_id == actor_user_id, Product.deleted_at.is_(None))
     product = session.scalar(stmt)
     if product is None:
         raise NotFoundError("商品不存在")
@@ -446,6 +447,7 @@ def list_products(
     filters = []
     if actor_user_id is not None and not actor_is_admin:
         filters.append(Product.owner_user_id == actor_user_id)
+        filters.append(Product.deleted_at.is_(None))
     if actor_is_admin and owner_user_id:
         filters.append(Product.owner_user_id == owner_user_id)
     if status is not None:
@@ -499,6 +501,8 @@ def delete_product(
         missing_message="商品不存在",
     )
     ensure_resource_usable(product)
+    if product.deleted_at is not None:
+        raise NotFoundError("商品不存在")
     active_workflow_run = session.scalar(
         select(WorkflowRun)
         .join(ProductWorkflow, WorkflowRun.workflow_id == ProductWorkflow.id)
@@ -509,10 +513,10 @@ def delete_product(
     )
     if active_workflow_run is not None:
         raise BusinessValidationError("商品工作流运行中，稍后删除")
-    storage = storage or LocalStorage()
-    session.delete(product)
+    product.deleted_at = now_utc()
+    product.deleted_by_user_id = actor_user_id
+    product.updated_at = product.deleted_at
     session.commit()
-    storage.delete_product_tree(product_id)
 
 
 def update_copy_set(

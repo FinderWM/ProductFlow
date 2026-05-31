@@ -40,6 +40,8 @@ class OpenAITextProvider(TextProvider):
         self.copy_model = resolved_config.copy_model
         self.brief_system_prompt = settings.prompt_brief_system
         self.copy_system_prompt = settings.prompt_copy_system
+        self.image_prompt_polish_system_prompt = settings.prompt_image_prompt_polish_system
+        self.tail_split_system_prompt = settings.prompt_tail_split_system
 
     def _read_output_json(self, response) -> dict:
         return read_json_object_from_response(response, error_label="文案 provider")
@@ -117,9 +119,9 @@ class OpenAITextProvider(TextProvider):
     def polish_image_prompt(self, prompt: str) -> tuple[str, str]:
         response = self.client.responses.create(
             model=self.copy_model,
-            instructions=(
-                "你是电商图片生成提示词编辑器。只输出润色后的中文画面描述，不要输出 markdown、标题或解释。"
-                "保留原始商品、风格、构图和禁忌要求，补充清晰主体、光线、材质、背景和电商可售卖细节。"
+            instructions=text_or_default(
+                self.image_prompt_polish_system_prompt,
+                "只输出润色后的中文画面描述，不要输出 markdown、标题或解释。",
             ),
             input=[
                 {
@@ -141,13 +143,14 @@ class OpenAITextProvider(TextProvider):
             )
             for index, reference in enumerate(payload.reference_images, start=1)
         ]
-        upstream_text = "\n".join(f"{index}. {text}" for index, text in enumerate(payload.upstream_text_contexts, start=1))
+        upstream_text = "\n".join(
+            f"{index}. {text}" for index, text in enumerate(payload.upstream_text_contexts, start=1)
+        )
         response = self.client.responses.create(
             model=self.copy_model,
-            instructions=(
-                "你是电商工作台的尾巴节点拆分器。"
-                "把输入拆成多条彼此独立、适合后续单独生图的方向。"
-                "只输出 JSON 对象，不要输出 markdown。"
+            instructions=text_or_default(
+                self.tail_split_system_prompt,
+                "把输入拆成多条彼此独立、适合后续单独生图的方向。只输出 JSON 对象。",
             ),
             input=[
                 {

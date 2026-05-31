@@ -22,7 +22,13 @@ from productflow_backend.application.product_workflow.context import collect_inc
 from productflow_backend.application.time import now_utc
 from productflow_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType
 from productflow_backend.domain.errors import BusinessValidationError
-from productflow_backend.infrastructure.db.models import ProductWorkflow, SourceAsset, WorkflowEdge, WorkflowNode, WorkflowNodeRun
+from productflow_backend.infrastructure.db.models import (
+    ProductWorkflow,
+    SourceAsset,
+    WorkflowEdge,
+    WorkflowNode,
+    WorkflowNodeRun,
+)
 
 DEFAULT_TAIL_SPLITTER_SUMMARY = "尾巴节点待运行"
 TAIL_SPLITTER_PUBLIC_COPY_TITLE = "公共约束"
