@@ -338,7 +338,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
 
   return (
     <div className="pf-app min-h-[100dvh] text-slate-900 dark:text-slate-100">
-      <TopNav breadcrumbs={pageTitle} onHome={() => navigate("/products")} />
+      <TopNav breadcrumbs={pageTitle} />
       <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-slate-800 lg:flex-row lg:items-end lg:justify-between">
           <div>

@@ -196,16 +196,25 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
       <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/94 px-3 py-3 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl dark:border-slate-800 dark:bg-[#070b13]/94 sm:px-4 lg:px-5">
         <div className="mx-auto flex w-full max-w-[1500px] items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2 text-sm md:min-w-40 md:shrink-0 lg:min-w-44 2xl:w-64">
-            <button
-              type="button"
-              className="flex min-w-0 items-center text-base font-semibold text-slate-950 transition-colors hover:text-indigo-700 dark:text-slate-100 dark:hover:text-indigo-300"
-              onClick={onHome}
-            >
-              <span className="mr-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm shadow-slate-950/20 dark:bg-white dark:text-slate-950">
-                <Wand2 size={17} />
-              </span>
-              <span className="min-w-0 truncate text-[15px] sm:text-base">ProductFlow</span>
-            </button>
+            {onHome ? (
+              <button
+                type="button"
+                className="flex min-w-0 items-center text-base font-semibold text-slate-950 transition-colors hover:text-indigo-700 dark:text-slate-100 dark:hover:text-indigo-300"
+                onClick={onHome}
+              >
+                <span className="mr-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm shadow-slate-950/20 dark:bg-white dark:text-slate-950">
+                  <Wand2 size={17} />
+                </span>
+                <span className="min-w-0 truncate text-[15px] sm:text-base">ProductFlow</span>
+              </button>
+            ) : (
+              <div className="flex min-w-0 items-center text-base font-semibold text-slate-950 dark:text-slate-100">
+                <span className="mr-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm shadow-slate-950/20 dark:bg-white dark:text-slate-950">
+                  <Wand2 size={17} />
+                </span>
+                <span className="min-w-0 truncate text-[15px] sm:text-base">ProductFlow</span>
+              </div>
+            )}
             {breadcrumbs ? (
               <div className="hidden min-w-0 items-center gap-2 2xl:flex">
                 <span className="text-slate-300 dark:text-slate-700">/</span>

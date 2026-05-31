@@ -2775,7 +2775,6 @@ export function SettingsPage() {
     <div className="pf-app flex flex-col dark:text-slate-100">
       <TopNav
         breadcrumbs={t("settings.breadcrumb")}
-        onHome={() => navigate("/products")}
         onLogout={() => logoutMutation.mutate()}
       />
 
@@ -2792,13 +2791,6 @@ export function SettingsPage() {
               </h1>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.description")}</p>
             </div>
-            <button
-              type="button"
-              onClick={() => navigate("/products")}
-              className="text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-slate-400 dark:hover:text-white"
-            >
-              {t("settings.back")}
-            </button>
           </div>
 
           {loadingMain ? (
