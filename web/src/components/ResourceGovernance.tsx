@@ -1,4 +1,4 @@
-import { Ban, UserRound } from "lucide-react";
+import { Ban, Trash2, UserRound } from "lucide-react";
 
 import { useI18n } from "../lib/preferences";
 import type { ModerationFields } from "../lib/types";
@@ -11,6 +11,10 @@ export interface GovernedResource extends ModerationFields {
 export function isResourceBlocked(resource: ModerationFields | null | undefined): boolean {
   const effectiveEnabled = resource?.effective_enabled ?? resource?.enabled;
   return effectiveEnabled === false;
+}
+
+export function isResourceDeleted(resource: ModerationFields | null | undefined): boolean {
+  return Boolean(resource?.deleted_at);
 }
 
 export function getResourceDisabledReason(resource: ModerationFields | null | undefined): string | null {
@@ -36,10 +40,11 @@ export function ResourceMetaBadges({
 }) {
   const { t } = useI18n();
   const blocked = isResourceBlocked(resource);
+  const deleted = isResourceDeleted(resource);
   const reason = getResourceDisabledReason(resource);
   const ownerUsername = resource?.owner_username ?? null;
 
-  if (!blocked && !ownerUsername) {
+  if (!blocked && !deleted && !ownerUsername) {
     return null;
   }
 
@@ -58,6 +63,15 @@ export function ResourceMetaBadges({
         >
           <Ban size={11} className="mr-1 shrink-0" aria-hidden="true" />
           <span className="truncate">{t("resource.disabled")}</span>
+        </span>
+      ) : null}
+      {deleted ? (
+        <span
+          className="inline-flex max-w-full items-center rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+          title={t("resource.deleted")}
+        >
+          <Trash2 size={11} className="mr-1 shrink-0" aria-hidden="true" />
+          <span className="truncate">{t("resource.deleted")}</span>
         </span>
       ) : null}
       {blocked && showReason && reason ? (

@@ -198,6 +198,57 @@ def test_alembic_upgrade_head_supports_sqlite(tmp_path: Path, monkeypatch) -> No
     get_settings.cache_clear()
 
 
+def test_repair_migration_adds_missing_0033_columns_after_stamp(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "repair-0033-drift.db"
+    storage_root = tmp_path / "storage"
+    monkeypatch.setenv("ADMIN_ACCESS_KEY", "super-secret-admin-key")
+    monkeypatch.setenv("SESSION_SECRET", "super-secret-session-key-123")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/9")
+    monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    command.upgrade(config, "20260529_0032")
+    command.stamp(config, "20260530_0033")
+    command.upgrade(config, "head")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    canvas_template_columns = {column["name"] for column in inspector.get_columns("canvas_templates")}
+    assert {
+        "review_status",
+        "review_note",
+        "review_submitted_at",
+        "reviewed_at",
+        "reviewed_by_user_id",
+    } <= canvas_template_columns
+    assert "ix_canvas_templates_review_status" in {
+        index["name"] for index in inspector.get_indexes("canvas_templates")
+    }
+    assert any(
+        foreign_key["constrained_columns"] == ["reviewed_by_user_id"]
+        and foreign_key["referred_table"] == "auth_users"
+        for foreign_key in inspector.get_foreign_keys("canvas_templates")
+    )
+
+    for table_name, index_name in (
+        ("products", "ix_products_deleted_at"),
+        ("image_sessions", "ix_image_sessions_deleted_at"),
+    ):
+        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        assert {"deleted_at", "deleted_by_user_id"} <= columns
+        assert index_name in {index["name"] for index in inspector.get_indexes(table_name)}
+        assert any(
+            foreign_key["constrained_columns"] == ["deleted_by_user_id"]
+            and foreign_key["referred_table"] == "auth_users"
+            for foreign_key in inspector.get_foreign_keys(table_name)
+        )
+    get_settings.cache_clear()
+
+
 def test_legacy_copy_fields_migrate_to_structured_payload_and_drop_columns(
     tmp_path: Path,
     monkeypatch,

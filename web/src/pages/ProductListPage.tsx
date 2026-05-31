@@ -25,6 +25,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
+  isResourceDeleted,
   ResourceMetaBadges,
 } from "../components/ResourceGovernance";
 import { StatusPill } from "../components/StatusPill";
@@ -279,6 +280,10 @@ export function ProductListPage() {
     }
     if (isResourceBlocked(product)) {
       setDeleteError(t("resource.blockedAction"));
+      return;
+    }
+    if (isResourceDeleted(product)) {
+      setDeleteError(t("resource.deleted"));
       return;
     }
     setPendingDeleteProduct(product);
@@ -572,6 +577,7 @@ function ProductMobileCard({
 }) {
   const { t } = useI18n();
   const productBlocked = isResourceBlocked(product);
+  const productDeleted = isResourceDeleted(product);
   const metadata = [
     product.category,
     product.price ? formatPrice(product.price) : null,
@@ -685,16 +691,20 @@ function ProductMobileCard({
         type="button"
         onClick={handleDeleteClick}
         onPointerDown={(event) => event.stopPropagation()}
-        disabled={isDeleting || !deletionEnabled || productBlocked}
+        disabled={isDeleting || !deletionEnabled || productBlocked || productDeleted}
         aria-label={
-          productBlocked
+          productDeleted
+            ? t("resource.deleted")
+            : productBlocked
             ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
             : deletionEnabled
             ? t("products.deleteProduct", { name: product.name })
             : t("products.deleteDisabled")
         }
         title={
-          productBlocked
+          productDeleted
+            ? t("resource.deleted")
+            : productBlocked
             ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
             : deletionEnabled
               ? t("products.delete")
@@ -763,6 +773,7 @@ function ProductTableRow({
 }) {
   const { t } = useI18n();
   const productBlocked = isResourceBlocked(product);
+  const productDeleted = isResourceDeleted(product);
   const pressOpen = usePressOpen(onOpen);
   const handleDeleteClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -818,9 +829,11 @@ function ProductTableRow({
             type="button"
             onClick={handleDeleteClick}
             onPointerDown={(event) => event.stopPropagation()}
-            disabled={isDeleting || !deletionEnabled || productBlocked}
+            disabled={isDeleting || !deletionEnabled || productBlocked || productDeleted}
             title={
-              productBlocked
+              productDeleted
+                ? t("resource.deleted")
+                : productBlocked
                 ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
                 : deletionEnabled
                   ? t("products.delete")

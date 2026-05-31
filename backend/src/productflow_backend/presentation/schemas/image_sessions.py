@@ -99,6 +99,8 @@ class ImageSessionSummaryResponse(ResourceModerationFields):
     title: str
     rounds_count: int
     latest_generated_asset: ImageSessionAssetResponse | None = None
+    deleted_at: datetime | None = None
+    deleted_by_user_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -112,6 +114,8 @@ class ImageSessionDetailResponse(ResourceModerationFields):
     assets: list[ImageSessionAssetResponse]
     rounds: list[ImageSessionRoundResponse]
     generation_tasks: list[ImageSessionGenerationTaskResponse] = Field(default_factory=list)
+    deleted_at: datetime | None = None
+    deleted_by_user_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -127,6 +131,8 @@ class ImageSessionStatusResponse(ResourceModerationFields):
     latest_generation_group_id: str | None = None
     has_active_generation_task: bool
     generation_tasks: list[ImageSessionGenerationTaskResponse] = Field(default_factory=list)
+    deleted_at: datetime | None = None
+    deleted_by_user_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -329,6 +335,8 @@ def serialize_image_session_summary(image_session: ImageSession) -> ImageSession
         rounds_count=len(image_session.rounds),
         latest_generated_asset=(serialize_image_session_asset(latest_round.generated_asset) if latest_round else None),
         **serialize_moderation_fields(image_session).model_dump(),
+        deleted_at=image_session.deleted_at,
+        deleted_by_user_id=image_session.deleted_by_user_id,
         created_at=image_session.created_at,
         updated_at=image_session.updated_at,
     )
@@ -359,6 +367,8 @@ def serialize_image_session_detail(image_session: ImageSession) -> ImageSessionD
             for item in generation_tasks
         ],
         **serialize_moderation_fields(image_session).model_dump(),
+        deleted_at=image_session.deleted_at,
+        deleted_by_user_id=image_session.deleted_by_user_id,
         created_at=image_session.created_at,
         updated_at=image_session.updated_at,
     )
@@ -391,6 +401,8 @@ def serialize_image_session_status(snapshot: ImageSessionStatusSnapshot) -> Imag
             for item in generation_tasks
         ],
         **serialize_moderation_fields(image_session).model_dump(),
+        deleted_at=image_session.deleted_at,
+        deleted_by_user_id=image_session.deleted_by_user_id,
         created_at=image_session.created_at,
         updated_at=image_session.updated_at,
     )

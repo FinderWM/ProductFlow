@@ -328,9 +328,12 @@ def test_product_can_be_deleted_from_api(configured_env: Path, db_session) -> No
 
     listed = client.get("/api/products")
     assert listed.status_code == 200
-    assert product_id in {item["id"] for item in listed.json()["items"]}
+    listed_product = next(item for item in listed.json()["items"] if item["id"] == product_id)
+    assert listed_product["deleted_at"] is not None
+    assert listed_product["deleted_by_user_id"] is not None
     visible_to_admin = client.get(f"/api/products/{product_id}")
     assert visible_to_admin.status_code == 200
+    assert visible_to_admin.json()["deleted_at"] is not None
 
     db_session.expire_all()
     persisted = db_session.get(Product, product_id)

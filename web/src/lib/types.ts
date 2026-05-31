@@ -50,6 +50,8 @@ export interface ModerationFields {
   effective_disabled_resource_type?: string | null;
   effective_disabled_resource_id?: string | null;
   effective_disabled_reason?: string | null;
+  deleted_at?: string | null;
+  deleted_by_user_id?: string | null;
 }
 
 export interface SessionState {

@@ -2315,7 +2315,9 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
 
     admin_listed = admin_client.get("/api/image-sessions")
     assert admin_listed.status_code == 200
-    assert session_id in {item["id"] for item in admin_listed.json()["items"]}
+    admin_session = next(item for item in admin_listed.json()["items"] if item["id"] == session_id)
+    assert admin_session["deleted_at"] is not None
+    assert admin_session["deleted_by_user_id"] is not None
 
     db_session.expire_all()
     persisted = db_session.get(ImageSession, session_id)

@@ -90,6 +90,8 @@ class ProductSummaryResponse(ResourceModerationFields):
     source_image_download_url: str | None = None
     source_image_preview_url: str | None = None
     source_image_thumbnail_url: str | None = None
+    deleted_at: datetime | None = None
+    deleted_by_user_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -115,6 +117,8 @@ class ProductDetailResponse(ResourceModerationFields):
     current_confirmed_copy_set: CopySetResponse | None = None
     copy_sets: list[CopySetResponse]
     poster_variants: list[PosterVariantResponse]
+    deleted_at: datetime | None = None
+    deleted_by_user_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -207,6 +211,8 @@ def serialize_product_summary(product: Product) -> ProductSummaryResponse:
         source_image_preview_url=source_urls.get("preview_url"),
         source_image_thumbnail_url=source_urls.get("thumbnail_url"),
         **serialize_moderation_fields(product).model_dump(),
+        deleted_at=product.deleted_at,
+        deleted_by_user_id=product.deleted_by_user_id,
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
@@ -233,6 +239,8 @@ def serialize_product_detail(product: Product) -> ProductDetailResponse:
         copy_sets=[serialize_copy_set(item) for item in copy_sets],
         poster_variants=[serialize_poster_variant(item) for item in poster_variants],
         **serialize_moderation_fields(product).model_dump(),
+        deleted_at=product.deleted_at,
+        deleted_by_user_id=product.deleted_by_user_id,
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
