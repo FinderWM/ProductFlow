@@ -21,7 +21,7 @@ from productflow_backend.infrastructure.db.models import (
     Product,
     SourceAsset,
 )
-from productflow_backend.presentation.image_variants import build_image_urls
+from productflow_backend.presentation.image_variants import build_stored_image_urls
 from productflow_backend.presentation.schemas.moderation import ResourceModerationFields, serialize_moderation_fields
 
 
@@ -133,7 +133,7 @@ class CopySetUpdateRequest(BaseModel):
 
 
 def serialize_source_asset(asset: SourceAsset) -> SourceAssetResponse:
-    urls = build_image_urls(f"/api/source-assets/{asset.id}/download")
+    urls = build_stored_image_urls(asset, f"/api/source-assets/{asset.id}/download")
     return SourceAssetResponse(
         id=asset.id,
         kind=asset.kind,
@@ -175,7 +175,7 @@ def serialize_copy_set(copy_set: CopySet) -> CopySetResponse:
 
 
 def serialize_poster_variant(poster: PosterVariant) -> PosterVariantResponse:
-    urls = build_image_urls(f"/api/posters/{poster.id}/download")
+    urls = build_stored_image_urls(poster, f"/api/posters/{poster.id}/download")
     return PosterVariantResponse(
         id=poster.id,
         product_id=poster.product_id,
@@ -195,7 +195,7 @@ def serialize_product_summary(product: Product) -> ProductSummaryResponse:
     latest_copy = max(product.copy_sets, key=lambda item: item.created_at, default=None)
     latest_poster = max(product.poster_variants, key=lambda item: item.created_at, default=None)
     source = next((item for item in product.source_assets if item.kind == SourceAssetKind.ORIGINAL_IMAGE), None)
-    source_urls = build_image_urls(f"/api/source-assets/{source.id}/download") if source else {}
+    source_urls = build_stored_image_urls(source, f"/api/source-assets/{source.id}/download") if source else {}
     return ProductSummaryResponse(
         id=product.id,
         owner_user_id=product.owner_user_id,

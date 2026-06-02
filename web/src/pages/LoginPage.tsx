@@ -13,7 +13,7 @@ interface LoginPageProps {
 export function LoginPage({ authenticated }: LoginPageProps) {
   const { t } = useI18n();
   const [mode, setMode] = useState<"login" | "password">("login");
-  const [username, setUsername] = useState("libow");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");

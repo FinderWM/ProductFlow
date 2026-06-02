@@ -314,24 +314,26 @@ def create_product(
     if image_bytes is not None:
         resolved_filename = filename or "upload.bin"
         relative_path = storage.save_product_upload(product.id, resolved_filename, image_bytes)
+        storage_metadata = storage.metadata_for(relative_path)
         original_source_asset = SourceAsset(
             product_id=product.id,
             kind=SourceAssetKind.ORIGINAL_IMAGE,
             original_filename=resolved_filename,
             mime_type=content_type or "application/octet-stream",
-            storage_path=relative_path,
+            **storage_metadata.as_model_kwargs(),
         )
         session.add(original_source_asset)
         session.flush()
     for reference_bytes, reference_filename, reference_content_type in reference_image_uploads or []:
         reference_path = storage.save_reference_upload(product.id, reference_filename, reference_bytes)
+        storage_metadata = storage.metadata_for(reference_path)
         session.add(
             SourceAsset(
                 product_id=product.id,
                 kind=SourceAssetKind.REFERENCE_IMAGE,
                 original_filename=reference_filename,
                 mime_type=reference_content_type or "application/octet-stream",
-                storage_path=reference_path,
+                **storage_metadata.as_model_kwargs(),
             )
         )
     if canvas_template is not None:
@@ -379,13 +381,14 @@ def add_reference_images(
     storage = storage or LocalStorage()
     for reference_bytes, reference_filename, reference_content_type in reference_image_uploads:
         reference_path = storage.save_reference_upload(product.id, reference_filename, reference_bytes)
+        storage_metadata = storage.metadata_for(reference_path)
         session.add(
             SourceAsset(
                 product_id=product.id,
                 kind=SourceAssetKind.REFERENCE_IMAGE,
                 original_filename=reference_filename,
                 mime_type=reference_content_type or "application/octet-stream",
-                storage_path=reference_path,
+                **storage_metadata.as_model_kwargs(),
             )
         )
     session.commit()
@@ -417,8 +420,8 @@ def delete_reference_image(
     ensure_resource_usable(asset)
 
     product_id = asset.product_id
-    storage_path = asset.storage_path
     storage = storage or LocalStorage()
+    storage_path = storage.object_key_for(asset)
     product = _get_product_or_raise(session, product_id)
     product.updated_at = now_utc()
     session.delete(asset)

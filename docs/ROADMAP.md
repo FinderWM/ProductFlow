@@ -28,7 +28,7 @@
 - 运行中轻量状态轮询：连续生图和商品工作流运行时只轮询 status 响应，完成后再刷新完整详情。
 - 移动端商品列表和商品工作台适配：商品列表使用移动卡片与浮动分页，商品工作台使用底部工具栏、底部详情面板和画布触控模式。
 - 移动端连续生图页面适配：主视图、会话抽屉、历史窄抽屉、生成设置底部面板和底部快捷操作已按小屏幕组织。
-- Docker Compose 一键自托管路径：`docker compose up -d --build` 可启动 PostgreSQL、Redis、后端 API、Dramatiq worker 和 Web 静态站点；`just release` 已切到 Compose 生产更新和健康检查链路。
+- Docker Compose 一键自托管应用路径：共享 PostgreSQL、Redis 和 MinIO 运行后，`docker compose up -d --build` 可启动后端 API、Dramatiq worker 和 Web 静态站点；`just release` 已切到 Compose 生产更新和健康检查链路。
 - 基础开源文件、MIT License、贡献/安全说明、issue/PR 模板。
 
 ## 近期优先级

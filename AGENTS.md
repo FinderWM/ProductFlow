@@ -28,7 +28,8 @@ ProductFlow is a private single-merchant workspace. The backend lives in `backen
 Use the root `justfile` whenever possible:
 
 - `just backend-install` — install backend dependencies with `uv` dev extras.
-- `docker compose up -d` — start local PostgreSQL and Redis.
+- Shared PostgreSQL, Redis, and MinIO are maintained outside this repository; for local hot-reload development, confirm
+  `libowpg`, `libowredis`, and `libowminio` are running, then use the `just` commands below for app processes.
 - `just backend-migrate` — apply Alembic migrations with dev env vars.
 - `just backend-run` — run the FastAPI API on the dev port.
 - `just backend-worker` — run Dramatiq workers for async jobs.

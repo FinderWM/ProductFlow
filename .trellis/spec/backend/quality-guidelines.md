@@ -31,20 +31,25 @@ Use the root `justfile` where possible so local env loading and ports match the 
 #### 1. Scope / Trigger
 
 - Trigger: editing `docker-compose.yml`, Dockerfiles, example env files, or README/docs for the self-hosted runtime.
-- Applies to the full Compose stack: PostgreSQL, Redis, FastAPI API, Dramatiq worker, built Web static server, and shared storage.
+- Applies to the Compose application stack: FastAPI API, Dramatiq worker, built Web static server, shared storage, and
+  external PostgreSQL / Redis middleware maintained under `/Users/yunlong/project/self/env`.
 
 #### 2. Signatures
 
-- One-click start: `docker compose up -d --build`.
+- One-click application start: `docker compose up -d --build`.
+- Shared middleware containers: PostgreSQL `libowpg`, Redis `libowredis`.
 - Manual migration path: `docker compose run --rm productflow-backend alembic upgrade head`.
 - Direct API health: `GET /healthz` returns `{"status":"ok"}`.
 - Web proxy smoke path: `GET /api/healthz` through nginx proxies to backend `GET /healthz`.
 
 #### 3. Contracts
 
-- `productflow-backend` and `productflow-worker` must use Compose service names for runtime dependencies:
-  - `DATABASE_URL=postgresql+psycopg://productflow:<password>@productflow-postgres:5432/productflow`
-  - `REDIS_URL=redis://productflow-redis:6379/0`
+- `productflow-backend` and `productflow-worker` must read runtime dependencies from `.env`:
+  - `DATABASE_URL=postgresql+psycopg://productflow:<password>@host.docker.internal:15432/product_flow`
+  - `REDIS_URL=redis://host.docker.internal:16379/0`
+- Local host development uses `.env.dev` with `localhost:15432/product_flow` and `localhost:16379/0`.
+- Do not reintroduce PostgreSQL or Redis services into `docker-compose.yml`; they are shared middleware for multiple
+  projects.
 - Container storage must use a shared in-container path `STORAGE_ROOT=/app/storage`.
 - `STORAGE_HOST_PATH` is host-only Compose interpolation for production bind mounts. When unset, `/app/storage` is backed
   by the named volume `productflow-storage`; when set, it may point at an existing host directory such as
@@ -56,8 +61,8 @@ Use the root `justfile` where possible so local env loading and ports match the 
 
 #### 4. Validation & Error Matrix
 
-- Missing `POSTGRES_PASSWORD` in `.env` -> Compose config/start should fail before launching Postgres.
-- Postgres/Redis unhealthy -> backend must wait via `depends_on.condition: service_healthy`.
+- Missing `DATABASE_URL` or `REDIS_URL` in `.env` -> Compose config should fail before launching application containers.
+- External Postgres/Redis unavailable -> backend migration/startup must fail before serving API traffic.
 - Migration failure -> backend container must fail before serving API traffic.
 - Backend unhealthy -> worker and web must wait for backend health before starting.
 - Web `/api/*` not proxied -> same-origin frontend API calls fail even if static files load.
@@ -68,11 +73,13 @@ Use the root `justfile` where possible so local env loading and ports match the 
 
 #### 5. Good/Base/Bad Cases
 
-- Good: `docker compose up -d --build` starts all five services, API health is OK, and web `/api/healthz` returns backend health.
+- Good: with `libowpg` and `libowredis` running, `docker compose up -d --build` starts API, worker, and web; API health
+  is OK, and web `/api/healthz` returns backend health.
 - Good: `STORAGE_HOST_PATH=/home/cot/ProductFlow-release/shared/storage docker compose up -d --build` bind-mounts old
   production files while API/worker still run with `STORAGE_ROOT=/app/storage`.
-- Base: local development starts only `productflow-postgres` and `productflow-redis`, while host `just` commands run API/worker/web.
+- Base: local development reuses `libowpg` and `libowredis`, while host `just` commands run API/worker/web.
 - Bad: `DATABASE_URL` points at `localhost` from inside containers; that targets the app container itself, not Postgres.
+- Bad: `docker-compose.yml` starts project-local PostgreSQL or Redis containers for ProductFlow after the middleware split.
 - Bad: setting container `STORAGE_ROOT=/home/cot/ProductFlow-release/shared/storage`; that host path does not exist inside
   the container and bypasses the stable `/app/storage` contract.
 - Bad: using Vite dev server or host `pnpm` as the documented production-style self-host web runtime.
@@ -88,16 +95,16 @@ Use the root `justfile` where possible so local env loading and ports match the 
 
 #### 7. Wrong vs Correct
 
-Wrong:
+Wrong inside an app container:
 
 ```yaml
-DATABASE_URL: postgresql+psycopg://productflow:password@localhost:15432/productflow
+DATABASE_URL: postgresql+psycopg://productflow:password@localhost:15432/product_flow
 ```
 
-Correct:
+Correct inside an app container:
 
 ```yaml
-DATABASE_URL: postgresql+psycopg://productflow:${POSTGRES_PASSWORD}@productflow-postgres:5432/productflow
+DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
 ```
 
 Wrong:
@@ -405,6 +412,10 @@ should own pure graph decisions.
 
 Use `LocalStorage` from `backend/src/productflow_backend/infrastructure/storage.py` for storage paths. It resolves relative
 paths under the configured root and rejects absolute/path-traversal paths. Do not build download paths manually in routes.
+For image resource rows, persist storage metadata through `StorageService.metadata_for(...)` so `storage_path`,
+`storage_backend`, `storage_bucket`, and `storage_object_key` stay consistent. Do not persist full public URLs; derive
+MinIO/S3 download, preview, and thumbnail URLs from current storage configuration at response time. Read existing resource
+rows with `StorageService.object_key_for(...)`; it prefers `storage_object_key` and falls back to legacy `storage_path`.
 
 ### Keep durable async task semantics idempotent
 

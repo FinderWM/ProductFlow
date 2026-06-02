@@ -264,8 +264,8 @@ def execute_workflow_image_generation(
                 copy_set_id=copy_set.id,
                 kind=kind,
                 template_name=generated_image.template_name,
-                storage_path=relative_path,
                 mime_type=mime_type,
+                **storage.metadata_for(relative_path).as_model_kwargs(),
                 width=generated_image.width,
                 height=generated_image.height,
             )
@@ -275,12 +275,13 @@ def execute_workflow_image_generation(
 
             filename = f"reference-{generated_image.target_index}{infer_extension(mime_type)}"
             reference_path = storage.save_reference_upload(product.id, filename, content)
+            storage_metadata = storage.metadata_for(reference_path)
             asset = SourceAsset(
                 product_id=product.id,
                 kind=SourceAssetKind.REFERENCE_IMAGE,
                 original_filename=filename,
                 mime_type=mime_type,
-                storage_path=reference_path,
+                **storage_metadata.as_model_kwargs(),
                 source_poster_variant_id=poster.id,
             )
             session.add(asset)

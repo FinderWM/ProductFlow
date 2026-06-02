@@ -175,7 +175,7 @@ ProductFlow/
 
 ## 快速开始：Docker Compose 一键自托管
 
-该路径面向单机自托管部署。默认配置可运行基础流程；配置真实模型供应商、持久化存储和反向代理/HTTPS 后，可作为小规模生产运行的基础方式。宿主机仅需 Docker / Docker Compose，无需安装 Python、`uv`、Node、`pnpm` 或 `just`。Compose 会构建并启动 PostgreSQL、Redis、后端 API、Dramatiq worker 和 Web 静态站点。
+该路径面向单机自托管部署。默认配置可运行基础流程；配置真实模型供应商、持久化存储和反向代理/HTTPS 后，可作为小规模生产运行的基础方式。宿主机仅需 Docker / Docker Compose，无需安装 Python、`uv`、Node、`pnpm` 或 `just`。Compose 会构建并启动后端 API、Dramatiq worker 和 Web 静态站点；PostgreSQL、Redis 和 MinIO 作为共享中间件由 `/Users/yunlong/project/self/env` 单独维护。
 
 ### 1. 复制并修改环境变量
 
@@ -188,7 +188,7 @@ cp .env.example .env
 - `ADMIN_ACCESS_KEY`：登录后台使用的管理员密钥；密钥本身只从环境变量读取，不写入数据库。
 - `SETTINGS_ACCESS_TOKEN`：配置页二次解锁令牌，必须与登录密钥分开。
 - `SESSION_SECRET`：签名 session cookie 的长随机字符串。
-- `POSTGRES_PASSWORD`：PostgreSQL 密码；Compose 会用它拼出容器内的 `DATABASE_URL`。
+- `POSTGRES_PASSWORD`：共享 PostgreSQL 密码；需要与 `/Users/yunlong/project/self/env/productflow.env` 的 `PG_PASSWORD` 一致。
 
 默认 provider 为 `mock`，`POSTER_GENERATION_MODE=template`，无需真实模型密钥即可完成创建商品、生成文案和模板海报等基础流程。真实模型配置见“模型与供应商配置”。
 
@@ -202,23 +202,46 @@ docker compose up -d --build
 
 Compose 默认启动：
 
-- PostgreSQL：服务名 `productflow-postgres`，Compose volume `productflow-postgres-data`，宿主机端口 `${POSTGRES_HOST_PORT:-15432}`。
-- Redis：服务名 `productflow-redis`，AOF 持久化 Compose volume `productflow-redis-data`，宿主机端口 `${REDIS_HOST_PORT:-16379}`。
 - 后端 API：服务名 `productflow-backend`，宿主机端口 `${APP_HOST_PORT:-29280}`。
-- Dramatiq worker：服务名 `productflow-worker`，与 API 共享数据库、Redis 和 storage 卷。
+- Dramatiq worker：服务名 `productflow-worker`，与 API 共享外部 PostgreSQL、Redis 和 storage 卷。
 - Web：服务名 `productflow-web`，nginx 静态服务，宿主机端口 `${WEB_PORT:-29281}`。
 
-如端口已被占用，可在 `.env` 中修改 `APP_HOST_PORT`、`WEB_PORT`、`POSTGRES_HOST_PORT` 或 `REDIS_HOST_PORT`，再重新执行 `docker compose up -d --build`。容器内部仍通过服务名互联，无需修改应用内的 `DATABASE_URL` / `REDIS_URL`。
+PostgreSQL、Redis 和 MinIO 由 `/Users/yunlong/project/self/env` 下的独立 Docker 中间件维护。ProductFlow 使用：
 
-容器内应用会使用 Compose 网络服务名连接依赖：
+- PostgreSQL 容器：`libowpg`，宿主机端口 `15432`，数据库 `product_flow`。
+- Redis 容器：`libowredis`，宿主机端口 `16379`，DB `0`。
+- MinIO 容器：`libowminio`，S3 API 宿主机端口 `19000`，bucket `productflow`。
+
+如应用端口已被占用，可在 `.env` 中修改 `APP_HOST_PORT` 或 `WEB_PORT`，再重新执行 `docker compose up -d --build`。
+
+容器内应用通过 `.env` 中的外部连接 URL 访问共享中间件：
 
 ```text
-DATABASE_URL=postgresql+psycopg://productflow:<POSTGRES_PASSWORD>@productflow-postgres:5432/productflow
-REDIS_URL=redis://productflow-redis:6379/0
+DATABASE_URL=postgresql+psycopg://productflow:<POSTGRES_PASSWORD>@host.docker.internal:15432/product_flow
+REDIS_URL=redis://host.docker.internal:16379/0
 STORAGE_ROOT=/app/storage
+STORAGE_BACKEND=local
 ```
 
-容器运行时 `STORAGE_ROOT` 固定为 `/app/storage`，不要写入宿主机路径。默认上传和生成文件存入 Docker named volume `productflow-storage`，容器重启后数据保留。
+文件存储通过 `STORAGE_BACKEND` 切换：
+
+- `local`：上传和生成文件存入 `STORAGE_ROOT`，Compose 默认使用 Docker named volume `productflow-storage`。
+- `minio`：通过 S3 兼容接口写入共享 MinIO，PgSQL 保存对象 key 和后端/bucket 元数据，API 响应时按当前配置拼接公开访问 URL，`STORAGE_ROOT` 只作为本地缓存目录。
+- `s3`：预留给其他 S3 兼容对象存储；接入时填写 `STORAGE_PUBLIC_BASE_URL`、`S3_ENDPOINT_URL`、`S3_BUCKET`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`、`S3_REGION`。
+
+使用共享 MinIO 时，`.env` 需要设置：
+
+```env
+STORAGE_BACKEND=minio
+S3_ENDPOINT_URL=http://host.docker.internal:19000
+STORAGE_PUBLIC_BASE_URL=http://localhost:19000
+S3_BUCKET=productflow
+S3_ACCESS_KEY=<MINIO_APP_ACCESS_KEY>
+S3_SECRET_KEY=<MINIO_APP_SECRET_KEY>
+S3_REGION=us-east-1
+```
+
+容器运行时 `STORAGE_ROOT` 固定为 `/app/storage`，不要写入宿主机路径。`STORAGE_BACKEND=local` 时上传和生成文件存入 Docker named volume `productflow-storage`，容器重启后数据保留；`STORAGE_BACKEND=minio` 时文件写入 MinIO，PgSQL 只保存对象 key 和必要的后端/bucket 元数据，API 响应时再按当前 `STORAGE_PUBLIC_BASE_URL` + bucket + object key 拼接访问 URL，`/app/storage` 仅用于缓存和缩略图派生。
 
 从旧 systemd 生产环境迁移到 Compose 时，如已有生产文件目录（例如 `/home/cot/ProductFlow-release/shared/storage`），可在 `.env` 中设置 host-only 变量复用旧文件：
 
@@ -303,21 +326,21 @@ cp .env.dev.example .env.dev
 cp web/.env.example web/.env
 ```
 
-`.env.example` 的 `DATABASE_URL` / `REDIS_URL` 面向 Compose 容器网络；本地热重载开发命令会通过 `.env.dev` 使用宿主机 `localhost:${POSTGRES_HOST_PORT:-15432}` 和 `localhost:${REDIS_HOST_PORT:-16379}`。至少需要把 `.env` / `.env.dev` 中的这些值改成自己的随机值：
+`.env.example` 的 `DATABASE_URL` / `REDIS_URL` 面向 Docker 容器访问宿主机共享中间件；本地热重载开发命令会通过 `.env.dev` 使用宿主机 `localhost:${POSTGRES_HOST_PORT:-15432}` 和 `localhost:${REDIS_HOST_PORT:-16379}`。至少需要把 `.env` / `.env.dev` 中的这些值改成自己的随机值：
 
 - `ADMIN_ACCESS_KEY`：登录后台使用的管理员密钥；密钥本身只从环境变量读取，不写入数据库。
 - `SETTINGS_ACCESS_TOKEN`：配置页二次解锁令牌，必须与登录密钥分开。
 - `SESSION_SECRET`：签名 session cookie 的长随机字符串。
-- `POSTGRES_PASSWORD`：本地 PostgreSQL 密码，同时保持 `.env.dev` 的 `DATABASE_URL` 中密码一致。
+- `POSTGRES_PASSWORD`：共享 PostgreSQL 密码，同时保持 `.env.dev` 的 `DATABASE_URL` 中密码一致。
 
-`.env.dev.example` 使用开发端口、Redis DB 1 和 `backend/storage-dev`，数据库名与默认 `docker-compose.yml` 保持一致。使用单独开发数据库时，需要先在 PostgreSQL 中创建对应数据库，再调整 `.env.dev` 的 `DATABASE_URL`。本地开发 storage 与生产 Compose 隔离：`just backend-run` / `just backend-worker` 及对应原始命令会读取 `.env.dev` 中的 `STORAGE_ROOT=./backend/storage-dev`。避免通过 `source .env` 或生产 `STORAGE_HOST_PATH` 启动开发进程。
+`.env.dev.example` 使用开发端口、Redis DB 0、共享 PostgreSQL 中的 `product_flow`，并默认 `STORAGE_BACKEND=minio`。`scripts/with_dev_env.sh` 会读取 `/Users/yunlong/project/self/env/minio.env`，自动导出本机进程需要的 `S3_*` 变量。使用单独开发数据库时，需要在 PostgreSQL 中创建对应数据库，再调整 `.env.dev` 的 `DATABASE_URL`。本地开发的 `STORAGE_ROOT=./backend/storage-dev` 只作为对象缓存目录；避免通过 `source .env` 或生产 `STORAGE_HOST_PATH` 启动开发进程。
 
-### 3. 仅启动开发依赖
+### 3. 确认共享中间件运行
 
-本地热重载开发只用 Compose 启动 PostgreSQL 和 Redis；API、worker 和 Web 由下一步的本机命令启动。完整自托管栈使用上文的 `docker compose up -d --build`。
+本地热重载开发依赖 `/Users/yunlong/project/self/env` 下的共享 PostgreSQL、Redis 和 MinIO。本仓库不通过 Compose 启动这些依赖；API、worker 和 Web 由下一步的本机命令启动。完整自托管应用栈使用上文的 `docker compose up -d --build`。
 
 ```bash
-docker compose up -d productflow-postgres productflow-redis
+docker ps --format '{{.Names}}' | grep -E '^(libowpg|libowredis|libowminio)$'
 ```
 
 ### 4. 安装依赖并迁移数据库

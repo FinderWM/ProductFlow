@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, ValidationError, ValidationInfo, field_validator
+from pydantic import Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -139,6 +139,13 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
     storage_root: Path = Path("./backend/storage")
+    storage_backend: Literal["local", "minio", "s3"] = "local"
+    storage_public_base_url: str | None = None
+    s3_endpoint_url: str | None = None
+    s3_bucket: str = "productflow"
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_region: str = "us-east-1"
 
     log_dir: Path = DEFAULT_LOG_DIR
     log_level: str = "INFO"
@@ -249,10 +256,46 @@ class Settings(BaseSettings):
             return None
         return int(value)
 
+    @field_validator("storage_backend", mode="before")
+    @classmethod
+    def _normalize_storage_backend(cls, value: Any) -> str:
+        normalized = "" if value is None else str(value).strip().lower()
+        return normalized or "local"
+
+    @field_validator("storage_public_base_url", "s3_endpoint_url", "s3_access_key", "s3_secret_key", mode="before")
+    @classmethod
+    def _normalize_optional_storage_text(cls, value: Any) -> str | None:
+        normalized = "" if value is None else str(value).strip()
+        return normalized or None
+
+    @field_validator("s3_bucket", "s3_region", mode="before")
+    @classmethod
+    def _normalize_storage_text(cls, value: Any) -> str:
+        return "" if value is None else str(value).strip()
+
     @field_validator("image_tool_allowed_fields", mode="before")
     @classmethod
     def _normalize_image_tool_allowed_fields(cls, value: Any) -> str:
         return normalize_image_tool_allowed_fields(value)
+
+    @model_validator(mode="after")
+    def _validate_storage_backend_config(self) -> Settings:
+        if self.storage_backend == "local":
+            return self
+        missing_fields = [
+            label
+            for label, value in (
+                ("S3_ENDPOINT_URL", self.s3_endpoint_url),
+                ("S3_BUCKET", self.s3_bucket),
+                ("S3_ACCESS_KEY", self.s3_access_key),
+                ("S3_SECRET_KEY", self.s3_secret_key),
+                ("S3_REGION", self.s3_region),
+            )
+            if not value
+        ]
+        if missing_fields:
+            raise ValueError(f"对象存储后端缺少环境变量: {', '.join(missing_fields)}")
+        return self
 
     @property
     def cors_origins(self) -> list[str]:

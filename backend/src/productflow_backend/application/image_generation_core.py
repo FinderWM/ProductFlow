@@ -13,6 +13,7 @@ from productflow_backend.infrastructure.image.base import image_dimensions_from_
 class StoredImageReference(Protocol):
     id: str
     storage_path: str
+    storage_object_key: str | None
     mime_type: str
     original_filename: str
 
@@ -45,7 +46,7 @@ def normalize_image_generation_tool_options(tool_options: dict[str, Any] | None)
 def unique_image_generation_references[T: StoredImageReference](references: list[T]) -> list[T]:
     unique_by_path: dict[str, T] = {}
     for reference in references:
-        unique_by_path.setdefault(reference.storage_path, reference)
+        unique_by_path.setdefault(_storage_key(reference), reference)
     return list(unique_by_path.values())
 
 
@@ -57,7 +58,7 @@ def build_stored_image_reference_payload(
     unique_references = unique_image_generation_references(references)
     reference_inputs = [
         ReferenceImageInput(
-            path=Path(resolve_storage_path(reference.storage_path)),
+            path=Path(resolve_storage_path(_storage_key(reference))),
             mime_type=reference.mime_type,
             filename=reference.original_filename,
         )
@@ -67,6 +68,10 @@ def build_stored_image_reference_payload(
         source_image=reference_inputs[0].path if reference_inputs else None,
         reference_images=reference_inputs,
     )
+
+
+def _storage_key(reference: StoredImageReference) -> str:
+    return getattr(reference, "storage_object_key", None) or reference.storage_path
 
 
 def provider_output_with_actual_image_size(

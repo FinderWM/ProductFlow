@@ -28,7 +28,7 @@ Completed baseline capabilities:
 - Lightweight status polling while running: iterative image generation and product workflows poll status responses only, then refresh full details after completion.
 - Mobile product list and product workbench adaptation: product list cards with floating pagination, plus workbench bottom toolbar, bottom sheet, and canvas touch modes.
 - Mobile iterative image page adaptation: main view, session drawer, narrow history drawer, generation-settings bottom sheet, and bottom quick actions are organized for small screens.
-- One-command Docker Compose self-hosting path: `docker compose up -d --build` starts PostgreSQL, Redis, backend API, Dramatiq worker, and the Web static site; `just release` now uses the Compose production update and health-check flow.
+- One-command Docker Compose application self-hosting path: after shared PostgreSQL, Redis, and MinIO are running, `docker compose up -d --build` starts the backend API, Dramatiq worker, and the Web static site; `just release` now uses the Compose production update and health-check flow.
 - Basic open-source files, MIT License, contribution/security guides, and issue/PR templates.
 
 ## Near-Term Priorities

@@ -326,6 +326,9 @@ def reference_assets_for_image_generation(
                     original_filename=f"{poster.kind.value}.png",
                     mime_type=poster.mime_type,
                     storage_path=poster.storage_path,
+                    storage_backend=poster.storage_backend,
+                    storage_bucket=poster.storage_bucket,
+                    storage_object_key=poster.storage_object_key,
                 )
             )
     return unique_image_generation_references(assets)
@@ -368,7 +371,7 @@ def reference_image_inputs_for_copy(
             seen_asset_ids.add(asset.id)
             inputs.append(
                 ReferenceImageInput(
-                    path=Path(storage.resolve(asset.storage_path)),
+                    path=Path(storage.resolve(storage.object_key_for(asset))),
                     mime_type=asset.mime_type,
                     filename=asset.original_filename,
                     role=role,
@@ -402,7 +405,7 @@ def reference_image_inputs_for_tail(
             continue
         inputs.append(
             ReferenceImageInput(
-                path=Path(storage.resolve(asset.storage_path)),
+                path=Path(storage.resolve(storage.object_key_for(asset))),
                 mime_type=asset.mime_type,
                 filename=asset.original_filename,
                 role="reference",

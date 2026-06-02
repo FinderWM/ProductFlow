@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -228,7 +228,7 @@ def download_poster_endpoint(
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
-) -> FileResponse:
+) -> Response:
     poster = session.scalar(
         select(PosterVariant).options(selectinload(PosterVariant.product)).where(PosterVariant.id == poster_id)
     )
@@ -236,18 +236,17 @@ def download_poster_endpoint(
         raise HTTPException(status_code=404, detail="海报不存在")
     ensure_resource_usable(poster)
     storage = LocalStorage()
+    object_key = storage.object_key_for(poster)
     try:
         path, media_type = storage.resolve_for_variant(
-            poster.storage_path,
+            object_key,
             variant,
             fallback_media_type=poster.mime_type,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="海报文件不存在") from exc
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="海报文件不存在")
     filename = build_variant_filename(
-        f"{poster.kind.value}{Path(poster.storage_path).suffix or '.png'}",
+        f"{poster.kind.value}{Path(object_key).suffix or '.png'}",
         variant=variant,
         resolved_suffix=path.suffix,
     )
@@ -260,7 +259,7 @@ def download_source_asset_endpoint(
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
-) -> FileResponse:
+) -> Response:
     asset = session.scalar(
         select(SourceAsset).options(selectinload(SourceAsset.product)).where(SourceAsset.id == asset_id)
     )
@@ -268,16 +267,15 @@ def download_source_asset_endpoint(
         raise HTTPException(status_code=404, detail="源图不存在")
     ensure_resource_usable(asset)
     storage = LocalStorage()
+    object_key = storage.object_key_for(asset)
     try:
         path, media_type = storage.resolve_for_variant(
-            asset.storage_path,
+            object_key,
             variant,
             fallback_media_type=asset.mime_type,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="源图文件不存在") from exc
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="源图文件不存在")
     filename = build_variant_filename(asset.original_filename, variant=variant, resolved_suffix=path.suffix)
     return FileResponse(path, media_type=media_type, filename=filename)
 

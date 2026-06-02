@@ -542,12 +542,13 @@ def upload_workflow_node_image(
     workflow = product_workflow_graph.get_workflow_or_raise(session, node.workflow_id)
     storage = storage or LocalStorage()
     relative_path = storage.save_reference_upload(workflow.product_id, filename, image_bytes)
+    storage_metadata = storage.metadata_for(relative_path)
     asset = SourceAsset(
         product_id=workflow.product_id,
         kind=SourceAssetKind.REFERENCE_IMAGE,
         original_filename=filename,
         mime_type=content_type or "application/octet-stream",
-        storage_path=relative_path,
+        **storage_metadata.as_model_kwargs(),
     )
     session.add(asset)
     session.flush()
@@ -617,17 +618,18 @@ def bind_workflow_node_image(
         if asset is None:
             storage = storage or LocalStorage()
             try:
-                content = storage.resolve(poster.storage_path).read_bytes()
+                content = storage.resolve(storage.object_key_for(poster)).read_bytes()
             except (OSError, ValueError) as exc:
                 raise BusinessValidationError("海报文件不存在") from exc
             filename = f"poster-{poster.id}{infer_extension(poster.mime_type)}"
             reference_path = storage.save_reference_upload(workflow.product_id, filename, content)
+            storage_metadata = storage.metadata_for(reference_path)
             asset = SourceAsset(
                 product_id=workflow.product_id,
                 kind=SourceAssetKind.REFERENCE_IMAGE,
                 original_filename=filename,
                 mime_type=poster.mime_type,
-                storage_path=reference_path,
+                **storage_metadata.as_model_kwargs(),
                 source_poster_variant_id=poster.id,
             )
             session.add(asset)

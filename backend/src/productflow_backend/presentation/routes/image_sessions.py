@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -313,7 +313,7 @@ def download_image_session_asset_endpoint(
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_IMAGE_CHAT_READ)),
-) -> FileResponse:
+) -> Response:
     stmt = select(ImageSessionAsset).where(ImageSessionAsset.id == asset_id)
     if not current_user.is_admin:
         stmt = stmt.where(ImageSessionAsset.owner_user_id == current_user.id)
@@ -322,15 +322,14 @@ def download_image_session_asset_endpoint(
         raise HTTPException(status_code=404, detail="会话图片不存在")
     ensure_resource_usable(asset)
     storage = LocalStorage()
+    object_key = storage.object_key_for(asset)
     try:
         path, media_type = storage.resolve_for_variant(
-            asset.storage_path,
+            object_key,
             variant,
             fallback_media_type=asset.mime_type,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="会话图片文件不存在") from exc
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="会话图片文件不存在")
     filename = build_variant_filename(asset.original_filename, variant=variant, resolved_suffix=path.suffix)
     return FileResponse(path, media_type=media_type, filename=filename)

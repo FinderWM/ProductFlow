@@ -14,7 +14,7 @@ from productflow_backend.infrastructure.db.models import (
     ImageSessionGenerationTask,
     ImageSessionRound,
 )
-from productflow_backend.presentation.image_variants import build_image_urls
+from productflow_backend.presentation.image_variants import build_stored_image_urls
 from productflow_backend.presentation.schemas.moderation import ResourceModerationFields, serialize_moderation_fields
 from productflow_backend.presentation.schemas.validators import validate_image_generation_size
 
@@ -210,7 +210,7 @@ class ProductWritebackResponse(BaseModel):
 
 
 def serialize_image_session_asset(asset: ImageSessionAsset) -> ImageSessionAssetResponse:
-    urls = build_image_urls(f"/api/image-session-assets/{asset.id}/download")
+    urls = build_stored_image_urls(asset, f"/api/image-session-assets/{asset.id}/download")
     return ImageSessionAssetResponse(
         id=asset.id,
         owner_user_id=asset.owner_user_id,

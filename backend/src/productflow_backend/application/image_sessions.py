@@ -288,7 +288,7 @@ def _build_branch_generation_context(
             expected_kind=ImageSessionAssetKind.GENERATED_IMAGE,
         )
         normalized_base_asset_id = base_asset.id
-        manual_references.append(_session_data_url(storage, base_asset.storage_path, base_asset.mime_type))
+        manual_references.append(_session_data_url(storage, storage.object_key_for(base_asset), base_asset.mime_type))
 
     normalized_reference_ids: list[str] = []
     for asset_id in selected_reference_ids:
@@ -299,7 +299,9 @@ def _build_branch_generation_context(
             missing_message="会话参考图不存在",
         )
         normalized_reference_ids.append(reference_asset.id)
-        manual_references.append(_session_data_url(storage, reference_asset.storage_path, reference_asset.mime_type))
+        manual_references.append(
+            _session_data_url(storage, storage.object_key_for(reference_asset), reference_asset.mime_type)
+        )
 
     return [], manual_references[:6], None, normalized_base_asset_id, normalized_reference_ids
 
@@ -625,6 +627,7 @@ def add_image_session_reference_images(
     storage = storage or LocalStorage()
     for content, filename, mime_type in reference_image_uploads:
         relative_path = storage.save_image_session_reference(image_session.id, filename, content)
+        storage_metadata = storage.metadata_for(relative_path)
         session.add(
             ImageSessionAsset(
                 owner_user_id=image_session.owner_user_id,
@@ -632,7 +635,7 @@ def add_image_session_reference_images(
                 kind=ImageSessionAssetKind.REFERENCE_UPLOAD,
                 original_filename=filename,
                 mime_type=mime_type or "application/octet-stream",
-                storage_path=relative_path,
+                **storage_metadata.as_model_kwargs(),
             )
         )
     image_session.updated_at = now_utc()
@@ -671,7 +674,7 @@ def delete_image_session_reference_image(
     ensure_resource_usable(asset)
 
     storage = storage or LocalStorage()
-    storage_path = asset.storage_path
+    storage_path = storage.object_key_for(asset)
     session.delete(asset)
     image_session.updated_at = now_utc()
     session.commit()
@@ -869,7 +872,7 @@ def _execute_image_session_round_generation(
                     f"-{candidate_index}{infer_extension(result.mime_type)}"
                 ),
                 mime_type=result.mime_type,
-                storage_path=relative_path,
+                **storage.metadata_for(relative_path).as_model_kwargs(),
             )
             session.add(asset)
             session.flush()
@@ -1733,17 +1736,18 @@ def attach_image_session_asset_to_product(
         raise BusinessValidationError("只能写回同一账号下的商品")
 
     storage = storage or LocalStorage()
-    image_bytes = storage.resolve(asset.storage_path).read_bytes()
+    image_bytes = storage.resolve(storage.object_key_for(asset)).read_bytes()
 
     if target == "reference":
         relative_path = storage.save_reference_upload(product.id, asset.original_filename, image_bytes)
+        storage_metadata = storage.metadata_for(relative_path)
         session.add(
             SourceAsset(
                 product_id=product.id,
                 kind=SourceAssetKind.REFERENCE_IMAGE,
                 original_filename=asset.original_filename,
                 mime_type=asset.mime_type,
-                storage_path=relative_path,
+                **storage_metadata.as_model_kwargs(),
             )
         )
     else:
@@ -1751,13 +1755,14 @@ def attach_image_session_asset_to_product(
             current_source.kind = SourceAssetKind.REFERENCE_IMAGE
         session.flush()
         relative_path = storage.save_product_upload(product.id, asset.original_filename, image_bytes)
+        storage_metadata = storage.metadata_for(relative_path)
         session.add(
             SourceAsset(
                 product_id=product.id,
                 kind=SourceAssetKind.ORIGINAL_IMAGE,
                 original_filename=asset.original_filename,
                 mime_type=asset.mime_type,
-                storage_path=relative_path,
+                **storage_metadata.as_model_kwargs(),
             )
         )
     product.updated_at = now_utc()

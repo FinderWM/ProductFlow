@@ -6,6 +6,7 @@ readme = "../README.md"
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.16.5",
+  "boto3>=1.35.0",
   "dramatiq[redis]>=1.18.0",
   "fastapi>=0.115.12",
   "google-genai>=2.2.0",

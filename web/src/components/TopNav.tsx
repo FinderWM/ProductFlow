@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   BookOpen,
+  Check,
   GalleryHorizontalEnd,
   Languages,
   LayoutGrid,
@@ -118,6 +119,12 @@ const localeLabelKey: Record<Locale, TranslationKey> = {
   "ja-JP": "locale.jaJP",
 };
 
+const localeMarkers: Record<Locale, string> = {
+  "zh-CN": "zh",
+  "en-US": "en",
+  "ja-JP": "ja",
+};
+
 function navItemClassName(active: boolean) {
   return [
     "inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition-colors",
@@ -145,11 +152,130 @@ function mobileNavItemClassName(active: boolean) {
   ].join(" ");
 }
 
-const preferenceButtonClassName =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 " +
-  "text-sm font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:bg-white hover:text-slate-950 " +
-  "focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-800 dark:bg-slate-900 " +
-  "dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-slate-800 dark:hover:text-slate-100";
+function preferenceTriggerClassName(hasMarker: boolean) {
+  return [
+    "inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white/80 text-sm font-semibold text-slate-600 shadow-sm shadow-slate-950/[0.03] transition-colors active:scale-[0.98] hover:border-slate-300 hover:bg-white hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-300 dark:shadow-black/20 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-slate-100",
+    hasMarker ? "min-w-16 gap-1.5 px-2" : "w-9 px-0",
+  ].join(" ");
+}
+
+function preferenceMenuClassName(open: boolean) {
+  return [
+    "absolute right-0 top-11 z-50 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
+    open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
+  ].join(" ");
+}
+
+function preferenceMenuItemClassName(active: boolean) {
+  return [
+    "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-semibold transition-colors",
+    active
+      ? "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
+      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white",
+  ].join(" ");
+}
+
+function preferenceBadgeClassName(active: boolean) {
+  return [
+    "inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md border px-1.5 text-[11px] font-bold leading-none",
+    active
+      ? "border-slate-300 bg-white text-slate-950 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+      : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
+  ].join(" ");
+}
+
+type PreferenceOption<T extends string> = {
+  value: T;
+  label: string;
+  icon?: typeof Sun;
+  marker?: string;
+};
+
+function PreferenceMenu<T extends string>({
+  label,
+  currentLabel,
+  options,
+  value,
+  onChange,
+  triggerIcon: TriggerIcon,
+  triggerMarker,
+}: {
+  label: string;
+  currentLabel: string;
+  options: Array<PreferenceOption<T>>;
+  value: T;
+  onChange: (value: T) => void;
+  triggerIcon?: typeof Sun;
+  triggerMarker?: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      className="relative"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          setOpen(false);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        aria-label={`${label}: ${currentLabel}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`${label}: ${currentLabel}`}
+        className={preferenceTriggerClassName(Boolean(triggerMarker))}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {TriggerIcon ? <TriggerIcon size={15} aria-hidden="true" /> : null}
+        {triggerMarker ? <span className={preferenceBadgeClassName(true)}>{triggerMarker}</span> : null}
+      </button>
+      <div role="menu" aria-label={label} className={preferenceMenuClassName(open)}>
+        <div className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
+          {label}
+        </div>
+        {options.map((option) => {
+          const active = option.value === value;
+          const Icon = option.icon;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={active}
+              className={preferenceMenuItemClassName(active)}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {Icon ? (
+                <span className={preferenceBadgeClassName(active)}>
+                  <Icon size={14} aria-hidden="true" />
+                </span>
+              ) : (
+                <span className={preferenceBadgeClassName(active)}>{option.marker}</span>
+              )}
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+              <Check
+                size={14}
+                aria-hidden="true"
+                className={active ? "text-indigo-600 dark:text-violet-300" : "text-transparent"}
+              />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -163,14 +289,42 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
         (!item.requiredPermission || hasSessionApiPermission(session, item.requiredPermission))),
   );
   const CurrentThemeIcon = themeIcons[themePreference];
-  const nextThemePreference =
-    THEME_PREFERENCES[(THEME_PREFERENCES.indexOf(themePreference) + 1) % THEME_PREFERENCES.length];
-  const nextLocale = LOCALES[(LOCALES.indexOf(locale) + 1) % LOCALES.length];
+  const themeOptions = THEME_PREFERENCES.map((theme) => ({
+    value: theme,
+    label: t(`theme.${theme}`),
+    icon: themeIcons[theme],
+  }));
+  const localeOptions = LOCALES.map((availableLocale) => ({
+    value: availableLocale,
+    label: t(localeLabelKey[availableLocale]),
+    marker: localeMarkers[availableLocale],
+  }));
   const primaryNavItems = visibleNavItems.filter((item) => item.priority === "primary");
   const secondaryNavItems = visibleNavItems.filter((item) => item.priority === "secondary");
   const secondaryActive = secondaryNavItems.some((item) => item.match(location.pathname));
   const hasOverflowNav = secondaryNavItems.length > 0 || Boolean(onLogout);
   const mobileNavColumnCount = primaryNavItems.length + (hasOverflowNav ? 1 : 0);
+  const renderPreferenceControls = () => (
+    <>
+      <PreferenceMenu
+        label={t("nav.language")}
+        currentLabel={t(localeLabelKey[locale])}
+        options={localeOptions}
+        value={locale}
+        onChange={setLocale}
+        triggerIcon={Languages}
+        triggerMarker={localeMarkers[locale]}
+      />
+      <PreferenceMenu
+        label={t("nav.theme")}
+        currentLabel={t(`theme.${themePreference}`)}
+        options={themeOptions}
+        value={themePreference}
+        onChange={setThemePreference}
+        triggerIcon={CurrentThemeIcon}
+      />
+    </>
+  );
 
   const renderDesktopNavItem = (item: (typeof navItems)[number], compact = false) => {
     const Icon = item.icon;
@@ -265,47 +419,11 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
           </div>
 
           <div className="flex shrink-0 items-center gap-1 md:hidden">
-            <button
-              type="button"
-              onClick={() => setLocale(nextLocale)}
-              aria-label={`${t("nav.language")}: ${t(localeLabelKey[locale])}`}
-              title={t(localeLabelKey[locale])}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
-            >
-              <Languages size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setThemePreference(nextThemePreference)}
-              aria-label={`${t("nav.theme")}: ${t(`theme.${themePreference}`)}`}
-              title={t(`theme.${themePreference}`)}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
-            >
-              <CurrentThemeIcon size={16} />
-            </button>
+            {renderPreferenceControls()}
           </div>
 
           <div className="hidden shrink-0 items-center justify-end gap-1.5 md:flex">
-            <button
-              type="button"
-              onClick={() => setLocale(nextLocale)}
-              aria-label={`${t("nav.language")}: ${t(localeLabelKey[locale])}`}
-              title={t(localeLabelKey[locale])}
-              className={preferenceButtonClassName}
-            >
-              <Languages size={14} aria-hidden="true" />
-              <span className="hidden lg:inline">{t(localeLabelKey[locale])}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setThemePreference(nextThemePreference)}
-              aria-label={`${t("nav.theme")}: ${t(`theme.${themePreference}`)}`}
-              title={t(`theme.${themePreference}`)}
-              className={preferenceButtonClassName}
-            >
-              <CurrentThemeIcon size={14} aria-hidden="true" />
-              <span className="hidden lg:inline">{t(`theme.${themePreference}`)}</span>
-            </button>
+            {renderPreferenceControls()}
             {onLogout ? (
               <button
                 type="button"

@@ -1087,7 +1087,7 @@ def _execute_copy_generation(
         category=product_context["category"],
         price=product_context["price"],
         source_note=product_context["source_note"],
-        image_path=str(storage.resolve(source.storage_path)) if source is not None else "",
+        image_path=str(storage.resolve(storage.object_key_for(source))) if source is not None else "",
     )
     incoming_context = collect_incoming_context(workflow, node.id)
     reference_images = reference_image_inputs_for_copy(session, workflow=workflow, node_id=node.id, storage=storage)

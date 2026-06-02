@@ -365,6 +365,9 @@ def test_reference_images_can_be_attached_to_product(db_session, configured_env:
     reference_assets = [asset for asset in updated.source_assets if asset.kind == SourceAssetKind.REFERENCE_IMAGE]
     assert len(reference_assets) == 2
     assert all((Path(configured_env) / asset.storage_path).exists() for asset in reference_assets)
+    assert all(asset.storage_backend == "local" for asset in reference_assets)
+    assert all(asset.storage_bucket is None for asset in reference_assets)
+    assert all(asset.storage_object_key == asset.storage_path for asset in reference_assets)
 
 
 def test_product_status_filter_uses_database_pagination_before_eager_loading(db_session, configured_env: Path) -> None:
