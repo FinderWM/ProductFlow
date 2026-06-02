@@ -719,6 +719,14 @@ export const api = {
       body: formData,
     });
   },
+  async uploadWorkflowNodeDocument(nodeId: string, input: { file: File }): Promise<ProductWorkflow> {
+    const formData = new FormData();
+    formData.set("document", input.file);
+    return request(`/api/workflow-nodes/${nodeId}/document`, {
+      method: "POST",
+      body: formData,
+    });
+  },
   bindWorkflowNodeImage(
     nodeId: string,
     input: { source_asset_id?: string; poster_variant_id?: string },

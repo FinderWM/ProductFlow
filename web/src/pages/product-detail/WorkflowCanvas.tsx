@@ -100,6 +100,7 @@ interface WorkflowCanvasNodeData extends ProductFlowNodeData {
   onSelectNode: (nodeId: string, event: ReactMouseEvent<Element>) => void;
   actionToolbar: WorkflowCanvasActionToolbar | null;
   onNodeAction: (actionId: WorkflowCanvasActionId, target: WorkflowCanvasActionTarget) => void;
+  onPreviewImage: ((image: DownloadableImage) => void) | null;
 }
 
 interface WorkflowCanvasEdgeData extends ProductFlowEdgeData {
@@ -160,6 +161,7 @@ interface WorkflowCanvasProps {
   keyboardShortcutsActive: boolean;
   onClearSelection: () => void;
   getNodeImage: (node: WorkflowNode) => DownloadableImage | null;
+  onPreviewImage: (image: DownloadableImage) => void;
 }
 
 const NODE_HANDLE_CLASS_NAME =
@@ -354,6 +356,7 @@ function ProductFlowCanvasNode({ data, dragging, isConnectable }: NodeProps<Work
           event.stopPropagation();
           data.onSelectNode(node.id, event);
         }}
+        onPreviewImage={data.onPreviewImage ?? undefined}
       />
       <Handle
         type="source"
@@ -729,6 +732,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     keyboardShortcutsActive,
     onClearSelection,
     getNodeImage,
+    onPreviewImage,
   },
   ref,
 ) {
@@ -989,6 +993,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
           onSelectNode,
           actionToolbar: getNodeActionToolbar(node.id),
           onNodeAction,
+          onPreviewImage,
         },
       };
     });
@@ -1001,6 +1006,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     onNodeAction,
     onSelectNode,
     optimisticNodePositions,
+    onPreviewImage,
     selectedNodeId,
     selectedNodeIds,
     structureBusy,

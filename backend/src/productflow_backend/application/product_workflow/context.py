@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -30,24 +31,173 @@ from productflow_backend.infrastructure.db.models import (
 from productflow_backend.infrastructure.storage import LocalStorage
 
 _UNRESOLVED_PLACEHOLDER_PATTERN = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}$")
+PRODUCT_CONTEXT_ENTRY_TYPES = frozenset({"image", "copy", "tail", "blank"})
+PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY = "dynamic_fields"
+PRODUCT_CONTEXT_TEXT_KEYS = (
+    "name",
+    "owner_id",
+    "long_text",
+    "category",
+    "price",
+    "source_note",
+    "image_source_asset_id",
+    "document_source_asset_id",
+    "document_filename",
+    "document_mime_type",
+    "document_text",
+)
 
 
 def find_source_asset(product: Product) -> SourceAsset | None:
     return next((asset for asset in product.source_assets if asset.kind == SourceAssetKind.ORIGINAL_IMAGE), None)
 
 
-def product_context_values(product: Product, node: WorkflowNode | None = None) -> dict[str, str | None]:
-    config = node.config_json if node is not None else {}
+def normalize_product_context_config(config_json: dict[str, Any] | None) -> dict[str, Any]:
+    config = dict(config_json or {})
+    for key in PRODUCT_CONTEXT_TEXT_KEYS:
+        if key in config:
+            config[key] = _normalize_nullable_text(config.get(key))
+    if "entry_type" in config:
+        config["entry_type"] = _normalize_product_context_entry_type(config.get("entry_type"), strict=True)
+    if "long_text" not in config and "source_note" in config:
+        config["long_text"] = config["source_note"]
+    if "image_source_asset_id" not in config:
+        legacy_image_id = _first_source_asset_id(config)
+        if legacy_image_id is not None:
+            config["image_source_asset_id"] = legacy_image_id
+    config[PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY] = normalize_product_context_dynamic_fields(
+        config.get(PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY, {})
+    )
+    return config
+
+
+def normalize_product_context_dynamic_fields(raw: Any) -> dict[str, str | int | float | bool | None]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise BusinessValidationError("动态信息必须是 JSON 对象")
+    normalized: dict[str, str | int | float | bool | None] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key.strip():
+            raise BusinessValidationError("动态信息 key 不能为空")
+        clean_key = key.strip()
+        if isinstance(value, str):
+            normalized[clean_key] = value.strip()
+            continue
+        if isinstance(value, bool) or value is None:
+            normalized[clean_key] = value
+            continue
+        if isinstance(value, int):
+            normalized[clean_key] = value
+            continue
+        if isinstance(value, float) and math.isfinite(value):
+            normalized[clean_key] = value
+            continue
+        raise BusinessValidationError("动态信息只支持字符串、数字、布尔值或 null")
+    return normalized
+
+
+def product_context_values(
+    product: Product,
+    node: WorkflowNode | None = None,
+    *,
+    workflow: ProductWorkflow | None = None,
+) -> dict[str, Any]:
+    config = normalize_product_context_config(node.config_json if node is not None else {})
+    output = node.output_json or {}
+    source = find_source_asset(product)
+    legacy_source_note = _configured_text(
+        config,
+        "source_note",
+        fallback=_output_text(output, "source_note", fallback=product.source_note),
+    )
+    long_text = _configured_text(
+        config,
+        "long_text",
+        fallback=_output_text(output, "long_text", fallback=legacy_source_note),
+    )
+    source_note = legacy_source_note or long_text
+    image_source_asset_id = (
+        _configured_text(config, "image_source_asset_id")
+        or _output_text(output, "image_source_asset_id")
+        or _output_text(output, "source_asset_id")
+        or (source.id if source is not None else None)
+    )
+    dynamic_fields = config.get(PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY)
+    if not dynamic_fields and isinstance(output.get(PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY), dict):
+        dynamic_fields = normalize_product_context_dynamic_fields(output.get(PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY))
     return {
+        "product_id": product.id,
+        "owner_id": _configured_text(
+            config,
+            "owner_id",
+            fallback=_output_text(output, "owner_id", fallback=product.id),
+        ),
+        "entry_type": _product_context_entry_type(config=config, output=output, workflow=workflow),
         "name": _configured_text(config, "name", fallback=product.name) or product.name,
         "category": _configured_text(config, "category", fallback=product.category),
         "price": _configured_text(config, "price", fallback=str(product.price) if product.price is not None else None),
-        "source_note": _configured_text(config, "source_note", fallback=product.source_note),
+        "source_note": source_note,
+        "long_text": long_text or source_note,
+        "image_source_asset_id": image_source_asset_id,
+        "document_source_asset_id": _configured_text(
+            config,
+            "document_source_asset_id",
+            fallback=_output_text(output, "document_source_asset_id"),
+        ),
+        "document_filename": _configured_text(
+            config,
+            "document_filename",
+            fallback=_output_text(output, "document_filename"),
+        ),
+        "document_mime_type": _configured_text(
+            config,
+            "document_mime_type",
+            fallback=_output_text(output, "document_mime_type"),
+        ),
+        "document_text": _configured_text(config, "document_text", fallback=_output_text(output, "document_text")),
+        PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY: dynamic_fields or {},
     }
 
 
-def _empty_product_context() -> dict[str, str | None]:
-    return {"name": None, "category": None, "price": None, "source_note": None}
+def product_context_output(
+    product: Product,
+    node: WorkflowNode,
+    *,
+    workflow: ProductWorkflow | None = None,
+) -> dict[str, Any]:
+    context = product_context_values(product, node, workflow=workflow)
+    image_source_asset_id = context["image_source_asset_id"]
+    source_asset_ids = (
+        [image_source_asset_id]
+        if isinstance(image_source_asset_id, str) and image_source_asset_id
+        else []
+    )
+    return {
+        **context,
+        "source_asset_id": image_source_asset_id,
+        "source_asset_ids": source_asset_ids,
+        "summary": "上下文已读取。",
+    }
+
+
+def _empty_product_context() -> dict[str, Any]:
+    return {
+        "product_id": None,
+        "owner_id": None,
+        "entry_type": None,
+        "name": None,
+        "category": None,
+        "price": None,
+        "source_note": None,
+        "long_text": None,
+        "image_source_asset_id": None,
+        "document_source_asset_id": None,
+        "document_filename": None,
+        "document_mime_type": None,
+        "document_text": None,
+        PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY: {},
+    }
 
 
 def _direct_source_nodes(workflow: ProductWorkflow, target_node_id: str) -> list[WorkflowNode]:
@@ -91,7 +241,7 @@ def effective_product_context(
     target_node_id: str,
     *,
     include_transitive: bool = False,
-) -> dict[str, str | None]:
+) -> dict[str, Any]:
     incoming_context_nodes = (
         _upstream_nodes_of_type(workflow, target_node_id, WorkflowNodeType.PRODUCT_CONTEXT)
         if include_transitive
@@ -105,31 +255,54 @@ def effective_product_context(
         return _empty_product_context()
 
     product = workflow.product
-    fallback_context = product_context_values(product)
     node = sorted(incoming_context_nodes, key=lambda item: item.last_run_at or item.updated_at, reverse=True)[0]
-    output = node.output_json or {}
-    return {
-        "name": _configured_text(
-            node.config_json,
-            "name",
-            fallback=_output_text(output, "name", fallback=fallback_context["name"]),
-        ),
-        "category": _configured_text(
-            node.config_json,
-            "category",
-            fallback=_output_text(output, "category", fallback=fallback_context["category"]),
-        ),
-        "price": _configured_text(
-            node.config_json,
-            "price",
-            fallback=_output_text(output, "price", fallback=fallback_context["price"]),
-        ),
-        "source_note": _configured_text(
-            node.config_json,
-            "source_note",
-            fallback=_output_text(output, "source_note", fallback=fallback_context["source_note"]),
-        ),
-    }
+    return product_context_values(product, node, workflow=workflow)
+
+
+def _normalize_nullable_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return str(value)
+
+
+def _normalize_product_context_entry_type(value: Any, *, strict: bool = False) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower() if isinstance(value, str) else str(value).strip().lower()
+    if not normalized:
+        return None
+    if normalized in PRODUCT_CONTEXT_ENTRY_TYPES:
+        return normalized
+    if strict:
+        raise BusinessValidationError("上下文入口类型不支持")
+    return None
+
+
+def _product_context_entry_type(
+    *,
+    config: dict[str, Any],
+    output: dict[str, Any],
+    workflow: ProductWorkflow | None,
+) -> str:
+    return (
+        _normalize_product_context_entry_type(config.get("entry_type"))
+        or _normalize_product_context_entry_type(getattr(workflow, "initial_entry_mode", None))
+        or _normalize_product_context_entry_type(output.get("entry_type"))
+        or "image"
+    )
+
+
+def _first_source_asset_id(config: dict[str, Any]) -> str | None:
+    raw_ids = config.get("source_asset_ids")
+    if isinstance(raw_ids, list):
+        return next((item for item in raw_ids if isinstance(item, str) and item.strip()), None)
+    if isinstance(raw_ids, str) and raw_ids.strip():
+        return raw_ids.strip()
+    raw_id = config.get("source_asset_id")
+    return raw_id.strip() if isinstance(raw_id, str) and raw_id.strip() else None
 
 
 def _configured_text(config: dict[str, Any], key: str, *, fallback: str | None = None) -> str | None:
@@ -154,13 +327,15 @@ def _output_text(output: dict[str, Any], key: str, *, fallback: str | None = Non
 
 
 def source_asset_ids_from_config(config: dict[str, Any]) -> list[str]:
+    image_source_asset_id = config.get("image_source_asset_id")
+    image_source_asset_ids = [image_source_asset_id] if isinstance(image_source_asset_id, str) else []
     raw = config.get("source_asset_ids")
     if isinstance(raw, str):
-        return [raw]
+        return [*image_source_asset_ids, raw]
     if isinstance(raw, list):
-        return [item for item in raw if isinstance(item, str)]
+        return [*image_source_asset_ids, *[item for item in raw if isinstance(item, str)]]
     single = config.get("source_asset_id")
-    return [single] if isinstance(single, str) else []
+    return [*image_source_asset_ids, single] if isinstance(single, str) else image_source_asset_ids
 
 
 def optional_config_text(config: dict[str, Any], key: str) -> str | None:
@@ -271,30 +446,47 @@ def collect_incoming_context(
                 text=copy_payload_context_text(normalize_copy_payload(structured_payload)),
             )
         elif candidate.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
-            product_source_asset_ids = source_asset_ids_from_config(output)
-            if not product_source_asset_ids:
-                product_source = find_source_asset(workflow.product)
-                if product_source is not None:
-                    product_source_asset_ids = [product_source.id]
-            context.image_asset_ids.extend(product_source_asset_ids)
+            product_context = product_context_values(workflow.product, candidate, workflow=workflow)
+            product_source_asset_ids = [
+                product_context["image_source_asset_id"]
+            ] if isinstance(product_context["image_source_asset_id"], str) else []
+            context.image_asset_ids.extend(item for item in product_source_asset_ids if item)
             product_source_assets = [
                 asset for asset in workflow.product.source_assets if asset.id in product_source_asset_ids
             ]
-            if product_source_assets:
-                image_labels = "、".join(asset.original_filename or "商品原图" for asset in product_source_assets)
+            original_image_assets = [
+                asset for asset in product_source_assets if asset.kind == SourceAssetKind.ORIGINAL_IMAGE
+            ]
+            context_image_assets = [
+                asset for asset in product_source_assets if asset.kind == SourceAssetKind.CONTEXT_IMAGE
+            ]
+            if original_image_assets:
+                image_labels = "、".join(asset.original_filename or "商品图" for asset in original_image_assets)
                 context.append_text(node=candidate, label="商品图", text=f"商品图：{image_labels}")
-            product_context = product_context_values(workflow.product, candidate)
-            product_parts = [
-                f"商品：{product_context['name']}" if product_context["name"] else "",
+            if context_image_assets:
+                image_labels = "、".join(asset.original_filename or "上下文图片" for asset in context_image_assets)
+                context.append_text(node=candidate, label="上下文图片", text=f"上下文图片：{image_labels}")
+            context_parts = [
+                f"名称：{product_context['name']}" if product_context["name"] else "",
+                f"所属 ID：{product_context['owner_id']}" if product_context["owner_id"] else "",
+                f"入口类型：{product_context['entry_type']}" if product_context["entry_type"] else "",
                 f"类目：{product_context['category']}" if product_context["category"] else "",
                 f"价格：{product_context['price']}" if product_context["price"] else "",
-                f"描述：{product_context['source_note']}" if product_context["source_note"] else "",
+                f"长文案：{product_context['long_text']}" if product_context["long_text"] else "",
+                _dynamic_fields_context_text(product_context.get(PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY)),
             ]
             context.append_text(
                 node=candidate,
-                label="商品资料",
-                text="；".join(part for part in product_parts if part),
+                label="上下文",
+                text="；".join(part for part in context_parts if part),
             )
+            if product_context["document_text"]:
+                document_label = product_context["document_filename"] or "上下文文档"
+                context.append_text(
+                    node=candidate,
+                    label="上下文文档",
+                    text=f"文档：{document_label}\n{product_context['document_text']}",
+                )
         else:
             summary = _output_text(output, "summary")
             if summary:
@@ -340,6 +532,7 @@ def reference_image_inputs_for_copy(
     workflow: ProductWorkflow,
     node_id: str,
     storage: LocalStorage,
+    incoming_context: IncomingContext | None = None,
 ) -> list[ReferenceImageInput]:
     nodes_by_id = {node.id: node for node in workflow.nodes}
     reference_nodes = [
@@ -376,6 +569,33 @@ def reference_image_inputs_for_copy(
                     filename=asset.original_filename,
                     role=role,
                     label=label,
+                )
+            )
+    incoming_asset_ids = incoming_context.image_asset_ids if incoming_context is not None else []
+    if incoming_asset_ids:
+        context_assets = list(
+            session.scalars(
+                select(SourceAsset).where(
+                    SourceAsset.id.in_(incoming_asset_ids),
+                    SourceAsset.kind == SourceAssetKind.CONTEXT_IMAGE,
+                )
+            )
+        )
+        context_assets_by_id = {
+            asset.id: asset for asset in context_assets if asset.product_id == workflow.product_id
+        }
+        for asset_id in incoming_asset_ids:
+            asset = context_assets_by_id.get(asset_id)
+            if asset is None or asset.id in seen_asset_ids:
+                continue
+            seen_asset_ids.add(asset.id)
+            inputs.append(
+                ReferenceImageInput(
+                    path=Path(storage.resolve(storage.object_key_for(asset))),
+                    mime_type=asset.mime_type,
+                    filename=asset.original_filename,
+                    role="context",
+                    label=asset.original_filename,
                 )
             )
     return inputs
@@ -444,3 +664,20 @@ def instruction_with_upstream_text(instruction: str | None, incoming_context: In
     if instruction:
         return f"{instruction}\n上游文本上下文：{joined}"
     return f"上游文本上下文：{joined}"
+
+
+def _dynamic_fields_context_text(raw: Any) -> str:
+    if not isinstance(raw, dict) or not raw:
+        return ""
+    pairs = [f"{key}：{_stringify_dynamic_field_value(value)}" for key, value in raw.items()]
+    return f"动态信息：{'；'.join(pairs)}"
+
+
+def _stringify_dynamic_field_value(value: Any) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if value is None:
+        return "null"
+    return str(value)

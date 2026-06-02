@@ -454,6 +454,9 @@ returns the normal `ProductWorkflow`.
   - `workflow_edges(workflow_id, source_node_id, target_node_id, source_handle, target_handle)`.
   - `workflow_runs(workflow_id, status, started_at, finished_at, failure_reason)`.
   - `workflow_node_runs(workflow_run_id, node_id, status, output_json, copy_set_id, poster_variant_id, image_session_asset_id)`.
+  - `source_assets(product_id, kind, original_filename, mime_type, storage_provider, object_key, ...)` stores workflow
+    image and text-document resources. `SourceAssetKind` includes `original_image`, `reference_image`,
+    `processed_product_image`, `context_image`, and `context_document`.
 - APIs:
   - `GET /api/products/{product_id}/workflow`
   - `GET /api/products/{product_id}/workflow/status`
@@ -462,6 +465,7 @@ returns the normal `ProductWorkflow`.
   - `PATCH /api/workflow-nodes/{node_id}/copy`
   - `POST /api/workflow-nodes/{node_id}/image`
   - `POST /api/workflow-nodes/{node_id}/image-source`
+  - `POST /api/workflow-nodes/{node_id}/document` with multipart field `document`
   - `POST /api/products/{product_id}/workflow/edges`
   - `DELETE /api/workflow-edges/{edge_id}`
   - `POST /api/products/{product_id}/workflow/run`
@@ -472,7 +476,7 @@ returns the normal `ProductWorkflow`.
 ### 3. Contracts
 
 - Supported product node types are exactly mirrored in frontend types:
-  `product_context`, `reference_image`, `copy_generation`, `image_generation`.
+  `product_context`, `reference_image`, `copy_generation`, `image_generation`, and `tail_splitter`.
 - Legacy PostgreSQL databases may already have older enum values. Forward migrations must safely add `reference_image`
   and migrate old image-slot rows to it; fresh databases should create only the supported simplified node values.
 - Node status values are `idle`, `queued`, `running`, `succeeded`, `failed`; run status values are
@@ -534,14 +538,17 @@ returns the normal `ProductWorkflow`.
   image template. If no explicit copy link exists, create the workflow-local draft `CopySet` as needed for
   `PosterVariant.copy_set_id`, but set `copy_prompt_mode = "image_edit"` so provider prompts use the no-copy image-edit
   template and do not require fixed copy-field semantics.
-- A connected upstream `product_context` node contributes the product source image asset and product fields to
-  `image_generation` image context. For image-generation context only, "upstream" includes direct edges and transitive
-  ancestors such as `product_context -> copy_generation -> image_generation`; this preserves product context for older or
-  manually rewired canvases that no longer have a direct `product_context -> image_generation` edge. Use the node output
-  `source_asset_id` when available and fall back to the product's current original source asset so direct selected
-  image-node runs do not require re-running product context only to get image context. Deduplicate with other reference
-  assets before provider/render input construction. A totally disconnected image-generation node remains free-form and
-  must not implicitly inherit product context.
+- A connected upstream `product_context` node contributes normalized context fields to `copy_generation`,
+  `image_generation`, and `tail_splitter`: `name`, `owner_id`, `entry_type`, `long_text`, `image_source_asset_id`,
+  `document_source_asset_id`, `document_filename`, `document_mime_type`, `document_text`, and `dynamic_fields`, plus
+  legacy `category`, `price`, `source_note`, `source_asset_id`, and `source_asset_ids`.
+- For image-generation context only, "upstream" includes direct edges and transitive ancestors such as
+  `product_context -> copy_generation -> image_generation`; this preserves product context for older or manually rewired
+  canvases that no longer have a direct `product_context -> image_generation` edge. Use `image_source_asset_id` first,
+  then legacy `source_asset_id`, then the product's current original source asset so direct selected image-node runs can
+  use saved context without re-running product context. Deduplicate with other reference assets before provider/render
+  input construction. A totally disconnected image-generation node remains free-form and must not implicitly inherit
+  product context.
 - Image-generation count is driven by graph structure: an `image_generation` node connected to N downstream
   `reference_image` slots generates N images and fills those slots. If no downstream reference slot is connected, the node
   must fail with a clear user-facing message asking the user to connect at least one image/reference node before running.
@@ -563,9 +570,25 @@ returns the normal `ProductWorkflow`.
 - Generated images should still be persisted as first-class `poster_variants` for history and as `source_assets` on the
   downstream `reference_image` slots. Keep only workflow-boundary summaries and internal generated-poster IDs in
   `image_generation.output_json`; do not expose `poster_variant_ids` there as the preview/download contract.
-- `product_context` node config may override/fill `name`, `category`, `price`, and `source_note`; downstream
-  `ProductInput.source_note` and `PosterGenerationInput.source_note` must use that effective node context and propagate it
-  to text and image providers.
+- `product_context` execution is non-AI. Running the node returns normalized context JSON and must not call text or image
+  providers. `source_note` is a legacy alias for `long_text` when `long_text` is missing, while `category`, `price`,
+  `source_asset_id`, and `source_asset_ids` remain API/output compatibility fields.
+- `entry_type` values are `image`, `copy`, `tail`, and `blank`. Resolution order is saved node config, workflow
+  `initial_entry_mode`, previous node output, then `image`. Template `entry_mode` remains the existing
+  `image/copy/tail` template vocabulary; blank canvases use `blank` only on workflow/context state.
+- `dynamic_fields` is a one-level JSON object whose keys are non-blank strings and values are scalar JSON values:
+  string, finite number, boolean, or `null`. Nested objects and arrays must be rejected during config normalization.
+- `context_image` assets represent the single image resource attached to a product context node. Uploading an image to a
+  `product_context` node through `POST /api/workflow-nodes/{node_id}/image` replaces `config_json.image_source_asset_id`
+  and clears legacy `source_asset_id` / `source_asset_ids` from config. Original product images remain the fallback when
+  no context image exists.
+- `context_document` assets represent the single text document attached to a product context node. Document upload stores
+  the asset id plus `document_filename`, `document_mime_type`, and UTF-8 `document_text` on config/output. First-pass
+  uploads accept only `.txt`, `.md`, `.csv`, and `.json` with MIME `text/plain`, `text/markdown`, `text/csv`, or
+  `application/json`, capped at 1 MB.
+- Downstream context collection must append `long_text`, `document_text`, dynamic-field key/value text, and context image
+  labels into `context_sources`. `context_image` assets may become `ReferenceImageInput(role="context")` for copy
+  providers; `context_document` assets contribute text only and must not be treated as images.
 - Product context resolution must prefer the latest saved `product_context.config_json` over stale `output_json` from an
   older run. Direct selected-node runs should not require re-running the product-context node just to see saved edits.
 - Copy/image node outputs may expose compact `context_summary` and `context_sources` for UI/tests. These summaries should
@@ -576,8 +599,22 @@ returns the normal `ProductWorkflow`.
 - Missing product/workflow/node/edge -> `ValueError("...不存在")`, mapped to HTTP `404`.
 - Existing-image fill without exactly one `source_asset_id` / `poster_variant_id` -> `400`.
 - Existing-image fill on a non-`reference_image` node -> `400`.
+- Image upload on a node that is neither `reference_image` nor `product_context` -> `400` with
+  `只有参考图或上下文节点可以上传图片`.
+- Document upload on a non-`product_context` node -> `400` with `只有上下文节点可以上传文档`.
 - Existing-image fill with a source asset or poster outside the workflow product -> `404`.
 - Poster fill when the backing file is missing or storage resolution fails -> `400` with `海报文件不存在`.
+- Product context `entry_type` outside `image/copy/tail/blank` -> `400` with `上下文入口类型不支持`.
+- Product context `dynamic_fields` is not a JSON object -> `400` with `动态信息必须是 JSON 对象`.
+- Product context dynamic-field key is blank -> `400` with `动态信息 key 不能为空`.
+- Product context dynamic-field value is an array, object, non-finite number, or other non-scalar value -> `400` with
+  `动态信息只支持字符串、数字、布尔值或 null`.
+- Document upload extension outside `.txt/.md/.csv/.json` -> `415` with `不支持的文档扩展名`.
+- Document upload MIME outside `text/plain`, `text/markdown`, `text/csv`, and `application/json` -> `415` with
+  `不支持的文档类型: <mime>`.
+- Document upload over 1 MB -> `413` with `文档超过大小限制`.
+- Empty document upload -> `400` with `文档内容不能为空`.
+- Non-UTF-8 document upload -> `400` with `文档必须使用 UTF-8 编码`.
 - Edge source/target outside the product workflow -> `400` with a user-readable validation detail.
 - Self-edge -> `400`.
 - Cyclic graph -> `400` and no edge persisted.
@@ -599,6 +636,10 @@ returns the normal `ProductWorkflow`.
 - Good: run default DAG `product_context -> copy_generation -> image_generation -> reference_image`; it produces one draft
   `CopySet`, one generated `PosterVariant` history row, fills the downstream reference slot with a `SourceAsset`, and writes
   run history.
+- Good: upload a context image and a UTF-8 markdown document to `product_context`, patch `owner_id`, `entry_type`,
+  `long_text`, and scalar `dynamic_fields`, then directly run a downstream image node. The downstream
+  `context_summary.product_context` reflects the saved config, `context_sources` include long text, document text, and
+  dynamic fields, and image reference count includes the context image.
 - Good: delete all downstream reference nodes, then run the image node; it fails before provider generation and tells the
   user to connect at least one image/reference node.
 - Good: connect an uploaded style `reference_image` into a `copy_generation` node; the generated copy reflects the
@@ -635,6 +676,13 @@ returns the normal `ProductWorkflow`.
 - API regression creates a product with only name + image, loads the workflow, updates `product_context` node config with
   `source_note`/category/price, runs the DAG, and asserts the effective node context reaches `CopySet`, generated image
   input, node output, and run history.
+- Unit regression covers `normalize_product_context_config(...)`: `source_note` fills `long_text`, `entry_type` accepts
+  only `image/copy/tail/blank`, and `dynamic_fields` accepts only one-level scalar values.
+- API regression uploads context documents through `POST /api/workflow-nodes/{node_id}/document`, asserting config/output
+  document fields, `context_document` SourceAsset persistence, UTF-8 failure, and unsupported extension failure.
+- API regression uploads a context image through `POST /api/workflow-nodes/{node_id}/image` and asserts the asset kind is
+  `context_image`, `image_source_asset_id` replaces legacy image config keys, and downstream copy/image context can consume
+  it without treating documents as images.
 - API regression rejects creating a second `product_context` node and verifies opening an active workflow normalizes duplicate
   product-context nodes down to one.
 - API regression deletes downstream reference nodes and runs an image node directly, asserting a failed run/node with the
@@ -684,6 +732,33 @@ returns the normal `ProductWorkflow`.
 - Alembic head upgrade must pass on SQLite after adding workflow tables.
 
 ### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+node.output_json = {"document_source_asset_id": asset.id}
+```
+
+This loses the text extraction needed by downstream nodes and makes direct selected-node runs depend on a separate
+document read path.
+
+#### Correct
+
+```python
+node.config_json = normalize_product_context_config(
+    {
+        **node.config_json,
+        "document_source_asset_id": asset.id,
+        "document_filename": filename,
+        "document_mime_type": content_type,
+        "document_text": document_text,
+    }
+)
+node.output_json = product_context_output(workflow.product, node, workflow=workflow)
+```
+
+Store the document resource id and the decoded UTF-8 text at the node boundary so downstream context collection is
+deterministic.
 
 #### Wrong
 

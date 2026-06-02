@@ -2,7 +2,12 @@ export type ProductWorkflowState = "draft" | "copy_ready" | "poster_ready" | "fa
 export type CopyStatus = "draft" | "confirmed";
 export type PosterKind = "main_image" | "promo_poster";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
-export type SourceAssetKind = "original_image" | "reference_image" | "processed_product_image";
+export type SourceAssetKind =
+  | "original_image"
+  | "reference_image"
+  | "processed_product_image"
+  | "context_image"
+  | "context_document";
 export type ImageSessionAssetKind = "reference_upload" | "generated_image";
 export type GenerationConfigSelectionMode = "auto" | "manual";
 export type WorkflowNodeType =

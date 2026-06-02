@@ -389,7 +389,7 @@ export function ProductDetailPage() {
     if (draftDirty && !selectedChanged) {
       return;
     }
-    setDraft(draftFromNode(selectedNode, productQuery.data));
+    setDraft(draftFromNode(selectedNode, productQuery.data, workflow?.initial_entry_mode ?? "image"));
     setDraftDirty(false);
     setSaveStatus("idle");
   }, [
@@ -398,6 +398,7 @@ export function ProductDetailPage() {
     selectedNode?.id,
     selectedNode?.last_run_at,
     selectedNode?.updated_at,
+    workflow?.initial_entry_mode,
   ]);
 
   useEffect(() => {
@@ -1533,6 +1534,27 @@ export function ProductDetailPage() {
     },
   });
 
+  const uploadNodeDocumentMutation = useMutation({
+    mutationFn: (file: File) => {
+      assertProductUsable();
+      if (!selectedNode || selectedNode.node_type !== "product_context") {
+        throw new Error(t("detail.error.selectContextNode"));
+      }
+      return api.uploadWorkflowNodeDocument(selectedNode.id, { file });
+    },
+    onSuccess: async (nextWorkflow) => {
+      setError("");
+      queryClient.setQueryData(["product-workflow", productId], nextWorkflow);
+      setSelectedNodeIds(clearSelectedNodeGroup(selectedNodeId));
+      await refreshProductArtifacts();
+    },
+    onError: (mutationError) => {
+      setError(
+        mutationError instanceof ApiError ? mutationError.detail : t("detail.error.uploadDocument"),
+      );
+    },
+  });
+
   const bindNodeImageMutation = useMutation({
     mutationFn: (input: { source_asset_id?: string; poster_variant_id?: string }) => {
       assertProductUsable();
@@ -1685,6 +1707,7 @@ export function ProductDetailPage() {
     deleteNodeMutation.isPending ||
     deleteSelectedNodesMutation.isPending ||
     uploadNodeImageMutation.isPending ||
+    uploadNodeDocumentMutation.isPending ||
     bindNodeImageMutation.isPending ||
     createUserCanvasTemplateMutation.isPending ||
     updateNodeCopyMutation.isPending;
@@ -2279,6 +2302,7 @@ export function ProductDetailPage() {
           }
           saveStatus={saveStatus}
           onUploadImage={(file) => uploadNodeImageMutation.mutate(file)}
+          onUploadDocument={(file) => uploadNodeDocumentMutation.mutate(file)}
           onDelete={() => handleDeleteNode(selectedNode)}
           busy={structureBusy}
           cancelBusy={cancelWorkflowRunMutation.isPending}
@@ -2500,6 +2524,7 @@ export function ProductDetailPage() {
               keyboardShortcutsActive={workflowCanvasKeyboardShortcutsActive}
               onClearSelection={clearMultiSelection}
               getNodeImage={(node) => getNodeImageDownload(node, product, t)}
+              onPreviewImage={setPreviewImage}
             />
             {selectedGroupCount > 1 ? (
               <div data-canvas-control className="pointer-events-none absolute bottom-[calc(12.75rem+env(safe-area-inset-bottom))] left-3 right-3 z-30 lg:bottom-auto lg:left-1/2 lg:right-auto lg:top-4 lg:-translate-x-1/2">

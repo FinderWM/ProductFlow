@@ -263,6 +263,29 @@ class StorageService:
         self._warm_image_variants(relative.as_posix())
         return relative.as_posix()
 
+    def save_context_image_upload(
+        self,
+        product_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        suffix = Path(filename).suffix.lower() or ".bin"
+        relative = Path("products") / product_id / "context" / "images" / f"{uuid4()}{suffix}"
+        self._write_relative(relative, content)
+        self._warm_image_variants(relative.as_posix())
+        return relative.as_posix()
+
+    def save_document_upload(
+        self,
+        product_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        suffix = Path(filename).suffix.lower() or ".txt"
+        relative = Path("products") / product_id / "context" / "documents" / f"{uuid4()}{suffix}"
+        self._write_relative(relative, content)
+        return relative.as_posix()
+
     def save_generated_image(
         self,
         product_id: str,

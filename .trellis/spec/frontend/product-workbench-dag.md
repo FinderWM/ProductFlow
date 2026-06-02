@@ -17,12 +17,17 @@
   - `updateWorkflowNode(nodeId, input)`
   - `updateWorkflowNodeCopy(nodeId, input)`
   - `uploadWorkflowNodeImage(nodeId, input)`
+  - `uploadWorkflowNodeDocument(nodeId, { file })`
   - `bindWorkflowNodeImage(nodeId, { source_asset_id? , poster_variant_id? })`
   - `createWorkflowEdge(productId, input)`
   - `deleteWorkflowEdge(edgeId)`
   - `runProductWorkflow(productId, input?)`
 - DTOs live only in `web/src/lib/types.ts`: `ProductWorkflow`, `WorkflowNode`, `WorkflowEdge`, `WorkflowRun`,
   `WorkflowNodeRun`.
+- `SourceAssetKind` includes `original_image`, `reference_image`, `processed_product_image`, `context_image`, and
+  `context_document`.
+- `NodeConfigDraft` for `product_context` includes `ownerId`, `entryType`, `longText`, `imageSourceAssetId`,
+  `documentSourceAssetId`, `documentFilename`, `documentMimeType`, `documentText`, and `dynamicFields`.
 - Query key: `['product-workflow', productId]`.
 
 ### 3. Contracts
@@ -172,6 +177,23 @@
   description/context, reference images, copy, and image directions are configured later through canvas nodes.
 - Product list deletion must use `api.deleteProduct(productId)`, ask for explicit confirmation, and refresh `['products']`
   after success. Show `ApiError.detail` when active workflow runs block deletion.
+- `product_context` inspector edits generalized context fields: name, owner id, entry type, long text, one context image,
+  one text document, and dynamic key/value pairs. Keep legacy category and price fields visible while writing the new
+  backend `snake_case` config keys.
+- Product context `entryType` uses `ProductInitialWorkflowEntry = "image" | "copy" | "tail" | "blank"`. The `copy` value
+  means the existing copywriting/text entry mode (`文案入口`), and should be localized as an entry label rather than a
+  duplicate/copy action.
+- `draftFromNode(...)` must prefer `config_json` over `output_json` for saved product-context edits. `source_note` remains
+  a legacy fallback for `longText`; `nodeConfigFromDraft(...)` writes both `long_text` and `source_note` during the
+  compatibility period.
+- Product context dynamic-field rows serialize to backend `dynamic_fields` as one-level scalar JSON. Parse the strings
+  `true`, `false`, and `null` to booleans/null, parse finite numeric strings to numbers, preserve other values as strings,
+  and omit rows whose key is blank.
+- Product context document upload uses `api.uploadWorkflowNodeDocument(nodeId, { file })` with multipart field `document`.
+  The upload response is the authoritative workflow payload; update `['product-workflow', productId]` from it and refresh
+  product/artifact queries because the route creates a `context_document` SourceAsset.
+- Product context image upload reuses `api.uploadWorkflowNodeImage(...)` for `product_context` nodes. The current preview
+  should prefer `image_source_asset_id` / `context_image` and fall back to the product original image for legacy workflows.
 - `reference_image` nodes use `uploadWorkflowNodeImage(...)` for manual uploads and can also be filled by upstream
   `image_generation` nodes.
 - A `reference_image` node is a single current-image slot. When manual upload or upstream `image_generation` fills a slot,
@@ -216,6 +238,8 @@
   backend materialized poster filename convention `poster-{poster_variant_id}.*` is only a legacy fallback when an older
   API payload lacks the explicit SourceAsset field; do not apply it when `source_poster_variant_id` is present and null, or
   user-uploaded reference images with the same filename would be over-filtered.
+- Image preview/download helpers must filter out `context_document` assets. `context_image` is image-preview eligible;
+  `context_document` appears only as context metadata in the product-context inspector and text context.
 - Image download links should use `download_url` when available and fall back to preview URLs only when needed. Always pass
   backend URLs through `api.toApiUrl(...)`, use short visible copy such as `下载`, stop propagation inside node cards, and
   sanitize generated filenames so product names cannot introduce path separators or control characters.
@@ -497,6 +521,13 @@ Filter editable/action targets before interpreting canvas shortcuts.
 - Deleting a product during active workflow runs -> show backend detail; do not locally remove it until the API succeeds.
 - Unsupported node config fields stay in `config_json` and are not force-cast to narrower frontend-only types.
 - Image URLs from workflow-created source assets and poster artifacts still go through `api.toApiUrl(...)`.
+- Product-context document upload failure -> show backend `ApiError.detail` near the inspector/workflow action and keep the
+  current draft visible.
+- Product-context image/document upload buttons are disabled while the selected node upload/save action is pending.
+- Blank product-context dynamic-field keys -> omit those rows from `dynamic_fields` before saving.
+- Product-context entry type from stale output or unknown config -> fall back to the current workflow initial entry or
+  `image`; do not submit an unsupported select value.
+- `context_document` in `product.source_assets` -> omit from image preview/download collections.
 - Direct image runs without downstream reference slots should show the backend error near the workflow action/node; do not
   invent a fallback preview on the image-generation node.
 - Image-size inputs smaller than the provider-safe lower bound must be calibrated in the picker before submission, matching
@@ -507,6 +538,12 @@ Filter editable/action targets before interpreting canvas shortcuts.
 ### 5. Good/Base/Bad Cases
 
 - Good: selecting a node updates the inspector without navigating away from the product detail page.
+- Good: editing a product-context node round-trips name, owner id, `entry_type`, long text, context image id, document
+  fields, and dynamic scalar fields through `draftFromNode(...)` and `nodeConfigFromDraft(...)`.
+- Good: uploading a markdown document on the product-context inspector updates the selected node from the returned
+  workflow, shows the uploaded filename/status, and preserves the existing image preview.
+- Good: a product-context node with `image_source_asset_id` displays that context image; a legacy node without it falls
+  back to the product original image.
 - Good: an image-generation node with no downstream reference slot fails clearly and shows no generated image
   preview/download on the image node.
 - Good: an image-generation node connected to two downstream reference slots visibly fills both slot nodes after run.
@@ -550,6 +587,10 @@ Filter editable/action targets before interpreting canvas shortcuts.
 ### 6. Tests Required
 
 - `just web-build` must pass after any DTO or page change.
+- `pnpm --dir web test:run` should cover `workflowConfig.ts` product-context round-trip, including dynamic scalar parsing
+  and blank-key omission.
+- ProductDetail/image-download helper tests should assert `context_image` can be previewed and `context_document` is
+  filtered out of image-only surfaces.
 - Backend API tests should cover workflow payload shapes; the frontend relies on these typed shapes at build time.
 - User-template frontend changes must pass `just web-build` because `CanvasTemplateSummary`, API helpers, ProductDetail,
   and `TemplateGroupsPanel` all share DTO fields.
@@ -591,6 +632,23 @@ const workflowQuery = useQuery({
 ```
 
 Load the persisted workflow and keep only transient selection/edit drafts in local state.
+
+#### Wrong
+
+```ts
+dynamic_fields: Object.fromEntries(draft.dynamicFields.map((field) => [field.key, field.value]));
+```
+
+This sends blank keys and converts booleans/null/numbers into strings, so backend normalization rejects or weakens the
+context contract.
+
+#### Correct
+
+```ts
+dynamic_fields: dynamicFieldsToConfig(draft.dynamicFields);
+```
+
+Centralize product-context serialization so blank keys are dropped and scalar strings are converted before the PATCH.
 
 #### Wrong
 

@@ -41,6 +41,7 @@ from productflow_backend.application.product_workflows import (
     update_global_canvas_template,
     update_workflow_copy_set,
     update_workflow_node,
+    upload_workflow_node_document,
     upload_workflow_node_image,
 )
 from productflow_backend.domain.rbac import (
@@ -90,7 +91,10 @@ from productflow_backend.presentation.schemas.product_workflows import (
     serialize_product_workflow_status,
     serialize_user_canvas_template_summary,
 )
-from productflow_backend.presentation.upload_validation import read_validated_image_upload
+from productflow_backend.presentation.upload_validation import (
+    read_validated_image_upload,
+    read_validated_text_document_upload,
+)
 
 router = APIRouter(
     prefix="/api",
@@ -797,6 +801,26 @@ async def upload_workflow_node_image_endpoint(
         content_type=validated.mime_type,
         role=role,
         label=label,
+    )
+    return serialize_product_workflow(workflow)
+
+
+@router.post("/workflow-nodes/{node_id}/document", response_model=ProductWorkflowResponse)
+async def upload_workflow_node_document_endpoint(
+    node_id: str,
+    document: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
+) -> ProductWorkflowResponse:
+    _ensure_node_access(session, node_id, current_user, mutate=True)
+    validated = await read_validated_text_document_upload(document, fallback_filename="workflow-document.txt")
+    workflow = upload_workflow_node_document(
+        session,
+        node_id=node_id,
+        document_bytes=validated.content,
+        filename=validated.filename,
+        content_type=validated.mime_type,
+        document_text=validated.text,
     )
     return serialize_product_workflow(workflow)
 

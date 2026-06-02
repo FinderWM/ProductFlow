@@ -14,6 +14,12 @@ import { outputStringArray } from "./utils";
 type TranslateFunction = (key: TranslationKey, params?: TranslationParams) => string;
 
 const defaultT: TranslateFunction = (key, params) => translate(DEFAULT_LOCALE, key, params);
+const IMAGE_SOURCE_ASSET_KINDS = new Set<SourceAsset["kind"]>([
+  "original_image",
+  "reference_image",
+  "context_image",
+  "processed_product_image",
+]);
 
 export function getSourceImageAsset(product: ProductDetail): SourceAsset | null {
   return (
@@ -76,7 +82,20 @@ export function getNodeImageDownload(
   t: TranslateFunction = defaultT,
 ): DownloadableImage | null {
   if (node.node_type === "product_context") {
-    return getSourceImageDownload(product, t);
+    const imageSourceAssetId =
+      typeof node.output_json?.image_source_asset_id === "string"
+        ? node.output_json.image_source_asset_id
+        : typeof node.config_json.image_source_asset_id === "string"
+          ? node.config_json.image_source_asset_id
+          : null;
+    const contextAsset = imageSourceAssetId
+      ? product.source_assets.find(
+          (asset) => asset.id === imageSourceAssetId && IMAGE_SOURCE_ASSET_KINDS.has(asset.kind),
+        )
+      : null;
+    return contextAsset
+      ? buildSourceImageDownload(product, contextAsset, workflowNodeDisplayTitle(node, t), undefined, t)
+      : getSourceImageDownload(product, t);
   }
   if (node.node_type === "reference_image") {
     const ids = outputStringArray(node, "source_asset_ids");

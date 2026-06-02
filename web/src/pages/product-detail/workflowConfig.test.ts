@@ -100,4 +100,75 @@ describe("draftFromNode", () => {
       generation_config_id: "config-text",
     });
   });
+
+  it("round-trips generalized product context fields", () => {
+    const node: WorkflowNode = {
+      ...baseNode,
+      id: "context-node",
+      node_type: "product_context",
+      title: "灵感资料",
+      config_json: {
+        name: "露营灯",
+        owner_id: "goods-123",
+        entry_type: "copy",
+        category: "户外",
+        price: "89",
+        long_text: "主打轻量照明和帐篷氛围。",
+        image_source_asset_id: "asset-image",
+        document_source_asset_id: "asset-doc",
+        document_filename: "brief.md",
+        document_mime_type: "text/markdown",
+        document_text: "文档内容",
+        dynamic_fields: {
+          waterproof: true,
+          weight: 1.2,
+          note: "暖光",
+          empty: null,
+        },
+      },
+      output_json: null,
+    };
+
+    const draft = draftFromNode(node, product, "tail");
+    expect(draft.productName).toBe("露营灯");
+    expect(draft.ownerId).toBe("goods-123");
+    expect(draft.entryType).toBe("copy");
+    expect(draft.longText).toBe("主打轻量照明和帐篷氛围。");
+    expect(draft.documentFilename).toBe("brief.md");
+    expect(draft.dynamicFields.map((field) => [field.key, field.value])).toEqual([
+      ["waterproof", "true"],
+      ["weight", "1.2"],
+      ["note", "暖光"],
+      ["empty", "null"],
+    ]);
+
+    const nextConfig = nodeConfigFromDraft(node, {
+      ...draft,
+      entryType: "blank",
+      dynamicFields: [
+        ...draft.dynamicFields,
+        { id: "dynamic-new", key: "stock", value: "42" },
+        { id: "dynamic-skip", key: " ", value: "ignored" },
+      ],
+    });
+    expect(nextConfig).toMatchObject({
+      name: "露营灯",
+      owner_id: "goods-123",
+      entry_type: "blank",
+      long_text: "主打轻量照明和帐篷氛围。",
+      source_note: "主打轻量照明和帐篷氛围。",
+      image_source_asset_id: "asset-image",
+      document_source_asset_id: "asset-doc",
+      document_filename: "brief.md",
+      document_mime_type: "text/markdown",
+      document_text: "文档内容",
+      dynamic_fields: {
+        waterproof: true,
+        weight: 1.2,
+        note: "暖光",
+        empty: null,
+        stock: 42,
+      },
+    });
+  });
 });

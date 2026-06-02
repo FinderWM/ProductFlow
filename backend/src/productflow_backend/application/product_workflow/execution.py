@@ -36,7 +36,7 @@ from productflow_backend.application.product_workflow.context import (
     find_source_asset,
     instruction_with_upstream_text,
     optional_config_text,
-    product_context_values,
+    product_context_output,
     reference_image_inputs_for_copy,
     reference_image_inputs_for_tail,
     source_asset_ids_from_config,
@@ -89,7 +89,6 @@ from productflow_backend.domain.workflow_rules import (
 from productflow_backend.infrastructure.db.models import (
     CopySet,
     CreativeBrief,
-    Product,
     ProductWorkflow,
     WorkflowNode,
     WorkflowNodeRun,
@@ -1019,10 +1018,9 @@ def _execute_node(
     dependencies: WorkflowExecutionDependencies | None = None,
 ) -> dict[str, Any]:
     workflow = product_workflow_graph.get_workflow_or_raise(session, workflow_id)
-    product = workflow.product
     dependencies = dependencies or default_workflow_execution_dependencies()
     if node.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
-        return _execute_product_context(product, node)
+        return _execute_product_context(workflow, node)
     if node.node_type == WorkflowNodeType.REFERENCE_IMAGE:
         return _execute_reference_image(session, workflow=workflow, node=node)
     if node.node_type == WorkflowNodeType.COPY_GENERATION:
@@ -1034,18 +1032,8 @@ def _execute_node(
     raise BusinessValidationError("工作流节点类型不支持")
 
 
-def _execute_product_context(product: Product, node: WorkflowNode) -> dict[str, Any]:
-    context = product_context_values(product, node)
-    source = find_source_asset(product)
-    return {
-        "product_id": product.id,
-        "name": context["name"],
-        "category": context["category"],
-        "price": context["price"],
-        "source_note": context["source_note"],
-        "source_asset_id": source.id if source else None,
-        "summary": "商品已读取。",
-    }
+def _execute_product_context(workflow: ProductWorkflow, node: WorkflowNode) -> dict[str, Any]:
+    return product_context_output(workflow.product, node, workflow=workflow)
 
 
 def _execute_reference_image(session: Session, *, workflow: ProductWorkflow, node: WorkflowNode) -> dict[str, Any]:
@@ -1072,7 +1060,7 @@ def _execute_copy_generation(
     dependencies = dependencies or default_workflow_execution_dependencies()
     product = workflow.product
     product_context = effective_product_context(workflow, node.id)
-    has_product_context = any(value is not None for value in product_context.values())
+    has_product_context = any(value not in (None, {}, []) for value in product_context.values())
     existing_output = node.output_json or {}
     existing_copy_set_id = existing_output.get("copy_set_id")
     if existing_output.get("manual_edit") is True and isinstance(existing_copy_set_id, str):
@@ -1090,7 +1078,13 @@ def _execute_copy_generation(
         image_path=str(storage.resolve(storage.object_key_for(source))) if source is not None else "",
     )
     incoming_context = collect_incoming_context(workflow, node.id)
-    reference_images = reference_image_inputs_for_copy(session, workflow=workflow, node_id=node.id, storage=storage)
+    reference_images = reference_image_inputs_for_copy(
+        session,
+        workflow=workflow,
+        node_id=node.id,
+        storage=storage,
+        incoming_context=incoming_context,
+    )
     config = _normalize_copy_node_config_for_execution(node.config_json)
     instruction = instruction_with_upstream_text(
         config.instruction,

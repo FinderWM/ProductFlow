@@ -9,6 +9,8 @@ class SourceAssetKind(StrEnum):
     ORIGINAL_IMAGE = "original_image"
     REFERENCE_IMAGE = "reference_image"
     PROCESSED_PRODUCT_IMAGE = "processed_product_image"
+    CONTEXT_IMAGE = "context_image"
+    CONTEXT_DOCUMENT = "context_document"
 
 
 class ImageSessionAssetKind(StrEnum):

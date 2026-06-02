@@ -34,6 +34,7 @@ from productflow_backend.application.product_workflow.mutations import (
     normalize_workflow_node_config,
     update_workflow_copy_set,
     update_workflow_node,
+    upload_workflow_node_document,
     upload_workflow_node_image,
 )
 from productflow_backend.application.product_workflow.user_templates import (
@@ -116,5 +117,6 @@ __all__ = [
     "update_global_canvas_template",
     "update_workflow_copy_set",
     "update_workflow_node",
+    "upload_workflow_node_document",
     "upload_workflow_node_image",
 ]

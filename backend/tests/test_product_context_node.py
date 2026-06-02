@@ -1,0 +1,175 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from helpers import _execute_workflow_queue_inline, _login, _make_demo_image_bytes, _wait_for_workflow_run
+
+
+@pytest.fixture(autouse=True)
+def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep API workflow tests deterministic while production delivery goes through Dramatiq."""
+
+    _execute_workflow_queue_inline(monkeypatch)
+
+
+def test_product_context_dynamic_fields_accept_only_scalar_values(configured_env: Path) -> None:
+    from productflow_backend.application.product_workflow.context import normalize_product_context_config
+    from productflow_backend.domain.errors import BusinessValidationError
+
+    normalized = normalize_product_context_config(
+        {
+            "entry_type": "copy",
+            "source_note": " legacy long text ",
+            "dynamic_fields": {
+                " enabled ": True,
+                "stock": 12,
+                "weight": 1.5,
+                "note": " warm light ",
+                "empty": None,
+            },
+        }
+    )
+
+    assert normalized["entry_type"] == "copy"
+    assert normalized["long_text"] == "legacy long text"
+    assert normalized["dynamic_fields"] == {
+        "enabled": True,
+        "stock": 12,
+        "weight": 1.5,
+        "note": "warm light",
+        "empty": None,
+    }
+
+    with pytest.raises(BusinessValidationError, match="动态信息只支持"):
+        normalize_product_context_config({"dynamic_fields": {"nested": {"bad": True}}})
+
+    with pytest.raises(BusinessValidationError, match="动态信息只支持"):
+        normalize_product_context_config({"dynamic_fields": {"items": ["bad"]}})
+
+    with pytest.raises(BusinessValidationError, match="动态信息 key 不能为空"):
+        normalize_product_context_config({"dynamic_fields": {" ": "bad"}})
+
+
+def test_product_context_document_upload_validates_text_documents(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={"name": "露营灯"},
+        files={"image": ("lamp.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+    workflow = client.get(f"/api/products/{product_id}/workflow").json()
+    context_node = next(node for node in workflow["nodes"] if node["node_type"] == "product_context")
+
+    uploaded = client.post(
+        f"/api/workflow-nodes/{context_node['id']}/document",
+        files={"document": ("brief.md", b"# brief\nwarm light", "text/markdown")},
+    )
+    assert uploaded.status_code == 200
+    uploaded_context = next(node for node in uploaded.json()["nodes"] if node["id"] == context_node["id"])
+    assert uploaded_context["config_json"]["document_filename"] == "brief.md"
+    assert uploaded_context["config_json"]["document_mime_type"] == "text/markdown"
+    assert uploaded_context["config_json"]["document_text"] == "# brief\nwarm light"
+    assert uploaded_context["output_json"]["document_text"] == "# brief\nwarm light"
+
+    detail = client.get(f"/api/products/{product_id}").json()
+    document_asset = next(asset for asset in detail["source_assets"] if asset["kind"] == "context_document")
+    assert document_asset["original_filename"] == "brief.md"
+    assert document_asset["mime_type"] == "text/markdown"
+
+    invalid_utf8 = client.post(
+        f"/api/workflow-nodes/{context_node['id']}/document",
+        files={"document": ("bad.txt", b"\xff", "text/plain")},
+    )
+    assert invalid_utf8.status_code == 400
+    assert invalid_utf8.json()["detail"] == "文档必须使用 UTF-8 编码"
+
+    unsupported_extension = client.post(
+        f"/api/workflow-nodes/{context_node['id']}/document",
+        files={"document": ("bad.pdf", b"text", "text/plain")},
+    )
+    assert unsupported_extension.status_code == 415
+
+
+def test_product_context_fields_flow_to_downstream_image_node(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={"name": "折叠露营灯"},
+        files={"image": ("lamp.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+    workflow = client.get(f"/api/products/{product_id}/workflow").json()
+    context_node = next(node for node in workflow["nodes"] if node["node_type"] == "product_context")
+    image_node = next(node for node in workflow["nodes"] if node["node_type"] == "image_generation")
+
+    context_image = client.post(
+        f"/api/workflow-nodes/{context_node['id']}/image",
+        files={"image": ("context.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert context_image.status_code == 200
+    context_after_image = next(node for node in context_image.json()["nodes"] if node["id"] == context_node["id"])
+
+    context_document = client.post(
+        f"/api/workflow-nodes/{context_node['id']}/document",
+        files={"document": ("brief.txt", "轻量，三档亮度，帐篷挂钩。".encode(), "text/plain")},
+    )
+    assert context_document.status_code == 200
+    context_after_document = next(node for node in context_document.json()["nodes"] if node["id"] == context_node["id"])
+
+    patched_config = {
+        **context_after_document["config_json"],
+        "name": "折叠露营灯",
+        "owner_id": "goods-789",
+        "entry_type": "tail",
+        "category": "户外照明",
+        "price": "89",
+        "long_text": "主打轻量照明、帐篷氛围和应急备用。",
+        "dynamic_fields": {"waterproof": True, "lumens": 300, "scene": "露营"},
+    }
+    patched_context = client.patch(
+        f"/api/workflow-nodes/{context_node['id']}",
+        json={"config_json": patched_config},
+    )
+    assert patched_context.status_code == 200
+    patched_context_node = next(node for node in patched_context.json()["nodes"] if node["id"] == context_node["id"])
+    assert (
+        patched_context_node["config_json"]["image_source_asset_id"]
+        == context_after_image["config_json"]["image_source_asset_id"]
+    )
+
+    selected_run = client.post(
+        f"/api/products/{product_id}/workflow/run",
+        json={"start_node_id": image_node["id"]},
+    )
+    assert selected_run.status_code == 200
+    payload = _wait_for_workflow_run(client, product_id, status="succeeded")
+    image_output = next(node for node in payload["nodes"] if node["id"] == image_node["id"])["output_json"]
+    product_context = image_output["context_summary"]["product_context"]
+
+    assert product_context["owner_id"] == "goods-789"
+    assert product_context["entry_type"] == "tail"
+    assert product_context["long_text"] == "主打轻量照明、帐篷氛围和应急备用。"
+    assert product_context["document_filename"] == "brief.txt"
+    assert product_context["dynamic_fields"] == {"waterproof": True, "lumens": 300, "scene": "露营"}
+    assert image_output["context_summary"]["reference_image_count"] >= 1
+    assert any("主打轻量照明" in source["text"] for source in image_output["context_sources"])
+    assert any("轻量，三档亮度" in source["text"] for source in image_output["context_sources"])
+    assert any(
+        "动态信息" in source["text"] and "lumens" in source["text"]
+        for source in image_output["context_sources"]
+    )

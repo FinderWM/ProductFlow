@@ -17,7 +17,12 @@ from productflow_backend.application.product_workflow.artifacts import (
     image_asset_output,
     source_asset_for_poster_variant,
 )
-from productflow_backend.application.product_workflow.context import image_size_from_config, optional_config_text
+from productflow_backend.application.product_workflow.context import (
+    image_size_from_config,
+    normalize_product_context_config,
+    optional_config_text,
+    product_context_output,
+)
 from productflow_backend.application.product_workflow.tail_splitter import (
     apply_tail_split_plan as apply_tail_split_plan_to_graph,
 )
@@ -160,6 +165,8 @@ def _active_workflow_run(workflow: ProductWorkflow) -> WorkflowRun | None:
 
 def normalize_workflow_node_config(node_type: WorkflowNodeType, config_json: dict[str, Any] | None) -> dict[str, Any]:
     config = dict(config_json or {})
+    if node_type == WorkflowNodeType.PRODUCT_CONTEXT:
+        return normalize_product_context_config(config)
     if node_type == WorkflowNodeType.COPY_GENERATION:
         try:
             normalized_copy_config = normalize_copy_node_config(config).model_dump(mode="json")
@@ -535,17 +542,22 @@ def upload_workflow_node_image(
     label: str | None = None,
     storage: LocalStorage | None = None,
 ) -> ProductWorkflow:
-    """把上传图存为商品参考图，并绑定到参考图节点输出。"""
+    """把上传图存为工作流节点资源，并绑定到节点输出。"""
     node = product_workflow_graph.get_node_or_raise(session, node_id)
-    if node.node_type != WorkflowNodeType.REFERENCE_IMAGE:
-        raise BusinessValidationError("只有参考图节点可以上传图片")
+    if node.node_type not in {WorkflowNodeType.REFERENCE_IMAGE, WorkflowNodeType.PRODUCT_CONTEXT}:
+        raise BusinessValidationError("只有参考图或上下文节点可以上传图片")
     workflow = product_workflow_graph.get_workflow_or_raise(session, node.workflow_id)
     storage = storage or LocalStorage()
-    relative_path = storage.save_reference_upload(workflow.product_id, filename, image_bytes)
+    if node.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
+        relative_path = storage.save_context_image_upload(workflow.product_id, filename, image_bytes)
+        kind = SourceAssetKind.CONTEXT_IMAGE
+    else:
+        relative_path = storage.save_reference_upload(workflow.product_id, filename, image_bytes)
+        kind = SourceAssetKind.REFERENCE_IMAGE
     storage_metadata = storage.metadata_for(relative_path)
     asset = SourceAsset(
         product_id=workflow.product_id,
-        kind=SourceAssetKind.REFERENCE_IMAGE,
+        kind=kind,
         original_filename=filename,
         mime_type=content_type or "application/octet-stream",
         **storage_metadata.as_model_kwargs(),
@@ -554,6 +566,24 @@ def upload_workflow_node_image(
     session.flush()
 
     config = dict(node.config_json or {})
+    if node.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
+        config["image_source_asset_id"] = asset.id
+        config.pop("source_asset_id", None)
+        config.pop("source_asset_ids", None)
+        node.config_json = normalize_product_context_config(config)
+        node.output_json = {
+            **product_context_output(workflow.product, node, workflow=workflow),
+            "summary": "已替换上下文图片",
+        }
+        node.status = WorkflowNodeStatus.SUCCEEDED
+        node.failure_reason = None
+        node.last_run_at = now_utc()
+        workflow.updated_at = now_utc()
+        workflow.product.updated_at = now_utc()
+        session.commit()
+        session.expire_all()
+        return product_workflow_graph.get_workflow_or_raise(session, workflow.id)
+
     if role is not None:
         config["role"] = role.strip() or "reference"
     if label is not None:
@@ -567,6 +597,57 @@ def upload_workflow_node_image(
         role=optional_config_text(config, "role"),
         label=optional_config_text(config, "label"),
     )
+    node.status = WorkflowNodeStatus.SUCCEEDED
+    node.failure_reason = None
+    node.last_run_at = now_utc()
+    workflow.updated_at = now_utc()
+    workflow.product.updated_at = now_utc()
+    session.commit()
+    session.expire_all()
+    return product_workflow_graph.get_workflow_or_raise(session, workflow.id)
+
+
+def upload_workflow_node_document(
+    session: Session,
+    *,
+    node_id: str,
+    document_bytes: bytes,
+    filename: str,
+    content_type: str,
+    document_text: str,
+    storage: LocalStorage | None = None,
+) -> ProductWorkflow:
+    node = product_workflow_graph.get_node_or_raise(session, node_id)
+    if node.node_type != WorkflowNodeType.PRODUCT_CONTEXT:
+        raise BusinessValidationError("只有上下文节点可以上传文档")
+    workflow = product_workflow_graph.get_workflow_or_raise(session, node.workflow_id)
+    storage = storage or LocalStorage()
+    relative_path = storage.save_document_upload(workflow.product_id, filename, document_bytes)
+    storage_metadata = storage.metadata_for(relative_path)
+    asset = SourceAsset(
+        product_id=workflow.product_id,
+        kind=SourceAssetKind.CONTEXT_DOCUMENT,
+        original_filename=filename,
+        mime_type=content_type or "application/octet-stream",
+        **storage_metadata.as_model_kwargs(),
+    )
+    session.add(asset)
+    session.flush()
+
+    config = dict(node.config_json or {})
+    config.update(
+        {
+            "document_source_asset_id": asset.id,
+            "document_filename": filename,
+            "document_mime_type": content_type,
+            "document_text": document_text,
+        }
+    )
+    node.config_json = normalize_product_context_config(config)
+    node.output_json = {
+        **product_context_output(workflow.product, node, workflow=workflow),
+        "summary": "已上传上下文文档",
+    }
     node.status = WorkflowNodeStatus.SUCCEEDED
     node.failure_reason = None
     node.last_run_at = now_utc()

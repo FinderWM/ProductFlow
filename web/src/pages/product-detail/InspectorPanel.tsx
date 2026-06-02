@@ -35,6 +35,7 @@ import type {
   GenerationConfigSelectionMode,
   ImageToolOptionKey,
   ProductDetail,
+  ProductInitialWorkflowEntry,
   ProductWorkflow,
   WorkflowNode,
 } from "../../lib/types";
@@ -87,6 +88,13 @@ const REFERENCE_ROLE_OPTIONS: Array<{ value: string; labelKey: TranslationKey }>
   { value: "background", labelKey: "detail.referenceRole.background" },
 ];
 
+const PRODUCT_CONTEXT_ENTRY_OPTIONS: Array<{ value: ProductInitialWorkflowEntry; labelKey: TranslationKey }> = [
+  { value: "image", labelKey: "detail.inspector.entryType.image" },
+  { value: "copy", labelKey: "detail.inspector.entryType.copy" },
+  { value: "tail", labelKey: "detail.inspector.entryType.tail" },
+  { value: "blank", labelKey: "detail.inspector.entryType.blank" },
+];
+
 function referenceRolePresetValue(role: string): string {
   return REFERENCE_ROLE_OPTIONS.some((option) => option.value === role) ? role : "__custom__";
 }
@@ -115,6 +123,7 @@ interface InspectorPanelProps {
   onRun: () => void;
   onCancelRun: (() => void) | null;
   onUploadImage: (file: File) => void;
+  onUploadDocument: (file: File) => void;
   onDelete: () => void;
   busy: boolean;
   cancelBusy: boolean;
@@ -137,6 +146,7 @@ export function InspectorPanel({
   onRun,
   onCancelRun,
   onUploadImage,
+  onUploadDocument,
   onDelete,
   busy,
   cancelBusy,
@@ -342,9 +352,13 @@ export function InspectorPanel({
         {node.node_type === "product_context" ? (
           <ProductContextInspector
             product={product}
-            sourceImage={sourceImage}
+            sourceImage={getNodeImageDownload(node, product, t) ?? sourceImage}
             draft={draft}
             onDraftChange={onDraftChange}
+            onPreviewImage={onPreviewImage}
+            onUploadImage={onUploadImage}
+            onUploadDocument={onUploadDocument}
+            busy={busy}
             t={t}
           />
         ) : null}
@@ -437,18 +451,51 @@ function ProductContextInspector({
   sourceImage,
   draft,
   onDraftChange,
+  onPreviewImage,
+  onUploadImage,
+  onUploadDocument,
+  busy,
   t,
 }: {
   product: ProductDetail;
   sourceImage: DownloadableImage | null;
   draft: NodeConfigDraft;
   onDraftChange: (draft: NodeConfigDraft) => void;
+  onPreviewImage: (image: DownloadableImage) => void;
+  onUploadImage: (file: File) => void;
+  onUploadDocument: (file: File) => void;
+  busy: boolean;
   t: TFunction;
 }) {
+  const addDynamicField = () => {
+    onDraftChange({
+      ...draft,
+      dynamicFields: [
+        ...draft.dynamicFields,
+        { id: `dynamic-${Date.now()}-${draft.dynamicFields.length}`, key: "", value: "" },
+      ],
+    });
+  };
+
+  const updateDynamicField = (fieldId: string, patch: Partial<NodeConfigDraft["dynamicFields"][number]>) => {
+    onDraftChange({
+      ...draft,
+      dynamicFields: draft.dynamicFields.map((field) => (field.id === fieldId ? { ...field, ...patch } : field)),
+    });
+  };
+
+  const removeDynamicField = (fieldId: string) => {
+    onDraftChange({
+      ...draft,
+      dynamicFields: draft.dynamicFields.filter((field) => field.id !== fieldId),
+    });
+  };
+
   return (
     <div className="space-y-3">
       <div
-        className={`group relative flex h-40 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white/50 p-2 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-slate-800 dark:bg-slate-950/40 dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
+        className={`group relative flex h-40 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white/50 p-2 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-slate-800 dark:bg-slate-950/40 dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME} ${sourceImage ? "cursor-zoom-in" : ""}`}
+        onClick={sourceImage ? () => onPreviewImage(sourceImage) : undefined}
       >
         {sourceImage ? (
           <>
@@ -463,6 +510,30 @@ function ProductContextInspector({
           <div className="text-xs text-zinc-400 dark:text-slate-500">{t("detail.inspector.noSourceImage")}</div>
         )}
       </div>
+      <ImageDropZone
+        ariaLabel={sourceImage ? t("detail.inspector.replaceContextImage") : t("detail.inspector.uploadContextImage")}
+        disabled={busy}
+        className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-slate-300 px-3 py-5 text-xs font-medium text-zinc-600 transition-all duration-300 hover:border-indigo-500 hover:bg-indigo-50/20 hover:text-indigo-600 dark:border-slate-700/80 dark:text-slate-300 dark:hover:border-violet-400 dark:hover:bg-violet-500/5 dark:hover:text-violet-200"
+        activeClassName="border-indigo-500 bg-indigo-50/60 text-indigo-700 shadow-[0_0_0_4px_rgba(99,102,241,0.12)] dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100 dark:shadow-[0_0_0_4px_rgba(139,92,246,0.18)]"
+        focusClassName="focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
+        onFiles={(files) => {
+          const file = files[0];
+          if (file) {
+            onUploadImage(file);
+          }
+        }}
+      >
+        {({ isDragging }) => (
+          <div className={`flex h-full w-full items-center justify-center transition-transform duration-200 ${isDragging ? "scale-[1.03] text-indigo-600 dark:text-violet-300" : ""}`}>
+            <Upload size={14} className={`mr-2 transition-transform duration-200 ${isDragging ? "-translate-y-0.5 scale-110" : ""}`} />
+            {isDragging
+              ? t("detail.inspector.dropUpload")
+              : sourceImage
+                ? t("detail.inspector.replaceContextImage")
+                : t("detail.inspector.uploadContextImage")}
+          </div>
+        )}
+      </ImageDropZone>
       <label className="block">
         <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
           {t("detail.inspector.productName")}
@@ -475,6 +546,41 @@ function ProductContextInspector({
           className="w-full px-3 py-2 text-xs outline-none input-premium"
         />
       </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+            {t("detail.inspector.ownerId")}
+          </span>
+          <input
+            value={draft.ownerId}
+            onChange={(event) => onDraftChange({ ...draft, ownerId: event.target.value })}
+            className="w-full px-3 py-2 text-xs outline-none input-premium"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+            {t("detail.inspector.entryType")}
+          </span>
+          <SelectField
+            value={draft.entryType}
+            options={PRODUCT_CONTEXT_ENTRY_OPTIONS.map((option) => ({
+              value: option.value,
+              label: t(option.labelKey),
+            }))}
+            onChange={(value) =>
+              onDraftChange({
+                ...draft,
+                entryType: PRODUCT_CONTEXT_ENTRY_OPTIONS.some((option) => option.value === value)
+                  ? (value as ProductInitialWorkflowEntry)
+                  : "image",
+              })
+            }
+            ariaLabel={t("detail.inspector.entryType")}
+            radius="lg"
+            visualSize="sm"
+          />
+        </label>
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <label className="block">
           <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
@@ -502,10 +608,115 @@ function ProductContextInspector({
         </label>
       </div>
       <TextArea
-        label={t("detail.inspector.productDescription")}
-        value={draft.sourceNote}
-        onChange={(value) => onDraftChange({ ...draft, sourceNote: value })}
+        label={t("detail.inspector.longText")}
+        value={draft.longText}
+        onChange={(value) => onDraftChange({ ...draft, longText: value, sourceNote: value })}
+        minRows={4}
+        maxRows={18}
       />
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+              {t("detail.inspector.contextDocument")}
+            </div>
+            {draft.documentFilename ? (
+              <div className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
+                {draft.documentFilename}
+              </div>
+            ) : null}
+          </div>
+          {draft.documentSourceAssetId ? (
+            <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100">
+              {t("detail.inspector.documentUploaded")}
+            </span>
+          ) : null}
+        </div>
+        <ImageDropZone
+          accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+          ariaLabel={draft.documentSourceAssetId ? t("detail.inspector.replaceContextDocument") : t("detail.inspector.uploadContextDocument")}
+          disabled={busy}
+          className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 px-3 py-4 text-xs font-medium text-zinc-600 transition-all duration-300 hover:border-indigo-500 hover:bg-indigo-50/20 hover:text-indigo-600 dark:border-slate-700/80 dark:text-slate-300 dark:hover:border-violet-400 dark:hover:bg-violet-500/5 dark:hover:text-violet-200"
+          activeClassName="border-indigo-500 bg-indigo-50/60 text-indigo-700 shadow-[0_0_0_4px_rgba(99,102,241,0.12)] dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100 dark:shadow-[0_0_0_4px_rgba(139,92,246,0.18)]"
+          focusClassName="focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
+          onFiles={(files) => {
+            const file = files[0];
+            if (file) {
+              onUploadDocument(file);
+            }
+          }}
+        >
+          {({ isDragging }) => (
+            <div className={`flex h-full w-full items-center justify-center transition-transform duration-200 ${isDragging ? "scale-[1.03] text-indigo-600 dark:text-violet-300" : ""}`}>
+              <Upload size={14} className={`mr-2 transition-transform duration-200 ${isDragging ? "-translate-y-0.5 scale-110" : ""}`} />
+              {isDragging
+                ? t("detail.inspector.dropDocument")
+                : draft.documentSourceAssetId
+                  ? t("detail.inspector.replaceContextDocument")
+                  : t("detail.inspector.uploadContextDocument")}
+            </div>
+          )}
+        </ImageDropZone>
+        {draft.documentText ? (
+          <TextArea
+            label={t("detail.inspector.documentText")}
+            value={draft.documentText}
+            onChange={(value) => onDraftChange({ ...draft, documentText: value })}
+            minRows={3}
+            maxRows={12}
+          />
+        ) : null}
+      </div>
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {t("detail.inspector.dynamicFields")}
+          </div>
+          <button
+            type="button"
+            onClick={addDynamicField}
+            disabled={busy}
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+          >
+            <Plus size={12} className="mr-1" />
+            {t("detail.inspector.addDynamicField")}
+          </button>
+        </div>
+        {draft.dynamicFields.length ? (
+          <div className="space-y-2">
+            {draft.dynamicFields.map((field) => (
+              <div key={field.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
+                <input
+                  value={field.key}
+                  onChange={(event) => updateDynamicField(field.id, { key: event.target.value })}
+                  className="min-w-0 px-3 py-2 text-xs outline-none input-premium"
+                  placeholder={t("detail.inspector.dynamicKey")}
+                />
+                <input
+                  value={field.value}
+                  onChange={(event) => updateDynamicField(field.id, { value: event.target.value })}
+                  className="min-w-0 px-3 py-2 text-xs outline-none input-premium"
+                  placeholder={t("detail.inspector.dynamicValue")}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeDynamicField(field.id)}
+                  disabled={busy}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/35 dark:bg-[#111b2d] dark:text-red-200 dark:hover:bg-red-500/10"
+                  aria-label={t("detail.inspector.removeDynamicField")}
+                  title={t("detail.inspector.removeDynamicField")}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("detail.inspector.noDynamicFields")}
+          </div>
+        )}
+      </div>
       <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
         {t("detail.inspector.originalProduct", { name: product.name })}
         {product.category ? ` · ${product.category}` : ""}

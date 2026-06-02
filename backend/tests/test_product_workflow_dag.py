@@ -68,6 +68,10 @@ REMOVED_COPY_OUTPUT_KEYS = [
 ]
 
 
+def _assert_product_context_subset(actual: dict, expected: dict) -> None:
+    assert {key: actual.get(key) for key in expected} == expected
+
+
 @pytest.fixture(autouse=True)
 def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep API workflow tests deterministic while production delivery goes through Dramatiq."""
@@ -844,12 +848,15 @@ def test_builtin_scenario_template_runs_with_auto_product_context_edges(
     ran_image_node = next(node for node in payload["nodes"] if node["id"] == template_image_node["id"])
     filled_output_node = next(node for node in payload["nodes"] if node["id"] == template_output_node["id"])
     image_output = ran_image_node["output_json"]
-    assert image_output["context_summary"]["product_context"] == {
-        "name": "自动接入测试商品",
-        "category": "出图工具",
-        "price": "199",
-        "source_note": "验证场景模板会自动继承商品资料和商品主图。",
-    }
+    _assert_product_context_subset(
+        image_output["context_summary"]["product_context"],
+        {
+            "name": "自动接入测试商品",
+            "category": "出图工具",
+            "price": "199",
+            "source_note": "验证场景模板会自动继承商品资料和商品主图。",
+        },
+    )
     assert image_output["context_summary"]["reference_image_count"] == 1
     assert template_output_node["id"] in image_output["filled_reference_node_ids"]
     assert filled_output_node["output_json"]["source_asset_ids"]
@@ -1819,12 +1826,15 @@ def test_product_context_ignores_unresolved_placeholder_values(
     payload = _wait_for_workflow_run(client, product_id, status="succeeded")
     image_output = next(node for node in payload["nodes"] if node["id"] == image_node["id"])["output_json"]
 
-    assert image_output["context_summary"]["product_context"] == {
-        "name": "测试手机壳",
-        "category": None,
-        "price": None,
-        "source_note": None,
-    }
+    _assert_product_context_subset(
+        image_output["context_summary"]["product_context"],
+        {
+            "name": "测试手机壳",
+            "category": None,
+            "price": None,
+            "source_note": None,
+        },
+    )
     assert not any("{category}" in source["text"] for source in image_output["context_sources"])
     assert not any("{price}" in source["text"] for source in image_output["context_sources"])
     assert not any("{source_note}" in source["text"] for source in image_output["context_sources"])
@@ -2401,12 +2411,15 @@ def test_image_generation_runs_without_product_context_edge(
     payload = _wait_for_workflow_run(client, product_id, status="succeeded")
     image_output = next(node for node in payload["nodes"] if node["id"] == image_node["id"])["output_json"]
 
-    assert image_output["context_summary"]["product_context"] == {
-        "name": None,
-        "category": None,
-        "price": None,
-        "source_note": None,
-    }
+    _assert_product_context_subset(
+        image_output["context_summary"]["product_context"],
+        {
+            "name": None,
+            "category": None,
+            "price": None,
+            "source_note": None,
+        },
+    )
     assert image_output["context_summary"]["reference_image_count"] == 0
     assert not any(source["label"] == "商品资料" for source in image_output["context_sources"])
     assert len(captured_inputs) == 1
@@ -2513,10 +2526,13 @@ def test_copy_generation_runs_without_product_context_edge(
     assert captured_product.price is None
     assert captured_product.source_note is None
     assert captured_product.image_path == ""
-    assert copy_output["context_summary"]["product_context"] == {
-        "name": None,
-        "category": None,
-        "price": None,
-        "source_note": None,
-    }
+    _assert_product_context_subset(
+        copy_output["context_summary"]["product_context"],
+        {
+            "name": None,
+            "category": None,
+            "price": None,
+            "source_note": None,
+        },
+    )
     assert not any(source["label"] == "商品资料" for source in copy_output["context_sources"])

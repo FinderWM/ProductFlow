@@ -1,4 +1,9 @@
-import type { CopyPayloadV2, GenerationConfigSelectionMode, ImageToolOptions } from "../../lib/types";
+import type {
+  CopyPayloadV2,
+  GenerationConfigSelectionMode,
+  ImageToolOptions,
+  ProductInitialWorkflowEntry,
+} from "../../lib/types";
 
 export type CanvasPoint = {
   x: number;
@@ -9,12 +14,27 @@ export type CanvasInteractionMode = "browse" | "edit" | "select";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "failed";
 
+export type ProductContextDynamicFieldDraft = {
+  id: string;
+  key: string;
+  value: string;
+};
+
 export type NodeConfigDraft = {
   title: string;
   productName: string;
+  ownerId: string;
+  entryType: ProductInitialWorkflowEntry;
   category: string;
   price: string;
   sourceNote: string;
+  longText: string;
+  imageSourceAssetId: string;
+  documentSourceAssetId: string;
+  documentFilename: string;
+  documentMimeType: string;
+  documentText: string;
+  dynamicFields: ProductContextDynamicFieldDraft[];
   instruction: string;
   role: string;
   label: string;

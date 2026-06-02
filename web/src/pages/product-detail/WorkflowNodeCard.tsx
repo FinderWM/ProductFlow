@@ -35,6 +35,7 @@ interface WorkflowNodeCardProps {
   previewSelected: boolean;
   dragging: boolean;
   onSelect: (event: ReactMouseEvent<HTMLElement>) => void;
+  onPreviewImage?: (image: DownloadableImage) => void;
 }
 
 export function WorkflowNodeCard({
@@ -46,6 +47,7 @@ export function WorkflowNodeCard({
   previewSelected,
   dragging,
   onSelect,
+  onPreviewImage,
 }: WorkflowNodeCardProps) {
   const { t } = useI18n();
   const icon = {
@@ -116,7 +118,8 @@ export function WorkflowNodeCard({
         </div>
         {image ? (
           <div
-            className={`relative mb-2 flex h-28 items-center justify-center overflow-hidden rounded-xl border border-zinc-100 p-2 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
+            className={`relative mb-2 flex h-28 items-center justify-center overflow-hidden rounded-xl border border-zinc-100 p-2 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME} ${onPreviewImage ? "cursor-zoom-in" : ""}`}
+            onClick={onPreviewImage ? (e) => { e.stopPropagation(); onPreviewImage(image); } : undefined}
           >
             <img
               src={image.previewUrl}
