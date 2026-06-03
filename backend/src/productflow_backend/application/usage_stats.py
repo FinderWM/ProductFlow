@@ -6,6 +6,7 @@ from datetime import date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from productflow_backend.application.ownership import require_active_user_id
 from productflow_backend.infrastructure.db.models import AuthUser, UserDailyUsageStat
 from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, TEXT_PURPOSE
 
@@ -126,16 +127,17 @@ def _usage_stat_for_update(
     purpose: str,
     now: datetime,
 ) -> UserDailyUsageStat:
+    normalized_user_id = require_active_user_id(session, user_id, missing_message="用户不存在")
     stat_date = _local_stat_date(now)
     stat = session.scalar(
         select(UserDailyUsageStat).where(
-            UserDailyUsageStat.user_id == user_id,
+            UserDailyUsageStat.user_id == normalized_user_id,
             UserDailyUsageStat.stat_date == stat_date,
             UserDailyUsageStat.purpose == purpose,
         )
     )
     if stat is None:
-        stat = UserDailyUsageStat(user_id=user_id, stat_date=stat_date, purpose=purpose)
+        stat = UserDailyUsageStat(user_id=normalized_user_id, stat_date=stat_date, purpose=purpose)
         session.add(stat)
         session.flush()
     return stat

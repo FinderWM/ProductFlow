@@ -4,10 +4,15 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from helpers import _enable_deletion, _login, _make_demo_image_bytes
 
-from productflow_backend.infrastructure.db.models import Product
+from productflow_backend.application.auth import ensure_auth_bootstrapped
+from productflow_backend.application.ownership import resolve_owner_user_id
+from productflow_backend.domain.errors import BusinessValidationError
+from productflow_backend.domain.rbac import ADMIN_USER_ID
+from productflow_backend.infrastructure.db.models import AuthUser, Product
 
 RESOURCE_DISABLED_MESSAGE = "资源已被管理员屏蔽，暂不可使用"
 
@@ -48,6 +53,22 @@ def _set_product_updated_at(db_session, product_id: str, value: datetime) -> Non
     assert product is not None
     product.updated_at = value
     db_session.commit()
+
+
+def test_resolve_owner_user_id_rejects_missing_or_archived_user(db_session) -> None:
+    ensure_auth_bootstrapped(db_session)
+
+    assert resolve_owner_user_id(db_session, ADMIN_USER_ID) == ADMIN_USER_ID
+    with pytest.raises(BusinessValidationError, match="资源归属账号不存在"):
+        resolve_owner_user_id(db_session, "missing-user")
+
+    admin = db_session.get(AuthUser, ADMIN_USER_ID)
+    assert admin is not None
+    admin.archived_at = datetime.now(UTC)
+    db_session.commit()
+
+    with pytest.raises(BusinessValidationError, match="资源归属账号不存在"):
+        resolve_owner_user_id(db_session, ADMIN_USER_ID)
 
 
 def test_product_owner_isolation_and_admin_read_only_view(configured_env: Path) -> None:

@@ -44,16 +44,33 @@ MODEL_LEGACY_COPY_COLUMNS = [
 LEGACY_COPY_COLUMNS = ["title", "selling" + "_points", "poster" + "_headline", "c" + "ta"]
 
 
-def test_sqlalchemy_enum_columns_use_database_values() -> None:
-    assert SourceAsset.__table__.c.kind.type.enums == [member.value for member in SourceAssetKind]
-    assert ImageSessionAsset.__table__.c.kind.type.enums == [member.value for member in ImageSessionAssetKind]
-    assert CopySet.__table__.c.status.type.enums == [member.value for member in CopyStatus]
-    assert PosterVariant.__table__.c.kind.type.enums == [member.value for member in PosterKind]
-    assert ImageSessionGenerationTask.__table__.c.status.type.enums == [member.value for member in JobStatus]
-    assert WorkflowNode.__table__.c.node_type.type.enums == [member.value for member in WorkflowNodeType]
-    assert WorkflowNode.__table__.c.status.type.enums == [member.value for member in WorkflowNodeStatus]
-    assert WorkflowNodeRun.__table__.c.status.type.enums == [member.value for member in WorkflowNodeStatus]
-    assert WorkflowRun.__table__.c.status.type.enums == [member.value for member in WorkflowRunStatus]
+def test_sqlalchemy_enum_columns_use_application_values_without_database_constraints() -> None:
+    enum_columns = (
+        (SourceAsset.__table__.c.kind, SourceAssetKind),
+        (ImageSessionAsset.__table__.c.kind, ImageSessionAssetKind),
+        (CopySet.__table__.c.status, CopyStatus),
+        (PosterVariant.__table__.c.kind, PosterKind),
+        (ImageSessionGenerationTask.__table__.c.status, JobStatus),
+        (WorkflowNode.__table__.c.node_type, WorkflowNodeType),
+        (WorkflowNode.__table__.c.status, WorkflowNodeStatus),
+        (WorkflowNodeRun.__table__.c.status, WorkflowNodeStatus),
+        (WorkflowRun.__table__.c.status, WorkflowRunStatus),
+    )
+    for column, enum_cls in enum_columns:
+        assert column.type.enums == [member.value for member in enum_cls]
+        assert column.type.native_enum is False
+        assert column.type.create_constraint is False
+
+
+def test_sqlalchemy_metadata_has_no_foreign_keys_or_check_constraints() -> None:
+    tables = SourceAsset.metadata.tables.values()
+    assert not [foreign_key for table in tables for foreign_key in table.foreign_keys]
+    assert not [
+        constraint
+        for table in SourceAsset.metadata.tables.values()
+        for constraint in table.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    ]
 
 
 def test_workflow_run_model_has_retryability_and_progress_metadata() -> None:
@@ -87,12 +104,7 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
         "ix_image_gallery_entries_created_at",
         "ix_image_gallery_entries_enabled",
     }
-    foreign_keys = {fk.parent.name: fk for fk in table.foreign_keys}
-    assert foreign_keys["image_session_asset_id"].constraint.name == "fk_image_gallery_entries_image_session_asset_id"
-    assert foreign_keys["image_session_asset_id"].ondelete == "CASCADE"
-    assert foreign_keys["image_session_round_id"].constraint.name == "fk_image_gallery_entries_image_session_round_id"
-    assert foreign_keys["image_session_round_id"].ondelete == "SET NULL"
-    assert foreign_keys["disabled_by_user_id"].ondelete == "SET NULL"
+    assert not table.foreign_keys
 
 
 def test_user_canvas_template_model_matches_migration_contract() -> None:
@@ -137,6 +149,9 @@ def test_canvas_template_models_match_migration_contract() -> None:
         "uq_canvas_template_categories_global_name",
         "uq_canvas_template_categories_user_owner_name",
     }
+    assert not [
+        constraint for constraint in category_table.constraints if isinstance(constraint, sa.CheckConstraint)
+    ]
 
     template_table = CanvasTemplate.__table__
     assert template_table.c.id.type.length == 36
@@ -172,11 +187,13 @@ def test_canvas_template_models_match_migration_contract() -> None:
         "ix_canvas_templates_sort_order",
         "uq_canvas_templates_key",
     }
+    assert not [constraint for constraint in template_table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
     workflow_table = ProductWorkflow.__table__
     assert workflow_table.c.initial_entry_mode.type.length == 20
     assert not workflow_table.c.initial_entry_mode.nullable
     assert "ix_product_workflows_initial_entry_mode" in {index.name for index in workflow_table.indexes}
+    assert not [constraint for constraint in workflow_table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
 
 def test_alembic_upgrade_head_supports_sqlite(tmp_path: Path, monkeypatch) -> None:
@@ -195,6 +212,19 @@ def test_alembic_upgrade_head_supports_sqlite(tmp_path: Path, monkeypatch) -> No
     command.upgrade(config, "head")
 
     assert database_path.exists()
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    assert not [
+        foreign_key
+        for table_name in inspector.get_table_names()
+        for foreign_key in inspector.get_foreign_keys(table_name)
+    ]
+    assert not [
+        check_constraint
+        for table_name in inspector.get_table_names()
+        for check_constraint in inspector.get_check_constraints(table_name)
+    ]
+    engine.dispose()
     get_settings.cache_clear()
 
 
@@ -228,11 +258,7 @@ def test_repair_migration_adds_missing_0033_columns_after_stamp(tmp_path: Path, 
     assert "ix_canvas_templates_review_status" in {
         index["name"] for index in inspector.get_indexes("canvas_templates")
     }
-    assert any(
-        foreign_key["constrained_columns"] == ["reviewed_by_user_id"]
-        and foreign_key["referred_table"] == "auth_users"
-        for foreign_key in inspector.get_foreign_keys("canvas_templates")
-    )
+    assert not inspector.get_foreign_keys("canvas_templates")
 
     for table_name, index_name in (
         ("products", "ix_products_deleted_at"),
@@ -241,11 +267,7 @@ def test_repair_migration_adds_missing_0033_columns_after_stamp(tmp_path: Path, 
         columns = {column["name"] for column in inspector.get_columns(table_name)}
         assert {"deleted_at", "deleted_by_user_id"} <= columns
         assert index_name in {index["name"] for index in inspector.get_indexes(table_name)}
-        assert any(
-            foreign_key["constrained_columns"] == ["deleted_by_user_id"]
-            and foreign_key["referred_table"] == "auth_users"
-            for foreign_key in inspector.get_foreign_keys(table_name)
-        )
+        assert not inspector.get_foreign_keys(table_name)
     get_settings.cache_clear()
 
 
@@ -586,11 +608,7 @@ def test_gallery_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, m
     assert indexes["uq_image_gallery_entries_asset_id"]["column_names"] == ["image_session_asset_id"]
     assert indexes["ix_image_gallery_entries_round_id"]["column_names"] == ["image_session_round_id"]
     assert indexes["ix_image_gallery_entries_created_at"]["column_names"] == ["created_at"]
-    foreign_keys = {tuple(fk["constrained_columns"]): fk for fk in inspector.get_foreign_keys("image_gallery_entries")}
-    assert foreign_keys[("image_session_asset_id",)]["referred_table"] == "image_session_assets"
-    assert foreign_keys[("image_session_asset_id",)]["options"]["ondelete"] == "CASCADE"
-    assert foreign_keys[("image_session_round_id",)]["referred_table"] == "image_session_rounds"
-    assert foreign_keys[("image_session_round_id",)]["options"]["ondelete"] == "SET NULL"
+    assert not inspector.get_foreign_keys("image_gallery_entries")
 
     engine.dispose()
     command.downgrade(config, "20260427_0015")

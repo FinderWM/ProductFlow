@@ -14,6 +14,7 @@ from productflow_backend.infrastructure.db.models import (
 from productflow_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
     TEXT_PURPOSE,
+    _ensure_generation_config_state,
     add_generation_config,
     claim_generation_config,
     ensure_provider_config_bootstrapped,
@@ -63,6 +64,11 @@ def test_bootstrap_creates_default_generation_configs_and_states(db_session: Ses
 
     assert purposes == {TEXT_PURPOSE, IMAGE_PURPOSE}
     assert {item.id for item in configs}.issubset(state_ids)
+
+
+def test_generation_config_state_requires_existing_config(db_session: Session) -> None:
+    with pytest.raises(ValueError, match="生成配置不存在"):
+        _ensure_generation_config_state(db_session, "missing-generation-config")
 
 
 def test_auto_claim_prefers_higher_priority_healthy_config(db_session: Session) -> None:

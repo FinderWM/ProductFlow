@@ -50,7 +50,8 @@ records such as `SourceAsset`, `CreativeBrief`, and `PosterVariant`.
 ### Enum storage
 
 SQLAlchemy enum columns use `enum_value_column(...)` so database values are the enum `.value` strings, not Python enum
-member names. This is explicitly tested in
+member names. Business enum columns are stored as non-native string columns: no PostgreSQL enum type and no generated
+database `CHECK` constraint. This is explicitly tested in
 `backend/tests/test_migrations_database_constraints.py::test_sqlalchemy_enum_columns_use_database_values`.
 
 ```python
@@ -60,27 +61,37 @@ def enum_value_column(enum_cls: type) -> SqlEnum:
         name=enum_cls.__name__.lower(),
         values_callable=lambda members: [member.value for member in members],
         validate_strings=True,
+        native_enum=False,
+        create_constraint=False,
     )
 ```
 
 When changing an enum, update:
 
 - `backend/src/productflow_backend/domain/enums.py`
-- SQLAlchemy columns/migrations as needed
 - `web/src/lib/types.ts`
-- tests that assert enum database values
+- tests that assert enum database values and user-facing validation
+
+Adding a new business enum value must not require `ALTER TYPE ... ADD VALUE` or a table-level enum allowlist constraint.
+Use code/domain/API validation and tests for the supported value set.
 
 ### Relationships and delete behavior
 
-Relationships are defined on models and use explicit cascades where child records belong to a parent. Examples:
+Relationship ID columns such as `product_id`, `workflow_id`, and `owner_user_id` are plain scalar columns. The database
+keeps primary keys, nullability, ordinary indexes, unique indexes, and partial unique indexes, but it does not declare
+business foreign-key constraints.
+
+Relationships are defined on models and use explicit joins/cascades where application code needs ORM navigation. Examples:
 
 - `Product.source_assets`, `Product.creative_briefs`, `Product.copy_sets`, `Product.poster_variants`,
   `Product.image_sessions`, and `Product.workflows` use `cascade="all, delete-orphan"` in
   `infrastructure/db/models.py`.
-- Foreign keys use `ondelete="CASCADE"` for owned children and `ondelete="SET NULL"` for optional references such as
-  `creative_brief_id`, `copy_set_id`, and `poster_variant_id`.
-- `Product.current_confirmed_copy_set_id` uses a named foreign key (`fk_products_current_confirmed_copy_set_id`) and
-  `post_update=True` to handle the cycle with `CopySet`.
+- Relationships that SQLAlchemy cannot infer must declare `primaryjoin` and `foreign_keys`, using `foreign(...)` to mark
+  the child/reference column.
+- Owned-child deletion, optional-reference nulling, and required-reference existence checks are application contracts.
+  Implement them in use cases or ORM cascades where the product behavior depends on them.
+- Cycles such as `Product.current_confirmed_copy_set_id` keep ORM-level `post_update=True`; they must not use a database
+  foreign-key constraint to encode the relationship.
 
 ---
 
@@ -188,7 +199,7 @@ For runtime settings:
   - `cooldown_minutes: int`
   - `archived_at: datetime | null`
 - DB table: `generation_config_states`
-  - `generation_config_id: String(36)` primary key and FK to `generation_configs`
+  - `generation_config_id: String(36)` primary key referencing `generation_configs.id` by application validation
   - `current_concurrency: int`
   - `frozen_until: datetime | null`
   - `failure_window_started_at: datetime | null`
@@ -773,7 +784,8 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 ### 3. Contracts
 
 - `image_session_asset_id` must point to an `image_session_assets.kind == generated_image` row.
-- `image_session_round_id` references the round that generated the asset and may be set null by database delete behavior.
+- `image_session_round_id` references the round that generated the asset and must be nulled or rejected by application
+  code if a cleanup path removes the referenced round.
 - Gallery entries reference existing generated files through `/api/image-session-assets/{asset_id}/download` URLs; they
   must not duplicate image bytes into product storage or a gallery-specific storage tree.
 - Repeated saves for the same generated asset are idempotent and return the existing gallery entry.
@@ -837,9 +849,12 @@ Migration conventions already present:
 
 - Use explicit `revision` and `down_revision` strings.
 - Add matching `upgrade()` and `downgrade()` functions.
-- For PostgreSQL enum types, create/drop with `checkfirst=True` as in `20260421_0001_initial.py`.
 - Add partial unique indexes with both `postgresql_where` and `sqlite_where` when tests need SQLite compatibility, as in
   `20260423_0004_add_backend_safety_constraints.py`.
+- New migrations must not add database-owned business constraints: PostgreSQL enum types, enum-style `CHECK` constraints,
+  or foreign-key constraints. Keep relationship ID columns and validate enum values/relationship existence in code.
+- Constraint-relaxation migrations should tolerate PostgreSQL and SQLite differences, dynamically drop existing
+  FK/check constraints when needed, preserve unique/partial-unique indexes, and keep SQLite Alembic upgrade tests green.
 - Avoid migrations that work only on PostgreSQL unless the SQLite test path is intentionally excluded and documented.
 
 Run migrations with `just backend-migrate` for dev and `just backend-migrate-prod` for production env-only settings.
@@ -1586,7 +1601,7 @@ with op.batch_alter_table("products") as batch_op:
 - API tests for owner edit-with-review-note, pending review visibility, admin approve, admin keep-disabled, and
   operational catalog hiding disabled/pending templates.
 - Migration/model test proving `product_workflows.initial_entry_mode`, `canvas_templates.entry_mode`, and
-  `canvas_templates.sort_order` exist with check constraints and indexes.
+  `canvas_templates.sort_order` exist with indexes and code-level validation coverage.
 - API tests for entry-mode template filtering, blank entry template initialization, mismatched entry rejection, blank
   workflow save rejection, tail-node ancestor-only save, artifact stripping, and user-template copy-to-global.
 - Frontend build must pass when `CanvasTemplateSummary` response fields change.
@@ -1826,11 +1841,10 @@ provider = dependencies.text_provider(runtime_claim.generation_config_id, sessio
 ## Naming Conventions
 
 - Table names are plural snake_case: `products`, `source_assets`, `workflow_runs`, `image_session_rounds`.
-- Foreign key columns end with `_id`: `product_id`, `copy_set_id`, `generated_asset_id`.
+- Relationship ID columns end with `_id`: `product_id`, `copy_set_id`, `generated_asset_id`.
 - Unique partial indexes use descriptive names beginning with `uq_`, e.g.
   `uq_workflow_node_runs_one_active_per_node` and `uq_source_assets_one_original_per_product`.
-- Foreign key constraint names are explicit only where the project already needs them for cycles or migration stability,
-  e.g. `fk_products_current_confirmed_copy_set_id`.
+- Do not add foreign-key constraint names; relationship semantics live in model joins, use cases, and tests.
 
 ---
 
@@ -1838,6 +1852,8 @@ provider = dependencies.text_provider(runtime_claim.generation_config_id, sessio
 
 - Storing enum member names instead of `.value` strings. The frontend and tests expect values such as `queued`, not
   `QUEUED`.
+- Adding PostgreSQL native enums, enum-style `CheckConstraint` allowlists, or database foreign keys for business rules.
+  Use code validation and focused regression tests instead.
 - Adding model fields without an Alembic revision.
 - Updating `domain/enums.py` without updating `web/src/lib/types.ts` and tests.
 - Returning ORM objects from a use case after commit without reloading relationships needed by serializers.

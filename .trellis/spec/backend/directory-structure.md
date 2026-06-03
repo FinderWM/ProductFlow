@@ -240,5 +240,5 @@ and the runtime config definitions in `config.py`, then update tests and fronten
 - Adding new route modules without including them in `presentation/api.py`.
 - Duplicating frontend-facing DTO shapes outside `presentation/schemas/`.
 - Importing OpenAI, Pillow renderer details, Redis/Dramatiq, or storage path manipulation directly from route modules.
-- Changing enum string values without updating SQLAlchemy models/migrations, Pydantic schemas/tests, and
+- Changing enum string values without updating SQLAlchemy enum-value tests, Pydantic schemas/tests, and
   `web/src/lib/types.ts`.

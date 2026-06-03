@@ -20,6 +20,13 @@ branch_labels = None
 depends_on = None
 
 
+def _has_foreign_key(table_name: str, constraint_name: str) -> bool:
+    return any(
+        foreign_key.get("name") == constraint_name
+        for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys(table_name)
+    )
+
+
 def upgrade() -> None:
     op.create_table(
         "generation_configs",
@@ -137,20 +144,29 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    has_used_config_fk = _has_foreign_key("image_session_generation_tasks", "fk_img_task_used_gen_config")
+    has_requested_config_fk = _has_foreign_key(
+        "image_session_generation_tasks",
+        "fk_img_task_requested_gen_config",
+    )
     with op.batch_alter_table("image_session_generation_tasks") as batch_op:
-        batch_op.drop_constraint(
-            "fk_img_task_used_gen_config",
-            type_="foreignkey",
-        )
-        batch_op.drop_constraint(
-            "fk_img_task_requested_gen_config",
-            type_="foreignkey",
-        )
+        if has_used_config_fk:
+            batch_op.drop_constraint(
+                "fk_img_task_used_gen_config",
+                type_="foreignkey",
+            )
+        if has_requested_config_fk:
+            batch_op.drop_constraint(
+                "fk_img_task_requested_gen_config",
+                type_="foreignkey",
+            )
         batch_op.drop_column("used_generation_config_id")
         batch_op.drop_column("requested_generation_config_id")
         batch_op.drop_column("generation_config_mode")
+    has_round_config_fk = _has_foreign_key("image_session_rounds", "fk_image_session_rounds_generation_config_id")
     with op.batch_alter_table("image_session_rounds") as batch_op:
-        batch_op.drop_constraint("fk_image_session_rounds_generation_config_id", type_="foreignkey")
+        if has_round_config_fk:
+            batch_op.drop_constraint("fk_image_session_rounds_generation_config_id", type_="foreignkey")
         batch_op.drop_column("generation_config_id")
     op.drop_index("uq_generation_config_daily_stats_config_date", table_name="generation_config_daily_stats")
     op.drop_index("ix_generation_config_daily_stats_stat_date", table_name="generation_config_daily_stats")

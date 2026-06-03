@@ -393,7 +393,7 @@ Correct:
 - Auth/session behavior.
 - Settings API persistence and validation.
 - Typed business error and legacy `ValueError` HTTP mapping.
-- SQLAlchemy enum value storage.
+- SQLAlchemy enum value storage, with no native enum/check/FK business constraints in model/head metadata.
 - End-to-end product/copy/poster workflow.
 - Reference image upload/deletion.
 - Continuous image-session behavior.
@@ -772,6 +772,8 @@ and add/update an Alembic revision under `backend/alembic/versions/`. Existing t
 - Provider-specific SDK calls from `presentation/` modules.
 - New database columns or tables without an Alembic migration.
 - Enum string changes without updating frontend types and regression tests.
+- Database-owned business constraints such as PostgreSQL native enums, enum-style `CHECK` allowlists, or foreign keys.
+  Keep primary keys, nullability, ordinary indexes, unique indexes, and partial unique indexes.
 - Unbounded list endpoints that load all rows for UI lists.
 - Raw filesystem access for user-controlled storage paths; go through `LocalStorage.resolve(...)`.
 - Broad `except Exception` that hides failures. Existing broad catches are narrow boundary cases:
@@ -789,6 +791,8 @@ When reviewing backend changes, check:
 - Are Pydantic DTOs in `presentation/schemas/` and frontend types in `web/src/lib/types.ts` still aligned?
 - Are database model changes mirrored by Alembic migrations and tests?
 - Are enum values stored/returned as stable lowercase string values?
+- Does final SQLAlchemy/Alembic metadata stay free of business FK/check/native-enum constraints while preserving unique and
+  partial-unique indexes?
 - Are uploads, image sizes, and storage paths still bounded?
 - Are durable workflow/image-session task failures persisted and visible through their owning status/detail APIs?
 - Are provider secrets hidden from API responses and logs?

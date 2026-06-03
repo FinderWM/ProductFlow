@@ -10,6 +10,13 @@ branch_labels = None
 depends_on = None
 
 
+def _has_foreign_key(table_name: str, constraint_name: str) -> bool:
+    return any(
+        foreign_key.get("name") == constraint_name
+        for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys(table_name)
+    )
+
+
 def upgrade() -> None:
     op.execute(
         """
@@ -107,20 +114,32 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_image_sessions_deleted_at", table_name="image_sessions")
+    has_image_sessions_deleted_fk = _has_foreign_key(
+        "image_sessions",
+        "fk_image_sessions_deleted_by_user_id",
+    )
     with op.batch_alter_table("image_sessions") as batch_op:
-        batch_op.drop_constraint("fk_image_sessions_deleted_by_user_id", type_="foreignkey")
+        if has_image_sessions_deleted_fk:
+            batch_op.drop_constraint("fk_image_sessions_deleted_by_user_id", type_="foreignkey")
         batch_op.drop_column("deleted_by_user_id")
         batch_op.drop_column("deleted_at")
 
     op.drop_index("ix_products_deleted_at", table_name="products")
+    has_products_deleted_fk = _has_foreign_key("products", "fk_products_deleted_by_user_id")
     with op.batch_alter_table("products") as batch_op:
-        batch_op.drop_constraint("fk_products_deleted_by_user_id", type_="foreignkey")
+        if has_products_deleted_fk:
+            batch_op.drop_constraint("fk_products_deleted_by_user_id", type_="foreignkey")
         batch_op.drop_column("deleted_by_user_id")
         batch_op.drop_column("deleted_at")
 
     op.drop_index("ix_canvas_templates_review_status", table_name="canvas_templates")
+    has_canvas_templates_reviewed_fk = _has_foreign_key(
+        "canvas_templates",
+        "fk_canvas_templates_reviewed_by_user_id",
+    )
     with op.batch_alter_table("canvas_templates") as batch_op:
-        batch_op.drop_constraint("fk_canvas_templates_reviewed_by_user_id", type_="foreignkey")
+        if has_canvas_templates_reviewed_fk:
+            batch_op.drop_constraint("fk_canvas_templates_reviewed_by_user_id", type_="foreignkey")
         batch_op.drop_column("reviewed_by_user_id")
         batch_op.drop_column("reviewed_at")
         batch_op.drop_column("review_submitted_at")

@@ -72,6 +72,13 @@ DEFAULT_ROLE_API_PERMISSION_CODES = {
 }
 
 
+def _has_foreign_key(table_name: str, constraint_name: str) -> bool:
+    return any(
+        foreign_key.get("name") == constraint_name
+        for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys(table_name)
+    )
+
+
 def upgrade() -> None:
     op.create_table(
         "auth_roles",
@@ -432,18 +439,22 @@ def _drop_core_resource_moderation_columns() -> None:
 
 
 def _drop_owner_column(table_name: str, fk_name: str, index_name: str | None) -> None:
+    has_fk = _has_foreign_key(table_name, fk_name)
     with op.batch_alter_table(table_name) as batch_op:
         if index_name is not None:
             batch_op.drop_index(index_name)
-        batch_op.drop_constraint(fk_name, type_="foreignkey")
+        if has_fk:
+            batch_op.drop_constraint(fk_name, type_="foreignkey")
         batch_op.drop_column("owner_user_id")
 
 
 def _drop_moderation_columns(table_name: str, fk_name: str, index_name: str | None) -> None:
+    has_fk = _has_foreign_key(table_name, fk_name)
     with op.batch_alter_table(table_name) as batch_op:
         if index_name is not None:
             batch_op.drop_index(index_name)
-        batch_op.drop_constraint(fk_name, type_="foreignkey")
+        if has_fk:
+            batch_op.drop_constraint(fk_name, type_="foreignkey")
         batch_op.drop_column("disabled_reason")
         batch_op.drop_column("disabled_by_user_id")
         batch_op.drop_column("disabled_at")

@@ -120,6 +120,7 @@ def claim_workflow_node_run(session: Session, *, node_run_id: str, node_id: str)
             update(WorkflowNodeRun)
             .where(
                 WorkflowNodeRun.id == node_run_id,
+                WorkflowNodeRun.node_id == node_id,
                 WorkflowNodeRun.status == WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_queued_statuses[0],
             )
             .values(status=WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_running_statuses[0], started_at=now)

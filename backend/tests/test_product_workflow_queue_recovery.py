@@ -137,6 +137,34 @@ def test_workflow_run_kickoff_reuses_overlapping_active_node_runs(db_session, co
     db_session.rollback()
 
 
+def test_claim_workflow_node_run_requires_matching_node_id(db_session, configured_env: Path) -> None:
+    from productflow_backend.application.product_workflow.run_state import claim_workflow_node_run
+    from productflow_backend.application.product_workflows import start_product_workflow_run
+
+    product = create_product(
+        db_session,
+        name="节点 claim 校验商品",
+        category=None,
+        price=None,
+        source_note=None,
+        image_bytes=_make_demo_image_bytes(),
+        filename="product.png",
+        content_type="image/png",
+    )
+    kickoff = start_product_workflow_run(db_session, product_id=product.id)
+    node_run = db_session.query(WorkflowNodeRun).filter_by(workflow_run_id=kickoff.run_id).first()
+    assert node_run is not None
+    other_node = next(node for node in kickoff.workflow.nodes if node.id != node_run.node_id)
+
+    claim = claim_workflow_node_run(db_session, node_run_id=node_run.id, node_id=other_node.id)
+
+    assert claim.claimed is False
+    db_session.expire_all()
+    persisted_node_run = db_session.get(WorkflowNodeRun, node_run.id)
+    assert persisted_node_run is not None
+    assert persisted_node_run.status == WorkflowNodeStatus.QUEUED
+
+
 def test_workflow_run_kickoff_allows_disjoint_active_node_runs(db_session, configured_env: Path) -> None:
     from productflow_backend.application.product_workflows import start_product_workflow_run
 

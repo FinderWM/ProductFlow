@@ -37,6 +37,7 @@ from productflow_backend.domain.rbac import (
 )
 from productflow_backend.infrastructure.db.models import (
     AppSetting,
+    AuthUser,
     GenerationConfig,
     GenerationConfigDailyStat,
     GenerationConfigState,
@@ -1070,8 +1071,39 @@ def _upsert_canvas_template(session: Session, template: dict[str, Any]) -> None:
     row.archived_at = None
 
 
+def _validate_settings_import_canvas_template_references(session: Session, bundle: _SettingsImportBundle) -> None:
+    owner_user_ids = {
+        owner_user_id
+        for item in (*bundle.canvas_template_categories, *bundle.canvas_templates)
+        if (owner_user_id := item["owner_user_id"]) is not None
+    }
+    if owner_user_ids:
+        existing_owner_user_ids = set(
+            session.scalars(
+                select(AuthUser.id).where(
+                    AuthUser.id.in_(owner_user_ids),
+                    AuthUser.archived_at.is_(None),
+                )
+            )
+        )
+        if owner_user_ids - existing_owner_user_ids:
+            raise ValueError("导入文件引用的用户不存在")
+
+    categories_by_id = {category["id"]: category for category in bundle.canvas_template_categories}
+    for template in bundle.canvas_templates:
+        category_id = template["category_id"]
+        if category_id is None:
+            continue
+        category = categories_by_id[category_id]
+        if category["scope"] != template["scope"]:
+            raise ValueError("画布模板分类范围不匹配")
+        if template["scope"] == "user" and category["owner_user_id"] != template["owner_user_id"]:
+            raise ValueError("画布模板分类不存在")
+
+
 def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundle) -> None:
     with session.begin():
+        _validate_settings_import_canvas_template_references(session, bundle)
         for key, value in bundle.normalized_runtime_config.items():
             existing = session.get(AppSetting, key)
             if existing is None:

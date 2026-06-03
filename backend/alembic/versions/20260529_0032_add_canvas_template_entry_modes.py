@@ -13,6 +13,13 @@ WORKFLOW_ENTRY_MODES = "'image', 'copy', 'tail', 'blank'"
 TEMPLATE_ENTRY_MODES = "'image', 'copy', 'tail'"
 
 
+def _has_check_constraint(table_name: str, constraint_name: str) -> bool:
+    return any(
+        check_constraint.get("name") == constraint_name
+        for check_constraint in sa.inspect(op.get_bind()).get_check_constraints(table_name)
+    )
+
+
 def upgrade() -> None:
     with op.batch_alter_table("product_workflows") as batch_op:
         batch_op.add_column(
@@ -47,11 +54,18 @@ def downgrade() -> None:
     op.drop_index("ix_canvas_templates_entry_mode", table_name="canvas_templates")
     op.drop_index("ix_product_workflows_initial_entry_mode", table_name="product_workflows")
 
+    has_template_entry_mode_check = _has_check_constraint("canvas_templates", "ck_canvas_templates_entry_mode")
     with op.batch_alter_table("canvas_templates") as batch_op:
-        batch_op.drop_constraint("ck_canvas_templates_entry_mode", type_="check")
+        if has_template_entry_mode_check:
+            batch_op.drop_constraint("ck_canvas_templates_entry_mode", type_="check")
         batch_op.drop_column("sort_order")
         batch_op.drop_column("entry_mode")
 
+    has_workflow_entry_mode_check = _has_check_constraint(
+        "product_workflows",
+        "ck_product_workflows_initial_entry_mode",
+    )
     with op.batch_alter_table("product_workflows") as batch_op:
-        batch_op.drop_constraint("ck_product_workflows_initial_entry_mode", type_="check")
+        if has_workflow_entry_mode_check:
+            batch_op.drop_constraint("ck_product_workflows_initial_entry_mode", type_="check")
         batch_op.drop_column("initial_entry_mode")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -510,6 +511,22 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
     rejected_import = client.post("/api/settings/import", json=invalid_binding)
     assert rejected_import.status_code == 400
     assert "供应商不存在" in rejected_import.json()["detail"]
+
+    missing_owner = deepcopy(document)
+    missing_owner["canvas_template_categories"].append(
+        {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "scope": "user",
+            "owner_user_id": "missing-user",
+            "name": "缺失用户分类",
+            "sort_order": 100,
+            "enabled": True,
+            "disabled_reason": None,
+        }
+    )
+    rejected_owner = client.post("/api/settings/import", json=missing_owner)
+    assert rejected_owner.status_code == 400
+    assert rejected_owner.json()["detail"] == "导入文件引用的用户不存在"
 
     assert get_runtime_settings().generation_max_concurrent_tasks == 3
     session = get_session_factory()()

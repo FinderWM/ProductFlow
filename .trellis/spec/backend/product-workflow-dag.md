@@ -577,11 +577,11 @@ returns the normal `ProductWorkflow`.
 
 - Supported product node types are exactly mirrored in frontend types:
   `product_context`, `reference_image`, `copy_generation`, `image_generation`, and `tail_splitter`.
-- Legacy PostgreSQL databases may already have older enum values. Forward migrations must safely add `reference_image`
-  and migrate old image-slot rows to it; fresh databases should create only the supported simplified node values.
+- Legacy PostgreSQL databases may already have older string node values. Forward migrations must safely migrate old
+  image-slot rows to `reference_image`; fresh databases should create only the supported simplified node values.
 - Node status values are `idle`, `queued`, `running`, `succeeded`, `failed`; run status values are
-  `running`, `succeeded`, `failed`, `cancelled`. Any run-status enum expansion must include an Alembic revision that
-  adds the PostgreSQL enum value while remaining a no-op for SQLite test databases.
+  `running`, `succeeded`, `failed`, `cancelled`. New workflow enum values use non-native string storage and code/frontend
+  validation updates; they must not require a PostgreSQL enum expansion migration.
 - Active workflow status polling must use `GET /api/products/{product_id}/workflow/status`, not repeated full workflow
   detail loads. The status endpoint returns workflow identity/timestamps, node status fields, latest run status fields,
   and node-run status fields only; it must not serialize edges, node `config_json`, node `output_json`, or node-run
@@ -775,7 +775,8 @@ returns the normal `ProductWorkflow`.
 
 ### 6. Tests Required
 
-- Enum storage test includes workflow node/run enums and asserts database values equal enum `.value` strings.
+- Enum storage test includes workflow node/run enums, asserts database values equal enum `.value` strings, and asserts no
+  native enum/check/FK business constraints are present in model/head metadata.
 - API regression creates a product with only name + image, loads the workflow, updates `product_context` node config with
   `source_note`/category/price, runs the DAG, and asserts the effective node context reaches `CopySet`, generated image
   input, node output, and run history.
@@ -1143,7 +1144,9 @@ Centralize text extraction before JSON parsing so every text provider method sup
 - Duplicate Redis messages must be idempotent:
   - terminal workflow runs (`succeeded` / `failed` / `cancelled`) are no-ops;
   - runs that already have a non-stale `running` node run are no-ops;
-  - claiming a queued node run must be an atomic conditional update so two workers cannot execute the same provider call.
+  - claiming a queued node run must be an atomic conditional update on both `WorkflowNodeRun.id` and
+    `WorkflowNodeRun.node_id` so two workers cannot execute the same provider call or claim a stale message for another
+    node.
 - Background execution must persist every decisive transition: node run `queued -> running -> succeeded/failed`, node
   status, workflow run `succeeded/failed`, output JSON, artifact IDs, `failure_reason`, and `finished_at`.
 - Any exception inside or around the background execution boundary must mark the run `failed`; do not leave a stale

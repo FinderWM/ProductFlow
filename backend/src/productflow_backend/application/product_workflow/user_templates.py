@@ -25,6 +25,7 @@ from productflow_backend.application.moderation import (
 )
 from productflow_backend.application.ownership import (
     ensure_actor_can_mutate_owner,
+    require_active_user_id,
     resolve_owner_user_id,
 )
 from productflow_backend.application.product_workflow import graph as product_workflow_graph
@@ -418,10 +419,15 @@ def create_canvas_template_category(
     actor_user_id: str | None,
 ) -> CanvasTemplateCategory:
     ensure_canvas_templates_bootstrapped(session)
-    owner_user_id = actor_user_id if scope == "user" else None
+    normalized_scope = _normalize_scope(scope)
+    owner_user_id = (
+        require_active_user_id(session, actor_user_id or "", missing_message="用户画布模板分类缺少 owner_user_id")
+        if normalized_scope == "user"
+        else None
+    )
     category = CanvasTemplateCategory(
         id=new_id(),
-        scope=scope,
+        scope=normalized_scope,
         owner_user_id=owner_user_id,
         name=_normalize_category_name(name),
         sort_order=sort_order,
@@ -626,6 +632,7 @@ def create_user_canvas_template_from_workflow_nodes(
     category_id: str | None = None,
 ) -> DbCanvasTemplate:
     ensure_canvas_templates_bootstrapped(session)
+    resolved_owner_user_id = require_active_user_id(session, owner_user_id, missing_message="用户模板归属账号不存在")
     clean_title = title.strip()
     if not clean_title:
         raise BusinessValidationError("模板名称不能为空")
@@ -650,7 +657,7 @@ def create_user_canvas_template_from_workflow_nodes(
     _validate_template_category(
         session,
         scope="user",
-        owner_user_id=owner_user_id,
+        owner_user_id=resolved_owner_user_id,
         category_id=category_id,
     )
 
@@ -679,14 +686,14 @@ def create_user_canvas_template_from_workflow_nodes(
         key=template_key,
         title=clean_title,
         description=(description or "").strip() or None,
-        owner_user_id=owner_user_id,
+        owner_user_id=resolved_owner_user_id,
         entry_mode="image",
     )
     template = DbCanvasTemplate(
         id=template_id,
         key=template_key,
         scope="user",
-        owner_user_id=owner_user_id,
+        owner_user_id=resolved_owner_user_id,
         category_id=category_id,
         title=clean_title,
         description=(description or "").strip() or None,
@@ -717,11 +724,12 @@ def create_user_canvas_template_from_active_workflow(
     sort_order: int = 100,
 ) -> DbCanvasTemplate:
     ensure_canvas_templates_bootstrapped(session)
+    resolved_owner_user_id = require_active_user_id(session, owner_user_id, missing_message="用户模板归属账号不存在")
     clean_title = _normalize_template_title(title)
     _validate_template_category(
         session,
         scope="user",
-        owner_user_id=owner_user_id,
+        owner_user_id=resolved_owner_user_id,
         category_id=category_id,
     )
     workflow = product_workflow_graph.get_active_workflow(session, product_id)
@@ -754,7 +762,7 @@ def create_user_canvas_template_from_active_workflow(
         key=template_key,
         title=clean_title,
         description=(description or "").strip() or None,
-        owner_user_id=owner_user_id,
+        owner_user_id=resolved_owner_user_id,
         entry_mode=entry_mode,
         sort_order=sort_order,
     )
@@ -762,7 +770,7 @@ def create_user_canvas_template_from_active_workflow(
         id=template_id,
         key=template_key,
         scope="user",
-        owner_user_id=owner_user_id,
+        owner_user_id=resolved_owner_user_id,
         category_id=category_id,
         title=clean_title,
         description=(description or "").strip() or None,
@@ -1439,7 +1447,7 @@ def _ensure_category_mutable(
 
 
 def _ensure_category_scope(category: CanvasTemplateCategory, expected_scope: TemplateScope | None) -> None:
-    if expected_scope is not None and category.scope != expected_scope:
+    if expected_scope is not None and category.scope != _normalize_scope(expected_scope):
         raise NotFoundError("画布模板分类不存在")
 
 
@@ -1450,16 +1458,24 @@ def _validate_template_category(
     owner_user_id: str | None,
     category_id: str | None,
 ) -> CanvasTemplateCategory | None:
+    normalized_scope = _normalize_scope(scope)
+    normalized_owner_user_id = None
+    if normalized_scope == "user":
+        normalized_owner_user_id = require_active_user_id(
+            session,
+            owner_user_id or "",
+            missing_message="用户模板归属账号不存在",
+        )
     if category_id is None:
         return None
     category = session.get(CanvasTemplateCategory, category_id)
     if category is None or category.archived_at is not None:
         raise BusinessValidationError("画布模板分类不存在")
-    if category.scope != scope:
+    if category.scope != normalized_scope:
         raise BusinessValidationError("画布模板分类范围不匹配")
-    if scope == "user" and category.owner_user_id != owner_user_id:
+    if normalized_scope == "user" and category.owner_user_id != normalized_owner_user_id:
         raise BusinessValidationError("画布模板分类不存在")
-    if scope == "global" and category.owner_user_id is not None:
+    if normalized_scope == "global" and category.owner_user_id is not None:
         raise BusinessValidationError("画布模板分类范围不匹配")
     ensure_resource_usable(category)
     return category
@@ -1558,6 +1574,13 @@ def _normalize_template_title(title: str) -> str:
     return normalized
 
 
+def _normalize_scope(scope: str) -> TemplateScope:
+    normalized = (scope or "").strip().lower()
+    if normalized not in {"global", "user"}:
+        raise BusinessValidationError("画布模板范围不支持")
+    return normalized  # type: ignore[return-value]
+
+
 def _normalize_optional_scope(scope: str | None) -> TemplateScope | None:
     normalized = (scope or "").strip().lower()
     if not normalized or normalized == "all":
@@ -1582,9 +1605,7 @@ def _normalize_optional_initial_workflow_entry(value: str | None) -> InitialWork
 
 
 def _template_scope(value: str) -> TemplateScope:
-    if value not in {"global", "user"}:
-        raise BusinessValidationError("画布模板范围不支持")
-    return value  # type: ignore[return-value]
+    return _normalize_scope(value)
 
 
 def _template_kind(value: str) -> TemplateKind:

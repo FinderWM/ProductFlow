@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 
+import pytest
 from fastapi.testclient import TestClient
 from helpers import _login
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ from productflow_backend.application.generation_config_runtime import (
     release_runtime_generation_config,
 )
 from productflow_backend.application.usage_stats import list_user_usage_stats, record_user_usage_result
+from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.domain.rbac import ADMIN_USER_ID
 from productflow_backend.infrastructure.db.models import AuthUser, UserDailyUsageStat
 from productflow_backend.infrastructure.db.session import get_session_factory
@@ -169,6 +171,34 @@ def test_user_usage_stats_aggregate_counts_text_image_timeout_and_throttled(db_s
     assert result.summary.text_attempt_count == 1
     assert result.summary.image_attempt_count == 1
     assert {item.purpose for item in result.items} == {TEXT_PURPOSE, IMAGE_PURPOSE}
+
+
+def test_user_usage_stats_rejects_missing_or_archived_user(db_session: Session) -> None:
+    now = datetime.now(UTC)
+    with pytest.raises(BusinessValidationError, match="用户不存在"):
+        record_user_usage_result(
+            db_session,
+            user_id="missing-user",
+            purpose=TEXT_PURPOSE,
+            success=True,
+            now=now,
+        )
+
+    ensure_auth_bootstrapped(db_session)
+    user = db_session.get(AuthUser, ADMIN_USER_ID)
+    assert user is not None
+    user.archived_at = now
+    db_session.commit()
+
+    with pytest.raises(BusinessValidationError, match="用户不存在"):
+        record_user_usage_result(
+            db_session,
+            user_id=ADMIN_USER_ID,
+            purpose=IMAGE_PURPOSE,
+            success=False,
+            now=now,
+        )
+    assert db_session.query(UserDailyUsageStat).count() == 0
 
 
 def test_usage_stats_api_self_only_and_admin_filters(configured_env: Path) -> None:

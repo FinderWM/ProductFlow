@@ -20,8 +20,10 @@ from helpers import (
 from sqlalchemy import select
 
 from productflow_backend.config import get_settings
+from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.infrastructure.db.models import (
     AppSetting,
+    GenerationConfig,
     GenerationConfigDailyStat,
     ImageSession,
     ImageSessionAsset,
@@ -184,6 +186,32 @@ def test_prompt_polish_uses_text_generation_config_and_updates_stats(configured_
         assert stat.generated_unit_count == 1
     finally:
         session.close()
+
+
+def test_image_session_generation_task_rejects_manual_non_image_config(
+    configured_env: Path,
+    db_session,
+) -> None:
+    from productflow_backend.application.image_sessions import (
+        create_image_session,
+        create_image_session_generation_task,
+    )
+    from productflow_backend.infrastructure.provider_config import TEXT_PURPOSE, ensure_provider_config_bootstrapped
+
+    ensure_provider_config_bootstrapped(db_session)
+    text_config_id = db_session.scalar(select(GenerationConfig.id).where(GenerationConfig.purpose == TEXT_PURPOSE))
+    assert text_config_id is not None
+    image_session = create_image_session(db_session, product_id=None, title="手动配置校验")
+
+    with pytest.raises(BusinessValidationError, match="生图任务只能使用图片生成配置"):
+        create_image_session_generation_task(
+            db_session,
+            image_session_id=image_session.id,
+            prompt="白底产品图",
+            size="1024x1024",
+            generation_config_mode="manual",
+            generation_config_id=text_config_id,
+        )
 
 
 def test_image_session_generate_returns_queued_task_without_waiting_for_provider(

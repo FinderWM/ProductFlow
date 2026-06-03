@@ -8,10 +8,8 @@ from uuid import uuid4
 from sqlalchemy import (
     JSON,
     Boolean,
-    CheckConstraint,
     Date,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
@@ -20,7 +18,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy import Enum as SqlEnum
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, foreign, mapped_column, relationship
 
 from productflow_backend.domain.enums import (
     CopyStatus,
@@ -49,7 +47,18 @@ def enum_value_column(enum_cls: type) -> SqlEnum:
         name=enum_cls.__name__.lower(),
         values_callable=lambda members: [member.value for member in members],
         validate_strings=True,
+        native_enum=False,
+        create_constraint=False,
+        length=max(len(member.value) for member in enum_cls),
     )
+
+
+def child_parent_join(child_column: Any, parent_column: Any) -> Any:
+    return foreign(child_column) == parent_column
+
+
+def parent_child_join(parent_column: Any, child_column: Any) -> Any:
+    return parent_column == foreign(child_column)
 
 
 class Base(DeclarativeBase):
@@ -89,7 +98,11 @@ class AuthRole(Base, TimestampMixin):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    users: Mapped[list[AuthUser]] = relationship(back_populates="role")
+    users: Mapped[list[AuthUser]] = relationship(
+        back_populates="role",
+        primaryjoin=lambda: parent_child_join(AuthRole.id, AuthUser.role_id),
+        foreign_keys=lambda: [AuthUser.role_id],
+    )
 
 
 class AuthUser(Base, TimestampMixin):
@@ -112,14 +125,18 @@ class AuthUser(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     username: Mapped[str] = mapped_column(String(80), nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    role_id: Mapped[str] = mapped_column(String(36), ForeignKey("auth_roles.id", ondelete="RESTRICT"))
+    role_id: Mapped[str] = mapped_column(String(36))
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     password_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
     password_salt: Mapped[str | None] = mapped_column(String(32), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    role: Mapped[AuthRole] = relationship(back_populates="users")
+    role: Mapped[AuthRole] = relationship(
+        back_populates="users",
+        primaryjoin=lambda: child_parent_join(AuthUser.role_id, AuthRole.id),
+        foreign_keys=lambda: [AuthUser.role_id],
+    )
 
 
 class RbacMenu(Base):
@@ -132,7 +149,11 @@ class RbacMenu(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=100)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    api_permissions: Mapped[list[RbacApiPermission]] = relationship(back_populates="menu")
+    api_permissions: Mapped[list[RbacApiPermission]] = relationship(
+        back_populates="menu",
+        primaryjoin=lambda: parent_child_join(RbacMenu.code, RbacApiPermission.menu_code),
+        foreign_keys=lambda: [RbacApiPermission.menu_code],
+    )
 
 
 class RbacApiPermission(Base):
@@ -145,13 +166,17 @@ class RbacApiPermission(Base):
     )
 
     code: Mapped[str] = mapped_column(String(120), primary_key=True)
-    menu_code: Mapped[str] = mapped_column(String(80), ForeignKey("rbac_menus.code", ondelete="CASCADE"))
+    menu_code: Mapped[str] = mapped_column(String(80))
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     sort_order: Mapped[int] = mapped_column(Integer, default=100)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    menu: Mapped[RbacMenu] = relationship(back_populates="api_permissions")
+    menu: Mapped[RbacMenu] = relationship(
+        back_populates="api_permissions",
+        primaryjoin=lambda: child_parent_join(RbacApiPermission.menu_code, RbacMenu.code),
+        foreign_keys=lambda: [RbacApiPermission.menu_code],
+    )
 
 
 class RoleMenuPermission(Base):
@@ -159,12 +184,10 @@ class RoleMenuPermission(Base):
 
     role_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("auth_roles.id", ondelete="CASCADE"),
         primary_key=True,
     )
     menu_code: Mapped[str] = mapped_column(
         String(80),
-        ForeignKey("rbac_menus.code", ondelete="CASCADE"),
         primary_key=True,
     )
 
@@ -174,12 +197,10 @@ class RoleApiPermission(Base):
 
     role_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("auth_roles.id", ondelete="CASCADE"),
         primary_key=True,
     )
     permission_code: Mapped[str] = mapped_column(
         String(120),
-        ForeignKey("rbac_api_permissions.code", ondelete="CASCADE"),
         primary_key=True,
     )
 
@@ -194,7 +215,7 @@ class UserDailyUsageStat(Base, TimestampMixin):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("auth_users.id", ondelete="RESTRICT"))
+    user_id: Mapped[str] = mapped_column(String(36))
     stat_date: Mapped[date] = mapped_column(Date, nullable=False)
     purpose: Mapped[str] = mapped_column(String(40), nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -207,7 +228,10 @@ class UserDailyUsageStat(Base, TimestampMixin):
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    user: Mapped[AuthUser] = relationship()
+    user: Mapped[AuthUser] = relationship(
+        primaryjoin=lambda: child_parent_join(UserDailyUsageStat.user_id, AuthUser.id),
+        foreign_keys=lambda: [UserDailyUsageStat.user_id],
+    )
 
 
 class CanvasTemplateCategory(Base, TimestampMixin):
@@ -215,11 +239,6 @@ class CanvasTemplateCategory(Base, TimestampMixin):
 
     __tablename__ = "canvas_template_categories"
     __table_args__ = (
-        CheckConstraint("scope IN ('global', 'user')", name="ck_canvas_template_categories_scope"),
-        CheckConstraint(
-            "(scope = 'global' AND owner_user_id IS NULL) OR (scope = 'user' AND owner_user_id IS NOT NULL)",
-            name="ck_canvas_template_categories_owner_scope",
-        ),
         Index(
             "uq_canvas_template_categories_global_name",
             "name",
@@ -243,7 +262,6 @@ class CanvasTemplateCategory(Base, TimestampMixin):
     scope: Mapped[str] = mapped_column(String(20), nullable=False)
     owner_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="RESTRICT"),
         nullable=True,
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -253,13 +271,18 @@ class CanvasTemplateCategory(Base, TimestampMixin):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    owner: Mapped[AuthUser | None] = relationship(foreign_keys=[owner_user_id])
-    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
+    owner: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(CanvasTemplateCategory.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [CanvasTemplateCategory.owner_user_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(CanvasTemplateCategory.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [CanvasTemplateCategory.disabled_by_user_id],
+    )
 
 
 class CanvasTemplate(Base, TimestampMixin):
@@ -267,12 +290,6 @@ class CanvasTemplate(Base, TimestampMixin):
 
     __tablename__ = "canvas_templates"
     __table_args__ = (
-        CheckConstraint("scope IN ('global', 'user')", name="ck_canvas_templates_scope"),
-        CheckConstraint("entry_mode IN ('image', 'copy', 'tail')", name="ck_canvas_templates_entry_mode"),
-        CheckConstraint(
-            "(scope = 'global' AND owner_user_id IS NULL) OR (scope = 'user' AND owner_user_id IS NOT NULL)",
-            name="ck_canvas_templates_owner_scope",
-        ),
         Index("uq_canvas_templates_key", "key", unique=True),
         Index("ix_canvas_templates_scope", "scope"),
         Index("ix_canvas_templates_entry_mode", "entry_mode"),
@@ -296,12 +313,10 @@ class CanvasTemplate(Base, TimestampMixin):
     scope: Mapped[str] = mapped_column(String(20), nullable=False)
     owner_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="RESTRICT"),
         nullable=True,
     )
     category_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("canvas_template_categories.id", ondelete="SET NULL"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -316,7 +331,6 @@ class CanvasTemplate(Base, TimestampMixin):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -326,14 +340,25 @@ class CanvasTemplate(Base, TimestampMixin):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    owner: Mapped[AuthUser | None] = relationship(foreign_keys=[owner_user_id])
-    category: Mapped[CanvasTemplateCategory | None] = relationship(foreign_keys=[category_id])
-    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
-    reviewed_by: Mapped[AuthUser | None] = relationship(foreign_keys=[reviewed_by_user_id])
+    owner: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(CanvasTemplate.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [CanvasTemplate.owner_user_id],
+    )
+    category: Mapped[CanvasTemplateCategory | None] = relationship(
+        primaryjoin=lambda: child_parent_join(CanvasTemplate.category_id, CanvasTemplateCategory.id),
+        foreign_keys=lambda: [CanvasTemplate.category_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(CanvasTemplate.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [CanvasTemplate.disabled_by_user_id],
+    )
+    reviewed_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(CanvasTemplate.reviewed_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [CanvasTemplate.reviewed_by_user_id],
+    )
 
 
 class ProviderProfile(Base, TimestampMixin):
@@ -355,7 +380,11 @@ class ProviderProfile(Base, TimestampMixin):
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    generation_configs: Mapped[list[GenerationConfig]] = relationship(back_populates="provider_profile")
+    generation_configs: Mapped[list[GenerationConfig]] = relationship(
+        back_populates="provider_profile",
+        primaryjoin=lambda: parent_child_join(ProviderProfile.id, GenerationConfig.provider_profile_id),
+        foreign_keys=lambda: [GenerationConfig.provider_profile_id],
+    )
 
 
 class GenerationConfig(Base, TimestampMixin):
@@ -375,7 +404,6 @@ class GenerationConfig(Base, TimestampMixin):
     provider_kind: Mapped[str] = mapped_column(String(40), nullable=False)
     provider_profile_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("provider_profiles.id", ondelete="SET NULL"),
         nullable=True,
     )
     model_settings_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -388,15 +416,23 @@ class GenerationConfig(Base, TimestampMixin):
     cooldown_minutes: Mapped[int] = mapped_column(Integer, default=10)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    provider_profile: Mapped[ProviderProfile | None] = relationship(back_populates="generation_configs")
+    provider_profile: Mapped[ProviderProfile | None] = relationship(
+        back_populates="generation_configs",
+        primaryjoin=lambda: child_parent_join(GenerationConfig.provider_profile_id, ProviderProfile.id),
+        foreign_keys=lambda: [GenerationConfig.provider_profile_id],
+    )
     state: Mapped[GenerationConfigState | None] = relationship(
         back_populates="generation_config",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(GenerationConfig.id, GenerationConfigState.generation_config_id),
+        foreign_keys=lambda: [GenerationConfigState.generation_config_id],
         uselist=False,
     )
     daily_stats: Mapped[list[GenerationConfigDailyStat]] = relationship(
         back_populates="generation_config",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(GenerationConfig.id, GenerationConfigDailyStat.generation_config_id),
+        foreign_keys=lambda: [GenerationConfigDailyStat.generation_config_id],
     )
 
 
@@ -407,7 +443,6 @@ class GenerationConfigState(Base, TimestampMixin):
 
     generation_config_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("generation_configs.id", ondelete="CASCADE"),
         primary_key=True,
     )
     current_concurrency: Mapped[int] = mapped_column(Integer, default=0)
@@ -419,7 +454,11 @@ class GenerationConfigState(Base, TimestampMixin):
     last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    generation_config: Mapped[GenerationConfig] = relationship(back_populates="state")
+    generation_config: Mapped[GenerationConfig] = relationship(
+        back_populates="state",
+        primaryjoin=lambda: child_parent_join(GenerationConfigState.generation_config_id, GenerationConfig.id),
+        foreign_keys=lambda: [GenerationConfigState.generation_config_id],
+    )
 
 
 class GenerationConfigDailyStat(Base, TimestampMixin):
@@ -439,7 +478,6 @@ class GenerationConfigDailyStat(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     generation_config_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("generation_configs.id", ondelete="CASCADE"),
     )
     stat_date: Mapped[date] = mapped_column(Date, nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -453,7 +491,11 @@ class GenerationConfigDailyStat(Base, TimestampMixin):
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    generation_config: Mapped[GenerationConfig] = relationship(back_populates="daily_stats")
+    generation_config: Mapped[GenerationConfig] = relationship(
+        back_populates="daily_stats",
+        primaryjoin=lambda: child_parent_join(GenerationConfigDailyStat.generation_config_id, GenerationConfig.id),
+        foreign_keys=lambda: [GenerationConfigDailyStat.generation_config_id],
+    )
 
 
 class ProviderBinding(Base, TimestampMixin):
@@ -467,13 +509,15 @@ class ProviderBinding(Base, TimestampMixin):
     provider_kind: Mapped[str] = mapped_column(String(40), nullable=False)
     provider_profile_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("provider_profiles.id", ondelete="SET NULL"),
         nullable=True,
     )
     model_settings_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
-    provider_profile: Mapped[ProviderProfile | None] = relationship()
+    provider_profile: Mapped[ProviderProfile | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ProviderBinding.provider_profile_id, ProviderProfile.id),
+        foreign_keys=lambda: [ProviderBinding.provider_profile_id],
+    )
 
 
 class UserCanvasTemplate(Base, TimestampMixin):
@@ -503,7 +547,6 @@ class Product(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     owner_user_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="RESTRICT"),
         default=ADMIN_USER_ID,
     )
     name: Mapped[str] = mapped_column(String(255))
@@ -514,59 +557,71 @@ class Product(Base, TimestampMixin):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     current_confirmed_copy_set_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey(
-            "copy_sets.id",
-            ondelete="SET NULL",
-            use_alter=True,
-            name="fk_products_current_confirmed_copy_set_id",
-        ),
         nullable=True,
     )
 
-    owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
-    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
-    deleted_by: Mapped[AuthUser | None] = relationship(foreign_keys=[deleted_by_user_id])
+    owner: Mapped[AuthUser] = relationship(
+        primaryjoin=lambda: child_parent_join(Product.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [Product.owner_user_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(Product.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [Product.disabled_by_user_id],
+    )
+    deleted_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(Product.deleted_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [Product.deleted_by_user_id],
+    )
     source_assets: Mapped[list[SourceAsset]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
-        foreign_keys="SourceAsset.product_id",
+        primaryjoin=lambda: parent_child_join(Product.id, SourceAsset.product_id),
+        foreign_keys=lambda: [SourceAsset.product_id],
     )
     creative_briefs: Mapped[list[CreativeBrief]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(Product.id, CreativeBrief.product_id),
+        foreign_keys=lambda: [CreativeBrief.product_id],
     )
     copy_sets: Mapped[list[CopySet]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
-        foreign_keys="CopySet.product_id",
+        primaryjoin=lambda: parent_child_join(Product.id, CopySet.product_id),
+        foreign_keys=lambda: [CopySet.product_id],
     )
     confirmed_copy_set: Mapped[CopySet | None] = relationship(
-        foreign_keys=[current_confirmed_copy_set_id],
+        primaryjoin=lambda: child_parent_join(Product.current_confirmed_copy_set_id, CopySet.id),
+        foreign_keys=lambda: [Product.current_confirmed_copy_set_id],
         post_update=True,
     )
     poster_variants: Mapped[list[PosterVariant]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(Product.id, PosterVariant.product_id),
+        foreign_keys=lambda: [PosterVariant.product_id],
     )
     image_sessions: Mapped[list[ImageSession]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(Product.id, ImageSession.product_id),
+        foreign_keys=lambda: [ImageSession.product_id],
     )
     workflows: Mapped[list[ProductWorkflow]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(Product.id, ProductWorkflow.product_id),
+        foreign_keys=lambda: [ProductWorkflow.product_id],
     )
 
 
@@ -575,10 +630,6 @@ class ProductWorkflow(Base, TimestampMixin):
 
     __tablename__ = "product_workflows"
     __table_args__ = (
-        CheckConstraint(
-            "initial_entry_mode IN ('image', 'copy', 'tail', 'blank')",
-            name="ck_product_workflows_initial_entry_mode",
-        ),
         Index(
             "uq_product_workflows_one_active_per_product",
             "product_id",
@@ -590,24 +641,33 @@ class ProductWorkflow(Base, TimestampMixin):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id", ondelete="CASCADE"))
+    product_id: Mapped[str] = mapped_column(String(36))
     title: Mapped[str] = mapped_column(String(255), default="商品创意工作流")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     initial_entry_mode: Mapped[str] = mapped_column(String(20), default="image")
 
-    product: Mapped[Product] = relationship(back_populates="workflows")
+    product: Mapped[Product] = relationship(
+        back_populates="workflows",
+        primaryjoin=lambda: child_parent_join(ProductWorkflow.product_id, Product.id),
+        foreign_keys=lambda: [ProductWorkflow.product_id],
+    )
     nodes: Mapped[list[WorkflowNode]] = relationship(
         back_populates="workflow",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(ProductWorkflow.id, WorkflowNode.workflow_id),
+        foreign_keys=lambda: [WorkflowNode.workflow_id],
     )
     edges: Mapped[list[WorkflowEdge]] = relationship(
         back_populates="workflow",
         cascade="all, delete-orphan",
-        foreign_keys="WorkflowEdge.workflow_id",
+        primaryjoin=lambda: parent_child_join(ProductWorkflow.id, WorkflowEdge.workflow_id),
+        foreign_keys=lambda: [WorkflowEdge.workflow_id],
     )
     runs: Mapped[list[WorkflowRun]] = relationship(
         back_populates="workflow",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(ProductWorkflow.id, WorkflowRun.workflow_id),
+        foreign_keys=lambda: [WorkflowRun.workflow_id],
     )
 
 
@@ -617,7 +677,7 @@ class WorkflowNode(Base, TimestampMixin):
     __tablename__ = "workflow_nodes"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    workflow_id: Mapped[str] = mapped_column(String(36), ForeignKey("product_workflows.id", ondelete="CASCADE"))
+    workflow_id: Mapped[str] = mapped_column(String(36))
     node_type: Mapped[WorkflowNodeType] = mapped_column(enum_value_column(WorkflowNodeType))
     title: Mapped[str] = mapped_column(String(255))
     position_x: Mapped[int] = mapped_column(default=0)
@@ -631,18 +691,28 @@ class WorkflowNode(Base, TimestampMixin):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    workflow: Mapped[ProductWorkflow] = relationship(back_populates="nodes")
+    workflow: Mapped[ProductWorkflow] = relationship(
+        back_populates="nodes",
+        primaryjoin=lambda: child_parent_join(WorkflowNode.workflow_id, ProductWorkflow.id),
+        foreign_keys=lambda: [WorkflowNode.workflow_id],
+    )
     outgoing_edges: Mapped[list[WorkflowEdge]] = relationship(
         back_populates="source_node",
         cascade="all, delete-orphan",
-        foreign_keys="WorkflowEdge.source_node_id",
+        primaryjoin=lambda: parent_child_join(WorkflowNode.id, WorkflowEdge.source_node_id),
+        foreign_keys=lambda: [WorkflowEdge.source_node_id],
     )
     incoming_edges: Mapped[list[WorkflowEdge]] = relationship(
         back_populates="target_node",
         cascade="all, delete-orphan",
-        foreign_keys="WorkflowEdge.target_node_id",
+        primaryjoin=lambda: parent_child_join(WorkflowNode.id, WorkflowEdge.target_node_id),
+        foreign_keys=lambda: [WorkflowEdge.target_node_id],
     )
-    node_runs: Mapped[list[WorkflowNodeRun]] = relationship(back_populates="node")
+    node_runs: Mapped[list[WorkflowNodeRun]] = relationship(
+        back_populates="node",
+        primaryjoin=lambda: parent_child_join(WorkflowNode.id, WorkflowNodeRun.node_id),
+        foreign_keys=lambda: [WorkflowNodeRun.node_id],
+    )
 
 
 class WorkflowEdge(Base):
@@ -651,16 +721,28 @@ class WorkflowEdge(Base):
     __tablename__ = "workflow_edges"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    workflow_id: Mapped[str] = mapped_column(String(36), ForeignKey("product_workflows.id", ondelete="CASCADE"))
-    source_node_id: Mapped[str] = mapped_column(String(36), ForeignKey("workflow_nodes.id", ondelete="CASCADE"))
-    target_node_id: Mapped[str] = mapped_column(String(36), ForeignKey("workflow_nodes.id", ondelete="CASCADE"))
+    workflow_id: Mapped[str] = mapped_column(String(36))
+    source_node_id: Mapped[str] = mapped_column(String(36))
+    target_node_id: Mapped[str] = mapped_column(String(36))
     source_handle: Mapped[str | None] = mapped_column(String(80), nullable=True)
     target_handle: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    workflow: Mapped[ProductWorkflow] = relationship(back_populates="edges", foreign_keys=[workflow_id])
-    source_node: Mapped[WorkflowNode] = relationship(back_populates="outgoing_edges", foreign_keys=[source_node_id])
-    target_node: Mapped[WorkflowNode] = relationship(back_populates="incoming_edges", foreign_keys=[target_node_id])
+    workflow: Mapped[ProductWorkflow] = relationship(
+        back_populates="edges",
+        primaryjoin=lambda: child_parent_join(WorkflowEdge.workflow_id, ProductWorkflow.id),
+        foreign_keys=lambda: [WorkflowEdge.workflow_id],
+    )
+    source_node: Mapped[WorkflowNode] = relationship(
+        back_populates="outgoing_edges",
+        primaryjoin=lambda: child_parent_join(WorkflowEdge.source_node_id, WorkflowNode.id),
+        foreign_keys=lambda: [WorkflowEdge.source_node_id],
+    )
+    target_node: Mapped[WorkflowNode] = relationship(
+        back_populates="incoming_edges",
+        primaryjoin=lambda: child_parent_join(WorkflowEdge.target_node_id, WorkflowNode.id),
+        foreign_keys=lambda: [WorkflowEdge.target_node_id],
+    )
 
 
 class WorkflowRun(Base):
@@ -669,7 +751,7 @@ class WorkflowRun(Base):
     __tablename__ = "workflow_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    workflow_id: Mapped[str] = mapped_column(String(36), ForeignKey("product_workflows.id", ondelete="CASCADE"))
+    workflow_id: Mapped[str] = mapped_column(String(36))
     status: Mapped[WorkflowRunStatus] = mapped_column(
         enum_value_column(WorkflowRunStatus),
         default=WorkflowRunStatus.RUNNING,
@@ -680,10 +762,16 @@ class WorkflowRun(Base):
     is_retryable: Mapped[bool] = mapped_column(Boolean, default=True)
     progress_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
-    workflow: Mapped[ProductWorkflow] = relationship(back_populates="runs")
+    workflow: Mapped[ProductWorkflow] = relationship(
+        back_populates="runs",
+        primaryjoin=lambda: child_parent_join(WorkflowRun.workflow_id, ProductWorkflow.id),
+        foreign_keys=lambda: [WorkflowRun.workflow_id],
+    )
     node_runs: Mapped[list[WorkflowNodeRun]] = relationship(
         back_populates="workflow_run",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(WorkflowRun.id, WorkflowNodeRun.workflow_run_id),
+        foreign_keys=lambda: [WorkflowNodeRun.workflow_run_id],
     )
 
 
@@ -704,31 +792,36 @@ class WorkflowNodeRun(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    workflow_run_id: Mapped[str] = mapped_column(String(36), ForeignKey("workflow_runs.id", ondelete="CASCADE"))
-    node_id: Mapped[str] = mapped_column(String(36), ForeignKey("workflow_nodes.id", ondelete="CASCADE"))
+    workflow_run_id: Mapped[str] = mapped_column(String(36))
+    node_id: Mapped[str] = mapped_column(String(36))
     status: Mapped[WorkflowNodeStatus] = mapped_column(enum_value_column(WorkflowNodeStatus))
     output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     copy_set_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("copy_sets.id", ondelete="SET NULL"),
         nullable=True,
     )
     poster_variant_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("poster_variants.id", ondelete="SET NULL"),
         nullable=True,
     )
     image_session_asset_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("image_session_assets.id", ondelete="SET NULL"),
         nullable=True,
     )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    workflow_run: Mapped[WorkflowRun] = relationship(back_populates="node_runs")
-    node: Mapped[WorkflowNode] = relationship(back_populates="node_runs")
+    workflow_run: Mapped[WorkflowRun] = relationship(
+        back_populates="node_runs",
+        primaryjoin=lambda: child_parent_join(WorkflowNodeRun.workflow_run_id, WorkflowRun.id),
+        foreign_keys=lambda: [WorkflowNodeRun.workflow_run_id],
+    )
+    node: Mapped[WorkflowNode] = relationship(
+        back_populates="node_runs",
+        primaryjoin=lambda: child_parent_join(WorkflowNodeRun.node_id, WorkflowNode.id),
+        foreign_keys=lambda: [WorkflowNodeRun.node_id],
+    )
 
 
 class SourceAsset(Base):
@@ -747,7 +840,7 @@ class SourceAsset(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id", ondelete="CASCADE"))
+    product_id: Mapped[str] = mapped_column(String(36))
     kind: Mapped[SourceAssetKind] = mapped_column(enum_value_column(SourceAssetKind))
     original_filename: Mapped[str] = mapped_column(String(255))
     mime_type: Mapped[str] = mapped_column(String(100))
@@ -760,14 +853,20 @@ class SourceAsset(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    product: Mapped[Product] = relationship(back_populates="source_assets", foreign_keys=[product_id])
-    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
+    product: Mapped[Product] = relationship(
+        back_populates="source_assets",
+        primaryjoin=lambda: child_parent_join(SourceAsset.product_id, Product.id),
+        foreign_keys=lambda: [SourceAsset.product_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(SourceAsset.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [SourceAsset.disabled_by_user_id],
+    )
 
 
 class CreativeBrief(Base):
@@ -776,15 +875,23 @@ class CreativeBrief(Base):
     __tablename__ = "creative_briefs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id", ondelete="CASCADE"))
+    product_id: Mapped[str] = mapped_column(String(36))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
     provider_name: Mapped[str] = mapped_column(String(50))
     model_name: Mapped[str] = mapped_column(String(100))
     prompt_version: Mapped[str] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    product: Mapped[Product] = relationship(back_populates="creative_briefs")
-    copy_sets: Mapped[list[CopySet]] = relationship(back_populates="creative_brief")
+    product: Mapped[Product] = relationship(
+        back_populates="creative_briefs",
+        primaryjoin=lambda: child_parent_join(CreativeBrief.product_id, Product.id),
+        foreign_keys=lambda: [CreativeBrief.product_id],
+    )
+    copy_sets: Mapped[list[CopySet]] = relationship(
+        back_populates="creative_brief",
+        primaryjoin=lambda: parent_child_join(CreativeBrief.id, CopySet.creative_brief_id),
+        foreign_keys=lambda: [CopySet.creative_brief_id],
+    )
 
 
 class CopySet(Base, TimestampMixin):
@@ -793,10 +900,9 @@ class CopySet(Base, TimestampMixin):
     __tablename__ = "copy_sets"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id", ondelete="CASCADE"))
+    product_id: Mapped[str] = mapped_column(String(36))
     creative_brief_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("creative_briefs.id", ondelete="SET NULL"),
         nullable=True,
     )
     status: Mapped[CopyStatus] = mapped_column(enum_value_column(CopyStatus), default=CopyStatus.DRAFT)
@@ -812,10 +918,19 @@ class CopySet(Base, TimestampMixin):
 
     product: Mapped[Product] = relationship(
         back_populates="copy_sets",
-        foreign_keys=[product_id],
+        primaryjoin=lambda: child_parent_join(CopySet.product_id, Product.id),
+        foreign_keys=lambda: [CopySet.product_id],
     )
-    creative_brief: Mapped[CreativeBrief | None] = relationship(back_populates="copy_sets")
-    poster_variants: Mapped[list[PosterVariant]] = relationship(back_populates="copy_set")
+    creative_brief: Mapped[CreativeBrief | None] = relationship(
+        back_populates="copy_sets",
+        primaryjoin=lambda: child_parent_join(CopySet.creative_brief_id, CreativeBrief.id),
+        foreign_keys=lambda: [CopySet.creative_brief_id],
+    )
+    poster_variants: Mapped[list[PosterVariant]] = relationship(
+        back_populates="copy_set",
+        primaryjoin=lambda: parent_child_join(CopySet.id, PosterVariant.copy_set_id),
+        foreign_keys=lambda: [PosterVariant.copy_set_id],
+    )
 
 
 class PosterVariant(Base):
@@ -825,8 +940,8 @@ class PosterVariant(Base):
     __table_args__ = (Index("ix_poster_variants_enabled", "enabled"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id", ondelete="CASCADE"))
-    copy_set_id: Mapped[str] = mapped_column(String(36), ForeignKey("copy_sets.id", ondelete="CASCADE"))
+    product_id: Mapped[str] = mapped_column(String(36))
+    copy_set_id: Mapped[str] = mapped_column(String(36))
     kind: Mapped[PosterKind] = mapped_column(enum_value_column(PosterKind))
     template_name: Mapped[str] = mapped_column(String(100))
     mime_type: Mapped[str] = mapped_column(String(50), default="image/png")
@@ -840,15 +955,25 @@ class PosterVariant(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    product: Mapped[Product] = relationship(back_populates="poster_variants")
-    copy_set: Mapped[CopySet] = relationship(back_populates="poster_variants")
-    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
+    product: Mapped[Product] = relationship(
+        back_populates="poster_variants",
+        primaryjoin=lambda: child_parent_join(PosterVariant.product_id, Product.id),
+        foreign_keys=lambda: [PosterVariant.product_id],
+    )
+    copy_set: Mapped[CopySet] = relationship(
+        back_populates="poster_variants",
+        primaryjoin=lambda: child_parent_join(PosterVariant.copy_set_id, CopySet.id),
+        foreign_keys=lambda: [PosterVariant.copy_set_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(PosterVariant.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [PosterVariant.disabled_by_user_id],
+    )
 
 
 class ImageSession(Base, TimestampMixin):
@@ -864,12 +989,10 @@ class ImageSession(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     owner_user_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="RESTRICT"),
         default=ADMIN_USER_ID,
     )
     product_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("products.id", ondelete="CASCADE"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(255))
@@ -877,34 +1000,51 @@ class ImageSession(Base, TimestampMixin):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
-    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
-    deleted_by: Mapped[AuthUser | None] = relationship(foreign_keys=[deleted_by_user_id])
-    product: Mapped[Product | None] = relationship(back_populates="image_sessions")
+    owner: Mapped[AuthUser] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSession.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [ImageSession.owner_user_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSession.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [ImageSession.disabled_by_user_id],
+    )
+    deleted_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSession.deleted_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [ImageSession.deleted_by_user_id],
+    )
+    product: Mapped[Product | None] = relationship(
+        back_populates="image_sessions",
+        primaryjoin=lambda: child_parent_join(ImageSession.product_id, Product.id),
+        foreign_keys=lambda: [ImageSession.product_id],
+    )
     assets: Mapped[list[ImageSessionAsset]] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(ImageSession.id, ImageSessionAsset.session_id),
+        foreign_keys=lambda: [ImageSessionAsset.session_id],
     )
     rounds: Mapped[list[ImageSessionRound]] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
         order_by="ImageSessionRound.created_at",
+        primaryjoin=lambda: parent_child_join(ImageSession.id, ImageSessionRound.session_id),
+        foreign_keys=lambda: [ImageSessionRound.session_id],
     )
     generation_tasks: Mapped[list[ImageSessionGenerationTask]] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
         order_by="ImageSessionGenerationTask.created_at",
+        primaryjoin=lambda: parent_child_join(ImageSession.id, ImageSessionGenerationTask.session_id),
+        foreign_keys=lambda: [ImageSessionGenerationTask.session_id],
     )
 
 
@@ -918,10 +1058,9 @@ class ImageSessionAsset(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     owner_user_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="RESTRICT"),
         default=ADMIN_USER_ID,
     )
-    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("image_sessions.id", ondelete="CASCADE"))
+    session_id: Mapped[str] = mapped_column(String(36))
     kind: Mapped[ImageSessionAssetKind] = mapped_column(enum_value_column(ImageSessionAssetKind))
     original_filename: Mapped[str] = mapped_column(String(255))
     mime_type: Mapped[str] = mapped_column(String(100))
@@ -933,18 +1072,28 @@ class ImageSessionAsset(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
-    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
-    session: Mapped[ImageSession] = relationship(back_populates="assets")
+    owner: Mapped[AuthUser] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSessionAsset.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [ImageSessionAsset.owner_user_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSessionAsset.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [ImageSessionAsset.disabled_by_user_id],
+    )
+    session: Mapped[ImageSession] = relationship(
+        back_populates="assets",
+        primaryjoin=lambda: child_parent_join(ImageSessionAsset.session_id, ImageSession.id),
+        foreign_keys=lambda: [ImageSessionAsset.session_id],
+    )
     generated_in_round: Mapped[ImageSessionRound | None] = relationship(
         back_populates="generated_asset",
-        foreign_keys="ImageSessionRound.generated_asset_id",
+        primaryjoin=lambda: parent_child_join(ImageSessionAsset.id, ImageSessionRound.generated_asset_id),
+        foreign_keys=lambda: [ImageSessionRound.generated_asset_id],
     )
 
 
@@ -957,7 +1106,7 @@ class ImageSessionRound(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("image_sessions.id", ondelete="CASCADE"))
+    session_id: Mapped[str] = mapped_column(String(36))
     prompt: Mapped[str] = mapped_column(Text)
     assistant_message: Mapped[str] = mapped_column(Text)
     size: Mapped[str] = mapped_column(String(32))
@@ -971,7 +1120,6 @@ class ImageSessionRound(Base):
     provider_output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     generation_config_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("generation_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
     generation_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -979,22 +1127,28 @@ class ImageSessionRound(Base):
     candidate_count: Mapped[int] = mapped_column(Integer, default=1)
     base_asset_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("image_session_assets.id", ondelete="SET NULL", name="fk_image_session_rounds_base_asset_id"),
         nullable=True,
     )
     selected_reference_asset_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     generated_asset_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("image_session_assets.id", ondelete="CASCADE"),
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    session: Mapped[ImageSession] = relationship(back_populates="rounds")
+    session: Mapped[ImageSession] = relationship(
+        back_populates="rounds",
+        primaryjoin=lambda: child_parent_join(ImageSessionRound.session_id, ImageSession.id),
+        foreign_keys=lambda: [ImageSessionRound.session_id],
+    )
     generated_asset: Mapped[ImageSessionAsset] = relationship(
         back_populates="generated_in_round",
-        foreign_keys=[generated_asset_id],
+        primaryjoin=lambda: child_parent_join(ImageSessionRound.generated_asset_id, ImageSessionAsset.id),
+        foreign_keys=lambda: [ImageSessionRound.generated_asset_id],
     )
-    base_asset: Mapped[ImageSessionAsset | None] = relationship(foreign_keys=[base_asset_id])
+    base_asset: Mapped[ImageSessionAsset | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSessionRound.base_asset_id, ImageSessionAsset.id),
+        foreign_keys=lambda: [ImageSessionRound.base_asset_id],
+    )
 
 
 class ImageSessionGenerationTask(Base):
@@ -1007,17 +1161,12 @@ class ImageSessionGenerationTask(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("image_sessions.id", ondelete="CASCADE"))
+    session_id: Mapped[str] = mapped_column(String(36))
     status: Mapped[JobStatus] = mapped_column(enum_value_column(JobStatus), default=JobStatus.QUEUED)
     prompt: Mapped[str] = mapped_column(Text)
     size: Mapped[str] = mapped_column(String(32))
     base_asset_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey(
-            "image_session_assets.id",
-            ondelete="SET NULL",
-            name="fk_image_session_generation_tasks_base_asset_id",
-        ),
         nullable=True,
     )
     selected_reference_asset_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
@@ -1025,12 +1174,10 @@ class ImageSessionGenerationTask(Base):
     generation_config_mode: Mapped[str] = mapped_column(String(20), default="auto")
     requested_generation_config_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("generation_configs.id", ondelete="SET NULL", name="fk_img_task_requested_gen_config"),
         nullable=True,
     )
     used_generation_config_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("generation_configs.id", ondelete="SET NULL", name="fk_img_task_used_gen_config"),
         nullable=True,
     )
     generation_count: Mapped[int] = mapped_column(Integer, default=1)
@@ -1049,8 +1196,15 @@ class ImageSessionGenerationTask(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     is_retryable: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    session: Mapped[ImageSession] = relationship(back_populates="generation_tasks")
-    base_asset: Mapped[ImageSessionAsset | None] = relationship(foreign_keys=[base_asset_id])
+    session: Mapped[ImageSession] = relationship(
+        back_populates="generation_tasks",
+        primaryjoin=lambda: child_parent_join(ImageSessionGenerationTask.session_id, ImageSession.id),
+        foreign_keys=lambda: [ImageSessionGenerationTask.session_id],
+    )
+    base_asset: Mapped[ImageSessionAsset | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSessionGenerationTask.base_asset_id, ImageSessionAsset.id),
+        foreign_keys=lambda: [ImageSessionGenerationTask.base_asset_id],
+    )
 
 
 class ImageGalleryEntry(Base):
@@ -1067,37 +1221,37 @@ class ImageGalleryEntry(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     owner_user_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="RESTRICT"),
         default=ADMIN_USER_ID,
     )
     image_session_asset_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey(
-            "image_session_assets.id",
-            ondelete="CASCADE",
-            name="fk_image_gallery_entries_image_session_asset_id",
-        ),
     )
     image_session_round_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey(
-            "image_session_rounds.id",
-            ondelete="SET NULL",
-            name="fk_image_gallery_entries_image_session_round_id",
-        ),
         nullable=True,
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("auth_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    owner: Mapped[AuthUser] = relationship(foreign_keys=[owner_user_id])
-    disabled_by: Mapped[AuthUser | None] = relationship(foreign_keys=[disabled_by_user_id])
-    asset: Mapped[ImageSessionAsset] = relationship(foreign_keys=[image_session_asset_id])
-    round: Mapped[ImageSessionRound | None] = relationship(foreign_keys=[image_session_round_id])
+    owner: Mapped[AuthUser] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageGalleryEntry.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [ImageGalleryEntry.owner_user_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageGalleryEntry.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [ImageGalleryEntry.disabled_by_user_id],
+    )
+    asset: Mapped[ImageSessionAsset] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageGalleryEntry.image_session_asset_id, ImageSessionAsset.id),
+        foreign_keys=lambda: [ImageGalleryEntry.image_session_asset_id],
+    )
+    round: Mapped[ImageSessionRound | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageGalleryEntry.image_session_round_id, ImageSessionRound.id),
+        foreign_keys=lambda: [ImageGalleryEntry.image_session_round_id],
+    )

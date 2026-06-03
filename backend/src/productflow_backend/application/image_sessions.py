@@ -51,6 +51,7 @@ from productflow_backend.domain.durable_generation_tasks import (
 from productflow_backend.domain.enums import ImageSessionAssetKind, JobStatus, SourceAssetKind
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import (
+    GenerationConfig,
     ImageSession,
     ImageSessionAsset,
     ImageSessionGenerationTask,
@@ -63,7 +64,7 @@ from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.infrastructure.image.base import infer_extension
 from productflow_backend.infrastructure.image.chat_service import ImageChatService, ImageChatTurn
 from productflow_backend.infrastructure.image.responses_provider import PROVIDER_TEXT_OUTPUT_MESSAGE
-from productflow_backend.infrastructure.provider_config import ensure_provider_config_bootstrapped
+from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, ensure_provider_config_bootstrapped
 from productflow_backend.infrastructure.queue import (
     enqueue_image_session_generation_task,
     enqueue_image_session_generation_task_later,
@@ -363,6 +364,24 @@ def _generation_config_selection(
     if normalized_id is None:
         raise BusinessValidationError("手动指定生成配置时必须选择配置")
     return GenerationConfigSelection(mode="manual", generation_config_id=normalized_id)
+
+
+def _validate_manual_image_generation_config_selection(
+    session: Session,
+    selection: GenerationConfigSelection,
+) -> None:
+    if selection.mode != "manual" or selection.generation_config_id is None:
+        return
+    generation_config = session.scalar(
+        select(GenerationConfig).where(
+            GenerationConfig.id == selection.generation_config_id,
+            GenerationConfig.archived_at.is_(None),
+        )
+    )
+    if generation_config is None:
+        raise BusinessValidationError("生成配置不存在")
+    if generation_config.purpose != IMAGE_PURPOSE:
+        raise BusinessValidationError("生图任务只能使用图片生成配置")
 
 
 def polish_image_session_prompt(
@@ -1052,6 +1071,7 @@ def create_image_session_generation_task(
     ensure_resource_usable(image_session)
     normalized_tool_options = _normalize_tool_options(tool_options)
     generation_config_selection = _generation_config_selection(generation_config_mode, generation_config_id)
+    _validate_manual_image_generation_config_selection(session, generation_config_selection)
     normalized_size, normalized_base_asset_id, normalized_reference_ids = _validate_generation_request(
         image_session,
         size=size,

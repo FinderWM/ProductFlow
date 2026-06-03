@@ -1142,6 +1142,9 @@ def _ensure_generation_config_states(session: Session) -> None:
 
 
 def _ensure_generation_config_state(session: Session, generation_config_id: str) -> GenerationConfigState:
+    exists = session.scalar(select(GenerationConfig.id).where(GenerationConfig.id == generation_config_id))
+    if exists is None:
+        raise ValueError("生成配置不存在")
     state = session.get(GenerationConfigState, generation_config_id)
     if state is None:
         state = GenerationConfigState(generation_config_id=generation_config_id)

@@ -3,10 +3,14 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from helpers import _login, _make_demo_image_bytes
 
+from productflow_backend.application.auth import ensure_auth_bootstrapped
 from productflow_backend.application.canvas_templates import get_builtin_canvas_template
+from productflow_backend.domain.errors import BusinessValidationError
+from productflow_backend.domain.rbac import ADMIN_USER_ID
 
 
 def _password_md5(value: str) -> str:
@@ -58,6 +62,37 @@ def _save_first_node_group_template(client: TestClient, product_id: str, categor
     )
     assert saved.status_code == 201
     return saved.json()
+
+
+def test_canvas_template_user_scope_requires_active_owner(db_session) -> None:
+    from productflow_backend.application.product_workflow.user_templates import (
+        create_canvas_template_category,
+        create_user_canvas_template_from_workflow_nodes,
+    )
+
+    ensure_auth_bootstrapped(db_session)
+
+    with pytest.raises(BusinessValidationError, match="用户画布模板分类缺少 owner_user_id"):
+        create_canvas_template_category(db_session, scope="user", name="缺 owner 分类", actor_user_id=None)
+
+    category = create_canvas_template_category(
+        db_session,
+        scope=" USER ",
+        name="归一化用户分类",
+        actor_user_id=ADMIN_USER_ID,
+    )
+    assert category.scope == "user"
+    assert category.owner_user_id == ADMIN_USER_ID
+
+    with pytest.raises(BusinessValidationError, match="用户模板归属账号不存在"):
+        create_user_canvas_template_from_workflow_nodes(
+            db_session,
+            product_id="missing-product",
+            owner_user_id="missing-user",
+            title="失效 owner 模板",
+            description=None,
+            node_ids=["node-1"],
+        )
 
 
 def test_builtin_templates_seed_to_database_and_support_search_category_filter(configured_env: Path) -> None:
