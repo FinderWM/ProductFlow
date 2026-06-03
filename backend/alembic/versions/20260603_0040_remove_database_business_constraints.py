@@ -39,6 +39,20 @@ POSTGRES_ENUM_TYPES = (
     "workflownodetype",
     "workflowrunstatus",
 )
+POSTGRES_PARTIAL_UNIQUE_INDEXES: tuple[tuple[str, str, tuple[str, ...], sa.TextClause], ...] = (
+    (
+        "uq_source_assets_one_original_per_product",
+        "source_assets",
+        ("product_id",),
+        sa.text("kind = 'original_image'"),
+    ),
+    (
+        "uq_workflow_node_runs_one_active_per_node",
+        "workflow_node_runs",
+        ("node_id",),
+        sa.text("status IN ('queued', 'running')"),
+    ),
+)
 SQLITE_NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
 }
@@ -47,8 +61,10 @@ SQLITE_NAMING_CONVENTION = {
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
+        _drop_postgresql_partial_unique_indexes()
         _drop_postgresql_foreign_keys_and_checks(bind)
         _convert_postgresql_enum_columns()
+        _create_postgresql_partial_unique_indexes()
         _drop_postgresql_enum_types()
         return
     if bind.dialect.name == "sqlite":
@@ -70,6 +86,22 @@ def _drop_postgresql_foreign_keys_and_checks(bind: sa.engine.Connection) -> None
             constraint_name = check_constraint.get("name")
             if constraint_name:
                 op.drop_constraint(constraint_name, table_name, type_="check")
+
+
+def _drop_postgresql_partial_unique_indexes() -> None:
+    for index_name, _, _, _ in POSTGRES_PARTIAL_UNIQUE_INDEXES:
+        op.execute(sa.text(f'DROP INDEX IF EXISTS "{index_name}"'))
+
+
+def _create_postgresql_partial_unique_indexes() -> None:
+    for index_name, table_name, columns, predicate in POSTGRES_PARTIAL_UNIQUE_INDEXES:
+        op.create_index(
+            index_name,
+            table_name,
+            list(columns),
+            unique=True,
+            postgresql_where=predicate,
+        )
 
 
 def _convert_postgresql_enum_columns() -> None:
