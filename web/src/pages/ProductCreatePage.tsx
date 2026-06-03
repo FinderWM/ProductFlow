@@ -8,10 +8,12 @@ import {
   ImagePlus,
   LayoutTemplate,
   Loader2,
+  Plus,
   Search,
   Settings2,
   Sparkles,
   Tag,
+  Trash2,
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -24,6 +26,7 @@ import {
 } from "../components/ResourceGovernance";
 import { api, ApiError } from "../lib/api";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
+import { dynamicFieldsToRecord, type DynamicFieldDraft } from "../lib/dynamicFields";
 import { useI18n } from "../lib/preferences";
 import type { TranslationKey } from "../lib/i18n";
 import type {
@@ -229,9 +232,12 @@ export function ProductCreatePage() {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
   const [name, setName] = useState("");
+  const [ownerId, setOwnerId] = useState("");
+  const [longText, setLongText] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [contextDocumentFile, setContextDocumentFile] = useState<File | null>(null);
+  const [dynamicFields, setDynamicFields] = useState<Array<DynamicFieldDraft & { id: string }>>([]);
   const [initialWorkflowEntry, setInitialWorkflowEntry] = useState<ProductInitialWorkflowEntry>("image");
-  const [entryTextDrafts, setEntryTextDrafts] = useState({ copy: "", tail: "" });
   const [canvasTemplateKey, setCanvasTemplateKey] = useState<string>("");
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateCategoryId, setTemplateCategoryId] = useState("");
@@ -240,23 +246,8 @@ export function ProductCreatePage() {
   const [mobileStep, setMobileStep] = useState<MobileCreateStep>("entry");
   const normalizedTemplateSearch = templateSearch.trim();
   const templateScopeParam = templateScope === "all" ? undefined : templateScope;
-  const entryTextValue =
-    initialWorkflowEntry === "copy" ? entryTextDrafts.copy : initialWorkflowEntry === "tail" ? entryTextDrafts.tail : "";
-  const showEntryTextInput = initialWorkflowEntry === "copy" || initialWorkflowEntry === "tail";
-  const showImageDropZone = initialWorkflowEntry !== "blank";
+  const longTextRequired = initialWorkflowEntry === "copy" || initialWorkflowEntry === "tail";
   const mainImageRequired = initialWorkflowEntry === "image";
-  const entryTextLabelKey: TranslationKey | null =
-    initialWorkflowEntry === "copy"
-      ? "create.entryText.copyLabel"
-      : initialWorkflowEntry === "tail"
-        ? "create.entryText.tailLabel"
-        : null;
-  const entryTextPlaceholderKey: TranslationKey | null =
-    initialWorkflowEntry === "copy"
-      ? "create.entryText.copyPlaceholder"
-      : initialWorkflowEntry === "tail"
-        ? "create.entryText.tailPlaceholder"
-        : null;
   const entryTextHelpKey: TranslationKey | null =
     initialWorkflowEntry === "copy"
       ? "create.entryText.copyHelp"
@@ -391,11 +382,14 @@ export function ProductCreatePage() {
     if (mainImageRequired && !file) {
       return t("create.requiredImage");
     }
-    if (initialWorkflowEntry === "copy" && !entryTextValue.trim()) {
+    if (initialWorkflowEntry === "copy" && !longText.trim()) {
       return t("create.requiredCopyText");
     }
-    if (initialWorkflowEntry === "tail" && !entryTextValue.trim()) {
+    if (initialWorkflowEntry === "tail" && !longText.trim()) {
       return t("create.requiredTailText");
+    }
+    if (dynamicFields.some((field) => !field.key.trim() && field.value.trim())) {
+      return t("create.dynamicKeyRequired");
     }
     if (options?.checkResource !== false && isResourceBlocked(selectedPlan)) {
       return getResourceBlockedActionTitle(selectedPlan, t("resource.blockedAction"));
@@ -420,12 +414,18 @@ export function ProductCreatePage() {
       if (validationError) {
         throw new Error(validationError);
       }
+      const dynamicFieldsPayload = dynamicFieldsToRecord(dynamicFields);
+      const trimmedLongText = longText.trim();
       return api.createProduct({
         name: name.trim(),
+        owner_id: ownerId.trim() || undefined,
+        long_text: trimmedLongText || undefined,
         file: file ?? undefined,
+        contextDocumentFile: contextDocumentFile ?? undefined,
+        dynamic_fields: Object.keys(dynamicFieldsPayload).length ? dynamicFieldsPayload : undefined,
         canvas_template_key: selectedPlan.key || undefined,
         initial_workflow_entry: initialWorkflowEntry,
-        entry_text: showEntryTextInput ? entryTextValue.trim() : undefined,
+        entry_text: longTextRequired ? trimmedLongText : undefined,
       });
     },
     onSuccess: (product) => {
@@ -451,13 +451,26 @@ export function ProductCreatePage() {
     setError("");
   };
 
-  const handleEntryTextChange = (value: string) => {
-    if (initialWorkflowEntry === "copy") {
-      setEntryTextDrafts((current) => ({ ...current, copy: value }));
-    }
-    if (initialWorkflowEntry === "tail") {
-      setEntryTextDrafts((current) => ({ ...current, tail: value }));
-    }
+  const handleDocumentFiles = (files: File[]) => {
+    setContextDocumentFile(files[0] ?? null);
+    setError("");
+  };
+
+  const addDynamicField = () => {
+    setDynamicFields((current) => [
+      ...current,
+      { id: `dynamic-${Date.now()}-${current.length}`, key: "", value: "" },
+    ]);
+    setError("");
+  };
+
+  const updateDynamicField = (fieldId: string, patch: Partial<DynamicFieldDraft>) => {
+    setDynamicFields((current) => current.map((field) => (field.id === fieldId ? { ...field, ...patch } : field)));
+    setError("");
+  };
+
+  const removeDynamicField = (fieldId: string) => {
+    setDynamicFields((current) => current.filter((field) => field.id !== fieldId));
     setError("");
   };
 
@@ -771,51 +784,155 @@ export function ProductCreatePage() {
                 <div className="mt-1 text-right text-xs text-zinc-400 dark:text-slate-500">{name.length} / 60</div>
               </div>
 
-              {showEntryTextInput && entryTextLabelKey && entryTextPlaceholderKey ? (
-                <div className="mt-5">
-                  <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
-                    {t(entryTextLabelKey)} <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={entryTextValue}
-                    maxLength={4000}
-                    onChange={(event) => handleEntryTextChange(event.target.value)}
-                    className="min-h-32 w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm leading-6 transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
-                    placeholder={t(entryTextPlaceholderKey)}
-                  />
-                  <div className="mt-1 flex items-start justify-between gap-3 text-xs text-zinc-400 dark:text-slate-500">
-                    <span>{entryTextHelpKey ? t(entryTextHelpKey) : null}</span>
-                    <span className="shrink-0">{entryTextValue.length} / 4000</span>
-                  </div>
-                </div>
-              ) : null}
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
+                  {t("create.ownerId")}
+                </label>
+                <input
+                  type="text"
+                  maxLength={255}
+                  value={ownerId}
+                  onChange={(event) => {
+                    setOwnerId(event.target.value);
+                    setError("");
+                  }}
+                  className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                  placeholder={t("create.ownerIdPlaceholder")}
+                />
+              </div>
 
-              {showImageDropZone ? (
-                <div className="mt-5">
-                  <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
-                    {t("create.mainImage")} {mainImageRequired ? <span className="text-red-500">*</span> : null}
-                  </label>
-                  <ImageDropZone
-                    ariaLabel={t("create.uploadAria")}
-                    className="flex aspect-[1.9] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/40 p-5 text-zinc-500 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10 md:aspect-[2.8] xl:aspect-[1.55]"
-                    onFiles={handleImageFiles}
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
+                  {t("create.longText")} {longTextRequired ? <span className="text-red-500">*</span> : null}
+                </label>
+                <textarea
+                  value={longText}
+                  maxLength={4000}
+                  onChange={(event) => {
+                    setLongText(event.target.value);
+                    setError("");
+                  }}
+                  className="min-h-32 w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm leading-6 transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                  placeholder={t("create.longTextPlaceholder")}
+                />
+                <div className="mt-1 flex items-start justify-between gap-3 text-xs text-zinc-400 dark:text-slate-500">
+                  <span>{entryTextHelpKey ? t(entryTextHelpKey) : t("create.longTextHelp")}</span>
+                  <span className="shrink-0">{longText.length} / 4000</span>
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
+                  {t("create.mainImage")} {mainImageRequired ? <span className="text-red-500">*</span> : null}
+                </label>
+                <ImageDropZone
+                  ariaLabel={t("create.uploadAria")}
+                  className="flex aspect-[1.9] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/40 p-5 text-zinc-500 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10 md:aspect-[2.8] xl:aspect-[1.55]"
+                  onFiles={handleImageFiles}
+                >
+                  {({ isDragging }) => (
+                    <>
+                      <ImagePlus size={28} className="mb-2 text-zinc-400 dark:text-slate-500" />
+                      <p className="text-sm font-medium text-zinc-700 dark:text-slate-200">{isDragging ? t("create.uploadDrop") : previewLabel}</p>
+                      <p className="mt-1.5 text-xs text-zinc-500 dark:text-slate-400">
+                        {mainImageRequired ? t("create.uploadHint") : t("create.uploadOptionalHint")}
+                      </p>
+                    </>
+                  )}
+                </ImageDropZone>
+              </div>
+
+              <div className="mt-5 rounded-md border border-zinc-200 bg-zinc-50/60 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-zinc-700 dark:text-slate-300">
+                      {t("create.contextDocument")}
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-slate-400">
+                      {contextDocumentFile ? contextDocumentFile.name : t("create.contextDocumentHint")}
+                    </div>
+                  </div>
+                  {contextDocumentFile ? (
+                    <button
+                      type="button"
+                      onClick={() => setContextDocumentFile(null)}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 transition-colors hover:border-red-200 hover:text-red-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-red-400/50 dark:hover:text-red-200"
+                      aria-label={t("create.clearDocument")}
+                      title={t("create.clearDocument")}
+                    >
+                      <X size={14} />
+                    </button>
+                  ) : null}
+                </div>
+                <ImageDropZone
+                  accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                  ariaLabel={t("create.contextDocument")}
+                  className="flex cursor-pointer items-center justify-center rounded-md border border-dashed border-zinc-300 bg-white px-3 py-3 text-xs font-medium text-zinc-600 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10"
+                  onFiles={handleDocumentFiles}
+                >
+                  {({ isDragging }) => (
+                    <span className="inline-flex items-center gap-2">
+                      <FileText size={14} />
+                      {isDragging ? t("create.documentDrop") : t("create.documentUpload")}
+                    </span>
+                  )}
+                </ImageDropZone>
+              </div>
+
+              <div className="mt-5 rounded-md border border-zinc-200 bg-zinc-50/60 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-zinc-700 dark:text-slate-300">
+                      {t("create.dynamicFields")}
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-500 dark:text-slate-400">
+                      {t("create.dynamicFieldsHint")}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addDynamicField}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 transition-colors hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                    aria-label={t("create.addDynamicField")}
+                    title={t("create.addDynamicField")}
                   >
-                    {({ isDragging }) => (
-                      <>
-                        <ImagePlus size={28} className="mb-2 text-zinc-400 dark:text-slate-500" />
-                        <p className="text-sm font-medium text-zinc-700 dark:text-slate-200">{isDragging ? t("create.uploadDrop") : previewLabel}</p>
-                        <p className="mt-1.5 text-xs text-zinc-500 dark:text-slate-400">
-                          {mainImageRequired ? t("create.uploadHint") : t("create.uploadOptionalHint")}
-                        </p>
-                      </>
-                    )}
-                  </ImageDropZone>
+                    <Plus size={14} />
+                  </button>
                 </div>
-              ) : (
-                <div className="mt-5 rounded-xl border border-dashed border-zinc-200 bg-zinc-50/70 p-4 text-sm leading-6 text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
-                  {t("create.blankNoInputHint")}
-                </div>
-              )}
+                {dynamicFields.length ? (
+                  <div className="space-y-2">
+                    {dynamicFields.map((field) => (
+                      <div key={field.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
+                        <input
+                          value={field.key}
+                          onChange={(event) => updateDynamicField(field.id, { key: event.target.value })}
+                          className="min-w-0 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-900 outline-none transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                          placeholder={t("create.dynamicKey")}
+                        />
+                        <input
+                          value={field.value}
+                          onChange={(event) => updateDynamicField(field.id, { value: event.target.value })}
+                          className="min-w-0 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-900 outline-none transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                          placeholder={t("create.dynamicValue")}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeDynamicField(field.id)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-200 bg-white text-red-600 transition-colors hover:bg-red-50 dark:border-red-400/35 dark:bg-[#111b2d] dark:text-red-200 dark:hover:bg-red-500/10"
+                          aria-label={t("create.removeDynamicField")}
+                          title={t("create.removeDynamicField")}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-zinc-300 px-3 py-3 text-xs text-zinc-500 dark:border-slate-700 dark:text-slate-400">
+                    {t("create.noDynamicFields")}
+                  </div>
+                )}
+              </div>
 
               {error ? <div className="mt-4 hidden text-sm text-red-600 dark:text-red-300 md:block">{error}</div> : null}
 

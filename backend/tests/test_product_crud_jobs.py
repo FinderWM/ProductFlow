@@ -148,25 +148,33 @@ def test_product_create_materializes_full_canvas_template(configured_env: Path, 
     persisted_node_ids_by_template_key: dict[str, str] = {}
     unmatched_nodes = list(nodes)
     for template_node in template.nodes:
-        matched_node = next(
-            (
-                node
-                for node in unmatched_nodes
-                if node.node_type == template_node.node_type
-                and node.title == template_node.title
-                and node.position_x == template_node.position_x
-                and node.position_y == template_node.position_y
-                and node.config_json == {
-                    **template_node.config_json,
-                    TEMPLATE_METADATA_CONFIG_KEY: {
-                        "source": "builtin",
-                        "template_key": template.key,
-                        "node_key": template_node.key,
-                    },
-                }
-            ),
-            None,
-        )
+        expected_config = {
+            **template_node.config_json,
+            TEMPLATE_METADATA_CONFIG_KEY: {
+                "source": "builtin",
+                "template_key": template.key,
+                "node_key": template_node.key,
+            },
+        }
+        matched_node = None
+        for node in unmatched_nodes:
+            if (
+                node.node_type != template_node.node_type
+                or node.title != template_node.title
+                or node.position_x != template_node.position_x
+                or node.position_y != template_node.position_y
+            ):
+                continue
+            if template_node.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
+                if all(node.config_json.get(key) == value for key, value in expected_config.items()):
+                    assert node.config_json["name"] == "模板画布商品"
+                    assert node.config_json["entry_type"] == "image"
+                    matched_node = node
+                    break
+                continue
+            if node.config_json == expected_config:
+                matched_node = node
+                break
         assert matched_node is not None
         unmatched_nodes.remove(matched_node)
         persisted_node_ids_by_template_key[template_node.key] = matched_node.id

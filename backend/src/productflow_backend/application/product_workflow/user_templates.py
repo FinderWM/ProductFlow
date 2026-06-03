@@ -28,7 +28,10 @@ from productflow_backend.application.ownership import (
     resolve_owner_user_id,
 )
 from productflow_backend.application.product_workflow import graph as product_workflow_graph
-from productflow_backend.application.product_workflow.context import image_size_from_config
+from productflow_backend.application.product_workflow.context import (
+    image_size_from_config,
+    normalize_product_context_config,
+)
 from productflow_backend.application.time import now_utc
 from productflow_backend.domain.enums import WorkflowNodeType
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
@@ -87,6 +90,14 @@ REUSABLE_SUFFIX_CONFIG_KEYS = frozenset({"generation_config_id"})
 
 ARTIFACT_SPECIFIC_KEY_SUFFIXES = ("_id", "_ids", "_url", "_path")
 PROMPT_TEXT_CONFIG_KEYS = frozenset({"instruction", "prompt", "source_note"})
+PRODUCT_CONTEXT_TEMPLATE_ASSET_CONFIG_KEYS = frozenset(
+    {
+        "document_source_asset_id",
+        "image_source_asset_id",
+        "source_asset_id",
+        "source_asset_ids",
+    }
+)
 
 
 class UserCanvasTemplateNodePayload(BaseModel):
@@ -1615,7 +1626,10 @@ def _selected_internal_edges(
 
 
 def extract_reusable_node_config(node: WorkflowNode, *, retain_prompt_text: bool = True) -> dict[str, Any]:
-    reusable_config = _sanitize_reusable_config(node.config_json or {})
+    if node.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
+        reusable_config = _sanitize_product_context_template_config(node.config_json or {})
+    else:
+        reusable_config = _sanitize_reusable_config(node.config_json or {})
     if not retain_prompt_text:
         reusable_config = _strip_prompt_text_config(node.node_type, reusable_config)
     if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
@@ -1683,7 +1697,24 @@ def _strip_prompt_text_config(node_type: WorkflowNodeType, config_json: dict[str
     return {key: value for key, value in config_json.items() if key not in PROMPT_TEXT_CONFIG_KEYS}
 
 
-def _sanitize_reusable_config(value: Any, *, path: tuple[str, ...] = ()) -> Any:
+def _sanitize_product_context_template_config(config_json: dict[str, Any]) -> dict[str, Any]:
+    sanitized = _sanitize_reusable_config(
+        {
+            key: value
+            for key, value in normalize_product_context_config(config_json).items()
+            if key not in PRODUCT_CONTEXT_TEMPLATE_ASSET_CONFIG_KEYS
+        },
+        allow_artifact_shaped_keys=True,
+    )
+    return sanitized if isinstance(sanitized, dict) else {}
+
+
+def _sanitize_reusable_config(
+    value: Any,
+    *,
+    path: tuple[str, ...] = (),
+    allow_artifact_shaped_keys: bool = False,
+) -> Any:
     if isinstance(value, dict):
         sanitized: dict[str, Any] = {}
         for key, nested_value in value.items():
@@ -1695,12 +1726,27 @@ def _sanitize_reusable_config(value: Any, *, path: tuple[str, ...] = ()) -> Any:
             if normalized_key in ARTIFACT_SPECIFIC_CONFIG_KEYS:
                 continue
             if normalized_key in REUSABLE_SUFFIX_CONFIG_KEYS:
-                sanitized[key] = _sanitize_reusable_config(nested_value, path=(*path, key))
+                sanitized[key] = _sanitize_reusable_config(
+                    nested_value,
+                    path=(*path, key),
+                    allow_artifact_shaped_keys=allow_artifact_shaped_keys,
+                )
                 continue
-            if normalized_key.endswith(ARTIFACT_SPECIFIC_KEY_SUFFIXES):
+            if not allow_artifact_shaped_keys and normalized_key.endswith(ARTIFACT_SPECIFIC_KEY_SUFFIXES):
                 raise BusinessValidationError("模板配置包含不可复用的产物数据")
-            sanitized[key] = _sanitize_reusable_config(nested_value, path=(*path, key))
+            sanitized[key] = _sanitize_reusable_config(
+                nested_value,
+                path=(*path, key),
+                allow_artifact_shaped_keys=allow_artifact_shaped_keys,
+            )
         return sanitized
     if isinstance(value, list):
-        return [_sanitize_reusable_config(item, path=path) for item in value]
+        return [
+            _sanitize_reusable_config(
+                item,
+                path=path,
+                allow_artifact_shaped_keys=allow_artifact_shaped_keys,
+            )
+            for item in value
+        ]
     return value

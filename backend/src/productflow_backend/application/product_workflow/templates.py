@@ -50,6 +50,7 @@ def materialize_product_workflow_from_template(
     template: CanvasTemplate,
     initial_entry_mode: InitialWorkflowEntry = "image",
     entry_text: str | None = None,
+    product_context_config: dict[str, object] | None = None,
 ) -> ProductWorkflow:
     validate_canvas_template(template)
     if template.kind != "full_canvas":
@@ -78,10 +79,11 @@ def materialize_product_workflow_from_template(
     session.flush()
 
     nodes_by_template_key = materialize_canvas_template_graph(session, workflow=workflow, template=template)
-    _persist_template_entry_text(
+    _persist_template_product_context(
         nodes_by_template_key.values(),
         initial_entry_mode=initial_entry_mode,
         entry_text=entry_text,
+        product_context_config=product_context_config,
     )
     session.flush()
     return workflow
@@ -149,17 +151,13 @@ def materialize_canvas_template_graph(
     return nodes_by_template_key
 
 
-def _persist_template_entry_text(
+def _persist_template_product_context(
     nodes: Iterable[WorkflowNode],
     *,
     initial_entry_mode: InitialWorkflowEntry,
     entry_text: str | None,
+    product_context_config: dict[str, object] | None,
 ) -> None:
-    if initial_entry_mode not in {"copy", "tail"}:
-        return
-    normalized_text = (entry_text or "").strip()
-    if not normalized_text:
-        return
     product_context_node = next(
         (
             node
@@ -170,11 +168,11 @@ def _persist_template_entry_text(
     )
     if product_context_node is None:
         return
-    product_context_node.config_json = normalize_product_context_config(
-        {
-            **(product_context_node.config_json or {}),
-            "entry_type": initial_entry_mode,
-            "long_text": normalized_text,
-            "source_note": normalized_text,
-        }
-    )
+    config = {**(product_context_node.config_json or {}), **(product_context_config or {})}
+    if initial_entry_mode in {"copy", "tail"}:
+        normalized_text = (entry_text or "").strip()
+        if normalized_text:
+            config.setdefault("entry_type", initial_entry_mode)
+            config.setdefault("long_text", normalized_text)
+            config.setdefault("source_note", normalized_text)
+    product_context_node.config_json = normalize_product_context_config(config)

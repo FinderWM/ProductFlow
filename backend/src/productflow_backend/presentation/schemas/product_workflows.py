@@ -17,6 +17,7 @@ from productflow_backend.application.product_workflow.run_state import (
     WORKFLOW_CANCELLED_REASON,
     workflow_node_failed_run_is_retryable,
 )
+from productflow_backend.application.product_workflow.tail_confirmation import workflow_run_is_user_active
 from productflow_backend.application.product_workflows import latest_workflow_runs
 from productflow_backend.domain.durable_generation_tasks import WORKFLOW_RUN_GENERATION_TASK_CONTRACT
 from productflow_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType, WorkflowRunStatus
@@ -391,11 +392,18 @@ class CopyUserTemplateToGlobalRequest(BaseModel):
 
 class RunWorkflowRequest(BaseModel):
     start_node_id: str | None = None
+    start_mode: Literal["from_node", "after_node"] = "from_node"
+
+
+class ApplyTailSplitPlanItemRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    instruction: str | None = Field(default=None, max_length=8000)
 
 
 class ApplyTailSplitPlanRequest(BaseModel):
     plan_id: str = Field(min_length=1, max_length=80)
     item_ids: list[str] = Field(default_factory=list)
+    items: list[ApplyTailSplitPlanItemRequest] = Field(default_factory=list)
     position_x: int | None = None
     position_y: int | None = None
 
@@ -405,7 +413,7 @@ def workflow_run_is_retryable(run: WorkflowRun) -> bool:
 
 
 def workflow_run_is_cancelable(run: WorkflowRun) -> bool:
-    return WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_active(run.status)
+    return workflow_run_is_user_active(run.status)
 
 
 def workflow_run_queue_fields(run: WorkflowRun) -> dict[str, int | None]:
@@ -747,7 +755,7 @@ def serialize_product_workflow_status(snapshot: ProductWorkflowStatusSnapshot) -
         title=workflow.title,
         active=workflow.active,
         initial_entry_mode=workflow.initial_entry_mode,
-        has_active_workflow=any(WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_active(item.status) for item in snapshot.runs)
+        has_active_workflow=any(workflow_run_is_user_active(item.status) for item in snapshot.runs)
         or any(
             WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_queued(item.status)
             or WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_running(item.status)

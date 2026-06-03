@@ -73,7 +73,7 @@ describe("workflow canvas actions", () => {
       },
     );
 
-    expect(items.map((item) => item.id)).toEqual(["run", "duplicate", "fitSelected", "delete"]);
+    expect(items.map((item) => item.id)).toEqual(["run", "runAfter", "duplicate", "fitSelected", "delete"]);
   });
 
   it("builds group actions with save-template and without single-node run", () => {
@@ -86,7 +86,7 @@ describe("workflow canvas actions", () => {
     expect(items.map((item) => item.id)).toEqual(["duplicate", "fitSelected", "saveTemplate", "delete"]);
   });
 
-  it("does not expose product-context single-node run or delete actions", () => {
+  it("exposes product-context run actions without delete actions", () => {
     const items = buildWorkflowCanvasActionItems(
       { kind: "single", nodeId: "product" },
       {
@@ -98,7 +98,11 @@ describe("workflow canvas actions", () => {
       },
     );
 
-    expect(items.map((item) => item.id)).toEqual(["fitSelected"]);
+    expect(items.map((item) => item.id)).toEqual(["run", "runAfter", "fitSelected"]);
+    expect(items.slice(0, 2).map((item) => item.labelKey)).toEqual([
+      "detail.runAction.runFromNode",
+      "detail.runAction.runAfterNode",
+    ]);
   });
 
   it("keeps product-context groups away from template and delete actions", () => {

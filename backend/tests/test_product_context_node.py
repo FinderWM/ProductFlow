@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -97,6 +98,106 @@ def test_product_context_document_upload_validates_text_documents(configured_env
         files={"document": ("bad.pdf", b"text", "text/plain")},
     )
     assert unsupported_extension.status_code == 415
+
+
+def test_product_create_initializes_rich_product_context(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    long_text = "三阶魔方，顺滑磁吸结构，适合入门练习和竞速进阶。"
+    created = client.post(
+        "/api/products",
+        data={
+            "name": "三阶魔方",
+            "owner_id": "goods-333",
+            "category": "益智玩具",
+            "price": "39.90",
+            "initial_workflow_entry": "copy",
+            "long_text": long_text,
+            "dynamic_fields_json": json.dumps(
+                {"color": "黑色", "magnetic": True, "level": 3, "note": None},
+                ensure_ascii=False,
+            ),
+        },
+        files={
+            "image": ("cube.png", _make_demo_image_bytes(), "image/png"),
+            "context_document": ("brief.md", "核心卖点：顺滑、稳定、磁吸。".encode(), "text/markdown"),
+        },
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+    assert created.json()["source_note"] == long_text
+    assert {asset["kind"] for asset in created.json()["source_assets"]} >= {
+        "original_image",
+        "context_document",
+    }
+
+    workflow = client.get(f"/api/products/{product_id}/workflow")
+    assert workflow.status_code == 200
+    payload = workflow.json()
+    context_node = next(node for node in payload["nodes"] if node["node_type"] == "product_context")
+    copy_node = next(node for node in payload["nodes"] if node["node_type"] == "copy_generation")
+    image_asset = next(asset for asset in created.json()["source_assets"] if asset["kind"] == "original_image")
+    document_asset = next(asset for asset in created.json()["source_assets"] if asset["kind"] == "context_document")
+
+    assert context_node["config_json"]["name"] == "三阶魔方"
+    assert context_node["config_json"]["owner_id"] == "goods-333"
+    assert context_node["config_json"]["entry_type"] == "copy"
+    assert context_node["config_json"]["category"] == "益智玩具"
+    assert context_node["config_json"]["price"] == "39.90"
+    assert context_node["config_json"]["long_text"] == long_text
+    assert context_node["config_json"]["source_note"] == long_text
+    assert context_node["config_json"]["image_source_asset_id"] == image_asset["id"]
+    assert context_node["config_json"]["document_source_asset_id"] == document_asset["id"]
+    assert context_node["config_json"]["document_filename"] == "brief.md"
+    assert context_node["config_json"]["document_mime_type"] == "text/markdown"
+    assert context_node["config_json"]["document_text"] == "核心卖点：顺滑、稳定、磁吸。"
+    assert context_node["config_json"]["dynamic_fields"] == {
+        "color": "黑色",
+        "magnetic": True,
+        "level": 3,
+        "note": None,
+    }
+    assert copy_node["config_json"]["source_note"] == long_text
+
+    listed = client.get("/api/products")
+    assert listed.status_code == 200
+    item = next(item for item in listed.json()["items"] if item["id"] == product_id)
+    assert item["initial_workflow_entry"] == "copy"
+    assert item["initial_entry_text"] == long_text
+
+
+def test_product_create_rejects_invalid_dynamic_fields_json(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    invalid_json = client.post(
+        "/api/products",
+        data={
+            "name": "动态字段坏 JSON",
+            "initial_workflow_entry": "blank",
+            "dynamic_fields_json": "{bad",
+        },
+    )
+    assert invalid_json.status_code == 400
+    assert invalid_json.json()["detail"] == "动态信息必须是有效 JSON"
+
+    invalid_object = client.post(
+        "/api/products",
+        data={
+            "name": "动态字段非对象",
+            "initial_workflow_entry": "blank",
+            "dynamic_fields_json": "[1, 2]",
+        },
+    )
+    assert invalid_object.status_code == 400
+    assert invalid_object.json()["detail"] == "动态信息必须是 JSON 对象"
 
 
 def test_product_context_fields_flow_to_downstream_image_node(configured_env: Path) -> None:

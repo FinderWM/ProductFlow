@@ -18,8 +18,10 @@ def test_durable_generation_task_contract_keeps_workflow_and_image_models_separa
     assert IMAGE_SESSION_GENERATION_TASK_CONTRACT.durable_model_name == "ImageSessionGenerationTask"
 
     assert WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_active(WorkflowRunStatus.RUNNING)
+    assert not WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_active(WorkflowRunStatus.WAITING_CONFIRMATION)
     assert WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_terminal(WorkflowRunStatus.SUCCEEDED)
     assert WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_terminal(WorkflowRunStatus.CANCELLED)
+    assert not WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_terminal(WorkflowRunStatus.WAITING_CONFIRMATION)
     assert WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_queued(WorkflowNodeStatus.QUEUED)
     assert WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_running(WorkflowNodeStatus.RUNNING)
 

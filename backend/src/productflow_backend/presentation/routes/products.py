@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.use_cases import (
+    ProductContextDocumentInput,
     add_reference_images,
     confirm_copy_set,
     create_product,
@@ -39,6 +40,7 @@ from productflow_backend.presentation.schemas.products import (
 )
 from productflow_backend.presentation.upload_validation import (
     read_validated_image_upload,
+    read_validated_text_document_upload,
     validate_reference_image_count,
 )
 
@@ -56,6 +58,10 @@ async def create_product_endpoint(
     category: str | None = Form(default=None),
     price: str | None = Form(default=None),
     source_note: str | None = Form(default=None),
+    owner_id: str | None = Form(default=None),
+    long_text: str | None = Form(default=None),
+    dynamic_fields_json: str | None = Form(default=None),
+    context_document: UploadFile | None = File(default=None),
     canvas_template_key: str | None = Form(default=None),
     initial_workflow_entry: str | None = Form(default=None),
     entry_text: str | None = Form(default=None),
@@ -74,6 +80,18 @@ async def create_product_endpoint(
                 validated_reference.mime_type,
             )
         )
+    context_document_payload: ProductContextDocumentInput | None = None
+    if context_document is not None:
+        validated_document = await read_validated_text_document_upload(
+            context_document,
+            fallback_filename="context-document.txt",
+        )
+        context_document_payload = ProductContextDocumentInput(
+            content=validated_document.content,
+            filename=validated_document.filename,
+            mime_type=validated_document.mime_type,
+            text=validated_document.text,
+        )
     product = create_product(
         session,
         name=name,
@@ -87,6 +105,10 @@ async def create_product_endpoint(
         canvas_template_key=canvas_template_key,
         initial_workflow_entry=initial_workflow_entry,
         entry_text=entry_text,
+        owner_id=owner_id,
+        long_text=long_text,
+        dynamic_fields_json=dynamic_fields_json,
+        context_document_upload=context_document_payload,
         owner_user_id=current_user.id,
     )
     return serialize_product_detail(product)

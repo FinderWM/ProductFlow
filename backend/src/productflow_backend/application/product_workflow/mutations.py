@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from productflow_backend.application.canvas_templates import CanvasTemplateNodeSpec
 from productflow_backend.application.copy_payloads import normalize_copy_node_config
@@ -23,17 +24,26 @@ from productflow_backend.application.product_workflow.context import (
     optional_config_text,
     product_context_output,
 )
-from productflow_backend.application.product_workflow.tail_splitter import (
-    apply_tail_split_plan as apply_tail_split_plan_to_graph,
+from productflow_backend.application.product_workflow.run_state import mark_workflow_run_failed
+from productflow_backend.application.product_workflow.tail_confirmation import (
+    remove_pending_tail_confirmation,
+    run_has_pending_tail_confirmation,
+    run_has_pending_tail_confirmations,
+    workflow_run_is_user_active,
 )
 from productflow_backend.application.product_workflow.tail_splitter import (
+    TailSplitPlanItemSelection,
     normalize_tail_splitter_config,
+)
+from productflow_backend.application.product_workflow.tail_splitter import (
+    apply_tail_split_plan as apply_tail_split_plan_to_graph,
 )
 from productflow_backend.application.product_workflow.templates import materialize_canvas_template_graph
 from productflow_backend.application.product_workflow.user_templates import (
     extract_reusable_node_config,
     get_canvas_template,
 )
+from productflow_backend.application.queue_submission import enqueue_or_mark_failed
 from productflow_backend.application.time import now_utc
 from productflow_backend.application.use_cases import update_copy_set
 from productflow_backend.domain.durable_generation_tasks import WORKFLOW_RUN_GENERATION_TASK_CONTRACT
@@ -41,6 +51,7 @@ from productflow_backend.domain.enums import (
     SourceAssetKind,
     WorkflowNodeStatus,
     WorkflowNodeType,
+    WorkflowRunStatus,
 )
 from productflow_backend.domain.errors import BusinessError, BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import (
@@ -730,8 +741,10 @@ def apply_tail_split_plan(
     node_id: str,
     plan_id: str,
     item_ids: list[str] | None,
+    items: list[TailSplitPlanItemSelection] | None = None,
     position_x: int | None = None,
     position_y: int | None = None,
+    enqueue: Callable[[str], None] | None = None,
 ) -> ProductWorkflow:
     node = product_workflow_graph.get_node_or_raise(session, node_id)
     applied = apply_tail_split_plan_to_graph(
@@ -739,12 +752,120 @@ def apply_tail_split_plan(
         tail_node=node,
         plan_id=plan_id,
         item_ids=item_ids,
+        items=items,
         position_x=position_x,
         position_y=position_y,
     )
+    resumed_run_ids = _resume_tail_confirmation_runs_after_apply(
+        session,
+        workflow_id=applied.workflow.id,
+        tail_node_id=node.id,
+        plan_id=plan_id,
+        created_node_ids=applied.created_node_ids,
+    )
     session.commit()
+    if enqueue is not None:
+        for run_id in resumed_run_ids:
+            enqueue_or_mark_failed(
+                run_id,
+                enqueue=enqueue,
+                mark_failed=lambda task_id, reason: mark_workflow_run_failed(
+                    session,
+                    run_id=task_id,
+                    failed_node_id=None,
+                    reason=reason,
+                ),
+            )
     session.expire_all()
     return product_workflow_graph.get_workflow_or_raise(session, applied.workflow.id)
+
+
+def _resume_tail_confirmation_runs_after_apply(
+    session: Session,
+    *,
+    workflow_id: str,
+    tail_node_id: str,
+    plan_id: str,
+    created_node_ids: list[str],
+) -> list[str]:
+    runs = list(
+        session.scalars(
+            select(WorkflowRun)
+            .options(selectinload(WorkflowRun.node_runs))
+            .where(
+                WorkflowRun.workflow_id == workflow_id,
+                WorkflowRun.status.in_((WorkflowRunStatus.RUNNING, WorkflowRunStatus.WAITING_CONFIRMATION)),
+            )
+        )
+    )
+    resumed_run_ids: list[str] = []
+    for run in runs:
+        if not workflow_run_is_user_active(run.status):
+            continue
+        if not run_has_pending_tail_confirmation(run, tail_node_id=tail_node_id, plan_id=plan_id):
+            continue
+        has_queued_or_running = _run_has_queued_or_running_node_runs(run)
+        existing_run_node_ids = {node_run.node_id for node_run in run.node_runs}
+        now = now_utc()
+        for node_id in created_node_ids:
+            if node_id in existing_run_node_ids:
+                continue
+            created_node = session.get(WorkflowNode, node_id)
+            if created_node is None or created_node.workflow_id != workflow_id:
+                continue
+            if created_node.status == WorkflowNodeStatus.SUCCEEDED:
+                session.add(
+                    WorkflowNodeRun(
+                        workflow_run_id=run.id,
+                        node_id=created_node.id,
+                        status=WorkflowNodeStatus.SUCCEEDED,
+                        output_json=created_node.output_json,
+                        copy_set_id=_copy_set_id_from_output(created_node.output_json),
+                        finished_at=now,
+                    )
+                )
+                continue
+            created_node.status = WorkflowNodeStatus.QUEUED
+            created_node.failure_reason = None
+            created_node.last_run_at = now
+            session.add(
+                WorkflowNodeRun(
+                    workflow_run_id=run.id,
+                    node_id=created_node.id,
+                    status=WorkflowNodeStatus.QUEUED,
+                )
+            )
+            has_queued_or_running = True
+        remove_pending_tail_confirmation(run, tail_node_id=tail_node_id, plan_id=plan_id)
+        if has_queued_or_running:
+            run.status = WorkflowRunStatus.RUNNING
+            run.failure_reason = None
+            run.finished_at = None
+            resumed_run_ids.append(run.id)
+        elif run_has_pending_tail_confirmations(run):
+            run.status = WorkflowRunStatus.WAITING_CONFIRMATION
+        else:
+            run.status = WorkflowRunStatus.SUCCEEDED
+            run.failure_reason = None
+            run.finished_at = now
+        run.workflow.updated_at = now
+    session.flush()
+    return resumed_run_ids
+
+
+def _run_has_queued_or_running_node_runs(run: WorkflowRun) -> bool:
+    return any(
+        WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_queued(node_run.status)
+        or WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_running(node_run.status)
+        for node_run in run.node_runs
+    )
+
+
+def _copy_set_id_from_output(output_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(output_json, dict):
+        return None
+    copy_set_id = output_json.get("copy_set_id")
+    return copy_set_id if isinstance(copy_set_id, str) else None
 
 
 def create_workflow_edge(

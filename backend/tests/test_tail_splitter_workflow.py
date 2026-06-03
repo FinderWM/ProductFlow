@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login, _wait_for_workflow_run
 
-from productflow_backend.domain.enums import WorkflowNodeType
+from productflow_backend.domain.enums import WorkflowNodeType, WorkflowRunStatus
 from productflow_backend.domain.workflow_rules import WorkflowRuleNode, should_execute_missing_upstream
 
 
@@ -45,6 +45,10 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
         "product_context",
         "copy_generation",
     }
+    copy_context_node = _workflow_node(copy_payload, "product_context")
+    assert copy_context_node["config_json"]["name"] == "文案入口商品"
+    assert copy_context_node["config_json"]["entry_type"] == "copy"
+    assert copy_context_node["config_json"]["long_text"] == "强调免安装、整洁收纳和家居场景适配。"
     copy_node = _workflow_node(copy_payload, "copy_generation")
     assert copy_node["config_json"]["source_note"] == "强调免安装、整洁收纳和家居场景适配。"
     assert "强调免安装" in copy_node["config_json"]["instruction"]
@@ -68,6 +72,10 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
         "product_context",
         "tail_splitter",
     }
+    tail_context_node = _workflow_node(tail_payload, "product_context")
+    assert tail_context_node["config_json"]["name"] == "尾巴入口商品"
+    assert tail_context_node["config_json"]["entry_type"] == "tail"
+    assert tail_context_node["config_json"]["long_text"] == "免安装、收纳整洁、细节材质、不同场景摆放。"
     tail_node = _workflow_node(tail_payload, "tail_splitter")
     assert tail_node["config_json"]["source_text"] == "免安装、收纳整洁、细节材质、不同场景摆放。"
     assert len(tail_payload["edges"]) == 1
@@ -84,6 +92,8 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
     blank_payload = blank_workflow.json()
     assert [node["node_type"] for node in blank_payload["nodes"]] == ["product_context"]
     assert blank_payload["nodes"][0]["title"] == "灵感"
+    assert blank_payload["nodes"][0]["config_json"]["name"] == "空白入口灵感"
+    assert blank_payload["nodes"][0]["config_json"]["entry_type"] == "blank"
     assert blank_payload["edges"] == []
 
     image_missing = client.post(
@@ -150,18 +160,31 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
     )
     assert run_response.status_code == 200
 
-    finished = _wait_for_workflow_run(client, product_id, status="succeeded")
+    finished = _wait_for_workflow_run(client, product_id, status="waiting_confirmation")
+    assert finished["runs"][0]["is_cancelable"] is True
+    assert finished["runs"][0]["queue_active_count"] == 0
     tail_node_after_run = next(node for node in finished["nodes"] if node["id"] == tail_node["id"])
     latest_plan = tail_node_after_run["output_json"]["latest_plan"]
     assert latest_plan["status"] == "pending"
     assert len(latest_plan["items"]) == 4
+    assert not any(
+        isinstance(node.get("config_json"), dict)
+        and isinstance(node["config_json"].get("generated_by"), dict)
+        and node["config_json"]["generated_by"].get("tail_node_id") == tail_node["id"]
+        for node in finished["nodes"]
+    )
 
-    selected_item_ids = [item["id"] for item in latest_plan["items"][:2]]
+    selected_items = [
+        {"id": latest_plan["items"][0]["id"], "instruction": "编辑后的第一条生图指令"},
+        {"id": latest_plan["items"][1]["id"], "instruction": latest_plan["items"][1]["instruction"]},
+    ]
+    selected_item_ids = [item["id"] for item in selected_items]
     applied = client.post(
         f"/api/workflow-nodes/{tail_node['id']}/tail-split-plan/apply",
         json={
             "plan_id": latest_plan["plan_id"],
             "item_ids": selected_item_ids,
+            "items": selected_items,
             "position_x": tail_node["position_x"] + 80,
             "position_y": tail_node["position_y"],
         },
@@ -200,7 +223,23 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
         or edge["target_node_id"] in generated_node_ids
         or edge["source_node_id"] == tail_node["id"]
     ]
-    assert len(generated_edges) == 10
+    assert len(generated_edges) == 8
+    public_node_ids = {
+        node["id"]
+        for node in generated_nodes
+        if node["config_json"]["generated_by"]["role"] in {"public_copy", "public_reference"}
+    }
+    assert not any(
+        edge["source_node_id"] == tail_node["id"] and edge["target_node_id"] in public_node_ids
+        for edge in generated_edges
+    )
+    edited_image_node = next(
+        node
+        for node in generated_nodes
+        if node["node_type"] == "image_generation"
+        and node["config_json"]["generated_by"].get("item_id") == selected_items[0]["id"]
+    )
+    assert edited_image_node["config_json"]["instruction"] == "编辑后的第一条生图指令"
 
     second_apply = client.post(
         f"/api/workflow-nodes/{tail_node['id']}/tail-split-plan/apply",
@@ -219,6 +258,7 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
     from productflow_backend.application.product_workflows import (
         apply_tail_split_plan,
         create_workflow_node,
+        execute_product_workflow_run,
         get_or_create_product_workflow,
         run_product_workflow,
         update_workflow_node,
@@ -258,8 +298,10 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
 
     workflow = run_product_workflow(db_session, product_id=product.id, start_node_id=tail_node.id)
+    first_run = next(run for run in workflow.runs if run.status == WorkflowRunStatus.WAITING_CONFIRMATION)
     tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
     first_plan = tail_node.output_json["latest_plan"]
+    assert first_plan["status"] == "pending"
     first_item_ids = [item["id"] for item in first_plan["items"][:2]]
 
     workflow = apply_tail_split_plan(
@@ -269,7 +311,9 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
         item_ids=first_item_ids,
         position_x=tail_node.position_x + 80,
         position_y=tail_node.position_y,
+        enqueue=lambda run_id: execute_product_workflow_run(run_id),
     )
+    assert first_run.id in {run.id for run in workflow.runs}
     tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
     first_batch = tail_node.output_json["applied_batches"][-1]
     first_batch_node_ids = set(first_batch["node_ids"])
@@ -302,19 +346,39 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
 
     workflow = run_product_workflow(db_session, product_id=product.id)
     node_ids_after_full_run = {node.id for node in workflow.nodes}
-    assert first_batch_node_ids.isdisjoint(node_ids_after_full_run)
+    assert first_batch_node_ids.issubset(node_ids_after_full_run)
     assert manual_node_id in node_ids_after_full_run
+
+    tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
+    latest_plan = tail_node.output_json["latest_plan"]
+    assert latest_plan["status"] == "pending"
+    waiting_run = next(run for run in workflow.runs if run.status == WorkflowRunStatus.WAITING_CONFIRMATION)
+    assert waiting_run.progress_metadata["pending_tail_confirmations"][0]["tail_node_id"] == tail_node.id
+
+    second_item_ids = [item["id"] for item in latest_plan["items"][:2]]
+    workflow = apply_tail_split_plan(
+        db_session,
+        node_id=tail_node.id,
+        plan_id=latest_plan["plan_id"],
+        item_ids=second_item_ids,
+        position_x=tail_node.position_x + 80,
+        position_y=tail_node.position_y,
+        enqueue=lambda run_id: execute_product_workflow_run(run_id),
+    )
+    node_ids_after_confirm = {node.id for node in workflow.nodes}
+    assert first_batch_node_ids.isdisjoint(node_ids_after_confirm)
+    assert manual_node_id in node_ids_after_confirm
 
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
     latest_plan = tail_node.output_json["latest_plan"]
     assert latest_plan["status"] == "applied"
 
     applied_batches = tail_node.output_json["applied_batches"]
-    assert len(applied_batches) == 2
+    assert len(applied_batches) == 1
     second_batch = applied_batches[-1]
     assert second_batch["batch_id"] != first_batch["batch_id"]
     assert second_batch["plan_id"] != first_batch["plan_id"]
-    assert set(second_batch["node_ids"]).issubset(node_ids_after_full_run)
+    assert set(second_batch["node_ids"]).issubset(node_ids_after_confirm)
 
 
 def test_tail_splitter_missing_upstream_rules_cover_copy_reference_and_image() -> None:

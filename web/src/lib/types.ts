@@ -21,7 +21,8 @@ export type ProductInitialWorkflowEntry = "image" | "copy" | "tail" | "blank";
 export type CanvasTemplateEntryMode = Exclude<ProductInitialWorkflowEntry, "blank">;
 export type WorkflowNodeStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type WorkflowNodeRunStatusValue = WorkflowNodeStatus;
-export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "cancelled";
+export type WorkflowRunStatus = "running" | "waiting_confirmation" | "succeeded" | "failed" | "cancelled";
+export type WorkflowRunStartMode = "from_node" | "after_node";
 export type WorkflowRetryHint = "retry_later" | "revise_input" | "check_settings";
 export type CanvasTemplateKind = "full_canvas" | "node_group";
 export type CanvasTemplateScope = "global" | "user";
@@ -297,10 +298,14 @@ export interface CreateProductInput {
   category?: string;
   price?: string;
   source_note?: string;
+  owner_id?: string;
+  long_text?: string;
+  dynamic_fields?: Record<string, string | number | boolean | null>;
   canvas_template_key?: string;
   initial_workflow_entry?: ProductInitialWorkflowEntry;
   entry_text?: string;
   file?: File;
+  contextDocumentFile?: File;
   referenceFiles?: File[];
 }
 
@@ -614,9 +619,15 @@ export interface ApplyWorkflowTemplateGroupInput {
   position_y: number;
 }
 
+export interface ApplyTailSplitPlanItemInput {
+  id: string;
+  instruction: string;
+}
+
 export interface ApplyTailSplitPlanInput {
   plan_id: string;
-  item_ids: string[];
+  item_ids?: string[];
+  items?: ApplyTailSplitPlanItemInput[];
   position_x?: number;
   position_y?: number;
 }

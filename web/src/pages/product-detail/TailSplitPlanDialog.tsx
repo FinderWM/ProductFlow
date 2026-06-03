@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Sparkles, X } from "lucide-react";
 
 import { useI18n } from "../../lib/preferences";
-import type { TailSplitPlan } from "../../lib/types";
+import type { ApplyTailSplitPlanItemInput, TailSplitPlan } from "../../lib/types";
 
 interface TailSplitPlanDialogProps {
   open: boolean;
@@ -10,7 +10,7 @@ interface TailSplitPlanDialogProps {
   plan: TailSplitPlan | null;
   busy: boolean;
   onClose: () => void;
-  onConfirm: (itemIds: string[]) => void;
+  onConfirm: (items: ApplyTailSplitPlanItemInput[]) => void;
 }
 
 export function TailSplitPlanDialog({
@@ -23,16 +23,29 @@ export function TailSplitPlanDialog({
 }: TailSplitPlanDialogProps) {
   const { t } = useI18n();
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [instructionDrafts, setInstructionDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!open || !plan) {
       return;
     }
     setSelectedItemIds(plan.items.map((item) => item.id));
+    setInstructionDrafts(Object.fromEntries(plan.items.map((item) => [item.id, item.instruction])));
   }, [open, plan]);
 
   const selectedCount = selectedItemIds.length;
   const selectedIdSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
+  const selectedItems = useMemo(
+    () =>
+      plan?.items
+        .filter((item) => selectedIdSet.has(item.id))
+        .map((item) => ({
+          id: item.id,
+          instruction: (instructionDrafts[item.id] ?? item.instruction).trim(),
+        })) ?? [],
+    [instructionDrafts, plan, selectedIdSet],
+  );
+  const hasBlankSelectedInstruction = selectedItems.some((item) => !item.instruction);
 
   if (!open || !plan) {
     return null;
@@ -114,7 +127,19 @@ export function TailSplitPlanDialog({
                       <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
                         {t("detail.tailPlan.instruction")}
                       </div>
-                      <div className="mt-1 whitespace-pre-wrap">{item.instruction}</div>
+                      <textarea
+                        value={instructionDrafts[item.id] ?? item.instruction}
+                        onChange={(event) =>
+                          setInstructionDrafts((current) => ({
+                            ...current,
+                            [item.id]: event.target.value,
+                          }))
+                        }
+                        disabled={busy || !selected}
+                        rows={4}
+                        className="mt-1 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-700 outline-none transition focus:border-fuchsia-300 focus:ring-2 focus:ring-fuchsia-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:focus:border-fuchsia-400 dark:focus:ring-fuchsia-400/15 dark:disabled:bg-slate-900/70"
+                        aria-label={t("detail.tailPlan.instruction")}
+                      />
                     </div>
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
@@ -148,7 +173,11 @@ export function TailSplitPlanDialog({
 
         <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-5 py-4 dark:border-slate-700">
           <div className="text-sm text-slate-500 dark:text-slate-400">
-            {selectedCount ? t("detail.tailPlan.footerReady") : t("detail.tailPlan.footerEmpty")}
+            {!selectedCount
+              ? t("detail.tailPlan.footerEmpty")
+              : hasBlankSelectedInstruction
+                ? t("detail.tailPlan.instructionEmpty")
+                : t("detail.tailPlan.footerReady")}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -161,8 +190,8 @@ export function TailSplitPlanDialog({
             </button>
             <button
               type="button"
-              onClick={() => onConfirm(selectedItemIds)}
-              disabled={busy || !selectedCount}
+              onClick={() => onConfirm(selectedItems)}
+              disabled={busy || !selectedCount || hasBlankSelectedInstruction}
               className="inline-flex items-center rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-fuchsia-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-fuchsia-500 dark:to-violet-500"
             >
               {t("detail.tailPlan.confirm")}

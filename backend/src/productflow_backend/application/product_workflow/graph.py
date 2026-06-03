@@ -11,7 +11,8 @@ from productflow_backend.application.admission import (
     get_queued_generation_positions,
     get_workflow_run_queue_metadata,
 )
-from productflow_backend.domain.enums import WorkflowNodeType, WorkflowRunStatus
+from productflow_backend.application.product_workflow.tail_confirmation import workflow_run_is_user_active
+from productflow_backend.domain.enums import WorkflowNodeType
 from productflow_backend.domain.errors import NotFoundError
 from productflow_backend.domain.workflow_rules import WorkflowRuleEdge, WorkflowRuleNode, topological_node_ids
 from productflow_backend.infrastructure.db.models import (
@@ -306,7 +307,7 @@ def latest_workflow_runs(workflow: ProductWorkflow, limit: int = 10) -> list[Wor
         workflow.runs,
         key=lambda item: (
             item.started_at,
-            item.status == WorkflowRunStatus.RUNNING,
+            workflow_run_is_user_active(item.status),
             item.finished_at or item.started_at,
             item.id,
         ),

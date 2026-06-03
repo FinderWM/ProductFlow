@@ -165,6 +165,12 @@ export function InspectorPanel({
   const InspectorIcon = icon;
   const displayTitle = workflowNodeDisplayTitle({ ...node, title: draft.title || node.title }, t);
   const displayLabel = workflowNodeDisplayLabel(node, t);
+  let actionGridColumns = "grid-cols-2";
+  if (node.node_type === "product_context") {
+    actionGridColumns = onCancelRun ? "grid-cols-2" : "grid-cols-1";
+  } else if (onCancelRun) {
+    actionGridColumns = "grid-cols-3";
+  }
   const downstreamReferenceCount =
     node.node_type === "image_generation"
       ? new Set(
@@ -269,56 +275,48 @@ export function InspectorPanel({
           </div>
         ) : null}
 
-        {node.node_type !== "product_context" || onCancelRun ? (
-          <div
-            className={`mt-4 grid gap-2 ${
-              node.node_type === "product_context" ? "grid-cols-1" : onCancelRun ? "grid-cols-3" : "grid-cols-2"
-            }`}
+        <div className={`mt-4 grid gap-2 ${actionGridColumns}`}>
+          <button
+            type="button"
+            onClick={onRun}
+            disabled={runActionState.disabled}
+            className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-primary-spring"
+            title={runActionState.title}
           >
-            {node.node_type !== "product_context" ? (
-              <button
-                type="button"
-                onClick={onRun}
-                disabled={runActionState.disabled}
-                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-primary-spring"
-                title={runActionState.title}
-              >
-                {runActionState.pending ? (
-                  <Loader2 size={13} className="mr-1.5 animate-spin" />
-                ) : (
-                  <Play size={13} className="mr-1.5" />
-                )}
-                {runActionState.label}
-              </button>
-            ) : null}
-            {onCancelRun ? (
-              <button
-                type="button"
-                onClick={onCancelRun}
-                disabled={cancelBusy}
-                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
-                title={t("detail.inspector.cancelCurrentRun")}
-              >
-                {cancelBusy ? (
-                  <Loader2 size={13} className="mr-1.5 animate-spin" />
-                ) : (
-                  <OctagonX size={13} className="mr-1.5" />
-                )}
-                {t("detail.cancel")}
-              </button>
-            ) : null}
-            {node.node_type !== "product_context" ? (
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={busy}
-                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
-              >
-                <Trash2 size={13} className="mr-1.5" /> {t("detail.delete")}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+            {runActionState.pending ? (
+              <Loader2 size={13} className="mr-1.5 animate-spin" />
+            ) : (
+              <Play size={13} className="mr-1.5" />
+            )}
+            {runActionState.label}
+          </button>
+          {onCancelRun ? (
+            <button
+              type="button"
+              onClick={onCancelRun}
+              disabled={cancelBusy}
+              className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
+              title={t("detail.inspector.cancelCurrentRun")}
+            >
+              {cancelBusy ? (
+                <Loader2 size={13} className="mr-1.5 animate-spin" />
+              ) : (
+                <OctagonX size={13} className="mr-1.5" />
+              )}
+              {t("detail.cancel")}
+            </button>
+          ) : null}
+          {node.node_type !== "product_context" ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
+            >
+              <Trash2 size={13} className="mr-1.5" /> {t("detail.delete")}
+            </button>
+          ) : null}
+        </div>
       </section>
 
       <section className="config-bubble rounded-2xl p-4 shadow-sm">

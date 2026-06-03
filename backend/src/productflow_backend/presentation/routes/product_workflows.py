@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from productflow_backend.application.auth import user_has_api_permission
 from productflow_backend.application.moderation import ensure_resource_usable
+from productflow_backend.application.product_workflow import execution as workflow_execution
 from productflow_backend.application.product_workflows import (
     apply_node_group_template_to_workflow,
     apply_tail_split_plan,
@@ -776,8 +777,10 @@ def apply_tail_split_plan_endpoint(
         node_id=node_id,
         plan_id=payload.plan_id,
         item_ids=payload.item_ids,
+        items=payload.items,
         position_x=payload.position_x,
         position_y=payload.position_y,
+        enqueue=lambda run_id: workflow_execution.enqueue_workflow_run(run_id),
     )
     return serialize_product_workflow(workflow)
 
@@ -900,6 +903,7 @@ def run_product_workflow_endpoint(
         session,
         product_id=product_id,
         start_node_id=payload.start_node_id if payload else None,
+        start_mode=payload.start_mode if payload else "from_node",
     )
     return serialize_product_workflow(workflow)
 

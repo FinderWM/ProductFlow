@@ -24,6 +24,8 @@ from productflow_backend.application.contracts import (
     CreativeBriefPayload,
     PosterGenerationInput,
     ProductInput,
+    TailSplitPlanDraft,
+    TailSplitPlanInput,
 )
 from productflow_backend.application.product_workflow.templates import TEMPLATE_METADATA_CONFIG_KEY
 from productflow_backend.application.product_workflow_dependencies import WorkflowExecutionDependencies
@@ -35,15 +37,18 @@ from productflow_backend.domain.enums import (
 from productflow_backend.infrastructure.db.models import (
     AppSetting,
     CopySet,
+    GenerationConfigDailyStat,
+    GenerationConfigState,
     PosterVariant,
     Product,
     ProductWorkflow,
     ProviderProfile,
+    UserDailyUsageStat,
     WorkflowEdge,
     WorkflowNode,
 )
 from productflow_backend.infrastructure.db.session import get_session_factory
-from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, add_generation_config
+from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, TEXT_PURPOSE, add_generation_config
 
 _WORKFLOW_NODE_VISUAL_WIDTH = 248
 _WORKFLOW_NODE_VISUAL_HEIGHT = 248
@@ -373,6 +378,34 @@ def test_product_workflow_dag_runs_and_persists_artifacts(configured_env: Path) 
         assert session.query(ProductWorkflow).filter_by(product_id=product_id).count() == 1
     finally:
         session.close()
+
+
+def test_workflow_run_after_node_excludes_start_node(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={"name": "从节点后运行商品"},
+        files={"image": ("workflow.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+
+    workflow = client.get(f"/api/products/{product_id}/workflow").json()
+    context_node = next(node for node in workflow["nodes"] if node["node_type"] == "product_context")
+    run_response = client.post(
+        f"/api/products/{product_id}/workflow/run",
+        json={"start_node_id": context_node["id"], "start_mode": "after_node"},
+    )
+    assert run_response.status_code == 200
+    run_payload = run_response.json()["runs"][0]
+    assert run_payload["progress_metadata"]["start_mode"] == "after_node"
+    assert run_payload["node_runs"]
+    assert context_node["id"] not in {node_run["node_id"] for node_run in run_payload["node_runs"]}
 
 
 def test_real_image_config_uses_provider_even_when_legacy_poster_mode_is_template(
@@ -1467,6 +1500,80 @@ def test_user_canvas_template_from_workflow_rejects_blank_and_trims_tail_outputs
         session.close()
 
 
+def test_tail_splitter_accepts_provider_source_refs_as_scalar_string(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    class ScalarSourceRefsTailProvider:
+        provider_name = "tail-text"
+        prompt_version = "tail-text-v1"
+
+        def generate_tail_split_plan(self, payload: TailSplitPlanInput) -> tuple[TailSplitPlanDraft, str]:
+            assert payload.source_text == "三阶魔方的展示需要使用两个角度的图片，分别是正视图和剖面图"
+            return (
+                TailSplitPlanDraft.model_validate(
+                    {
+                        "source_summary": "三阶魔方需要正视图和剖面图两类展示。",
+                        "items": [
+                            {
+                                "title": "正视图",
+                                "instruction": "生成三阶魔方正视图，突出完整外观。",
+                                "visual_intent": "正面展示魔方结构",
+                                "source_refs": "三阶魔方展示需求，正视图",
+                            },
+                            {
+                                "title": "剖面图",
+                                "instruction": "生成三阶魔方剖面图，突出内部结构。",
+                                "visual_intent": "剖面展示魔方结构",
+                                "source_refs": "三阶魔方展示需求，剖面图",
+                            },
+                        ],
+                    }
+                ),
+                "tail-model",
+            )
+
+    _execute_workflow_queue_inline(
+        monkeypatch,
+        dependencies=WorkflowExecutionDependencies(
+            text_provider_resolver=lambda: ScalarSourceRefsTailProvider(),
+        ),
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={
+            "name": "魔方图",
+            "initial_workflow_entry": "tail",
+            "entry_text": "三阶魔方的展示需要使用两个角度的图片，分别是正视图和剖面图",
+        },
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+
+    workflow_response = client.get(f"/api/products/{product_id}/workflow")
+    assert workflow_response.status_code == 200
+    tail_node = next(node for node in workflow_response.json()["nodes"] if node["node_type"] == "tail_splitter")
+
+    selected_run = client.post(
+        f"/api/products/{product_id}/workflow/run",
+        json={"start_node_id": tail_node["id"]},
+    )
+    assert selected_run.status_code == 200
+    payload = _wait_for_workflow_run(client, product_id, status="waiting_confirmation")
+    tail_output = next(node for node in payload["nodes"] if node["id"] == tail_node["id"])["output_json"]
+
+    items = tail_output["latest_plan"]["items"]
+    assert items[0]["source_refs"] == ["三阶魔方展示需求，正视图"]
+    assert items[1]["source_refs"] == ["三阶魔方展示需求，剖面图"]
+
+
 def test_admin_can_copy_user_canvas_template_to_global_with_global_category(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -2536,3 +2643,84 @@ def test_copy_generation_runs_without_product_context_edge(
         },
     )
     assert not any(source["label"] == "商品资料" for source in copy_output["context_sources"])
+
+
+def test_copy_generation_provider_failure_records_text_usage_stats(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    class FailingTextProvider:
+        provider_name = "failing-text"
+        prompt_version = "failing-text-v1"
+
+        def generate_brief(self, product: ProductInput) -> tuple[CreativeBriefPayload, str]:
+            del product
+            raise RuntimeError("text provider failed")
+
+        def generate_copy(
+            self,
+            product: ProductInput,
+            brief: CreativeBriefPayload,
+            config: CopyNodeConfigV2,
+            reference_images: list | None = None,
+        ) -> tuple[CopyPayloadV2, str]:
+            del product, brief, config, reference_images
+            raise AssertionError("copy generation should not run after brief failure")
+
+    _execute_workflow_queue_inline(
+        monkeypatch,
+        dependencies=WorkflowExecutionDependencies(
+            text_provider_resolver=lambda: FailingTextProvider(),
+        ),
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={"name": "失败统计商品"},
+        files={"image": ("source.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+
+    workflow_response = client.get(f"/api/products/{product_id}/workflow")
+    assert workflow_response.status_code == 200
+    copy_node = next(node for node in workflow_response.json()["nodes"] if node["node_type"] == "copy_generation")
+
+    selected_run = client.post(
+        f"/api/products/{product_id}/workflow/run",
+        json={"start_node_id": copy_node["id"]},
+    )
+    assert selected_run.status_code == 200
+    _wait_for_workflow_run(client, product_id, status="failed")
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        user_stats = list(session.scalars(sa.select(UserDailyUsageStat)))
+        config_stats = list(session.scalars(sa.select(GenerationConfigDailyStat)))
+        config_state = session.scalar(sa.select(GenerationConfigState))
+
+    assert len(user_stats) == 1
+    user_stat = user_stats[0]
+    assert user_stat.purpose == TEXT_PURPOSE
+    assert user_stat.attempt_count == 1
+    assert user_stat.success_count == 0
+    assert user_stat.failure_count == 1
+    assert user_stat.generated_unit_count == 0
+    assert user_stat.last_failure_at is not None
+
+    assert len(config_stats) == 1
+    config_stat = config_stats[0]
+    assert config_stat.attempt_count == 1
+    assert config_stat.success_count == 0
+    assert config_stat.failure_count == 1
+    assert config_stat.generated_unit_count == 0
+    assert config_stat.last_failure_at is not None
+    assert config_state is not None
+    assert config_state.current_concurrency == 0
+    assert config_state.last_failure_at is not None

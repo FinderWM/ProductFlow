@@ -150,10 +150,10 @@
   `['product-workflow', productId]`; deleting a node must not be represented by local-only filtering because connected
   edges and run history cleanup are backend responsibilities.
 - Workflow execution is asynchronous from the frontend perspective: `runProductWorkflow(productId, input?)` returns the
-  persisted kickoff state, then the page polls `['product-workflow', productId]` while any run is `running` or any node is
-  `queued` / `running`. Run history must use backend `is_retryable` for retry actions. Cancellation belongs in the
-  selected node detail actions when the selected node is part of a cancelable active run; cancel buttons call the workflow
-  cancel API and must not be local-only state.
+  persisted kickoff state, then the page polls `['product-workflow', productId]` while any run is `running` /
+  `waiting_confirmation` or any node is `queued` / `running`. Run history must use backend `is_retryable` for retry
+  actions. Cancellation belongs in the selected node detail actions when the selected node is part of a cancelable active
+  run; cancel buttons call the workflow cancel API and must not be local-only state.
 - ProductDetail run history should display both workflow-run and node-run status details. Each run card should surface
   queue/running text, `is_cancelable`, `is_retryable`, `failure_reason`, and a node-run list with node title, node type,
   node-run status, started/finished timestamps, and node-run failure reason. Image-generation prompt review may be exposed
@@ -713,72 +713,95 @@ const structureBusy = layoutMutationBusy || workflowActive;
 Use persisted workflow activity to control polling and unsafe structural mutations. Use node status plus submission
 pending state for individual node run actions, while keeping layout dragging independent from provider execution.
 
-## Scenario: Tail splitter node and split-plan apply UX
+## Scenario: Tail splitter confirmation UX
 
 ### 1. Scope / Trigger
-- Trigger: ProductDetail changes that introduce `tail_splitter` nodes, tail split-plan preview/apply flows, or tail-batch
-  rerun actions.
+- Trigger: ProductDetail changes that introduce `tail_splitter` nodes, tail split-plan preview/apply flows, workflow run
+  modes, or waiting-confirmation status displays.
 
 ### 2. Signatures
 - `WorkflowNode.node_type` includes `tail_splitter`.
+- `WorkflowRun.status` includes `waiting_confirmation`.
+- `WorkflowRunStartMode = "from_node" | "after_node"`.
 - API contracts:
-  - `api.runProductWorkflow(productId, { start_node_id? })`
-  - `api.applyTailSplitPlan(nodeId, { plan_id, item_ids, position_x?, position_y? })`
+  - `api.runProductWorkflow(productId, { start_node_id?, start_mode? })`
+  - `api.applyTailSplitPlan(nodeId, { plan_id, item_ids?, items?, position_x?, position_y? })`
+  - `items` entries are `{ id: string; instruction?: string | null }` and take precedence over `item_ids`.
 - Tail node data:
   - `config_json` carries editable split input fields (for example source text/description/max items).
   - `output_json.latest_plan` carries pending/applied split-plan payload.
 
 ### 3. Contracts
 - ProductDetail must expose tail nodes as first-class ordinary nodes in add-node, node labels, iconography, and inspector.
-- Running a tail node should produce a pending split plan that is visible and reviewable before graph expansion.
-- The split-plan dialog shows plan items with remove-selection controls; confirm applies only remaining items, cancel keeps
-  the graph unchanged.
+- Node toolbars should expose two run actions for single nodes: `运行此节点` and
+  `从此节点开始运行后面的节点`. The downstream action submits `start_mode="after_node"` and does not rerun
+  the selected node itself.
+- Running a tail node should produce a pending split plan and a `waiting_confirmation` run that is visible and cancelable
+  before graph expansion.
+- The split-plan dialog shows plan items with remove-selection controls and editable instruction text. Confirm submits
+  selected `{id, instruction}` entries; cancel keeps the graph unchanged.
+- Waiting confirmation must display a distinct status label and queue text so the user can tell the system is waiting for
+  their confirmation rather than provider capacity.
 - Tail apply mutation invalidates/refreshes `["product-workflow", productId]` and selects a sensible post-apply focus
   (applied tail node or newly generated branch anchor) without losing page context.
-- Manual tail apply path must not auto-apply all items when the dialog has explicit item removals.
-- UI must keep two rerun intents distinct:
-  - re-split tail branch (destructive to prior generated tail batch);
-  - rerun current tail batch image outputs (non-destructive to edited public nodes).
+- Manual tail apply path must not auto-apply all items when the dialog has explicit item removals or edited instructions.
+- After confirmation, the same waiting run may resume into generated downstream node runs; the UI should keep polling until
+  the run becomes terminal or has another pending confirmation.
 - Workflow run and tail apply permission failures surface backend `ApiError.detail` clearly (for example `没有接口权限`)
   near the action that failed.
 
 ### 4. Validation & Error Matrix
 - Tail apply called with stale/non-pending plan -> show backend detail and keep dialog open for user correction/refresh.
 - Tail apply called with zero selected items -> prevent submit locally or show backend validation detail.
+- Tail apply called with a blank edited instruction -> show backend detail and keep the user's draft visible.
+- Run status `waiting_confirmation` -> show waiting-confirmation styling, active polling, and cancel affordance when the
+  backend marks the run cancelable.
 - User lacks `inspirations:write` -> tail apply returns `403`; ProductDetail shows permission error without clearing current
   tail plan view.
 - User lacks `inspirations:generate` -> run action returns `403`; ProductDetail shows permission error on run controls.
 
 ### 5. Good/Base/Bad Cases
-- Good: user runs tail, deselects one plan item in dialog, confirms, and only selected image branches are created.
-- Good: user edits generated public copy node then chooses current-batch rerun and keeps public-node edits.
+- Good: user runs tail, edits one plan-item instruction, deselects another item, confirms, and only selected image branches
+  are created with edited instructions.
+- Good: user chooses `从此节点开始运行后面的节点` on a tail node's previous generated branch anchor to avoid
+  re-running the tail itself.
+- Good: a run card clearly shows `waiting_confirmation`, not a generic queued/running capacity message.
 - Base: user cancels dialog and the workflow graph remains unchanged.
 - Bad: opening tail plan dialog immediately creates nodes before confirmation.
-- Bad: using one generic rerun action that silently re-splits and discards edited public nodes.
+- Bad: the downstream run action submits only `start_node_id` and reruns the selected node.
+- Bad: treating `waiting_confirmation` as terminal and stopping status polling while the run is still cancelable.
 
 ### 6. Tests Required
 - `defaultConfigForType("tail_splitter")` and node label/icon/display contract tests.
-- ProductDetail tests for pending-plan dialog open/cancel/confirm and selected-item payload.
+- ProductDetail helper tests for `运行此节点` and downstream-run toolbar actions.
+- ProductDetail tests for pending-plan dialog open/cancel/confirm, edited-instruction payload, and selected-item payload.
+- Workflow status helper tests proving `waiting_confirmation` is active and has distinct queue text.
 - API contract test for `applyTailSplitPlan` request shape.
-- Build gate: `just web-build`.
+- Build gate: `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build`.
 
 ### 7. Wrong vs Correct
 
 #### Wrong
 
 ```tsx
+runProductWorkflow(productId, { start_node_id: nodeId });
 onTailRunSuccess(() => applyTailSplitPlan(nodeId, { plan_id, item_ids: allItemIds }));
 ```
 
-This removes user confirmation and item filtering.
+This reruns the selected node for downstream-run flows and removes user confirmation, instruction editing, and item
+filtering.
 
 #### Correct
 
 ```tsx
-onTailRunSuccess(() => setTailPlanDialogOpen(true));
+runProductWorkflow(productId, { start_node_id: nodeId, start_mode: "after_node" });
+applyTailSplitPlan(nodeId, {
+  plan_id: plan.plan_id,
+  items: selectedItems.map((item) => ({ id: item.id, instruction: drafts[item.id] })),
+});
 ```
 
-Tail run exposes a pending plan first; apply happens only after explicit dialog confirmation.
+The downstream run action uses an explicit start mode, and tail apply sends the user's confirmed item/instruction choices.
 
 ## Scenario: Autosaved direct image workbench
 

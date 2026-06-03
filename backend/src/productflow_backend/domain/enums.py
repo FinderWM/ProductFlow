@@ -77,6 +77,7 @@ class WorkflowRunStatus(StrEnum):
     """工作流运行记录状态。"""
 
     RUNNING = "running"
+    WAITING_CONFIRMATION = "waiting_confirmation"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"

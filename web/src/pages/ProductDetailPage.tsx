@@ -41,6 +41,7 @@ import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
 import { useI18n } from "../lib/preferences";
 import type {
+  ApplyTailSplitPlanItemInput,
   CanvasTemplateSummary,
   CanvasTemplateScope,
   CanvasTemplateCategory,
@@ -50,6 +51,7 @@ import type {
   TailSplitPlan,
   WorkflowNode,
   WorkflowNodeType,
+  WorkflowRunStartMode,
 } from "../lib/types";
 import {
   ADD_NODE_OPTIONS,
@@ -128,6 +130,7 @@ import { normalizeWorkflowZoom } from "./product-detail/reactFlowAdapters";
 
 type SidebarTab = "singleNode" | "templates" | "details" | "runs" | "images";
 type TemplateScopeFilter = CanvasTemplateScope | "all";
+type RunWorkflowInput = { startNodeId: string; startMode: WorkflowRunStartMode } | undefined;
 
 type PendingDeleteAction =
   | { kind: "node"; node: WorkflowNode }
@@ -891,11 +894,13 @@ export function ProductDetailPage() {
   };
 
   const runWorkflowMutation = useMutation({
-    mutationFn: (startNodeId?: string) => {
+    mutationFn: (input?: RunWorkflowInput) => {
       assertProductUsable();
       return api.runProductWorkflow(
         productId,
-        startNodeId ? { start_node_id: startNodeId } : {},
+        input?.startNodeId
+          ? { start_node_id: input.startNodeId, start_mode: input.startMode }
+          : {},
       );
     },
     onSuccess: async (nextWorkflow) => {
@@ -1087,18 +1092,27 @@ export function ProductDetailPage() {
   });
 
   const applyTailSplitPlanMutation = useMutation({
-    mutationFn: async ({ nodeId, plan, itemIds }: { nodeId: string; plan: TailSplitPlan; itemIds: string[] }) => {
+    mutationFn: async ({
+      nodeId,
+      plan,
+      items,
+    }: {
+      nodeId: string;
+      plan: TailSplitPlan;
+      items: ApplyTailSplitPlanItemInput[];
+    }) => {
       assertProductUsable();
       await flushSelectedDraft();
       const previousWorkflow = getCurrentWorkflow();
       const tailNode = previousWorkflow?.nodes.find((node) => node.id === nodeId) ?? null;
       const nextWorkflow = await api.applyTailSplitPlan(nodeId, {
         plan_id: plan.plan_id,
-        item_ids: itemIds,
+        item_ids: items.map((item) => item.id),
+        items,
         position_x: (tailNode?.position_x ?? 120) + 80,
         position_y: tailNode?.position_y ?? 120,
       });
-      return { nextWorkflow, previousWorkflow, itemCount: itemIds.length };
+      return { nextWorkflow, previousWorkflow, itemCount: items.length };
     },
     onSuccess: ({ nextWorkflow, previousWorkflow, itemCount }) => {
       const previousNodeIds = new Set(previousWorkflow?.nodes.map((node) => node.id) ?? []);
@@ -1679,24 +1693,24 @@ export function ProductDetailPage() {
     return () => window.clearTimeout(timer);
   }, [draft, draftDirty, productBlocked, selectedNode?.id, workflowActive]);
 
-  const handleRunWorkflow = async (startNodeId?: string) => {
+  const handleRunWorkflow = async (startNodeId?: string, startMode: WorkflowRunStartMode = "from_node") => {
     if (productBlocked) {
       showBlockedProductError();
       return;
     }
     try {
       await flushSelectedDraft();
-      await runWorkflowMutation.mutateAsync(startNodeId);
+      await runWorkflowMutation.mutateAsync(startNodeId ? { startNodeId, startMode } : undefined);
     } catch {
       // Mutations already surface ApiError.detail in local error state.
     }
   };
 
-  const handleConfirmTailSplitPlan = async (itemIds: string[]) => {
+  const handleConfirmTailSplitPlan = async (items: ApplyTailSplitPlanItemInput[]) => {
     if (!selectedNode || selectedNode.node_type !== "tail_splitter" || !selectedTailPendingPlan) {
       return;
     }
-    if (!itemIds.length) {
+    if (!items.length) {
       setError(t("detail.tailPlan.selectAtLeastOne"));
       return;
     }
@@ -1708,7 +1722,7 @@ export function ProductDetailPage() {
       await applyTailSplitPlanMutation.mutateAsync({
         nodeId: selectedNode.id,
         plan: selectedTailPendingPlan,
-        itemIds,
+        items,
       });
     } catch {
       // mutation handles UI errors
@@ -1777,7 +1791,7 @@ export function ProductDetailPage() {
     updateNodeCopyMutation.isPending;
   const structureBusy = layoutMutationBusy || workflowActive || productBlocked;
   const runSubmissionPending = runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending;
-  const pendingStartNodeId = runWorkflowMutation.isPending ? (runWorkflowMutation.variables ?? null) : null;
+  const pendingStartNodeId = runWorkflowMutation.isPending ? (runWorkflowMutation.variables?.startNodeId ?? null) : null;
   const fullWorkflowRunBusy = runSubmissionPending || workflowActive;
   const fullWorkflowRunDisabled = fullWorkflowRunBusy || productBlocked;
   const blockedProductActionTitle = productBlocked ? blockedProductActionMessage() : "";
@@ -1881,6 +1895,12 @@ export function ProductDetailPage() {
     if (actionId === "run") {
       if (target.kind === "single") {
         void handleRunWorkflow(target.nodeId);
+      }
+      return;
+    }
+    if (actionId === "runAfter") {
+      if (target.kind === "single") {
+        void handleRunWorkflow(target.nodeId, "after_node");
       }
       return;
     }

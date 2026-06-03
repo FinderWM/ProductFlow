@@ -260,6 +260,9 @@ export function getWorkflowNodeActiveRunContext(
 }
 
 export function workflowRunQueueText(run: WorkflowRun, t: TranslateFunction = defaultT): string {
+  if (run.status === "waiting_confirmation") {
+    return t("detail.runWaitingConfirmationText");
+  }
   const retryMetadata = workflowRunRetryMetadata(run);
   const retryText =
     run.status === "running" && retryMetadata?.last_failure_reason
@@ -373,7 +376,7 @@ export function hasActiveWorkflow(workflow: ProductWorkflow | undefined | null):
     return false;
   }
   return (
-    workflow.runs.some((run) => run.status === "running") ||
+    workflow.runs.some((run) => run.status === "running" || run.status === "waiting_confirmation") ||
     workflow.nodes.some((node) => node.status === "queued" || node.status === "running")
   );
 }
@@ -384,7 +387,7 @@ export function isProductWorkflowStatusActive(status: ProductWorkflowStatus | un
   }
   return (
     status.has_active_workflow ||
-    status.runs.some((run) => run.status === "running") ||
+    status.runs.some((run) => run.status === "running" || run.status === "waiting_confirmation") ||
     status.nodes.some((node) => node.status === "queued" || node.status === "running")
   );
 }

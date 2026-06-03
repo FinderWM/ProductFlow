@@ -58,11 +58,13 @@ from productflow_backend.application.product_workflow.run_state import (
     workflow_run_failure_context,
     workflow_run_failure_progress_metadata,
 )
+from productflow_backend.application.product_workflow.tail_confirmation import (
+    append_pending_tail_confirmation,
+    run_has_pending_tail_confirmations,
+    workflow_run_is_user_active,
+)
 from productflow_backend.application.product_workflow.tail_splitter import (
-    apply_tail_split_plan,
     build_tail_split_plan_output,
-    delete_tail_generated_branch,
-    pending_tail_split_plan_or_raise,
     read_tail_splitter_config,
 )
 from productflow_backend.application.product_workflow_dependencies import (
@@ -117,7 +119,7 @@ def _active_workflow_run(workflow: ProductWorkflow) -> WorkflowRun | None:
         (
             run
             for run in sorted(workflow.runs, key=lambda item: item.started_at, reverse=True)
-            if WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_running(run.status)
+            if workflow_run_is_user_active(run.status)
         ),
         None,
     )
@@ -132,7 +134,7 @@ def _active_workflow_run_for_nodes(workflow: ProductWorkflow, node_ids: set[str]
         (
             run
             for run in sorted(workflow.runs, key=lambda item: item.started_at, reverse=True)
-            if WORKFLOW_RUN_GENERATION_TASK_CONTRACT.is_active(run.status)
+            if workflow_run_is_user_active(run.status)
             and _workflow_run_overlaps_nodes(run, node_ids)
         ),
         None,
@@ -182,6 +184,7 @@ def start_product_workflow_run(
     *,
     product_id: str,
     start_node_id: str | None = None,
+    start_mode: str = "from_node",
     progress_metadata: dict[str, Any] | None = None,
     node_ids_to_run_override: set[str] | None = None,
 ) -> WorkflowRunKickoff:
@@ -196,14 +199,17 @@ def start_product_workflow_run(
         if (
             start_node.status == WorkflowNodeStatus.FAILED
             and start_node.failure_reason != WORKFLOW_CANCELLED_REASON
-            and not workflow_node_failed_run_is_retryable(start_node, workflow.runs)
+                and not workflow_node_failed_run_is_retryable(start_node, workflow.runs)
         ):
             raise BusinessValidationError("该工作流节点不可重试")
+    elif start_mode == "after_node":
+        raise BusinessValidationError("从节点后运行需要选择起始节点")
     node_ids_to_run = (
         node_ids_to_run_override
         if node_ids_to_run_override is not None
-        else _node_ids_to_run(session, workflow, start_node_id)
+        else _node_ids_to_run(session, workflow, start_node_id, start_mode=start_mode)
     )
+    node_ids_to_run = _exclude_generated_nodes_for_running_tails(workflow, node_ids_to_run)
     if not node_ids_to_run:
         raise BusinessValidationError("工作流没有可运行节点")
     active_run = _active_workflow_run_for_nodes(workflow, node_ids_to_run)
@@ -220,6 +226,7 @@ def start_product_workflow_run(
     next_progress_metadata.setdefault("run_mode", "selected" if start_node_id is not None else "full")
     if start_node_id is not None:
         next_progress_metadata.setdefault("start_node_id", start_node_id)
+        next_progress_metadata.setdefault("start_mode", start_mode)
     run = WorkflowRun(
         workflow_id=workflow.id,
         status=WorkflowRunStatus.RUNNING,
@@ -334,9 +341,15 @@ def run_product_workflow(
     *,
     product_id: str,
     start_node_id: str | None = None,
+    start_mode: str = "from_node",
     dependencies: WorkflowExecutionDependencies | None = None,
 ) -> ProductWorkflow:
-    kickoff = start_product_workflow_run(session, product_id=product_id, start_node_id=start_node_id)
+    kickoff = start_product_workflow_run(
+        session,
+        product_id=product_id,
+        start_node_id=start_node_id,
+        start_mode=start_mode,
+    )
     if kickoff.created:
         _execute_product_workflow_run(
             session,
@@ -360,6 +373,7 @@ def submit_product_workflow_run(
     *,
     product_id: str,
     start_node_id: str | None = None,
+    start_mode: str = "from_node",
     enqueue: Callable[[str], None] | None = None,
     progress_metadata: dict[str, Any] | None = None,
 ) -> ProductWorkflow:
@@ -367,6 +381,7 @@ def submit_product_workflow_run(
         session,
         product_id=product_id,
         start_node_id=start_node_id,
+        start_mode=start_mode,
         progress_metadata=progress_metadata,
     )
     if kickoff.should_enqueue:
@@ -406,10 +421,6 @@ def _workflow_run_mode(run: WorkflowRun) -> str:
     if mode in {"full", "selected"}:
         return str(mode)
     return "full" if len(run.node_runs) >= len(run.workflow.nodes) else "selected"
-
-
-def _workflow_run_resplits_tails(run: WorkflowRun) -> bool:
-    return _workflow_run_mode(run) == "full"
 
 
 def execute_product_workflow_run(
@@ -578,11 +589,6 @@ def _execute_workflow_node_run(
     node_run = session.get(WorkflowNodeRun, node_run_id)
     if node_run is None:
         return
-    if node.node_type == WorkflowNodeType.TAIL_SPLITTER and _workflow_run_resplits_tails(run):
-        delete_tail_generated_branch(session, workflow=workflow, tail_node=node)
-        session.expire(workflow, ["nodes", "edges", "runs"])
-        workflow = queries.get_workflow_or_raise(run.workflow_id)
-        node = queries.get_node_or_raise(node_run.node_id)
     try:
         logger.info(
             "开始执行工作流节点: run_id=%s node_id=%s node_type=%s",
@@ -591,10 +597,6 @@ def _execute_workflow_node_run(
             node.node_type.value,
         )
         output = _execute_node(session, workflow_id=workflow.id, node=node, dependencies=dependencies)
-        if node.node_type == WorkflowNodeType.TAIL_SPLITTER and _workflow_run_resplits_tails(run):
-            node.output_json = output
-            _auto_apply_tail_plan_for_run(session, run=run, workflow=workflow, tail_node=node)
-            output = dict(node.output_json or output)
     except GenerationConfigWaitError:
         session.rollback()
         _reset_workflow_node_run_for_generation_config_wait(session, node_run_id=node_run_id)
@@ -650,6 +652,8 @@ def _execute_workflow_node_run(
     node_run.poster_variant_id = poster_ids[0] if poster_ids else output.get("poster_variant_id")
     node_run.image_session_asset_id = output.get("image_session_asset_id")
     node_run.finished_at = now_utc()
+    if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
+        _append_tail_pending_confirmation_from_output(run=run, node=node, node_run=node_run, output=output)
     workflow.updated_at = now_utc()
     session.commit()
     logger.info("工作流节点执行成功: run_id=%s node_id=%s", run.id, node.id)
@@ -775,6 +779,14 @@ def _finalize_workflow_run_if_terminal(session: Session, *, run: WorkflowRun) ->
         return False
     now = now_utc()
     if node_runs and all(node_run.status == WorkflowNodeStatus.SUCCEEDED for node_run in node_runs):
+        if run_has_pending_tail_confirmations(run):
+            run.status = WorkflowRunStatus.WAITING_CONFIRMATION
+            run.failure_reason = None
+            run.finished_at = None
+            run.workflow.updated_at = now
+            logger.info("工作流等待尾巴确认: run_id=%s workflow_id=%s", run.id, run.workflow_id)
+            session.commit()
+            return True
         run.status = WorkflowRunStatus.SUCCEEDED
         run.finished_at = now
         run.workflow.updated_at = now
@@ -819,64 +831,38 @@ def _finalize_workflow_run_if_terminal(session: Session, *, run: WorkflowRun) ->
     return True
 
 
-def _auto_apply_tail_plan_for_run(
-    session: Session,
+def _append_tail_pending_confirmation_from_output(
     *,
     run: WorkflowRun,
-    workflow: ProductWorkflow,
-    tail_node: WorkflowNode,
+    node: WorkflowNode,
+    node_run: WorkflowNodeRun,
+    output: dict[str, Any],
 ) -> None:
-    plan = pending_tail_split_plan_or_raise(tail_node)
-    applied = apply_tail_split_plan(
-        session,
-        tail_node=tail_node,
-        plan_id=plan.plan_id,
-        item_ids=[item.id for item in plan.items],
-        position_x=tail_node.position_x + 80,
-        position_y=tail_node.position_y,
+    latest_plan = output.get("latest_plan")
+    if not isinstance(latest_plan, dict):
+        return
+    plan_id = latest_plan.get("plan_id")
+    if not isinstance(plan_id, str) or not plan_id.strip():
+        return
+    append_pending_tail_confirmation(
+        run,
+        tail_node_id=node.id,
+        plan_id=plan_id,
+        node_run_id=node_run.id,
     )
-    existing_run_node_ids = {node_run.node_id for node_run in run.node_runs}
-    now = now_utc()
-    for node_id in applied.created_node_ids:
-        if node_id in existing_run_node_ids:
-            continue
-        created_node = session.get(WorkflowNode, node_id)
-        if created_node is None or created_node.workflow_id != workflow.id:
-            continue
-        if created_node.status == WorkflowNodeStatus.SUCCEEDED:
-            session.add(
-                WorkflowNodeRun(
-                    workflow_run_id=run.id,
-                    node_id=created_node.id,
-                    status=WorkflowNodeStatus.SUCCEEDED,
-                    output_json=created_node.output_json,
-                    copy_set_id=(
-                        created_node.output_json.get("copy_set_id")
-                        if isinstance(created_node.output_json, dict)
-                        and isinstance(created_node.output_json.get("copy_set_id"), str)
-                        else None
-                    ),
-                    finished_at=now,
-                )
-            )
-            continue
-        created_node.status = WorkflowNodeStatus.QUEUED
-        created_node.failure_reason = None
-        created_node.last_run_at = now
-        session.add(
-            WorkflowNodeRun(
-                workflow_run_id=run.id,
-                node_id=created_node.id,
-                status=WorkflowNodeStatus.QUEUED,
-            )
-        )
-    workflow.updated_at = now_utc()
-    session.flush()
 
 
-def _node_ids_to_run(session: Session, workflow: ProductWorkflow, start_node_id: str | None) -> set[str]:
+def _node_ids_to_run(
+    session: Session,
+    workflow: ProductWorkflow,
+    start_node_id: str | None,
+    *,
+    start_mode: str = "from_node",
+) -> set[str]:
     if start_node_id is None:
         return {node.id for node in workflow.nodes}
+    if start_mode not in {"from_node", "after_node"}:
+        raise BusinessValidationError("工作流运行模式不支持")
     rule_nodes = [
         WorkflowRuleNode(
             id=node.id,
@@ -901,12 +887,80 @@ def _node_ids_to_run(session: Session, workflow: ProductWorkflow, start_node_id:
             raise BusinessValidationError("工作流连线引用了不存在的节点")
         if _node_has_reusable_output(session, workflow, source_node, target_node=target_node):
             reusable_edges.add((edge.source_node_id, edge.target_node_id))
+    if start_mode == "after_node":
+        downstream_node_ids = _downstream_node_ids(workflow, start_node_id)
+        if not downstream_node_ids:
+            return set()
+        reusable_edges_with_start = {
+            *reusable_edges,
+            *{
+                (edge.source_node_id, edge.target_node_id)
+                for edge in workflow.edges
+                if edge.source_node_id == start_node_id
+            },
+        }
+        node_ids_to_run: set[str] = set()
+        for downstream_node_id in downstream_node_ids:
+            node_ids_to_run.update(
+                selected_node_execution_plan(
+                    nodes=rule_nodes,
+                    edges=rule_edges,
+                    start_node_id=downstream_node_id,
+                    reusable_edges=reusable_edges_with_start,
+                )
+            )
+        node_ids_to_run.discard(start_node_id)
+        return node_ids_to_run
     return selected_node_execution_plan(
         nodes=rule_nodes,
         edges=rule_edges,
         start_node_id=start_node_id,
         reusable_edges=reusable_edges,
     )
+
+
+def _downstream_node_ids(workflow: ProductWorkflow, start_node_id: str) -> set[str]:
+    outgoing: dict[str, list[str]] = {}
+    for edge in workflow.edges:
+        outgoing.setdefault(edge.source_node_id, []).append(edge.target_node_id)
+    seen: set[str] = set()
+    pending = list(outgoing.get(start_node_id, []))
+    while pending:
+        node_id = pending.pop()
+        if node_id in seen:
+            continue
+        seen.add(node_id)
+        pending.extend(outgoing.get(node_id, []))
+    return seen
+
+
+def _exclude_generated_nodes_for_running_tails(
+    workflow: ProductWorkflow,
+    node_ids_to_run: set[str],
+) -> set[str]:
+    running_tail_node_ids = {
+        node.id
+        for node in workflow.nodes
+        if node.id in node_ids_to_run and node.node_type == WorkflowNodeType.TAIL_SPLITTER
+    }
+    if not running_tail_node_ids:
+        return node_ids_to_run
+    generated_node_ids = {
+        node.id
+        for node in workflow.nodes
+        if _generated_tail_node_id(node.config_json) in running_tail_node_ids
+    }
+    return node_ids_to_run - generated_node_ids
+
+
+def _generated_tail_node_id(config_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(config_json, dict):
+        return None
+    generated_by = config_json.get("generated_by")
+    if not isinstance(generated_by, dict):
+        return None
+    tail_node_id = generated_by.get("tail_node_id")
+    return tail_node_id if isinstance(tail_node_id, str) else None
 
 
 def _node_has_reusable_output(
@@ -1094,7 +1148,6 @@ def _execute_copy_generation(
     runtime_claim = claim_runtime_generation_config(
         purpose="text",
         selection=generation_config_selection_from_config(node.config_json),
-        session=session,
     )
     try:
         provider = dependencies.text_provider(runtime_claim.generation_config_id, session=session)
@@ -1111,7 +1164,6 @@ def _execute_copy_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=False,
-            session=session,
             user_id=product.owner_user_id,
             generated_unit_count=0,
             failure_reason=generation_failure_reason(exc),
@@ -1122,7 +1174,6 @@ def _execute_copy_generation(
     release_runtime_generation_config(
         runtime_claim,
         success=True,
-        session=session,
         user_id=product.owner_user_id,
         generated_unit_count=2,
     )
@@ -1196,7 +1247,6 @@ def _execute_tail_splitter(
     runtime_claim = claim_runtime_generation_config(
         purpose="text",
         selection=generation_config_selection_from_config(node.config_json),
-        session=session,
     )
     try:
         provider = dependencies.text_provider(runtime_claim.generation_config_id, session=session)
@@ -1209,7 +1259,6 @@ def _execute_tail_splitter(
         release_runtime_generation_config(
             runtime_claim,
             success=False,
-            session=session,
             user_id=product.owner_user_id,
             generated_unit_count=0,
             failure_reason=generation_failure_reason(exc),
@@ -1220,7 +1269,6 @@ def _execute_tail_splitter(
     release_runtime_generation_config(
         runtime_claim,
         success=True,
-        session=session,
         user_id=product.owner_user_id,
         generated_unit_count=len(draft.items),
     )

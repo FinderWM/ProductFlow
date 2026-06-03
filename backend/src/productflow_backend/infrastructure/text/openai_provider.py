@@ -170,7 +170,8 @@ class OpenAITextProvider(TextProvider):
                         "要求：\n"
                         "1. instruction 必须是可直接用于后续生图触发器的完整中文提示词；\n"
                         "2. 每个 item 聚焦不同画面目标，不要只是同义改写；\n"
-                        "3. source_refs 使用简短字符串说明该方向来自哪些输入。"
+                        "3. source_refs 必须是字符串数组，例如 [\"入口长文本：正视图\", \"参考图 1\"]；"
+                        "没有来源时输出 []。"
                     ),
                 },
             ],

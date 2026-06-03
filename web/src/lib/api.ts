@@ -43,6 +43,7 @@ import type {
   ProviderProfileUpdateRequest,
   ProductWorkflow,
   ProductWorkflowStatus,
+  WorkflowRunStartMode,
   ProductWritebackResponse,
   ProductListResponse,
   ReviewUserTemplateGroupInput,
@@ -349,6 +350,18 @@ export const api = {
     }
     if (input.source_note) {
       formData.set("source_note", input.source_note);
+    }
+    if (input.owner_id) {
+      formData.set("owner_id", input.owner_id);
+    }
+    if (input.long_text) {
+      formData.set("long_text", input.long_text);
+    }
+    if (input.dynamic_fields !== undefined) {
+      formData.set("dynamic_fields_json", JSON.stringify(input.dynamic_fields));
+    }
+    if (input.contextDocumentFile) {
+      formData.set("context_document", input.contextDocumentFile);
     }
     if (input.canvas_template_key !== undefined) {
       formData.set("canvas_template_key", input.canvas_template_key);
@@ -751,7 +764,10 @@ export const api = {
   deleteWorkflowNode(nodeId: string): Promise<ProductWorkflow> {
     return request(`/api/workflow-nodes/${nodeId}`, { method: "DELETE" });
   },
-  runProductWorkflow(productId: string, input?: { start_node_id?: string }): Promise<ProductWorkflow> {
+  runProductWorkflow(
+    productId: string,
+    input?: { start_node_id?: string; start_mode?: WorkflowRunStartMode },
+  ): Promise<ProductWorkflow> {
     return request(`/api/products/${productId}/workflow/run`, {
       method: "POST",
       body: JSON.stringify(input ?? {}),

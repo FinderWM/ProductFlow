@@ -34,7 +34,7 @@ import type {
   Viewport,
   XYPosition,
 } from "@xyflow/react";
-import { CopyPlus, Focus, Grid, Loader2, Play, Save, Sparkles, Trash2 } from "lucide-react";
+import { CopyPlus, Focus, Grid, Loader2, Play, Save, SkipForward, Sparkles, Trash2 } from "lucide-react";
 
 import type { DownloadableImage } from "../../lib/image-downloads";
 import type { ProductWorkflow, WorkflowNode } from "../../lib/types";
@@ -241,6 +241,9 @@ function WorkflowNodeToolbarIcon({
   }
   if (icon === "run") {
     return <Play size={16} aria-hidden="true" />;
+  }
+  if (icon === "runAfter") {
+    return <SkipForward size={16} aria-hidden="true" />;
   }
   if (icon === "duplicate") {
     return <CopyPlus size={16} aria-hidden="true" />;

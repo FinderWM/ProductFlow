@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from json import JSONDecodeError
 from typing import Any, Literal, cast
 
 from sqlalchemy import desc, exists, func, literal, select
@@ -11,12 +14,16 @@ from productflow_backend.application.copy_payloads import normalize_copy_payload
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
 from productflow_backend.application.product_workflow import graph as product_workflow_graph
+from productflow_backend.application.product_workflow.context import (
+    normalize_product_context_config,
+    normalize_product_context_dynamic_fields,
+)
+from productflow_backend.application.product_workflow.tail_confirmation import workflow_run_is_user_active
 from productflow_backend.application.product_workflow.templates import (
     materialize_product_workflow_from_template,
     resolve_product_creation_canvas_template,
 )
 from productflow_backend.application.time import now_utc
-from productflow_backend.domain.durable_generation_tasks import WORKFLOW_RUN_GENERATION_TASK_CONTRACT
 from productflow_backend.domain.enums import (
     CopyStatus,
     ProductWorkflowState,
@@ -38,6 +45,49 @@ from productflow_backend.infrastructure.db.models import (
 from productflow_backend.infrastructure.storage import LocalStorage
 
 InitialWorkflowEntry = Literal["image", "copy", "tail", "blank"]
+
+
+@dataclass(frozen=True, slots=True)
+class ProductContextDocumentInput:
+    content: bytes
+    filename: str
+    mime_type: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProductContextCreationInput:
+    name: str
+    owner_id: str | None
+    entry_type: InitialWorkflowEntry
+    category: str | None
+    price: Decimal | None
+    long_text: str | None
+    image_source_asset_id: str | None
+    document_source_asset_id: str | None
+    document_filename: str | None
+    document_mime_type: str | None
+    document_text: str | None
+    dynamic_fields: dict[str, str | int | float | bool | None]
+
+    def to_config(self) -> dict[str, Any]:
+        return normalize_product_context_config(
+            {
+                "name": self.name,
+                "owner_id": self.owner_id,
+                "entry_type": self.entry_type,
+                "category": self.category,
+                "price": str(self.price) if self.price is not None else None,
+                "long_text": self.long_text,
+                "source_note": self.long_text,
+                "image_source_asset_id": self.image_source_asset_id,
+                "document_source_asset_id": self.document_source_asset_id,
+                "document_filename": self.document_filename,
+                "document_mime_type": self.document_mime_type,
+                "document_text": self.document_text,
+                "dynamic_fields": self.dynamic_fields,
+            }
+        )
 
 
 def _normalize_required_text(value: str, *, field_name: str, max_length: int) -> str:
@@ -90,6 +140,12 @@ def _normalize_initial_workflow_entry(value: str | None) -> InitialWorkflowEntry
     return cast(InitialWorkflowEntry, normalized)
 
 
+def _entry_text_or_long_text(entry_text: str | None, long_text: str | None) -> str | None:
+    if entry_text is not None and entry_text.strip():
+        return entry_text
+    return long_text
+
+
 def _normalize_entry_text(value: str | None, *, initial_workflow_entry: InitialWorkflowEntry) -> str | None:
     if initial_workflow_entry not in {"copy", "tail"}:
         return _normalize_optional_text(value, field_name="入口内容", max_length=4000)
@@ -101,6 +157,16 @@ def _normalize_entry_text(value: str | None, *, initial_workflow_entry: InitialW
     return normalized
 
 
+def _normalize_dynamic_fields_json(value: str | None) -> dict[str, str | int | float | bool | None]:
+    if value is None or not value.strip():
+        return {}
+    try:
+        raw = json.loads(value)
+    except JSONDecodeError as exc:
+        raise BusinessValidationError("动态信息必须是有效 JSON") from exc
+    return normalize_product_context_dynamic_fields(raw)
+
+
 def _materialize_initial_workflow(
     session: Session,
     *,
@@ -108,6 +174,7 @@ def _materialize_initial_workflow(
     initial_workflow_entry: InitialWorkflowEntry,
     entry_text: str | None,
     source_asset: SourceAsset | None,
+    product_context_config: dict[str, Any],
 ) -> None:
     workflow = ProductWorkflow(
         product_id=product.id,
@@ -118,26 +185,14 @@ def _materialize_initial_workflow(
     session.add(workflow)
     session.flush()
 
-    product_context_node = WorkflowNode(
-        workflow_id=workflow.id,
-        node_type=WorkflowNodeType.PRODUCT_CONTEXT,
-        title="灵感",
-        position_x=40,
-        position_y=120,
-        config_json={},
-    )
-    session.add(product_context_node)
-    session.flush()
-
     if initial_workflow_entry == "image":
         if source_asset is None:
             raise BusinessValidationError("图片入口需要上传灵感主图")
-        session.delete(product_context_node)
-        session.flush()
-
         nodes_by_key: dict[str, WorkflowNode] = {}
         for spec in product_workflow_graph.default_node_specs(product):
             key = str(spec.pop("key"))
+            if key == "context":
+                spec["config_json"] = product_context_config
             node = WorkflowNode(workflow_id=workflow.id, **spec)
             session.add(node)
             nodes_by_key[key] = node
@@ -145,6 +200,17 @@ def _materialize_initial_workflow(
         for edge in product_workflow_graph.default_edges(nodes_by_key, workflow.id):
             session.add(edge)
         return
+
+    product_context_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.PRODUCT_CONTEXT,
+        title="灵感",
+        position_x=40,
+        position_y=120,
+        config_json=product_context_config,
+    )
+    session.add(product_context_node)
+    session.flush()
 
     if initial_workflow_entry == "blank":
         return
@@ -331,6 +397,10 @@ def create_product(
     canvas_template_key: str | None = None,
     initial_workflow_entry: str | None = None,
     entry_text: str | None = None,
+    owner_id: str | None = None,
+    long_text: str | None = None,
+    dynamic_fields_json: str | None = None,
+    context_document_upload: ProductContextDocumentInput | None = None,
     owner_user_id: str | None = None,
     storage: LocalStorage | None = None,
 ) -> Product:
@@ -338,14 +408,22 @@ def create_product(
     resolved_owner_user_id = resolve_owner_user_id(session, owner_user_id)
     explicit_initial_workflow_entry = initial_workflow_entry is not None
     workflow_entry = _normalize_initial_workflow_entry(initial_workflow_entry)
-    normalized_entry_text = _normalize_entry_text(entry_text, initial_workflow_entry=workflow_entry)
+    normalized_entry_text = _normalize_entry_text(
+        _entry_text_or_long_text(entry_text, long_text),
+        initial_workflow_entry=workflow_entry,
+    )
+    normalized_owner_id = _normalize_optional_text(owner_id, field_name="所属 id", max_length=255)
+    normalized_long_text = _normalize_optional_text(long_text, field_name="长文案内容", max_length=4000)
+    normalized_source_note = _normalize_optional_text(source_note, field_name="备注", max_length=4000)
+    normalized_context_long_text = normalized_long_text or normalized_entry_text or normalized_source_note
+    normalized_dynamic_fields = _normalize_dynamic_fields_json(dynamic_fields_json)
     canvas_template = resolve_product_creation_canvas_template(
         session,
         canvas_template_key,
         initial_workflow_entry=workflow_entry,
         actor_user_id=resolved_owner_user_id,
     )
-    if image_bytes is None and (canvas_template is not None or workflow_entry == "image"):
+    if image_bytes is None and workflow_entry == "image":
         raise BusinessValidationError("请先上传灵感图")
     storage = storage or LocalStorage()
     product = Product(
@@ -353,7 +431,7 @@ def create_product(
         name=_normalize_required_text(name, field_name="商品名", max_length=255),
         category=_normalize_optional_text(category, field_name="类目", max_length=120),
         price=_normalize_price(price),
-        source_note=_normalize_optional_text(source_note, field_name="备注", max_length=4000),
+        source_note=normalized_source_note or normalized_context_long_text,
     )
     session.add(product)
     session.flush()
@@ -372,6 +450,23 @@ def create_product(
         )
         session.add(original_source_asset)
         session.flush()
+    context_document_asset: SourceAsset | None = None
+    if context_document_upload is not None:
+        document_path = storage.save_document_upload(
+            product.id,
+            context_document_upload.filename,
+            context_document_upload.content,
+        )
+        storage_metadata = storage.metadata_for(document_path)
+        context_document_asset = SourceAsset(
+            product_id=product.id,
+            kind=SourceAssetKind.CONTEXT_DOCUMENT,
+            original_filename=context_document_upload.filename,
+            mime_type=context_document_upload.mime_type or "application/octet-stream",
+            **storage_metadata.as_model_kwargs(),
+        )
+        session.add(context_document_asset)
+        session.flush()
     for reference_bytes, reference_filename, reference_content_type in reference_image_uploads or []:
         reference_path = storage.save_reference_upload(product.id, reference_filename, reference_bytes)
         storage_metadata = storage.metadata_for(reference_path)
@@ -384,6 +479,20 @@ def create_product(
                 **storage_metadata.as_model_kwargs(),
             )
         )
+    product_context_config = ProductContextCreationInput(
+        name=product.name,
+        owner_id=normalized_owner_id or product.id,
+        entry_type=workflow_entry,
+        category=product.category,
+        price=product.price,
+        long_text=normalized_context_long_text,
+        image_source_asset_id=original_source_asset.id if original_source_asset is not None else None,
+        document_source_asset_id=context_document_asset.id if context_document_asset is not None else None,
+        document_filename=context_document_upload.filename if context_document_upload is not None else None,
+        document_mime_type=context_document_upload.mime_type if context_document_upload is not None else None,
+        document_text=context_document_upload.text if context_document_upload is not None else None,
+        dynamic_fields=normalized_dynamic_fields,
+    ).to_config()
     if canvas_template is not None:
         materialize_product_workflow_from_template(
             session,
@@ -391,6 +500,7 @@ def create_product(
             template=canvas_template,
             initial_entry_mode=workflow_entry,
             entry_text=normalized_entry_text,
+            product_context_config=product_context_config,
         )
     elif explicit_initial_workflow_entry:
         _materialize_initial_workflow(
@@ -399,6 +509,7 @@ def create_product(
             initial_workflow_entry=workflow_entry,
             entry_text=normalized_entry_text,
             source_asset=original_source_asset,
+            product_context_config=product_context_config,
         )
     session.commit()
     session.expire_all()
@@ -555,15 +666,14 @@ def delete_product(
     ensure_resource_usable(product)
     if product.deleted_at is not None:
         raise NotFoundError("商品不存在")
-    active_workflow_run = session.scalar(
-        select(WorkflowRun)
-        .join(ProductWorkflow, WorkflowRun.workflow_id == ProductWorkflow.id)
-        .where(
-            ProductWorkflow.product_id == product_id,
-            WorkflowRun.status.in_(WORKFLOW_RUN_GENERATION_TASK_CONTRACT.active_statuses),
+    active_workflow_runs = list(
+        session.scalars(
+            select(WorkflowRun)
+            .join(ProductWorkflow, WorkflowRun.workflow_id == ProductWorkflow.id)
+            .where(ProductWorkflow.product_id == product_id)
         )
     )
-    if active_workflow_run is not None:
+    if any(workflow_run_is_user_active(run.status) for run in active_workflow_runs):
         raise BusinessValidationError("商品工作流运行中，稍后删除")
     product.deleted_at = now_utc()
     product.deleted_by_user_id = actor_user_id

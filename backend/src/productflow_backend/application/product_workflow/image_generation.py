@@ -150,7 +150,6 @@ def execute_workflow_image_generation(
         runtime_claim = claim_runtime_generation_config(
             purpose="image",
             selection=generation_config_selection,
-            session=session,
         )
         used_generation_config_id = runtime_claim.generation_config_id
         poster_generation_mode = effective_workflow_image_generation_mode(
@@ -240,7 +239,6 @@ def execute_workflow_image_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=poster_generation_mode == "generated",
-            session=session,
             user_id=product.owner_user_id,
             generated_unit_count=len(downstream_nodes) if poster_generation_mode == "generated" else 0,
             record_result=poster_generation_mode == "generated",
@@ -335,7 +333,6 @@ def execute_workflow_image_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=False,
-            session=session,
             user_id=product.owner_user_id,
             generated_unit_count=0,
             failure_reason=generation_failure_reason(exc) if provider_invoked else None,

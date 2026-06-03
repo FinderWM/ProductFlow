@@ -2,8 +2,8 @@ import type { TranslationKey } from "../../lib/i18n";
 import type { WorkflowNode } from "../../lib/types";
 import type { WorkflowNodeRunActionState } from "./utils";
 
-export type WorkflowCanvasActionId = "run" | "duplicate" | "fitSelected" | "saveTemplate" | "delete";
-export type WorkflowCanvasActionIcon = "run" | "duplicate" | "fitSelected" | "saveTemplate" | "delete";
+export type WorkflowCanvasActionId = "run" | "runAfter" | "duplicate" | "fitSelected" | "saveTemplate" | "delete";
+export type WorkflowCanvasActionIcon = "run" | "runAfter" | "duplicate" | "fitSelected" | "saveTemplate" | "delete";
 
 export type WorkflowCanvasActionTarget =
   | { kind: "single"; nodeId: string }
@@ -75,13 +75,24 @@ export function buildWorkflowCanvasActionItems(
   const structureBusy = Boolean(options.structureBusy);
   const items: WorkflowCanvasActionItem[] = [];
 
-  if (target.kind === "single" && !primaryIsProductContext) {
+  if (target.kind === "single") {
     items.push({
       id: "run",
       icon: "run",
       label: options.runActionState?.label,
       labelKey: options.runActionState?.label ? undefined : "detail.runAction.runFromNode",
       title: options.runActionState?.title,
+      disabled: Boolean(options.runActionState?.disabled),
+      pending: Boolean(options.runActionState?.pending),
+    });
+  }
+
+  if (target.kind === "single") {
+    items.push({
+      id: "runAfter",
+      icon: "runAfter",
+      labelKey: "detail.runAction.runAfterNode",
+      title: options.runActionState?.pending ? options.runActionState.title : undefined,
       disabled: Boolean(options.runActionState?.disabled),
       pending: Boolean(options.runActionState?.pending),
     });

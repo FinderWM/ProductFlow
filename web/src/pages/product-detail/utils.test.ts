@@ -139,12 +139,33 @@ describe("product-detail utils", () => {
     expect(
       hasActiveWorkflow(
         workflowWith({
+          runs: [
+            workflowRun({ status: "waiting_confirmation" }),
+          ],
+        }),
+      ),
+    ).toBe(true);
+
+    expect(
+      hasActiveWorkflow(
+        workflowWith({
           nodes: [{ ...baseNode, status: "queued" }],
         }),
       ),
     ).toBe(true);
 
     expect(hasActiveWorkflow(workflowWith({}))).toBe(false);
+  });
+
+  it("shows waiting-confirmation queue text", () => {
+    expect(
+      workflowRunQueueText(
+        workflowRun({ status: "waiting_confirmation", is_cancelable: true }),
+        stubT({
+          "detail.runWaitingConfirmationText": "Waiting for confirmation",
+        }),
+      ),
+    ).toBe("Waiting for confirmation");
   });
 
   it("reads workflow run retry metadata and includes the previous failure in active retry text", () => {
@@ -233,7 +254,7 @@ describe("product-detail utils", () => {
       ).toMatchObject({
         disabled: false,
         pending: false,
-        label: "从此节点运行",
+        label: "运行此节点",
       });
     }
 
@@ -256,7 +277,7 @@ describe("product-detail utils", () => {
     ).toMatchObject({
       disabled: true,
       pending: false,
-      label: "从此节点运行",
+      label: "运行此节点",
     });
 
     expect(
@@ -267,7 +288,7 @@ describe("product-detail utils", () => {
     ).toMatchObject({
       disabled: false,
       pending: false,
-      label: "从此节点运行",
+      label: "运行此节点",
     });
 
     expect(
@@ -276,15 +297,15 @@ describe("product-detail utils", () => {
         idleOptions,
         stubT({
           "detail.retry": "Retry",
-          "detail.runAction.runFromNode": "Run from this node",
-          "detail.runAction.retryTitle": "Run from this node again",
+          "detail.runAction.runFromNode": "Run this node",
+          "detail.runAction.retryTitle": "Run this node again",
         }),
       ),
     ).toMatchObject({
       disabled: false,
       pending: false,
-      label: "Run from this node",
-      title: "Run from this node again",
+      label: "Run this node",
+      title: "Run this node again",
     });
 
     expect(
@@ -306,7 +327,7 @@ describe("product-detail utils", () => {
     ).toMatchObject({
       disabled: false,
       pending: false,
-      label: "从此节点运行",
+      label: "运行此节点",
     });
   });
 

@@ -266,6 +266,16 @@ class TailSplitPlanDraftItem(BaseModel):
             return None
         return value.strip() or None
 
+    @field_validator("source_refs", mode="before")
+    @classmethod
+    def normalize_source_refs_input(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = value.strip()
+            return [value] if value else []
+        return value
+
     @field_validator("source_refs")
     @classmethod
     def normalize_source_refs(cls, value: list[str]) -> list[str]:

@@ -48,6 +48,12 @@ class AppliedTailSplitPlan:
     created_node_ids: list[str]
 
 
+@dataclass(frozen=True, slots=True)
+class TailSplitPlanItemSelection:
+    id: str
+    instruction: str | None = None
+
+
 def normalize_tail_splitter_config(config_json: dict[str, Any] | None) -> dict[str, Any]:
     config = dict(config_json or {})
     normalized = read_tail_splitter_config(config)
@@ -126,6 +132,7 @@ def apply_tail_split_plan(
     tail_node: WorkflowNode,
     plan_id: str,
     item_ids: list[str] | None,
+    items: list[TailSplitPlanItemSelection] | None = None,
     position_x: int | None = None,
     position_y: int | None = None,
 ) -> AppliedTailSplitPlan:
@@ -133,11 +140,16 @@ def apply_tail_split_plan(
         raise BusinessValidationError("只有尾巴节点可以应用拆分计划")
     workflow = product_workflow_graph.get_workflow_or_raise(session, tail_node.workflow_id)
     plan = pending_tail_split_plan_or_raise(tail_node, plan_id=plan_id)
-    selected_items = _selected_plan_items(plan, item_ids)
+    selected_items = _selected_plan_items(plan, item_ids=item_ids, items=items)
     tail_config = read_tail_splitter_config(tail_node.config_json)
     origin_x = position_x if position_x is not None else tail_node.position_x
     origin_y = position_y if position_y is not None else tail_node.position_y
     batch_id = str(uuid4())
+
+    delete_tail_generated_branch(session, workflow=workflow, tail_node=tail_node)
+    session.expire(workflow, ["nodes", "edges"])
+    workflow = product_workflow_graph.get_workflow_or_raise(session, workflow.id)
+    tail_node = product_workflow_graph.get_node_or_raise(session, tail_node.id)
 
     shared_reference_node = _build_public_reference_node(
         session,
@@ -224,24 +236,6 @@ def apply_tail_split_plan(
         created_nodes.extend([image_node, output_reference])
     session.flush()
 
-    session.add(
-        WorkflowEdge(
-            workflow_id=workflow.id,
-            source_node_id=tail_node.id,
-            target_node_id=shared_copy_node.id,
-            source_handle="output",
-            target_handle="input",
-        )
-    )
-    session.add(
-        WorkflowEdge(
-            workflow_id=workflow.id,
-            source_node_id=tail_node.id,
-            target_node_id=shared_reference_node.id,
-            source_handle="output",
-            target_handle="input",
-        )
-    )
     item_nodes = created_nodes[2:]
     for image_node, output_reference in zip(item_nodes[::2], item_nodes[1::2], strict=True):
         session.add(
@@ -285,7 +279,7 @@ def apply_tail_split_plan(
     output = read_tail_splitter_output(tail_node.output_json)
     output.summary = f"已应用 {len(selected_items)} 个生图方向"
     output.latest_plan = plan.model_copy(update={"status": "applied"})
-    output.applied_batches.append(
+    output.applied_batches = [
         TailAppliedBatch(
             batch_id=batch_id,
             plan_id=plan.plan_id,
@@ -293,7 +287,7 @@ def apply_tail_split_plan(
             node_ids=[shared_copy_node.id, shared_reference_node.id, *item_node_ids],
             created_at=now_utc(),
         )
-    )
+    ]
     tail_node.output_json = output.model_dump(mode="json")
     workflow.updated_at = now_utc()
     session.flush()
@@ -329,7 +323,33 @@ def delete_tail_generated_branch(session: Session, *, workflow: ProductWorkflow,
     return sorted(node_ids)
 
 
-def _selected_plan_items(plan: TailSplitPlan, item_ids: list[str] | None) -> list[TailSplitPlanItem]:
+def _selected_plan_items(
+    plan: TailSplitPlan,
+    *,
+    item_ids: list[str] | None,
+    items: list[TailSplitPlanItemSelection] | None = None,
+) -> list[TailSplitPlanItem]:
+    if items:
+        instruction_by_id: dict[str, str] = {}
+        for item in items:
+            item_id = item.id.strip()
+            if not item_id:
+                continue
+            instruction = (item.instruction or "").strip()
+            if not instruction:
+                raise BusinessValidationError("生图指令不能为空")
+            instruction_by_id[item_id] = instruction
+        if not instruction_by_id:
+            raise BusinessValidationError("请至少保留一个拆分项")
+        selected_id_set = set(instruction_by_id)
+        selected_items = [
+            item.model_copy(update={"instruction": instruction_by_id[item.id]})
+            for item in plan.items
+            if item.id in selected_id_set
+        ]
+        if len(selected_items) != len(selected_id_set):
+            raise BusinessValidationError("所选拆分项不存在")
+        return selected_items
     if item_ids is None:
         return list(plan.items)
     deduplicated_ids = list(dict.fromkeys(item_id.strip() for item_id in item_ids if item_id.strip()))

@@ -11,6 +11,7 @@ import {
   compactImageToolOptions,
   imageToolOptionsFromUnknown,
 } from "../../lib/imageToolOptions";
+import { dynamicFieldsToRecord } from "../../lib/dynamicFields";
 import type { NodeConfigDraft } from "./types";
 import { defaultTitleForNodeType } from "./nodeDisplay";
 import { configString, outputText } from "./utils";
@@ -76,37 +77,6 @@ function dynamicFieldsFromNode(node: WorkflowNode | null): NodeConfigDraft["dyna
     key,
     value: dynamicFieldValueToDraft(value),
   }));
-}
-
-function parseDynamicScalar(value: string): string | number | boolean | null {
-  const trimmed = value.trim();
-  if (trimmed === "true") {
-    return true;
-  }
-  if (trimmed === "false") {
-    return false;
-  }
-  if (trimmed === "null") {
-    return null;
-  }
-  if (trimmed && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed)) {
-    const parsed = Number(trimmed);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return value;
-}
-
-function dynamicFieldsToConfig(fields: NodeConfigDraft["dynamicFields"]): Record<string, string | number | boolean | null> {
-  return fields.reduce<Record<string, string | number | boolean | null>>((result, field) => {
-    const key = field.key.trim();
-    if (!key) {
-      return result;
-    }
-    result[key] = parseDynamicScalar(field.value);
-    return result;
-  }, {});
 }
 
 export function draftFromNode(
@@ -187,7 +157,7 @@ export function nodeConfigFromDraft(
       document_filename: draft.documentFilename || null,
       document_mime_type: draft.documentMimeType || null,
       document_text: draft.documentText || null,
-      dynamic_fields: dynamicFieldsToConfig(draft.dynamicFields),
+      dynamic_fields: dynamicFieldsToRecord(draft.dynamicFields),
     };
   }
   if (node.node_type === "reference_image") {
