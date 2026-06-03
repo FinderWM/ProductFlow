@@ -140,6 +140,10 @@
   mutation success must not overwrite other pending group positions with stale full-workflow responses.
 - Edges are created by dragging a ReactFlow output handle to a target handle/node. The visible temporary connection line is
   rendered by ReactFlow.
+- Rendered workflow edges should keep short horizontal entry/exit segments at node handles, then use a dominant smooth
+  cubic Bezier curve (SVG `C` command) for vertical displacement. Avoid long straight vertical segments in the final SVG
+  path; dense fan-in/fan-out graphs should separate sibling edges with deterministic lane offsets while preserving
+  backend edge identity and handle semantics.
 - Connection-drag handle highlighting should use ReactFlow native connection state, such as `useConnection` or
   ReactFlow-provided handle connection classes. Do not reimplement connection drag, draw a custom temporary connection
   path, or bypass ProductFlow's existing `onConnect` / `isValidConnection` / backend edge mutation path.

@@ -56,6 +56,7 @@ import {
   type ProductFlowEdgeData,
   type ProductFlowNodeData,
   type WorkflowEdgeObstacle,
+  buildWorkflowEdgeLaneOffsets,
   buildOrthogonalAvoidingPath,
   connectionToWorkflowEdgeInput,
   getChangedWorkflowNodePositionCandidates,
@@ -106,6 +107,7 @@ interface WorkflowCanvasNodeData extends ProductFlowNodeData {
 interface WorkflowCanvasEdgeData extends ProductFlowEdgeData {
   deleteLabel: string;
   disabled: boolean;
+  laneOffset: number;
   obstacles: WorkflowEdgeObstacle[];
   onDeleteEdge: (edgeId: string) => void;
 }
@@ -390,6 +392,7 @@ function ProductFlowCanvasEdge({
     targetY,
     sourceNodeId: data?.workflowEdge.source_node_id,
     targetNodeId: data?.workflowEdge.target_node_id,
+    laneOffset: data?.laneOffset ?? 0,
     obstacles: data?.obstacles ?? [],
   });
   const edgePath = edgeRoute.path;
@@ -877,9 +880,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         };
 
         const startX = 72;
-        const centerY = 216;
-        const gapX = 360;
-        const itemSpacingY = 72;
+        const centerY = 288;
+        const gapX = 504;
+        const itemSpacingY = 144;
 
         const committed: Array<{ nodeId: string; position: CanvasPoint }> = [];
         const moveGroupId = `auto-layout-${Date.now()}`;
@@ -1022,6 +1025,10 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     () => nodes.map((node) => getWorkflowNodeObstacle(node, flowInstanceRef.current)),
     [nodes, flowReady],
   );
+  const edgeLaneOffsets = useMemo(
+    () => (workflow ? buildWorkflowEdgeLaneOffsets(workflow.edges) : {}),
+    [workflow],
+  );
 
   const edges = useMemo<WorkflowCanvasEdge[]>(() => {
     if (!workflow) {
@@ -1034,11 +1041,12 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         ...edge.data,
         deleteLabel: deleteEdgeLabel,
         disabled: structureBusy,
+        laneOffset: edgeLaneOffsets[edge.id] ?? 0,
         obstacles: edgeObstacles,
         onDeleteEdge,
       },
     }));
-  }, [deleteEdgeLabel, edgeObstacles, onDeleteEdge, structureBusy, workflow]);
+  }, [deleteEdgeLabel, edgeLaneOffsets, edgeObstacles, onDeleteEdge, structureBusy, workflow]);
 
   useEffect(() => {
     const instance = flowInstanceRef.current;

@@ -6,6 +6,7 @@ import {
   PRODUCTFLOW_NODE_TYPE,
   PRODUCTFLOW_SOURCE_HANDLE,
   PRODUCTFLOW_TARGET_HANDLE,
+  buildWorkflowEdgeLaneOffsets,
   buildOrthogonalAvoidingPath,
   connectionToWorkflowEdgeInput,
   getChangedWorkflowNodePositionCandidates,
@@ -174,7 +175,7 @@ describe("reactFlowAdapters", () => {
     expect(edges[1]?.data?.workflowEdge.source_node_id).toBe("copy");
   });
 
-  it("builds a default cubic bezier edge path when no obstacle blocks the route", () => {
+  it("builds a horizontal-plus-cubic-bezier edge path when no obstacle blocks the route", () => {
     const route = buildOrthogonalAvoidingPath({
       sourceX: 100,
       sourceY: 50,
@@ -183,7 +184,7 @@ describe("reactFlowAdapters", () => {
     });
 
     expect(route.path).toBe(
-      "M 100 50 L 178 50 C 190.1 50 200 59.9 200 72 L 200 128 C 200 140.1 209.9 150 222 150 L 300 150",
+      "M 100 50 L 114 50 C 200 50 200 150 286 150 L 300 150",
     );
     expect(route.points).toEqual([
       { x: 100, y: 50 },
@@ -193,6 +194,40 @@ describe("reactFlowAdapters", () => {
     ]);
     expect(route.labelX).toBe(200);
     expect(route.labelY).toBe(100);
+  });
+
+  it("offsets sibling edge routes without changing their endpoints", () => {
+    const route = buildOrthogonalAvoidingPath({
+      sourceX: 100,
+      sourceY: 50,
+      targetX: 300,
+      targetY: 150,
+      laneOffset: 36,
+    });
+
+    expect(route.points).toEqual([
+      { x: 100, y: 50 },
+      { x: 236, y: 50 },
+      { x: 236, y: 150 },
+      { x: 300, y: 150 },
+    ]);
+    expect(route.path).not.toBe(
+      "M 100 50 L 114 50 C 200 50 200 150 286 150 L 300 150",
+    );
+  });
+
+  it("computes deterministic centered lane offsets for fan-out edges", () => {
+    expect(
+      buildWorkflowEdgeLaneOffsets([
+        makeEdge({ id: "edge-copy", source_node_id: "product", target_node_id: "copy" }),
+        makeEdge({ id: "edge-image", source_node_id: "product", target_node_id: "image" }),
+        makeEdge({ id: "edge-tail", source_node_id: "tail", target_node_id: "output" }),
+      ]),
+    ).toEqual({
+      "edge-copy": -18,
+      "edge-image": 18,
+      "edge-tail": 0,
+    });
   });
 
   it("routes workflow edges around blocking node-card obstacles", () => {
@@ -222,7 +257,7 @@ describe("reactFlowAdapters", () => {
       ],
     });
 
-    expect(route.path).toContain("C 190.1 50 200 59.9 200 72");
+    expect(route.path).toContain("C 200 50 200 150 286 150");
     expect(route.points).toEqual([
       { x: 100, y: 50 },
       { x: 200, y: 50 },

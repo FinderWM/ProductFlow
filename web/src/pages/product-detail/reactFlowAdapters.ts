@@ -14,8 +14,11 @@ const ZOOM_PRECISION = 10_000;
 const EDGE_HANDLE_OFFSET = 36;
 const EDGE_OBSTACLE_PADDING = 18;
 const EDGE_LANE_MARGIN = 10;
+const EDGE_SIBLING_LANE_GAP = 36;
 const EDGE_POINT_EPSILON = 0.001;
-const EDGE_CORNER_RADIUS = 22;
+const EDGE_CORNER_RADIUS = 42;
+const EDGE_CURVE_MAX_HORIZONTAL_SPAN = 180;
+const EDGE_CURVE_MIN_HORIZONTAL_TAIL = 14;
 const EDGE_CUBIC_CONTROL_RATIO = 0.55;
 
 export interface ProductFlowNodeData extends Record<string, unknown> {
@@ -135,16 +138,54 @@ function moveAlongSegment(start: CanvasPoint, end: CanvasPoint, distance: number
   };
 }
 
+function isHorizontalSegment(start: CanvasPoint, end: CanvasPoint): boolean {
+  return Math.abs(start.y - end.y) < EDGE_POINT_EPSILON && Math.abs(start.x - end.x) >= EDGE_POINT_EPSILON;
+}
+
+function isVerticalSegment(start: CanvasPoint, end: CanvasPoint): boolean {
+  return Math.abs(start.x - end.x) < EDGE_POINT_EPSILON && Math.abs(start.y - end.y) >= EDGE_POINT_EPSILON;
+}
+
+function getDominantCurveRadius(incomingLength: number, outgoingLength: number): number {
+  const incomingLimit = Math.max(incomingLength - EDGE_CURVE_MIN_HORIZONTAL_TAIL, incomingLength / 2);
+  const outgoingLimit = Math.max(outgoingLength - EDGE_CURVE_MIN_HORIZONTAL_TAIL, outgoingLength / 2);
+  return Math.min(EDGE_CURVE_MAX_HORIZONTAL_SPAN, incomingLimit, outgoingLimit);
+}
+
 function toBezierSvgPath(points: CanvasPoint[]): string {
   if (points.length < 3) {
     return toSvgPath(points);
   }
 
   const commands = [`M ${formatPathPoint(points[0])}`];
-  for (let index = 1; index < points.length - 1; index += 1) {
+  let index = 1;
+  while (index < points.length - 1) {
     const previous = points[index - 1];
     const corner = points[index];
     const next = points[index + 1];
+
+    if (index + 2 < points.length) {
+      const verticalEnd = points[index + 1];
+      const horizontalEnd = points[index + 2];
+      if (
+        isHorizontalSegment(previous, corner) &&
+        isVerticalSegment(corner, verticalEnd) &&
+        isHorizontalSegment(verticalEnd, horizontalEnd)
+      ) {
+        const incomingLength = getOrthogonalDistance(previous, corner);
+        const outgoingLength = getOrthogonalDistance(verticalEnd, horizontalEnd);
+        const radius = getDominantCurveRadius(incomingLength, outgoingLength);
+        if (radius > EDGE_POINT_EPSILON) {
+          const curveStart = moveAlongSegment(corner, previous, radius);
+          const curveEnd = moveAlongSegment(verticalEnd, horizontalEnd, radius);
+          commands.push(`L ${formatPathPoint(curveStart)}`);
+          commands.push(`C ${formatPathPoint(corner)} ${formatPathPoint(verticalEnd)} ${formatPathPoint(curveEnd)}`);
+          index += 2;
+          continue;
+        }
+      }
+    }
+
     const incomingLength = getOrthogonalDistance(previous, corner);
     const outgoingLength = getOrthogonalDistance(corner, next);
     const isOrthogonalCorner =
@@ -156,6 +197,7 @@ function toBezierSvgPath(points: CanvasPoint[]): string {
 
     if (!isOrthogonalCorner || radius <= EDGE_POINT_EPSILON) {
       commands.push(`L ${formatPathPoint(corner)}`);
+      index += 1;
       continue;
     }
 
@@ -166,6 +208,7 @@ function toBezierSvgPath(points: CanvasPoint[]): string {
     const secondControl = moveAlongSegment(curveEnd, corner, controlDistance);
     commands.push(`L ${formatPathPoint(curveStart)}`);
     commands.push(`C ${formatPathPoint(firstControl)} ${formatPathPoint(secondControl)} ${formatPathPoint(curveEnd)}`);
+    index += 1;
   }
   commands.push(`L ${formatPathPoint(points[points.length - 1])}`);
   return commands.join(" ");
@@ -277,20 +320,35 @@ function countRouteCollisions(points: CanvasPoint[], obstacles: PaddedWorkflowEd
   return collisions;
 }
 
-function buildDefaultEdgePoints(sourceX: number, sourceY: number, targetX: number, targetY: number): CanvasPoint[] {
-  if (targetX - sourceX >= EDGE_HANDLE_OFFSET * 2) {
-    const midX = (sourceX + targetX) / 2;
-    return compactOrthogonalPoints([
-      { x: sourceX, y: sourceY },
-      { x: midX, y: sourceY },
-      { x: midX, y: targetY },
-      { x: targetX, y: targetY },
-    ]);
-  }
+function buildForwardEdgePoints(
+  sourceX: number,
+  sourceY: number,
+  targetX: number,
+  targetY: number,
+  laneOffset: number,
+): CanvasPoint[] {
+  const defaultMidX = (sourceX + targetX) / 2;
+  const minMidX = Math.min(sourceX, targetX) + EDGE_HANDLE_OFFSET;
+  const maxMidX = Math.max(sourceX, targetX) - EDGE_HANDLE_OFFSET;
+  const midX = minMidX <= maxMidX ? clamp(defaultMidX + laneOffset, minMidX, maxMidX) : defaultMidX + laneOffset;
+  return compactOrthogonalPoints([
+    { x: sourceX, y: sourceY },
+    { x: midX, y: sourceY },
+    { x: midX, y: targetY },
+    { x: targetX, y: targetY },
+  ]);
+}
 
+function buildReturnEdgePoints(
+  sourceX: number,
+  sourceY: number,
+  targetX: number,
+  targetY: number,
+  laneOffset: number,
+): CanvasPoint[] {
   const sourceLaneX = sourceX + EDGE_HANDLE_OFFSET;
   const targetLaneX = targetX - EDGE_HANDLE_OFFSET;
-  const midY = (sourceY + targetY) / 2;
+  const midY = (sourceY + targetY) / 2 + laneOffset;
   return compactOrthogonalPoints([
     { x: sourceX, y: sourceY },
     { x: sourceLaneX, y: sourceY },
@@ -299,6 +357,20 @@ function buildDefaultEdgePoints(sourceX: number, sourceY: number, targetX: numbe
     { x: targetLaneX, y: targetY },
     { x: targetX, y: targetY },
   ]);
+}
+
+function buildOffsetEdgePoints(
+  sourceX: number,
+  sourceY: number,
+  targetX: number,
+  targetY: number,
+  laneOffset: number,
+): CanvasPoint[] {
+  if (targetX - sourceX >= EDGE_HANDLE_OFFSET * 2) {
+    return buildForwardEdgePoints(sourceX, sourceY, targetX, targetY, laneOffset);
+  }
+
+  return buildReturnEdgePoints(sourceX, sourceY, targetX, targetY, laneOffset);
 }
 
 function buildLaneEdgePoints(
@@ -318,6 +390,65 @@ function buildLaneEdgePoints(
     { x: targetLaneX, y: targetY },
     { x: targetX, y: targetY },
   ]);
+}
+
+function centeredLaneOffset(index: number, count: number): number {
+  if (count <= 1 || index < 0) {
+    return 0;
+  }
+  return (index - (count - 1) / 2) * EDGE_SIBLING_LANE_GAP;
+}
+
+function sortEdgesByNodePair(edges: WorkflowEdge[], firstNodeKey: keyof WorkflowEdge, secondNodeKey: keyof WorkflowEdge) {
+  return [...edges].sort((a, b) => {
+    const firstNodeCompare = String(a[firstNodeKey]).localeCompare(String(b[firstNodeKey]));
+    if (firstNodeCompare !== 0) {
+      return firstNodeCompare;
+    }
+    const secondNodeCompare = String(a[secondNodeKey]).localeCompare(String(b[secondNodeKey]));
+    if (secondNodeCompare !== 0) {
+      return secondNodeCompare;
+    }
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function assignGroupOffsets(
+  edgeOffsets: Record<string, number[]>,
+  groups: Map<string, WorkflowEdge[]>,
+  firstNodeKey: keyof WorkflowEdge,
+  secondNodeKey: keyof WorkflowEdge,
+) {
+  for (const groupEdges of groups.values()) {
+    if (groupEdges.length <= 1) {
+      continue;
+    }
+    const sortedEdges = sortEdgesByNodePair(groupEdges, firstNodeKey, secondNodeKey);
+    sortedEdges.forEach((edge, index) => {
+      edgeOffsets[edge.id] = [...(edgeOffsets[edge.id] ?? []), centeredLaneOffset(index, sortedEdges.length)];
+    });
+  }
+}
+
+export function buildWorkflowEdgeLaneOffsets(edges: WorkflowEdge[]): Record<string, number> {
+  const bySource = new Map<string, WorkflowEdge[]>();
+  const byTarget = new Map<string, WorkflowEdge[]>();
+  for (const edge of edges) {
+    bySource.set(edge.source_node_id, [...(bySource.get(edge.source_node_id) ?? []), edge]);
+    byTarget.set(edge.target_node_id, [...(byTarget.get(edge.target_node_id) ?? []), edge]);
+  }
+
+  const edgeOffsets: Record<string, number[]> = {};
+  assignGroupOffsets(edgeOffsets, bySource, "source_node_id", "target_node_id");
+  assignGroupOffsets(edgeOffsets, byTarget, "target_node_id", "source_node_id");
+
+  return Object.fromEntries(
+    edges.map((edge) => {
+      const offsets = edgeOffsets[edge.id] ?? [];
+      const offset = offsets.length ? offsets.reduce((sum, item) => sum + item, 0) / offsets.length : 0;
+      return [edge.id, offset];
+    }),
+  );
 }
 
 function getRelevantObstacleLanes(
@@ -361,6 +492,7 @@ export function buildOrthogonalAvoidingPath({
   targetY,
   sourceNodeId,
   targetNodeId,
+  laneOffset = 0,
   obstacles = [],
 }: {
   sourceX: number;
@@ -369,14 +501,15 @@ export function buildOrthogonalAvoidingPath({
   targetY: number;
   sourceNodeId?: string;
   targetNodeId?: string;
+  laneOffset?: number;
   obstacles?: WorkflowEdgeObstacle[];
 }): WorkflowEdgeRoute {
   const paddedObstacles = obstacles
     .filter((obstacle) => obstacle.nodeId !== sourceNodeId && obstacle.nodeId !== targetNodeId)
     .map(toPaddedObstacle)
     .filter((obstacle): obstacle is PaddedWorkflowEdgeObstacle => obstacle !== null);
-  const defaultPoints = buildDefaultEdgePoints(sourceX, sourceY, targetX, targetY);
-  const preferredY = (sourceY + targetY) / 2;
+  const defaultPoints = buildOffsetEdgePoints(sourceX, sourceY, targetX, targetY, laneOffset);
+  const preferredY = (sourceY + targetY) / 2 + laneOffset;
   const defaultCollisions = countRouteCollisions(defaultPoints, paddedObstacles);
   if (defaultCollisions === 0) {
     const label = getPathMidpoint(defaultPoints);
@@ -389,7 +522,7 @@ export function buildOrthogonalAvoidingPath({
   }
 
   const candidateRoutes = getRelevantObstacleLanes(paddedObstacles, sourceX, targetX).map((laneY) =>
-    buildLaneEdgePoints(sourceX, sourceY, targetX, targetY, laneY),
+    buildLaneEdgePoints(sourceX, sourceY, targetX, targetY, laneY + laneOffset),
   );
   const rankedRoutes = [defaultPoints, ...candidateRoutes]
     .map((points) => ({
