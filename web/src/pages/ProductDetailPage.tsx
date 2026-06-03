@@ -273,14 +273,17 @@ export function ProductDetailPage() {
     enabled: Boolean(productId),
   });
   const workflow = workflowQuery.data ?? null;
+  const workflowInitialEntryMode = workflow?.initial_entry_mode ?? "image";
   const canvasTemplatesQuery = useQuery({
-    queryKey: ["canvas-templates", normalizedTemplateSearch, templateCategoryId, templateScope],
+    queryKey: ["canvas-templates", normalizedTemplateSearch, templateCategoryId, templateScope, workflowInitialEntryMode],
     queryFn: () =>
       api.listCanvasTemplates({
         search: normalizedTemplateSearch || undefined,
         category_id: templateCategoryId || undefined,
         scope: templateScopeParam,
+        initial_workflow_entry: workflowInitialEntryMode,
       }),
+    enabled: Boolean(workflow),
   });
   const canvasTemplateCategoriesQuery = useQuery({
     queryKey: ["canvas-template-categories", templateScope],
@@ -2151,7 +2154,6 @@ export function ProductDetailPage() {
   const canvasTemplates = canvasTemplatesQuery.data?.items ?? [];
   const canvasTemplateCategories: CanvasTemplateCategory[] = canvasTemplateCategoriesQuery.data?.items ?? [];
   const userCanvasTemplateCategories: CanvasTemplateCategory[] = userCanvasTemplateCategoriesQuery.data?.items ?? [];
-  const workflowInitialEntryMode = workflow?.initial_entry_mode ?? "image";
   const canvasTemplateSaveDisabled = workflowInitialEntryMode === "blank" || productBlocked || !workflow;
   const canvasTemplateHasTailNode = Boolean(workflow?.nodes.some((node) => node.node_type === "tail_splitter"));
   const userTemplateMutationBusy =
