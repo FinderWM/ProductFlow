@@ -140,10 +140,10 @@
   mutation success must not overwrite other pending group positions with stale full-workflow responses.
 - Edges are created by dragging a ReactFlow output handle to a target handle/node. The visible temporary connection line is
   rendered by ReactFlow.
-- Rendered workflow edges should keep short horizontal entry/exit segments at node handles, then use a dominant smooth
-  cubic Bezier curve (SVG `C` command) for vertical displacement. Avoid long straight vertical segments in the final SVG
-  path; dense fan-in/fan-out graphs should separate sibling edges with deterministic lane offsets while preserving
-  backend edge identity and handle semantics.
+- Rendered workflow edges should preserve horizontal entry/exit direction at node handles through cubic Bezier control
+  points instead of drawing explicit intermediate orthogonal line segments. Avoid visible elbow breaks and long straight
+  vertical segments in the final SVG path; dense fan-in/fan-out graphs should separate sibling edges with deterministic
+  lane offsets while preserving backend edge identity and handle semantics.
 - Edge curves should prefer the source/target vertical relationship: a source above its target bends downward through the
   cubic control points, and a source below its target mirrors that bias upward. Keep the horizontal tails short enough that
   the Bezier curve carries most of the visible route.

@@ -16,11 +16,12 @@ const EDGE_OBSTACLE_PADDING = 18;
 const EDGE_LANE_MARGIN = 10;
 const EDGE_SIBLING_LANE_GAP = 36;
 const EDGE_POINT_EPSILON = 0.001;
-const EDGE_CURVE_TAIL_LENGTH = 24;
-const EDGE_CURVE_CONTROL_X_RATIO = 0.36;
-const EDGE_CURVE_MIN_CONTROL_X = 52;
-const EDGE_CURVE_MAX_CONTROL_X = 220;
-const EDGE_CURVE_LANE_PULL_RATIO = 0.88;
+const EDGE_CURVE_CONTROL_X_RATIO = 0.44;
+const EDGE_CURVE_VERTICAL_CONTROL_RATIO = 0.42;
+const EDGE_CURVE_MIN_CONTROL_X = 72;
+const EDGE_CURVE_MAX_CONTROL_X = 260;
+const EDGE_CURVE_VERTICAL_BIAS_RATIO = 0.18;
+const EDGE_CURVE_LANE_PULL_RATIO = 0.58;
 
 export interface ProductFlowNodeData extends Record<string, unknown> {
   workflowNode: WorkflowNode;
@@ -138,15 +139,16 @@ function toBezierSvgPath(points: CanvasPoint[]): string {
   const previous = points[points.length - 2] ?? start;
   const sourceDirection = Math.sign(next.x - start.x) || (end.x >= start.x ? 1 : -1);
   const targetDirection = Math.sign(end.x - previous.x) || (end.x >= start.x ? 1 : -1);
-  const curveStart = { x: start.x + sourceDirection * EDGE_CURVE_TAIL_LENGTH, y: start.y };
-  const curveEnd = { x: end.x - targetDirection * EDGE_CURVE_TAIL_LENGTH, y: end.y };
-  const horizontalSpan = Math.abs(curveEnd.x - curveStart.x);
-  const minControlX = Math.min(EDGE_CURVE_MIN_CONTROL_X, horizontalSpan * 0.25);
-  const maxControlX = Math.max(minControlX, Math.min(EDGE_CURVE_MAX_CONTROL_X, horizontalSpan * 0.45));
+  const horizontalSpan = Math.abs(end.x - start.x);
+  const verticalSpan = Math.abs(end.y - start.y);
   const controlXDistance =
     horizontalSpan <= EDGE_POINT_EPSILON
-      ? EDGE_CURVE_MIN_CONTROL_X
-      : clamp(horizontalSpan * EDGE_CURVE_CONTROL_X_RATIO, minControlX, maxControlX);
+      ? Math.min(EDGE_CURVE_MAX_CONTROL_X, Math.max(EDGE_CURVE_MIN_CONTROL_X, verticalSpan * EDGE_CURVE_VERTICAL_CONTROL_RATIO))
+      : clamp(
+          Math.max(horizontalSpan * EDGE_CURVE_CONTROL_X_RATIO, verticalSpan * EDGE_CURVE_VERTICAL_CONTROL_RATIO),
+          Math.min(EDGE_CURVE_MIN_CONTROL_X, horizontalSpan),
+          Math.max(EDGE_CURVE_MIN_CONTROL_X, Math.min(EDGE_CURVE_MAX_CONTROL_X, horizontalSpan * 0.75)),
+        );
   const laneY = getDominantHorizontalLaneY(points, start, end);
   const [firstControlY, secondControlY] =
     laneY === null
@@ -156,24 +158,26 @@ function toBezierSvgPath(points: CanvasPoint[]): string {
           end.y + (laneY - end.y) * EDGE_CURVE_LANE_PULL_RATIO,
         ];
   const firstControl = {
-    x: curveStart.x + sourceDirection * controlXDistance,
+    x: start.x + sourceDirection * controlXDistance,
     y: firstControlY,
   };
   const secondControl = {
-    x: curveEnd.x - targetDirection * controlXDistance,
+    x: end.x - targetDirection * controlXDistance,
     y: secondControlY,
   };
 
-  return [
-    `M ${formatPathPoint(start)}`,
-    `L ${formatPathPoint(curveStart)}`,
-    `C ${formatPathPoint(firstControl)} ${formatPathPoint(secondControl)} ${formatPathPoint(curveEnd)}`,
-    `L ${formatPathPoint(end)}`,
-  ].join(" ");
+  return `M ${formatPathPoint(start)} C ${formatPathPoint(firstControl)} ${formatPathPoint(secondControl)} ${formatPathPoint(end)}`;
 }
 
 function getPreferredCurveControlY(sourceY: number, targetY: number): [number, number] {
-  return [sourceY, targetY];
+  const verticalDelta = targetY - sourceY;
+  if (Math.abs(verticalDelta) <= EDGE_POINT_EPSILON) {
+    return [sourceY, targetY];
+  }
+  return [
+    sourceY + verticalDelta * EDGE_CURVE_VERTICAL_BIAS_RATIO,
+    targetY - verticalDelta * EDGE_CURVE_VERTICAL_BIAS_RATIO,
+  ];
 }
 
 function getDominantHorizontalLaneY(points: CanvasPoint[], start: CanvasPoint, end: CanvasPoint): number | null {

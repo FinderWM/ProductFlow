@@ -175,7 +175,7 @@ describe("reactFlowAdapters", () => {
     expect(edges[1]?.data?.workflowEdge.source_node_id).toBe("copy");
   });
 
-  it("builds a horizontal-plus-cubic-bezier edge path when no obstacle blocks the route", () => {
+  it("builds a continuous cubic-bezier edge path when no obstacle blocks the route", () => {
     const route = buildOrthogonalAvoidingPath({
       sourceX: 100,
       sourceY: 50,
@@ -183,9 +183,8 @@ describe("reactFlowAdapters", () => {
       targetY: 150,
     });
 
-    expect(route.path).toBe(
-      "M 100 50 L 124 50 C 178.72 50 221.28 150 276 150 L 300 150",
-    );
+    expect(route.path).toBe("M 100 50 C 188 68 212 132 300 150");
+    expect(route.path).not.toContain(" L ");
     expect(route.points).toEqual([
       { x: 100, y: 50 },
       { x: 200, y: 50 },
@@ -204,9 +203,22 @@ describe("reactFlowAdapters", () => {
       targetY: 50,
     });
 
-    expect(route.path).toBe(
-      "M 100 150 L 124 150 C 178.72 150 221.28 50 276 50 L 300 50",
-    );
+    expect(route.path).toBe("M 100 150 C 188 132 212 68 300 50");
+    expect(route.path).not.toContain(" L ");
+  });
+
+  it("keeps close vertical-offset routes smooth without elbow line segments", () => {
+    const route = buildOrthogonalAvoidingPath({
+      sourceX: 496,
+      sourceY: 164,
+      targetX: 404,
+      targetY: 676,
+    });
+
+    expect(route.path).toMatch(/^M 496 164 C /);
+    expect(route.path).toMatch(/ 404 676$/);
+    expect(route.path.match(/\sC\s/g)).toHaveLength(1);
+    expect(route.path).not.toContain(" L ");
   });
 
   it("offsets sibling edge routes without changing their endpoints", () => {
@@ -254,6 +266,7 @@ describe("reactFlowAdapters", () => {
 
     expect(route.path).not.toBe("M 100 100 L 400 100");
     expect(route.path.match(/\sC\s/g)).toHaveLength(1);
+    expect(route.path).not.toContain(" L ");
     expect(route.points.some((point) => point.y < 60 || point.y > 140)).toBe(true);
   });
 
@@ -271,7 +284,8 @@ describe("reactFlowAdapters", () => {
       ],
     });
 
-    expect(route.path).toContain("C 178.72 50 221.28 150 276 150");
+    expect(route.path).toBe("M 100 50 C 188 68 212 132 300 150");
+    expect(route.path).not.toContain(" L ");
     expect(route.points).toEqual([
       { x: 100, y: 50 },
       { x: 200, y: 50 },
