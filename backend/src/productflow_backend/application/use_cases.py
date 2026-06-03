@@ -58,10 +58,8 @@ class ProductContextDocumentInput:
 @dataclass(frozen=True, slots=True)
 class ProductContextCreationInput:
     name: str
-    owner_id: str | None
+    owner_id: str
     entry_type: InitialWorkflowEntry
-    category: str | None
-    price: Decimal | None
     long_text: str | None
     image_source_asset_id: str | None
     document_source_asset_id: str | None
@@ -76,8 +74,6 @@ class ProductContextCreationInput:
                 "name": self.name,
                 "owner_id": self.owner_id,
                 "entry_type": self.entry_type,
-                "category": self.category,
-                "price": str(self.price) if self.price is not None else None,
                 "long_text": self.long_text,
                 "source_note": self.long_text,
                 "image_source_asset_id": self.image_source_asset_id,
@@ -397,7 +393,6 @@ def create_product(
     canvas_template_key: str | None = None,
     initial_workflow_entry: str | None = None,
     entry_text: str | None = None,
-    owner_id: str | None = None,
     long_text: str | None = None,
     dynamic_fields_json: str | None = None,
     context_document_upload: ProductContextDocumentInput | None = None,
@@ -412,7 +407,6 @@ def create_product(
         _entry_text_or_long_text(entry_text, long_text),
         initial_workflow_entry=workflow_entry,
     )
-    normalized_owner_id = _normalize_optional_text(owner_id, field_name="所属 id", max_length=255)
     normalized_long_text = _normalize_optional_text(long_text, field_name="长文案内容", max_length=4000)
     normalized_source_note = _normalize_optional_text(source_note, field_name="备注", max_length=4000)
     normalized_context_long_text = normalized_long_text or normalized_entry_text or normalized_source_note
@@ -481,10 +475,8 @@ def create_product(
         )
     product_context_config = ProductContextCreationInput(
         name=product.name,
-        owner_id=normalized_owner_id or product.id,
+        owner_id=product.id,
         entry_type=workflow_entry,
-        category=product.category,
-        price=product.price,
         long_text=normalized_context_long_text,
         image_source_asset_id=original_source_asset.id if original_source_asset is not None else None,
         document_source_asset_id=context_document_asset.id if context_document_asset is not None else None,

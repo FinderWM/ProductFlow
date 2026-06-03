@@ -165,12 +165,10 @@ export function InspectorPanel({
   const InspectorIcon = icon;
   const displayTitle = workflowNodeDisplayTitle({ ...node, title: draft.title || node.title }, t);
   const displayLabel = workflowNodeDisplayLabel(node, t);
-  let actionGridColumns = "grid-cols-2";
-  if (node.node_type === "product_context") {
-    actionGridColumns = onCancelRun ? "grid-cols-2" : "grid-cols-1";
-  } else if (onCancelRun) {
-    actionGridColumns = "grid-cols-3";
-  }
+  const showRunAction = node.node_type !== "product_context";
+  const showDeleteAction = node.node_type !== "product_context";
+  const showActionRow = showRunAction || Boolean(onCancelRun) || showDeleteAction;
+  const actionGridColumns = showRunAction && onCancelRun ? "grid-cols-2" : "grid-cols-1";
   const downstreamReferenceCount =
     node.node_type === "image_generation"
       ? new Set(
@@ -275,48 +273,52 @@ export function InspectorPanel({
           </div>
         ) : null}
 
-        <div className={`mt-4 grid gap-2 ${actionGridColumns}`}>
-          <button
-            type="button"
-            onClick={onRun}
-            disabled={runActionState.disabled}
-            className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-primary-spring"
-            title={runActionState.title}
-          >
-            {runActionState.pending ? (
-              <Loader2 size={13} className="mr-1.5 animate-spin" />
-            ) : (
-              <Play size={13} className="mr-1.5" />
-            )}
-            {runActionState.label}
-          </button>
-          {onCancelRun ? (
-            <button
-              type="button"
-              onClick={onCancelRun}
-              disabled={cancelBusy}
-              className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
-              title={t("detail.inspector.cancelCurrentRun")}
-            >
-              {cancelBusy ? (
-                <Loader2 size={13} className="mr-1.5 animate-spin" />
-              ) : (
-                <OctagonX size={13} className="mr-1.5" />
-              )}
-              {t("detail.cancel")}
-            </button>
-          ) : null}
-          {node.node_type !== "product_context" ? (
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={busy}
-              className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
-            >
-              <Trash2 size={13} className="mr-1.5" /> {t("detail.delete")}
-            </button>
-          ) : null}
-        </div>
+        {showActionRow ? (
+          <div className={`mt-4 grid gap-2 ${actionGridColumns}`}>
+            {showRunAction ? (
+              <button
+                type="button"
+                onClick={onRun}
+                disabled={runActionState.disabled}
+                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-primary-spring"
+                title={runActionState.title}
+              >
+                {runActionState.pending ? (
+                  <Loader2 size={13} className="mr-1.5 animate-spin" />
+                ) : (
+                  <Play size={13} className="mr-1.5" />
+                )}
+                {runActionState.label}
+              </button>
+            ) : null}
+            {onCancelRun ? (
+              <button
+                type="button"
+                onClick={onCancelRun}
+                disabled={cancelBusy}
+                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
+                title={t("detail.inspector.cancelCurrentRun")}
+              >
+                {cancelBusy ? (
+                  <Loader2 size={13} className="mr-1.5 animate-spin" />
+                ) : (
+                  <OctagonX size={13} className="mr-1.5" />
+                )}
+                {t("detail.cancel")}
+              </button>
+            ) : null}
+            {showDeleteAction ? (
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={busy}
+                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
+              >
+                <Trash2 size={13} className="mr-1.5" /> {t("detail.delete")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="config-bubble rounded-2xl p-4 shadow-sm">
@@ -488,6 +490,9 @@ function ProductContextInspector({
       dynamicFields: draft.dynamicFields.filter((field) => field.id !== fieldId),
     });
   };
+  const entryTypeLabelKey =
+    PRODUCT_CONTEXT_ENTRY_OPTIONS.find((option) => option.value === draft.entryType)?.labelKey ??
+    "detail.inspector.entryType.image";
 
   return (
     <div className="space-y-3">
@@ -551,57 +556,18 @@ function ProductContextInspector({
           </span>
           <input
             value={draft.ownerId}
-            onChange={(event) => onDraftChange({ ...draft, ownerId: event.target.value })}
-            className="w-full px-3 py-2 text-xs outline-none input-premium"
+            readOnly
+            className="w-full px-3 py-2 text-xs text-zinc-500 outline-none input-premium dark:text-slate-300"
           />
         </label>
         <label className="block">
           <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
             {t("detail.inspector.entryType")}
           </span>
-          <SelectField
-            value={draft.entryType}
-            options={PRODUCT_CONTEXT_ENTRY_OPTIONS.map((option) => ({
-              value: option.value,
-              label: t(option.labelKey),
-            }))}
-            onChange={(value) =>
-              onDraftChange({
-                ...draft,
-                entryType: PRODUCT_CONTEXT_ENTRY_OPTIONS.some((option) => option.value === value)
-                  ? (value as ProductInitialWorkflowEntry)
-                  : "image",
-              })
-            }
-            ariaLabel={t("detail.inspector.entryType")}
-            radius="lg"
-            visualSize="sm"
-          />
-        </label>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-            {t("detail.inspector.category")}
-          </span>
           <input
-            value={draft.category}
-            onChange={(event) =>
-              onDraftChange({ ...draft, category: event.target.value })
-            }
-            className="w-full px-3 py-2 text-xs outline-none input-premium"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-            {t("detail.inspector.price")}
-          </span>
-          <input
-            value={draft.price}
-            onChange={(event) =>
-              onDraftChange({ ...draft, price: event.target.value })
-            }
-            className="w-full px-3 py-2 text-xs outline-none input-premium"
+            value={t(entryTypeLabelKey)}
+            readOnly
+            className="w-full px-3 py-2 text-xs text-zinc-500 outline-none input-premium dark:text-slate-300"
           />
         </label>
       </div>

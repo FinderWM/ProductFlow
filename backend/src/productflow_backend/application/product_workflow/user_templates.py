@@ -98,6 +98,7 @@ PRODUCT_CONTEXT_TEMPLATE_ASSET_CONFIG_KEYS = frozenset(
         "source_asset_ids",
     }
 )
+PRODUCT_CONTEXT_TEMPLATE_RUNTIME_CONFIG_KEYS = frozenset({"owner_id", "entry_type", "category", "price"})
 
 
 class UserCanvasTemplateNodePayload(BaseModel):
@@ -1068,7 +1069,7 @@ def _builtin_template_category_for_stage(
 
 
 def _builtin_template_payload(template: CanvasTemplate, category: CanvasTemplateCategory) -> dict[str, Any]:
-    return template.model_copy(
+    payload = template.model_copy(
         update={
             "scope": "global",
             "category_id": category.id,
@@ -1078,6 +1079,7 @@ def _builtin_template_payload(template: CanvasTemplate, category: CanvasTemplate
             "review_status": "none",
         }
     ).model_dump(mode="json")
+    return _sanitize_template_payload_product_context_configs(payload)
 
 
 def _template_payload_with_category_metadata(
@@ -1095,7 +1097,7 @@ def _template_payload_with_category_metadata(
             "review_status": "none",
         }
     )
-    return payload
+    return _sanitize_template_payload_product_context_configs(payload)
 
 
 def _archive_empty_legacy_builtin_category(session: Session, seeded_template_keys: set[str]) -> None:
@@ -1703,10 +1705,25 @@ def _sanitize_product_context_template_config(config_json: dict[str, Any]) -> di
             key: value
             for key, value in normalize_product_context_config(config_json).items()
             if key not in PRODUCT_CONTEXT_TEMPLATE_ASSET_CONFIG_KEYS
+            and key not in PRODUCT_CONTEXT_TEMPLATE_RUNTIME_CONFIG_KEYS
         },
         allow_artifact_shaped_keys=True,
     )
     return sanitized if isinstance(sanitized, dict) else {}
+
+
+def _sanitize_template_payload_product_context_configs(payload: dict[str, Any]) -> dict[str, Any]:
+    nodes = payload.get("nodes")
+    if not isinstance(nodes, list):
+        return payload
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("node_type") != WorkflowNodeType.PRODUCT_CONTEXT.value:
+            continue
+        config_json = node.get("config_json")
+        node["config_json"] = _sanitize_product_context_template_config(
+            config_json if isinstance(config_json, dict) else {}
+        )
+    return payload
 
 
 def _sanitize_reusable_config(

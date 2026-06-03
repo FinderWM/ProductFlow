@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -31,15 +31,34 @@ interface TopNavProps {
   onLogout?: () => void;
 }
 
-const navItems: Array<{
+type NavPriority = "primary" | "secondary";
+
+interface TopNavItem {
   labelKey: TranslationKey;
   to: string;
   menuCode: string | null;
   requiredPermission?: string;
-  priority: "primary" | "secondary";
+  priority: NavPriority;
   icon: typeof Activity;
   match: (pathname: string) => boolean;
-}> = [
+}
+
+export interface DesktopNavLayoutInput {
+  key: string;
+  priority: NavPriority;
+  active: boolean;
+  width: number;
+}
+
+export interface DesktopNavLayout {
+  visibleKeys: string[];
+  overflowKeys: string[];
+}
+
+const DESKTOP_NAV_GAP_PX = 4;
+const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 10;
+
+const navItems: TopNavItem[] = [
   {
     labelKey: "nav.products",
     to: "/products",
@@ -107,6 +126,84 @@ const navItems: Array<{
   },
 ];
 
+function safeWidth(width: number) {
+  return Number.isFinite(width) ? Math.max(0, width) : 0;
+}
+
+function widthForControls(controlWidths: number[], gap: number) {
+  if (controlWidths.length === 0) {
+    return 0;
+  }
+  return controlWidths.reduce((total, width) => total + safeWidth(width), 0) + (controlWidths.length - 1) * gap;
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export function getDesktopNavLayout({
+  items,
+  availableWidth,
+  moreButtonWidth,
+  gap = DESKTOP_NAV_GAP_PX,
+}: {
+  items: DesktopNavLayoutInput[];
+  availableWidth: number;
+  moreButtonWidth: number;
+  gap?: number;
+}): DesktopNavLayout {
+  const itemByKey = new Map(items.map((item) => [item.key, item]));
+  const overflowKeys = new Set<string>();
+  let visibleKeys = items.map((item) => item.key);
+  const usableWidth = safeWidth(availableWidth);
+
+  if (items.length === 0 || usableWidth <= 0) {
+    return { visibleKeys, overflowKeys: [] };
+  }
+
+  const getVisibleWidth = () => {
+    const visibleWidths = visibleKeys.map((key) => itemByKey.get(key)?.width ?? 0);
+    const controlWidths = overflowKeys.size > 0 ? [...visibleWidths, moreButtonWidth] : visibleWidths;
+    return widthForControls(controlWidths, Math.max(0, gap));
+  };
+
+  const pickOverflowKey = () => {
+    const reversedVisibleKeys = [...visibleKeys].reverse();
+    const buckets: Array<{ priority: NavPriority; active: boolean }> = [
+      { priority: "secondary", active: false },
+      { priority: "secondary", active: true },
+      { priority: "primary", active: false },
+      { priority: "primary", active: true },
+    ];
+
+    for (const bucket of buckets) {
+      const match = reversedVisibleKeys.find((key) => {
+        const item = itemByKey.get(key);
+        return item?.priority === bucket.priority && item.active === bucket.active;
+      });
+      if (match) {
+        return match;
+      }
+    }
+
+    return reversedVisibleKeys[0];
+  };
+
+  while (visibleKeys.length > 0 && getVisibleWidth() > usableWidth) {
+    const nextOverflowKey = pickOverflowKey();
+    if (!nextOverflowKey) {
+      break;
+    }
+    overflowKeys.add(nextOverflowKey);
+    visibleKeys = visibleKeys.filter((key) => key !== nextOverflowKey);
+  }
+
+  return {
+    visibleKeys,
+    overflowKeys: items.map((item) => item.key).filter((key) => overflowKeys.has(key)),
+  };
+}
+
 const themeIcons: Record<ThemePreference, typeof Sun> = {
   light: Sun,
   dark: Moon,
@@ -162,6 +259,13 @@ function preferenceTriggerClassName(hasMarker: boolean) {
 function preferenceMenuClassName(open: boolean) {
   return [
     "absolute right-0 top-11 z-50 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
+    open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
+  ].join(" ");
+}
+
+function desktopMoreMenuClassName(open: boolean) {
+  return [
+    "absolute right-0 top-10 z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
     open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
   ].join(" ");
 }
@@ -278,15 +382,27 @@ function PreferenceMenu<T extends string>({
 }
 
 export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
+  const desktopNavAreaRef = useRef<HTMLDivElement | null>(null);
+  const desktopMeasureRowRef = useRef<HTMLDivElement | null>(null);
+  const desktopMeasureItemRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const desktopMoreMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const desktopMoreMenuRef = useRef<HTMLDivElement | null>(null);
+  const desktopMoreCloseTimerRef = useRef<number | null>(null);
+  const [desktopOverflowKeys, setDesktopOverflowKeys] = useState<string[]>([]);
+  const [desktopMoreOpen, setDesktopMoreOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const location = useLocation();
   const { locale, setLocale, t, themePreference, setThemePreference } = usePreferences();
   const session = useSessionState();
-  const visibleNavItems = navItems.filter(
-    (item) =>
-      item.menuCode === null ||
-      (hasSessionMenu(session, item.menuCode) &&
-        (!item.requiredPermission || hasSessionApiPermission(session, item.requiredPermission))),
+  const visibleNavItems = useMemo(
+    () =>
+      navItems.filter(
+        (item) =>
+          item.menuCode === null ||
+          (hasSessionMenu(session, item.menuCode) &&
+            (!item.requiredPermission || hasSessionApiPermission(session, item.requiredPermission))),
+      ),
+    [session],
   );
   const CurrentThemeIcon = themeIcons[themePreference];
   const themeOptions = THEME_PREFERENCES.map((theme) => ({
@@ -304,6 +420,99 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const secondaryActive = secondaryNavItems.some((item) => item.match(location.pathname));
   const hasOverflowNav = secondaryNavItems.length > 0 || Boolean(onLogout);
   const mobileNavColumnCount = primaryNavItems.length + (hasOverflowNav ? 1 : 0);
+  const desktopOverflowKeySet = useMemo(() => new Set(desktopOverflowKeys), [desktopOverflowKeys]);
+  const desktopVisibleNavItems = visibleNavItems.filter((item) => !desktopOverflowKeySet.has(item.to));
+  const desktopOverflowNavItems = visibleNavItems.filter((item) => desktopOverflowKeySet.has(item.to));
+  const desktopOverflowActive = desktopOverflowNavItems.some((item) => item.match(location.pathname));
+
+  const clearDesktopMoreCloseTimer = useCallback(() => {
+    if (desktopMoreCloseTimerRef.current !== null) {
+      window.clearTimeout(desktopMoreCloseTimerRef.current);
+      desktopMoreCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleDesktopMoreClose = useCallback(() => {
+    clearDesktopMoreCloseTimer();
+    desktopMoreCloseTimerRef.current = window.setTimeout(() => {
+      setDesktopMoreOpen(false);
+      desktopMoreCloseTimerRef.current = null;
+    }, 180);
+  }, [clearDesktopMoreCloseTimer]);
+
+  const updateDesktopNavLayout = useCallback(() => {
+    const navArea = desktopNavAreaRef.current;
+    const moreMeasure = desktopMoreMeasureRef.current;
+    if (!navArea || !moreMeasure) {
+      return;
+    }
+
+    const layoutItems = visibleNavItems.map((item) => ({
+      key: item.to,
+      priority: item.priority,
+      active: item.match(location.pathname),
+      width: desktopMeasureItemRefs.current[item.to]?.getBoundingClientRect().width ?? 0,
+    }));
+    const moreButtonWidth = moreMeasure.getBoundingClientRect().width;
+
+    if (layoutItems.some((item) => item.width <= 0) || moreButtonWidth <= 0) {
+      setDesktopOverflowKeys((current) => (current.length === 0 ? current : []));
+      return;
+    }
+
+    const layout = getDesktopNavLayout({
+      items: layoutItems,
+      availableWidth: navArea.clientWidth - DESKTOP_NAV_HORIZONTAL_CHROME_PX,
+      moreButtonWidth,
+    });
+    setDesktopOverflowKeys((current) => (arraysEqual(current, layout.overflowKeys) ? current : layout.overflowKeys));
+  }, [location.pathname, visibleNavItems]);
+
+  useLayoutEffect(() => {
+    updateDesktopNavLayout();
+  }, [locale, updateDesktopNavLayout]);
+
+  useEffect(() => () => clearDesktopMoreCloseTimer(), [clearDesktopMoreCloseTimer]);
+
+  useEffect(() => {
+    const navArea = desktopNavAreaRef.current;
+    if (!navArea || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(updateDesktopNavLayout);
+    observer.observe(navArea);
+    if (desktopMeasureRowRef.current) {
+      observer.observe(desktopMeasureRowRef.current);
+    }
+    updateDesktopNavLayout();
+    return () => observer.disconnect();
+  }, [updateDesktopNavLayout]);
+
+  useEffect(() => {
+    if (desktopOverflowNavItems.length === 0) {
+      setDesktopMoreOpen(false);
+    }
+  }, [desktopOverflowNavItems.length]);
+
+  useEffect(() => {
+    if (!desktopMoreOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && desktopMoreMenuRef.current?.contains(target)) {
+        return;
+      }
+      clearDesktopMoreCloseTimer();
+      setDesktopMoreOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [clearDesktopMoreCloseTimer, desktopMoreOpen]);
+
   const renderPreferenceControls = () => (
     <>
       <PreferenceMenu
@@ -326,7 +535,7 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
     </>
   );
 
-  const renderDesktopNavItem = (item: (typeof navItems)[number], compact = false) => {
+  const renderDesktopNavItem = (item: TopNavItem) => {
     const Icon = item.icon;
     const active = item.match(location.pathname);
     const label = t(item.labelKey);
@@ -340,8 +549,25 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
         title={label}
       >
         <Icon size={16} />
-        <span className={compact ? "hidden min-[1440px]:inline" : "inline"}>{label}</span>
+        <span className="inline">{label}</span>
       </Link>
+    );
+  };
+
+  const renderDesktopNavMeasurementItem = (item: TopNavItem) => {
+    const Icon = item.icon;
+    const label = t(item.labelKey);
+    return (
+      <span
+        key={item.to}
+        ref={(node) => {
+          desktopMeasureItemRefs.current[item.to] = node;
+        }}
+        className={navItemClassName(false)}
+      >
+        <Icon size={16} aria-hidden="true" />
+        <span>{label}</span>
+      </span>
     );
   };
 
@@ -377,25 +603,53 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
             ) : null}
           </div>
 
-          <div className="hidden min-w-0 flex-1 justify-center md:flex">
-            <div className="flex min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/70 p-1 shadow-inner shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-none">
-              <div className="hidden items-center gap-1 min-[1440px]:flex">
-                {visibleNavItems.map((item) => renderDesktopNavItem(item))}
-              </div>
-              <div className="flex items-center gap-1 min-[1440px]:hidden">
-                {primaryNavItems.map((item) => renderDesktopNavItem(item, true))}
-                {secondaryNavItems.length ? (
-                  <div className="group relative">
+          <div ref={desktopNavAreaRef} className="hidden min-w-0 flex-1 justify-center md:flex">
+            <div className="relative flex max-w-full min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/70 p-1 shadow-inner shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-none">
+              <div className="flex min-w-0 items-center gap-1">
+                {desktopVisibleNavItems.map((item) => renderDesktopNavItem(item))}
+                {desktopOverflowNavItems.length ? (
+                  <div
+                    ref={desktopMoreMenuRef}
+                    className="relative"
+                    onPointerEnter={() => {
+                      clearDesktopMoreCloseTimer();
+                      setDesktopMoreOpen(true);
+                    }}
+                    onPointerLeave={scheduleDesktopMoreClose}
+                    onBlur={(event) => {
+                      const nextTarget = event.relatedTarget;
+                      if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                        clearDesktopMoreCloseTimer();
+                        setDesktopMoreOpen(false);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        clearDesktopMoreCloseTimer();
+                        setDesktopMoreOpen(false);
+                      }
+                    }}
+                  >
                     <button
                       type="button"
                       aria-label={t("nav.more")}
-                      className={navItemClassName(secondaryActive)}
+                      aria-haspopup="menu"
+                      aria-expanded={desktopMoreOpen}
+                      className={navItemClassName(desktopOverflowActive || desktopMoreOpen)}
+                      onClick={() => {
+                        clearDesktopMoreCloseTimer();
+                        setDesktopMoreOpen(true);
+                      }}
                     >
-                      <MoreHorizontal size={16} />
-                      <span className="hidden min-[1440px]:inline">{t("nav.more")}</span>
+                      <MoreHorizontal size={16} aria-hidden="true" />
                     </button>
-                    <div className="invisible absolute right-0 top-12 z-50 w-56 translate-y-1 rounded-xl border border-slate-200 bg-white p-2 opacity-0 shadow-xl shadow-slate-950/10 transition group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30">
-                      {secondaryNavItems.map((item) => {
+                    <div
+                      role="menu"
+                      aria-label={t("nav.more")}
+                      aria-hidden={!desktopMoreOpen}
+                      className={desktopMoreMenuClassName(desktopMoreOpen)}
+                    >
+                      {desktopOverflowNavItems.map((item) => {
                         const Icon = item.icon;
                         const active = item.match(location.pathname);
                         const label = t(item.labelKey);
@@ -403,10 +657,15 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
                           <Link
                             key={item.to}
                             to={item.to}
+                            role="menuitem"
                             aria-current={active ? "page" : undefined}
                             className={menuItemClassName(active)}
+                            onClick={() => {
+                              clearDesktopMoreCloseTimer();
+                              setDesktopMoreOpen(false);
+                            }}
                           >
-                            <Icon size={16} />
+                            <Icon size={16} aria-hidden="true" />
                             <span className="truncate">{label}</span>
                           </Link>
                         );
@@ -414,6 +673,16 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
                     </div>
                   </div>
                 ) : null}
+              </div>
+              <div
+                ref={desktopMeasureRowRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute left-0 top-0 flex items-center gap-1 opacity-0"
+              >
+                {visibleNavItems.map((item) => renderDesktopNavMeasurementItem(item))}
+                <span ref={desktopMoreMeasureRef} className={navItemClassName(false)}>
+                  <MoreHorizontal size={16} aria-hidden="true" />
+                </span>
               </div>
             </div>
           </div>

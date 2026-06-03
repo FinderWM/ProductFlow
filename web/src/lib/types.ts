@@ -298,7 +298,6 @@ export interface CreateProductInput {
   category?: string;
   price?: string;
   source_note?: string;
-  owner_id?: string;
   long_text?: string;
   dynamic_fields?: Record<string, string | number | boolean | null>;
   canvas_template_key?: string;

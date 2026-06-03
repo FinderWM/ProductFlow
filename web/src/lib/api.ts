@@ -351,9 +351,6 @@ export const api = {
     if (input.source_note) {
       formData.set("source_note", input.source_note);
     }
-    if (input.owner_id) {
-      formData.set("owner_id", input.owner_id);
-    }
     if (input.long_text) {
       formData.set("long_text", input.long_text);
     }

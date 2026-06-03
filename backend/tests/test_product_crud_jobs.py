@@ -168,7 +168,10 @@ def test_product_create_materializes_full_canvas_template(configured_env: Path, 
             if template_node.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
                 if all(node.config_json.get(key) == value for key, value in expected_config.items()):
                     assert node.config_json["name"] == "模板画布商品"
+                    assert node.config_json["owner_id"] == product_id
                     assert node.config_json["entry_type"] == "image"
+                    assert "category" not in node.config_json
+                    assert "price" not in node.config_json
                     matched_node = node
                     break
                 continue
@@ -301,7 +304,11 @@ def test_product_create_template_persists_text_entry_context_for_summary(configu
         .filter_by(workflow_id=workflow.id, node_type=WorkflowNodeType.PRODUCT_CONTEXT)
         .one()
     )
+    product_id = created.json()["id"]
     assert context_node.config_json["entry_type"] == "copy"
+    assert context_node.config_json["owner_id"] == product_id
+    assert "category" not in context_node.config_json
+    assert "price" not in context_node.config_json
     assert context_node.config_json["long_text"] == entry_text
     assert context_node.config_json["source_note"] == entry_text
 

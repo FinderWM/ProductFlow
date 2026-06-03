@@ -37,7 +37,11 @@ function generationConfigIdFromNode(node: WorkflowNode | null): string | null {
 
 function recordString(record: Record<string, unknown> | null | undefined, key: string, fallback = ""): string {
   const value = record?.[key];
-  return typeof value === "string" ? value : fallback;
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const normalizedValue = value.trim();
+  return normalizedValue || fallback;
 }
 
 function configOrOutputString(node: WorkflowNode | null, key: string, fallback = ""): string {
@@ -95,12 +99,10 @@ export function draftFromNode(
     productName: configString(node, "name", product?.name ?? ""),
     ownerId: configOrOutputString(node, "owner_id", product?.id ?? ""),
     entryType: entryTypeFromNode(node, workflowInitialEntry),
-    category: configString(node, "category", product?.category ?? ""),
-    price: configString(node, "price", product?.price ?? ""),
     sourceNote:
       node?.node_type === "tail_splitter"
-        ? configString(node, "source_text")
-        : configString(node, "source_note", product?.source_note ?? ""),
+        ? configOrOutputString(node, "source_text")
+        : configOrOutputString(node, "source_note", product?.source_note ?? ""),
     longText: configOrOutputString(
       node,
       "long_text",
@@ -143,13 +145,14 @@ export function nodeConfigFromDraft(
   const base = { ...node.config_json };
   if (node.node_type === "product_context") {
     const longText = draft.longText;
+    const productContextBase = { ...base };
+    delete productContextBase.category;
+    delete productContextBase.price;
     return {
-      ...base,
+      ...productContextBase,
       name: draft.productName,
-      owner_id: draft.ownerId,
-      entry_type: draft.entryType,
-      category: draft.category,
-      price: draft.price,
+      owner_id: productContextBase.owner_id ?? draft.ownerId,
+      entry_type: productContextBase.entry_type ?? draft.entryType,
       long_text: longText,
       source_note: longText,
       image_source_asset_id: draft.imageSourceAssetId || null,

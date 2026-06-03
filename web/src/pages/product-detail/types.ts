@@ -25,8 +25,6 @@ export type NodeConfigDraft = {
   productName: string;
   ownerId: string;
   entryType: ProductInitialWorkflowEntry;
-  category: string;
-  price: string;
   sourceNote: string;
   longText: string;
   imageSourceAssetId: string;

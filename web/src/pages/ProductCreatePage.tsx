@@ -232,7 +232,6 @@ export function ProductCreatePage() {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [ownerId, setOwnerId] = useState("");
   const [longText, setLongText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [contextDocumentFile, setContextDocumentFile] = useState<File | null>(null);
@@ -418,7 +417,6 @@ export function ProductCreatePage() {
       const trimmedLongText = longText.trim();
       return api.createProduct({
         name: name.trim(),
-        owner_id: ownerId.trim() || undefined,
         long_text: trimmedLongText || undefined,
         file: file ?? undefined,
         contextDocumentFile: contextDocumentFile ?? undefined,
@@ -782,23 +780,6 @@ export function ProductCreatePage() {
                   placeholder={t("create.namePlaceholder")}
                 />
                 <div className="mt-1 text-right text-xs text-zinc-400 dark:text-slate-500">{name.length} / 60</div>
-              </div>
-
-              <div className="mt-5">
-                <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
-                  {t("create.ownerId")}
-                </label>
-                <input
-                  type="text"
-                  maxLength={255}
-                  value={ownerId}
-                  onChange={(event) => {
-                    setOwnerId(event.target.value);
-                    setError("");
-                  }}
-                  className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
-                  placeholder={t("create.ownerIdPlaceholder")}
-                />
               </div>
 
               <div className="mt-5">

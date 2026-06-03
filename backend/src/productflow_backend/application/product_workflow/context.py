@@ -33,12 +33,11 @@ from productflow_backend.infrastructure.storage import LocalStorage
 _UNRESOLVED_PLACEHOLDER_PATTERN = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}$")
 PRODUCT_CONTEXT_ENTRY_TYPES = frozenset({"image", "copy", "tail", "blank"})
 PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY = "dynamic_fields"
+DEPRECATED_PRODUCT_CONTEXT_CONFIG_KEYS = frozenset({"category", "price"})
 PRODUCT_CONTEXT_TEXT_KEYS = (
     "name",
     "owner_id",
     "long_text",
-    "category",
-    "price",
     "source_note",
     "image_source_asset_id",
     "document_source_asset_id",
@@ -54,6 +53,8 @@ def find_source_asset(product: Product) -> SourceAsset | None:
 
 def normalize_product_context_config(config_json: dict[str, Any] | None) -> dict[str, Any]:
     config = dict(config_json or {})
+    for key in DEPRECATED_PRODUCT_CONTEXT_CONFIG_KEYS:
+        config.pop(key, None)
     for key in PRODUCT_CONTEXT_TEXT_KEYS:
         if key in config:
             config[key] = _normalize_nullable_text(config.get(key))
@@ -135,8 +136,8 @@ def product_context_values(
         ),
         "entry_type": _product_context_entry_type(config=config, output=output, workflow=workflow),
         "name": _configured_text(config, "name", fallback=product.name) or product.name,
-        "category": _configured_text(config, "category", fallback=product.category),
-        "price": _configured_text(config, "price", fallback=str(product.price) if product.price is not None else None),
+        "category": None,
+        "price": None,
         "source_note": source_note,
         "long_text": long_text or source_note,
         "image_source_asset_id": image_source_asset_id,
@@ -470,8 +471,6 @@ def collect_incoming_context(
                 f"名称：{product_context['name']}" if product_context["name"] else "",
                 f"所属 ID：{product_context['owner_id']}" if product_context["owner_id"] else "",
                 f"入口类型：{product_context['entry_type']}" if product_context["entry_type"] else "",
-                f"类目：{product_context['category']}" if product_context["category"] else "",
-                f"价格：{product_context['price']}" if product_context["price"] else "",
                 f"长文案：{product_context['long_text']}" if product_context["long_text"] else "",
                 _dynamic_fields_context_text(product_context.get(PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY)),
             ]

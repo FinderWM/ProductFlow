@@ -1,0 +1,59 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { api } from "./api";
+
+function productDetailResponse() {
+  return new Response(
+    JSON.stringify({
+      id: "product-1",
+      owner_user_id: "user-1",
+      owner_username: null,
+      name: "三阶魔方",
+      category: null,
+      price: null,
+      source_note: "顺滑磁吸结构",
+      workflow_state: "draft",
+      source_assets: [],
+      latest_brief: null,
+      current_confirmed_copy_set: null,
+      copy_sets: [],
+      poster_variants: [],
+      created_at: "2026-06-03T00:00:00Z",
+      updated_at: "2026-06-03T00:00:00Z",
+    }),
+    { status: 201, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+describe("api.createProduct", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("serializes rich product context fields into multipart form data", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(productDetailResponse());
+    const image = new File(["image"], "cube.png", { type: "image/png" });
+    const documentFile = new File(["brief"], "brief.md", { type: "text/markdown" });
+
+    await api.createProduct({
+      name: "三阶魔方",
+      long_text: "顺滑磁吸结构",
+      dynamic_fields: { magnetic: true, level: 3, note: null },
+      initial_workflow_entry: "copy",
+      entry_text: "顺滑磁吸结构",
+      file: image,
+      contextDocumentFile: documentFile,
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = init?.body as FormData;
+    expect(body.get("name")).toBe("三阶魔方");
+    expect(body.has("owner_id")).toBe(false);
+    expect(body.get("long_text")).toBe("顺滑磁吸结构");
+    expect(body.get("initial_workflow_entry")).toBe("copy");
+    expect(body.get("entry_text")).toBe("顺滑磁吸结构");
+    expect(body.get("dynamic_fields_json")).toBe(JSON.stringify({ magnetic: true, level: 3, note: null }));
+    expect(body.get("image")).toBe(image);
+    expect(body.get("context_document")).toBe(documentFile);
+  });
+});

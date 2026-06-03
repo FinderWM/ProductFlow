@@ -127,7 +127,7 @@ export interface GenerationConfigDraft {
   cooldown_minutes: string;
 }
 
-interface TextConfigTestDraft {
+export interface TextConfigTestDraft {
   productName: string;
   category: string;
   price: string;
@@ -135,11 +135,21 @@ interface TextConfigTestDraft {
   instruction: string;
 }
 
-interface TextConfigTestState {
-  draft: TextConfigTestDraft;
-  testingKey: string | null;
+export interface TextConfigTestRecord {
+  testing: boolean;
   result: TextGenerationConfigTestResponse | null;
   error: string;
+}
+
+export interface TextConfigTestState {
+  draft: TextConfigTestDraft;
+  latestKey: string | null;
+  records: Record<string, TextConfigTestRecord>;
+}
+
+interface TextGenerationConfigTestMutationInput {
+  key: string;
+  payload: TextGenerationConfigTestRequest;
 }
 
 type TextProviderKind = "mock" | "openai";
@@ -283,6 +293,54 @@ const DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
   sourceNote: "用于验证当前文案生成配置的测试输入。",
   instruction: "输出适合主图的短文案。",
 };
+
+export function textConfigTestRecordForKey(
+  state: TextConfigTestState | undefined,
+  key: string,
+): TextConfigTestRecord | null {
+  return state?.records[key] ?? null;
+}
+
+export function markTextConfigTestStarted(state: TextConfigTestState, key: string): TextConfigTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: true, result: null, error: "" },
+    },
+  };
+}
+
+export function markTextConfigTestSucceeded(
+  state: TextConfigTestState,
+  key: string,
+  result: TextGenerationConfigTestResponse,
+): TextConfigTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: false, result, error: "" },
+    },
+  };
+}
+
+export function markTextConfigTestFailed(
+  state: TextConfigTestState,
+  key: string,
+  error: string,
+): TextConfigTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: false, result: null, error },
+    },
+  };
+}
 
 function multiSelectValue(value: ConfigItem["value"]): string[] {
   if (Array.isArray(value)) {
@@ -898,6 +956,18 @@ function providerModelsStatusText(
   return t("settings.provider.modelsEmpty");
 }
 
+export function filterProviderModels(models: ProviderModel[], query: string): ProviderModel[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return models;
+  }
+  return models.filter((model) => {
+    const normalizedId = model.id.toLowerCase();
+    const normalizedLabel = model.label.toLowerCase();
+    return normalizedId.includes(normalizedQuery) || normalizedLabel.includes(normalizedQuery);
+  });
+}
+
 interface ProviderModelInputProps {
   idPrefix: string;
   label: string;
@@ -935,6 +1005,7 @@ function ProviderModelInput({
     retry: false,
   });
   const models = modelsQuery.data?.models ?? [];
+  const filteredModels = filterProviderModels(models, value);
   const statusText =
     providerKind === "mock"
       ? ""
@@ -947,7 +1018,8 @@ function ProviderModelInput({
     ? "text-red-600 dark:text-red-300"
     : "text-slate-500 dark:text-slate-400";
   const canOpenModels = !disabled && canFetchModels && models.length > 0;
-  const activeModel = models.find((model) => model.id === activeModelId) ?? models[0] ?? null;
+  const activeModel = filteredModels.find((model) => model.id === activeModelId) ?? filteredModels[0] ?? null;
+  const modelOptionsOpen = open && canOpenModels && filteredModels.length > 0;
 
   useEffect(() => {
     if (!open) {
@@ -966,10 +1038,10 @@ function ProviderModelInput({
   }, [open, value]);
 
   useEffect(() => {
-    if (open && activeModel) {
+    if (modelOptionsOpen && activeModel) {
       optionRefs.current[activeModel.id]?.scrollIntoView({ block: "nearest" });
     }
-  }, [activeModel, open]);
+  }, [activeModel, modelOptionsOpen]);
 
   useEffect(() => {
     if (!models.length) {
@@ -978,15 +1050,17 @@ function ProviderModelInput({
   }, [models.length]);
 
   function moveActiveModel(delta: number) {
-    if (!models.length) {
+    if (!filteredModels.length) {
       return;
     }
-    const currentIndex = Math.max(
-      0,
-      models.findIndex((model) => model.id === activeModelId),
-    );
-    const nextIndex = (currentIndex + delta + models.length) % models.length;
-    setActiveModelId(models[nextIndex].id);
+    const currentIndex = filteredModels.findIndex((model) => model.id === activeModelId);
+    const nextIndex =
+      currentIndex === -1
+        ? delta > 0
+          ? 0
+          : filteredModels.length - 1
+        : (currentIndex + delta + filteredModels.length) % filteredModels.length;
+    setActiveModelId(filteredModels[nextIndex].id);
   }
 
   function selectModel(model: ProviderModel) {
@@ -1005,13 +1079,16 @@ function ProviderModelInput({
           <input
             id={inputId}
             role="combobox"
-            aria-expanded={open}
+            aria-expanded={modelOptionsOpen}
             aria-controls={listboxId}
             aria-autocomplete="list"
             value={value}
             onChange={(event) => {
               onChange(event.target.value);
               setActiveModelId(event.target.value);
+              if (canOpenModels) {
+                setOpen(true);
+              }
             }}
             onFocus={() => {
               if (canOpenModels) {
@@ -1034,7 +1111,7 @@ function ProviderModelInput({
                 moveActiveModel(-1);
                 return;
               }
-              if (event.key === "Enter" && open && activeModel) {
+              if (event.key === "Enter" && modelOptionsOpen && activeModel) {
                 event.preventDefault();
                 selectModel(activeModel);
                 return;
@@ -1055,7 +1132,7 @@ function ProviderModelInput({
               aria-label={t("settings.provider.openModelOptions")}
               title={t("settings.provider.openModelOptions")}
             >
-              <ChevronDown size={15} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+              <ChevronDown size={15} className={`transition-transform ${modelOptionsOpen ? "rotate-180" : ""}`} />
             </button>
           ) : null}
         </div>
@@ -1075,14 +1152,14 @@ function ProviderModelInput({
           </button>
         ) : null}
       </div>
-      {open && canOpenModels ? (
+      {modelOptionsOpen ? (
         <div
           id={listboxId}
           role="listbox"
           aria-labelledby={inputId}
           className="absolute left-0 right-[3.25rem] z-[95] max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10"
         >
-          {models.map((model) => (
+          {filteredModels.map((model) => (
             <button
               key={model.id}
               ref={(element) => {
@@ -1935,6 +2012,11 @@ function TextConfigTestPanel({
   onDraftChange: (draft: TextConfigTestDraft) => void;
 }) {
   const { t } = useI18n();
+  const latestRecord = state.latestKey ? state.records[state.latestKey] : null;
+  const latestResult = latestRecord?.result ?? null;
+  const latestError = latestRecord?.error ?? "";
+  const runningCount = Object.values(state.records).filter((record) => record.testing).length;
+
   return (
     <section className={`${PANEL_CLASS} space-y-4`}>
       <div>
@@ -1982,27 +2064,53 @@ function TextConfigTestPanel({
           className={`${TEXTAREA_CLASS} min-h-24 resize-y`}
         />
       </SettingsFormField>
-      {state.error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-          {state.error}
+      {runningCount > 0 ? (
+        <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
+          <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
+          <div>
+            <div className="font-semibold">{t("settings.generation.testRunning")}</div>
+            <div className="mt-0.5 text-xs text-indigo-700/80 dark:text-violet-100/75">
+              {t("settings.generation.testRunningDetail")}
+            </div>
+          </div>
         </div>
       ) : null}
-      {state.result ? (
+      {latestError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+          {latestError}
+        </div>
+      ) : null}
+      {runningCount === 0 && latestResult ? (
+        <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100">
+          <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-semibold">{t("settings.generation.testPassed")}</div>
+            <div className="mt-0.5 text-xs text-emerald-700/80 dark:text-emerald-100/75">
+              {t("settings.generation.testPassedDetail", {
+                duration: String(Math.max(1, Math.round(latestResult.duration_ms))),
+                briefModel: latestResult.brief_model,
+                copyModel: latestResult.copy_model,
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {latestResult ? (
         <div className="grid gap-3 lg:grid-cols-2">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
             <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              {t("settings.generation.testBriefResult", { model: state.result.brief_model })}
+              {t("settings.generation.testBriefResult", { model: latestResult.brief_model })}
             </div>
             <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
-              {JSON.stringify(state.result.brief, null, 2)}
+              {JSON.stringify(latestResult.brief, null, 2)}
             </pre>
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
             <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              {t("settings.generation.testCopyResult", { model: state.result.copy_model })}
+              {t("settings.generation.testCopyResult", { model: latestResult.copy_model })}
             </div>
             <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
-              {JSON.stringify(state.result.copy_result, null, 2)}
+              {JSON.stringify(latestResult.copy_result, null, 2)}
             </pre>
           </div>
         </div>
@@ -2058,24 +2166,25 @@ function GenerationConfigPoolSection({
           {t("settings.generation.refreshSort")}
         </button>
       </div>
-      {cards.map(({ key, config, draft }) => (
-        <GenerationConfigCard
-          key={key}
-          config={config}
-          draft={draft}
-          profiles={providerProfilesForGenerationConfig(profiles, draft)}
-          pending={pending || archivingConfigId === config?.id}
-          onChange={(next) => onChange(generationConfigDraftKey(next), next)}
-          onSave={() => onSave(draft)}
-          onArchive={config ? () => onArchive(config.id) : undefined}
-          onTest={
-            purpose === "text" && onTestTextConfig
-              ? () => onTestTextConfig(draft)
-              : undefined
-          }
-          testing={textTestState?.testingKey === key}
-        />
-      ))}
+      {cards.map(({ key, config, draft }) => {
+        const testRecord = textConfigTestRecordForKey(textTestState, key);
+        return (
+          <GenerationConfigCard
+            key={key}
+            config={config}
+            draft={draft}
+            profiles={providerProfilesForGenerationConfig(profiles, draft)}
+            pending={pending || archivingConfigId === config?.id}
+            onChange={(next) => onChange(generationConfigDraftKey(next), next)}
+            onSave={() => onSave(draft)}
+            onArchive={config ? () => onArchive(config.id) : undefined}
+            onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(draft) : undefined}
+            testing={Boolean(testRecord?.testing)}
+            testResult={testRecord?.result ?? null}
+            testError={testRecord?.error ?? ""}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -2090,6 +2199,8 @@ interface GenerationConfigCardProps {
   onArchive?: () => void;
   onTest?: () => void;
   testing?: boolean;
+  testResult?: TextGenerationConfigTestResponse | null;
+  testError?: string;
 }
 
 function GenerationConfigCard({
@@ -2102,6 +2213,8 @@ function GenerationConfigCard({
   onArchive,
   onTest,
   testing = false,
+  testResult = null,
+  testError = "",
 }: GenerationConfigCardProps) {
   const { t } = useI18n();
   const isNew = !config;
@@ -2178,6 +2291,64 @@ function GenerationConfigCard({
           ) : null}
         </div>
       </div>
+      {testing || testResult || testError ? (
+        <div
+          className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm ${
+            testError
+              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
+              : testResult
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100"
+                : "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100"
+          }`}
+        >
+          {testError ? (
+            <X size={16} className="mt-0.5 shrink-0" />
+          ) : testResult ? (
+            <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+          ) : (
+            <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
+          )}
+          <div className="min-w-0">
+            <div className="font-semibold">
+              {testError
+                ? t("settings.generation.testFailed")
+                : testResult
+                  ? t("settings.generation.testPassed")
+                  : t("settings.generation.testRunning")}
+            </div>
+            <div className="mt-0.5 break-words text-xs opacity-80">
+              {testError ||
+                (testResult
+                  ? t("settings.generation.testPassedDetail", {
+                      duration: String(Math.max(1, Math.round(testResult.duration_ms))),
+                      briefModel: testResult.brief_model,
+                      copyModel: testResult.copy_model,
+                    })
+                  : t("settings.generation.testRunningDetail"))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {testResult ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {t("settings.generation.testBriefResult", { model: testResult.brief_model })}
+            </div>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+              {JSON.stringify(testResult.brief, null, 2)}
+            </pre>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {t("settings.generation.testCopyResult", { model: testResult.copy_model })}
+            </div>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+              {JSON.stringify(testResult.copy_result, null, 2)}
+            </pre>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
         <SettingsFormField label={t("settings.generation.nameLabel")}>
@@ -2413,9 +2584,8 @@ export function SettingsPage() {
   const [importFileName, setImportFileName] = useState("");
   const [textConfigTestState, setTextConfigTestState] = useState<TextConfigTestState>({
     draft: DEFAULT_TEXT_CONFIG_TEST_DRAFT,
-    testingKey: null,
-    result: null,
-    error: "",
+    latestKey: null,
+    records: {},
   });
 
   const configQuery = useQuery({
@@ -2703,33 +2873,23 @@ export function SettingsPage() {
   });
 
   const testTextGenerationConfigMutation = useMutation({
-    mutationFn: (draft: GenerationConfigDraft) =>
-      api.testTextGenerationConfig(textGenerationConfigTestPayload(draft, textConfigTestState.draft)),
-    onMutate: (draft) => {
-      setTextConfigTestState((current) => ({
-        ...current,
-        testingKey: generationConfigDraftKey(draft),
-        result: null,
-        error: "",
-      }));
+    mutationFn: ({ payload }: TextGenerationConfigTestMutationInput) => api.testTextGenerationConfig(payload),
+    onMutate: ({ key }) => {
+      setTextConfigTestState((current) => markTextConfigTestStarted(current, key));
       setSavedMessage("");
       setError("");
     },
-    onSuccess: (result) => {
-      setTextConfigTestState((current) => ({
-        ...current,
-        testingKey: null,
-        result,
-        error: "",
-      }));
+    onSuccess: (result, { key }) => {
+      setTextConfigTestState((current) => markTextConfigTestSucceeded(current, key, result));
     },
-    onError: (mutationError) => {
-      setTextConfigTestState((current) => ({
-        ...current,
-        testingKey: null,
-        result: null,
-        error: mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.testFailed"),
-      }));
+    onError: (mutationError, { key }) => {
+      setTextConfigTestState((current) =>
+        markTextConfigTestFailed(
+          current,
+          key,
+          mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.testFailed"),
+        ),
+      );
     },
   });
 
@@ -3021,7 +3181,10 @@ export function SettingsPage() {
                           setTextConfigTestState((current) => ({ ...current, draft }));
                         }}
                         onTestTextConfig={(draft) => {
-                          testTextGenerationConfigMutation.mutate(draft);
+                          testTextGenerationConfigMutation.mutate({
+                            key: generationConfigDraftKey(draft),
+                            payload: textGenerationConfigTestPayload(draft, textConfigTestState.draft),
+                          });
                         }}
                         onRefreshSort={() => {
                           void queryClient.invalidateQueries({ queryKey: ["provider-config"] });

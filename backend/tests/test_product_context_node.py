@@ -112,13 +112,19 @@ def test_product_create_initializes_rich_product_context(configured_env: Path) -
         "/api/products",
         data={
             "name": "三阶魔方",
-            "owner_id": "goods-333",
             "category": "益智玩具",
             "price": "39.90",
             "initial_workflow_entry": "copy",
             "long_text": long_text,
             "dynamic_fields_json": json.dumps(
-                {"color": "黑色", "magnetic": True, "level": 3, "note": None},
+                {
+                    "类目": "益智玩具",
+                    "价格": "39.90",
+                    "color": "黑色",
+                    "magnetic": True,
+                    "level": 3,
+                    "note": None,
+                },
                 ensure_ascii=False,
             ),
         },
@@ -144,10 +150,10 @@ def test_product_create_initializes_rich_product_context(configured_env: Path) -
     document_asset = next(asset for asset in created.json()["source_assets"] if asset["kind"] == "context_document")
 
     assert context_node["config_json"]["name"] == "三阶魔方"
-    assert context_node["config_json"]["owner_id"] == "goods-333"
+    assert context_node["config_json"]["owner_id"] == product_id
     assert context_node["config_json"]["entry_type"] == "copy"
-    assert context_node["config_json"]["category"] == "益智玩具"
-    assert context_node["config_json"]["price"] == "39.90"
+    assert "category" not in context_node["config_json"]
+    assert "price" not in context_node["config_json"]
     assert context_node["config_json"]["long_text"] == long_text
     assert context_node["config_json"]["source_note"] == long_text
     assert context_node["config_json"]["image_source_asset_id"] == image_asset["id"]
@@ -156,6 +162,8 @@ def test_product_create_initializes_rich_product_context(configured_env: Path) -
     assert context_node["config_json"]["document_mime_type"] == "text/markdown"
     assert context_node["config_json"]["document_text"] == "核心卖点：顺滑、稳定、磁吸。"
     assert context_node["config_json"]["dynamic_fields"] == {
+        "类目": "益智玩具",
+        "价格": "39.90",
         "color": "黑色",
         "magnetic": True,
         "level": 3,
@@ -240,7 +248,13 @@ def test_product_context_fields_flow_to_downstream_image_node(configured_env: Pa
         "category": "户外照明",
         "price": "89",
         "long_text": "主打轻量照明、帐篷氛围和应急备用。",
-        "dynamic_fields": {"waterproof": True, "lumens": 300, "scene": "露营"},
+        "dynamic_fields": {
+            "类目": "户外照明",
+            "价格": "89",
+            "waterproof": True,
+            "lumens": 300,
+            "scene": "露营",
+        },
     }
     patched_context = client.patch(
         f"/api/workflow-nodes/{context_node['id']}",
@@ -252,6 +266,10 @@ def test_product_context_fields_flow_to_downstream_image_node(configured_env: Pa
         patched_context_node["config_json"]["image_source_asset_id"]
         == context_after_image["config_json"]["image_source_asset_id"]
     )
+    assert patched_context_node["config_json"]["owner_id"] == product_id
+    assert patched_context_node["config_json"]["entry_type"] == "image"
+    assert "category" not in patched_context_node["config_json"]
+    assert "price" not in patched_context_node["config_json"]
 
     selected_run = client.post(
         f"/api/products/{product_id}/workflow/run",
@@ -262,11 +280,19 @@ def test_product_context_fields_flow_to_downstream_image_node(configured_env: Pa
     image_output = next(node for node in payload["nodes"] if node["id"] == image_node["id"])["output_json"]
     product_context = image_output["context_summary"]["product_context"]
 
-    assert product_context["owner_id"] == "goods-789"
-    assert product_context["entry_type"] == "tail"
+    assert product_context["owner_id"] == product_id
+    assert product_context["entry_type"] == "image"
+    assert product_context["category"] is None
+    assert product_context["price"] is None
     assert product_context["long_text"] == "主打轻量照明、帐篷氛围和应急备用。"
     assert product_context["document_filename"] == "brief.txt"
-    assert product_context["dynamic_fields"] == {"waterproof": True, "lumens": 300, "scene": "露营"}
+    assert product_context["dynamic_fields"] == {
+        "类目": "户外照明",
+        "价格": "89",
+        "waterproof": True,
+        "lumens": 300,
+        "scene": "露营",
+    }
     assert image_output["context_summary"]["reference_image_count"] >= 1
     assert any("主打轻量照明" in source["text"] for source in image_output["context_sources"])
     assert any("轻量，三档亮度" in source["text"] for source in image_output["context_sources"])

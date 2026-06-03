@@ -839,6 +839,7 @@ def test_builtin_scenario_template_runs_with_auto_product_context_edges(
                 "category": "出图工具",
                 "price": "199",
                 "source_note": "验证场景模板会自动继承商品资料和商品主图。",
+                "dynamic_fields": {"类目": "出图工具", "价格": "199"},
             }
         },
     )
@@ -885,19 +886,23 @@ def test_builtin_scenario_template_runs_with_auto_product_context_edges(
         image_output["context_summary"]["product_context"],
         {
             "name": "自动接入测试商品",
-            "category": "出图工具",
-            "price": "199",
+            "category": None,
+            "price": None,
             "source_note": "验证场景模板会自动继承商品资料和商品主图。",
         },
     )
+    assert image_output["context_summary"]["product_context"]["dynamic_fields"] == {
+        "类目": "出图工具",
+        "价格": "199",
+    }
     assert image_output["context_summary"]["reference_image_count"] == 1
     assert template_output_node["id"] in image_output["filled_reference_node_ids"]
     assert filled_output_node["output_json"]["source_asset_ids"]
     assert len(captured_inputs) == 1
     provider_input = captured_inputs[0]
     assert provider_input.product_name == "自动接入测试商品"
-    assert provider_input.category == "出图工具"
-    assert provider_input.price == "199"
+    assert provider_input.category is None
+    assert provider_input.price is None
     assert provider_input.source_note == "验证场景模板会自动继承商品资料和商品主图。"
     assert provider_input.source_image is not None
     assert len(provider_input.reference_images) == 1
@@ -1803,6 +1808,7 @@ def test_direct_downstream_run_uses_latest_saved_product_context(configured_env:
                 "category": "旧类目",
                 "price": "199",
                 "source_note": "旧说明：城市通勤。",
+                "dynamic_fields": {"类目": "旧类目", "价格": "199"},
             }
         },
     )
@@ -1823,6 +1829,7 @@ def test_direct_downstream_run_uses_latest_saved_product_context(configured_env:
                 "category": "户外装备",
                 "price": "249",
                 "source_note": "最新说明：防泼水牛津布，适合短途出差和周末露营。",
+                "dynamic_fields": {"类目": "户外装备", "价格": "249"},
             }
         },
     )
@@ -1836,13 +1843,15 @@ def test_direct_downstream_run_uses_latest_saved_product_context(configured_env:
     payload = _wait_for_workflow_run(client, product_id, status="succeeded")
     image_output = next(node for node in payload["nodes"] if node["id"] == image_node["id"])["output_json"]
 
-    assert image_output["context_summary"]["product_context"]["category"] == "户外装备"
-    assert image_output["context_summary"]["product_context"]["price"] == "249"
+    assert image_output["context_summary"]["product_context"]["category"] is None
+    assert image_output["context_summary"]["product_context"]["price"] is None
+    assert image_output["context_summary"]["product_context"]["dynamic_fields"] == {"类目": "户外装备", "价格": "249"}
     assert (
         image_output["context_summary"]["product_context"]["source_note"]
         == "最新说明：防泼水牛津布，适合短途出差和周末露营。"
     )
     assert any("最新说明" in source["text"] for source in image_output["context_sources"])
+    assert any("户外装备" in source["text"] for source in image_output["context_sources"])
 
 
 def test_product_context_ignores_unresolved_placeholder_values(
@@ -2152,6 +2161,7 @@ def test_image_generation_collects_product_context_through_upstream_copy_edge(
                 "category": "户外家具",
                 "price": "129",
                 "source_note": "铝合金支架，可折叠收纳，适合露营和阳台休息。",
+                "dynamic_fields": {"类目": "户外家具", "价格": "129"},
             }
         },
     )
@@ -2165,8 +2175,9 @@ def test_image_generation_collects_product_context_through_upstream_copy_edge(
     payload = _wait_for_workflow_run(client, product_id, status="succeeded")
     image_output = next(node for node in payload["nodes"] if node["id"] == image_node["id"])["output_json"]
 
-    assert image_output["context_summary"]["product_context"]["category"] == "户外家具"
-    assert image_output["context_summary"]["product_context"]["price"] == "129"
+    assert image_output["context_summary"]["product_context"]["category"] is None
+    assert image_output["context_summary"]["product_context"]["price"] is None
+    assert image_output["context_summary"]["product_context"]["dynamic_fields"] == {"类目": "户外家具", "价格": "129"}
     assert image_output["context_summary"]["reference_image_count"] == 1
     assert any("折叠露营椅" in source["text"] for source in image_output["context_sources"])
     assert any(
@@ -2177,8 +2188,8 @@ def test_image_generation_collects_product_context_through_upstream_copy_edge(
     provider_input = captured_inputs[0]
     assert provider_input.copy_prompt_mode == "copy"
     assert provider_input.product_name == "折叠露营椅"
-    assert provider_input.category == "户外家具"
-    assert provider_input.price == "129"
+    assert provider_input.category is None
+    assert provider_input.price is None
     assert provider_input.source_note == "铝合金支架，可折叠收纳，适合露营和阳台休息。"
     assert provider_input.structured_copy_context is not None
     assert "workflow_context" not in provider_input.structured_copy_context

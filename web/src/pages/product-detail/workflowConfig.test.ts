@@ -101,6 +101,33 @@ describe("draftFromNode", () => {
     });
   });
 
+  it("falls back from blank product context text config to product source note", () => {
+    const node: WorkflowNode = {
+      ...baseNode,
+      id: "context-node",
+      node_type: "product_context",
+      title: "灵感资料",
+      config_json: {
+        name: "三阶魔方",
+        entry_type: "tail",
+        long_text: "",
+        source_note: "",
+      },
+      output_json: null,
+    };
+    const draft = draftFromNode(
+      node,
+      {
+        ...product,
+        source_note: "三阶魔方展示图，分三个角度",
+      },
+      "tail",
+    );
+
+    expect(draft.longText).toBe("三阶魔方展示图，分三个角度");
+    expect(draft.sourceNote).toBe("三阶魔方展示图，分三个角度");
+  });
+
   it("round-trips generalized product context fields", () => {
     const node: WorkflowNode = {
       ...baseNode,
@@ -154,7 +181,7 @@ describe("draftFromNode", () => {
     expect(nextConfig).toMatchObject({
       name: "露营灯",
       owner_id: "goods-123",
-      entry_type: "blank",
+      entry_type: "copy",
       long_text: "主打轻量照明和帐篷氛围。",
       source_note: "主打轻量照明和帐篷氛围。",
       image_source_asset_id: "asset-image",
@@ -170,5 +197,7 @@ describe("draftFromNode", () => {
         stock: 42,
       },
     });
+    expect(nextConfig).not.toHaveProperty("category");
+    expect(nextConfig).not.toHaveProperty("price");
   });
 });

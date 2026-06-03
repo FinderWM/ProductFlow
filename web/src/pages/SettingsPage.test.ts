@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   configValuesFromChangedDrafts,
   draftsFromConfig,
+  filterProviderModels,
   generationConfigPayloadFromDraft,
+  markTextConfigTestFailed,
+  markTextConfigTestStarted,
+  markTextConfigTestSucceeded,
   providerDisableBlocked,
   providerDrawerCreateState,
   providerDrawerEditState,
@@ -16,6 +20,8 @@ import {
   settingsImportSummaryCounts,
   settingsSectionIds,
   shouldShowSettingsMigrationPanel,
+  textConfigTestRecordForKey,
+  type TextConfigTestState,
 } from "./SettingsPage";
 import { translate } from "../lib/i18n";
 import type {
@@ -23,8 +29,10 @@ import type {
   ConfigResponse,
   GenerationConfig,
   ProviderCapability,
+  ProviderModel,
   ProviderProfile,
   SettingsImportPreviewResponse,
+  TextGenerationConfigTestResponse,
 } from "../lib/types";
 
 function configItem(overrides: Partial<ConfigItem> & Pick<ConfigItem, "key" | "value">): ConfigItem {
@@ -89,6 +97,32 @@ function generationConfig(overrides: Partial<GenerationConfig> & Pick<Generation
   };
 }
 
+function textConfigTestState(): TextConfigTestState {
+  return {
+    draft: {
+      productName: "测试商品",
+      category: "电商商品",
+      price: "",
+      sourceNote: "测试备注",
+      instruction: "输出短文案",
+    },
+    latestKey: null,
+    records: {},
+  };
+}
+
+function textConfigTestResponse(model: string): TextGenerationConfigTestResponse {
+  return {
+    generation_config_id: null,
+    provider_kind: "openai",
+    brief_model: model,
+    copy_model: model,
+    brief: { positioning: model },
+    copy_result: { summary: model },
+    duration_ms: 1200,
+  };
+}
+
 describe("SettingsPage draft helpers", () => {
   it("only submits changed non-secret values instead of rewriting the whole config page", () => {
     const items = [
@@ -145,7 +179,67 @@ describe("SettingsPage draft helpers", () => {
   });
 });
 
+describe("SettingsPage text config test state", () => {
+  it("keeps concurrent test records isolated by generation config key", () => {
+    const firstResult = textConfigTestResponse("brief-a");
+    let state = textConfigTestState();
+
+    state = markTextConfigTestStarted(state, "config-a");
+    state = markTextConfigTestStarted(state, "config-b");
+    state = markTextConfigTestSucceeded(state, "config-a", firstResult);
+    state = markTextConfigTestFailed(state, "config-b", "provider failed");
+
+    expect(textConfigTestRecordForKey(state, "config-a")).toEqual({
+      testing: false,
+      result: firstResult,
+      error: "",
+    });
+    expect(textConfigTestRecordForKey(state, "config-b")).toEqual({
+      testing: false,
+      result: null,
+      error: "provider failed",
+    });
+  });
+
+  it("clears only the retried config result when starting another test", () => {
+    const firstResult = textConfigTestResponse("brief-a");
+    const secondResult = textConfigTestResponse("brief-b");
+    let state = textConfigTestState();
+
+    state = markTextConfigTestSucceeded(state, "config-a", firstResult);
+    state = markTextConfigTestSucceeded(state, "config-b", secondResult);
+    state = markTextConfigTestStarted(state, "config-b");
+
+    expect(textConfigTestRecordForKey(state, "config-a")?.result).toBe(firstResult);
+    expect(textConfigTestRecordForKey(state, "config-b")).toEqual({
+      testing: true,
+      result: null,
+      error: "",
+    });
+    expect(state.latestKey).toBe("config-b");
+  });
+});
+
 describe("SettingsPage provider profile helpers", () => {
+  it("filters fetched provider models by typed id or label", () => {
+    const models: ProviderModel[] = [
+      { id: "openai/gpt-4.1", label: "GPT-4.1", owned_by: "openai", created: 1 },
+      { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", owned_by: "google", created: 2 },
+      { id: "anthropic/claude-opus-4", label: "Claude Opus 4", owned_by: "anthropic", created: 3 },
+    ];
+
+    expect(filterProviderModels(models, "").map((model) => model.id)).toEqual([
+      "openai/gpt-4.1",
+      "google/gemini-2.5-flash",
+      "anthropic/claude-opus-4",
+    ]);
+    expect(filterProviderModels(models, " FLASH ").map((model) => model.id)).toEqual([
+      "google/gemini-2.5-flash",
+    ]);
+    expect(filterProviderModels(models, "opus").map((model) => model.id)).toEqual(["anthropic/claude-opus-4"]);
+    expect(filterProviderModels(models, "dall-e")).toEqual([]);
+  });
+
   it("opens the drawer in create mode with a clean provider form", () => {
     expect(providerDrawerCreateState()).toEqual({
       open: true,

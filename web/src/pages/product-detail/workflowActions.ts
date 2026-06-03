@@ -75,7 +75,7 @@ export function buildWorkflowCanvasActionItems(
   const structureBusy = Boolean(options.structureBusy);
   const items: WorkflowCanvasActionItem[] = [];
 
-  if (target.kind === "single") {
+  if (target.kind === "single" && !primaryIsProductContext) {
     items.push({
       id: "run",
       icon: "run",
@@ -87,7 +87,7 @@ export function buildWorkflowCanvasActionItems(
     });
   }
 
-  if (target.kind === "single") {
+  if (target.kind === "single" && !primaryIsProductContext) {
     items.push({
       id: "runAfter",
       icon: "runAfter",

@@ -45,10 +45,10 @@ export function GenerationCanvasPlaceholder({
   const nonRetryableReason = candidate.failure_reason ?? retryMetadata?.last_failure_reason;
 
   return (
-    <div className="relative z-0 flex h-full min-h-0 w-full items-center justify-center px-6 pb-6 pt-16">
-      <div className="flex max-w-md flex-col items-center text-center">
+    <div className="relative z-0 h-full min-h-0 w-full overflow-hidden px-4 pb-4 pt-14 sm:px-6 sm:pb-6 sm:pt-16">
+      <div className="pointer-events-none absolute inset-x-4 bottom-[10rem] top-14 flex items-center justify-center [container-type:size] sm:inset-x-6 sm:bottom-[10.75rem] sm:top-16">
         <div
-          className={`relative flex h-72 w-72 items-center justify-center overflow-hidden rounded-[40px] border shadow-sm transition-[border-color,box-shadow,transform] transition-spring ${
+          className={`relative flex size-[min(18rem,100cqw,100cqh)] items-center justify-center overflow-hidden rounded-[14%] border shadow-sm transition-[border-color,box-shadow,transform] transition-spring ${
             failed
               ? "border-red-200 bg-red-50 text-red-600 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
               : active
@@ -74,60 +74,65 @@ export function GenerationCanvasPlaceholder({
             <Sparkles size={48} className="relative" />
           )}
         </div>
-        <div className="mt-4 text-sm font-semibold text-slate-900">{placeholderStatusLabel(candidate, t)}</div>
-        <div className="mt-1 text-xs text-slate-500">
-          {t("chat.candidate", { index: candidate.candidate_index, count: candidate.candidate_count })} · {formatImageSizeValue(candidate.size)}
-        </div>
-        {queueText ? <div className="mt-3 max-w-sm text-xs leading-5 text-slate-500">{queueText}</div> : null}
-        <div className="mt-4 line-clamp-3 max-w-sm rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-xs font-medium leading-5 text-[#334155] shadow-sm dark:border-slate-700/70 dark:bg-slate-950/75 dark:text-[#e2e8f0]">
-          {candidate.prompt}
-        </div>
-        {isImageSessionGenerationTaskCancelable(candidate.task) ? (
-          <button
-            type="button"
-            onClick={() => onCancel(candidate.task)}
-            disabled={cancelling}
-            className="mt-5 inline-flex items-center justify-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:bg-red-50 disabled:opacity-60 dark:border-red-400/40 dark:bg-[#0b1220] dark:text-red-200 dark:hover:bg-red-500/12"
-          >
-            {cancelling ? <Loader2 size={15} className="mr-2 animate-spin" /> : <OctagonX size={15} className="mr-2" />}
-            {t("chat.cancelGeneration")}
-          </button>
-        ) : null}
-        {failed && retryable ? (
-          <button
-            type="button"
-            onClick={() => onRetry(candidate.task)}
-            disabled={retrying || Boolean(actionBlockedTitle)}
-            title={actionBlockedTitle ?? t("chat.retryGeneration")}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-500/20 transition-colors hover:bg-red-500 disabled:opacity-60"
-          >
-            {retrying ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
-            {t("chat.retryGeneration")}
-          </button>
-        ) : failed ? (
-          <div className="mt-5 max-w-sm rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-medium leading-5 text-red-500 dark:border-red-400/40 dark:bg-[#0b1220] dark:text-red-200">
-            <div>{t("chat.notRetryable")}</div>
-            {nonRetryableReason ? <div className="mt-1 text-red-500/80 dark:text-red-100/80">{nonRetryableReason}</div> : null}
+      </div>
+
+      <div className="absolute inset-x-4 bottom-4 z-10 flex max-h-36 flex-col items-center overflow-y-auto px-1 text-center sm:inset-x-6 sm:bottom-6 sm:max-h-[9rem]">
+        <div className="max-w-sm">
+          <div className="text-sm font-semibold text-slate-900 dark:text-white">{placeholderStatusLabel(candidate, t)}</div>
+          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {t("chat.candidate", { index: candidate.candidate_index, count: candidate.candidate_count })} · {formatImageSizeValue(candidate.size)}
           </div>
-        ) : cancelled ? (
-          <>
-            <div className="mt-5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
-              {t("chat.taskCancelled")}
+          {queueText ? <div className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">{queueText}</div> : null}
+          <div className="mt-4 line-clamp-3 rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-xs font-medium leading-5 text-[#334155] shadow-sm backdrop-blur dark:border-slate-700/70 dark:bg-slate-950/75 dark:text-[#e2e8f0]">
+            {candidate.prompt}
+          </div>
+          {isImageSessionGenerationTaskCancelable(candidate.task) ? (
+            <button
+              type="button"
+              onClick={() => onCancel(candidate.task)}
+              disabled={cancelling}
+              className="mt-5 inline-flex items-center justify-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:bg-red-50 disabled:opacity-60 dark:border-red-400/40 dark:bg-[#0b1220] dark:text-red-200 dark:hover:bg-red-500/12"
+            >
+              {cancelling ? <Loader2 size={15} className="mr-2 animate-spin" /> : <OctagonX size={15} className="mr-2" />}
+              {t("chat.cancelGeneration")}
+            </button>
+          ) : null}
+          {failed && retryable ? (
+            <button
+              type="button"
+              onClick={() => onRetry(candidate.task)}
+              disabled={retrying || Boolean(actionBlockedTitle)}
+              title={actionBlockedTitle ?? t("chat.retryGeneration")}
+              className="mt-5 inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-500/20 transition-colors hover:bg-red-500 disabled:opacity-60"
+            >
+              {retrying ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
+              {t("chat.retryGeneration")}
+            </button>
+          ) : failed ? (
+            <div className="mt-5 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-medium leading-5 text-red-500 dark:border-red-400/40 dark:bg-[#0b1220] dark:text-red-200">
+              <div>{t("chat.notRetryable")}</div>
+              {nonRetryableReason ? <div className="mt-1 text-red-500/80 dark:text-red-100/80">{nonRetryableReason}</div> : null}
             </div>
-            {regeneratable ? (
-              <button
-                type="button"
-                onClick={() => onRegenerate(candidate.task)}
-                disabled={regenerating || Boolean(actionBlockedTitle)}
-                title={actionBlockedTitle ?? t("chat.regenerateCancelled")}
-                className="mt-3 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
-              >
-                {regenerating ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
-                {t("chat.regenerateCancelled")}
-              </button>
-            ) : null}
-          </>
-        ) : null}
+          ) : cancelled ? (
+            <>
+              <div className="mt-5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
+                {t("chat.taskCancelled")}
+              </div>
+              {regeneratable ? (
+                <button
+                  type="button"
+                  onClick={() => onRegenerate(candidate.task)}
+                  disabled={regenerating || Boolean(actionBlockedTitle)}
+                  title={actionBlockedTitle ?? t("chat.regenerateCancelled")}
+                  className="mt-3 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                >
+                  {regenerating ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
+                  {t("chat.regenerateCancelled")}
+                </button>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   );

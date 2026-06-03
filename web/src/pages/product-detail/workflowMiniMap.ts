@@ -14,7 +14,7 @@ const MINI_MAP_ACTIVE_STATUS_CLASS_NAMES: Partial<Record<WorkflowNode["status"],
 };
 
 export function workflowMiniMapNodeColor(node: Pick<WorkflowNode, "status">): string {
-  return node.status === "running" ? "#2563eb" : "#d4d4d8";
+  return node.status === "running" ? "#2563eb" : "#52525b";
 }
 
 export function workflowMiniMapNodeStrokeColor(

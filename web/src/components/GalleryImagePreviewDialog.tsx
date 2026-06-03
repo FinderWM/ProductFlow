@@ -1,5 +1,5 @@
 import { Download, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { api } from "../lib/api";
 
@@ -39,6 +39,18 @@ export function GalleryImagePreviewDialog({
   closeLabel,
   onClose,
 }: GalleryImagePreviewDialogProps) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-[80] flex items-center justify-center overflow-hidden bg-slate-950/86 p-2 backdrop-blur-sm sm:p-4"

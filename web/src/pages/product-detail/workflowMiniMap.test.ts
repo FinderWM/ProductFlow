@@ -8,9 +8,9 @@ import {
 
 describe("workflowMiniMap", () => {
   it("uses a neutral fill for non-running nodes and an emphasis fill for running nodes", () => {
-    expect(workflowMiniMapNodeColor({ status: "idle" })).toBe("#d4d4d8");
-    expect(workflowMiniMapNodeColor({ status: "queued" })).toBe("#d4d4d8");
-    expect(workflowMiniMapNodeColor({ status: "succeeded" })).toBe("#d4d4d8");
+    expect(workflowMiniMapNodeColor({ status: "idle" })).toBe("#52525b");
+    expect(workflowMiniMapNodeColor({ status: "queued" })).toBe("#52525b");
+    expect(workflowMiniMapNodeColor({ status: "succeeded" })).toBe("#52525b");
     expect(workflowMiniMapNodeColor({ status: "running" })).toBe("#2563eb");
   });
 

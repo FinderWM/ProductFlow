@@ -204,6 +204,31 @@ def normalize_workflow_node_config(node_type: WorkflowNodeType, config_json: dic
     return config
 
 
+def _product_context_runtime_config(
+    workflow: ProductWorkflow,
+    config_json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    product = workflow.product
+    config = dict(config_json or {})
+    config["name"] = config.get("name") or product.name
+    config["owner_id"] = product.id
+    config["entry_type"] = workflow.initial_entry_mode
+    if "long_text" not in config and product.source_note:
+        config["long_text"] = product.source_note
+        config["source_note"] = product.source_note
+    return normalize_product_context_config(config)
+
+
+def _preserve_product_context_runtime_config(
+    node: WorkflowNode,
+    config_json: dict[str, Any],
+) -> dict[str, Any]:
+    config = dict(config_json)
+    config["owner_id"] = node.workflow.product_id
+    config["entry_type"] = node.workflow.initial_entry_mode
+    return normalize_product_context_config(config)
+
+
 def apply_workflow_node_patch(
     node: WorkflowNode,
     *,
@@ -218,6 +243,8 @@ def apply_workflow_node_patch(
             changed = True
     if config_json is not None:
         normalized_config = normalize_workflow_node_config(node.node_type, config_json)
+        if node.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
+            normalized_config = _preserve_product_context_runtime_config(node, normalized_config)
         config_changed = normalized_config != (node.config_json or {})
         if config_changed:
             node.config_json = normalized_config
@@ -252,6 +279,8 @@ def get_or_create_product_workflow(session: Session, product_id: str) -> Product
     nodes_by_key: dict[str, WorkflowNode] = {}
     for spec in product_workflow_graph.default_node_specs(product):
         key = str(spec.pop("key"))
+        if key == "context":
+            spec["config_json"] = _product_context_runtime_config(workflow, spec.get("config_json"))
         node = WorkflowNode(workflow_id=workflow.id, **spec)
         session.add(node)
         nodes_by_key[key] = node
@@ -293,7 +322,11 @@ def create_workflow_node(
         title=title.strip() or product_workflow_graph.default_title_for_type(node_type),
         position_x=position_x,
         position_y=position_y,
-        config_json=normalize_workflow_node_config(node_type, config_json),
+        config_json=(
+            _product_context_runtime_config(workflow, config_json)
+            if node_type == WorkflowNodeType.PRODUCT_CONTEXT
+            else normalize_workflow_node_config(node_type, config_json)
+        ),
     )
     session.add(node)
     workflow.updated_at = now_utc()
@@ -581,7 +614,7 @@ def upload_workflow_node_image(
         config["image_source_asset_id"] = asset.id
         config.pop("source_asset_id", None)
         config.pop("source_asset_ids", None)
-        node.config_json = normalize_product_context_config(config)
+        node.config_json = _product_context_runtime_config(workflow, config)
         node.output_json = {
             **product_context_output(workflow.product, node, workflow=workflow),
             "summary": "已替换上下文图片",
@@ -654,7 +687,7 @@ def upload_workflow_node_document(
             "document_text": document_text,
         }
     )
-    node.config_json = normalize_product_context_config(config)
+    node.config_json = _product_context_runtime_config(workflow, config)
     node.output_json = {
         **product_context_output(workflow.product, node, workflow=workflow),
         "summary": "已上传上下文文档",
@@ -956,11 +989,16 @@ def _normalize_product_context_singleton(session: Session, workflow: ProductWork
             title="灵感",
             position_x=40,
             position_y=120,
-            config_json={},
+            config_json=_product_context_runtime_config(workflow),
         )
         session.add(context)
         session.flush()
         product_nodes = [context]
+        changed = True
+    primary = product_nodes[0]
+    normalized_primary_config = _product_context_runtime_config(workflow, primary.config_json)
+    if normalized_primary_config != (primary.config_json or {}):
+        primary.config_json = normalized_primary_config
         changed = True
     duplicate_ids = {node.id for node in product_nodes[1:]}
     if duplicate_ids:
