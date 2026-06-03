@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from productflow_backend.application.canvas_templates import CanvasTemplate, validate_canvas_template
+from productflow_backend.application.product_workflow.context import normalize_product_context_config
 from productflow_backend.application.product_workflow.user_templates import get_canvas_template
+from productflow_backend.domain.enums import WorkflowNodeType
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import Product, ProductWorkflow, WorkflowEdge, WorkflowNode
 
@@ -46,6 +49,7 @@ def materialize_product_workflow_from_template(
     product_id: str,
     template: CanvasTemplate,
     initial_entry_mode: InitialWorkflowEntry = "image",
+    entry_text: str | None = None,
 ) -> ProductWorkflow:
     validate_canvas_template(template)
     if template.kind != "full_canvas":
@@ -73,7 +77,12 @@ def materialize_product_workflow_from_template(
     session.add(workflow)
     session.flush()
 
-    materialize_canvas_template_graph(session, workflow=workflow, template=template)
+    nodes_by_template_key = materialize_canvas_template_graph(session, workflow=workflow, template=template)
+    _persist_template_entry_text(
+        nodes_by_template_key.values(),
+        initial_entry_mode=initial_entry_mode,
+        entry_text=entry_text,
+    )
     session.flush()
     return workflow
 
@@ -138,3 +147,34 @@ def materialize_canvas_template_graph(
         )
     session.flush()
     return nodes_by_template_key
+
+
+def _persist_template_entry_text(
+    nodes: Iterable[WorkflowNode],
+    *,
+    initial_entry_mode: InitialWorkflowEntry,
+    entry_text: str | None,
+) -> None:
+    if initial_entry_mode not in {"copy", "tail"}:
+        return
+    normalized_text = (entry_text or "").strip()
+    if not normalized_text:
+        return
+    product_context_node = next(
+        (
+            node
+            for node in nodes
+            if isinstance(node, WorkflowNode) and node.node_type == WorkflowNodeType.PRODUCT_CONTEXT
+        ),
+        None,
+    )
+    if product_context_node is None:
+        return
+    product_context_node.config_json = normalize_product_context_config(
+        {
+            **(product_context_node.config_json or {}),
+            "entry_type": initial_entry_mode,
+            "long_text": normalized_text,
+            "source_note": normalized_text,
+        }
+    )

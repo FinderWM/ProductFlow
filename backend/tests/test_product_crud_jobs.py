@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,9 @@ from productflow_backend.domain.enums import (
     PosterKind,
     ProductWorkflowState,
     SourceAssetKind,
+    WorkflowNodeStatus,
+    WorkflowNodeType,
+    WorkflowRunStatus,
 )
 from productflow_backend.infrastructure.db.models import (
     CopySet,
@@ -34,6 +38,8 @@ from productflow_backend.infrastructure.db.models import (
     SourceAsset,
     WorkflowEdge,
     WorkflowNode,
+    WorkflowNodeRun,
+    WorkflowRun,
 )
 
 
@@ -248,6 +254,59 @@ def test_product_create_filters_canvas_template_by_entry_mode(configured_env: Pa
     assert workflow.initial_entry_mode == "copy"
 
 
+def test_product_create_template_persists_text_entry_context_for_summary(configured_env: Path, db_session) -> None:
+    from productflow_backend.application.product_workflow.user_templates import create_global_canvas_template
+    from productflow_backend.presentation.api import create_app
+
+    entry_text = "免安装收纳架适配厨房场景"
+    template = get_builtin_canvas_template("ecommerce-main-image-v1").model_copy(update={"entry_mode": "copy"})
+    create_global_canvas_template(
+        db_session,
+        key="copy-entry-summary-template",
+        title="文案入口摘要模板",
+        description="用于列表摘要测试",
+        kind="full_canvas",
+        entry_mode="copy",
+        template_json=template.model_dump(mode="json"),
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={
+            "name": "模板文案入口灵感",
+            "canvas_template_key": "copy-entry-summary-template",
+            "initial_workflow_entry": "copy",
+            "entry_text": entry_text,
+        },
+        files={"image": ("entry-copy-summary.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+
+    db_session.expire_all()
+    workflow = db_session.query(ProductWorkflow).filter_by(product_id=created.json()["id"], active=True).one()
+    context_node = (
+        db_session.query(WorkflowNode)
+        .filter_by(workflow_id=workflow.id, node_type=WorkflowNodeType.PRODUCT_CONTEXT)
+        .one()
+    )
+    assert context_node.config_json["entry_type"] == "copy"
+    assert context_node.config_json["long_text"] == entry_text
+    assert context_node.config_json["source_note"] == entry_text
+
+    listed = client.get("/api/products")
+    assert listed.status_code == 200
+    item = next(item for item in listed.json()["items"] if item["id"] == created.json()["id"])
+    assert item["initial_workflow_entry"] == "copy"
+    assert item["initial_entry_text"] == entry_text
+    assert item["initial_entry_text_excerpt"] == "免安装收纳架"
+    assert item["source_image_thumbnail_url"]
+    assert item["latest_generated_image_thumbnail_url"] is None
+
+
 def test_product_create_accepts_broad_builtin_canvas_template_key(configured_env: Path, db_session) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -269,6 +328,169 @@ def test_product_create_accepts_broad_builtin_canvas_template_key(configured_env
     assert workflow.title == template.title
     assert db_session.query(WorkflowNode).filter_by(workflow_id=workflow.id).count() == len(template.nodes)
     assert db_session.query(WorkflowEdge).filter_by(workflow_id=workflow.id).count() == len(template.edges)
+
+
+def test_product_list_summary_uses_latest_run_first_generated_image(configured_env: Path, db_session) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    product = create_product(
+        db_session,
+        name="最新生成图摘要",
+        category=None,
+        price=None,
+        source_note=None,
+        image_bytes=None,
+        filename=None,
+        content_type=None,
+        initial_workflow_entry="blank",
+    )
+    workflow = db_session.query(ProductWorkflow).filter_by(product_id=product.id, active=True).one()
+    context_node = (
+        db_session.query(WorkflowNode)
+        .filter_by(workflow_id=workflow.id, node_type=WorkflowNodeType.PRODUCT_CONTEXT)
+        .one()
+    )
+    first_image_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.IMAGE_GENERATION,
+        title="第一张生成图节点",
+        position_x=320,
+        position_y=100,
+        config_json={"instruction": "先生成这一张"},
+    )
+    later_image_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.IMAGE_GENERATION,
+        title="后续生成图节点",
+        position_x=620,
+        position_y=100,
+        config_json={"instruction": "后生成这一张"},
+    )
+    db_session.add_all([first_image_node, later_image_node])
+    db_session.flush()
+    db_session.add_all(
+        [
+            WorkflowEdge(
+                workflow_id=workflow.id,
+                source_node_id=context_node.id,
+                target_node_id=first_image_node.id,
+            ),
+            WorkflowEdge(
+                workflow_id=workflow.id,
+                source_node_id=context_node.id,
+                target_node_id=later_image_node.id,
+            ),
+        ]
+    )
+    copy_set = CopySet(
+        product_id=product.id,
+        status=CopyStatus.CONFIRMED,
+        structured_payload={
+            "version": 2,
+            "summary": "摘要",
+            "content": {"kind": "blocks", "blocks": [{"id": "headline", "text": "摘要"}]},
+        },
+        model_structured_payload={
+            "version": 2,
+            "summary": "摘要",
+            "content": {"kind": "blocks", "blocks": [{"id": "headline", "text": "摘要"}]},
+        },
+        provider_name="test",
+        model_name="test",
+        prompt_version="test",
+    )
+    db_session.add(copy_set)
+    db_session.flush()
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+    old_poster = PosterVariant(
+        product_id=product.id,
+        copy_set_id=copy_set.id,
+        kind=PosterKind.MAIN_IMAGE,
+        template_name="old",
+        storage_path="products/posters/old.png",
+        width=800,
+        height=800,
+        created_at=now,
+    )
+    first_poster = PosterVariant(
+        product_id=product.id,
+        copy_set_id=copy_set.id,
+        kind=PosterKind.MAIN_IMAGE,
+        template_name="first",
+        storage_path="products/posters/first.png",
+        width=800,
+        height=800,
+        created_at=now + timedelta(minutes=1),
+    )
+    latest_created_poster = PosterVariant(
+        product_id=product.id,
+        copy_set_id=copy_set.id,
+        kind=PosterKind.MAIN_IMAGE,
+        template_name="latest-created",
+        storage_path="products/posters/latest-created.png",
+        width=800,
+        height=800,
+        created_at=now + timedelta(minutes=2),
+    )
+    db_session.add_all([old_poster, first_poster, latest_created_poster])
+    db_session.flush()
+    old_run = WorkflowRun(
+        workflow_id=workflow.id,
+        status=WorkflowRunStatus.SUCCEEDED,
+        started_at=now,
+        finished_at=now + timedelta(seconds=10),
+    )
+    latest_run = WorkflowRun(
+        workflow_id=workflow.id,
+        status=WorkflowRunStatus.SUCCEEDED,
+        started_at=now + timedelta(minutes=5),
+        finished_at=now + timedelta(minutes=6),
+    )
+    db_session.add_all([old_run, latest_run])
+    db_session.flush()
+    db_session.add_all(
+        [
+            WorkflowNodeRun(
+                workflow_run_id=old_run.id,
+                node_id=first_image_node.id,
+                status=WorkflowNodeStatus.SUCCEEDED,
+                poster_variant_id=old_poster.id,
+                started_at=now,
+                finished_at=now + timedelta(seconds=10),
+            ),
+            WorkflowNodeRun(
+                workflow_run_id=latest_run.id,
+                node_id=first_image_node.id,
+                status=WorkflowNodeStatus.SUCCEEDED,
+                poster_variant_id=first_poster.id,
+                started_at=now + timedelta(minutes=5),
+                finished_at=now + timedelta(minutes=5, seconds=20),
+            ),
+            WorkflowNodeRun(
+                workflow_run_id=latest_run.id,
+                node_id=later_image_node.id,
+                status=WorkflowNodeStatus.SUCCEEDED,
+                poster_variant_id=latest_created_poster.id,
+                started_at=now + timedelta(minutes=5, seconds=30),
+                finished_at=now + timedelta(minutes=5, seconds=50),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    listed = client.get("/api/products")
+    assert listed.status_code == 200
+    item = next(item for item in listed.json()["items"] if item["id"] == product.id)
+    assert item["initial_workflow_entry"] == "blank"
+    assert item["initial_entry_text"] is None
+    assert item["latest_generated_image_download_url"] == f"/api/posters/{first_poster.id}/download"
+    assert item["latest_generated_image_preview_url"] == f"/api/posters/{first_poster.id}/download?variant=preview"
+    assert item["latest_generated_image_thumbnail_url"] == f"/api/posters/{first_poster.id}/download?variant=thumbnail"
+    assert latest_created_poster.id not in item["latest_generated_image_download_url"]
 
 
 def test_legacy_jobrun_routes_are_removed(configured_env: Path) -> None:

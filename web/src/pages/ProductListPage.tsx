@@ -36,6 +36,7 @@ import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import { useSessionState } from "../lib/session";
 import type { ProductSummary, RbacUser } from "../lib/types";
+import { productKeyInfo, productMainThumbnailUrl } from "./ProductListPage.helpers";
 
 const PAGE_SIZE = 12;
 const PRODUCT_LIST_STALE_TIME_MS = 60_000;
@@ -45,6 +46,8 @@ const PRODUCT_OPEN_DELAY_MS = 90;
 const PRESS_CANCEL_DISTANCE_PX = 8;
 const MOBILE_DELETE_ACTION_WIDTH_PX = 96;
 const MOBILE_DELETE_OPEN_THRESHOLD_PX = 42;
+const HOVER_IMAGE_PREVIEW_SIZE_PX = 224;
+const HOVER_IMAGE_PREVIEW_GAP_PX = 12;
 
 type ProductQuickRangeId = "day" | "week" | "month";
 
@@ -420,10 +423,11 @@ export function ProductListPage() {
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 bg-slate-50/70 dark:border-slate-700/80 dark:bg-[#151f33]">
-                      <th className="w-[45%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.product")}</th>
-                      <th className="w-[18%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.state")}</th>
-                      <th className="w-[18%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.updated")}</th>
-                      <th className="w-[19%] px-5 py-3 text-right font-medium text-zinc-500 dark:text-slate-300">{t("products.table.actions")}</th>
+                      <th className="w-[32%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.product")}</th>
+                      <th className="w-[25%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.keyInfo")}</th>
+                      <th className="w-[15%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.state")}</th>
+                      <th className="w-[15%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.updated")}</th>
+                      <th className="w-[13%] px-5 py-3 text-right font-medium text-zinc-500 dark:text-slate-300">{t("products.table.actions")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-slate-800">
@@ -437,6 +441,9 @@ export function ProductListPage() {
                               <div className="h-3.5 w-1/2 animate-shimmer" />
                             </div>
                           </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="h-6 w-20 rounded-full animate-shimmer" />
                         </td>
                         <td className="px-5 py-4">
                           <div className="h-6 w-20 rounded-full animate-shimmer" />
@@ -477,10 +484,11 @@ export function ProductListPage() {
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 bg-slate-50/70 dark:border-slate-700/80 dark:bg-[#151f33]">
-                      <th className="w-[45%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.product")}</th>
-                      <th className="w-[18%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.state")}</th>
-                      <th className="w-[18%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.updated")}</th>
-                      <th className="w-[19%] px-5 py-3 text-right font-medium text-zinc-500 dark:text-slate-300">{t("products.table.actions")}</th>
+                      <th className="w-[32%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.product")}</th>
+                      <th className="w-[25%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.keyInfo")}</th>
+                      <th className="w-[15%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.state")}</th>
+                      <th className="w-[15%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("products.table.updated")}</th>
+                      <th className="w-[13%] px-5 py-3 text-right font-medium text-zinc-500 dark:text-slate-300">{t("products.table.actions")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-slate-800">
@@ -751,6 +759,7 @@ function ProductMobileCard({
               </span>
             </div>
           ) : null}
+          <ProductKeyInfoCell product={product} compact />
         </div>
       </div>
       </div>
@@ -816,6 +825,9 @@ function ProductTableRow({
             </div>
           </div>
         </div>
+      </td>
+      <td className="px-5 py-4">
+        <ProductKeyInfoCell product={product} />
       </td>
       <td className="px-5 py-4">
         <StatusPill status={product.workflow_state} />
@@ -1039,30 +1051,184 @@ function MetricCard({ label, value }: { label: string; value: number }) {
   );
 }
 
-function ProductThumbnail({ product, compact = false }: { product: ProductSummary; compact?: boolean }) {
+function hoverImagePreviewGeometry(anchorRect: DOMRect) {
+  if (typeof window === "undefined") {
+    return {
+      size: HOVER_IMAGE_PREVIEW_SIZE_PX,
+      top: anchorRect.top,
+      left: anchorRect.right + HOVER_IMAGE_PREVIEW_GAP_PX,
+    };
+  }
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const size = Math.max(
+    140,
+    Math.min(
+      HOVER_IMAGE_PREVIEW_SIZE_PX,
+      viewportWidth - HOVER_IMAGE_PREVIEW_GAP_PX * 2,
+      viewportHeight - HOVER_IMAGE_PREVIEW_GAP_PX * 2,
+    ),
+  );
+  const rightSideLeft = anchorRect.right + HOVER_IMAGE_PREVIEW_GAP_PX;
+  const leftSideLeft = anchorRect.left - size - HOVER_IMAGE_PREVIEW_GAP_PX;
+  const preferredLeft =
+    rightSideLeft + size <= viewportWidth - HOVER_IMAGE_PREVIEW_GAP_PX ? rightSideLeft : leftSideLeft;
+  return {
+    size,
+    top: clamp(
+      anchorRect.top + anchorRect.height / 2 - size / 2,
+      HOVER_IMAGE_PREVIEW_GAP_PX,
+      Math.max(HOVER_IMAGE_PREVIEW_GAP_PX, viewportHeight - size - HOVER_IMAGE_PREVIEW_GAP_PX),
+    ),
+    left: clamp(
+      preferredLeft,
+      HOVER_IMAGE_PREVIEW_GAP_PX,
+      Math.max(HOVER_IMAGE_PREVIEW_GAP_PX, viewportWidth - size - HOVER_IMAGE_PREVIEW_GAP_PX),
+    ),
+  };
+}
+
+function HoverImagePreview({ imageUrl, anchorRect }: { imageUrl: string; anchorRect: DOMRect }) {
+  const geometry = hoverImagePreviewGeometry(anchorRect);
+  return (
+    <div
+      className="pointer-events-none fixed z-40 rounded-2xl border border-white/80 bg-white/95 p-1 shadow-[0_18px_45px_rgba(15,23,42,0.22)] backdrop-blur dark:border-slate-700/90 dark:bg-slate-950/95 dark:shadow-[0_22px_50px_rgba(0,0,0,0.48)]"
+      style={{
+        top: geometry.top,
+        left: geometry.left,
+        width: geometry.size,
+        height: geometry.size,
+      }}
+      aria-hidden="true"
+    >
+      <img src={api.toApiUrl(imageUrl)} alt="" className="h-full w-full rounded-xl object-cover" decoding="async" />
+    </div>
+  );
+}
+
+function HoverableImageFrame({
+  imageUrl,
+  previewUrl,
+  alt,
+  className,
+  iconSize,
+}: {
+  imageUrl: string | null;
+  previewUrl?: string | null;
+  alt: string;
+  className: string;
+  iconSize: number;
+}) {
   const [failed, setFailed] = useState(false);
-  const thumbUrl = product.source_image_thumbnail_url ?? product.source_image_preview_url;
-  const shouldShowImage = Boolean(thumbUrl) && !failed;
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const shouldShowImage = Boolean(imageUrl) && !failed;
+  const hoverPreviewUrl = previewUrl ?? imageUrl;
+
+  const showPreview = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "mouse" || !shouldShowImage) {
+      return;
+    }
+    setAnchorRect(event.currentTarget.getBoundingClientRect());
+  };
+
+  const hidePreview = () => setAnchorRect(null);
 
   return (
     <div
-      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-slate-400 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-500 ${
-        compact ? "h-20 w-20" : "h-16 w-16"
-      }`}
+      className={className}
+      onPointerEnter={showPreview}
+      onPointerLeave={hidePreview}
+      onPointerCancel={hidePreview}
     >
-      {shouldShowImage && thumbUrl ? (
+      {shouldShowImage && imageUrl ? (
         <img
-          src={api.toApiUrl(thumbUrl)}
-          alt={product.source_image_filename ?? product.name}
+          src={api.toApiUrl(imageUrl)}
+          alt={alt}
           className="h-full w-full object-cover"
           decoding="async"
           loading="lazy"
-          onError={() => setFailed(true)}
+          onError={() => {
+            setFailed(true);
+            hidePreview();
+          }}
         />
       ) : (
-        <ImageIcon size={18} strokeWidth={1.5} />
+        <ImageIcon size={iconSize} strokeWidth={1.5} />
       )}
+      {shouldShowImage && hoverPreviewUrl && anchorRect ? (
+        <HoverImagePreview imageUrl={hoverPreviewUrl} anchorRect={anchorRect} />
+      ) : null}
     </div>
+  );
+}
+
+function ProductKeyInfoCell({ product, compact = false }: { product: ProductSummary; compact?: boolean }) {
+  const { t } = useI18n();
+  const info = productKeyInfo(product);
+
+  if (info.kind === "image") {
+    const title = info.filename ?? t("products.keyInfo.startImage");
+    return (
+      <div
+        className={`flex min-w-0 items-center gap-2 text-xs text-zinc-500 dark:text-slate-400 ${
+          compact ? "mt-2" : ""
+        }`}
+        title={title}
+      >
+        <HoverableImageFrame
+          imageUrl={info.thumbnailUrl}
+          previewUrl={info.previewUrl}
+          alt={t("products.keyInfo.startImageAlt", { name: product.name })}
+          iconSize={15}
+          className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-500"
+        />
+        {!compact && info.filename ? (
+          <span className="min-w-0 truncate" title={info.filename}>
+            {info.filename}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (info.kind === "text") {
+    return (
+      <div
+        className={`flex min-w-0 items-center text-xs font-medium text-slate-600 dark:text-slate-300 ${
+          compact ? "mt-2" : ""
+        }`}
+        title={info.text}
+      >
+        <span className={`block min-w-0 max-w-full truncate leading-5 ${compact ? "text-xs" : "text-sm"}`}>
+          {info.text}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex min-w-0 items-center text-xs text-zinc-400 dark:text-slate-500 ${compact ? "mt-2" : ""}`}
+    >
+      <span className="truncate">{t("products.keyInfo.empty")}</span>
+    </div>
+  );
+}
+
+function ProductThumbnail({ product, compact = false }: { product: ProductSummary; compact?: boolean }) {
+  const thumbUrl = productMainThumbnailUrl(product);
+  const previewUrl = product.latest_generated_image_preview_url ?? product.latest_generated_image_thumbnail_url;
+
+  return (
+    <HoverableImageFrame
+      imageUrl={thumbUrl}
+      previewUrl={previewUrl}
+      alt={product.name}
+      iconSize={18}
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-slate-400 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-500 ${
+        compact ? "h-20 w-20" : "h-16 w-16"
+      }`}
+    />
   );
 }
 

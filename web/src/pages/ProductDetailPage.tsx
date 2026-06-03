@@ -55,6 +55,7 @@ import {
   ADD_NODE_OPTIONS,
   MAX_INSPECTOR_WIDTH,
   MIN_INSPECTOR_WIDTH,
+  NODE_WIDTH,
 } from "./product-detail/constants";
 import { ImagePreviewModal } from "./product-detail/ImagePreviewModal";
 import { ImagesPanel } from "./product-detail/ImagesPanel";
@@ -141,6 +142,20 @@ type PendingHistoryAction = {
 type WorkflowClipboard = {
   nodeIds: string[];
 };
+
+const AUTO_IMAGE_OUTPUT_NODE_OFFSET_X = NODE_WIDTH + 80;
+
+function latestCreatedWorkflowNode(
+  workflow: ProductWorkflow,
+  previousNodeIds: Set<string>,
+  nodeType?: WorkflowNodeType,
+): WorkflowNode | null {
+  return (
+    workflow.nodes
+      .filter((node) => !previousNodeIds.has(node.id) && (!nodeType || node.node_type === nodeType))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ?? null
+  );
+}
 
 export function ProductDetailPage() {
   const { t } = useI18n();
@@ -938,33 +953,82 @@ export function ProductDetailPage() {
   });
 
   const createNodeMutation = useMutation({
-    mutationFn: (type: WorkflowNodeType) => {
+    mutationFn: async (type: WorkflowNodeType) => {
       assertProductUsable();
       const currentWorkflow = workflowQuery.data;
       if (!currentWorkflow) {
         throw new Error(t("detail.error.workflowNotLoaded"));
       }
+      const previousNodeIds = new Set(currentWorkflow.nodes.map((node) => node.id));
       const siblingCount = currentWorkflow.nodes.filter(
         (node) => node.node_type === type,
       ).length;
       const nextPosition = workflowCanvasRef.current?.getViewportCenterNodePosition() ?? { x: 120, y: 120 };
-      return api.createWorkflowNode(productId, {
+      const nextWorkflow = await api.createWorkflowNode(productId, {
         node_type: type,
         title: defaultTitleForType(type, siblingCount + 1),
         position_x: nextPosition.x,
         position_y: nextPosition.y,
         config_json: defaultConfigForType(type),
       });
+
+      const createdNode = latestCreatedWorkflowNode(nextWorkflow, previousNodeIds, type);
+      if (type !== "image_generation" || !createdNode) {
+        return {
+          nextWorkflow,
+          createdNodeIds: createdNode ? [createdNode.id] : [],
+          selectedNodeId: createdNode?.id ?? null,
+        };
+      }
+
+      const beforeOutputNodeIds = new Set(nextWorkflow.nodes.map((node) => node.id));
+      const outputSiblingCount = nextWorkflow.nodes.filter((node) => node.node_type === "reference_image").length;
+      const workflowWithOutput = await api.createWorkflowNode(productId, {
+        node_type: "reference_image",
+        title: defaultTitleForType("reference_image", outputSiblingCount + 1),
+        position_x: createdNode.position_x + AUTO_IMAGE_OUTPUT_NODE_OFFSET_X,
+        position_y: createdNode.position_y,
+        config_json: {
+          ...defaultConfigForType("reference_image"),
+          label: "生成结果槽位",
+        },
+      });
+      const outputNode = latestCreatedWorkflowNode(workflowWithOutput, beforeOutputNodeIds, "reference_image");
+      if (!outputNode) {
+        return {
+          nextWorkflow: workflowWithOutput,
+          createdNodeIds: [createdNode.id],
+          selectedNodeId: createdNode.id,
+        };
+      }
+
+      const workflowWithEdge = await api.createWorkflowEdge(productId, {
+        source_node_id: createdNode.id,
+        target_node_id: outputNode.id,
+        source_handle: "output",
+        target_handle: "input",
+      });
+      return {
+        nextWorkflow: workflowWithEdge,
+        createdNodeIds: [createdNode.id, outputNode.id],
+        selectedNodeId: createdNode.id,
+      };
     },
-    onSuccess: (nextWorkflow) => {
+    onSuccess: ({ nextWorkflow, createdNodeIds, selectedNodeId }) => {
       setError("");
       setWorkflowCache(nextWorkflow);
-      const newest = [...nextWorkflow.nodes].sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      )[0];
-      if (newest) {
-        pushUndoStep({ kind: "deleteNodes", nodeIds: [newest.id] });
+      const fallbackNewest =
+        [...nextWorkflow.nodes].sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        )[0] ?? null;
+      const selectedCreatedNode = selectedNodeId
+        ? (nextWorkflow.nodes.find((node) => node.id === selectedNodeId) ?? null)
+        : null;
+      const newest = selectedCreatedNode ?? fallbackNewest;
+      const undoNodeIds = createdNodeIds.length ? createdNodeIds : newest ? [newest.id] : [];
+      if (undoNodeIds.length) {
+        pushUndoStep({ kind: "deleteNodes", nodeIds: undoNodeIds });
       }
       setSelectedNodeId(newest?.id ?? null);
       setSelectedNodeIds(newest ? [newest.id] : []);

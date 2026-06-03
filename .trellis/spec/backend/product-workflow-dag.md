@@ -238,7 +238,7 @@ Keep the template as node and edge specs so application code can persist visible
   - `create_product(..., canvas_template_key: str | None = None, ...) -> Product`
 - Application helper:
   - `resolve_product_creation_canvas_template(session, canvas_template_key: str | None, *, initial_workflow_entry, actor_user_id) -> CanvasTemplate | None`
-  - `materialize_product_workflow_from_template(session, *, product_id: str, template: CanvasTemplate) -> ProductWorkflow`
+  - `materialize_product_workflow_from_template(session, *, product_id: str, template: CanvasTemplate, initial_entry_mode: str = "image", entry_text: str | None = None) -> ProductWorkflow`
 
 ### 3. Contracts
 
@@ -255,6 +255,9 @@ Keep the template as node and edge specs so application code can persist visible
 - Materialized `WorkflowNode` rows copy template `node_type`, `title`, `position_x`, `position_y`, and `config_json`.
 - Materialized `WorkflowEdge` rows remap template node keys to persisted node ids and copy `source_handle` /
   `target_handle`.
+- For template-created `copy` and `tail` entries, normalized `entry_text` must be written to the materialized
+  `product_context` node config as `entry_type`, `long_text`, and `source_note`. This keeps list summaries and downstream
+  context reads aligned with non-template creation.
 - The materialized workflow must be active and must use normal workflow tables. Do not store a hidden selected-template
   state that later frontend code interprets locally.
 - If the product creation page renders a large preview for a built-in `full_canvas` plan, that preview is a mirror of the
@@ -278,6 +281,8 @@ Keep the template as node and edge specs so application code can persist visible
 
 - Good: creating a product with `ecommerce-main-image-v1` creates one active `ProductWorkflow`, persists all template nodes
   and edges, and the detail workflow endpoint returns that workflow unchanged.
+- Good: creating a copy-entry product from a full-canvas template persists the submitted `entry_text` on the
+  `product_context` node so `/api/products` can return the same six-character excerpt as non-template copy entries.
 - Good: creating a product with no `canvas_template_key` creates only the product/assets; opening the workflow later
   lazily creates the current default graph.
 - Base: frontend can label the key as a merchant-facing output plan such as `商品主图方案`; the submitted value remains the
@@ -295,6 +300,8 @@ Keep the template as node and edge specs so application code can persist visible
 - API test persisted node and edge counts, node types, titles, positions, and config match the selected template.
 - Regression test layout-sensitive built-in templates, including the main-image output and downstream iteration node
   coordinates that the creation page preview mirrors.
+- API regression for template-backed copy/tail entry creation asserting the `product_context` config stores `entry_type`,
+  `long_text`, and `source_note`, and the list summary returns the expected excerpt.
 - API test unknown key returns `400` with template-missing detail.
 - API test a broad built-in scenario key such as `ecommerce-sku-variant-image-v1` creates an active workflow immediately.
 - Regression test fetching the workflow after template-backed creation returns the existing active workflow id.
@@ -324,6 +331,99 @@ session.commit()
 ```
 
 Creation-time template application must persist the visible workflow graph in the same product creation transaction.
+
+## Scenario: Product list summary generated image and key-info contract
+
+### 1. Scope / Trigger
+
+- Trigger: changes to `/api/products`, `ProductSummaryResponse`, product list query loading, workflow run artifact
+  persistence, or frontend list thumbnail/key-info behavior.
+- The list must show two different concepts: the latest generated output image and the original starting information.
+
+### 2. Signatures
+
+- API: `GET /api/products`.
+- Backend serializer: `serialize_product_summary(product: Product) -> ProductSummaryResponse`.
+- Summary response fields:
+  - `initial_workflow_entry: "image" | "copy" | "tail" | "blank" | null`
+  - `initial_entry_text: str | null`
+  - `initial_entry_text_excerpt: str | null`
+  - `latest_generated_image_download_url: str | null`
+  - `latest_generated_image_preview_url: str | null`
+  - `latest_generated_image_thumbnail_url: str | null`
+  - Existing `source_image_*` fields remain unchanged.
+- Query helper: product list eager loading may load workflow ids, node config/position, edge endpoints, run timestamps,
+  and node-run `poster_variant_id`, but must not load workflow node or node-run `output_json` for list summaries.
+
+### 3. Contracts
+
+- The main list thumbnail is the latest generated result's first image. It must not fall back to the source image when no
+  generated result exists.
+- Latest generated result selection uses `WorkflowNodeRun.poster_variant_id` from successful image-generation node runs,
+  not the newest `PosterVariant.created_at`.
+- Pick the newest workflow run containing successful generated images by `finished_at or started_at`, then `started_at`,
+  then id descending.
+- Within that run, choose the first successful image node by workflow topological order. If the graph cannot be ordered,
+  fall back to `(position_x, position_y, created_at, id)`.
+- `initial_entry_text` is the full trimmed text. `initial_entry_text_excerpt` is the first six Unicode characters derived
+  from the same text. Prefer the `product_context` node's normalized `long_text` / `source_note`; fall back to the entry
+  node config (`copy.source_note` or `tail.source_text`) for legacy records.
+- For image-entry rows, key-info display uses the existing `source_image_*` fields. For copy/tail rows, it uses
+  `initial_entry_text` and falls back to `initial_entry_text_excerpt`. Blank rows use a stable empty state.
+
+### 4. Validation & Error Matrix
+
+- No active workflow -> `initial_workflow_entry`, `initial_entry_text`, and `initial_entry_text_excerpt` are `null`;
+  generated image fields are `null`.
+- Active workflow has source image but no generated node-run poster -> generated image fields are `null`.
+- Latest run has successful node runs without image-generation nodes -> skip that run for generated image selection.
+- Text entry has only legacy node config -> summary still returns the six-character excerpt.
+- Text entry has normalized product-context text -> summary returns both the full trimmed text and the six-character excerpt.
+- Invalid/cyclic graph during list serialization -> use position fallback rather than failing the list response.
+
+### 5. Good/Base/Bad Cases
+
+- Good: tail/image generation creates several posters in one node; the node run stores the first poster id, and the list
+  thumbnail uses that id.
+- Good: a later run has two successful image nodes; the thumbnail uses the first node by graph order even when a later
+  node's poster was created last.
+- Base: image-entry products with only an original source image render an empty main thumbnail and source image in
+  key-info.
+- Bad: choosing `max(product.poster_variants, key=created_at)` for the main thumbnail.
+- Bad: reusing `source_image_thumbnail_url` as the first-column fallback.
+- Bad: loading workflow `output_json` in the list query only to compute summary fields.
+
+### 6. Tests Required
+
+- API/list regression asserting `latest_generated_image_*` comes from the latest run's first successful image node.
+- Regression asserting a later-created poster from the same run does not become the list thumbnail.
+- API/list regression for template-created copy/tail entry text persistence and six-character excerpt.
+- API/list regression for `initial_entry_text` full-text output.
+- Frontend helper tests asserting main thumbnail reads only `latest_generated_image_*`.
+- Frontend helper tests asserting image key-info uses `source_image_*`, text key-info prefers full text with excerpt
+  fallback, and blank rows are empty.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+latest_poster = max(product.poster_variants, key=lambda item: item.created_at, default=None)
+summary.latest_generated_image_thumbnail_url = poster_url(latest_poster)
+```
+
+This breaks batch generation because the last-created poster is not necessarily the first image in the latest generated
+result.
+
+#### Correct
+
+```python
+node_run = first_successful_image_node_run(latest_run_with_generated_images, workflow_node_order)
+poster = poster_by_id.get(node_run.poster_variant_id)
+summary.latest_generated_image_thumbnail_url = poster_url(poster)
+```
+
+Use the per-node-run first-artifact pointer and workflow node order to preserve result semantics.
 
 ## Scenario: Product workflow template application
 
@@ -552,6 +652,9 @@ returns the normal `ProductWorkflow`.
 - Image-generation count is driven by graph structure: an `image_generation` node connected to N downstream
   `reference_image` slots generates N images and fills those slots. If no downstream reference slot is connected, the node
   must fail with a clear user-facing message asking the user to connect at least one image/reference node before running.
+- ProductDetail's single-node add action should create a downstream `reference_image` slot and a visible
+  `image_generation -> reference_image` edge when adding a new `image_generation` trigger node. This is a UI creation
+  convenience; execution still reads only persisted graph edges and must not invent hidden output slots.
 - Count downstream `reference_image` slots by unique target node id, not by raw edge count. Duplicate edges from the same
   `image_generation` node to the same `reference_image` slot must not multiply generated images or overwrite the slot
   multiple times in one run.

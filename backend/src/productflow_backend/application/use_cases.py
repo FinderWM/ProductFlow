@@ -32,6 +32,7 @@ from productflow_backend.infrastructure.db.models import (
     SourceAsset,
     WorkflowEdge,
     WorkflowNode,
+    WorkflowNodeRun,
     WorkflowRun,
 )
 from productflow_backend.infrastructure.storage import LocalStorage
@@ -218,6 +219,53 @@ def _product_query():
             selectinload(Product.confirmed_copy_set),
             selectinload(Product.owner),
             selectinload(Product.deleted_by),
+            selectinload(Product.workflows).load_only(
+                ProductWorkflow.id,
+                ProductWorkflow.product_id,
+                ProductWorkflow.active,
+                ProductWorkflow.initial_entry_mode,
+                ProductWorkflow.created_at,
+                ProductWorkflow.updated_at,
+            ),
+            selectinload(Product.workflows)
+            .selectinload(ProductWorkflow.nodes)
+            .load_only(
+                WorkflowNode.id,
+                WorkflowNode.workflow_id,
+                WorkflowNode.node_type,
+                WorkflowNode.position_x,
+                WorkflowNode.position_y,
+                WorkflowNode.config_json,
+                WorkflowNode.created_at,
+            ),
+            selectinload(Product.workflows)
+            .selectinload(ProductWorkflow.edges)
+            .load_only(
+                WorkflowEdge.id,
+                WorkflowEdge.workflow_id,
+                WorkflowEdge.source_node_id,
+                WorkflowEdge.target_node_id,
+                WorkflowEdge.created_at,
+            ),
+            selectinload(Product.workflows)
+            .selectinload(ProductWorkflow.runs)
+            .load_only(
+                WorkflowRun.id,
+                WorkflowRun.workflow_id,
+                WorkflowRun.status,
+                WorkflowRun.started_at,
+                WorkflowRun.finished_at,
+            )
+            .selectinload(WorkflowRun.node_runs)
+            .load_only(
+                WorkflowNodeRun.id,
+                WorkflowNodeRun.workflow_run_id,
+                WorkflowNodeRun.node_id,
+                WorkflowNodeRun.status,
+                WorkflowNodeRun.poster_variant_id,
+                WorkflowNodeRun.started_at,
+                WorkflowNodeRun.finished_at,
+            ),
         )
         .order_by(desc(Product.updated_at))
     )
@@ -342,6 +390,7 @@ def create_product(
             product_id=product.id,
             template=canvas_template,
             initial_entry_mode=workflow_entry,
+            entry_text=normalized_entry_text,
         )
     elif explicit_initial_workflow_entry:
         _materialize_initial_workflow(

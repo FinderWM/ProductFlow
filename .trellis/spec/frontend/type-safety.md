@@ -170,6 +170,76 @@ return api.createProduct({
 });
 ```
 
+### Scenario: Product list summary display DTO
+
+#### 1. Scope / Trigger
+
+- Trigger: changes to `ProductSummary`, `/api/products` response fields, `ProductListPage`, or product-list display
+  helpers.
+- The list displays both generated-result imagery and starting input info, so the DTO must keep those fields separate.
+
+#### 2. Signatures
+
+- Shared frontend DTO: `ProductSummary`.
+- API method: `api.listProducts(...): Promise<ProductListResponse>`.
+- Summary fields used by the list:
+  - `initial_workflow_entry: ProductInitialWorkflowEntry | null`
+  - `initial_entry_text: string | null`
+  - `initial_entry_text_excerpt: string | null`
+  - `latest_generated_image_download_url: string | null`
+  - `latest_generated_image_preview_url: string | null`
+  - `latest_generated_image_thumbnail_url: string | null`
+  - Existing `source_image_*` fields remain the start-image fields.
+
+#### 3. Contracts
+
+- `ProductThumbnail` / main row thumbnail must read only `latest_generated_image_thumbnail_url ??
+  latest_generated_image_preview_url`.
+- Main row thumbnail must not fall back to `source_image_thumbnail_url`; no generated result means an image placeholder.
+- Product key-info for `initial_workflow_entry="image"` reads `source_image_thumbnail_url ?? source_image_preview_url`.
+- Product key-info for `copy` / `tail` reads `initial_entry_text` and falls back to `initial_entry_text_excerpt` for older responses.
+- Product key-info text is allowed to exceed six characters; the UI truncates with ellipsis based on available width.
+- Product key-info for `blank`, missing text, or missing image returns a stable empty state.
+- Keep backend `snake_case` names in `ProductSummary`; do not introduce camelCase aliases in page code.
+
+#### 4. Validation & Error Matrix
+
+- New backend summary field missing from `types.ts` -> `just web-build` should fail or page code must not consume it.
+- Product has source image but no generated result -> main thumbnail helper returns `null`.
+- Copy/tail entry has blank full text and blank excerpt -> key-info helper returns empty.
+- Image entry has no source image URL -> key-info helper returns empty.
+
+#### 5. Good/Base/Bad Cases
+
+- Good: `productMainThumbnailUrl(product)` returns the generated thumbnail and `productKeyInfo(product)` returns a source
+  image for image-entry rows.
+- Good: a copy-entry row with `initial_entry_text="免安装收纳架适配厨房场景"` renders the full text in the key-info column/card
+  and truncates visually with an ellipsis when the column is narrow.
+- Base: legacy rows with no `initial_workflow_entry` but a source image may show the source image as key-info while keeping
+  the main thumbnail empty.
+- Bad: `ProductThumbnail` uses `source_image_thumbnail_url ?? source_image_preview_url` as its image source.
+- Bad: page components infer copy/tail text by slicing arbitrary product names or source filenames.
+
+#### 6. Tests Required
+
+- Pure helper tests for main thumbnail generated-only behavior.
+- Pure helper tests for image, copy/tail, and blank key-info behavior.
+- `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` after DTO/UI changes.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```ts
+const thumbUrl = product.source_image_thumbnail_url ?? product.source_image_preview_url;
+```
+
+Correct:
+
+```ts
+const thumbUrl = product.latest_generated_image_thumbnail_url ?? product.latest_generated_image_preview_url;
+```
+
 ---
 
 ## Local Types
