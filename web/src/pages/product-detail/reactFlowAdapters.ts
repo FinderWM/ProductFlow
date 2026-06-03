@@ -16,10 +16,11 @@ const EDGE_OBSTACLE_PADDING = 18;
 const EDGE_LANE_MARGIN = 10;
 const EDGE_SIBLING_LANE_GAP = 36;
 const EDGE_POINT_EPSILON = 0.001;
-const EDGE_CORNER_RADIUS = 42;
-const EDGE_CURVE_MAX_HORIZONTAL_SPAN = 180;
-const EDGE_CURVE_MIN_HORIZONTAL_TAIL = 14;
-const EDGE_CUBIC_CONTROL_RATIO = 0.55;
+const EDGE_CURVE_TAIL_LENGTH = 24;
+const EDGE_CURVE_CONTROL_X_RATIO = 0.36;
+const EDGE_CURVE_MIN_CONTROL_X = 52;
+const EDGE_CURVE_MAX_CONTROL_X = 220;
+const EDGE_CURVE_LANE_PULL_RATIO = 0.88;
 
 export interface ProductFlowNodeData extends Record<string, unknown> {
   workflowNode: WorkflowNode;
@@ -122,96 +123,76 @@ function toSvgPath(points: CanvasPoint[]): string {
   return points.map((point, index) => `${index === 0 ? "M" : "L"} ${formatPathPoint(point)}`).join(" ");
 }
 
-function getOrthogonalDistance(start: CanvasPoint, end: CanvasPoint): number {
-  return Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
-}
-
-function moveAlongSegment(start: CanvasPoint, end: CanvasPoint, distance: number): CanvasPoint {
-  const segmentLength = getOrthogonalDistance(start, end);
-  if (segmentLength <= EDGE_POINT_EPSILON) {
-    return { ...start };
-  }
-  const ratio = Math.min(distance, segmentLength) / segmentLength;
-  return {
-    x: start.x + (end.x - start.x) * ratio,
-    y: start.y + (end.y - start.y) * ratio,
-  };
-}
-
 function isHorizontalSegment(start: CanvasPoint, end: CanvasPoint): boolean {
   return Math.abs(start.y - end.y) < EDGE_POINT_EPSILON && Math.abs(start.x - end.x) >= EDGE_POINT_EPSILON;
 }
 
-function isVerticalSegment(start: CanvasPoint, end: CanvasPoint): boolean {
-  return Math.abs(start.x - end.x) < EDGE_POINT_EPSILON && Math.abs(start.y - end.y) >= EDGE_POINT_EPSILON;
-}
-
-function getDominantCurveRadius(incomingLength: number, outgoingLength: number): number {
-  const incomingLimit = Math.max(incomingLength - EDGE_CURVE_MIN_HORIZONTAL_TAIL, incomingLength / 2);
-  const outgoingLimit = Math.max(outgoingLength - EDGE_CURVE_MIN_HORIZONTAL_TAIL, outgoingLength / 2);
-  return Math.min(EDGE_CURVE_MAX_HORIZONTAL_SPAN, incomingLimit, outgoingLimit);
-}
-
 function toBezierSvgPath(points: CanvasPoint[]): string {
-  if (points.length < 3) {
+  if (points.length < 2) {
     return toSvgPath(points);
   }
 
-  const commands = [`M ${formatPathPoint(points[0])}`];
-  let index = 1;
-  while (index < points.length - 1) {
+  const start = points[0];
+  const end = points[points.length - 1];
+  const next = points[1] ?? end;
+  const previous = points[points.length - 2] ?? start;
+  const sourceDirection = Math.sign(next.x - start.x) || (end.x >= start.x ? 1 : -1);
+  const targetDirection = Math.sign(end.x - previous.x) || (end.x >= start.x ? 1 : -1);
+  const curveStart = { x: start.x + sourceDirection * EDGE_CURVE_TAIL_LENGTH, y: start.y };
+  const curveEnd = { x: end.x - targetDirection * EDGE_CURVE_TAIL_LENGTH, y: end.y };
+  const horizontalSpan = Math.abs(curveEnd.x - curveStart.x);
+  const minControlX = Math.min(EDGE_CURVE_MIN_CONTROL_X, horizontalSpan * 0.25);
+  const maxControlX = Math.max(minControlX, Math.min(EDGE_CURVE_MAX_CONTROL_X, horizontalSpan * 0.45));
+  const controlXDistance =
+    horizontalSpan <= EDGE_POINT_EPSILON
+      ? EDGE_CURVE_MIN_CONTROL_X
+      : clamp(horizontalSpan * EDGE_CURVE_CONTROL_X_RATIO, minControlX, maxControlX);
+  const laneY = getDominantHorizontalLaneY(points, start, end);
+  const [firstControlY, secondControlY] =
+    laneY === null
+      ? getPreferredCurveControlY(start.y, end.y)
+      : [
+          start.y + (laneY - start.y) * EDGE_CURVE_LANE_PULL_RATIO,
+          end.y + (laneY - end.y) * EDGE_CURVE_LANE_PULL_RATIO,
+        ];
+  const firstControl = {
+    x: curveStart.x + sourceDirection * controlXDistance,
+    y: firstControlY,
+  };
+  const secondControl = {
+    x: curveEnd.x - targetDirection * controlXDistance,
+    y: secondControlY,
+  };
+
+  return [
+    `M ${formatPathPoint(start)}`,
+    `L ${formatPathPoint(curveStart)}`,
+    `C ${formatPathPoint(firstControl)} ${formatPathPoint(secondControl)} ${formatPathPoint(curveEnd)}`,
+    `L ${formatPathPoint(end)}`,
+  ].join(" ");
+}
+
+function getPreferredCurveControlY(sourceY: number, targetY: number): [number, number] {
+  return [sourceY, targetY];
+}
+
+function getDominantHorizontalLaneY(points: CanvasPoint[], start: CanvasPoint, end: CanvasPoint): number | null {
+  let bestLane: { y: number; length: number } | null = null;
+  for (let index = 1; index < points.length; index += 1) {
     const previous = points[index - 1];
-    const corner = points[index];
-    const next = points[index + 1];
-
-    if (index + 2 < points.length) {
-      const verticalEnd = points[index + 1];
-      const horizontalEnd = points[index + 2];
-      if (
-        isHorizontalSegment(previous, corner) &&
-        isVerticalSegment(corner, verticalEnd) &&
-        isHorizontalSegment(verticalEnd, horizontalEnd)
-      ) {
-        const incomingLength = getOrthogonalDistance(previous, corner);
-        const outgoingLength = getOrthogonalDistance(verticalEnd, horizontalEnd);
-        const radius = getDominantCurveRadius(incomingLength, outgoingLength);
-        if (radius > EDGE_POINT_EPSILON) {
-          const curveStart = moveAlongSegment(corner, previous, radius);
-          const curveEnd = moveAlongSegment(verticalEnd, horizontalEnd, radius);
-          commands.push(`L ${formatPathPoint(curveStart)}`);
-          commands.push(`C ${formatPathPoint(corner)} ${formatPathPoint(verticalEnd)} ${formatPathPoint(curveEnd)}`);
-          index += 2;
-          continue;
-        }
-      }
-    }
-
-    const incomingLength = getOrthogonalDistance(previous, corner);
-    const outgoingLength = getOrthogonalDistance(corner, next);
-    const isOrthogonalCorner =
-      (previous.x === corner.x || previous.y === corner.y) &&
-      (corner.x === next.x || corner.y === next.y) &&
-      !(previous.x === corner.x && corner.x === next.x) &&
-      !(previous.y === corner.y && corner.y === next.y);
-    const radius = Math.min(EDGE_CORNER_RADIUS, incomingLength / 2, outgoingLength / 2);
-
-    if (!isOrthogonalCorner || radius <= EDGE_POINT_EPSILON) {
-      commands.push(`L ${formatPathPoint(corner)}`);
-      index += 1;
+    const point = points[index];
+    if (!isHorizontalSegment(previous, point)) {
       continue;
     }
-
-    const curveStart = moveAlongSegment(corner, previous, radius);
-    const curveEnd = moveAlongSegment(corner, next, radius);
-    const controlDistance = radius * EDGE_CUBIC_CONTROL_RATIO;
-    const firstControl = moveAlongSegment(curveStart, corner, controlDistance);
-    const secondControl = moveAlongSegment(curveEnd, corner, controlDistance);
-    commands.push(`L ${formatPathPoint(curveStart)}`);
-    commands.push(`C ${formatPathPoint(firstControl)} ${formatPathPoint(secondControl)} ${formatPathPoint(curveEnd)}`);
-    index += 1;
+    if (Math.abs(point.y - start.y) <= EDGE_POINT_EPSILON || Math.abs(point.y - end.y) <= EDGE_POINT_EPSILON) {
+      continue;
+    }
+    const length = Math.abs(point.x - previous.x);
+    if (!bestLane || length > bestLane.length) {
+      bestLane = { y: point.y, length };
+    }
   }
-  commands.push(`L ${formatPathPoint(points[points.length - 1])}`);
-  return commands.join(" ");
+  return bestLane?.y ?? null;
 }
 
 function compactOrthogonalPoints(points: CanvasPoint[]): CanvasPoint[] {

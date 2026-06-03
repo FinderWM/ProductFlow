@@ -580,8 +580,8 @@ returns the normal `ProductWorkflow`.
 - Legacy PostgreSQL databases may already have older string node values. Forward migrations must safely migrate old
   image-slot rows to `reference_image`; fresh databases should create only the supported simplified node values.
 - Node status values are `idle`, `queued`, `running`, `succeeded`, `failed`; run status values are
-  `running`, `succeeded`, `failed`, `cancelled`. New workflow enum values use non-native string storage and code/frontend
-  validation updates; they must not require a PostgreSQL enum expansion migration.
+  `running`, `waiting_confirmation`, `succeeded`, `failed`, `cancelled`. New workflow enum values use non-native string
+  storage and code/frontend validation updates; they must not require a PostgreSQL enum expansion migration.
 - Active workflow status polling must use `GET /api/products/{product_id}/workflow/status`, not repeated full workflow
   detail loads. The status endpoint returns workflow identity/timestamps, node status fields, latest run status fields,
   and node-run status fields only; it must not serialize edges, node `config_json`, node `output_json`, or node-run
@@ -1370,13 +1370,13 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
 
 ---
 
-## Scenario: Tail splitter confirmation and run resume
+## Scenario: Tail splitter confirmation without auto-run
 
 ### 1. Scope / Trigger
 - Trigger: changes to `tail_splitter` node execution, split-plan output shape, split-plan apply endpoint, or workflow
   run orchestration when a run crosses a tail node.
-- This scenario captures graph-expansion, waiting-confirmation, and resume behavior so tail runs do not drift back into
-  hidden auto-apply logic.
+- This scenario captures graph-expansion and waiting-confirmation behavior so tail runs do not drift back into hidden
+  auto-apply or auto-run logic.
 
 ### 2. Signatures
 - Workflow node type includes `tail_splitter`.
@@ -1414,8 +1414,16 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
 - Created nodes must carry `generated_by` metadata with at least `tail_node_id`, `plan_id`, `batch_id`, and role/item
   fields so later cleanup can target only generated branches.
 - Successful apply first removes the previous generated branch for the same tail, marks `latest_plan.status = "applied"`,
-  replaces `applied_batches` with the latest batch, creates node runs for the waiting run, removes the matching pending
-  confirmation, and resumes queued execution for the same run when generated work exists.
+  replaces `applied_batches` with the latest batch, creates the selected nodes/edges as idle editable graph structure, and
+  removes the matching pending confirmation. It must not create queued node runs for generated nodes and must not enqueue
+  the waiting run only because a split plan was confirmed.
+- After apply, the original waiting run resolves from the remaining durable state: if other node runs are already
+  queued/running it stays or returns `running`; if other pending tail confirmations remain it stays
+  `waiting_confirmation`; otherwise it becomes `succeeded` with `finished_at` set. Generated nodes remain `idle` until a
+  later explicit run.
+- A later manual `POST /api/products/{product_id}/workflow/run` with `start_node_id=<tail_node_id>` and
+  `start_mode="after_node"` may execute the generated branch. Scheduler dispatch must claim all independent ready
+  generated branches in the same ready wave, subject only to the existing global capacity gate.
 - If a run includes a tail node, its old generated branch must be excluded from that run plan until the new plan is
   confirmed. This prevents stale downstream image nodes from running before confirmation.
 - Multiple tail nodes may each append a pending confirmation. Confirming one plan must not remove unrelated pending tail
@@ -1432,7 +1440,8 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
 - Apply with `items` containing blank `instruction` -> `400` with split-item instruction validation message.
 - Waiting run cancellation -> run and queued/running node runs become cancelled, pending tail metadata is no longer active
   user work.
-- Queue recovery sees a `waiting_confirmation` run -> do not enqueue it; only explicit plan confirmation can resume it.
+- Queue recovery sees a `waiting_confirmation` run -> do not enqueue it; explicit plan confirmation resolves the pending
+  state but does not auto-enqueue generated work.
 - Authenticated user without `inspirations:generate` calling workflow run -> `403`, `{"detail": "没有接口权限"}`.
 - Authenticated user without `inspirations:write` calling tail apply -> `403`, `{"detail": "没有接口权限"}`.
 
@@ -1440,11 +1449,14 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
 - Good: full or selected run reaches a tail, writes `pending_tail_confirmations`, and waits until the user confirms a plan.
 - Good: user edits selected item instructions in the confirmation payload; generated `image_generation.config_json`
   persists the edited instructions.
-- Good: confirming a rerun tail plan deletes the old generated branch, preserves manual nodes, and resumes the waiting run
-  into the latest generated branch.
+- Good: confirming a rerun tail plan deletes the old generated branch, preserves manual nodes, completes the confirmation
+  run when no other active work remains, and leaves the latest generated branch idle/editable.
+- Good: after confirmation, manually running the tail with `start_mode="after_node"` dispatches independent generated
+  image branches in one scheduler wave.
 - Base: tail plan can consume upstream copy/reference/image context but still keeps split output as explicit user-visible
   confirmation data.
 - Bad: full-run tail execution auto-applies all plan items and reaches `succeeded` without confirmation.
+- Bad: split-plan apply immediately creates queued/running node runs for generated image branches.
 - Bad: generated public copy/reference nodes receive a direct tail edge and become part of the tail's ordered dependency
   chain.
 - Bad: queue recovery treats `waiting_confirmation` as a durable running task and re-enqueues it without user confirmation.
@@ -1458,7 +1470,9 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
 - Regression proving tail rerun confirmation deletes the old generated branch while preserving manual nodes.
 - Run regression for `start_mode="after_node"` excluding the start node.
 - Run regression for `waiting_confirmation` being user-active but not durable-generation active.
-- Run regression for confirming a pending plan resuming the waiting run into generated node runs.
+- Run regression for confirming a pending plan completing the waiting run without generated queued/running node runs.
+- Run regression for manual `start_mode="after_node"` after tail confirmation dispatching independent generated branches
+  in one scheduler wave.
 - RBAC regression proving workflow run vs tail apply permission split.
 
 ### 7. Wrong vs Correct
@@ -1483,7 +1497,8 @@ if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
     return
 ```
 
-Tail run persists a pending plan first; graph expansion and run resume happen only through explicit confirmation.
+Tail run persists a pending plan first; graph expansion happens only through explicit confirmation, and generated branch
+execution happens only through a later explicit run such as `start_mode="after_node"`.
 
 ---
 

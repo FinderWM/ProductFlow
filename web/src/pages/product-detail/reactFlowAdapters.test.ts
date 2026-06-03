@@ -184,7 +184,7 @@ describe("reactFlowAdapters", () => {
     });
 
     expect(route.path).toBe(
-      "M 100 50 L 114 50 C 200 50 200 150 286 150 L 300 150",
+      "M 100 50 L 124 50 C 178.72 50 221.28 150 276 150 L 300 150",
     );
     expect(route.points).toEqual([
       { x: 100, y: 50 },
@@ -194,6 +194,19 @@ describe("reactFlowAdapters", () => {
     ]);
     expect(route.labelX).toBe(200);
     expect(route.labelY).toBe(100);
+  });
+
+  it("mirrors the cubic control bias for lower-to-upper edges", () => {
+    const route = buildOrthogonalAvoidingPath({
+      sourceX: 100,
+      sourceY: 150,
+      targetX: 300,
+      targetY: 50,
+    });
+
+    expect(route.path).toBe(
+      "M 100 150 L 124 150 C 178.72 150 221.28 50 276 50 L 300 50",
+    );
   });
 
   it("offsets sibling edge routes without changing their endpoints", () => {
@@ -212,7 +225,7 @@ describe("reactFlowAdapters", () => {
       { x: 300, y: 150 },
     ]);
     expect(route.path).not.toBe(
-      "M 100 50 L 114 50 C 200 50 200 150 286 150 L 300 150",
+      "M 100 50 L 128 50 C 179.84 78 220.16 122 272 150 L 300 150",
     );
   });
 
@@ -240,6 +253,7 @@ describe("reactFlowAdapters", () => {
     });
 
     expect(route.path).not.toBe("M 100 100 L 400 100");
+    expect(route.path.match(/\sC\s/g)).toHaveLength(1);
     expect(route.points.some((point) => point.y < 60 || point.y > 140)).toBe(true);
   });
 
@@ -257,7 +271,7 @@ describe("reactFlowAdapters", () => {
       ],
     });
 
-    expect(route.path).toContain("C 200 50 200 150 286 150");
+    expect(route.path).toContain("C 178.72 50 221.28 150 276 150");
     expect(route.points).toEqual([
       { x: 100, y: 50 },
       { x: 200, y: 50 },
@@ -389,8 +403,8 @@ describe("reactFlowAdapters", () => {
     expect(workflowNodeIdFromReactFlowNode({ id: "node-1" })).toBe("node-1");
     expect(workflowNodeIdFromReactFlowNode("node-2")).toBe("node-2");
     expect(workflowEdgeIdFromReactFlowEdge({ id: "edge-1" })).toBe("edge-1");
-    expect(getNodePositionForViewportCenter({ x: 640, y: 360 })).toEqual({ x: 516, y: 280 });
-    expect(getNodePositionForViewportCenter({ x: -40, y: 20 })).toEqual({ x: -164, y: -60 });
+    expect(getNodePositionForViewportCenter({ x: 640, y: 360 })).toEqual({ x: 504, y: 280 });
+    expect(getNodePositionForViewportCenter({ x: -40, y: 20 })).toEqual({ x: -176, y: -60 });
     expect(normalizeWorkflowZoom(0.01)).toBe(0.05);
     expect(normalizeWorkflowZoom(0.1)).toBe(0.1);
     expect(normalizeWorkflowZoom(2)).toBe(1.6);

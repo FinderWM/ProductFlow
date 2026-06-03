@@ -1,6 +1,6 @@
 import type { WorkflowNodeType } from "../../lib/types";
 
-export const NODE_WIDTH = 248;
+export const NODE_WIDTH = 272;
 
 export const ADD_NODE_OPTIONS: Array<{ type: WorkflowNodeType }> = [
   { type: "reference_image" },

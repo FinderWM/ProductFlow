@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login, _wait_for_workflow_run
 
-from productflow_backend.domain.enums import WorkflowNodeType, WorkflowRunStatus
+from productflow_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType, WorkflowRunStatus
 from productflow_backend.domain.workflow_rules import WorkflowRuleNode, should_execute_missing_upstream
 
 
@@ -191,6 +191,10 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
     )
     assert applied.status_code == 200
     applied_payload = applied.json()
+    latest_run_after_apply = applied_payload["runs"][0]
+    assert latest_run_after_apply["status"] == "succeeded"
+    assert latest_run_after_apply["is_cancelable"] is False
+    assert "pending_tail_confirmations" not in latest_run_after_apply["progress_metadata"]
 
     tail_node_after_apply = next(node for node in applied_payload["nodes"] if node["id"] == tail_node["id"])
     applied_output = tail_node_after_apply["output_json"]
@@ -214,6 +218,7 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
     }
     assert sum(1 for node in generated_nodes if node["node_type"] == "image_generation") == 2
     assert sum(1 for node in generated_nodes if node["node_type"] == "reference_image") == 3
+    assert not any(node["status"] in {"queued", "running"} for node in generated_nodes)
 
     generated_node_ids = {node["id"] for node in generated_nodes}
     generated_edges = [
@@ -313,10 +318,16 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
         position_y=tail_node.position_y,
         enqueue=lambda run_id: execute_product_workflow_run(run_id),
     )
+    db_session.expire_all()
+    first_run_after_apply = db_session.get(type(first_run), first_run.id)
+    assert first_run_after_apply is not None
+    assert first_run_after_apply.status == WorkflowRunStatus.SUCCEEDED
     assert first_run.id in {run.id for run in workflow.runs}
     tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
     first_batch = tail_node.output_json["applied_batches"][-1]
     first_batch_node_ids = set(first_batch["node_ids"])
+    first_batch_nodes = [node for node in workflow.nodes if node.id in first_batch_node_ids]
+    assert not any(node.status.value in {"queued", "running"} for node in first_batch_nodes)
 
     workflow = create_workflow_node(
         db_session,
@@ -379,6 +390,115 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
     assert second_batch["batch_id"] != first_batch["batch_id"]
     assert second_batch["plan_id"] != first_batch["plan_id"]
     assert set(second_batch["node_ids"]).issubset(node_ids_after_confirm)
+
+
+def test_run_after_tail_dispatches_independent_generated_branches_in_one_wave(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from productflow_backend.application.product_workflows import (
+        apply_tail_split_plan,
+        execute_product_workflow_run,
+        get_or_create_product_workflow,
+        run_product_workflow,
+        start_product_workflow_run,
+        update_workflow_node,
+    )
+    from productflow_backend.application.use_cases import create_product
+    from productflow_backend.infrastructure.db.models import WorkflowRun
+
+    product = create_product(
+        db_session,
+        name="尾巴后并发分支商品",
+        category=None,
+        price=None,
+        source_note=None,
+        image_bytes=None,
+        filename=None,
+        content_type=None,
+        initial_workflow_entry="tail",
+        entry_text="主打免安装、收纳整洁、细节材质、不同场景摆放。",
+    )
+    workflow = get_or_create_product_workflow(db_session, product.id)
+    tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
+    workflow = update_workflow_node(
+        db_session,
+        node_id=tail_node.id,
+        title=None,
+        position_x=None,
+        position_y=None,
+        config_json={
+            "source_text": "主打免安装、收纳整洁、细节材质、不同场景摆放。",
+            "description": "拆成适合电商图片的独立方向。",
+            "max_items": 4,
+            "generation_config_mode": "auto",
+            "generation_config_id": None,
+        },
+    )
+    tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
+
+    workflow = run_product_workflow(db_session, product_id=product.id, start_node_id=tail_node.id)
+    tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
+    plan = tail_node.output_json["latest_plan"]
+    item_ids = [item["id"] for item in plan["items"][:3]]
+    workflow = apply_tail_split_plan(
+        db_session,
+        node_id=tail_node.id,
+        plan_id=plan["plan_id"],
+        item_ids=item_ids,
+        position_x=tail_node.position_x + 80,
+        position_y=tail_node.position_y,
+        enqueue=lambda run_id: pytest.fail(f"tail apply must not enqueue run {run_id}"),
+    )
+
+    tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
+    batch = tail_node.output_json["applied_batches"][-1]
+    generated_nodes = [
+        node
+        for node in workflow.nodes
+        if isinstance(node.config_json, dict)
+        and node.config_json.get("generated_by", {}).get("batch_id") == batch["batch_id"]
+    ]
+    image_node_ids = {
+        node.id
+        for node in generated_nodes
+        if node.config_json["generated_by"]["role"] == "image_trigger"
+    }
+    public_copy_node = next(
+        node for node in generated_nodes if node.config_json["generated_by"]["role"] == "public_copy"
+    )
+    assert len(image_node_ids) == 3
+
+    kickoff = start_product_workflow_run(
+        db_session,
+        product_id=product.id,
+        start_node_id=tail_node.id,
+        start_mode="after_node",
+    )
+    run = db_session.get(WorkflowRun, kickoff.run_id)
+    assert run is not None
+    public_copy_node_run = next(node_run for node_run in run.node_runs if node_run.node_id == public_copy_node.id)
+    public_copy_node.status = WorkflowNodeStatus.SUCCEEDED
+    public_copy_node_run.status = WorkflowNodeStatus.SUCCEEDED
+    db_session.commit()
+
+    dispatched_node_run_ids: list[str] = []
+    monkeypatch.setattr(
+        "productflow_backend.application.product_workflow.execution.enqueue_workflow_node_run",
+        lambda node_run_id: dispatched_node_run_ids.append(node_run_id),
+    )
+
+    execute_product_workflow_run(kickoff.run_id)
+
+    db_session.expire_all()
+    run = db_session.get(WorkflowRun, kickoff.run_id)
+    assert run is not None
+    dispatched_node_ids = {
+        node_run.node_id
+        for node_run in run.node_runs
+        if node_run.id in dispatched_node_run_ids
+    }
+    assert image_node_ids.issubset(dispatched_node_ids)
 
 
 def test_tail_splitter_missing_upstream_rules_cover_copy_reference_and_image() -> None:

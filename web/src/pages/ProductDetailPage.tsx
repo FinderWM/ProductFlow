@@ -2675,7 +2675,7 @@ export function ProductDetailPage() {
           {sidebarCollapsed ? (
             <div
               data-canvas-control
-              className="absolute right-6 top-20 z-30 hidden w-[72px] flex-col items-center gap-2 rounded-[24px] shadow-2xl glass-inspector p-2 pb-3 lg:flex"
+              className="absolute bottom-6 right-6 top-20 z-30 hidden min-h-0 w-[72px] flex-col items-center gap-2 overflow-y-auto overscroll-contain rounded-[24px] shadow-2xl glass-inspector p-2 pb-3 lg:flex"
             >
               {renderWorkflowToolbarButtons()}
               <SidebarTabButton active={false} label={t("detail.tabSingleNode")} title={t("detail.tabSingleNode")} icon={<Plus size={17} />} onClick={() => openSidebarTab("singleNode")} />
@@ -2712,7 +2712,7 @@ export function ProductDetailPage() {
               <div className="h-12 w-[4px] rounded-full bg-slate-300 opacity-40 transition-all duration-300 group-hover:h-20 group-hover:opacity-100 dark:bg-slate-700 animate-handle-glow" />
             </div>
 
-            <div className="flex w-[72px] shrink-0 flex-col items-center gap-2 border-r border-slate-200/40 bg-white/5 px-2 py-4 dark:border-white/5 dark:bg-black/10">
+            <div className="flex min-h-0 w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto overscroll-contain border-r border-slate-200/40 bg-white/5 px-2 py-4 dark:border-white/5 dark:bg-black/10">
               {renderWorkflowToolbarButtons()}
               <SidebarTabButton
                 active={activeSidebarTab === "singleNode"}

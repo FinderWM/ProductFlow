@@ -73,7 +73,7 @@ export function WorkflowNodeCard({
     <div
       ref={nodeRef}
       data-workflow-node-id={node.id}
-      className={`nopan relative w-[248px] touch-none select-none rounded-2xl border bg-white/95 p-3 text-left shadow-sm backdrop-blur dark:bg-[#1c2940]/96 dark:shadow-[0_18px_42px_rgba(0,0,0,0.34)] transition-[border-color,box-shadow,transform] transition-spring animate-spring-node-in ${
+      className={`nopan relative w-[272px] touch-none select-none rounded-2xl border bg-white/95 p-3 text-left shadow-sm backdrop-blur dark:bg-[#1c2940]/96 dark:shadow-[0_18px_42px_rgba(0,0,0,0.34)] transition-[border-color,box-shadow,transform] transition-spring animate-spring-node-in ${
         dragging ? "cursor-grabbing" : "hover:-translate-y-0.5 hover:shadow-md dark:hover:border-slate-400/85 dark:hover:shadow-[0_20px_46px_rgba(0,0,0,0.42)]"
       } ${selectedClassName} ${
         node.status === "running"

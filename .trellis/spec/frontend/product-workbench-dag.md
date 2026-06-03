@@ -144,6 +144,9 @@
   cubic Bezier curve (SVG `C` command) for vertical displacement. Avoid long straight vertical segments in the final SVG
   path; dense fan-in/fan-out graphs should separate sibling edges with deterministic lane offsets while preserving
   backend edge identity and handle semantics.
+- Edge curves should prefer the source/target vertical relationship: a source above its target bends downward through the
+  cubic control points, and a source below its target mirrors that bias upward. Keep the horizontal tails short enough that
+  the Bezier curve carries most of the visible route.
 - Connection-drag handle highlighting should use ReactFlow native connection state, such as `useConnection` or
   ReactFlow-provided handle connection classes. Do not reimplement connection drag, draw a custom temporary connection
   path, or bypass ProductFlow's existing `onConnect` / `isValidConnection` / backend edge mutation path.
@@ -226,6 +229,8 @@
 - ProductDetail uses one right sidebar for Details, Runs, Images, and Templates. The small rail selects the active tab; clicking a
   workflow node must select it and switch the sidebar to Details. Workflow completion must refresh artifacts silently and
   must not auto-switch the active tab.
+- The right sidebar rail must have bounded height and vertical scrolling (`overflow-y-auto` with overscroll containment)
+  so every tab, including Images/Gallery, remains reachable in short desktop viewports.
 - The Images tab may aggregate `PosterVariant` and `SourceAsset` records, but it must de-duplicate generated images that
   appear as both a persisted poster and a filled reference source asset from the same `image_generation` output.
 - In the Images tab, thumbnail primary click opens a large in-app preview/lightbox using preview/full URLs; it must not
@@ -252,6 +257,10 @@
   context while leaving real generative/action nodes to use the generic idle label.
 - Mutations that create artifacts must refresh `['product', productId]`, `['product-history', productId]`, and
   `['products']` when outputs can affect copy, posters, or list status.
+- ProductDetail node cards use a shared `NODE_WIDTH` contract across `constants.ts`, `WorkflowCanvas`, and
+  `WorkflowNodeCard`; keep these widths synchronized. The current balanced canvas baseline is `NODE_WIDTH = 272`,
+  auto-layout `gapX = 420`, and vertical item spacing around `132`, which leaves enough curve room without making nodes
+  feel undersized against empty edge space.
 
 ### Templates Sidebar Tab
 
@@ -749,8 +758,9 @@ pending state for individual node run actions, while keeping layout dragging ind
 - Tail apply mutation invalidates/refreshes `["product-workflow", productId]` and selects a sensible post-apply focus
   (applied tail node or newly generated branch anchor) without losing page context.
 - Manual tail apply path must not auto-apply all items when the dialog has explicit item removals or edited instructions.
-- After confirmation, the same waiting run may resume into generated downstream node runs; the UI should keep polling until
-  the run becomes terminal or has another pending confirmation.
+- After confirmation, generated branch nodes are ordinary idle/editable nodes. The waiting run should leave active polling
+  once the backend returns a terminal run with no pending confirmation; generated downstream execution is started later by
+  an explicit `start_mode="after_node"` run.
 - Workflow run and tail apply permission failures surface backend `ApiError.detail` clearly (for example `没有接口权限`)
   near the action that failed.
 
@@ -766,12 +776,13 @@ pending state for individual node run actions, while keeping layout dragging ind
 
 ### 5. Good/Base/Bad Cases
 - Good: user runs tail, edits one plan-item instruction, deselects another item, confirms, and only selected image branches
-  are created with edited instructions.
+  are created with edited instructions while remaining idle for review/editing.
 - Good: user chooses `从此节点开始运行后面的节点` on a tail node's previous generated branch anchor to avoid
   re-running the tail itself.
 - Good: a run card clearly shows `waiting_confirmation`, not a generic queued/running capacity message.
 - Base: user cancels dialog and the workflow graph remains unchanged.
 - Bad: opening tail plan dialog immediately creates nodes before confirmation.
+- Bad: confirming a tail plan immediately changes generated nodes to `queued` / `running`.
 - Bad: the downstream run action submits only `start_node_id` and reruns the selected node.
 - Bad: treating `waiting_confirmation` as terminal and stopping status polling while the run is still cancelable.
 
@@ -779,6 +790,7 @@ pending state for individual node run actions, while keeping layout dragging ind
 - `defaultConfigForType("tail_splitter")` and node label/icon/display contract tests.
 - ProductDetail helper tests for `运行此节点` and downstream-run toolbar actions.
 - ProductDetail tests for pending-plan dialog open/cancel/confirm, edited-instruction payload, and selected-item payload.
+- ProductDetail or API-backed regression proving tail confirmation leaves generated nodes idle until manual downstream run.
 - Workflow status helper tests proving `waiting_confirmation` is active and has distinct queue text.
 - API contract test for `applyTailSplitPlan` request shape.
 - Build gate: `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build`.
@@ -805,7 +817,8 @@ applyTailSplitPlan(nodeId, {
 });
 ```
 
-The downstream run action uses an explicit start mode, and tail apply sends the user's confirmed item/instruction choices.
+The downstream run action uses an explicit start mode. Tail apply sends the user's confirmed item/instruction choices and
+does not start generated nodes automatically.
 
 ## Scenario: Autosaved direct image workbench
 

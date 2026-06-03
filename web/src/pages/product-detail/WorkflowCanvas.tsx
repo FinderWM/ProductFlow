@@ -333,7 +333,7 @@ function ProductFlowCanvasNode({ data, dragging, isConnectable }: NodeProps<Work
   ];
 
   return (
-    <div data-workflow-node-id={node.id} className="nopan relative w-[248px]">
+    <div data-workflow-node-id={node.id} className="nopan relative w-[272px]">
       {data.actionToolbar ? (
         <WorkflowNodeToolbarActions
           target={data.actionToolbar.target}
@@ -880,9 +880,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         };
 
         const startX = 72;
-        const centerY = 288;
-        const gapX = 504;
-        const itemSpacingY = 144;
+        const centerY = 264;
+        const gapX = 420;
+        const itemSpacingY = 132;
 
         const committed: Array<{ nodeId: string; position: CanvasPoint }> = [];
         const moveGroupId = `auto-layout-${Date.now()}`;
