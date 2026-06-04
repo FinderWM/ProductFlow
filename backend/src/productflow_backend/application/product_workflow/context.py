@@ -31,9 +31,14 @@ from productflow_backend.infrastructure.db.models import (
 from productflow_backend.infrastructure.storage import LocalStorage
 
 _UNRESOLVED_PLACEHOLDER_PATTERN = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}$")
+PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH = 50_000
 PRODUCT_CONTEXT_ENTRY_TYPES = frozenset({"image", "copy", "tail", "blank"})
 PRODUCT_CONTEXT_DYNAMIC_FIELDS_KEY = "dynamic_fields"
 DEPRECATED_PRODUCT_CONTEXT_CONFIG_KEYS = frozenset({"category", "price"})
+PRODUCT_CONTEXT_MARKDOWN_TEXT_FIELD_NAMES = {
+    "long_text": "长文案内容",
+    "source_note": "备注",
+}
 PRODUCT_CONTEXT_TEXT_KEYS = (
     "name",
     "owner_id",
@@ -57,7 +62,13 @@ def normalize_product_context_config(config_json: dict[str, Any] | None) -> dict
         config.pop(key, None)
     for key in PRODUCT_CONTEXT_TEXT_KEYS:
         if key in config:
-            config[key] = _normalize_nullable_text(config.get(key))
+            config[key] = _normalize_nullable_text(
+                config.get(key),
+                field_name=PRODUCT_CONTEXT_MARKDOWN_TEXT_FIELD_NAMES.get(key),
+                max_length=PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH
+                if key in PRODUCT_CONTEXT_MARKDOWN_TEXT_FIELD_NAMES
+                else None,
+            )
     if "entry_type" in config:
         config["entry_type"] = _normalize_product_context_entry_type(config.get("entry_type"), strict=True)
     if "long_text" not in config and "source_note" in config:
@@ -260,13 +271,23 @@ def effective_product_context(
     return product_context_values(product, node, workflow=workflow)
 
 
-def _normalize_nullable_text(value: Any) -> str | None:
+def _normalize_nullable_text(
+    value: Any,
+    *,
+    field_name: str | None = None,
+    max_length: int | None = None,
+) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
         normalized = value.strip()
-        return normalized or None
-    return str(value)
+    else:
+        normalized = str(value)
+    if not normalized:
+        return None
+    if max_length is not None and len(normalized) > max_length:
+        raise BusinessValidationError(f"{field_name or '文本'}不能超过 {max_length} 个字符")
+    return normalized
 
 
 def _normalize_product_context_entry_type(value: Any, *, strict: bool = False) -> str | None:

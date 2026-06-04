@@ -676,6 +676,9 @@ returns the normal `ProductWorkflow`.
 - `product_context` execution is non-AI. Running the node returns normalized context JSON and must not call text or image
   providers. `source_note` is a legacy alias for `long_text` when `long_text` is missing, while `category`, `price`,
   `source_asset_id`, and `source_asset_ids` remain API/output compatibility fields.
+- `long_text` and legacy `source_note` are stored as raw text and may contain Markdown and Mermaid fenced blocks. Creation
+  entry text, creation `long_text` / `source_note`, and product-context node config `long_text` / `source_note` share the
+  `PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH = 50_000` application limit.
 - `entry_type` values are `image`, `copy`, `tail`, and `blank`. Resolution order is saved node config, workflow
   `initial_entry_mode`, previous node output, then `image`. Template `entry_mode` remains the existing
   `image/copy/tail` template vocabulary; blank canvases use `blank` only on workflow/context state.
@@ -781,7 +784,10 @@ returns the normal `ProductWorkflow`.
   `source_note`/category/price, runs the DAG, and asserts the effective node context reaches `CopySet`, generated image
   input, node output, and run history.
 - Unit regression covers `normalize_product_context_config(...)`: `source_note` fills `long_text`, `entry_type` accepts
-  only `image/copy/tail/blank`, and `dynamic_fields` accepts only one-level scalar values.
+  only `image/copy/tail/blank`, `long_text` / `source_note` enforce the 50,000-character Markdown text limit, and
+  `dynamic_fields` accepts only one-level scalar values.
+- API regression covers product creation with Markdown long text above the old 4,000-character limit and rejection above
+  the 50,000-character limit.
 - API regression uploads context documents through `POST /api/workflow-nodes/{node_id}/document`, asserting config/output
   document fields, `context_document` SourceAsset persistence, UTF-8 failure, and unsupported extension failure.
 - API regression uploads a context image through `POST /api/workflow-nodes/{node_id}/image` and asserts the asset kind is

@@ -19,6 +19,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { ImageDropZone } from "../components/ImageDropZone";
+import { MarkdownEditor } from "../components/MarkdownEditor";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -27,6 +28,7 @@ import {
 import { api, ApiError } from "../lib/api";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import { dynamicFieldsToRecord, type DynamicFieldDraft } from "../lib/dynamicFields";
+import { PRODUCT_CONTEXT_MARKDOWN_MAX_LENGTH } from "../lib/markdown";
 import { useI18n } from "../lib/preferences";
 import type { TranslationKey } from "../lib/i18n";
 import type {
@@ -783,23 +785,20 @@ export function ProductCreatePage() {
               </div>
 
               <div className="mt-5">
-                <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
-                  {t("create.longText")} {longTextRequired ? <span className="text-red-500">*</span> : null}
-                </label>
-                <textarea
+                <MarkdownEditor
+                  label={t("create.longText")}
                   value={longText}
-                  maxLength={4000}
-                  onChange={(event) => {
-                    setLongText(event.target.value);
+                  modalTitle={t("create.longText")}
+                  maxLength={PRODUCT_CONTEXT_MARKDOWN_MAX_LENGTH}
+                  minRows={6}
+                  required={longTextRequired}
+                  onChange={(value) => {
+                    setLongText(value);
                     setError("");
                   }}
-                  className="min-h-32 w-full resize-y rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm leading-6 transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
                   placeholder={t("create.longTextPlaceholder")}
+                  helpText={entryTextHelpKey ? t(entryTextHelpKey) : t("create.longTextHelp")}
                 />
-                <div className="mt-1 flex items-start justify-between gap-3 text-xs text-zinc-400 dark:text-slate-500">
-                  <span>{entryTextHelpKey ? t(entryTextHelpKey) : t("create.longTextHelp")}</span>
-                  <span className="shrink-0">{longText.length} / 4000</span>
-                </div>
               </div>
 
               <div className="mt-5">

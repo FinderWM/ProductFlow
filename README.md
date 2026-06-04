@@ -92,6 +92,14 @@ ProductFlow 是面向单人或小团队商家的开源自托管商品素材工�
 - 本地开发入口：根目录 `justfile`；无 `just` 时可直接执行下文列出的原始命令。
 - 文档：`docs/PRD.md`、`docs/USER_GUIDE.md`、`docs/ARCHITECTURE.md`、`docs/ARCHITECTURE_HEALTH_REVIEW.md`、`docs/ROADMAP.md`、`CHANGELOG.md`。
 
+## Markdown 编辑与图表渲染依赖
+
+ProductFlow 的商品上下文长文案编辑器使用以下开源项目实现 Markdown 源文编辑、GFM 预览和 Mermaid 图表渲染。项目通过 `web/package.json` 中的 npm 包依赖引入这些能力，没有复制第三方项目源码。
+
+- [react-markdown](https://github.com/remarkjs/react-markdown)：在 React 中渲染 Markdown 预览。
+- [remark-gfm](https://github.com/remarkjs/remark-gfm)：支持表格、任务列表、删除线和自动链接等 GFM 语法。
+- [Mermaid](https://github.com/mermaid-js/mermaid)：渲染 `mermaid` fenced code block 中的流程图等图表脚本。
+
 ## 开源依赖与致谢
 
 ProductFlow 的应用代码之外，仓库还保留了一套面向 AI 协作的项目工作流资产。特别感谢**真诚、友善、团结、专业**的 Linuxdo 社区。

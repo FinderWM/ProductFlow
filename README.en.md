@@ -92,6 +92,14 @@ ProductFlow does not currently provide multi-user/multi-tenant support, team per
 - Local development entrypoint: root `justfile`; if `just` is unavailable, raw commands are listed below.
 - Docs: `docs/PRD.en.md`, `docs/USER_GUIDE.en.md`, `docs/ARCHITECTURE.en.md`, `docs/ARCHITECTURE_HEALTH_REVIEW.en.md`, `docs/ROADMAP.en.md`, `CHANGELOG.md`.
 
+## Markdown Editing and Diagram Rendering Dependencies
+
+ProductFlow's product-context long-text editor uses the following open-source projects for Markdown source editing, GFM preview, and Mermaid diagram rendering. These capabilities are imported through npm package dependencies in `web/package.json`; third-party project source code is not copied into this repository.
+
+- [react-markdown](https://github.com/remarkjs/react-markdown): renders Markdown previews in React.
+- [remark-gfm](https://github.com/remarkjs/remark-gfm): supports GFM tables, task lists, strikethrough, and autolinks.
+- [Mermaid](https://github.com/mermaid-js/mermaid): renders diagrams from `mermaid` fenced code blocks.
+
 ## Open Source Dependencies and Thanks
 
 Beyond ProductFlow's application code, this repository keeps a set of project workflow assets for AI-assisted collaboration. Special thanks first to the sincere, kind, united, and professional Linuxdo community.

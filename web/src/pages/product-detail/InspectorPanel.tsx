@@ -20,12 +20,14 @@ import { ImageDropZone } from "../../components/ImageDropZone";
 import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSettingsPanel";
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../../components/ImageGenerationSettingsTabs";
 import { ImageToolControls } from "../../components/ImageToolControls";
+import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
 import { SelectField } from "../../components/SelectField";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import type { ImageSizeOption } from "../../lib/imageSizes";
 import { formatDateTime, formatPrice } from "../../lib/format";
 import type { TranslationKey, TranslationParams } from "../../lib/i18n";
+import { PRODUCT_CONTEXT_MARKDOWN_MAX_LENGTH } from "../../lib/markdown";
 import { useI18n } from "../../lib/preferences";
 import type {
   CopyBlock,
@@ -571,12 +573,14 @@ function ProductContextInspector({
           />
         </label>
       </div>
-      <TextArea
+      <MarkdownEditor
         label={t("detail.inspector.longText")}
         value={draft.longText}
+        modalTitle={t("detail.inspector.longText")}
         onChange={(value) => onDraftChange({ ...draft, longText: value, sourceNote: value })}
-        minRows={4}
-        maxRows={18}
+        maxLength={PRODUCT_CONTEXT_MARKDOWN_MAX_LENGTH}
+        minRows={5}
+        disabled={busy}
       />
       <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
         <div className="flex items-center justify-between gap-2">

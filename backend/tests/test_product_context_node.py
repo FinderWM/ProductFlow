@@ -16,7 +16,10 @@ def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_product_context_dynamic_fields_accept_only_scalar_values(configured_env: Path) -> None:
-    from productflow_backend.application.product_workflow.context import normalize_product_context_config
+    from productflow_backend.application.product_workflow.context import (
+        PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH,
+        normalize_product_context_config,
+    )
     from productflow_backend.domain.errors import BusinessValidationError
 
     normalized = normalize_product_context_config(
@@ -51,6 +54,10 @@ def test_product_context_dynamic_fields_accept_only_scalar_values(configured_env
 
     with pytest.raises(BusinessValidationError, match="动态信息 key 不能为空"):
         normalize_product_context_config({"dynamic_fields": {" ": "bad"}})
+
+    too_long_message = f"长文案内容不能超过 {PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH} 个字符"
+    with pytest.raises(BusinessValidationError, match=too_long_message):
+        normalize_product_context_config({"long_text": "x" * (PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH + 1)})
 
 
 def test_product_context_document_upload_validates_text_documents(configured_env: Path) -> None:
@@ -176,6 +183,72 @@ def test_product_create_initializes_rich_product_context(configured_env: Path) -
     item = next(item for item in listed.json()["items"] if item["id"] == product_id)
     assert item["initial_workflow_entry"] == "copy"
     assert item["initial_entry_text"] == long_text
+
+
+def test_product_create_accepts_markdown_long_text_over_legacy_limit(configured_env: Path) -> None:
+    from productflow_backend.application.product_workflow.context import PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    long_text = "\n".join(
+        [
+            "# 商品资料",
+            "",
+            "| 项目 | 内容 |",
+            "| --- | --- |",
+            "| 卖点 | 磁吸稳定，适合竞速练习 |",
+            "",
+            "```mermaid",
+            "flowchart TD",
+            "  A[商品资料] --> B[文案]",
+            "  B --> C[生图]",
+            "```",
+            "",
+            "补充说明：" + "顺滑磁吸结构，适合入门练习和竞速进阶。" * 250,
+        ]
+    )
+    assert 4000 < len(long_text) < PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH
+
+    created = client.post(
+        "/api/products",
+        data={
+            "name": "长 Markdown 魔方",
+            "initial_workflow_entry": "copy",
+            "long_text": long_text,
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["source_note"] == long_text
+    workflow = client.get(f"/api/products/{created.json()['id']}/workflow")
+    assert workflow.status_code == 200
+    context_node = next(node for node in workflow.json()["nodes"] if node["node_type"] == "product_context")
+    assert context_node["config_json"]["long_text"] == long_text
+    assert context_node["config_json"]["source_note"] == long_text
+
+
+def test_product_create_rejects_markdown_long_text_over_limit(configured_env: Path) -> None:
+    from productflow_backend.application.product_workflow.context import PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={
+            "name": "过长 Markdown",
+            "initial_workflow_entry": "copy",
+            "long_text": "x" * (PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH + 1),
+        },
+    )
+
+    assert created.status_code == 400
+    assert created.json()["detail"] == f"入口内容不能超过 {PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH} 个字符"
 
 
 def test_product_create_rejects_invalid_dynamic_fields_json(configured_env: Path) -> None:

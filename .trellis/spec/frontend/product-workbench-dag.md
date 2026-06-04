@@ -187,6 +187,10 @@
 - `product_context` inspector edits generalized context fields: name, owner id, entry type, long text, one context image,
   one text document, and dynamic key/value pairs. Keep legacy category and price fields visible while writing the new
   backend `snake_case` config keys.
+- The product-context long text editor must preserve raw Markdown source text, use the shared Markdown editor with
+  edit/preview/large-dialog modes, support Mermaid fenced block preview, and enforce the shared 50,000-character
+  product-context Markdown limit in both creation and inspector entry points. The large-dialog mode must render through a
+  page-level portal so ProductDetail sidebar, canvas, and node containers cannot clip or size-constrain the editor.
 - Product context `entryType` uses `ProductInitialWorkflowEntry = "image" | "copy" | "tail" | "blank"`. The `copy` value
   means the existing copywriting/text entry mode (`文案入口`), and should be localized as an entry label rather than a
   duplicate/copy action.

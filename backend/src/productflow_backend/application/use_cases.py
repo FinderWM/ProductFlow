@@ -15,6 +15,7 @@ from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
 from productflow_backend.application.product_workflow import graph as product_workflow_graph
 from productflow_backend.application.product_workflow.context import (
+    PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH,
     normalize_product_context_config,
     normalize_product_context_dynamic_fields,
 )
@@ -144,8 +145,16 @@ def _entry_text_or_long_text(entry_text: str | None, long_text: str | None) -> s
 
 def _normalize_entry_text(value: str | None, *, initial_workflow_entry: InitialWorkflowEntry) -> str | None:
     if initial_workflow_entry not in {"copy", "tail"}:
-        return _normalize_optional_text(value, field_name="入口内容", max_length=4000)
-    normalized = _normalize_required_text(value or "", field_name="入口内容", max_length=4000)
+        return _normalize_optional_text(
+            value,
+            field_name="入口内容",
+            max_length=PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH,
+        )
+    normalized = _normalize_required_text(
+        value or "",
+        field_name="入口内容",
+        max_length=PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH,
+    )
     if initial_workflow_entry == "copy" and len(normalized) < 4:
         raise BusinessValidationError("文案入口内容太短")
     if initial_workflow_entry == "tail" and len(normalized) < 4:
@@ -407,8 +416,16 @@ def create_product(
         _entry_text_or_long_text(entry_text, long_text),
         initial_workflow_entry=workflow_entry,
     )
-    normalized_long_text = _normalize_optional_text(long_text, field_name="长文案内容", max_length=4000)
-    normalized_source_note = _normalize_optional_text(source_note, field_name="备注", max_length=4000)
+    normalized_long_text = _normalize_optional_text(
+        long_text,
+        field_name="长文案内容",
+        max_length=PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH,
+    )
+    normalized_source_note = _normalize_optional_text(
+        source_note,
+        field_name="备注",
+        max_length=PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH,
+    )
     normalized_context_long_text = normalized_long_text or normalized_entry_text or normalized_source_note
     normalized_dynamic_fields = _normalize_dynamic_fields_json(dynamic_fields_json)
     canvas_template = resolve_product_creation_canvas_template(
