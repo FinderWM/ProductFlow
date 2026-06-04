@@ -2,10 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { ImageSizeOption } from "../lib/imageSizes";
 import {
+  IMAGE_GENERATION_MAX_ASPECT_RATIO,
   IMAGE_GENERATION_MIN_DIMENSION,
+  aspectFromImageSize,
+  buildCustomAspectSizeOptions,
+  buildImageAspectOptions,
   formatImageSizeValue,
   getImageSizePresetDisplay,
+  imageSizeOptionsForAspect,
+  isImageAspectWithinBounds,
+  labelForImageAspect,
   normalizeImageSizeValue,
+  parseImageAspectValue,
   parseImageSizeValue,
   resolveImageSize,
 } from "../lib/imageSizes";
@@ -34,78 +42,233 @@ function resolveCustomDraft(width: string, height: string, maxDimension?: number
   return resolveImageSize(Number(width), Number(height), maxDimension);
 }
 
+function resolutionOptionsForAspect(aspect: string, presets: ImageSizeOption[], maxDimension?: number): ImageSizeOption[] {
+  const presetOptions = imageSizeOptionsForAspect(presets, aspect);
+  return presetOptions.length > 0 ? presetOptions : buildCustomAspectSizeOptions(aspect, maxDimension);
+}
+
+function imageSizeArea(value: string, maxDimension?: number): number | null {
+  const parsed = parseImageSizeValue(value, maxDimension);
+  return parsed ? parsed.width * parsed.height : null;
+}
+
+function chooseResolutionForAspect(
+  aspect: string,
+  presets: ImageSizeOption[],
+  currentValue: string | null,
+  maxDimension?: number,
+): string | null {
+  const options = resolutionOptionsForAspect(aspect, presets, maxDimension);
+  if (options.length === 0) {
+    return null;
+  }
+  if (currentValue && aspectFromImageSize(currentValue, maxDimension) === aspect) {
+    return currentValue;
+  }
+  const currentArea = currentValue ? imageSizeArea(currentValue, maxDimension) : null;
+  if (!currentArea) {
+    return options[0].value;
+  }
+  return options
+    .slice()
+    .sort((left, right) => {
+      const leftArea = imageSizeArea(left.value, maxDimension) ?? 0;
+      const rightArea = imageSizeArea(right.value, maxDimension) ?? 0;
+      return Math.abs(leftArea - currentArea) - Math.abs(rightArea - currentArea) || leftArea - rightArea;
+    })[0].value;
+}
+
 function frameClassName(aspect: string): string {
-  if (aspect === "1:1") {
+  const parsed = parseImageAspectValue(aspect);
+  if (!parsed || parsed.widthRatio === parsed.heightRatio) {
     return "h-8 w-8";
   }
-  if (aspect === "2:3" || aspect === "9:16") {
+  const ratio = parsed.widthRatio / parsed.heightRatio;
+  if (ratio < 0.7) {
     return "h-10 w-7";
   }
-  if (aspect === "3:2" || aspect === "16:9") {
+  if (ratio < 1) {
+    return "h-10 w-8";
+  }
+  if (ratio > 1.45) {
     return "h-7 w-10";
   }
-  return "h-8 w-8";
+  return "h-8 w-10";
 }
 
 export function ImageSizePicker({ value, presets, onChange, disabled = false, maxDimension }: ImageSizePickerProps) {
   const { locale, t } = useI18n();
-  const optionValues = useMemo(() => new Set(presets.map((option) => option.value)), [presets]);
+  const aspectOptions = useMemo(() => buildImageAspectOptions(presets), [presets]);
+  const aspectOptionValues = useMemo(() => new Set(aspectOptions.map((option) => option.value)), [aspectOptions]);
   const normalizedValue = normalizeImageSizeValue(value, maxDimension);
-  const selectedPreset = normalizedValue !== null && optionValues.has(normalizedValue);
+  const hydratedAspect = normalizedValue ? aspectFromImageSize(normalizedValue, maxDimension) : null;
+  const defaultAspect = hydratedAspect ?? aspectOptions[0]?.value ?? "1:1";
+  const [selectedAspect, setSelectedAspect] = useState(defaultAspect);
+  const [customAspectDraft, setCustomAspectDraft] = useState(defaultAspect);
   const [{ width, height }, setCustomDraft] = useState(() => splitSize(value, maxDimension));
   const customResolution = resolveCustomDraft(width, height, maxDimension);
+  const resolutionOptions = useMemo(
+    () => resolutionOptionsForAspect(selectedAspect, presets, maxDimension),
+    [maxDimension, presets, selectedAspect],
+  );
+  const customAspect = parseImageAspectValue(customAspectDraft);
+  const customAspectInvalid =
+    customAspectDraft.trim() !== "" && (!customAspect || !isImageAspectWithinBounds(customAspect.value));
+  const customAspectActive = customAspect !== null && customAspect.value === selectedAspect && !aspectOptionValues.has(selectedAspect);
 
   useEffect(() => {
     const parsed = splitSize(value, maxDimension);
+    const nextAspect = aspectFromImageSize(value, maxDimension) ?? aspectOptions[0]?.value ?? "1:1";
+    setSelectedAspect(nextAspect);
+    setCustomAspectDraft(nextAspect);
     setCustomDraft(parsed);
-  }, [maxDimension, value]);
+  }, [aspectOptions, maxDimension, value]);
+
+  const selectAspect = (nextAspect: string) => {
+    setSelectedAspect(nextAspect);
+    setCustomAspectDraft(nextAspect);
+    const nextResolution = chooseResolutionForAspect(nextAspect, presets, normalizedValue, maxDimension);
+    if (nextResolution && nextResolution !== normalizedValue) {
+      onChange(nextResolution);
+    }
+  };
+
+  const updateCustomAspect = (nextValue: string) => {
+    setCustomAspectDraft(nextValue);
+    const nextAspect = parseImageAspectValue(nextValue);
+    if (!nextAspect) {
+      return;
+    }
+    setSelectedAspect(nextAspect.value);
+    if (!isImageAspectWithinBounds(nextAspect.value)) {
+      return;
+    }
+    const nextResolution = chooseResolutionForAspect(nextAspect.value, presets, normalizedValue, maxDimension);
+    if (nextResolution && nextResolution !== normalizedValue) {
+      onChange(nextResolution);
+    }
+  };
 
   const updateCustom = (nextWidth: string, nextHeight: string) => {
     setCustomDraft({ width: nextWidth, height: nextHeight });
     const nextResolution = resolveCustomDraft(nextWidth, nextHeight, maxDimension);
     if (nextResolution) {
+      const nextAspect = aspectFromImageSize(nextResolution.value, maxDimension);
+      if (nextAspect) {
+        setSelectedAspect(nextAspect);
+        setCustomAspectDraft(nextAspect);
+      }
       onChange(nextResolution.value);
     }
   };
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-2">
-        {presets.map((option) => {
-          const active = selectedPreset && option.value === normalizedValue;
-          const display = getImageSizePresetDisplay(option, locale);
-          return (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => {
-                onChange(option.value);
-              }}
-              disabled={disabled}
-              title={formatImageSizeValue(option.value)}
-              className={`flex h-24 flex-col items-center justify-center rounded-xl border px-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                active
-                  ? "border-indigo-500 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-100 dark:border-violet-400 dark:bg-violet-500/18 dark:text-violet-50 dark:ring-violet-400/45"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
-              }`}
-            >
-              <span
-                className={`mb-1.5 flex items-center justify-center rounded-sm border-2 border-current text-[10px] font-black leading-none ${frameClassName(option.aspect)}`}
+    <div className="space-y-4">
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-100">{t("imageSize.aspect")}</div>
+          <div className="shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+            {labelForImageAspect(selectedAspect, locale)}
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {aspectOptions.map((option) => {
+            const active = option.value === selectedAspect;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => selectAspect(option.value)}
+                disabled={disabled}
+                title={labelForImageAspect(option.value, locale)}
+                className={`flex h-16 flex-col items-center justify-center rounded-lg border px-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  active
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-100 dark:border-violet-400 dark:bg-violet-500/18 dark:text-violet-50 dark:ring-violet-400/45"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                }`}
               >
-                {display.tierLabel}
-              </span>
-              <span>{display.aspectLabel}</span>
-              <span className="mt-0.5 text-[10px] font-medium text-slate-400 dark:text-slate-500">{display.dimensionLabel}</span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950/50">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="text-xs font-semibold text-slate-700 dark:text-slate-100">{t("imageSize.custom")}</div>
+                <span
+                  className={`mb-1 flex items-center justify-center rounded-sm border-2 border-current text-[9px] font-black leading-none ${frameClassName(option.value)}`}
+                />
+                <span>{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <label
+          className={`block rounded-lg border p-3 transition-colors ${
+            customAspectActive
+              ? "border-indigo-500 bg-indigo-50 dark:border-violet-400 dark:bg-violet-500/18"
+              : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/50"
+          }`}
+        >
+          <span className="mb-1.5 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+            {t("imageSize.customAspect")}
+          </span>
+          <input
+            value={customAspectDraft}
+            onChange={(event) => updateCustomAspect(event.target.value)}
+            disabled={disabled}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20 dark:disabled:bg-slate-950"
+            placeholder="4:5"
+          />
+          <span
+            className={`mt-1.5 block text-[11px] leading-5 ${
+              customAspectInvalid ? "text-rose-600 dark:text-rose-300" : "text-slate-500 dark:text-slate-400"
+            }`}
+          >
+            {customAspectInvalid
+              ? t("imageSize.invalidAspect", { max: IMAGE_GENERATION_MAX_ASPECT_RATIO })
+              : t("imageSize.customAspectHint")}
+          </span>
+        </label>
+      </section>
+
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-100">{t("imageSize.resolution")}</div>
           <div className="shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500">
             {t("imageSize.current", { size: normalizedValue ? formatImageSizeValue(normalizedValue) : t("imageSize.unset") })}
           </div>
+        </div>
+        {resolutionOptions.length > 0 ? (
+          <div className="grid grid-cols-2 gap-2">
+            {resolutionOptions.map((option) => {
+              const active = option.value === normalizedValue;
+              const display = getImageSizePresetDisplay(option, locale);
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(option.value);
+                  }}
+                  disabled={disabled}
+                  title={formatImageSizeValue(option.value)}
+                  className={`flex h-20 flex-col items-center justify-center rounded-lg border px-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                    active
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-100 dark:border-violet-400 dark:bg-violet-500/18 dark:text-violet-50 dark:ring-violet-400/45"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                  }`}
+                >
+                  <span className="text-sm font-black">{display.tierLabel}</span>
+                  <span className="mt-1 text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                    {display.dimensionLabel}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-500 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-400">
+            {t("imageSize.noResolutionOptions")}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-100">{t("imageSize.custom")}</div>
         </div>
         <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
           <label className="block min-w-0">
@@ -150,7 +313,7 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
             t("imageSize.invalid")
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

@@ -197,6 +197,10 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 - Page/API boundary values remain normalized `WIDTHxHEIGHT` strings, for example `1024x1024` or `3840x2160`.
 - Custom dimensions are calibrated to the nearest provider-safe 16-pixel multiple before being emitted, for example
   `1500x800` becomes `1504x800`.
+- The shared picker displays image aspect and resolution as two separate choices. Aspect options are derived from the
+  shared preset set plus the built-in common aspect order, while resolution options are filtered by the selected aspect.
+- Custom aspect input accepts ratio forms such as `4:5`, `4/5`, and `16x9`; it must only emit a size after the ratio can
+  be parsed and a provider-safe resolution can be resolved.
 
 ### 3. Contracts
 
@@ -211,11 +215,17 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 - Pages pass built-in preset options into the component; `ImageSizePicker` must not call the API.
 - Runtime config filters built-in size preset buttons by maximum single edge. It must not provide an arbitrary backend
   allowlist; a custom value may be valid even when it is not present in the preset list.
+- Selecting a common aspect must not change the persisted contract shape. The component may derive local aspect state, but
+  it still calls `onChange(size)` with only the final normalized `WIDTHxHEIGHT` string.
+- When a selected aspect has no runtime-safe built-in resolution button, the component may generate provider-safe
+  resolution candidates from shared helpers or fall back to custom width/height editing. Do not add page-local fallback
+  lists in `ProductDetailPage`, `InspectorPanel`, or `ImageChatPage`.
 - Built-in generated-image presets must also stay within max total pixels `8,294,400`, max aspect ratio `3:1`, and 16px
   multiple dimensions. Do not offer 4K square presets such as `3840x3840`; custom oversized square inputs should calibrate
   down to a safe value such as `2880x2880`.
 - The picker should preserve and round-trip unknown valid values by switching to custom width/height mode instead of
-  resetting to the first preset.
+  resetting to the first preset. For unknown valid values, derive the aspect from the normalized size and show the value in
+  custom dimensions when it is not one of the selected aspect's resolution buttons.
 - Preset labels should include the human tier/aspect and the exact pixel string so users know what will be submitted.
 
 ### 4. Validation & Error Matrix

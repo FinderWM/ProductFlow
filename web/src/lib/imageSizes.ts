@@ -7,6 +7,18 @@ export interface ImageSizeOption {
   aspect: string;
 }
 
+export interface ImageAspectValue {
+  widthRatio: number;
+  heightRatio: number;
+  value: string;
+}
+
+export interface ImageAspectOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
 export interface ImageSizeResolution {
   width: number;
   height: number;
@@ -29,6 +41,9 @@ export const IMAGE_GENERATION_MAX_MAX_DIMENSION = 8192;
 export const IMAGE_GENERATION_MAX_DIMENSION = DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
 export const IMAGE_GENERATION_MAX_PIXELS = 8_294_400;
 export const IMAGE_GENERATION_MAX_ASPECT_RATIO = 3;
+
+const BUILT_IN_IMAGE_ASPECT_ORDER = ["1:1", "2:3", "3:2", "9:16", "16:9"];
+const CUSTOM_ASPECT_SCALE_STEPS = [128, 256, 384, 512, 768];
 
 const BUILT_IN_IMAGE_SIZE_OPTIONS: ImageSizeOption[] = [
   { label: "方图 · 1K", description: "1:1 · 1024×1024", aspect: "1:1", value: "1024x1024" },
@@ -78,6 +93,36 @@ function constrainImageGenerationAspectRatio(width: number, height: number): { w
     return { width, height: Math.max(height, Math.round(width / IMAGE_GENERATION_MAX_ASPECT_RATIO)) };
   }
   return { width: Math.max(width, Math.round(height / IMAGE_GENERATION_MAX_ASPECT_RATIO)), height };
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+  while (b !== 0) {
+    const remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+  return a || 1;
+}
+
+function reduceImageAspect(width: number, height: number): ImageAspectValue | null {
+  if (
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null;
+  }
+  const divisor = greatestCommonDivisor(width, height);
+  const widthRatio = width / divisor;
+  const heightRatio = height / divisor;
+  return {
+    widthRatio,
+    heightRatio,
+    value: `${widthRatio}:${heightRatio}`,
+  };
 }
 
 export function normalizeImageSizeValue(value: string, maxDimension?: number): string | null {
@@ -166,6 +211,33 @@ export function normalizeImageSizeDimensions(value: string, maxDimension?: numbe
   return resolution?.value ?? null;
 }
 
+export function parseImageAspectValue(value: string): ImageAspectValue | null {
+  const match = value.trim().toLowerCase().match(/^(\d+)\s*[:/x×]\s*(\d+)$/u);
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return reduceImageAspect(width, height);
+}
+
+export function isImageAspectWithinBounds(value: string): boolean {
+  const aspect = parseImageAspectValue(value);
+  if (!aspect) {
+    return false;
+  }
+  return Math.max(aspect.widthRatio, aspect.heightRatio) / Math.min(aspect.widthRatio, aspect.heightRatio) <=
+    IMAGE_GENERATION_MAX_ASPECT_RATIO;
+}
+
+export function aspectFromImageSize(value: string, maxDimension?: number): string | null {
+  const parsed = parseImageSizeValue(value, maxDimension);
+  if (!parsed) {
+    return null;
+  }
+  return reduceImageAspect(parsed.width, parsed.height)?.value ?? null;
+}
+
 export function buildImageSizeOptions(maxDimension?: number): ImageSizeOption[] {
   return BUILT_IN_IMAGE_SIZE_OPTIONS.filter((option) => {
     const parsed = parseImageSizeValue(option.value, DEFAULT_IMAGE_GENERATION_MAX_DIMENSION);
@@ -179,18 +251,113 @@ export function buildImageSizeOptions(maxDimension?: number): ImageSizeOption[] 
 
 export const DEFAULT_IMAGE_SIZE_OPTIONS: ImageSizeOption[] = buildImageSizeOptions(DEFAULT_IMAGE_GENERATION_MAX_DIMENSION);
 
+function imageSizeTierLabel(width: number, height: number): string {
+  const longEdge = Math.max(width, height);
+  if (longEdge >= 3840) {
+    return "4K";
+  }
+  if (longEdge >= 3072) {
+    return "3K";
+  }
+  if (longEdge >= 2048) {
+    return "2K";
+  }
+  if (longEdge >= 1536) {
+    return "1.5K";
+  }
+  if (longEdge >= 1024) {
+    return "1K";
+  }
+  return `${longEdge}px`;
+}
+
+function imageAspectSortIndex(aspect: string): number {
+  const index = BUILT_IN_IMAGE_ASPECT_ORDER.indexOf(aspect);
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+export function buildImageAspectOptions(presets: ImageSizeOption[] = DEFAULT_IMAGE_SIZE_OPTIONS): ImageAspectOption[] {
+  const discovered = new Set<string>();
+  for (const aspect of BUILT_IN_IMAGE_ASPECT_ORDER) {
+    discovered.add(aspect);
+  }
+  for (const option of presets) {
+    const aspect = parseImageAspectValue(option.aspect)?.value ?? aspectFromImageSize(option.value);
+    if (aspect) {
+      discovered.add(aspect);
+    }
+  }
+  return Array.from(discovered)
+    .sort((left, right) => imageAspectSortIndex(left) - imageAspectSortIndex(right) || left.localeCompare(right))
+    .map((aspect) => ({
+      value: aspect,
+      label: aspect,
+      description: aspect,
+    }));
+}
+
+export function imageSizeOptionsForAspect(presets: ImageSizeOption[], aspect: string): ImageSizeOption[] {
+  const selectedAspect = parseImageAspectValue(aspect);
+  if (!selectedAspect) {
+    return [];
+  }
+  return presets.filter((option) => {
+    const optionAspect = parseImageAspectValue(option.aspect)?.value ?? aspectFromImageSize(option.value);
+    return optionAspect === selectedAspect.value;
+  });
+}
+
+export function buildCustomAspectSizeOptions(aspect: string, maxDimension?: number): ImageSizeOption[] {
+  const selectedAspect = parseImageAspectValue(aspect);
+  if (!selectedAspect || !isImageAspectWithinBounds(selectedAspect.value)) {
+    return [];
+  }
+
+  const options: ImageSizeOption[] = [];
+  const seen = new Set<string>();
+  for (const scale of CUSTOM_ASPECT_SCALE_STEPS) {
+    const requestedWidth = selectedAspect.widthRatio * scale;
+    const requestedHeight = selectedAspect.heightRatio * scale;
+    const resolved = resolveImageSize(requestedWidth, requestedHeight, maxDimension);
+    if (!resolved || seen.has(resolved.value)) {
+      continue;
+    }
+    const resolvedAspect = reduceImageAspect(resolved.width, resolved.height);
+    if (resolvedAspect?.value !== selectedAspect.value) {
+      continue;
+    }
+    seen.add(resolved.value);
+    options.push({
+      value: resolved.value,
+      aspect: selectedAspect.value,
+      label: `自定义 · ${imageSizeTierLabel(resolved.width, resolved.height)}`,
+      description: `${selectedAspect.value} · ${formatImageSizeValue(resolved.value)}`,
+    });
+  }
+  return options;
+}
+
 export function formatImageSizeValue(value: string): string {
   return value.replace("x", "×");
 }
 
 function imageSizeKindLabel(aspect: string, locale: Locale): string {
-  if (aspect === "1:1") {
+  const parsedAspect = parseImageAspectValue(aspect);
+  if (!parsedAspect || parsedAspect.widthRatio === parsedAspect.heightRatio) {
     return translate(locale, "imageSize.square");
   }
-  if (aspect === "2:3" || aspect === "9:16") {
+  if (parsedAspect.widthRatio < parsedAspect.heightRatio) {
     return translate(locale, "imageSize.portrait");
   }
   return translate(locale, "imageSize.landscape");
+}
+
+export function labelForImageAspect(value: string, locale: Locale = DEFAULT_LOCALE): string {
+  const aspect = parseImageAspectValue(value);
+  if (!aspect) {
+    return value;
+  }
+  return `${imageSizeKindLabel(aspect.value, locale)} · ${aspect.value}`;
 }
 
 export function labelForImageSize(value: string, locale: Locale = DEFAULT_LOCALE): string {

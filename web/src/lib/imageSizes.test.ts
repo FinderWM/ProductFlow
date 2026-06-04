@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_IMAGE_SIZE_OPTIONS,
+  aspectFromImageSize,
+  buildCustomAspectSizeOptions,
+  buildImageAspectOptions,
   buildImageSizeOptions,
   getImageSizePresetDisplay,
+  imageSizeOptionsForAspect,
+  isImageAspectWithinBounds,
   labelForImageSize,
   normalizeImageSizeValue,
+  parseImageAspectValue,
   parseImageSizeValue,
   resolveImageSize,
 } from "./imageSizes";
@@ -110,5 +116,50 @@ describe("image size helpers", () => {
       { aspectLabel: "9:16", tierLabel: "4K", dimensionLabel: "2160×3840" },
       { aspectLabel: "16:9", tierLabel: "4K", dimensionLabel: "3840×2160" },
     ]);
+  });
+
+  it("builds stable aspect options and filters resolutions by selected aspect", () => {
+    expect(buildImageAspectOptions(DEFAULT_IMAGE_SIZE_OPTIONS).map((option) => option.value)).toEqual([
+      "1:1",
+      "2:3",
+      "3:2",
+      "9:16",
+      "16:9",
+    ]);
+    expect(imageSizeOptionsForAspect(DEFAULT_IMAGE_SIZE_OPTIONS, "1:1").map((option) => option.value)).toEqual([
+      "1024x1024",
+      "2048x2048",
+    ]);
+    expect(imageSizeOptionsForAspect(DEFAULT_IMAGE_SIZE_OPTIONS, "16/9").map((option) => option.value)).toEqual([
+      "3840x2160",
+    ]);
+  });
+
+  it("parses and normalizes custom aspect input forms", () => {
+    expect(parseImageAspectValue("4:5")).toEqual({ widthRatio: 4, heightRatio: 5, value: "4:5" });
+    expect(parseImageAspectValue(" 08 / 10 ")).toEqual({ widthRatio: 4, heightRatio: 5, value: "4:5" });
+    expect(parseImageAspectValue("1920x1080")).toEqual({ widthRatio: 16, heightRatio: 9, value: "16:9" });
+    expect(parseImageAspectValue("1920×1080")).toEqual({ widthRatio: 16, heightRatio: 9, value: "16:9" });
+    expect(parseImageAspectValue("4 by 5")).toBeNull();
+    expect(isImageAspectWithinBounds("4:5")).toBe(true);
+    expect(isImageAspectWithinBounds("10:1")).toBe(false);
+  });
+
+  it("derives aspect from unknown valid image sizes for round-trip hydration", () => {
+    expect(aspectFromImageSize("1280x720")).toBe("16:9");
+    expect(aspectFromImageSize("1504x800")).toBe("47:25");
+    expect(aspectFromImageSize("4000x4000")).toBe("1:1");
+    expect(aspectFromImageSize("not-a-size")).toBeNull();
+  });
+
+  it("generates safe resolution candidates for custom aspects", () => {
+    expect(buildCustomAspectSizeOptions("4:5").map((option) => option.value)).toEqual([
+      "512x640",
+      "1024x1280",
+      "1536x1920",
+      "2048x2560",
+    ]);
+    expect(buildCustomAspectSizeOptions("4:5", 1024).map((option) => option.value)).toEqual(["512x640"]);
+    expect(buildCustomAspectSizeOptions("10:1")).toEqual([]);
   });
 });
