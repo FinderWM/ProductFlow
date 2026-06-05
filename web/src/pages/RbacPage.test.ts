@@ -91,6 +91,20 @@ describe("RbacPage permission helpers", () => {
     });
   });
 
+  it("adds only base read api permissions when a menu permission is checked", () => {
+    const groups = buildPermissionGroups(permissionCatalog());
+    const settingsGroup = groups[0]!;
+    const draft: RolePermissionDraft = {
+      menu_codes: [],
+      api_permission_codes: [],
+    };
+
+    expect(toggleMenuPermissionDraft(draft, settingsGroup, true)).toEqual({
+      menu_codes: ["settings"],
+      api_permission_codes: ["settings:read"],
+    });
+  });
+
   it("auto-adds the parent menu when an api permission is checked", () => {
     const draft: RolePermissionDraft = {
       menu_codes: [],

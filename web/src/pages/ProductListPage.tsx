@@ -34,6 +34,7 @@ import { api, ApiError } from "../lib/api";
 import { formatDateTimeSeconds, formatPrice } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
+import { API_INSPIRATIONS_WRITE, hasSessionApiPermission } from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import type { ProductSummary, RbacUser } from "../lib/types";
 import { productKeyInfo, productMainThumbnailUrl } from "./ProductListPage.helpers";
@@ -208,6 +209,7 @@ export function ProductListPage() {
   const queryClient = useQueryClient();
   const session = useSessionState();
   const isAdmin = Boolean(session?.user?.is_admin);
+  const canWriteProducts = hasSessionApiPermission(session, API_INSPIRATIONS_WRITE);
   const [page, setPage] = useState(1);
   const [searchDraft, setSearchDraft] = useState<ProductSearchFilters>(EMPTY_PRODUCT_SEARCH);
   const [activeSearch, setActiveSearch] = useState<ProductSearchFilters>(EMPTY_PRODUCT_SEARCH);
@@ -284,6 +286,10 @@ export function ProductListPage() {
   });
 
   const handleDeleteProduct = (product: ProductSummary) => {
+    if (!canWriteProducts) {
+      setDeleteError(t("products.writePermissionRequired"));
+      return;
+    }
     if (!deletionEnabled) {
       setDeleteError(t("products.deleteDisabled"));
       return;
@@ -349,8 +355,10 @@ export function ProductListPage() {
               <button
                 type="button"
                 onClick={() => navigate("/products/new")}
+                disabled={!canWriteProducts}
                 aria-label={t("products.new")}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
+                title={canWriteProducts ? t("products.new") : t("products.writePermissionRequired")}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
               >
                 <Plus size={18} aria-hidden="true" />
               </button>
@@ -371,7 +379,9 @@ export function ProductListPage() {
                   <button
                     type="button"
                     onClick={() => navigate("/products/new")}
-                    className="inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-500 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+                    disabled={!canWriteProducts}
+                    title={canWriteProducts ? t("products.new") : t("products.writePermissionRequired")}
+                    className="inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
                   >
                     <Plus size={16} className="mr-1.5" /> {t("products.new")}
                   </button>
@@ -488,7 +498,9 @@ export function ProductListPage() {
                       product={product}
                       className={products.length === 1 ? "md:col-span-2" : undefined}
                       deletionEnabled={deletionEnabled}
-                      deleteBlockedTitle={deleteBlockedTitle}
+                      deleteBlockedTitle={
+                        canWriteProducts ? deleteBlockedTitle : t("products.writePermissionRequired")
+                      }
                       isDeleting={deleteProductMutation.isPending}
                       onOpen={() => navigate(`/products/${product.id}`)}
                       onDelete={() => handleDeleteProduct(product)}
@@ -518,7 +530,9 @@ export function ProductListPage() {
                           key={product.id}
                           product={product}
                           deletionEnabled={deletionEnabled}
-                          deleteBlockedTitle={deleteBlockedTitle}
+                          deleteBlockedTitle={
+                            canWriteProducts ? deleteBlockedTitle : t("products.writePermissionRequired")
+                          }
                           isDeleting={deleteProductMutation.isPending}
                           onOpen={() => navigate(`/products/${product.id}`)}
                           onDelete={() => handleDeleteProduct(product)}
@@ -550,7 +564,9 @@ export function ProductListPage() {
               <button
                 type="button"
                 onClick={() => navigate("/products/new")}
-                className="mt-5 inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-500 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35"
+                disabled={!canWriteProducts}
+                title={canWriteProducts ? t("products.new") : t("products.writePermissionRequired")}
+                className="mt-5 inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35"
               >
                 <Plus size={16} className="mr-1.5" /> {t("products.new")}
               </button>

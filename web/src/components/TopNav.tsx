@@ -23,7 +23,16 @@ import { Link, useLocation } from "react-router-dom";
 
 import { LOCALES, type Locale, type TranslationKey } from "../lib/i18n";
 import { usePreferences } from "../lib/preferences";
-import { hasRbacManagementAccess, hasSessionApiPermission, hasSessionMenu } from "../lib/rbac";
+import {
+  API_GALLERY_READ,
+  API_IMAGE_CHAT_READ,
+  API_INSPIRATIONS_READ,
+  API_SETTINGS_READ,
+  API_STATUS_READ,
+  API_USAGE_STATS_READ,
+  hasRbacManagementAccess,
+  hasSessionMenuApiPermission,
+} from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
 import type { SessionState, SessionUser } from "../lib/types";
@@ -72,6 +81,7 @@ const navItems: TopNavItem[] = [
     labelKey: "nav.products",
     to: "/products",
     menuCode: "inspirations",
+    requiredPermission: API_INSPIRATIONS_READ,
     priority: "primary",
     icon: LayoutGrid,
     match: (pathname: string) => pathname.startsWith("/products") && !pathname.endsWith("/image-chat"),
@@ -80,6 +90,7 @@ const navItems: TopNavItem[] = [
     labelKey: "nav.imageChat",
     to: "/image-chat",
     menuCode: "image_chat",
+    requiredPermission: API_IMAGE_CHAT_READ,
     priority: "primary",
     icon: MessagesSquare,
     match: (pathname: string) => pathname.includes("image-chat"),
@@ -88,6 +99,7 @@ const navItems: TopNavItem[] = [
     labelKey: "nav.gallery",
     to: "/gallery",
     menuCode: "gallery",
+    requiredPermission: API_GALLERY_READ,
     priority: "primary",
     icon: GalleryHorizontalEnd,
     match: (pathname: string) => pathname.startsWith("/gallery"),
@@ -96,6 +108,7 @@ const navItems: TopNavItem[] = [
     labelKey: "nav.status",
     to: "/status",
     menuCode: "status",
+    requiredPermission: API_STATUS_READ,
     priority: "primary",
     icon: Activity,
     match: (pathname: string) => pathname.startsWith("/status"),
@@ -104,6 +117,7 @@ const navItems: TopNavItem[] = [
     labelKey: "nav.usageStats",
     to: "/usage-stats",
     menuCode: "usage_stats",
+    requiredPermission: API_USAGE_STATS_READ,
     priority: "secondary",
     icon: BarChart3,
     match: (pathname: string) => pathname.startsWith("/usage-stats"),
@@ -112,7 +126,7 @@ const navItems: TopNavItem[] = [
     labelKey: "nav.settings",
     to: "/settings",
     menuCode: "settings",
-    requiredPermission: "settings:read",
+    requiredPermission: API_SETTINGS_READ,
     priority: "primary",
     icon: Settings,
     match: (pathname: string) => pathname.startsWith("/settings"),
@@ -524,8 +538,9 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
         }
         return (
           item.menuCode === null ||
-          (hasSessionMenu(session, item.menuCode) &&
-            (!item.requiredPermission || hasSessionApiPermission(session, item.requiredPermission)))
+          (item.requiredPermission
+            ? hasSessionMenuApiPermission(session, item.menuCode, item.requiredPermission)
+            : false)
         );
       }),
     [session],

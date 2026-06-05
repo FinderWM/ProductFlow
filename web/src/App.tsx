@@ -5,7 +5,18 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { api } from "./lib/api";
 import { PreferencesProvider, useI18n } from "./lib/preferences";
-import { hasRbacManagementAccess, hasSessionApiPermission, hasSessionMenu } from "./lib/rbac";
+import {
+  API_GALLERY_READ,
+  API_GLOBAL_TEMPLATES_MANAGE,
+  API_IMAGE_CHAT_READ,
+  API_INSPIRATIONS_READ,
+  API_INSPIRATIONS_WRITE,
+  API_SETTINGS_READ,
+  API_STATUS_READ,
+  API_USAGE_STATS_READ,
+  hasRbacManagementAccess,
+  hasSessionMenuApiPermission,
+} from "./lib/rbac";
 import { SessionStateProvider } from "./lib/session";
 import type { SessionState } from "./lib/types";
 
@@ -52,12 +63,12 @@ const menuHomeRoutes: Array<{
   requiredPermission?: string;
   hasAccess?: (sessionState: SessionState | null) => boolean;
 }> = [
-  { code: "inspirations", to: "/products" },
-  { code: "image_chat", to: "/image-chat" },
-  { code: "gallery", to: "/gallery" },
-  { code: "status", to: "/status" },
-  { code: "usage_stats", to: "/usage-stats" },
-  { code: "settings", to: "/settings", requiredPermission: "settings:read" },
+  { code: "inspirations", to: "/products", requiredPermission: API_INSPIRATIONS_READ },
+  { code: "image_chat", to: "/image-chat", requiredPermission: API_IMAGE_CHAT_READ },
+  { code: "gallery", to: "/gallery", requiredPermission: API_GALLERY_READ },
+  { code: "status", to: "/status", requiredPermission: API_STATUS_READ },
+  { code: "usage_stats", to: "/usage-stats", requiredPermission: API_USAGE_STATS_READ },
+  { code: "settings", to: "/settings", requiredPermission: API_SETTINGS_READ },
   { code: "rbac", to: "/rbac", hasAccess: hasRbacManagementAccess },
 ];
 
@@ -90,9 +101,9 @@ function AppRoutes() {
       return route.hasAccess(sessionState);
     }
     if (route.requiredPermission) {
-      return hasSessionMenu(sessionState, menuCode) && hasSessionApiPermission(sessionState, route.requiredPermission);
+      return hasSessionMenuApiPermission(sessionState, menuCode, route.requiredPermission);
     }
-    return hasSessionMenu(sessionState, menuCode);
+    return false;
   };
   const defaultAuthenticatedPath = menuHomeRoutes.find((route) => hasMenuRouteAccess(route.code))?.to ?? "/help";
 
@@ -126,7 +137,7 @@ function AppRoutes() {
     if (!authenticated) {
       return <Navigate to="/login" replace />;
     }
-    if (!hasSessionMenu(sessionState, menuCode) || !hasSessionApiPermission(sessionState, permissionCode)) {
+    if (!hasSessionMenuApiPermission(sessionState, menuCode, permissionCode)) {
       return <Navigate to={defaultAuthenticatedPath} replace />;
     }
     return element;
@@ -138,7 +149,10 @@ function AppRoutes() {
         <Routes>
           <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
           <Route path="/products" element={menuRoute("inspirations", <ProductListPage />)} />
-          <Route path="/products/new" element={menuRoute("inspirations", <ProductCreatePage />)} />
+          <Route
+            path="/products/new"
+            element={permissionRoute("inspirations", API_INSPIRATIONS_WRITE, <ProductCreatePage />)}
+          />
           <Route path="/workflow/templates" element={menuRoute("inspirations", <TemplateManagementPage mode="personal" />)} />
           <Route path="/image-chat" element={menuRoute("image_chat", <ImageChatPage />)} />
           <Route path="/gallery" element={menuRoute("gallery", <GalleryPage />)} />
@@ -146,7 +160,7 @@ function AppRoutes() {
           <Route path="/settings" element={menuRoute("settings", <SettingsPage />)} />
           <Route
             path="/settings/global-templates"
-            element={permissionRoute("settings", "templates:manage_global", <TemplateManagementPage mode="global" />)}
+            element={permissionRoute("settings", API_GLOBAL_TEMPLATES_MANAGE, <TemplateManagementPage mode="global" />)}
           />
           <Route path="/rbac" element={menuRoute("rbac", <RbacPage />)} />
           <Route path="/status" element={menuRoute("status", <StatusPage />)} />

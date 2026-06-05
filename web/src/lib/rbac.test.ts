@@ -5,6 +5,7 @@ import {
   hasSessionAdminApiPermission,
   hasSessionApiPermission,
   hasSessionMenu,
+  hasSessionMenuApiPermission,
   hasSettingsPageAccess,
 } from "./rbac";
 import type { SessionState, SessionUser } from "./types";
@@ -41,6 +42,9 @@ describe("rbac helpers", () => {
     expect(hasSessionMenu(session, "status")).toBe(false);
     expect(hasSessionApiPermission(session, "settings:read")).toBe(true);
     expect(hasSessionApiPermission(session, "settings:write")).toBe(false);
+    expect(hasSessionMenuApiPermission(session, "settings", "settings:read")).toBe(true);
+    expect(hasSessionMenuApiPermission(session, "settings", "settings:write")).toBe(false);
+    expect(hasSessionMenuApiPermission(session, "status", "settings:read")).toBe(false);
   });
 
   it("requires both settings menu and settings read permission for settings page access", () => {

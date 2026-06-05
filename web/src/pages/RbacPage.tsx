@@ -63,14 +63,20 @@ export function toggleMenuPermissionDraft(
   enabled: boolean,
 ): RolePermissionDraft {
   const nextMenuCodes = new Set(draft.menu_codes);
-  const removedPermissionCodes = new Set(group.apiPermissions.map((permission) => permission.code));
-  let nextApiPermissionCodes = draft.api_permission_codes;
+  const nextApiPermissionCodes = new Set(draft.api_permission_codes);
 
   if (enabled) {
     nextMenuCodes.add(group.menuCode);
+    for (const permission of group.apiPermissions) {
+      if (permission.enabled && permission.code.endsWith(":read")) {
+        nextApiPermissionCodes.add(permission.code);
+      }
+    }
   } else {
     nextMenuCodes.delete(group.menuCode);
-    nextApiPermissionCodes = draft.api_permission_codes.filter((code) => !removedPermissionCodes.has(code));
+    for (const permission of group.apiPermissions) {
+      nextApiPermissionCodes.delete(permission.code);
+    }
   }
 
   return {
