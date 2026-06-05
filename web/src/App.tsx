@@ -5,8 +5,9 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { api } from "./lib/api";
 import { PreferencesProvider, useI18n } from "./lib/preferences";
-import { hasSessionApiPermission, hasSessionMenu } from "./lib/rbac";
+import { hasRbacManagementAccess, hasSessionApiPermission, hasSessionMenu } from "./lib/rbac";
 import { SessionStateProvider } from "./lib/session";
+import type { SessionState } from "./lib/types";
 
 const GalleryPage = lazy(() =>
   import("./pages/GalleryPage").then((module) => ({ default: module.GalleryPage })),
@@ -45,14 +46,19 @@ const UsageStatsPage = lazy(() =>
   import("./pages/UsageStatsPage").then((module) => ({ default: module.UsageStatsPage })),
 );
 
-const menuHomeRoutes: Array<{ code: string; to: string; requiredPermission?: string }> = [
+const menuHomeRoutes: Array<{
+  code: string;
+  to: string;
+  requiredPermission?: string;
+  hasAccess?: (sessionState: SessionState | null) => boolean;
+}> = [
   { code: "inspirations", to: "/products" },
   { code: "image_chat", to: "/image-chat" },
   { code: "gallery", to: "/gallery" },
   { code: "status", to: "/status" },
   { code: "usage_stats", to: "/usage-stats" },
   { code: "settings", to: "/settings", requiredPermission: "settings:read" },
-  { code: "rbac", to: "/rbac" },
+  { code: "rbac", to: "/rbac", hasAccess: hasRbacManagementAccess },
 ];
 
 function LoadingScreen() {
@@ -79,6 +85,9 @@ function AppRoutes() {
     const route = menuHomeRoutes.find((item) => item.code === menuCode);
     if (!route) {
       return false;
+    }
+    if (route.hasAccess) {
+      return route.hasAccess(sessionState);
     }
     if (route.requiredPermission) {
       return hasSessionMenu(sessionState, menuCode) && hasSessionApiPermission(sessionState, route.requiredPermission);

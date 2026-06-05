@@ -21,6 +21,7 @@ These guides help you **ask the right questions before coding**.
 
 | Guide | Purpose | When to Use |
 |-------|---------|-------------|
+| [Codebase Governance Guide](./codebase-governance.md) | Review module boundaries, RBAC gates, extension points, UI/CSS governance, and validation gates | Before broad audits, protected routes, extension points, or large module splits |
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
 
@@ -46,6 +47,16 @@ These guides help you **ask the right questions before coding**.
 - [ ] **You're creating a new utility/helper function** ← Search first!
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+
+### When to Think About Codebase Governance
+
+- [ ] You're adding or changing a protected backend route
+- [ ] You're adding or changing a frontend route, navigation item, or protected action
+- [ ] You're touching provider/workflow/settings extension points
+- [ ] You're splitting a large page, backend service, or shared helper
+- [ ] You're reviewing UI/CSS density, theme coverage, or repeated class patterns
+
+→ Read [Codebase Governance Guide](./codebase-governance.md)
 
 ---
 

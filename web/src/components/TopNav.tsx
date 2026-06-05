@@ -23,10 +23,10 @@ import { Link, useLocation } from "react-router-dom";
 
 import { LOCALES, type Locale, type TranslationKey } from "../lib/i18n";
 import { usePreferences } from "../lib/preferences";
-import { hasSessionApiPermission, hasSessionMenu } from "../lib/rbac";
+import { hasRbacManagementAccess, hasSessionApiPermission, hasSessionMenu } from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
-import type { SessionUser } from "../lib/types";
+import type { SessionState, SessionUser } from "../lib/types";
 
 interface TopNavProps {
   breadcrumbs?: string;
@@ -41,6 +41,7 @@ interface TopNavItem {
   to: string;
   menuCode: string | null;
   requiredPermission?: string;
+  hasAccess?: (session: SessionState | null) => boolean;
   priority: NavPriority;
   icon: typeof Activity;
   match: (pathname: string) => boolean;
@@ -120,6 +121,7 @@ const navItems: TopNavItem[] = [
     labelKey: "nav.rbac",
     to: "/rbac",
     menuCode: "rbac",
+    hasAccess: hasRbacManagementAccess,
     priority: "secondary",
     icon: ShieldCheck,
     match: (pathname: string) => pathname.startsWith("/rbac"),
@@ -516,12 +518,16 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const session = useSessionState();
   const visibleNavItems = useMemo(
     () =>
-      navItems.filter(
-        (item) =>
+      navItems.filter((item) => {
+        if (item.hasAccess) {
+          return item.hasAccess(session);
+        }
+        return (
           item.menuCode === null ||
           (hasSessionMenu(session, item.menuCode) &&
-            (!item.requiredPermission || hasSessionApiPermission(session, item.requiredPermission))),
-      ),
+            (!item.requiredPermission || hasSessionApiPermission(session, item.requiredPermission)))
+        );
+      }),
     [session],
   );
   const CurrentThemeIcon = themeIcons[themePreference];
