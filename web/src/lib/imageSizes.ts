@@ -42,20 +42,71 @@ export const IMAGE_GENERATION_MAX_DIMENSION = DEFAULT_IMAGE_GENERATION_MAX_DIMEN
 export const IMAGE_GENERATION_MAX_PIXELS = 8_294_400;
 export const IMAGE_GENERATION_MAX_ASPECT_RATIO = 3;
 
-const BUILT_IN_IMAGE_ASPECT_ORDER = ["1:1", "2:3", "3:2", "9:16", "16:9"];
+const BUILT_IN_IMAGE_ASPECT_ORDER = ["1:1", "4:5", "5:4", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "7:3"];
+const IMAGE_ASPECT_DISPLAY_ALIASES: Record<string, string> = {
+  "7:3": "21:9",
+};
 const CUSTOM_ASPECT_SCALE_STEPS = [128, 256, 384, 512, 768];
 
 const BUILT_IN_IMAGE_SIZE_OPTIONS: ImageSizeOption[] = [
-  { label: "方图 · 1K", description: "1:1 · 1024×1024", aspect: "1:1", value: "1024x1024" },
-  { label: "竖图 · 1K", description: "2:3 · 1024×1536", aspect: "2:3", value: "1024x1536" },
-  { label: "横图 · 1K", description: "3:2 · 1536×1024", aspect: "3:2", value: "1536x1024" },
-  { label: "方图 · 2K", description: "1:1 · 2048×2048", aspect: "1:1", value: "2048x2048" },
-  { label: "竖图 · 2K", description: "2:3 · 2048×3072", aspect: "2:3", value: "2048x3072" },
-  { label: "横图 · 2K", description: "3:2 · 3072×2048", aspect: "3:2", value: "3072x2048" },
-  { label: "方图 · 4K", description: "1:1 · 3840×3840", aspect: "1:1", value: "3840x3840" },
-  { label: "竖图 · 4K", description: "9:16 · 2160×3840", aspect: "9:16", value: "2160x3840" },
-  { label: "横图 · 4K", description: "16:9 · 3840×2160", aspect: "16:9", value: "3840x2160" },
+  builtInImageSizeOption("1:1", "1024x1024"),
+  builtInImageSizeOption("1:1", "1536x1536"),
+  builtInImageSizeOption("1:1", "2048x2048"),
+  builtInImageSizeOption("1:1", "2880x2880", "2.8K"),
+  builtInImageSizeOption("4:5", "1024x1280"),
+  builtInImageSizeOption("4:5", "1536x1920"),
+  builtInImageSizeOption("4:5", "2048x2560"),
+  builtInImageSizeOption("4:5", "2560x3200"),
+  builtInImageSizeOption("5:4", "1280x1024"),
+  builtInImageSizeOption("5:4", "1920x1536"),
+  builtInImageSizeOption("5:4", "2560x2048"),
+  builtInImageSizeOption("5:4", "3200x2560"),
+  builtInImageSizeOption("2:3", "1024x1536"),
+  builtInImageSizeOption("2:3", "1280x1920"),
+  builtInImageSizeOption("2:3", "1536x2304"),
+  builtInImageSizeOption("2:3", "2048x3072"),
+  builtInImageSizeOption("3:2", "1536x1024"),
+  builtInImageSizeOption("3:2", "1920x1280"),
+  builtInImageSizeOption("3:2", "2304x1536"),
+  builtInImageSizeOption("3:2", "3072x2048"),
+  builtInImageSizeOption("3:4", "768x1024"),
+  builtInImageSizeOption("3:4", "1152x1536"),
+  builtInImageSizeOption("3:4", "1536x2048"),
+  builtInImageSizeOption("3:4", "2304x3072"),
+  builtInImageSizeOption("4:3", "1024x768"),
+  builtInImageSizeOption("4:3", "1536x1152"),
+  builtInImageSizeOption("4:3", "2048x1536"),
+  builtInImageSizeOption("4:3", "3072x2304"),
+  builtInImageSizeOption("9:16", "720x1280", "HD"),
+  builtInImageSizeOption("9:16", "1152x2048"),
+  builtInImageSizeOption("9:16", "1440x2560", "2.5K"),
+  builtInImageSizeOption("9:16", "2160x3840"),
+  builtInImageSizeOption("16:9", "1024x576"),
+  builtInImageSizeOption("16:9", "1280x720", "HD"),
+  builtInImageSizeOption("16:9", "2048x1152"),
+  builtInImageSizeOption("16:9", "2560x1440"),
+  builtInImageSizeOption("16:9", "3840x2160"),
+  builtInImageSizeOption("7:3", "1344x576"),
+  builtInImageSizeOption("7:3", "1792x768"),
+  builtInImageSizeOption("7:3", "2688x1152"),
+  builtInImageSizeOption("7:3", "3360x1440"),
 ];
+
+function builtInImageSizeOption(aspect: string, value: string, tierLabel?: string): ImageSizeOption {
+  const parsed = parseImageSizeValue(value, DEFAULT_IMAGE_GENERATION_MAX_DIMENSION);
+  const kindLabel = parsed && parsed.width === parsed.height
+    ? "方图"
+    : parsed && parsed.width < parsed.height
+      ? "竖图"
+      : "横图";
+  const resolvedTierLabel = tierLabel ?? (parsed ? imageSizeTierLabel(parsed.width, parsed.height) : value);
+  return {
+    label: `${kindLabel} · ${resolvedTierLabel}`,
+    description: `${formatImageAspectValue(aspect)} · ${formatImageSizeValue(value)}`,
+    aspect,
+    value,
+  };
+}
 
 function normalizeMaxDimension(maxDimension?: number): number {
   if (!Number.isFinite(maxDimension)) {
@@ -276,6 +327,12 @@ function imageAspectSortIndex(aspect: string): number {
   return index === -1 ? Number.MAX_SAFE_INTEGER : index;
 }
 
+export function formatImageAspectValue(value: string): string {
+  const parsed = parseImageAspectValue(value);
+  const normalized = parsed?.value ?? value;
+  return IMAGE_ASPECT_DISPLAY_ALIASES[normalized] ?? normalized;
+}
+
 export function buildImageAspectOptions(presets: ImageSizeOption[] = DEFAULT_IMAGE_SIZE_OPTIONS): ImageAspectOption[] {
   const discovered = new Set<string>();
   for (const aspect of BUILT_IN_IMAGE_ASPECT_ORDER) {
@@ -291,8 +348,8 @@ export function buildImageAspectOptions(presets: ImageSizeOption[] = DEFAULT_IMA
     .sort((left, right) => imageAspectSortIndex(left) - imageAspectSortIndex(right) || left.localeCompare(right))
     .map((aspect) => ({
       value: aspect,
-      label: aspect,
-      description: aspect,
+      label: formatImageAspectValue(aspect),
+      description: formatImageAspectValue(aspect),
     }));
 }
 
@@ -331,7 +388,7 @@ export function buildCustomAspectSizeOptions(aspect: string, maxDimension?: numb
       value: resolved.value,
       aspect: selectedAspect.value,
       label: `自定义 · ${imageSizeTierLabel(resolved.width, resolved.height)}`,
-      description: `${selectedAspect.value} · ${formatImageSizeValue(resolved.value)}`,
+      description: `${formatImageAspectValue(selectedAspect.value)} · ${formatImageSizeValue(resolved.value)}`,
     });
   }
   return options;
@@ -357,7 +414,7 @@ export function labelForImageAspect(value: string, locale: Locale = DEFAULT_LOCA
   if (!aspect) {
     return value;
   }
-  return `${imageSizeKindLabel(aspect.value, locale)} · ${aspect.value}`;
+  return `${imageSizeKindLabel(aspect.value, locale)} · ${formatImageAspectValue(aspect.value)}`;
 }
 
 export function labelForImageSize(value: string, locale: Locale = DEFAULT_LOCALE): string {
@@ -375,7 +432,7 @@ export function getImageSizePresetDisplay(
   void localeOrIndex;
   const [, tier] = option.label.split("·", 2);
   return {
-    aspectLabel: option.aspect,
+    aspectLabel: formatImageAspectValue(option.aspect),
     tierLabel: tier?.trim() || option.label,
     dimensionLabel: formatImageSizeValue(option.value),
   };

@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_va
 
 from productflow_backend.domain.enums import PosterKind
 
+TAIL_SPLITTER_DEFAULT_MAX_ITEMS = 8
+TAIL_SPLITTER_MIN_ITEMS = 1
+
 
 def _normalize_ai_scalar_text(value: Any, *, field_name: str) -> Any:
     """Normalize provider JSON scalar text fields without hiding malformed structures."""
@@ -25,6 +28,12 @@ def _normalize_ai_scalar_text(value: Any, *, field_name: str) -> Any:
             raise ValueError(f"{field_name}数组项不能为空")
         parts.append(text)
     return "、".join(parts)
+
+
+def _validate_tail_splitter_max_items(value: int) -> int:
+    if value < TAIL_SPLITTER_MIN_ITEMS:
+        raise ValueError(f"最大拆分数不能小于 {TAIL_SPLITTER_MIN_ITEMS}")
+    return value
 
 
 class ProductInput(BaseModel):
@@ -204,15 +213,43 @@ class TailSplitterConfig(BaseModel):
 
     description: str = ""
     source_text: str = ""
-    max_items: int = Field(default=8, ge=1, le=12)
+    max_items: int = TAIL_SPLITTER_DEFAULT_MAX_ITEMS
     generation_config_mode: Literal["auto", "manual"] = "auto"
     generation_config_id: str | None = None
     document_source: dict[str, Any] | None = None
 
-    @field_validator("description", "source_text")
+    @field_validator("description", "source_text", mode="before")
     @classmethod
-    def normalize_text(cls, value: str) -> str:
+    def normalize_text(cls, value: Any) -> Any:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            return value
         return value.strip()
+
+    @field_validator("max_items", mode="before")
+    @classmethod
+    def normalize_max_items_input(cls, value: Any) -> Any:
+        if value is None:
+            return TAIL_SPLITTER_DEFAULT_MAX_ITEMS
+        if isinstance(value, str) and not value.strip():
+            return TAIL_SPLITTER_DEFAULT_MAX_ITEMS
+        return value
+
+    @field_validator("max_items")
+    @classmethod
+    def validate_max_items(cls, value: int) -> int:
+        return _validate_tail_splitter_max_items(value)
+
+    @field_validator("generation_config_mode", mode="before")
+    @classmethod
+    def normalize_generation_config_mode(cls, value: Any) -> Any:
+        if value is None:
+            return "auto"
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return normalized or "auto"
+        return value
 
     @field_validator("generation_config_id")
     @classmethod
@@ -233,7 +270,12 @@ class TailSplitPlanInput(BaseModel):
     description: str = ""
     upstream_text_contexts: list[str] = Field(default_factory=list)
     reference_images: list[ReferenceImageInput] = Field(default_factory=list)
-    max_items: int = Field(default=8, ge=1, le=12)
+    max_items: int = TAIL_SPLITTER_DEFAULT_MAX_ITEMS
+
+    @field_validator("max_items")
+    @classmethod
+    def validate_max_items(cls, value: int) -> int:
+        return _validate_tail_splitter_max_items(value)
 
 
 class TailSplitPlanDraftItem(BaseModel):

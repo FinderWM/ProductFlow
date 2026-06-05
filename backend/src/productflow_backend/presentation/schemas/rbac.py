@@ -31,6 +31,7 @@ class RbacRoleResponse(BaseModel):
     code: str
     name: str
     is_admin: bool
+    user_count: int
     archived_at: str | None
 
 
@@ -44,6 +45,13 @@ class RbacUserResponse(BaseModel):
     enabled: bool
     password_pending: bool
     archived_at: str | None
+
+
+class RbacUserListResponse(BaseModel):
+    items: list[RbacUserResponse]
+    total: int
+    page: int
+    page_size: int
 
 
 class CreateTrustedUserRequest(BaseModel):
@@ -96,12 +104,13 @@ def serialize_api_permission(permission: RbacApiPermission) -> RbacApiPermission
     )
 
 
-def serialize_role(role: AuthRole) -> RbacRoleResponse:
+def serialize_role(role: AuthRole, *, user_count: int = 0) -> RbacRoleResponse:
     return RbacRoleResponse(
         id=role.id,
         code=role.code,
         name=role.name,
         is_admin=role.is_admin,
+        user_count=user_count,
         archived_at=role.archived_at.isoformat() if role.archived_at else None,
     )
 

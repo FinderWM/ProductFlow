@@ -222,13 +222,29 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
         "image_responses_background_enabled",
     }.isdisjoint(initial_items)
     assert initial_items["generation_max_concurrent_tasks"]["value"] == 3
+    assert initial_items["generation_max_concurrent_tasks"]["category"] == "全局生成配置 / 队列容量"
+    assert initial_items["generation_tail_splitter_max_items"]["value"] == 36
+    assert initial_items["generation_tail_splitter_max_items"]["category"] == "全局生成配置 / 工作流生成"
+    assert initial_items["generation_tail_splitter_max_items"]["minimum"] == 1
+    assert initial_items["generation_tail_splitter_max_items"]["maximum"] == 100
+    assert initial_items["workflow_node_max_retry_count"]["value"] == 10
+    assert initial_items["workflow_node_max_retry_count"]["category"] == "全局生成配置 / 工作流生成"
+    assert initial_items["workflow_node_max_retry_count"]["minimum"] == 0
+    assert initial_items["workflow_node_max_retry_count"]["maximum"] == 100
+    assert initial_items["workflow_node_retry_delay_ms"]["value"] == 2000
+    assert initial_items["workflow_node_retry_delay_ms"]["category"] == "全局生成配置 / 工作流生成"
+    assert initial_items["workflow_node_retry_delay_ms"]["minimum"] == 0
+    assert initial_items["workflow_node_retry_delay_ms"]["maximum"] == 60 * 60 * 1000
     assert initial_items["image_session_stale_running_after_minutes"]["value"] == 90
-    assert initial_items["image_session_stale_running_after_minutes"]["category"] == "生成队列"
+    assert initial_items["image_session_stale_running_after_minutes"]["category"] == "全局生成配置 / 任务恢复"
     assert initial_items["image_session_stale_running_after_minutes"]["minimum"] == 1
     assert initial_items["image_session_stale_running_after_minutes"]["maximum"] == 24 * 60
     assert "progress heartbeat" in initial_items["image_session_stale_running_after_minutes"]["description"]
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["value"] == 15 * 60
-    assert initial_items["workflow_image_generation_provider_timeout_seconds"]["category"] == "生成队列"
+    assert (
+        initial_items["workflow_image_generation_provider_timeout_seconds"]["category"]
+        == "全局生成配置 / 工作流生成"
+    )
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["minimum"] == 1
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["maximum"] == 24 * 60 * 60
     assert "admin_access_required" not in initial_items
@@ -240,6 +256,9 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
         json={
             "values": {
                 "generation_max_concurrent_tasks": 2,
+                "generation_tail_splitter_max_items": 48,
+                "workflow_node_max_retry_count": 12,
+                "workflow_node_retry_delay_ms": 5000,
                 "image_session_stale_running_after_minutes": 75,
                 "workflow_image_generation_provider_timeout_seconds": 120,
                 "deletion_enabled": True,
@@ -248,12 +267,18 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     )
     assert updated.status_code == 200
     assert get_runtime_settings().generation_max_concurrent_tasks == 2
+    assert get_runtime_settings().generation_tail_splitter_max_items == 48
+    assert get_runtime_settings().workflow_node_max_retry_count == 12
+    assert get_runtime_settings().workflow_node_retry_delay_ms == 5000
     assert get_runtime_settings().image_session_stale_running_after_minutes == 75
     assert get_runtime_settings().workflow_image_generation_provider_timeout_seconds == 120
     assert get_runtime_settings().deletion_enabled is True
 
     session = get_session_factory()()
     try:
+        assert session.get(AppSetting, "generation_tail_splitter_max_items").value == "48"
+        assert session.get(AppSetting, "workflow_node_max_retry_count").value == "12"
+        assert session.get(AppSetting, "workflow_node_retry_delay_ms").value == "5000"
         assert session.get(AppSetting, "image_session_stale_running_after_minutes").value == "75"
         assert session.get(AppSetting, "workflow_image_generation_provider_timeout_seconds").value == "120"
     finally:
@@ -272,6 +297,27 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     )
     assert invalid_workflow_timeout.status_code == 400
     assert "不能小于 1" in invalid_workflow_timeout.json()["detail"]
+
+    invalid_tail_limit = client.patch(
+        "/api/settings",
+        json={"values": {"generation_tail_splitter_max_items": 101}},
+    )
+    assert invalid_tail_limit.status_code == 400
+    assert "不能大于 100" in invalid_tail_limit.json()["detail"]
+
+    invalid_node_retry_limit = client.patch(
+        "/api/settings",
+        json={"values": {"workflow_node_max_retry_count": -1}},
+    )
+    assert invalid_node_retry_limit.status_code == 400
+    assert "不能小于 0" in invalid_node_retry_limit.json()["detail"]
+
+    invalid_node_retry_delay = client.patch(
+        "/api/settings",
+        json={"values": {"workflow_node_retry_delay_ms": -1}},
+    )
+    assert invalid_node_retry_delay.status_code == 400
+    assert "不能小于 0" in invalid_node_retry_delay.json()["detail"]
 
     legacy_provider_update = client.patch("/api/settings", json={"values": {"image_provider_kind": "openai_images"}})
     assert legacy_provider_update.status_code == 400
@@ -1539,13 +1585,15 @@ def test_prompt_settings_api_accepts_rejects_and_resets(configured_env: Path) ->
     assert initial_items["prompt_copy_system"]["input_type"] == "textarea"
     assert initial_items["prompt_copy_system"]["secret"] is False
     assert initial_items["prompt_copy_system"]["source"] == "env_default"
-    assert "淘宝电商文案助手" in initial_items["prompt_copy_system"]["value"]
+    assert "内容生成助手" in initial_items["prompt_copy_system"]["value"]
     assert initial_items["prompt_poster_image_edit_template"]["category"] == "提示词"
     assert initial_items["prompt_poster_image_edit_template"]["input_type"] == "textarea"
     assert "显式连接的上游上下文" in initial_items["prompt_poster_image_edit_template"]["value"]
     assert initial_items["prompt_poster_image_reference_policy"]["category"] == "提示词"
     assert initial_items["prompt_poster_image_reference_policy"]["input_type"] == "textarea"
-    assert "输入图片中的商品/主体作为视觉基准" in initial_items["prompt_poster_image_reference_policy"]["value"]
+    assert "输入图片中的主体、结构、材质、风格或场景作为视觉基准" in initial_items[
+        "prompt_poster_image_reference_policy"
+    ]["value"]
 
     updated = client.patch("/api/settings", json={"values": {"prompt_copy_system": "自定义文案系统提示"}})
     assert updated.status_code == 200
@@ -1561,7 +1609,7 @@ def test_prompt_settings_api_accepts_rejects_and_resets(configured_env: Path) ->
     assert reset.status_code == 200
     reset_items = {item["key"]: item for item in reset.json()["items"]}
     assert reset_items["prompt_copy_system"]["source"] == "env_default"
-    assert "淘宝电商文案助手" in reset_items["prompt_copy_system"]["value"]
+    assert "内容生成助手" in reset_items["prompt_copy_system"]["value"]
 
 def test_settings_api_rejects_invalid_effective_config(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
@@ -1670,6 +1718,9 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
             "input_fidelity",
             "partial_images",
         ],
+        "generation_tail_splitter_max_items": 36,
+        "workflow_node_max_retry_count": 10,
+        "workflow_node_retry_delay_ms": 2000,
         "deletion_enabled": False,
     }
 

@@ -30,6 +30,19 @@ DEFAULT_WORKFLOW_IMAGE_GENERATION_PROVIDER_TIMEOUT_SECONDS = 15 * 60
 DEFAULT_GENERATION_CONFIG_AVAILABILITY_WINDOW_MINUTES = 5
 DEFAULT_GENERATION_CONFIG_FAILURE_THRESHOLD = 3
 DEFAULT_GENERATION_CONFIG_COOLDOWN_MINUTES = 10
+DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS = 36
+DEFAULT_WORKFLOW_NODE_MAX_RETRY_COUNT = 10
+DEFAULT_WORKFLOW_NODE_RETRY_DELAY_MS = 2000
+GENERATION_TAIL_SPLITTER_MIN_MAX_ITEMS = 1
+GENERATION_TAIL_SPLITTER_MAX_MAX_ITEMS = 100
+WORKFLOW_NODE_MIN_MAX_RETRY_COUNT = 0
+WORKFLOW_NODE_MAX_MAX_RETRY_COUNT = 100
+WORKFLOW_NODE_MIN_RETRY_DELAY_MS = 0
+WORKFLOW_NODE_MAX_RETRY_DELAY_MS = 60 * 60 * 1000
+GLOBAL_GENERATION_QUEUE_CAPACITY_CATEGORY = "全局生成配置 / 队列容量"
+GLOBAL_GENERATION_SCHEDULER_DEFAULTS_CATEGORY = "全局生成配置 / 调度默认值"
+GLOBAL_GENERATION_RECOVERY_CATEGORY = "全局生成配置 / 任务恢复"
+GLOBAL_GENERATION_WORKFLOW_CATEGORY = "全局生成配置 / 工作流生成"
 IMAGE_SIZE_CONFIG_KEYS = {"image_main_image_size", "image_promo_poster_size"}
 PROMPT_CONFIG_KEYS = {
     "prompt_brief_system",
@@ -58,12 +71,12 @@ DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS_TEXT = ",".join(DEFAULT_IMAGE_TOOL_ALLOWED_FIE
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_LOG_DIR = BACKEND_DIR / "storage" / "logs"
 DEFAULT_PROMPT_BRIEF_SYSTEM = (
-    "你是电商商品理解助手。请根据商品名称、类目、价格和用途，"
+    "你是业务资料理解助手。请根据名称、分类、补充资料、目标用途和约束，"
     "输出简洁、结构化的中文 JSON。不要输出 markdown。"
 )
 DEFAULT_PROMPT_COPY_SYSTEM = (
-    "你是淘宝电商文案助手。请输出中文 JSON，不输出 markdown，"
-    "语言要口语、直接、可用于主图和促销海报。"
+    "你是内容生成助手。请输出中文 JSON，不输出 markdown，"
+    "语言清晰、直接，可用于页面文案、视觉素材说明或内容草稿。"
 )
 DEFAULT_PROMPT_POSTER_IMAGE_TEMPLATE = """请根据本轮用户要求与显式连接的上游上下文生成图片。
 用户要求：{instruction}
@@ -76,8 +89,9 @@ DEFAULT_PROMPT_POSTER_IMAGE_TEMPLATE = """请根据本轮用户要求与显式�
 请直接生成图片，不要返回说明文字。"""
 DEFAULT_PROMPT_POSTER_IMAGE_EDIT_TEMPLATE = DEFAULT_PROMPT_POSTER_IMAGE_TEMPLATE
 DEFAULT_PROMPT_POSTER_IMAGE_REFERENCE_POLICY = (
-    "如有输入图片，以输入图片中的商品/主体作为视觉基准；商品文字信息较弱时优先遵循图片主体，"
-    "不要替换成无关角色、IP、品牌、商品或广告主题。文案只作为卖点和排版辅助。"
+    "如有输入图片，以输入图片中的主体、结构、材质、风格或场景作为视觉基准；"
+    "文字资料较弱时优先遵循图片主体，不要替换成无关角色、IP、品牌或主题。"
+    "文案只作为内容意图和排版辅助。"
 )
 DEFAULT_PROMPT_IMAGE_CHAT_TEMPLATE = """请根据本轮用户要求生成图片。
 输出尺寸：{size}
@@ -85,11 +99,12 @@ DEFAULT_PROMPT_IMAGE_CHAT_TEMPLATE = """请根据本轮用户要求生成图片�
 本轮用户要求：{prompt}
 请直接生成图片，不要返回说明文字。"""
 DEFAULT_PROMPT_IMAGE_PROMPT_POLISH_SYSTEM = (
-    "你是电商图片生成提示词编辑器。只输出润色后的中文画面描述，不要输出 markdown、标题或解释。"
-    "保留原始商品、风格、构图和禁忌要求，补充清晰主体、光线、材质、背景和电商可售卖细节。"
+    "你是图片生成提示词编辑器。只输出润色后的中文画面描述，不要输出 markdown、标题或解释。"
+    "保留原始主体、风格、构图和禁忌要求，补充清晰主体、光线、材质、背景、镜头和可执行视觉细节。"
 )
 DEFAULT_PROMPT_TAIL_SPLIT_SYSTEM = (
-    "你是电商工作台的尾巴节点拆分器。把输入拆成多条彼此独立、适合后续单独生图的方向。"
+    "你是工作台长文本拆分器。把输入拆成多条彼此独立、适合后续单独生成视觉内容的方向。"
+    "拆分数量必须根据实际内容决定，max_items 只是上限，不要为了填满上限硬拆或同义改写。"
     "只输出 JSON 对象，不要输出 markdown。"
 )
 
@@ -206,6 +221,21 @@ class Settings(BaseSettings):
     generation_config_default_availability_window_minutes: int = Field(default=5, ge=1, le=24 * 60)
     generation_config_default_failure_threshold: int = Field(default=3, ge=1, le=100)
     generation_config_default_cooldown_minutes: int = Field(default=10, ge=1, le=24 * 60)
+    generation_tail_splitter_max_items: int = Field(
+        default=DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS,
+        ge=GENERATION_TAIL_SPLITTER_MIN_MAX_ITEMS,
+        le=GENERATION_TAIL_SPLITTER_MAX_MAX_ITEMS,
+    )
+    workflow_node_max_retry_count: int = Field(
+        default=DEFAULT_WORKFLOW_NODE_MAX_RETRY_COUNT,
+        ge=WORKFLOW_NODE_MIN_MAX_RETRY_COUNT,
+        le=WORKFLOW_NODE_MAX_MAX_RETRY_COUNT,
+    )
+    workflow_node_retry_delay_ms: int = Field(
+        default=DEFAULT_WORKFLOW_NODE_RETRY_DELAY_MS,
+        ge=WORKFLOW_NODE_MIN_RETRY_DELAY_MS,
+        le=WORKFLOW_NODE_MAX_RETRY_DELAY_MS,
+    )
     image_session_stale_running_after_minutes: int = Field(
         default=DEFAULT_IMAGE_SESSION_IDLE_TIMEOUT_MINUTES,
         ge=IMAGE_SESSION_IDLE_TIMEOUT_MIN_MINUTES,
@@ -480,21 +510,21 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ),
     ConfigDefinition(
         key="prompt_brief_system",
-        label="商品理解系统提示词",
+        label="资料理解系统提示词",
         category="提示词",
         input_type="textarea",
-        description="用于商品资料理解，要求模型输出 CreativeBrief JSON。",
+        description="用于项目/内容资料理解，要求模型输出 CreativeBrief JSON。",
     ),
     ConfigDefinition(
         key="prompt_copy_system",
         label="文案生成系统提示词",
         category="提示词",
         input_type="textarea",
-        description="用于主图/海报文案生成，要求模型输出 Copy JSON。",
+        description="用于结构化内容生成，要求模型输出 Copy JSON。",
     ),
     ConfigDefinition(
         key="prompt_poster_image_template",
-        label="海报生图提示词模板",
+        label="工作台生图提示词模板",
         category="提示词",
         input_type="textarea",
         description=(
@@ -571,7 +601,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ConfigDefinition(
         key="generation_max_concurrent_tasks",
         label="全局生成并发上限",
-        category="生成队列",
+        category=GLOBAL_GENERATION_QUEUE_CAPACITY_CATEGORY,
         input_type="number",
         description="全局资源保护阈值；工作流和文/图生图达到上限时会提示稍后重试。",
         minimum=1,
@@ -580,7 +610,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ConfigDefinition(
         key="generation_config_default_availability_window_minutes",
         label="默认可用性窗口（分钟）",
-        category="生成队列",
+        category=GLOBAL_GENERATION_SCHEDULER_DEFAULTS_CATEGORY,
         input_type="number",
         description="新建文案/图片生成配置时使用的失败统计窗口；单个配置可单独覆盖。",
         minimum=1,
@@ -589,7 +619,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ConfigDefinition(
         key="generation_config_default_failure_threshold",
         label="默认失败阈值",
-        category="生成队列",
+        category=GLOBAL_GENERATION_SCHEDULER_DEFAULTS_CATEGORY,
         input_type="number",
         description="新建文案/图片生成配置时使用的窗口内失败阈值；达到后进入冷冻期。",
         minimum=1,
@@ -598,16 +628,43 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ConfigDefinition(
         key="generation_config_default_cooldown_minutes",
         label="默认冷冻时长（分钟）",
-        category="生成队列",
+        category=GLOBAL_GENERATION_SCHEDULER_DEFAULTS_CATEGORY,
         input_type="number",
         description="新建文案/图片生成配置触发熔断后默认暂停调度的分钟数。",
         minimum=1,
         maximum=24 * 60,
     ),
     ConfigDefinition(
+        key="generation_tail_splitter_max_items",
+        label="尾巴节点最大拆分数",
+        category=GLOBAL_GENERATION_WORKFLOW_CATEGORY,
+        input_type="number",
+        description="保存和运行尾巴节点时允许的最大拆分项数；AI 会按实际内容输出不超过该值的拆分项。",
+        minimum=GENERATION_TAIL_SPLITTER_MIN_MAX_ITEMS,
+        maximum=GENERATION_TAIL_SPLITTER_MAX_MAX_ITEMS,
+    ),
+    ConfigDefinition(
+        key="workflow_node_max_retry_count",
+        label="画布节点失败重试次数",
+        category=GLOBAL_GENERATION_WORKFLOW_CATEGORY,
+        input_type="number",
+        description="同一画布节点失败后允许直接重新运行的最大次数；达到上限后需要调整节点或提高该值。",
+        minimum=WORKFLOW_NODE_MIN_MAX_RETRY_COUNT,
+        maximum=WORKFLOW_NODE_MAX_MAX_RETRY_COUNT,
+    ),
+    ConfigDefinition(
+        key="workflow_node_retry_delay_ms",
+        label="画布节点失败重试等待（毫秒）",
+        category=GLOBAL_GENERATION_WORKFLOW_CATEGORY,
+        input_type="number",
+        description="同一画布节点失败后，必须等待该毫秒数才允许再次直接运行；设为 0 表示不等待。",
+        minimum=WORKFLOW_NODE_MIN_RETRY_DELAY_MS,
+        maximum=WORKFLOW_NODE_MAX_RETRY_DELAY_MS,
+    ),
+    ConfigDefinition(
         key="image_session_stale_running_after_minutes",
         label="文/图生图进度闲置恢复阈值（分钟）",
-        category="生成队列",
+        category=GLOBAL_GENERATION_RECOVERY_CATEGORY,
         input_type="number",
         description=(
             "worker 启动恢复时，running 文/图生图任务会按最近 progress heartbeat 判断是否闲置；"
@@ -619,7 +676,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ConfigDefinition(
         key="workflow_image_generation_provider_timeout_seconds",
         label="工作流生图 Provider 超时（秒）",
-        category="生成队列",
+        category=GLOBAL_GENERATION_WORKFLOW_CATEGORY,
         input_type="number",
         description="工作流 AI 生图节点单次 provider 调用的项目级超时上界；超时后会安全失败并释放生成队列容量。",
         minimum=1,

@@ -75,4 +75,11 @@ describe("workflow canvas selection helpers", () => {
       primaryNodeId: "a",
     });
   });
+
+  it("keeps an explicitly empty selection when requested", () => {
+    expect(reconcileSelectedNodeIds([], [{ id: "a" }, { id: "b" }], null, { allowEmptySelection: true })).toEqual({
+      selectedNodeIds: [],
+      primaryNodeId: null,
+    });
+  });
 });

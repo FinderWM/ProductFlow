@@ -200,4 +200,40 @@ describe("draftFromNode", () => {
     expect(nextConfig).not.toHaveProperty("category");
     expect(nextConfig).not.toHaveProperty("price");
   });
+
+  it("clears product context document fields when the document is removed from the draft", () => {
+    const node: WorkflowNode = {
+      ...baseNode,
+      id: "context-node",
+      node_type: "product_context",
+      title: "灵感资料",
+      config_json: {
+        name: "露营灯",
+        owner_id: "goods-123",
+        entry_type: "copy",
+        long_text: "主打轻量照明和帐篷氛围。",
+        document_source_asset_id: "asset-doc",
+        document_filename: "brief.md",
+        document_mime_type: "text/markdown",
+        document_text: "# brief",
+      },
+      output_json: null,
+    };
+
+    const draft = draftFromNode(node, product, "copy");
+    const nextConfig = nodeConfigFromDraft(node, {
+      ...draft,
+      documentSourceAssetId: "",
+      documentFilename: "",
+      documentMimeType: "",
+      documentText: "",
+    });
+
+    expect(nextConfig).toMatchObject({
+      document_source_asset_id: null,
+      document_filename: null,
+      document_mime_type: null,
+      document_text: null,
+    });
+  });
 });

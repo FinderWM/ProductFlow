@@ -125,6 +125,13 @@ function countProductSearchFilters(filters: ProductSearchFilters): number {
   ].filter(Boolean).length;
 }
 
+function isAdminViewingOtherOwner(
+  user: { id: string; is_admin: boolean } | null | undefined,
+  ownerUserId: string | null | undefined,
+): boolean {
+  return Boolean(user?.is_admin && ownerUserId && user.id !== ownerUserId);
+}
+
 function usePressOpen(onOpen: () => void) {
   const [pressed, setPressed] = useState(false);
   const startPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -223,7 +230,7 @@ export function ProductListPage() {
   });
   const rbacUsersQuery = useQuery({
     queryKey: ["rbac-users"],
-    queryFn: api.listRbacUsers,
+    queryFn: () => api.listRbacUsers({ page_size: 100 }),
     enabled: isAdmin,
     retry: false,
     staleTime: RBAC_USERS_STALE_TIME_MS,
@@ -244,7 +251,7 @@ export function ProductListPage() {
   const searchActive = hasProductSearchFilters(activeSearch);
   const searchDraftActive = hasProductSearchFilters(searchDraft);
   const searchFilterCount = countProductSearchFilters(searchDraft) || countProductSearchFilters(activeSearch);
-  const rbacUsers = rbacUsersQuery.data ?? [];
+  const rbacUsers = rbacUsersQuery.data?.items ?? [];
 
   useEffect(() => {
     if (productsQuery.data && page > totalPages) {
@@ -287,6 +294,10 @@ export function ProductListPage() {
     }
     if (isResourceDeleted(product)) {
       setDeleteError(t("resource.deleted"));
+      return;
+    }
+    if (isAdminViewingOtherOwner(session?.user, product.owner_user_id ?? null)) {
+      setDeleteError(t("resource.adminReadonlyAction"));
       return;
     }
     setPendingDeleteProduct(product);
@@ -467,17 +478,23 @@ export function ProductListPage() {
           ) : products.length ? (
             <>
               <div className="grid gap-3 md:grid-cols-2 lg:hidden">
-                {products.map((product) => (
-                  <ProductMobileCard
-                    key={product.id}
-                    product={product}
-                    className={products.length === 1 ? "md:col-span-2" : undefined}
-                    deletionEnabled={deletionEnabled}
-                    isDeleting={deleteProductMutation.isPending}
-                    onOpen={() => navigate(`/products/${product.id}`)}
-                    onDelete={() => handleDeleteProduct(product)}
-                  />
-                ))}
+                {products.map((product) => {
+                  const deleteBlockedTitle = isAdminViewingOtherOwner(session?.user, product.owner_user_id ?? null)
+                    ? t("resource.adminReadonlyAction")
+                    : null;
+                  return (
+                    <ProductMobileCard
+                      key={product.id}
+                      product={product}
+                      className={products.length === 1 ? "md:col-span-2" : undefined}
+                      deletionEnabled={deletionEnabled}
+                      deleteBlockedTitle={deleteBlockedTitle}
+                      isDeleting={deleteProductMutation.isPending}
+                      onOpen={() => navigate(`/products/${product.id}`)}
+                      onDelete={() => handleDeleteProduct(product)}
+                    />
+                  );
+                })}
               </div>
 
               <div className="pf-table-panel hidden lg:block">
@@ -493,11 +510,15 @@ export function ProductListPage() {
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-slate-800">
                     {products.map((product) => {
+                      const deleteBlockedTitle = isAdminViewingOtherOwner(session?.user, product.owner_user_id ?? null)
+                        ? t("resource.adminReadonlyAction")
+                        : null;
                       return (
                         <ProductTableRow
                           key={product.id}
                           product={product}
                           deletionEnabled={deletionEnabled}
+                          deleteBlockedTitle={deleteBlockedTitle}
                           isDeleting={deleteProductMutation.isPending}
                           onOpen={() => navigate(`/products/${product.id}`)}
                           onDelete={() => handleDeleteProduct(product)}
@@ -572,6 +593,7 @@ function ProductMobileCard({
   product,
   className = "",
   deletionEnabled,
+  deleteBlockedTitle = null,
   isDeleting,
   onOpen,
   onDelete,
@@ -579,6 +601,7 @@ function ProductMobileCard({
   product: ProductSummary;
   className?: string;
   deletionEnabled: boolean;
+  deleteBlockedTitle?: string | null;
   isDeleting: boolean;
   onOpen: () => void;
   onDelete: () => void;
@@ -699,12 +722,14 @@ function ProductMobileCard({
         type="button"
         onClick={handleDeleteClick}
         onPointerDown={(event) => event.stopPropagation()}
-        disabled={isDeleting || !deletionEnabled || productBlocked || productDeleted}
+        disabled={isDeleting || !deletionEnabled || productBlocked || productDeleted || Boolean(deleteBlockedTitle)}
         aria-label={
           productDeleted
             ? t("resource.deleted")
             : productBlocked
             ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
+            : deleteBlockedTitle
+            ? deleteBlockedTitle
             : deletionEnabled
             ? t("products.deleteProduct", { name: product.name })
             : t("products.deleteDisabled")
@@ -714,6 +739,8 @@ function ProductMobileCard({
             ? t("resource.deleted")
             : productBlocked
             ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
+            : deleteBlockedTitle
+              ? deleteBlockedTitle
             : deletionEnabled
               ? t("products.delete")
               : t("products.deleteDisabled")
@@ -770,12 +797,14 @@ function ProductMobileCard({
 function ProductTableRow({
   product,
   deletionEnabled,
+  deleteBlockedTitle = null,
   isDeleting,
   onOpen,
   onDelete,
 }: {
   product: ProductSummary;
   deletionEnabled: boolean;
+  deleteBlockedTitle?: string | null;
   isDeleting: boolean;
   onOpen: () => void;
   onDelete: () => void;
@@ -841,12 +870,14 @@ function ProductTableRow({
             type="button"
             onClick={handleDeleteClick}
             onPointerDown={(event) => event.stopPropagation()}
-            disabled={isDeleting || !deletionEnabled || productBlocked || productDeleted}
+            disabled={isDeleting || !deletionEnabled || productBlocked || productDeleted || Boolean(deleteBlockedTitle)}
             title={
               productDeleted
                 ? t("resource.deleted")
                 : productBlocked
                 ? getResourceBlockedActionTitle(product, t("resource.blockedAction"))
+                : deleteBlockedTitle
+                  ? deleteBlockedTitle
                 : deletionEnabled
                   ? t("products.delete")
                   : t("products.deleteDisabled")

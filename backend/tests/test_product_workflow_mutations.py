@@ -277,6 +277,54 @@ def test_reference_workflow_node_upload_replaces_current_image(configured_env: P
     }
     assert {first_asset_id, second_asset_id}.issubset(reference_asset_ids)
 
+
+def test_reference_workflow_node_image_can_be_cleared(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={"name": "空参考图切换"},
+        files={"image": ("box.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+
+    workflow_response = client.get(f"/api/products/{product_id}/workflow")
+    assert workflow_response.status_code == 200
+    reference_node = next(node for node in workflow_response.json()["nodes"] if node["node_type"] == "reference_image")
+
+    uploaded = client.post(
+        f"/api/workflow-nodes/{reference_node['id']}/image",
+        data={"role": "style", "label": "可清除参考"},
+        files={"image": ("reference.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert uploaded.status_code == 200
+    uploaded_node = next(node for node in uploaded.json()["nodes"] if node["id"] == reference_node["id"])
+    asset_id = uploaded_node["output_json"]["source_asset_ids"][0]
+
+    cleared = client.delete(f"/api/workflow-nodes/{reference_node['id']}/image")
+    assert cleared.status_code == 200
+    cleared_node = next(node for node in cleared.json()["nodes"] if node["id"] == reference_node["id"])
+    assert cleared_node["status"] == "idle"
+    assert cleared_node["output_json"] is None
+    assert "source_asset_ids" not in cleared_node["config_json"]
+    assert "source_asset_id" not in cleared_node["config_json"]
+    assert "source_poster_variant_id" not in cleared_node["config_json"]
+    assert cleared_node["config_json"]["role"] == "style"
+    assert cleared_node["config_json"]["label"] == "可清除参考"
+
+    product_after = client.get(f"/api/products/{product_id}")
+    assert product_after.status_code == 200
+    reference_asset_ids = {
+        asset["id"] for asset in product_after.json()["source_assets"] if asset["kind"] == "reference_image"
+    }
+    assert asset_id in reference_asset_ids
+
+
 def test_reference_workflow_node_can_bind_existing_source_or_poster_image(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 

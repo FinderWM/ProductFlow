@@ -6,8 +6,8 @@ import secrets
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sqlalchemy import inspect, select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, inspect, select
+from sqlalchemy.orm import Session, selectinload
 
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.domain.rbac import (
@@ -47,6 +47,12 @@ SESSION_USER_KEYS = ("user_id", "username", "role_id", "is_admin")
 class UserPermissionState:
     menus: list[RbacMenu]
     api_permission_codes: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class RoleWithUserCount:
+    role: AuthRole
+    user_count: int
 
 
 def normalize_username(username: str) -> str:
@@ -250,14 +256,54 @@ def set_user_enabled(session: Session, *, user_id: str, enabled: bool) -> AuthUs
     return user
 
 
-def list_users(session: Session) -> list[AuthUser]:
+def list_users(
+    session: Session,
+    *,
+    page: int = 1,
+    page_size: int = 100,
+    username: str | None = None,
+    role_id: str | None = None,
+) -> tuple[list[AuthUser], int]:
     ensure_auth_bootstrapped(session)
-    return list(session.scalars(select(AuthUser).order_by(AuthUser.is_admin.desc(), AuthUser.created_at)))
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+    start = (page - 1) * page_size
+    filters = [AuthUser.archived_at.is_(None)]
+    normalized_username = username.strip() if username else ""
+    if normalized_username:
+        filters.append(AuthUser.username.ilike(f"%{normalized_username}%"))
+    normalized_role_id = role_id.strip() if role_id else ""
+    if normalized_role_id:
+        filters.append(AuthUser.role_id == normalized_role_id)
+
+    total = session.scalar(select(func.count()).select_from(AuthUser).where(*filters)) or 0
+    users = session.scalars(
+        select(AuthUser)
+        .options(selectinload(AuthUser.role))
+        .where(*filters)
+        .order_by(AuthUser.is_admin.desc(), AuthUser.created_at)
+        .offset(start)
+        .limit(page_size)
+    ).all()
+    return list(users), total
 
 
 def list_roles(session: Session) -> list[AuthRole]:
     ensure_auth_bootstrapped(session)
     return list(session.scalars(select(AuthRole).where(AuthRole.archived_at.is_(None)).order_by(AuthRole.created_at)))
+
+
+def list_roles_with_user_counts(session: Session) -> list[RoleWithUserCount]:
+    roles = list_roles(session)
+    user_counts = {
+        role_id: count
+        for role_id, count in session.execute(
+            select(AuthUser.role_id, func.count())
+            .where(AuthUser.archived_at.is_(None))
+            .group_by(AuthUser.role_id)
+        )
+    }
+    return [RoleWithUserCount(role=role, user_count=user_counts.get(role.id, 0)) for role in roles]
 
 
 def create_role(session: Session, *, code: str, name: str) -> AuthRole:

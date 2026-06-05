@@ -1,12 +1,33 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Loader2, Plus, Power, RefreshCcw, Save, ShieldCheck, UserPlus } from "lucide-react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  KeyRound,
+  Loader2,
+  Plus,
+  Power,
+  RefreshCcw,
+  Save,
+  Search,
+  ShieldCheck,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { useI18n } from "../lib/preferences";
-import type { RbacApiPermission, RbacPermissionCatalog, RbacRolePermissions } from "../lib/types";
+import type { RbacApiPermission, RbacPermissionCatalog, RbacRolePermissions, RbacUser } from "../lib/types";
+
+const RBAC_USER_PAGE_SIZE = 20;
+
+type PendingUserAction =
+  | { kind: "reset-password"; user: RbacUser }
+  | { kind: "set-enabled"; user: RbacUser; enabled: boolean };
 
 export interface RolePermissionDraft {
   menu_codes: string[];
@@ -91,19 +112,52 @@ export function RbacPage() {
   const [roleName, setRoleName] = useState("");
   const [selectedPermissionRoleId, setSelectedPermissionRoleId] = useState("");
   const [rolePermissionDraft, setRolePermissionDraft] = useState<RolePermissionDraft | null>(null);
+  const [rolesCollapsed, setRolesCollapsed] = useState(false);
+  const [roleSearch, setRoleSearch] = useState("");
+  const [userSearchDraft, setUserSearchDraft] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState("");
+  const [userPage, setUserPage] = useState(1);
+  const [pendingUserAction, setPendingUserAction] = useState<PendingUserAction | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const usersQuery = useQuery({ queryKey: ["rbac-users"], queryFn: api.listRbacUsers });
+  const usersQuery = useQuery({
+    queryKey: ["rbac-users", userPage, userSearch, userRoleFilter],
+    queryFn: () =>
+      api.listRbacUsers({
+        page: userPage,
+        page_size: RBAC_USER_PAGE_SIZE,
+        username: userSearch || undefined,
+        role_id: userRoleFilter || undefined,
+      }),
+    placeholderData: keepPreviousData,
+  });
   const rolesQuery = useQuery({ queryKey: ["rbac-roles"], queryFn: api.listRbacRoles });
   const permissionCatalogQuery = useQuery({
     queryKey: ["rbac-permission-catalog"],
     queryFn: api.listRbacPermissionCatalog,
   });
   const roles = rolesQuery.data ?? [];
+  const normalizedRoleSearch = roleSearch.trim().toLocaleLowerCase();
+  const filteredRoles = useMemo(
+    () =>
+      normalizedRoleSearch
+        ? roles.filter(
+            (role) =>
+              role.name.toLocaleLowerCase().includes(normalizedRoleSearch) ||
+              role.code.toLocaleLowerCase().includes(normalizedRoleSearch),
+          )
+        : roles,
+    [normalizedRoleSearch, roles],
+  );
   const assignableRoles = useMemo(() => roles.filter((role) => !role.is_admin), [roles]);
   const selectedRoleId = roleId || assignableRoles[0]?.id || "";
-  const selectedPermissionRole = roles.find((role) => role.id === selectedPermissionRoleId) ?? roles[0] ?? null;
+  const selectedPermissionRole =
+    filteredRoles.find((role) => role.id === selectedPermissionRoleId) ?? filteredRoles[0] ?? null;
+  const users = usersQuery.data?.items ?? [];
+  const userTotal = usersQuery.data?.total ?? 0;
+  const userTotalPages = Math.max(1, Math.ceil(userTotal / RBAC_USER_PAGE_SIZE));
   const permissionGroups = useMemo(
     () => (permissionCatalogQuery.data ? buildPermissionGroups(permissionCatalogQuery.data) : []),
     [permissionCatalogQuery.data],
@@ -116,14 +170,30 @@ export function RbacPage() {
   });
 
   useEffect(() => {
-    if (!selectedPermissionRoleId && roles[0]?.id) {
-      setSelectedPermissionRoleId(roles[0].id);
+    if (!filteredRoles.length) {
+      if (selectedPermissionRoleId) {
+        setSelectedPermissionRoleId("");
+      }
       return;
     }
-    if (selectedPermissionRoleId && !roles.some((role) => role.id === selectedPermissionRoleId) && roles[0]?.id) {
-      setSelectedPermissionRoleId(roles[0].id);
+    if (!selectedPermissionRoleId && filteredRoles[0]?.id) {
+      setSelectedPermissionRoleId(filteredRoles[0].id);
+      return;
     }
-  }, [roles, selectedPermissionRoleId]);
+    if (
+      selectedPermissionRoleId &&
+      !filteredRoles.some((role) => role.id === selectedPermissionRoleId) &&
+      filteredRoles[0]?.id
+    ) {
+      setSelectedPermissionRoleId(filteredRoles[0].id);
+    }
+  }, [filteredRoles, selectedPermissionRoleId]);
+
+  useEffect(() => {
+    if (usersQuery.data && userPage > userTotalPages) {
+      setUserPage(userTotalPages);
+    }
+  }, [userPage, userTotalPages, usersQuery.data]);
 
   useEffect(() => {
     if (!selectedPermissionRole?.id) {
@@ -156,6 +226,7 @@ export function RbacPage() {
       setMessage(t("rbac.userCreated"));
       setError("");
       await queryClient.invalidateQueries({ queryKey: ["rbac-users"] });
+      await queryClient.invalidateQueries({ queryKey: ["rbac-roles"] });
     },
     onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.createUserFailed"))),
   });
@@ -176,9 +247,11 @@ export function RbacPage() {
   const resetPasswordMutation = useMutation({
     mutationFn: api.resetRbacUserPassword,
     onSuccess: async () => {
+      setPendingUserAction(null);
       setMessage(t("rbac.passwordReset"));
       setError("");
       await queryClient.invalidateQueries({ queryKey: ["rbac-users"] });
+      await queryClient.invalidateQueries({ queryKey: ["rbac-roles"] });
     },
     onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.resetPasswordFailed"))),
   });
@@ -187,9 +260,11 @@ export function RbacPage() {
     mutationFn: ({ userId, enabled }: { userId: string; enabled: boolean }) =>
       api.updateRbacUser(userId, { enabled }),
     onSuccess: async () => {
+      setPendingUserAction(null);
       setMessage(t("rbac.userUpdated"));
       setError("");
       await queryClient.invalidateQueries({ queryKey: ["rbac-users"] });
+      await queryClient.invalidateQueries({ queryKey: ["rbac-roles"] });
     },
     onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.updateUserFailed"))),
   });
@@ -231,8 +306,56 @@ export function RbacPage() {
     createRoleMutation.mutate();
   };
 
+  const handleUserSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setUserSearch(userSearchDraft.trim());
+    setUserPage(1);
+  };
+
+  const handleClearUserFilters = () => {
+    setUserSearchDraft("");
+    setUserSearch("");
+    setUserRoleFilter("");
+    setUserPage(1);
+  };
+
+  const handleConfirmUserAction = () => {
+    if (!pendingUserAction) {
+      return;
+    }
+    if (pendingUserAction.kind === "reset-password") {
+      resetPasswordMutation.mutate(pendingUserAction.user.id);
+      return;
+    }
+    updateUserMutation.mutate({ userId: pendingUserAction.user.id, enabled: pendingUserAction.enabled });
+  };
+
   const loading = usersQuery.isLoading || rolesQuery.isLoading;
   const permissionsLoading = permissionCatalogQuery.isLoading || rolePermissionsQuery.isLoading;
+  const userFiltersActive = Boolean(userSearch || userRoleFilter);
+  const pendingUserActionBusy = resetPasswordMutation.isPending || updateUserMutation.isPending;
+  const pendingUserActionTitle = pendingUserAction
+    ? pendingUserAction.kind === "reset-password"
+      ? t("rbac.confirmResetPasswordTitle")
+      : pendingUserAction.enabled
+        ? t("rbac.confirmEnableTitle")
+        : t("rbac.confirmDisableTitle")
+    : "";
+  const pendingUserActionDescription = pendingUserAction
+    ? pendingUserAction.kind === "reset-password"
+      ? t("rbac.confirmResetPassword", { username: pendingUserAction.user.username })
+      : pendingUserAction.enabled
+        ? t("rbac.confirmEnable", { username: pendingUserAction.user.username })
+        : t("rbac.confirmDisable", { username: pendingUserAction.user.username })
+    : "";
+  const pendingUserActionConfirmLabel = pendingUserAction
+    ? pendingUserAction.kind === "reset-password"
+      ? t("rbac.resetPassword")
+      : pendingUserAction.enabled
+        ? t("rbac.enable")
+        : t("rbac.disable")
+    : "";
+  const emptyPermissionRoleMessage = roles.length ? t("rbac.noMatchingRoles") : t("rbac.noRoles");
 
   return (
     <div className="pf-app">
@@ -347,47 +470,106 @@ export function RbacPage() {
               </div>
             </section>
 
-            <section className="grid gap-4 lg:grid-cols-[280px_1fr]">
-              <div className="pf-panel p-4">
-                <div className="mb-4 flex items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold">{t("rbac.rolePermissions")}</h2>
-                  <span className="text-xs text-slate-500 dark:text-slate-400">{roles.length}</span>
-                </div>
-                <div className="space-y-2">
-                  {roles.map((role) => {
+            <section className="pf-panel p-4">
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <h2 className="min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setRolesCollapsed((current) => !current)}
+                    aria-expanded={!rolesCollapsed}
+                    aria-controls="rbac-role-management-content"
+                    aria-label={rolesCollapsed ? t("rbac.expandRoles") : t("rbac.collapseRoles")}
+                    title={rolesCollapsed ? t("rbac.expandRoles") : t("rbac.collapseRoles")}
+                    className="inline-flex min-w-0 items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900"
+                  >
+                    <ChevronDown
+                      size={15}
+                      className={`shrink-0 text-slate-500 transition-transform dark:text-slate-400 ${
+                        rolesCollapsed ? "-rotate-90" : ""
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate text-sm font-semibold">{t("rbac.roleManagement")}</span>
+                  </button>
+                </h2>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{roles.length}</span>
+              </div>
+
+              <div
+                id="rbac-role-management-content"
+                className={rolesCollapsed ? "hidden" : "grid gap-4 lg:grid-cols-[280px_1fr]"}
+              >
+                <div className="space-y-3">
+                  <label className="relative block">
+                    <span className="sr-only">{t("rbac.roleSearch")}</span>
+                    <Search
+                      size={15}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                      aria-hidden="true"
+                    />
+                    <input
+                      value={roleSearch}
+                      onChange={(event) => setRoleSearch(event.target.value)}
+                      placeholder={t("rbac.roleSearchPlaceholder")}
+                      className="h-10 w-full rounded-md border border-slate-200 bg-white pl-9 pr-9 text-sm outline-none transition-colors focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                    />
+                    {roleSearch ? (
+                      <button
+                        type="button"
+                        onClick={() => setRoleSearch("")}
+                        className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                        aria-label={t("rbac.clearRoleSearch")}
+                        title={t("rbac.clearRoleSearch")}
+                      >
+                        <X size={14} aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </label>
+
+                  {filteredRoles.length ? filteredRoles.map((role) => {
                     const active = selectedPermissionRole?.id === role.id;
                     return (
                       <button
                         key={role.id}
                         type="button"
                         onClick={() => setSelectedPermissionRoleId(role.id)}
-                        className={`flex w-full items-start justify-between rounded-lg border px-3 py-3 text-left transition-colors ${
+                        className={`flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
                           active
                             ? "border-indigo-200 bg-indigo-50 text-indigo-950 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-50"
                             : "border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900"
                         }`}
                       >
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-semibold">{role.name}</div>
-                          <div className="truncate text-xs text-slate-500 dark:text-slate-400">{role.code}</div>
+                          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="max-w-full truncate text-xs text-slate-500 dark:text-slate-400">
+                              {role.code}
+                            </span>
+                            <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              {t("rbac.roleUserCount", { count: role.user_count })}
+                            </span>
+                          </div>
                         </div>
                         {role.is_admin ? (
-                          <span className="ml-3 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             {t("rbac.adminRole")}
                           </span>
                         ) : null}
                       </button>
                     );
-                  })}
+                  }) : (
+                    <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                      {t("rbac.noMatchingRoles")}
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              <div className="pf-panel p-4">
+                <div className="min-w-0 border-t border-slate-200 pt-4 dark:border-slate-800 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-sm font-semibold">{t("rbac.permissionEditor")}</h2>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      {selectedPermissionRole ? selectedPermissionRole.name : t("rbac.noRoles")}
+                      {selectedPermissionRole ? selectedPermissionRole.name : emptyPermissionRoleMessage}
                     </p>
                   </div>
                   <button
@@ -412,7 +594,7 @@ export function RbacPage() {
 
                 {!selectedPermissionRole ? (
                   <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-                    {t("rbac.noRoles")}
+                    {emptyPermissionRoleMessage}
                   </div>
                 ) : permissionsLoading ? (
                   <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
@@ -502,11 +684,77 @@ export function RbacPage() {
                   </div>
                 )}
               </div>
+              </div>
             </section>
 
             <section className="pf-table-panel">
               <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-                <h2 className="text-sm font-semibold">{t("rbac.users")}</h2>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold">{t("rbac.users")}</h2>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {t("rbac.userPaginationSummary", {
+                        page: userPage,
+                        totalPages: userTotalPages,
+                        total: userTotal,
+                      })}
+                    </p>
+                  </div>
+                  <form className="grid gap-2 sm:grid-cols-[1fr_180px_auto_auto]" onSubmit={handleUserSearch}>
+                    <label className="min-w-0">
+                      <span className="sr-only">{t("rbac.userSearch")}</span>
+                      <div className="relative">
+                        <Search
+                          size={15}
+                          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                          aria-hidden="true"
+                        />
+                        <input
+                          value={userSearchDraft}
+                          onChange={(event) => setUserSearchDraft(event.target.value)}
+                          placeholder={t("rbac.userSearchPlaceholder")}
+                          className="h-10 w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none transition-colors focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                        />
+                      </div>
+                    </label>
+                    <label className="min-w-0">
+                      <span className="sr-only">{t("rbac.userRoleFilter")}</span>
+                      <select
+                        value={userRoleFilter}
+                        onChange={(event) => {
+                          setUserRoleFilter(event.target.value);
+                          setUserPage(1);
+                        }}
+                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none transition-colors focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                      >
+                        <option value="">{t("rbac.allRoles")}</option>
+                        {roles.map((role) => (
+                          <option key={role.id} value={role.id}>
+                            {role.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={usersQuery.isFetching}
+                      className="inline-flex h-10 items-center justify-center rounded-md bg-slate-950 px-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                    >
+                      {usersQuery.isFetching ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : null}
+                      {t("rbac.search")}
+                    </button>
+                    {userFiltersActive ? (
+                      <button
+                        type="button"
+                        onClick={handleClearUserFilters}
+                        disabled={usersQuery.isFetching}
+                        className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+                      >
+                        {t("rbac.clearFilters")}
+                      </button>
+                    ) : null}
+                  </form>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
@@ -519,61 +767,173 @@ export function RbacPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {(usersQuery.data ?? []).map((user) => (
-                      <tr key={user.id}>
-                        <td className="px-4 py-3">
-                          <div className="font-medium">{user.display_name}</div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400">{user.username}</div>
-                        </td>
-                        <td className="px-4 py-3">{user.role_name}</td>
-                        <td className="px-4 py-3">
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                            {user.password_pending
-                              ? t("rbac.passwordPending")
-                              : user.enabled
-                                ? t("rbac.enabled")
-                                : t("rbac.disabled")}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-2">
-                            {!user.is_admin ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => resetPasswordMutation.mutate(user.id)}
-                                  disabled={resetPasswordMutation.isPending}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
-                                  aria-label={t("rbac.resetPassword")}
-                                  title={t("rbac.resetPassword")}
-                                >
-                                  <KeyRound size={14} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => updateUserMutation.mutate({ userId: user.id, enabled: !user.enabled })}
-                                  disabled={updateUserMutation.isPending}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
-                                  aria-label={user.enabled ? t("rbac.disable") : t("rbac.enable")}
-                                  title={user.enabled ? t("rbac.disable") : t("rbac.enable")}
-                                >
-                                  {user.enabled ? <Power size={14} /> : <RefreshCcw size={14} />}
-                                </button>
-                              </>
-                            ) : null}
-                          </div>
+                    {users.length ? (
+                      users.map((user) => {
+                        const disabled = !user.enabled;
+                        const statusLabel = disabled
+                          ? t("rbac.disabled")
+                          : user.password_pending
+                            ? t("rbac.passwordPending")
+                            : t("rbac.enabled");
+
+                        return (
+                          <tr key={user.id} className={rbacUserRowClassName(user)}>
+                            <td className="px-4 py-3">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                <span className={disabled ? "font-semibold text-rose-800 dark:text-rose-100" : "font-medium"}>
+                                  {user.display_name}
+                                </span>
+                                {disabled ? (
+                                  <span className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
+                                    {t("rbac.disabled")}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="text-xs text-slate-500 dark:text-slate-400">{user.username}</div>
+                            </td>
+                            <td className="px-4 py-3">{user.role_name}</td>
+                            <td className="px-4 py-3">
+                              <span className={rbacUserStatusBadgeClassName(user)}>
+                                {disabled ? <Power size={12} aria-hidden="true" /> : null}
+                                {statusLabel}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex justify-end gap-2">
+                                {!user.is_admin ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPendingUserAction({ kind: "reset-password", user })}
+                                      disabled={pendingUserActionBusy}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-all hover:scale-[1.03] hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-amber-400/40 dark:hover:bg-amber-500/10 dark:hover:text-amber-100"
+                                      aria-label={t("rbac.resetPassword")}
+                                      title={t("rbac.resetPassword")}
+                                    >
+                                      <KeyRound size={14} aria-hidden="true" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setPendingUserAction({ kind: "set-enabled", user, enabled: !user.enabled })
+                                      }
+                                      disabled={pendingUserActionBusy}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-all hover:scale-[1.03] hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-violet-400/40 dark:hover:bg-violet-500/10 dark:hover:text-violet-100"
+                                      aria-label={user.enabled ? t("rbac.disable") : t("rbac.enable")}
+                                      title={user.enabled ? t("rbac.disable") : t("rbac.enable")}
+                                    >
+                                      {user.enabled ? (
+                                        <Power size={14} aria-hidden="true" />
+                                      ) : (
+                                        <RefreshCcw size={14} aria-hidden="true" />
+                                      )}
+                                    </button>
+                                  </>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                          {usersQuery.isFetching ? t("app.loading") : t("rbac.noMatchingUsers")}
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
+              </div>
+              <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {t("rbac.userPaginationSummary", {
+                    page: userPage,
+                    totalPages: userTotalPages,
+                    total: userTotal,
+                  })}
+                </span>
+                <RbacPagination
+                  page={userPage}
+                  totalPages={userTotalPages}
+                  onPageChange={setUserPage}
+                  disabled={usersQuery.isFetching}
+                />
               </div>
             </section>
           </>
         )}
       </main>
+      <ConfirmDialog
+        open={Boolean(pendingUserAction)}
+        title={pendingUserActionTitle}
+        description={pendingUserActionDescription}
+        confirmLabel={pendingUserActionConfirmLabel}
+        cancelLabel={t("common.cancel")}
+        busy={pendingUserActionBusy}
+        destructive={pendingUserAction?.kind === "reset-password" || pendingUserAction?.enabled === false}
+        onClose={() => setPendingUserAction(null)}
+        onConfirm={handleConfirmUserAction}
+      />
     </div>
   );
+}
+
+function RbacPagination({
+  page,
+  totalPages,
+  onPageChange,
+  disabled,
+}: {
+  page: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  disabled: boolean;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.max(1, page - 1))}
+        disabled={disabled || page <= 1}
+        className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-45 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+      >
+        <ChevronLeft size={14} className="mr-1" aria-hidden="true" />
+        {t("pagination.previous")}
+      </button>
+      <span className="min-w-16 text-center text-xs font-semibold tabular-nums text-slate-500 dark:text-slate-400">
+        {page} / {totalPages}
+      </span>
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+        disabled={disabled || page >= totalPages}
+        className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-45 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+      >
+        {t("pagination.next")}
+        <ChevronRight size={14} className="ml-1" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+function rbacUserRowClassName(user: RbacUser): string | undefined {
+  if (user.enabled) {
+    return undefined;
+  }
+  return "bg-rose-50/70 dark:bg-rose-950/20";
+}
+
+function rbacUserStatusBadgeClassName(user: RbacUser): string {
+  if (!user.enabled) {
+    return "inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200";
+  }
+  if (user.password_pending) {
+    return "inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200";
+  }
+  return "inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-400/40 dark:bg-emerald-500/10 dark:text-emerald-200";
 }
 
 function errorMessage(error: unknown, fallback: string): string {

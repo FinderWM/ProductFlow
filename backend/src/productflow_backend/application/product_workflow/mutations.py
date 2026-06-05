@@ -31,6 +31,7 @@ from productflow_backend.application.product_workflow.tail_confirmation import (
     workflow_run_is_user_active,
 )
 from productflow_backend.application.product_workflow.tail_splitter import (
+    TailSplitPlanImageGenerationConfig,
     TailSplitPlanItemSelection,
     normalize_tail_splitter_config,
 )
@@ -766,6 +767,33 @@ def bind_workflow_node_image(
     return product_workflow_graph.get_workflow_or_raise(session, workflow.id)
 
 
+def clear_workflow_node_image(
+    session: Session,
+    *,
+    node_id: str,
+) -> ProductWorkflow:
+    """清空参考图节点的当前图片绑定，保留节点角色/标签配置。"""
+    node = product_workflow_graph.get_node_or_raise(session, node_id)
+    if node.node_type != WorkflowNodeType.REFERENCE_IMAGE:
+        raise BusinessValidationError("只有参考图节点可以清除图片")
+    workflow = product_workflow_graph.get_workflow_or_raise(session, node.workflow_id)
+
+    config = dict(node.config_json or {})
+    config.pop("source_asset_id", None)
+    config.pop("source_asset_ids", None)
+    config.pop("source_poster_variant_id", None)
+    node.config_json = config
+    node.output_json = None
+    node.status = WorkflowNodeStatus.IDLE
+    node.failure_reason = None
+    node.last_run_at = None
+    workflow.updated_at = now_utc()
+    workflow.product.updated_at = now_utc()
+    session.commit()
+    session.expire_all()
+    return product_workflow_graph.get_workflow_or_raise(session, workflow.id)
+
+
 def apply_tail_split_plan(
     session: Session,
     *,
@@ -773,8 +801,11 @@ def apply_tail_split_plan(
     plan_id: str,
     item_ids: list[str] | None,
     items: list[TailSplitPlanItemSelection] | None = None,
+    image_generation_config: TailSplitPlanImageGenerationConfig | None = None,
     position_x: int | None = None,
     position_y: int | None = None,
+    reuse_public_copy_node: bool = False,
+    reuse_public_reference_node: bool = False,
     enqueue: Callable[[str], None] | None = None,
 ) -> ProductWorkflow:
     node = product_workflow_graph.get_node_or_raise(session, node_id)
@@ -784,8 +815,11 @@ def apply_tail_split_plan(
         plan_id=plan_id,
         item_ids=item_ids,
         items=items,
+        image_generation_config=image_generation_config,
         position_x=position_x,
         position_y=position_y,
+        reuse_public_copy_node=reuse_public_copy_node,
+        reuse_public_reference_node=reuse_public_reference_node,
     )
     _resolve_tail_confirmation_runs_after_apply(
         session,

@@ -1075,7 +1075,7 @@ def test_openai_responses_poster_provider_uses_image_generation_tool(
     assert "- 商品原图：第 1 张输入图片" in prompt_text
     assert "- 参考图：reference.png（角色：参考图）" in prompt_text
     assert "视觉参考规则：" in prompt_text
-    assert "如有输入图片，以输入图片中的商品/主体作为视觉基准" in prompt_text
+    assert "如有输入图片，以输入图片中的主体、结构、材质、风格或场景作为视觉基准" in prompt_text
     assert len([item for item in content if item["type"] == "input_image"]) == 2
     assert "/images/generations" not in str(payload)
     assert "/images/edits" not in str(payload)

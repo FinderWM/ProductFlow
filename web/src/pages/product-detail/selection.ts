@@ -62,12 +62,16 @@ export function reconcileSelectedNodeIds(
   selectedNodeIds: string[],
   nodes: Array<Pick<WorkflowNode, "id">>,
   primaryNodeId: string | null,
+  options: { allowEmptySelection?: boolean } = {},
 ): { selectedNodeIds: string[]; primaryNodeId: string | null } {
   if (!nodes.length) {
     return { selectedNodeIds: [], primaryNodeId: null };
   }
   const availableNodeIds = new Set(nodes.map((node) => node.id));
   const nextSelectedNodeIds = selectedNodeIds.filter((nodeId) => availableNodeIds.has(nodeId));
+  if (options.allowEmptySelection && !primaryNodeId && nextSelectedNodeIds.length === 0) {
+    return { selectedNodeIds: [], primaryNodeId: null };
+  }
   const nextPrimaryNodeId =
     primaryNodeId && availableNodeIds.has(primaryNodeId)
       ? primaryNodeId

@@ -529,7 +529,7 @@ const DOC_PAGES: DocPage[] = [
             type: "table",
             headers: ["操作", "行为"],
             rows: [
-              ["重新拆分", "删除该尾巴节点上一批自动生成分支，重新生成拆分计划并重建后续节点。"],
+              ["重新拆分", "重新生成拆分计划并重建后续节点；确认计划时可选择保留上一轮公共文案和公共参考图节点。"],
               ["保留当前批次重生图", "保留当前批次的公共节点和已建分支，只重新运行当前批次里的生图链路。"],
             ],
           },
@@ -1027,9 +1027,9 @@ const DOC_PAGES: DocPage[] = [
             type: "table",
             headers: ["字段", "说明"],
             rows: [
-              ["商品理解系统提示词", "用于商品资料理解，要求模型输出 CreativeBrief JSON。"],
-              ["文案生成系统提示词", "用于主图/海报文案生成，要求模型输出 CopyPayloadV2 JSON；后端会兼容常见的自由文案、块状文案和布局说明变体。"],
-              ["海报生图提示词模板", "用于工作台 AI 生图。常用占位符包括 `instruction`、`size`、`context_block`、`reference_policy`、`kind` 等。"],
+              ["资料理解系统提示词", "用于项目/内容资料理解，要求模型输出 CreativeBrief JSON。"],
+              ["文案生成系统提示词", "用于结构化内容生成，要求模型输出 CopyPayloadV2 JSON；后端会兼容常见的自由文案、块状文案和布局说明变体。"],
+              ["工作台生图提示词模板", "用于工作台 AI 生图。常用占位符包括 `instruction`、`size`、`context_block`、`reference_policy`、`kind` 等。"],
               ["图片改图提示词模板", "用于工作台参考图/生成图继续生图。适合带上游文案或参考图上下文的场景。"],
               ["工作台视觉参考规则", "填入工作台生图模板的 `reference_policy` 占位符，用于控制视觉参考优先级规则。"],
               ["文/图生图提示词模板", "用于文/图生图对话。可用占位符：`prompt`、`size`、`history_block`。"],
@@ -1304,7 +1304,7 @@ const DOC_PAGES_EN: DocPage[] = [
     sections: [
       { id: "when-to-use", title: "When to use it", blocks: [{ type: "list", items: ["When a long document, long product brief, or operating material should become several image directions.", "When you want to inspect AI split results before they change the graph.", "When one shared copy/reference pair should feed a batch of generated image branches."] }] },
       { id: "plan-flow", title: "Split-plan flow", blocks: [{ type: "steps", items: ["Add or select a tail-splitter node.", "Enter long text and node instructions, or connect upstream copy/reference nodes into the tail node.", "Run the current node. ProductFlow first produces a pending split plan.", "Remove items you do not want from the dialog.", "Confirm the dialog. ProductFlow then creates ordinary public copy/reference nodes, image-trigger nodes, and output reference-image nodes."] }, { type: "callout", title: "Cancel keeps the graph unchanged", text: "The split-plan dialog is only for confirming or trimming the current plan. Cancelling does not create nodes or edges." }] },
-      { id: "rerun-modes", title: "Re-split vs rerun current batch images", blocks: [{ type: "table", headers: ["Action", "Behavior"], rows: [["Re-split", "Deletes the previous generated branch for that tail node, creates a new split plan, and rebuilds downstream nodes."], ["Rerun current batch images", "Keeps the current batch public nodes and generated branch, and reruns only the image path inside that batch."]] }] },
+      { id: "rerun-modes", title: "Re-split vs rerun current batch images", blocks: [{ type: "table", headers: ["Action", "Behavior"], rows: [["Re-split", "Creates a new split plan and rebuilds downstream nodes; during confirmation, you can keep the previous shared copy and shared reference nodes."], ["Rerun current batch images", "Keeps the current batch public nodes and generated branch, and reruns only the image path inside that batch."]] }] },
     ],
   },
   {
@@ -2081,13 +2081,13 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "提示词模板": "プロンプトテンプレート",
   "说明全局提示词模板负责哪些默认行为，以及哪些要求应该留在单次节点或文/图生图输入里。":
     "グローバルプロンプトテンプレートがどの既定動作を制御し、どの要件を単発ノードや画像生成チャット入力に残すべきかを説明します。",
-  "商品理解系统提示词": "商品理解システムプロンプト",
-  "用于商品资料理解，要求模型输出 CreativeBrief JSON。":
-    "商品データ理解に使い、モデルに CreativeBrief JSON の出力を要求します。",
+  "资料理解系统提示词": "資料理解システムプロンプト",
+  "用于项目/内容资料理解，要求模型输出 CreativeBrief JSON。":
+    "プロジェクト/コンテンツ資料の理解に使い、モデルに CreativeBrief JSON の出力を要求します。",
   "文案生成系统提示词": "コピー生成システムプロンプト",
-  "用于主图/海报文案生成，要求模型输出 CopyPayloadV2 JSON；后端会兼容常见的自由文案、块状文案和布局说明变体。":
-    "メイン画像/ポスターコピー生成に使い、モデルに CopyPayloadV2 JSON の出力を要求します。バックエンドは一般的な自由コピー、ブロックコピー、レイアウト説明のバリエーションに対応します。",
-  "海报生图提示词模板": "ポスター画像生成プロンプトテンプレート",
+  "用于结构化内容生成，要求模型输出 CopyPayloadV2 JSON；后端会兼容常见的自由文案、块状文案和布局说明变体。":
+    "構造化コンテンツ生成に使い、モデルに CopyPayloadV2 JSON の出力を要求します。バックエンドは一般的な自由コピー、ブロックコピー、レイアウト説明のバリエーションに対応します。",
+  "工作台生图提示词模板": "ワークベンチ画像生成プロンプトテンプレート",
   "用于工作台 AI 生图。常用占位符包括 `instruction`、`size`、`context_block`、`reference_policy`、`kind` 等。":
     "ワークベンチ AI 画像生成に使います。よく使うプレースホルダーには `instruction`、`size`、`context_block`、`reference_policy`、`kind` などがあります。",
   "图片改图提示词模板": "画像編集プロンプトテンプレート",
@@ -2188,8 +2188,8 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "重拆分和当前批次重生图": "再分割と現バッチ画像再生成",
   "行为": "挙動",
   "重新拆分": "再分割",
-  "删除该尾巴节点上一批自动生成分支，重新生成拆分计划并重建后续节点。":
-    "このテールノードの前回自動生成分岐を削除し、分割プランを再生成して下流ノードを再構築します。",
+  "重新生成拆分计划并重建后续节点；确认计划时可选择保留上一轮公共文案和公共参考图节点。":
+    "分割プランを再生成して下流ノードを再構築します。確認時に前回の共通コピーと共通参考画像ノードを保持できます。",
   "保留当前批次重生图": "現バッチを保持して画像再生成",
   "保留当前批次的公共节点和已建分支，只重新运行当前批次里的生图链路。":
     "現バッチの共通ノードと既存分岐を保持し、現バッチ内の画像生成チェーンだけを再実行します。",

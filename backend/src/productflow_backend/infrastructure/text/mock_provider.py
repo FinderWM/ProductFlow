@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from productflow_backend.application.contracts import (
     BlocksCopyContent,
     CopyBlock,
@@ -142,7 +144,7 @@ class MockTextProvider(TextProvider):
                 source_refs=["规格信息", "结构化输出"],
             ),
         ]
-        item_count = max(1, min(payload.max_items, len(base_candidates)))
+        item_count = _mock_tail_split_item_count(payload, len(base_candidates))
         image_ref = (
             f"参考图：{payload.reference_images[0].label or payload.reference_images[0].filename}"
             if payload.reference_images
@@ -160,3 +162,34 @@ class MockTextProvider(TextProvider):
                 refs.append(description_ref)
             item.source_refs = refs
         return TailSplitPlanDraft(source_summary=summary, items=base_candidates[:item_count]), "mock-tail-split-v1"
+
+
+def _mock_tail_split_item_count(payload: TailSplitPlanInput, candidate_count: int) -> int:
+    """Choose a content-driven count so max_items behaves as an upper bound in local/mock runs."""
+
+    content_signals = _tail_split_content_signals(payload)
+    if content_signals:
+        requested_count = len(content_signals)
+    elif payload.reference_images:
+        requested_count = min(2, len(payload.reference_images))
+    elif payload.upstream_text_contexts:
+        requested_count = min(2, len(payload.upstream_text_contexts))
+    else:
+        requested_count = 1
+    return max(1, min(payload.max_items, candidate_count, requested_count))
+
+
+def _tail_split_content_signals(payload: TailSplitPlanInput) -> list[str]:
+    text_parts = [payload.source_text, payload.description, payload.source_note, *payload.upstream_text_contexts]
+    signals: list[str] = []
+    seen: set[str] = set()
+    for text in text_parts:
+        if not text:
+            continue
+        for part in re.split(r"[、，,；;。.\n\r]+", text):
+            signal = part.strip()
+            if len(signal) < 2 or signal in seen:
+                continue
+            seen.add(signal)
+            signals.append(signal)
+    return signals

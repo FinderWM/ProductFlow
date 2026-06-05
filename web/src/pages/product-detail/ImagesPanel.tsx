@@ -22,6 +22,7 @@ interface ImagesPanelProps {
   onFillFromSourceAsset: (sourceAssetId: string) => void;
   onFillFromPoster: (posterId: string) => void;
   fillReferenceBusy: boolean;
+  fillBlockedTitle?: string | null;
 }
 
 export function ImagesPanel({
@@ -35,6 +36,7 @@ export function ImagesPanel({
   onFillFromSourceAsset,
   onFillFromPoster,
   fillReferenceBusy,
+  fillBlockedTitle = null,
 }: ImagesPanelProps) {
   const { t } = useI18n();
   const canFillReference = Boolean(selectedReferenceNode);
@@ -75,7 +77,7 @@ export function ImagesPanel({
                         }
                       : undefined
                   }
-                  useAsReferenceDisabled={!canFillReference || posterBlocked}
+                  useAsReferenceDisabled={!canFillReference || posterBlocked || Boolean(fillBlockedTitle)}
                   useAsReferenceBusy={fillReferenceBusy}
                 />
                 <ResourceMetaBadges resource={poster} showReason />
@@ -95,7 +97,7 @@ export function ImagesPanel({
                       ? () => onFillFromSourceAsset(asset.id)
                       : undefined
                   }
-                  useAsReferenceDisabled={!canFillReference || assetBlocked}
+                  useAsReferenceDisabled={!canFillReference || assetBlocked || Boolean(fillBlockedTitle)}
                   useAsReferenceBusy={fillReferenceBusy}
                 />
                 <ResourceMetaBadges resource={asset} showReason />

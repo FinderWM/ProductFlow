@@ -1,16 +1,40 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Sparkles, X } from "lucide-react";
 
+import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSettingsPanel";
+import { ParameterHelpLabel } from "../../components/ParameterHelp";
+import { SelectField } from "../../components/SelectField";
+import { compactImageToolOptions } from "../../lib/imageToolOptions";
+import type { ImageSizeOption } from "../../lib/imageSizes";
 import { useI18n } from "../../lib/preferences";
-import type { ApplyTailSplitPlanItemInput, TailSplitPlan } from "../../lib/types";
+import type {
+  ApplyTailSplitPlanImageGenerationConfigInput,
+  ApplyTailSplitPlanItemInput,
+  ApplyTailSplitPlanReuseOptions,
+  GenerationConfigOption,
+  GenerationConfigSelectionMode,
+  ImageToolOptionKey,
+  ImageToolOptions,
+  TailSplitPlan,
+} from "../../lib/types";
 
 interface TailSplitPlanDialogProps {
   open: boolean;
   nodeTitle: string;
   plan: TailSplitPlan | null;
   busy: boolean;
+  imageSizeOptions: ImageSizeOption[];
+  imageGenerationMaxDimension: number;
+  imageToolAllowedFields: readonly ImageToolOptionKey[];
+  generationConfigs: GenerationConfigOption[];
+  canReusePublicCopyNode: boolean;
+  canReusePublicReferenceNode: boolean;
   onClose: () => void;
-  onConfirm: (items: ApplyTailSplitPlanItemInput[]) => void;
+  onConfirm: (
+    items: ApplyTailSplitPlanItemInput[],
+    imageGenerationConfig: ApplyTailSplitPlanImageGenerationConfigInput,
+    reuseOptions: ApplyTailSplitPlanReuseOptions,
+  ) => void;
 }
 
 export function TailSplitPlanDialog({
@@ -18,12 +42,24 @@ export function TailSplitPlanDialog({
   nodeTitle,
   plan,
   busy,
+  imageSizeOptions,
+  imageGenerationMaxDimension,
+  imageToolAllowedFields,
+  generationConfigs,
+  canReusePublicCopyNode,
+  canReusePublicReferenceNode,
   onClose,
   onConfirm,
 }: TailSplitPlanDialogProps) {
   const { t } = useI18n();
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [instructionDrafts, setInstructionDrafts] = useState<Record<string, string>>({});
+  const [imageSize, setImageSize] = useState("1024x1024");
+  const [generationConfigMode, setGenerationConfigMode] = useState<GenerationConfigSelectionMode>("auto");
+  const [generationConfigId, setGenerationConfigId] = useState<string | null>(null);
+  const [toolOptions, setToolOptions] = useState<ImageToolOptions>({});
+  const [reusePublicCopyNode, setReusePublicCopyNode] = useState(false);
+  const [reusePublicReferenceNode, setReusePublicReferenceNode] = useState(false);
 
   useEffect(() => {
     if (!open || !plan) {
@@ -31,7 +67,26 @@ export function TailSplitPlanDialog({
     }
     setSelectedItemIds(plan.items.map((item) => item.id));
     setInstructionDrafts(Object.fromEntries(plan.items.map((item) => [item.id, item.instruction])));
-  }, [open, plan]);
+    setImageSize("1024x1024");
+    setGenerationConfigMode("auto");
+    setGenerationConfigId(null);
+    setToolOptions({});
+    setReusePublicCopyNode(canReusePublicCopyNode);
+    setReusePublicReferenceNode(canReusePublicReferenceNode);
+  }, [canReusePublicCopyNode, canReusePublicReferenceNode, open, plan]);
+
+  const imageGenerationConfigs = useMemo(
+    () => generationConfigs.filter((config) => config.purpose === "image"),
+    [generationConfigs],
+  );
+  useEffect(() => {
+    if (
+      generationConfigId &&
+      !imageGenerationConfigs.some((config) => config.id === generationConfigId && config.enabled)
+    ) {
+      setGenerationConfigId(null);
+    }
+  }, [generationConfigId, imageGenerationConfigs]);
 
   const selectedCount = selectedItemIds.length;
   const selectedIdSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
@@ -46,6 +101,23 @@ export function TailSplitPlanDialog({
     [instructionDrafts, plan, selectedIdSet],
   );
   const hasBlankSelectedInstruction = selectedItems.some((item) => !item.instruction);
+  const requiresManualGenerationConfig = generationConfigMode === "manual" && !generationConfigId;
+  const imageGenerationConfig = useMemo<ApplyTailSplitPlanImageGenerationConfigInput>(
+    () => ({
+      size: imageSize,
+      generation_config_mode: generationConfigMode,
+      generation_config_id: generationConfigMode === "manual" ? generationConfigId : null,
+      tool_options: compactImageToolOptions(toolOptions, imageToolAllowedFields) ?? null,
+    }),
+    [generationConfigId, generationConfigMode, imageSize, imageToolAllowedFields, toolOptions],
+  );
+  const reuseOptions = useMemo<ApplyTailSplitPlanReuseOptions>(
+    () => ({
+      reuse_public_copy_node: canReusePublicCopyNode && reusePublicCopyNode,
+      reuse_public_reference_node: canReusePublicReferenceNode && reusePublicReferenceNode,
+    }),
+    [canReusePublicCopyNode, canReusePublicReferenceNode, reusePublicCopyNode, reusePublicReferenceNode],
+  );
 
   if (!open || !plan) {
     return null;
@@ -73,16 +145,137 @@ export function TailSplitPlanDialog({
           </button>
         </div>
 
-        <div className="grid gap-4 overflow-y-auto px-5 py-4 lg:grid-cols-[minmax(0,240px)_minmax(0,1fr)]">
-          <aside className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-[#0b1220]">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                {t("detail.tailPlan.summary")}
+        <div className="grid gap-4 overflow-y-auto px-5 py-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+          <aside className="space-y-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-[#0b1220]">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                  {t("detail.tailPlan.summary")}
+                </div>
+                <div className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{plan.source_summary}</div>
               </div>
-              <div className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{plan.source_summary}</div>
+              <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200">
+                {t("detail.tailPlan.selectedCount", { count: selectedCount, total: plan.items.length })}
+              </div>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200">
-              {t("detail.tailPlan.selectedCount", { count: selectedCount, total: plan.items.length })}
+            {canReusePublicCopyNode || canReusePublicReferenceNode ? (
+              <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-[#0b1220]">
+                <div>
+                  <div className="text-sm font-semibold text-slate-950 dark:text-white">
+                    {t("detail.tailPlan.reusePublicTitle")}
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    {t("detail.tailPlan.reusePublicDescription")}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {canReusePublicCopyNode ? (
+                    <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={reusePublicCopyNode}
+                        onChange={(event) => setReusePublicCopyNode(event.target.checked)}
+                        disabled={busy}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-fuchsia-600 focus:ring-fuchsia-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900"
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium">{t("detail.tailPlan.reusePublicCopy")}</span>
+                        <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                          {t("detail.tailPlan.reusePublicCopyHint")}
+                        </span>
+                      </span>
+                    </label>
+                  ) : null}
+                  {canReusePublicReferenceNode ? (
+                    <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={reusePublicReferenceNode}
+                        onChange={(event) => setReusePublicReferenceNode(event.target.checked)}
+                        disabled={busy}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-fuchsia-600 focus:ring-fuchsia-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900"
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium">{t("detail.tailPlan.reusePublicReference")}</span>
+                        <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                          {t("detail.tailPlan.reusePublicReferenceHint")}
+                        </span>
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-[#0b1220]">
+              <div>
+                <div className="text-sm font-semibold text-slate-950 dark:text-white">
+                  {t("detail.tailPlan.imageSettings")}
+                </div>
+                <div className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  {t("detail.tailPlan.imageSettingsDescription")}
+                </div>
+              </div>
+              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-slate-950/60">
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <ParameterHelpLabel
+                    label={t("detail.inspector.imageGenerationConfig")}
+                    helpKey="imageGenerationConfig"
+                    uiType="productDetail"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <SelectField
+                    value={generationConfigMode}
+                    options={[
+                      { value: "auto", label: t("detail.inspector.generationConfigAuto") },
+                      { value: "manual", label: t("detail.inspector.generationConfigManual") },
+                    ]}
+                    onChange={(value) => {
+                      const nextMode: GenerationConfigSelectionMode = value === "manual" ? "manual" : "auto";
+                      setGenerationConfigMode(nextMode);
+                      if (nextMode === "auto") {
+                        setGenerationConfigId(null);
+                      }
+                    }}
+                    ariaLabel={t("detail.inspector.imageGenerationConfig")}
+                    radius="lg"
+                    visualSize="sm"
+                  />
+                  <SelectField
+                    value={generationConfigId ?? ""}
+                    options={[
+                      {
+                        value: "",
+                        label: imageGenerationConfigs.length
+                          ? t("detail.inspector.selectGenerationConfig")
+                          : t("detail.inspector.noGenerationConfigs"),
+                        disabled: generationConfigMode === "manual",
+                      },
+                      ...imageGenerationConfigs.map((config) => ({
+                        value: config.id,
+                        label: generationConfigOptionLabel(config, t),
+                        disabled: !config.enabled,
+                      })),
+                    ]}
+                    onChange={(value) => setGenerationConfigId(value || null)}
+                    ariaLabel={t("detail.inspector.imageGenerationConfig")}
+                    disabled={generationConfigMode !== "manual"}
+                    radius="lg"
+                    visualSize="sm"
+                  />
+                </div>
+              </div>
+              <ImageGenerationSettingsPanel
+                surface="plain"
+                size={imageSize}
+                sizeOptions={imageSizeOptions}
+                maxDimension={imageGenerationMaxDimension}
+                toolOptions={toolOptions}
+                allowedToolFields={imageToolAllowedFields}
+                onSizeChange={setImageSize}
+                onToolOptionsChange={setToolOptions}
+                helpUiType="productDetail"
+              />
             </div>
           </aside>
 
@@ -177,6 +370,8 @@ export function TailSplitPlanDialog({
               ? t("detail.tailPlan.footerEmpty")
               : hasBlankSelectedInstruction
                 ? t("detail.tailPlan.instructionEmpty")
+                : requiresManualGenerationConfig
+                  ? t("detail.tailPlan.imageGenerationConfigRequired")
                 : t("detail.tailPlan.footerReady")}
           </div>
           <div className="flex items-center gap-2">
@@ -190,8 +385,8 @@ export function TailSplitPlanDialog({
             </button>
             <button
               type="button"
-              onClick={() => onConfirm(selectedItems)}
-              disabled={busy || !selectedCount || hasBlankSelectedInstruction}
+              onClick={() => onConfirm(selectedItems, imageGenerationConfig, reuseOptions)}
+              disabled={busy || !selectedCount || hasBlankSelectedInstruction || requiresManualGenerationConfig}
               className="inline-flex items-center rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-fuchsia-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-fuchsia-500 dark:to-violet-500"
             >
               {t("detail.tailPlan.confirm")}
@@ -201,4 +396,16 @@ export function TailSplitPlanDialog({
       </div>
     </div>
   );
+}
+
+function generationConfigOptionLabel(
+  config: GenerationConfigOption,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  const markers = [
+    !config.enabled ? t("detail.inspector.generationConfigDisabled") : "",
+    config.frozen_until ? t("detail.inspector.generationConfigFrozen") : "",
+  ].filter(Boolean);
+  const suffix = markers.length ? ` (${markers.join(" · ")})` : "";
+  return `${config.name}${suffix}`;
 }

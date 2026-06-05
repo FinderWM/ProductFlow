@@ -101,7 +101,15 @@ export interface RbacRole {
   code: string;
   name: string;
   is_admin: boolean;
+  user_count: number;
   archived_at?: string | null;
+}
+
+export interface RbacUserListResponse {
+  items: RbacUser[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface RbacMenuPermission {
@@ -623,12 +631,27 @@ export interface ApplyTailSplitPlanItemInput {
   instruction: string;
 }
 
+export interface ApplyTailSplitPlanImageGenerationConfigInput {
+  size?: string | null;
+  generation_config_mode?: GenerationConfigSelectionMode;
+  generation_config_id?: string | null;
+  tool_options?: ImageToolOptions | null;
+}
+
+export interface ApplyTailSplitPlanReuseOptions {
+  reuse_public_copy_node: boolean;
+  reuse_public_reference_node: boolean;
+}
+
 export interface ApplyTailSplitPlanInput {
   plan_id: string;
   item_ids?: string[];
   items?: ApplyTailSplitPlanItemInput[];
+  image_generation_config?: ApplyTailSplitPlanImageGenerationConfigInput | null;
   position_x?: number;
   position_y?: number;
+  reuse_public_copy_node?: boolean;
+  reuse_public_reference_node?: boolean;
 }
 
 export interface CreateUserTemplateGroupInput {
@@ -871,6 +894,9 @@ export interface ConfigResponse {
 export interface RuntimeConfig {
   image_generation_max_dimension: number;
   image_tool_allowed_fields: ImageToolOptionKey[];
+  generation_tail_splitter_max_items: number;
+  workflow_node_max_retry_count: number;
+  workflow_node_retry_delay_ms: number;
   deletion_enabled: boolean;
 }
 

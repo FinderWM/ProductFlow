@@ -1362,6 +1362,222 @@ def test_workflow_image_generation_policy_reject_is_not_retryable(
     assert unlocked_kickoff.created is True
 
 
+def test_workflow_node_retry_limit_uses_runtime_config(
+    db_session,
+    configured_env: Path,
+) -> None:
+    from productflow_backend.application.product_workflows import (
+        get_or_create_product_workflow,
+        start_product_workflow_run,
+    )
+    from productflow_backend.domain.errors import BusinessValidationError
+    from productflow_backend.presentation.schemas.product_workflows import serialize_product_workflow
+
+    db_session.add(AppSetting(key="workflow_node_max_retry_count", value="1"))
+    db_session.commit()
+
+    product = create_product(
+        db_session,
+        name="节点重试上限商品",
+        category=None,
+        price=None,
+        source_note=None,
+        image_bytes=_make_demo_image_bytes(),
+        filename="workflow-node-retry-limit.png",
+        content_type="image/png",
+    )
+    workflow = get_or_create_product_workflow(db_session, product.id)
+    failed_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.COPY_GENERATION)
+    failed_node.status = WorkflowNodeStatus.FAILED
+    failed_node.failure_reason = "历史失败"
+    base_started_at = datetime(2026, 6, 4, 9, 0, tzinfo=UTC)
+    for index in range(2):
+        run = WorkflowRun(
+            workflow_id=workflow.id,
+            status=WorkflowRunStatus.FAILED,
+            started_at=base_started_at + timedelta(minutes=index),
+            finished_at=base_started_at + timedelta(minutes=index, seconds=30),
+            failure_reason=f"历史失败 {index}",
+            is_retryable=True,
+        )
+        db_session.add(run)
+        db_session.flush()
+        db_session.add(
+            WorkflowNodeRun(
+                workflow_run_id=run.id,
+                node_id=failed_node.id,
+                status=WorkflowNodeStatus.FAILED,
+                failure_reason=f"历史失败 {index}",
+                started_at=run.started_at,
+                finished_at=run.finished_at,
+            )
+        )
+    db_session.commit()
+    db_session.expire_all()
+
+    workflow = get_or_create_product_workflow(db_session, product.id)
+    payload = serialize_product_workflow(workflow).model_dump(mode="json")
+    failed_payload = next(node for node in payload["nodes"] if node["id"] == failed_node.id)
+    assert failed_payload["attempt_count"] == 2
+    assert failed_payload["retry_count"] == 1
+    assert failed_payload["is_retryable"] is False
+    assert failed_payload["non_retryable_reason"] == "节点失败重试次数已达上限（1）"
+
+    with pytest.raises(BusinessValidationError, match="该工作流节点不可重试"):
+        start_product_workflow_run(db_session, product_id=product.id, start_node_id=failed_node.id)
+
+    setting = db_session.get(AppSetting, "workflow_node_max_retry_count")
+    assert setting is not None
+    setting.value = "2"
+    db_session.commit()
+
+    kickoff = start_product_workflow_run(db_session, product_id=product.id, start_node_id=failed_node.id)
+    assert kickoff.created is True
+
+
+def test_workflow_node_retry_delay_uses_runtime_config(
+    db_session,
+    configured_env: Path,
+) -> None:
+    from productflow_backend.application.product_workflows import (
+        get_or_create_product_workflow,
+        start_product_workflow_run,
+    )
+    from productflow_backend.domain.errors import BusinessValidationError
+    from productflow_backend.presentation.schemas.product_workflows import serialize_product_workflow
+
+    db_session.add(AppSetting(key="workflow_node_retry_delay_ms", value="5000"))
+    db_session.commit()
+
+    product = create_product(
+        db_session,
+        name="节点重试等待商品",
+        category=None,
+        price=None,
+        source_note=None,
+        image_bytes=_make_demo_image_bytes(),
+        filename="workflow-node-retry-delay.png",
+        content_type="image/png",
+    )
+    workflow = get_or_create_product_workflow(db_session, product.id)
+    failed_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.COPY_GENERATION)
+    failed_at = datetime.now(UTC)
+    failed_node.status = WorkflowNodeStatus.FAILED
+    failed_node.failure_reason = "临时失败"
+    failed_node.last_run_at = failed_at
+    run = WorkflowRun(
+        workflow_id=workflow.id,
+        status=WorkflowRunStatus.FAILED,
+        started_at=failed_at - timedelta(seconds=1),
+        finished_at=failed_at,
+        failure_reason="临时失败",
+        is_retryable=True,
+    )
+    db_session.add(run)
+    db_session.flush()
+    db_session.add(
+        WorkflowNodeRun(
+            workflow_run_id=run.id,
+            node_id=failed_node.id,
+            status=WorkflowNodeStatus.FAILED,
+            failure_reason="临时失败",
+            started_at=run.started_at,
+            finished_at=failed_at,
+        )
+    )
+    db_session.commit()
+    db_session.expire_all()
+
+    workflow = get_or_create_product_workflow(db_session, product.id)
+    payload = serialize_product_workflow(workflow).model_dump(mode="json")
+    failed_payload = next(node for node in payload["nodes"] if node["id"] == failed_node.id)
+    assert failed_payload["is_retryable"] is False
+    assert failed_payload["non_retryable_reason"].startswith("节点失败后需等待 ")
+
+    with pytest.raises(BusinessValidationError, match="该工作流节点不可重试"):
+        start_product_workflow_run(db_session, product_id=product.id, start_node_id=failed_node.id)
+
+    persisted_run = db_session.get(WorkflowRun, run.id)
+    assert persisted_run is not None
+    persisted_run.finished_at = datetime.now(UTC) - timedelta(seconds=6)
+    node_run = db_session.query(WorkflowNodeRun).filter_by(workflow_run_id=run.id, node_id=failed_node.id).one()
+    node_run.finished_at = persisted_run.finished_at
+    db_session.commit()
+
+    kickoff = start_product_workflow_run(db_session, product_id=product.id, start_node_id=failed_node.id)
+    assert kickoff.created is True
+
+
+def test_retry_failed_workflow_nodes_endpoint_starts_all_retryable_failed_nodes(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    sent_run_ids: list[str] = []
+    monkeypatch.setattr(
+        "productflow_backend.application.product_workflow.execution.enqueue_workflow_run",
+        lambda run_id: sent_run_ids.append(run_id),
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={"name": "失败节点批量重跑商品"},
+        files={"image": ("workflow-retry-failed.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+    workflow_payload = client.get(f"/api/products/{product_id}/workflow").json()
+    failed_node_ids = {
+        node["id"]
+        for node in workflow_payload["nodes"]
+        if node["node_type"] in {"copy_generation", "image_generation"}
+    }
+
+    session = get_session_factory()()
+    try:
+        failed_nodes = session.query(WorkflowNode).filter(WorkflowNode.id.in_(failed_node_ids)).all()
+        active_workflow = failed_nodes[0].workflow
+        failed_at = datetime.now(UTC) - timedelta(seconds=5)
+        failed_run = WorkflowRun(
+            workflow_id=active_workflow.id,
+            status=WorkflowRunStatus.FAILED,
+            failure_reason="节点失败",
+            is_retryable=True,
+            finished_at=failed_at,
+        )
+        session.add(failed_run)
+        session.flush()
+        for node in failed_nodes:
+            node.status = WorkflowNodeStatus.FAILED
+            node.failure_reason = "节点失败"
+            node.last_run_at = failed_at
+            session.add(
+                WorkflowNodeRun(
+                    workflow_run_id=failed_run.id,
+                    node_id=node.id,
+                    status=WorkflowNodeStatus.FAILED,
+                    failure_reason="节点失败",
+                    finished_at=failed_at,
+                )
+            )
+        session.commit()
+    finally:
+        session.close()
+
+    retried = client.post(f"/api/products/{product_id}/workflow/failed-nodes/retry")
+    assert retried.status_code == 202
+    payload = retried.json()
+    latest_run = payload["runs"][0]
+    assert latest_run["status"] == "running"
+    assert {node_run["node_id"] for node_run in latest_run["node_runs"]} == failed_node_ids
+    assert sent_run_ids == [latest_run["id"]]
+
+
 @pytest.mark.parametrize(
     "malformed_requested_slots",
     [

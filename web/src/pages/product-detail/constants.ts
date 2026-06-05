@@ -11,6 +11,7 @@ export const ADD_NODE_OPTIONS: Array<{ type: WorkflowNodeType }> = [
 
 export const MIN_INSPECTOR_WIDTH = 280;
 export const MAX_INSPECTOR_WIDTH = 560;
+export const DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS = 36;
 export const MIN_ZOOM = 0.05;
 export const MAX_ZOOM = 1.6;
 export const IMAGE_PREVIEW_SURFACE_CLASS_NAME =

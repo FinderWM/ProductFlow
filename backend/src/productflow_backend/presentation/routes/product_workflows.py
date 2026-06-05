@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from productflow_backend.application.auth import user_has_api_permission
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.product_workflow import execution as workflow_execution
+from productflow_backend.application.product_workflow.tail_splitter import TailSplitPlanImageGenerationConfig
 from productflow_backend.application.product_workflows import (
     apply_node_group_template_to_workflow,
     apply_tail_split_plan,
@@ -15,6 +16,7 @@ from productflow_backend.application.product_workflows import (
     archive_user_canvas_template,
     bind_workflow_node_image,
     cancel_product_workflow_run,
+    clear_workflow_node_image,
     copy_user_canvas_template_to_global,
     create_canvas_template_category,
     create_global_canvas_template,
@@ -37,6 +39,7 @@ from productflow_backend.application.product_workflows import (
     restore_user_canvas_template,
     retry_product_workflow_run,
     review_user_canvas_template,
+    submit_failed_workflow_nodes_run,
     submit_product_workflow_run,
     update_canvas_template_category,
     update_global_canvas_template,
@@ -778,8 +781,15 @@ def apply_tail_split_plan_endpoint(
         plan_id=payload.plan_id,
         item_ids=payload.item_ids,
         items=payload.items,
+        image_generation_config=(
+            TailSplitPlanImageGenerationConfig(**payload.image_generation_config.model_dump())
+            if payload.image_generation_config is not None
+            else None
+        ),
         position_x=payload.position_x,
         position_y=payload.position_y,
+        reuse_public_copy_node=payload.reuse_public_copy_node,
+        reuse_public_reference_node=payload.reuse_public_reference_node,
         enqueue=lambda run_id: workflow_execution.enqueue_workflow_run(run_id),
     )
     return serialize_product_workflow(workflow)
@@ -843,6 +853,17 @@ def bind_workflow_node_image_endpoint(
         source_asset_id=payload.source_asset_id,
         poster_variant_id=payload.poster_variant_id,
     )
+    return serialize_product_workflow(workflow)
+
+
+@router.delete("/workflow-nodes/{node_id}/image", response_model=ProductWorkflowResponse)
+def clear_workflow_node_image_endpoint(
+    node_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
+) -> ProductWorkflowResponse:
+    _ensure_node_access(session, node_id, current_user, mutate=True)
+    workflow = clear_workflow_node_image(session, node_id=node_id)
     return serialize_product_workflow(workflow)
 
 
@@ -933,4 +954,19 @@ def retry_product_workflow_run_endpoint(
 ) -> ProductWorkflowResponse:
     _ensure_product_access(session, product_id, current_user, mutate=True)
     workflow = retry_product_workflow_run(session, product_id=product_id, run_id=run_id)
+    return serialize_product_workflow(workflow)
+
+
+@router.post(
+    "/products/{product_id}/workflow/failed-nodes/retry",
+    response_model=ProductWorkflowResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_failed_workflow_nodes_endpoint(
+    product_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_GENERATE)),
+) -> ProductWorkflowResponse:
+    _ensure_product_access(session, product_id, current_user, mutate=True)
+    workflow = submit_failed_workflow_nodes_run(session, product_id=product_id)
     return serialize_product_workflow(workflow)

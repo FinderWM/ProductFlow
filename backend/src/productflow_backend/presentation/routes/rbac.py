@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from productflow_backend.application.auth import (
     archive_role,
     create_role,
     create_trusted_user,
     get_role_permissions,
-    list_roles,
+    list_roles_with_user_counts,
     list_users,
     replace_role_permissions,
     reset_user_password,
@@ -24,6 +24,7 @@ from productflow_backend.presentation.schemas.rbac import (
     CreateTrustedUserRequest,
     RbacPermissionCatalogResponse,
     RbacRoleResponse,
+    RbacUserListResponse,
     RbacUserResponse,
     RolePermissionResponse,
     UpdateRolePermissionRequest,
@@ -54,18 +55,21 @@ def list_permission_catalog_endpoint(session: Session = Depends(get_session)) ->
     )
 
 
-@router.get("/users", response_model=list[RbacUserResponse])
-def list_users_endpoint(session: Session = Depends(get_session)) -> list[RbacUserResponse]:
-    users = list(
-        session.scalars(
-            select(AuthUser)
-            .options(selectinload(AuthUser.role))
-            .order_by(AuthUser.is_admin.desc(), AuthUser.created_at)
-        )
+@router.get("/users", response_model=RbacUserListResponse)
+def list_users_endpoint(
+    username: str | None = Query(default=None, max_length=80),
+    role_id: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_session),
+) -> RbacUserListResponse:
+    users, total = list_users(session, page=page, page_size=page_size, username=username, role_id=role_id)
+    return RbacUserListResponse(
+        items=[serialize_user(user) for user in users],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
-    if not users:
-        users = list_users(session)
-    return [serialize_user(user) for user in users]
 
 
 @router.post("/users", response_model=RbacUserResponse, status_code=status.HTTP_201_CREATED)
@@ -102,7 +106,7 @@ def reset_user_password_endpoint(
 
 @router.get("/roles", response_model=list[RbacRoleResponse])
 def list_roles_endpoint(session: Session = Depends(get_session)) -> list[RbacRoleResponse]:
-    return [serialize_role(role) for role in list_roles(session)]
+    return [serialize_role(item.role, user_count=item.user_count) for item in list_roles_with_user_counts(session)]
 
 
 @router.post("/roles", response_model=RbacRoleResponse, status_code=status.HTTP_201_CREATED)

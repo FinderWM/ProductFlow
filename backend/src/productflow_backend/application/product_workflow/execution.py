@@ -65,7 +65,7 @@ from productflow_backend.application.product_workflow.tail_confirmation import (
 )
 from productflow_backend.application.product_workflow.tail_splitter import (
     build_tail_split_plan_output,
-    read_tail_splitter_config,
+    read_tail_splitter_config_for_runtime,
 )
 from productflow_backend.application.product_workflow_dependencies import (
     WorkflowExecutionDependencies,
@@ -317,6 +317,41 @@ def retry_product_workflow_run(
     return kickoff.workflow
 
 
+def submit_failed_workflow_nodes_run(
+    session: Session,
+    *,
+    product_id: str,
+    enqueue: Callable[[str], None] | None = None,
+) -> ProductWorkflow:
+    workflow = get_or_create_product_workflow(session, product_id)
+    node_ids_to_run = _failed_workflow_node_ids_to_retry(workflow)
+    if _active_workflow_run_for_nodes(workflow, node_ids_to_run) is not None:
+        raise BusinessValidationError("相关节点运行中，不能重试")
+    kickoff = start_product_workflow_run(
+        session,
+        product_id=product_id,
+        progress_metadata={
+            "run_mode": "failed_nodes",
+            "manual_retry": True,
+            "retry_node_ids": sorted(node_ids_to_run),
+        },
+        node_ids_to_run_override=node_ids_to_run,
+    )
+    if kickoff.should_enqueue:
+        enqueue_or_mark_failed(
+            kickoff.run_id,
+            enqueue=enqueue or enqueue_workflow_run,
+            mark_failed=lambda run_id, reason: mark_workflow_run_enqueue_failed(
+                session,
+                run_id=run_id,
+                reason=reason,
+            ),
+        )
+        session.expire_all()
+        return product_workflow_graph.get_workflow_or_raise(session, kickoff.workflow.id)
+    return kickoff.workflow
+
+
 def cancel_product_workflow_run(
     session: Session,
     *,
@@ -413,6 +448,22 @@ def _workflow_run_retry_progress_metadata(run: WorkflowRun) -> dict[str, Any] | 
     metadata["source_run_id"] = run.id
     metadata["manual_retry"] = True
     return metadata
+
+
+def _failed_workflow_node_ids_to_retry(workflow: ProductWorkflow) -> set[str]:
+    failed_nodes = [
+        node
+        for node in workflow.nodes
+        if node.status == WorkflowNodeStatus.FAILED and node.failure_reason != WORKFLOW_CANCELLED_REASON
+    ]
+    if not failed_nodes:
+        raise BusinessValidationError("画布没有可重新运行的失败节点")
+    non_retryable_nodes = [
+        node for node in failed_nodes if not workflow_node_failed_run_is_retryable(node, workflow.runs)
+    ]
+    if non_retryable_nodes:
+        raise BusinessValidationError("存在不可重试的失败节点，请调整节点设置或全局重试次数后重试")
+    return {node.id for node in failed_nodes}
 
 
 def _workflow_run_mode(run: WorkflowRun) -> str:
@@ -1301,10 +1352,11 @@ def _normalize_copy_node_config_for_execution(raw_config: dict[str, Any] | None)
 
 def _normalize_tail_splitter_config_for_execution(raw_config: dict[str, Any] | None):
     try:
-        return read_tail_splitter_config(raw_config)
+        return read_tail_splitter_config_for_runtime(raw_config)
     except ValueError as exc:
+        detail = str(exc) or "尾巴节点配置无效，请调整节点设置后重试"
         raise WorkflowSafeExecutionError(
-            "尾巴节点配置无效，请调整节点设置后重试",
+            detail,
             retryable=False,
             retry_hint="revise_input",
             failure_category="invalid_node_config",

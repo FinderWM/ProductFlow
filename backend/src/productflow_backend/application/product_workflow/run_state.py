@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from dramatiq.middleware.time_limit import TimeLimitExceeded
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from productflow_backend.application.admission import generation_running_capacity_available
 from productflow_backend.application.product_workflow import graph as product_workflow_graph
 from productflow_backend.application.time import now_utc
+from productflow_backend.config import get_runtime_settings
 from productflow_backend.domain.durable_generation_tasks import WORKFLOW_RUN_GENERATION_TASK_CONTRACT
 from productflow_backend.domain.enums import WorkflowNodeStatus, WorkflowRunStatus
 from productflow_backend.infrastructure.db.models import WorkflowNode, WorkflowNodeRun, WorkflowRun
@@ -22,6 +24,24 @@ logger = logging.getLogger(__name__)
 WORKFLOW_WORKER_TIMEOUT_FAILURE = "工作流执行超时，请稍后重试"
 WORKFLOW_CANCELLED_REASON = "已取消"
 PRODUCT_WORKFLOW_CAPACITY_RETRY_DELAY_MS = 2000
+
+
+def _workflow_node_max_retry_count(max_retry_count: int | None = None) -> int:
+    if max_retry_count is not None:
+        return max(0, int(max_retry_count))
+    return max(0, int(get_runtime_settings().workflow_node_max_retry_count))
+
+
+def _workflow_node_retry_delay_ms(retry_delay_ms: int | None = None) -> int:
+    if retry_delay_ms is not None:
+        return max(0, int(retry_delay_ms))
+    return max(0, int(get_runtime_settings().workflow_node_retry_delay_ms))
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def workflow_run_failure_progress_metadata(
@@ -92,8 +112,93 @@ def workflow_run_failure_context(exc: BaseException) -> dict[str, Any]:
     }
 
 
-def workflow_node_failed_run_is_retryable(node: WorkflowNode, runs: list[WorkflowRun]) -> bool:
+def workflow_node_attempt_runs(
+    node: WorkflowNode,
+    runs: list[WorkflowRun],
+) -> list[tuple[WorkflowRun, WorkflowNodeRun]]:
+    ordered_runs = sorted(runs, key=lambda item: (item.started_at, item.id))
+    attempts: list[tuple[WorkflowRun, WorkflowNodeRun]] = []
+    for run in ordered_runs:
+        for node_run in run.node_runs:
+            if node_run.node_id != node.id:
+                continue
+            if node_run.failure_reason == "上游节点失败":
+                continue
+            attempts.append((run, node_run))
+            break
+    return attempts
+
+
+def workflow_node_attempt_count(node: WorkflowNode, runs: list[WorkflowRun]) -> int:
+    return len(workflow_node_attempt_runs(node, runs))
+
+
+def workflow_node_retry_count(node: WorkflowNode, runs: list[WorkflowRun]) -> int:
+    return max(0, workflow_node_attempt_count(node, runs) - 1)
+
+
+def workflow_node_latest_failed_attempt(
+    node: WorkflowNode,
+    runs: list[WorkflowRun],
+) -> tuple[WorkflowRun, WorkflowNodeRun] | None:
+    attempts = workflow_node_attempt_runs(node, runs)
+    for run, node_run in reversed(attempts):
+        if run.status == WorkflowRunStatus.FAILED and node_run.status == WorkflowNodeStatus.FAILED:
+            return run, node_run
+    return None
+
+
+def workflow_node_retry_limit_reason(
+    node: WorkflowNode,
+    runs: list[WorkflowRun],
+    *,
+    max_retry_count: int | None = None,
+) -> str | None:
     if node.status != WorkflowNodeStatus.FAILED or node.failure_reason == WORKFLOW_CANCELLED_REASON:
+        return None
+    resolved_limit = _workflow_node_max_retry_count(max_retry_count)
+    if workflow_node_retry_count(node, runs) < resolved_limit:
+        return None
+    return f"节点失败重试次数已达上限（{resolved_limit}）"
+
+
+def workflow_node_retry_delay_reason(
+    node: WorkflowNode,
+    runs: list[WorkflowRun],
+    *,
+    retry_delay_ms: int | None = None,
+) -> str | None:
+    if node.status != WorkflowNodeStatus.FAILED or node.failure_reason == WORKFLOW_CANCELLED_REASON:
+        return None
+    resolved_delay_ms = _workflow_node_retry_delay_ms(retry_delay_ms)
+    if resolved_delay_ms <= 0:
+        return None
+    latest_failed_attempt = workflow_node_latest_failed_attempt(node, runs)
+    if latest_failed_attempt is None:
+        return None
+    run, node_run = latest_failed_attempt
+    failed_at = node_run.finished_at or run.finished_at or node.last_run_at
+    if failed_at is None:
+        return None
+    retry_after = _as_aware_utc(failed_at) + timedelta(milliseconds=resolved_delay_ms)
+    remaining_ms = int((retry_after - now_utc()).total_seconds() * 1000)
+    if remaining_ms <= 0:
+        return None
+    return f"节点失败后需等待 {remaining_ms}ms 后重试"
+
+
+def workflow_node_failed_run_is_retryable(
+    node: WorkflowNode,
+    runs: list[WorkflowRun],
+    *,
+    max_retry_count: int | None = None,
+    retry_delay_ms: int | None = None,
+) -> bool:
+    if node.status != WorkflowNodeStatus.FAILED or node.failure_reason == WORKFLOW_CANCELLED_REASON:
+        return False
+    if workflow_node_retry_limit_reason(node, runs, max_retry_count=max_retry_count) is not None:
+        return False
+    if workflow_node_retry_delay_reason(node, runs, retry_delay_ms=retry_delay_ms) is not None:
         return False
     ordered_runs = sorted(runs, key=lambda item: (item.started_at, item.id), reverse=True)
     for run in ordered_runs:

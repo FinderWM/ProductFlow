@@ -89,6 +89,10 @@ User-visible UI chrome should use the local i18n helpers instead of hard-coded o
 - Keep product/operator/model-authored data as source text. Do not translate product names, custom node titles, user
   template titles/descriptions returned by the backend, prompts, generated copy, filenames, provider messages, or
   `ApiError.detail`.
+- Prompt configuration help, runtime-setting explanations, and parameter-help examples should stay domain-neutral unless
+  the UI field is explicitly ecommerce-only. Prefer project/content material, context, subject, visual content, website
+  page, social post, and demo page examples over Taobao, ecommerce detail pages, main-image copy, or selling-point-only
+  wording.
 - Backend-owned built-in canvas template catalog text is system UI chrome. Localize it in frontend helpers by stable
   built-in template key and node/output/reference identifiers, while leaving user templates and user-renamed node titles
   as source text.
@@ -97,6 +101,21 @@ User-visible UI chrome should use the local i18n helpers instead of hard-coded o
   an already-localized system label.
 - Default system labels should be locale-aware. If a helper suppresses legacy default titles, it must recognize defaults
   from both supported locales so older records such as `参考图 2` do not leak into the English UI.
+- Parameter help content uses the global registry in `web/src/lib/parameterHelp.ts`. Add stable keys to
+  `PARAMETER_HELP_REGISTRY`, put all visible help text in `web/src/lib/i18n.ts`, and render entries through
+  `ParameterHelpButton` / `ParameterHelpLabel` from `web/src/components/ParameterHelp.tsx`.
+- Parameter help presentation also belongs to the registry layer: `PARAMETER_HELP_UI_CLASS_REGISTRY` defines page-level
+  defaults by `ParameterHelpUiType`, and each help entry may override class names by `helpKey + uiType` through
+  `uiClassNames`. Triggering components pass the nearest page `uiType` such as `productDetail`, `create`, `imageChat`, or
+  `settings`.
+- Use parameter help only for fields whose behavior has domain or provider nuance, such as workflow instructions,
+  generation config selection, provider tool options, product context documents, dynamic fields, and runtime queue
+  settings. Do not add help icons to self-evident fields such as names, titles, labels, body text, width/height,
+  aspect/resolution pickers, search filters, pagination, common CRUD controls, or RBAC username/role fields.
+- Dynamic backend runtime config rows may use keys in the shape `settings.config.${key}` with a content override derived
+  from the backend label/description/range metadata instead of adding a static registry entry for every runtime setting.
+- Parameter help dialogs are page-level portal overlays. They must close through Escape and the close button, and their
+  click/keyboard handling must not trigger canvas selection, form submission, or file-picker labels.
 
 Good:
 
@@ -138,6 +157,11 @@ Follow the patterns already present:
 - Image upload drop zones use the shared `ImageDropZone` component. Pages own the upload mutation and pass an `onFiles`
   callback; the shared component only handles click, keyboard, drag/drop, `accept`, `multiple`, and disabled/focus states.
   Use the default single-file mode for product/workflow images and `multiple` for session reference images.
+- `ImageDropZone` should use the standard label pattern: the visible custom drop zone is a `<label>`, and the
+  `input[type="file"]` inside it is visually hidden with `sr-only`. This keeps the custom upload UI clean while letting
+  mouse clicks open the native picker through label activation. Do not render the browser's default visible "choose file"
+  button inside the custom drop zone, and do not use `display: none`, Tailwind `hidden`, `opacity: 0`, transparent
+  file-button text, invisible overlay controls, or `showPicker()` for normal mouse clicks.
 - Loading states use `Loader2` with `animate-spin`; disabled buttons use `disabled` and reduced opacity.
 - Errors are rendered near the relevant action as text or red alert blocks.
 
@@ -199,6 +223,9 @@ preview-sized assets, explicit download actions should use download URLs, and ro
   `1500x800` becomes `1504x800`.
 - The shared picker displays image aspect and resolution as two separate choices. Aspect options are derived from the
   shared preset set plus the built-in common aspect order, while resolution options are filtered by the selected aspect.
+- Built-in common aspect order should cover marketplace, social feed, photo, video, and wide-display use cases:
+  `1:1`, `4:5`, `5:4`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9`, and ultra-wide `21:9`.
+  Internally `21:9` may normalize to `7:3`; the picker should display it as `21:9` so users see the familiar label.
 - Custom aspect input accepts ratio forms such as `4:5`, `4/5`, and `16x9`; it must only emit a size after the ratio can
   be parsed and a provider-safe resolution can be resolved.
 
@@ -223,6 +250,8 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 - Built-in generated-image presets must also stay within max total pixels `8,294,400`, max aspect ratio `3:1`, and 16px
   multiple dimensions. Do not offer 4K square presets such as `3840x3840`; custom oversized square inputs should calibrate
   down to a safe value such as `2880x2880`.
+- Common social/video sizes that are not 16px-safe, such as `1080x1350` or `1920x1080`, should inform nearby preset
+  choices but should not be emitted as built-in buttons unless the backend safety contract changes.
 - The picker should preserve and round-trip unknown valid values by switching to custom width/height mode instead of
   resetting to the first preset. For unknown valid values, derive the aspect from the normalized size and show the value in
   custom dimensions when it is not one of the selected aspect's resolution buttons.
@@ -242,8 +271,10 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 
 - Good: `3840x2160` from workflow node config opens the inspector with custom dimensions `3840` and `2160`, then submits
   `3840x2160` unchanged.
-- Base: `1024x1024`, `2048x2048`, and `3840x2160` appear as preset buttons when present in the derived presets.
+- Base: `1024x1024`, `2048x2048`, `4:5` portrait presets, `9:16` vertical presets, and `3840x2160` appear as preset
+  buttons when present in the derived presets.
 - Bad: `3840x3840` appears as a default preset even though the backend will calibrate it down.
+- Bad: `21:9` and `7:3` appear as separate aspect buttons for the same ultra-wide ratio.
 - Bad: `ImageChatPage` accepts custom dimensions while `InspectorPanel` still exposes a raw text field.
 - Bad: `ImageChatPage` supports provider quality/format/fidelity fields while `InspectorPanel` has a separate partial
   implementation or sends raw unnormalized `tool_options`.

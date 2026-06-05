@@ -152,6 +152,12 @@ For runtime settings:
 - UI/API metadata, allowed values, min/max, and secret masking live in `CONFIG_DEFINITIONS`.
 - Database rows override only keys in `RUNTIME_CONFIG_KEYS`.
 - Reset deletes the database row and falls back to the env/default `Settings` value.
+- Global generation runtime settings use `CONFIG_DEFINITIONS.category` values prefixed with `全局生成配置 / ...` so the
+  settings UI can group queue capacity, scheduler defaults, recovery, and workflow-specific limits without adding a new
+  database table.
+- Prompt runtime setting labels, descriptions, and default prompt constants should stay domain-neutral. Use terms such as
+  project/content material, context, subject, visual content, and structured copy instead of ecommerce-only labels such as
+  Taobao, product detail page, main image copy, or selling points unless the setting is explicitly limited to that flow.
 
 ## Scenario: Provider profile and generation config pool
 

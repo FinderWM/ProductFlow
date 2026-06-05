@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  configCategoryGroups,
   configValuesFromChangedDrafts,
   draftsFromConfig,
   filterProviderModels,
@@ -176,6 +177,49 @@ describe("SettingsPage draft helpers", () => {
 
     expect(unchanged).toEqual({});
     expect(changed).toEqual({ image_tool_allowed_fields: ["model", "quality"] });
+  });
+
+  it("groups global generation config items by backend category suffix", () => {
+    const groups = configCategoryGroups([
+      configItem({
+        key: "generation_max_concurrent_tasks",
+        category: "全局生成配置 / 队列容量",
+        value: 3,
+      }),
+      configItem({
+        key: "generation_tail_splitter_max_items",
+        category: "全局生成配置 / 工作流生成",
+        value: 36,
+      }),
+      configItem({
+        key: "workflow_image_generation_provider_timeout_seconds",
+        category: "全局生成配置 / 工作流生成",
+        value: 900,
+      }),
+      configItem({
+        key: "workflow_node_max_retry_count",
+        category: "全局生成配置 / 工作流生成",
+        value: 10,
+      }),
+      configItem({
+        key: "workflow_node_retry_delay_ms",
+        category: "全局生成配置 / 工作流生成",
+        value: 2000,
+      }),
+    ]);
+
+    expect(groups.map((group) => [group.title, group.items.map((item) => item.key)])).toEqual([
+      ["队列容量", ["generation_max_concurrent_tasks"]],
+      [
+        "工作流生成",
+        [
+          "generation_tail_splitter_max_items",
+          "workflow_image_generation_provider_timeout_seconds",
+          "workflow_node_max_retry_count",
+          "workflow_node_retry_delay_ms",
+        ],
+      ],
+    ]);
   });
 });
 
@@ -539,7 +583,7 @@ describe("SettingsPage import/export helpers", () => {
   it("normalizes import preview summary counts for confirmation copy", () => {
     const preview: SettingsImportPreviewResponse = {
       schema_version: 1,
-      runtime_config_count: 12,
+      runtime_config_count: 14,
       provider_profile_count: 2,
       provider_binding_count: 2,
       generation_config_count: 2,
@@ -554,7 +598,7 @@ describe("SettingsPage import/export helpers", () => {
     };
 
     expect(settingsImportSummaryCounts(preview)).toEqual({
-      runtimeConfigCount: 12,
+      runtimeConfigCount: 14,
       providerProfileCount: 2,
       providerBindingCount: 2,
       generationConfigCount: 2,

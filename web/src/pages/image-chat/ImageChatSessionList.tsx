@@ -8,7 +8,7 @@ import {
 } from "../../components/ResourceGovernance";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
-import type { ImageSessionSummary } from "../../lib/types";
+import type { ImageSessionSummary, SessionUser } from "../../lib/types";
 import type { ImageChatTranslate } from "./display";
 
 interface ImageChatSessionListProps {
@@ -17,6 +17,8 @@ interface ImageChatSessionListProps {
   selectedSessionId: string | null;
   deletingSessionId: string | null;
   deletionEnabled: boolean;
+  deletionBlockedTitle?: string | null;
+  currentUser?: SessionUser | null;
   variant: "desktop" | "mobile";
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -29,6 +31,8 @@ export function ImageChatSessionList({
   selectedSessionId,
   deletingSessionId,
   deletionEnabled,
+  deletionBlockedTitle = null,
+  currentUser = null,
   variant,
   onSelectSession,
   onDeleteSession,
@@ -67,6 +71,8 @@ export function ImageChatSessionList({
             active={item.id === selectedSessionId}
             deleting={deletingSessionId === item.id}
             deletionEnabled={deletionEnabled}
+            deletionBlockedTitle={deletionBlockedTitle}
+            currentUser={currentUser}
             variant={variant}
             onSelectSession={onSelectSession}
             onDeleteSession={onDeleteSession}
@@ -87,6 +93,8 @@ interface ImageChatSessionCardProps {
   active: boolean;
   deleting: boolean;
   deletionEnabled: boolean;
+  deletionBlockedTitle: string | null;
+  currentUser: SessionUser | null;
   variant: "desktop" | "mobile";
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -98,6 +106,8 @@ function ImageChatSessionCard({
   active,
   deleting,
   deletionEnabled,
+  deletionBlockedTitle,
+  currentUser,
   variant,
   onSelectSession,
   onDeleteSession,
@@ -121,6 +131,8 @@ function ImageChatSessionCard({
   const blocked = isResourceBlocked(item);
   const deleted = isResourceDeleted(item);
   const blockedTitle = getResourceBlockedActionTitle(item, t("resource.blockedAction"));
+  const adminReadonly = Boolean(currentUser?.is_admin && item.owner_user_id && currentUser.id !== item.owner_user_id);
+  const deleteDisabled = deleting || !deletionEnabled || Boolean(deletionBlockedTitle) || blocked || deleted || adminReadonly;
 
   return (
     <div className={cardClassName}>
@@ -155,15 +167,19 @@ function ImageChatSessionCard({
         type="button"
         aria-label={t("chat.deleteSession")}
         onClick={() => onDeleteSession(item.id)}
-        disabled={deleting || !deletionEnabled || blocked || deleted}
+        disabled={deleteDisabled}
         title={
           deleted
             ? t("resource.deleted")
             : blocked
               ? blockedTitle
-              : deletionEnabled
-                ? t("chat.deleteSession")
-                : t("chat.deleteDisabled")
+              : deletionBlockedTitle
+                ? deletionBlockedTitle
+                : adminReadonly
+                  ? t("resource.adminReadonlyAction")
+                  : deletionEnabled
+                    ? t("chat.deleteSession")
+                    : t("chat.deleteDisabled")
         }
         className={deleteClassName}
       >

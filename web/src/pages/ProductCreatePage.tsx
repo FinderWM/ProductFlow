@@ -4,6 +4,7 @@ import {
   Check,
   ChevronRight,
   Eye,
+  EyeOff,
   FileText,
   ImagePlus,
   LayoutTemplate,
@@ -20,6 +21,7 @@ import { useNavigate } from "react-router-dom";
 
 import { ImageDropZone } from "../components/ImageDropZone";
 import { MarkdownEditor } from "../components/MarkdownEditor";
+import { ParameterHelpButton, ParameterHelpLabel } from "../components/ParameterHelp";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -85,6 +87,7 @@ const NODE_HEIGHT = 92;
 const PREVIEW_HEIGHT = 560;
 const PRODUCT_CREATE_FORM_ID = "product-create-form";
 type MobileCreateStep = "entry" | "details" | "template";
+export type DocumentTextState = "idle" | "loading" | "ready" | "failed";
 
 const NODE_TYPE_LABEL_KEYS: Record<WorkflowNodeType, TranslationKey> = {
   product_context: "create.productContext",
@@ -230,6 +233,10 @@ function groupedPlans(
     .map((stage) => ({ stage, label: stageLabelKeys[stage] ? t(stageLabelKeys[stage]) : stage, plans: groups.get(stage) ?? [] }));
 }
 
+export function contextDocumentFileForSubmit(file: File | null): File | undefined {
+  return file ?? undefined;
+}
+
 export function ProductCreatePage() {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
@@ -237,6 +244,10 @@ export function ProductCreatePage() {
   const [longText, setLongText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [contextDocumentFile, setContextDocumentFile] = useState<File | null>(null);
+  const [contextDocumentText, setContextDocumentText] = useState("");
+  const [contextDocumentTextState, setContextDocumentTextState] = useState<DocumentTextState>("idle");
+  const [contextDocumentPreviewOpen, setContextDocumentPreviewOpen] = useState(false);
+  const contextDocumentTextFileRef = useRef<File | null>(null);
   const [dynamicFields, setDynamicFields] = useState<Array<DynamicFieldDraft & { id: string }>>([]);
   const [initialWorkflowEntry, setInitialWorkflowEntry] = useState<ProductInitialWorkflowEntry>("image");
   const [canvasTemplateKey, setCanvasTemplateKey] = useState<string>("");
@@ -376,6 +387,45 @@ export function ProductCreatePage() {
     return file.name;
   }, [file, mainImageRequired, t]);
 
+  useEffect(() => {
+    if (!contextDocumentFile) {
+      setContextDocumentText("");
+      setContextDocumentTextState("idle");
+      contextDocumentTextFileRef.current = null;
+      return;
+    }
+    if (!contextDocumentPreviewOpen) {
+      return;
+    }
+    if (contextDocumentTextFileRef.current === contextDocumentFile && contextDocumentTextState !== "idle") {
+      return;
+    }
+    let active = true;
+    setContextDocumentText("");
+    setContextDocumentTextState("loading");
+    void contextDocumentFile
+      .text()
+      .then((text) => {
+        if (!active) {
+          return;
+        }
+        contextDocumentTextFileRef.current = contextDocumentFile;
+        setContextDocumentText(text);
+        setContextDocumentTextState("ready");
+      })
+      .catch(() => {
+        if (!active) {
+          return;
+        }
+        contextDocumentTextFileRef.current = contextDocumentFile;
+        setContextDocumentText("");
+        setContextDocumentTextState("failed");
+      });
+    return () => {
+      active = false;
+    };
+  }, [contextDocumentFile, contextDocumentPreviewOpen]);
+
   const validateCreateDraft = (options?: { checkResource?: boolean }) => {
     if (!name.trim()) {
       return t("create.requiredName");
@@ -421,7 +471,7 @@ export function ProductCreatePage() {
         name: name.trim(),
         long_text: trimmedLongText || undefined,
         file: file ?? undefined,
-        contextDocumentFile: contextDocumentFile ?? undefined,
+        contextDocumentFile: contextDocumentFileForSubmit(contextDocumentFile),
         dynamic_fields: Object.keys(dynamicFieldsPayload).length ? dynamicFieldsPayload : undefined,
         canvas_template_key: selectedPlan.key || undefined,
         initial_workflow_entry: initialWorkflowEntry,
@@ -452,7 +502,24 @@ export function ProductCreatePage() {
   };
 
   const handleDocumentFiles = (files: File[]) => {
-    setContextDocumentFile(files[0] ?? null);
+    const nextFile = files[0] ?? null;
+    if (contextDocumentFile && nextFile) {
+      return;
+    }
+    setContextDocumentPreviewOpen(false);
+    setContextDocumentText("");
+    setContextDocumentTextState("idle");
+    contextDocumentTextFileRef.current = null;
+    setContextDocumentFile(nextFile);
+    setError("");
+  };
+
+  const clearContextDocument = () => {
+    setContextDocumentFile(null);
+    setContextDocumentText("");
+    setContextDocumentTextState("idle");
+    setContextDocumentPreviewOpen(false);
+    contextDocumentTextFileRef.current = null;
     setError("");
   };
 
@@ -787,6 +854,7 @@ export function ProductCreatePage() {
               <div className="mt-5">
                 <MarkdownEditor
                   label={t("create.longText")}
+                  labelHelp={<ParameterHelpButton helpKey="productContextLongText" uiType="create" />}
                   value={longText}
                   modalTitle={t("create.longText")}
                   maxLength={PRODUCT_CONTEXT_MARKDOWN_MAX_LENGTH}
@@ -826,44 +894,109 @@ export function ProductCreatePage() {
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
                     <div className="text-sm font-medium text-zinc-700 dark:text-slate-300">
-                      {t("create.contextDocument")}
+                      <ParameterHelpLabel
+                        label={t("create.contextDocument")}
+                        helpKey="productContextDocument"
+                        uiType="create"
+                      />
                     </div>
                     <div className="mt-1 text-xs text-zinc-500 dark:text-slate-400">
-                      {contextDocumentFile ? contextDocumentFile.name : t("create.contextDocumentHint")}
+                      {contextDocumentFile ? t("create.contextDocumentLockedHint") : t("create.contextDocumentHint")}
                     </div>
                   </div>
-                  {contextDocumentFile ? (
-                    <button
-                      type="button"
-                      onClick={() => setContextDocumentFile(null)}
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 transition-colors hover:border-red-200 hover:text-red-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-red-400/50 dark:hover:text-red-200"
-                      aria-label={t("create.clearDocument")}
-                      title={t("create.clearDocument")}
-                    >
-                      <X size={14} />
-                    </button>
-                  ) : null}
                 </div>
-                <ImageDropZone
-                  accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
-                  ariaLabel={t("create.contextDocument")}
-                  className="flex cursor-pointer items-center justify-center rounded-md border border-dashed border-zinc-300 bg-white px-3 py-3 text-xs font-medium text-zinc-600 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10"
-                  onFiles={handleDocumentFiles}
-                >
-                  {({ isDragging }) => (
-                    <span className="inline-flex items-center gap-2">
-                      <FileText size={14} />
-                      {isDragging ? t("create.documentDrop") : t("create.documentUpload")}
-                    </span>
-                  )}
-                </ImageDropZone>
+                {contextDocumentFile ? (
+                  <div className="space-y-3">
+                    <div className="rounded-md border border-zinc-200 bg-white p-3 dark:border-slate-700 dark:bg-[#111b2d]">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+                          <FileText size={14} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-semibold text-zinc-700 dark:text-slate-100">
+                            {contextDocumentFile.name}
+                          </div>
+                          {contextDocumentFile.type ? (
+                            <div className="mt-0.5 truncate text-[11px] text-zinc-400 dark:text-slate-500">
+                              {t("create.documentMimeType", { mime: contextDocumentFile.type })}
+                            </div>
+                          ) : null}
+                          <div className="mt-1 text-[11px] leading-5 text-zinc-500 dark:text-slate-400">
+                            {t("create.contextDocumentRemoveHint")}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setContextDocumentPreviewOpen((current) => !current)}
+                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                          aria-expanded={contextDocumentPreviewOpen}
+                          aria-label={contextDocumentPreviewOpen ? t("create.hideDocumentPreview") : t("create.showDocumentPreview")}
+                          title={contextDocumentPreviewOpen ? t("create.hideDocumentPreview") : t("create.showDocumentPreview")}
+                        >
+                          {contextDocumentPreviewOpen ? <EyeOff size={13} /> : <Eye size={13} />}
+                          {contextDocumentPreviewOpen ? t("create.hideDocumentPreview") : t("create.showDocumentPreview")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearContextDocument}
+                          className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 dark:border-red-400/35 dark:bg-slate-950/40 dark:text-red-200 dark:hover:border-red-300/70 dark:hover:bg-red-500/10"
+                          aria-label={t("create.clearDocument")}
+                          title={t("create.clearDocument")}
+                        >
+                          <X size={13} />
+                          {t("create.clearDocument")}
+                        </button>
+                      </div>
+                    </div>
+                    {contextDocumentPreviewOpen && (contextDocumentTextState === "idle" || contextDocumentTextState === "loading") ? (
+                      <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-400">
+                        {t("create.documentReading")}
+                      </div>
+                    ) : null}
+                    {contextDocumentPreviewOpen && contextDocumentTextState === "failed" ? (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                        {t("create.documentPreviewUnavailable")}
+                      </div>
+                    ) : null}
+                    {contextDocumentPreviewOpen && contextDocumentTextState === "ready" ? (
+                      <MarkdownEditor
+                        label={t("create.documentPreview")}
+                        value={contextDocumentText}
+                        modalTitle={contextDocumentFile.name}
+                        helpText={t("create.documentPreviewHelp")}
+                        minRows={4}
+                        readOnly
+                      />
+                    ) : null}
+                  </div>
+                ) : (
+                  <ImageDropZone
+                    accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                    ariaLabel={t("create.contextDocument")}
+                    className="flex cursor-pointer items-center justify-center rounded-md border border-dashed border-zinc-300 bg-white px-3 py-3 text-xs font-medium text-zinc-600 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10"
+                    onFiles={handleDocumentFiles}
+                  >
+                    {({ isDragging }) => (
+                      <span className="inline-flex items-center gap-2">
+                        <FileText size={14} />
+                        {isDragging ? t("create.documentDrop") : t("create.documentUpload")}
+                      </span>
+                    )}
+                  </ImageDropZone>
+                )}
               </div>
 
               <div className="mt-5 rounded-md border border-zinc-200 bg-zinc-50/60 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-medium text-zinc-700 dark:text-slate-300">
-                      {t("create.dynamicFields")}
+                      <ParameterHelpLabel
+                        label={t("create.dynamicFields")}
+                        helpKey="productContextDynamicFields"
+                        uiType="create"
+                      />
                     </div>
                     <div className="mt-1 text-xs text-zinc-500 dark:text-slate-400">
                       {t("create.dynamicFieldsHint")}

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
   Clock3,
+  Eye,
+  EyeOff,
   FileText,
   Image as ImageIcon,
   ImagePlus,
@@ -21,6 +23,7 @@ import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSe
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../../components/ImageGenerationSettingsTabs";
 import { ImageToolControls } from "../../components/ImageToolControls";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
+import { ParameterHelpButton } from "../../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
 import { SelectField } from "../../components/SelectField";
 import type { DownloadableImage } from "../../lib/image-downloads";
@@ -28,6 +31,7 @@ import type { ImageSizeOption } from "../../lib/imageSizes";
 import { formatDateTime, formatPrice } from "../../lib/format";
 import type { TranslationKey, TranslationParams } from "../../lib/i18n";
 import { PRODUCT_CONTEXT_MARKDOWN_MAX_LENGTH } from "../../lib/markdown";
+import type { ParameterHelpKey } from "../../lib/parameterHelp";
 import { useI18n } from "../../lib/preferences";
 import type {
   CopyBlock,
@@ -110,6 +114,85 @@ function generationConfigOptionLabel(config: GenerationConfigOption, t: TFunctio
   return `${config.name}${suffix}`;
 }
 
+function FieldLabel({
+  label,
+  helpKey,
+  className = "mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400",
+}: {
+  label: string;
+  helpKey?: ParameterHelpKey;
+  className?: string;
+}) {
+  return (
+    <span className={`${className} inline-flex items-center gap-1`}>
+      <span>{label}</span>
+      {helpKey ? <ParameterHelpButton helpKey={helpKey} uiType="productDetail" /> : null}
+    </span>
+  );
+}
+
+const INSPECTOR_TEXTAREA_LINE_HEIGHT_PX = 19;
+const INSPECTOR_TEXTAREA_VERTICAL_PADDING_PX = 16;
+
+function InspectorTextArea({
+  label,
+  value,
+  onChange,
+  minRows = 2,
+  maxRows,
+  placeholder,
+  onBlur,
+  helpKey,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  minRows?: number;
+  maxRows?: number;
+  placeholder?: string;
+  onBlur?: () => void;
+  helpKey?: ParameterHelpKey;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textareaId = useId();
+  const minHeight = minRows * INSPECTOR_TEXTAREA_LINE_HEIGHT_PX + INSPECTOR_TEXTAREA_VERTICAL_PADDING_PX;
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.style.height = "auto";
+    const maxHeight =
+      maxRows === undefined
+        ? Number.POSITIVE_INFINITY
+        : maxRows * INSPECTOR_TEXTAREA_LINE_HEIGHT_PX + INSPECTOR_TEXTAREA_VERTICAL_PADDING_PX;
+    const nextHeight = Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight));
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [maxRows, minHeight, value]);
+
+  return (
+    <div className="block">
+      <div className="mb-1.5 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+        <label htmlFor={textareaId}>{label}</label>
+        {helpKey ? <ParameterHelpButton helpKey={helpKey} uiType="productDetail" /> : null}
+      </div>
+      <textarea
+        id={textareaId}
+        ref={textareaRef}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+        placeholder={placeholder}
+        rows={minRows}
+        style={{ minHeight }}
+        className="w-full resize-none px-3 py-2 text-xs leading-relaxed outline-none textarea-premium"
+      />
+    </div>
+  );
+}
+
 interface InspectorPanelProps {
   product: ProductDetail;
   sourceImage: DownloadableImage | null;
@@ -119,6 +202,7 @@ interface InspectorPanelProps {
   imageSizeOptions: ImageSizeOption[];
   imageGenerationMaxDimension: number;
   imageToolAllowedFields: readonly ImageToolOptionKey[];
+  tailSplitterMaxItems: number;
   generationConfigs: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   onPreviewImage: (image: DownloadableImage) => void;
@@ -126,6 +210,7 @@ interface InspectorPanelProps {
   onCancelRun: (() => void) | null;
   onUploadImage: (file: File) => void;
   onUploadDocument: (file: File) => void;
+  onClearImage: () => void;
   onDelete: () => void;
   busy: boolean;
   cancelBusy: boolean;
@@ -142,6 +227,7 @@ export function InspectorPanel({
   imageSizeOptions,
   imageGenerationMaxDimension,
   imageToolAllowedFields,
+  tailSplitterMaxItems,
   generationConfigs,
   onDraftChange,
   onPreviewImage,
@@ -149,6 +235,7 @@ export function InspectorPanel({
   onCancelRun,
   onUploadImage,
   onUploadDocument,
+  onClearImage,
   onDelete,
   busy,
   cancelBusy,
@@ -324,32 +411,31 @@ export function InspectorPanel({
       </section>
 
       <section className="config-bubble rounded-2xl p-4 shadow-sm">
-        <div className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-slate-300">
-          {t("detail.inspector.config")}
-        </div>
-        <label className="mb-3 block">
-          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-            {t("detail.inspector.nodeName")}
-          </span>
-          <input
-            value={draft.title}
-            onChange={(event) =>
-              onDraftChange({ ...draft, title: event.target.value })
-            }
-            className="w-full px-3 py-2.5 text-sm outline-none input-premium"
-          />
-        </label>
-        <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
-          {node.node_type === "image_generation"
-            ? t("detail.inspector.description.imageGeneration")
-            : node.node_type === "reference_image"
-              ? t("detail.inspector.description.referenceImage")
-              : node.node_type === "copy_generation"
-                ? t("detail.inspector.description.copyGeneration")
-                : node.node_type === "tail_splitter"
-                  ? t("detail.inspector.description.tailSplitter")
-                : t("detail.inspector.description.productContext")}
-        </div>
+        <fieldset disabled={busy} className="min-w-0">
+          <div className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-slate-300">
+            {t("detail.inspector.config")}
+          </div>
+          <label className="mb-3 block">
+            <FieldLabel label={t("detail.inspector.nodeName")} />
+            <input
+              value={draft.title}
+              onChange={(event) =>
+                onDraftChange({ ...draft, title: event.target.value })
+              }
+              className="w-full px-3 py-2.5 text-sm outline-none input-premium"
+            />
+          </label>
+          <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
+            {node.node_type === "image_generation"
+              ? t("detail.inspector.description.imageGeneration")
+              : node.node_type === "reference_image"
+                ? t("detail.inspector.description.referenceImage")
+                : node.node_type === "copy_generation"
+                  ? t("detail.inspector.description.copyGeneration")
+                  : node.node_type === "tail_splitter"
+                    ? t("detail.inspector.description.tailSplitter")
+                  : t("detail.inspector.description.productContext")}
+          </div>
 
         {node.node_type === "product_context" ? (
           <ProductContextInspector
@@ -369,6 +455,7 @@ export function InspectorPanel({
             draft={draft}
             onDraftChange={onDraftChange}
             onUploadImage={onUploadImage}
+            onClearImage={onClearImage}
             busy={busy}
             hasImage={hasReferenceImage}
             image={referenceImage}
@@ -388,6 +475,7 @@ export function InspectorPanel({
         {node.node_type === "tail_splitter" ? (
           <TailSplitterInspector
             draft={draft}
+            tailSplitterMaxItems={tailSplitterMaxItems}
             generationConfigs={generationConfigs.filter((config) => config.purpose === "text")}
             onDraftChange={onDraftChange}
             t={t}
@@ -407,6 +495,7 @@ export function InspectorPanel({
             t={t}
           />
         ) : null}
+        </fieldset>
       </section>
       {node.failure_reason ? (
         <section
@@ -492,6 +581,21 @@ function ProductContextInspector({
       dynamicFields: draft.dynamicFields.filter((field) => field.id !== fieldId),
     });
   };
+  const hasDocument = Boolean(draft.documentSourceAssetId || draft.documentFilename || draft.documentText);
+  const [documentPreviewOpen, setDocumentPreviewOpen] = useState(false);
+  useEffect(() => {
+    setDocumentPreviewOpen(false);
+  }, [draft.documentSourceAssetId, draft.documentFilename]);
+  const removeDocument = () => {
+    setDocumentPreviewOpen(false);
+    onDraftChange({
+      ...draft,
+      documentSourceAssetId: "",
+      documentFilename: "",
+      documentMimeType: "",
+      documentText: "",
+    });
+  };
   const entryTypeLabelKey =
     PRODUCT_CONTEXT_ENTRY_OPTIONS.find((option) => option.value === draft.entryType)?.labelKey ??
     "detail.inspector.entryType.image";
@@ -575,6 +679,7 @@ function ProductContextInspector({
       </div>
       <MarkdownEditor
         label={t("detail.inspector.longText")}
+        labelHelp={<ParameterHelpButton helpKey="productContextLongText" uiType="productDetail" />}
         value={draft.longText}
         modalTitle={t("detail.inspector.longText")}
         onChange={(value) => onDraftChange({ ...draft, longText: value, sourceNote: value })}
@@ -582,64 +687,123 @@ function ProductContextInspector({
         minRows={5}
         disabled={busy}
       />
-      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-              {t("detail.inspector.contextDocument")}
+            <FieldLabel
+              label={t("detail.inspector.contextDocument")}
+              helpKey="productContextDocument"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+            />
+            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+              {hasDocument
+                ? t("detail.inspector.contextDocumentLockedHint")
+                : t("detail.inspector.uploadContextDocument")}
             </div>
-            {draft.documentFilename ? (
-              <div className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
-                {draft.documentFilename}
-              </div>
-            ) : null}
           </div>
-          {draft.documentSourceAssetId ? (
+          {hasDocument ? (
             <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100">
               {t("detail.inspector.documentUploaded")}
             </span>
           ) : null}
         </div>
-        <ImageDropZone
-          accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
-          ariaLabel={draft.documentSourceAssetId ? t("detail.inspector.replaceContextDocument") : t("detail.inspector.uploadContextDocument")}
-          disabled={busy}
-          className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 px-3 py-4 text-xs font-medium text-zinc-600 transition-all duration-300 hover:border-indigo-500 hover:bg-indigo-50/20 hover:text-indigo-600 dark:border-slate-700/80 dark:text-slate-300 dark:hover:border-violet-400 dark:hover:bg-violet-500/5 dark:hover:text-violet-200"
-          activeClassName="border-indigo-500 bg-indigo-50/60 text-indigo-700 shadow-[0_0_0_4px_rgba(99,102,241,0.12)] dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100 dark:shadow-[0_0_0_4px_rgba(139,92,246,0.18)]"
-          focusClassName="focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
-          onFiles={(files) => {
-            const file = files[0];
-            if (file) {
-              onUploadDocument(file);
-            }
-          }}
-        >
-          {({ isDragging }) => (
-            <div className={`flex h-full w-full items-center justify-center transition-transform duration-200 ${isDragging ? "scale-[1.03] text-indigo-600 dark:text-violet-300" : ""}`}>
-              <Upload size={14} className={`mr-2 transition-transform duration-200 ${isDragging ? "-translate-y-0.5 scale-110" : ""}`} />
-              {isDragging
-                ? t("detail.inspector.dropDocument")
-                : draft.documentSourceAssetId
-                  ? t("detail.inspector.replaceContextDocument")
-                  : t("detail.inspector.uploadContextDocument")}
+        {hasDocument ? (
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 dark:border-slate-700 dark:bg-[#111b2d]">
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+                <FileText size={15} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold text-slate-700 dark:text-slate-100">
+                  {draft.documentFilename || t("detail.inspector.unnamedContextDocument")}
+                </div>
+                {draft.documentMimeType ? (
+                  <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500">
+                    {t("detail.inspector.documentMimeType", { mime: draft.documentMimeType })}
+                  </div>
+                ) : null}
+                <div className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+                  {t("detail.inspector.removeContextDocumentHint")}
+                </div>
+              </div>
             </div>
-          )}
-        </ImageDropZone>
-        {draft.documentText ? (
-          <TextArea
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              {draft.documentText ? (
+                <button
+                  type="button"
+                  onClick={() => setDocumentPreviewOpen((current) => !current)}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                  aria-expanded={documentPreviewOpen}
+                  aria-label={
+                    documentPreviewOpen
+                      ? t("detail.inspector.hideDocumentPreview")
+                      : t("detail.inspector.showDocumentPreview")
+                  }
+                  title={
+                    documentPreviewOpen
+                      ? t("detail.inspector.hideDocumentPreview")
+                      : t("detail.inspector.showDocumentPreview")
+                  }
+                >
+                  {documentPreviewOpen ? <EyeOff size={12} /> : <Eye size={12} />}
+                  {documentPreviewOpen
+                    ? t("detail.inspector.hideDocumentPreview")
+                    : t("detail.inspector.showDocumentPreview")}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={removeDocument}
+                disabled={busy}
+                className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/35 dark:bg-slate-950/40 dark:text-red-200 dark:hover:border-red-300/70 dark:hover:bg-red-500/10"
+              >
+                <Trash2 size={12} />
+                {t("detail.inspector.removeContextDocument")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <ImageDropZone
+            accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+            ariaLabel={t("detail.inspector.uploadContextDocument")}
+            disabled={busy}
+            className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 px-3 py-4 text-xs font-medium text-zinc-600 transition-all duration-300 hover:border-indigo-500 hover:bg-indigo-50/20 hover:text-indigo-600 dark:border-slate-700/80 dark:text-slate-300 dark:hover:border-violet-400 dark:hover:bg-violet-500/5 dark:hover:text-violet-200"
+            activeClassName="border-indigo-500 bg-indigo-50/60 text-indigo-700 shadow-[0_0_0_4px_rgba(99,102,241,0.12)] dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100 dark:shadow-[0_0_0_4px_rgba(139,92,246,0.18)]"
+            focusClassName="focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
+            onFiles={(files) => {
+              const file = files[0];
+              if (file) {
+                onUploadDocument(file);
+              }
+            }}
+          >
+            {({ isDragging }) => (
+              <div className={`flex h-full w-full items-center justify-center transition-transform duration-200 ${isDragging ? "scale-[1.03] text-indigo-600 dark:text-violet-300" : ""}`}>
+                <Upload size={14} className={`mr-2 transition-transform duration-200 ${isDragging ? "-translate-y-0.5 scale-110" : ""}`} />
+                {isDragging ? t("detail.inspector.dropDocument") : t("detail.inspector.uploadContextDocument")}
+              </div>
+            )}
+          </ImageDropZone>
+        )}
+        {draft.documentText && documentPreviewOpen ? (
+          <MarkdownEditor
             label={t("detail.inspector.documentText")}
             value={draft.documentText}
-            onChange={(value) => onDraftChange({ ...draft, documentText: value })}
-            minRows={3}
-            maxRows={12}
+            modalTitle={draft.documentFilename || t("detail.inspector.documentText")}
+            helpText={t("detail.inspector.documentPreviewHelp")}
+            minRows={4}
+            readOnly
           />
         ) : null}
       </div>
       <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-            {t("detail.inspector.dynamicFields")}
-          </div>
+          <FieldLabel
+            label={t("detail.inspector.dynamicFields")}
+            helpKey="productContextDynamicFields"
+            className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+          />
           <button
             type="button"
             onClick={addDynamicField}
@@ -698,6 +862,7 @@ function ReferenceImageInspector({
   draft,
   onDraftChange,
   onUploadImage,
+  onClearImage,
   busy,
   hasImage,
   image,
@@ -707,6 +872,7 @@ function ReferenceImageInspector({
   draft: NodeConfigDraft;
   onDraftChange: (draft: NodeConfigDraft) => void;
   onUploadImage: (file: File) => void;
+  onClearImage: () => void;
   busy: boolean;
   hasImage: boolean;
   image: DownloadableImage | null;
@@ -731,16 +897,27 @@ function ReferenceImageInspector({
             </span>
           </button>
           <DownloadLink image={image} variant="overlay" />
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onClearImage();
+            }}
+            disabled={busy}
+            className="nodrag nopan nowheel absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 bg-white/95 text-red-600 shadow-sm ring-1 ring-red-100 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/45 dark:bg-slate-950/88 dark:text-red-200 dark:ring-red-400/20 dark:hover:bg-red-500/12"
+            aria-label={t("detail.inspector.clearReferenceImage")}
+            title={t("detail.inspector.clearReferenceImage")}
+          >
+            <Trash2 size={13} aria-hidden="true" />
+          </button>
           <div className="absolute left-2 top-2 inline-flex items-center rounded-full border border-violet-400/60 bg-slate-950/88 px-2.5 py-1 text-[11px] font-semibold text-violet-100 shadow-lg shadow-violet-950/35 ring-1 ring-violet-300/20 backdrop-blur">
             <Sparkles size={12} className="mr-1 text-violet-300" />
             {t("detail.canUseAsReference")}
           </div>
         </div>
       ) : null}
-      <label className="block">
-        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-          {t("detail.inspector.role")}
-        </span>
+      <div className="block">
+        <FieldLabel label={t("detail.inspector.role")} helpKey="referenceRole" />
         <div className="space-y-2">
           <SelectField
             value={referenceRolePresetValue(draft.role)}
@@ -769,7 +946,7 @@ function ReferenceImageInspector({
             placeholder={t("detail.referenceRole.customPlaceholder")}
           />
         </div>
-      </label>
+      </div>
       <label className="block">
         <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
           {t("detail.inspector.label")}
@@ -813,12 +990,14 @@ function ReferenceImageInspector({
 
 function GenerationConfigSelector({
   label,
+  helpKey,
   draft,
   generationConfigs,
   onDraftChange,
   t,
 }: {
   label: string;
+  helpKey?: ParameterHelpKey;
   draft: NodeConfigDraft;
   generationConfigs: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
@@ -826,7 +1005,11 @@ function GenerationConfigSelector({
 }) {
   return (
     <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
-      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">{label}</div>
+      <FieldLabel
+        label={label}
+        helpKey={helpKey}
+        className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+      />
       <div className="grid grid-cols-2 gap-2">
         <SelectField
           value={draft.generationConfigMode}
@@ -892,22 +1075,22 @@ function CopyNodeInspector({
   const copyPayload = draft.copyStructuredPayload;
   return (
     <div className="space-y-3">
-      <TextArea
+      <InspectorTextArea
         label={t("detail.inspector.copyInstruction")}
         value={draft.instruction}
         onChange={(value) => onDraftChange({ ...draft, instruction: value })}
+        helpKey="copyInstruction"
       />
       <GenerationConfigSelector
         label={t("detail.inspector.textGenerationConfig")}
+        helpKey="copyTextGenerationConfig"
         draft={draft}
         generationConfigs={generationConfigs}
         onDraftChange={onDraftChange}
         t={t}
       />
-      <label className="block">
-        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-          {t("detail.inspector.tone")}
-        </span>
+      <div className="block">
+        <FieldLabel label={t("detail.inspector.tone")} helpKey="copyTone" />
         <input
           value={draft.tone}
           onChange={(event) =>
@@ -915,11 +1098,9 @@ function CopyNodeInspector({
           }
           className="w-full px-3 py-2 text-xs outline-none input-premium"
         />
-      </label>
-      <label className="block">
-        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-          {t("detail.inspector.channel")}
-        </span>
+      </div>
+      <div className="block">
+        <FieldLabel label={t("detail.inspector.channel")} helpKey="copyChannel" />
         <input
           value={draft.channel}
           onChange={(event) =>
@@ -927,7 +1108,7 @@ function CopyNodeInspector({
           }
           className="w-full px-3 py-2 text-xs outline-none input-premium"
         />
-      </label>
+      </div>
       {hasCopy ? (
         <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
           <div className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
@@ -951,46 +1132,52 @@ function CopyNodeInspector({
 
 function TailSplitterInspector({
   draft,
+  tailSplitterMaxItems,
   generationConfigs,
   onDraftChange,
   t,
 }: {
   draft: NodeConfigDraft;
+  tailSplitterMaxItems: number;
   generationConfigs: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   t: TFunction;
 }) {
   return (
     <div className="space-y-3">
-      <TextArea
+      <InspectorTextArea
         label={t("detail.inspector.tailSourceText")}
         value={draft.sourceNote}
         onChange={(sourceNote) => onDraftChange({ ...draft, sourceNote })}
         minRows={4}
         maxRows={14}
+        helpKey="tailSourceText"
       />
-      <TextArea
+      <InspectorTextArea
         label={t("detail.inspector.tailDescription")}
         value={draft.instruction}
         onChange={(instruction) => onDraftChange({ ...draft, instruction })}
         minRows={2}
         maxRows={10}
+        helpKey="tailDescription"
       />
-      <label className="block">
-        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-          {t("detail.inspector.tailMaxItems")}
-        </span>
+      <div className="block">
+        <FieldLabel label={t("detail.inspector.tailMaxItems")} helpKey="tailMaxItems" />
         <input
           type="number"
           min={1}
-          max={12}
+          max={tailSplitterMaxItems}
           value={draft.channel}
           onChange={(event) => onDraftChange({ ...draft, channel: event.target.value })}
           className="w-full px-3 py-2 text-xs outline-none input-premium"
         />
-      </label>
+        <span className="mt-1 block text-[11px] leading-5 text-zinc-500 dark:text-slate-400">
+          {t("detail.inspector.tailMaxItemsHint", { max: tailSplitterMaxItems })}
+        </span>
+      </div>
       <GenerationConfigSelector
         label={t("detail.inspector.textGenerationConfig")}
+        helpKey="copyTextGenerationConfig"
         draft={draft}
         generationConfigs={generationConfigs}
         onDraftChange={onDraftChange}
@@ -1034,6 +1221,18 @@ function StructuredCopyEditor({
             <CopyBlockEditor
               key={block.id}
               block={block}
+              onRemove={
+                content.blocks.length > 1
+                  ? () =>
+                      onChange({
+                        ...payload,
+                        content: {
+                          kind: "blocks",
+                          blocks: content.blocks.filter((_, blockIndex) => blockIndex !== index),
+                        },
+                      })
+                  : undefined
+              }
               onChange={(nextBlock) => {
                 const blocks = [...content.blocks];
                 blocks[index] = nextBlock;
@@ -1050,6 +1249,18 @@ function StructuredCopyEditor({
             <CopySectionEditor
               key={section.id}
               section={section}
+              onRemove={
+                content.sections.length > 1
+                  ? () =>
+                      onChange({
+                        ...payload,
+                        content: {
+                          kind: "layout_brief",
+                          sections: content.sections.filter((_, sectionIndex) => sectionIndex !== index),
+                        },
+                      })
+                  : undefined
+              }
               onChange={(nextSection) => {
                 const sections = [...content.sections];
                 sections[index] = nextSection;
@@ -1065,6 +1276,7 @@ function StructuredCopyEditor({
         value={payload.visual_guidance?.composition_hint ?? ""}
         addLabel={t("detail.inspector.addVisualGuidance")}
         placeholder={t("detail.inspector.visualGuidancePlaceholder")}
+        helpKey="copyVisualGuidance"
         onChange={(composition_hint) =>
           onChange({
             ...payload,
@@ -1082,9 +1294,20 @@ function StructuredCopyEditor({
   );
 }
 
-function CopyBlockEditor({ block, onChange, t }: { block: CopyBlock; onChange: (block: CopyBlock) => void; t: TFunction }) {
+function CopyBlockEditor({
+  block,
+  onChange,
+  onRemove,
+  t,
+}: {
+  block: CopyBlock;
+  onChange: (block: CopyBlock) => void;
+  onRemove?: () => void;
+  t: TFunction;
+}) {
   return (
     <div className="copy-editor-card space-y-3 p-3">
+      <CopyEditorRemoveButton label={t("detail.inspector.removeCopyBlock")} onRemove={onRemove} />
       <OptionalTextInput
         label={t("detail.inspector.label")}
         value={block.label ?? ""}
@@ -1104,15 +1327,27 @@ function CopyBlockEditor({ block, onChange, t }: { block: CopyBlock; onChange: (
         value={block.visual_hint ?? ""}
         addLabel={t("detail.inspector.addVisualExpression")}
         placeholder={t("detail.inspector.visualExpressionPlaceholder")}
+        helpKey="copyVisualExpression"
         onChange={(visual_hint) => onChange({ ...block, visual_hint })}
       />
     </div>
   );
 }
 
-function CopySectionEditor({ section, onChange, t }: { section: CopySection; onChange: (section: CopySection) => void; t: TFunction }) {
+function CopySectionEditor({
+  section,
+  onChange,
+  onRemove,
+  t,
+}: {
+  section: CopySection;
+  onChange: (section: CopySection) => void;
+  onRemove?: () => void;
+  t: TFunction;
+}) {
   return (
     <div className="copy-editor-card space-y-3 p-3">
+      <CopyEditorRemoveButton label={t("detail.inspector.removeCopySection")} onRemove={onRemove} />
       <OptionalTextInput
         label={t("detail.inspector.sectionTitle")}
         value={section.title ?? ""}
@@ -1137,6 +1372,15 @@ function CopySectionEditor({ section, onChange, t }: { section: CopySection; onC
               <CopySectionItemEditor
                 key={item.id}
                 block={item}
+                onRemove={
+                  canRemoveCopySectionItem(section)
+                    ? () =>
+                        onChange({
+                          ...section,
+                          items: section.items.filter((_, itemIndex) => itemIndex !== index),
+                        })
+                    : undefined
+                }
                 onChange={(nextItem) => {
                   const items = [...section.items];
                   items[index] = nextItem;
@@ -1153,15 +1397,27 @@ function CopySectionEditor({ section, onChange, t }: { section: CopySection; onC
         value={section.visual_hint ?? ""}
         addLabel={t("detail.inspector.addVisualGuidance")}
         placeholder={t("detail.inspector.sectionVisualPlaceholder")}
+        helpKey="copyVisualGuidance"
         onChange={(visual_hint) => onChange({ ...section, visual_hint })}
       />
     </div>
   );
 }
 
-function CopySectionItemEditor({ block, onChange, t }: { block: CopyBlock; onChange: (block: CopyBlock) => void; t: TFunction }) {
+function CopySectionItemEditor({
+  block,
+  onChange,
+  onRemove,
+  t,
+}: {
+  block: CopyBlock;
+  onChange: (block: CopyBlock) => void;
+  onRemove?: () => void;
+  t: TFunction;
+}) {
   return (
     <div className="copy-editor-item space-y-2">
+      <CopyEditorRemoveButton label={t("detail.inspector.removeCopyItem")} onRemove={onRemove} compact />
       <OptionalTextInput
         label={t("detail.inspector.label")}
         value={block.label ?? ""}
@@ -1181,9 +1437,48 @@ function CopySectionItemEditor({ block, onChange, t }: { block: CopyBlock; onCha
         value={block.visual_hint ?? ""}
         addLabel={t("detail.inspector.addVisualExpression")}
         placeholder={t("detail.inspector.itemVisualPlaceholder")}
+        helpKey="copyVisualExpression"
         onChange={(visual_hint) => onChange({ ...block, visual_hint })}
       />
     </div>
+  );
+}
+
+function CopyEditorRemoveButton({
+  label,
+  onRemove,
+  compact = false,
+}: {
+  label: string;
+  onRemove?: () => void;
+  compact?: boolean;
+}) {
+  if (!onRemove) {
+    return null;
+  }
+  return (
+    <div className="flex justify-end">
+      <button
+        type="button"
+        onClick={onRemove}
+        className={`inline-flex items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-600 transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/60 dark:hover:bg-red-500/16 ${
+          compact ? "h-7 w-7" : "h-8 w-8"
+        }`}
+        aria-label={label}
+        title={label}
+      >
+        <Trash2 size={compact ? 12 : 14} />
+      </button>
+    </div>
+  );
+}
+
+function canRemoveCopySectionItem(section: CopySection): boolean {
+  return (
+    section.items.length > 1 ||
+    hasText(section.title) ||
+    hasText(section.body) ||
+    hasText(section.visual_hint)
   );
 }
 
@@ -1193,12 +1488,14 @@ function OptionalTextInput({
   addLabel,
   placeholder,
   onChange,
+  helpKey,
 }: {
   label: string;
   value: string;
   addLabel: string;
   placeholder?: string;
   onChange: (value: string) => void;
+  helpKey?: ParameterHelpKey;
 }) {
   const [isEditing, setIsEditing] = useState(hasText(value));
   const shouldShowInput = isEditing || hasText(value);
@@ -1216,22 +1513,35 @@ function OptionalTextInput({
     );
   }
 
+  const input = (
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={() => {
+        if (!hasText(value)) {
+          setIsEditing(false);
+        }
+      }}
+      placeholder={placeholder}
+      className="w-full px-3 py-2 text-xs outline-none input-premium"
+    />
+  );
+
+  if (helpKey) {
+    return (
+      <div className="block">
+        <FieldLabel label={label} helpKey={helpKey} />
+        {input}
+      </div>
+    );
+  }
+
   return (
     <label className="block">
       <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
         {label}
       </span>
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={() => {
-          if (!hasText(value)) {
-            setIsEditing(false);
-          }
-        }}
-        placeholder={placeholder}
-        className="w-full px-3 py-2 text-xs outline-none input-premium"
-      />
+      {input}
     </label>
   );
 }
@@ -1242,12 +1552,14 @@ function OptionalTextArea({
   addLabel,
   placeholder,
   onChange,
+  helpKey,
 }: {
   label: string;
   value: string;
   addLabel: string;
   placeholder?: string;
   onChange: (value: string) => void;
+  helpKey?: ParameterHelpKey;
 }) {
   const [isEditing, setIsEditing] = useState(hasText(value));
   const shouldShowTextArea = isEditing || hasText(value);
@@ -1262,6 +1574,25 @@ function OptionalTextArea({
         <Plus size={12} />
         {addLabel}
       </button>
+    );
+  }
+
+  if (helpKey) {
+    return (
+      <InspectorTextArea
+        label={label}
+        value={value}
+        onChange={onChange}
+        onBlur={() => {
+          if (!hasText(value)) {
+            setIsEditing(false);
+          }
+        }}
+        minRows={1}
+        maxRows={12}
+        placeholder={placeholder}
+        helpKey={helpKey}
+      />
     );
   }
 
@@ -1339,13 +1670,15 @@ function ImageGenerationInspector({
                 </span>
               </div>
             </div>
-            <TextArea
+            <InspectorTextArea
               label={t("detail.inspector.imageDescription")}
               value={draft.instruction}
               onChange={(value) => onDraftChange({ ...draft, instruction: value })}
+              helpKey="imageDescription"
             />
             <GenerationConfigSelector
               label={t("detail.inspector.imageGenerationConfig")}
+              helpKey="imageGenerationConfig"
               draft={draft}
               generationConfigs={generationConfigs}
               onDraftChange={onDraftChange}
@@ -1377,16 +1710,25 @@ function ImageGenerationInspector({
               onSizeChange={(size) => onDraftChange({ ...draft, size })}
               onToolOptionsChange={(toolOptions) => onDraftChange({ ...draft, toolOptions })}
               showToolOptions={false}
+              helpUiType="productDetail"
             />
           </div>
         }
         advanced={
-          <ImageToolControls
-            surface="plain"
-            value={draft.toolOptions}
-            allowedFields={imageToolAllowedFields}
-            onChange={(toolOptions) => onDraftChange({ ...draft, toolOptions })}
-          />
+          <div className="space-y-3">
+            <FieldLabel
+              label={t("detail.inspector.imageToolOptions")}
+              helpKey="imageToolOptions"
+              className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+            />
+            <ImageToolControls
+              surface="plain"
+              value={draft.toolOptions}
+              allowedFields={imageToolAllowedFields}
+              helpUiType="productDetail"
+              onChange={(toolOptions) => onDraftChange({ ...draft, toolOptions })}
+            />
+          </div>
         }
       />
     </div>

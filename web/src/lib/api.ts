@@ -52,6 +52,7 @@ import type {
   RbacRole,
   RbacRolePermissions,
   RbacUser,
+  RbacUserListResponse,
   SettingsExportPayload,
   SettingsImportCommitResponse,
   SettingsImportPreviewResponse,
@@ -138,8 +139,23 @@ export const api = {
   destroySession(): Promise<{ ok: boolean }> {
     return request("/api/auth/session", { method: "DELETE" });
   },
-  listRbacUsers(): Promise<RbacUser[]> {
-    return request("/api/rbac/users");
+  listRbacUsers(input?: {
+    page?: number;
+    page_size?: number;
+    username?: string;
+    role_id?: string;
+  }): Promise<RbacUserListResponse> {
+    const params = new URLSearchParams({
+      page: String(input?.page ?? 1),
+      page_size: String(input?.page_size ?? 20),
+    });
+    if (input?.username) {
+      params.set("username", input.username);
+    }
+    if (input?.role_id) {
+      params.set("role_id", input.role_id);
+    }
+    return request(`/api/rbac/users?${params.toString()}`);
   },
   createRbacUser(payload: CreateTrustedUserRequest): Promise<RbacUser> {
     return request("/api/rbac/users", {
@@ -746,6 +762,9 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  clearWorkflowNodeImage(nodeId: string): Promise<ProductWorkflow> {
+    return request(`/api/workflow-nodes/${nodeId}/image`, { method: "DELETE" });
+  },
   createWorkflowEdge(
     productId: string,
     input: { source_node_id: string; target_node_id: string; source_handle?: string; target_handle?: string },
@@ -775,5 +794,8 @@ export const api = {
   },
   retryProductWorkflowRun(productId: string, runId: string): Promise<ProductWorkflow> {
     return request(`/api/products/${productId}/workflow/runs/${runId}/retry`, { method: "POST" });
+  },
+  retryFailedWorkflowNodes(productId: string): Promise<ProductWorkflow> {
+    return request(`/api/products/${productId}/workflow/failed-nodes/retry`, { method: "POST" });
   },
 };

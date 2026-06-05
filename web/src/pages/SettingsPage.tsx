@@ -32,10 +32,15 @@ import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  ParameterHelpLabel,
+  type ParameterHelpContentOverride,
+} from "../components/ParameterHelp";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import type { TranslationKey } from "../lib/i18n";
+import type { ParameterHelpKey } from "../lib/parameterHelp";
 import { useI18n } from "../lib/preferences";
 import type {
   ConfigItem,
@@ -250,6 +255,8 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
 ];
 
 const SETTINGS_GROUPS: TranslationKey[] = ["settings.groupProviders", "settings.groupWorkflow", "settings.groupSecurity"];
+const GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX = "全局生成配置 / ";
+const LEGACY_GENERATION_QUEUE_CATEGORY = "生成队列";
 
 export function settingsSectionIds(): SettingsSectionId[] {
   return SETTINGS_SECTIONS.map((section) => section.id);
@@ -421,6 +428,37 @@ function sourceClassName(item: ConfigItem): string {
     return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12";
   }
   return "border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220]";
+}
+
+function configItemHelpContent(
+  item: ConfigItem,
+  t: ReturnType<typeof useI18n>["t"],
+): ParameterHelpContentOverride | null {
+  if (!item.description.trim()) {
+    return null;
+  }
+  const examples = [t("detail.parameterHelp.settingsRuntimeConfig.keyExample", { key: item.key })];
+  if (
+    (item.minimum !== null && item.minimum !== undefined) ||
+    (item.maximum !== null && item.maximum !== undefined)
+  ) {
+    examples.push(
+      t("detail.parameterHelp.settingsRuntimeConfig.rangeExample", {
+        min: item.minimum ?? "-",
+        max: item.maximum ?? "-",
+      }),
+    );
+  }
+  examples.push(
+    item.secret
+      ? t("detail.parameterHelp.settingsRuntimeConfig.secretExample")
+      : t("detail.parameterHelp.settingsRuntimeConfig.sourceExample"),
+  );
+  return {
+    title: item.label,
+    description: item.description,
+    examples,
+  };
 }
 
 function textValue(record: Record<string, unknown> | undefined, key: string): string {
@@ -694,12 +732,45 @@ function itemsForSection(config: ConfigResponse | undefined, section: SettingsSe
     return items.filter((item) => item.category === "海报与上传" || item.category === "图片工具参数");
   }
   if (section === "queue") {
-    return items.filter((item) => item.category === "生成队列");
+    return items.filter(
+      (item) =>
+        item.category === LEGACY_GENERATION_QUEUE_CATEGORY ||
+        item.category.startsWith(GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX),
+    );
   }
   if (section === "security") {
     return items.filter((item) => item.category === "安全与运维");
   }
   return [];
+}
+
+interface ConfigCategoryGroup {
+  category: string;
+  title: string;
+  items: ConfigItem[];
+}
+
+function configCategoryGroupTitle(category: string): string {
+  return category.startsWith(GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX)
+    ? category.slice(GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX.length)
+    : category;
+}
+
+export function configCategoryGroups(items: ConfigItem[]): ConfigCategoryGroup[] {
+  const groups: ConfigCategoryGroup[] = [];
+  for (const item of items) {
+    let group = groups.find((candidate) => candidate.category === item.category);
+    if (!group) {
+      group = {
+        category: item.category,
+        title: configCategoryGroupTitle(item.category),
+        items: [],
+      };
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  return groups;
 }
 
 export function settingsExportFilename(exportedAt: string | null | undefined): string {
@@ -927,12 +998,20 @@ interface SettingsFormFieldProps {
   label: string;
   children: ReactNode;
   className?: string;
+  helpKey?: ParameterHelpKey;
+  helpContent?: ParameterHelpContentOverride;
 }
 
-function SettingsFormField({ label, children, className = "" }: SettingsFormFieldProps) {
+function SettingsFormField({ label, children, className = "", helpKey, helpContent }: SettingsFormFieldProps) {
   return (
     <label className={`block space-y-2 ${className}`}>
-      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{label}</span>
+      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+        {helpKey ? (
+          <ParameterHelpLabel label={label} helpKey={helpKey} uiType="settings" content={helpContent} />
+        ) : (
+          label
+        )}
+      </span>
       {children}
     </label>
   );
@@ -976,6 +1055,7 @@ interface ProviderModelInputProps {
   providerKind: ProviderModelKind;
   providerProfileId: string;
   disabled?: boolean;
+  helpKey?: ParameterHelpKey;
   onChange: (value: string) => void;
 }
 
@@ -987,6 +1067,7 @@ function ProviderModelInput({
   providerKind,
   providerProfileId,
   disabled = false,
+  helpKey,
   onChange,
 }: ProviderModelInputProps) {
   const { t } = useI18n();
@@ -1072,7 +1153,7 @@ function ProviderModelInput({
   return (
     <div ref={rootRef} className="relative space-y-2">
       <label htmlFor={inputId} className="block text-xs font-medium text-slate-600 dark:text-slate-300">
-        {label}
+        {helpKey ? <ParameterHelpLabel label={label} helpKey={helpKey} uiType="settings" /> : label}
       </label>
       <div className="flex gap-2">
         <div className="relative min-w-0 flex-1">
@@ -1208,6 +1289,8 @@ function ConfigField({
   onReset,
 }: ConfigFieldProps) {
   const { t } = useI18n();
+  const helpContent = configItemHelpContent(item, t);
+  const helpKey = helpContent ? (`settings.config.${item.key}` as const) : null;
   const selectedMultiValues = Array.isArray(value) ? value : [];
   const toggleMultiValue = (optionValue: string) => {
     const selected = new Set(selectedMultiValues);
@@ -1277,7 +1360,11 @@ function ConfigField({
       <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/20">
         <div className="flex items-start justify-between gap-3">
           <label htmlFor={item.key} className="min-w-0 text-sm font-semibold text-zinc-950 dark:text-white">
-            {item.label}
+            {helpKey ? (
+              <ParameterHelpLabel label={item.label} helpKey={helpKey} uiType="settings" content={helpContent ?? undefined} />
+            ) : (
+              item.label
+            )}
           </label>
           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(item)}`}>
             {sourceLabel(item, t)}
@@ -1313,7 +1400,11 @@ function ConfigField({
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor={item.key} className="text-sm font-medium text-zinc-900 dark:text-white">
-            {item.label}
+            {helpKey ? (
+              <ParameterHelpLabel label={item.label} helpKey={helpKey} uiType="settings" content={helpContent ?? undefined} />
+            ) : (
+              item.label
+            )}
           </label>
           <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(item)}`}>
             {sourceLabel(item, t)}
@@ -1624,7 +1715,11 @@ function ProviderProfileCard({
       <div className="mt-5 flex items-start justify-between gap-4 border-t border-slate-100 pt-4 dark:border-slate-800">
         <div>
           <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-            {t("settings.provider.enabledSwitchLabel")}
+            <ParameterHelpLabel
+              label={t("settings.provider.enabledSwitchLabel")}
+              helpKey="settingsProviderEnabled"
+              uiType="settings"
+            />
           </div>
           {switchHelp ? (
             <p id={blockHelpId} className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-200">
@@ -1869,7 +1964,7 @@ function ProviderProfileDrawer({
                 placeholder={t("settings.provider.namePlaceholder")}
               />
             </SettingsFormField>
-            <SettingsFormField label={t("settings.provider.typeLabel")}>
+            <SettingsFormField label={t("settings.provider.typeLabel")} helpKey="settingsProviderType">
               <SelectField
                 value={form.provider_type}
                 options={[
@@ -1883,7 +1978,7 @@ function ProviderProfileDrawer({
               />
             </SettingsFormField>
             {form.provider_type === "openai_compatible" ? (
-              <SettingsFormField label={t("settings.provider.baseUrlLabel")}>
+              <SettingsFormField label={t("settings.provider.baseUrlLabel")} helpKey="settingsProviderBaseUrl">
                 <ProviderDrawerTextInput
                   value={form.base_url}
                   onChange={(base_url) => onFormChange({ ...form, base_url })}
@@ -1912,7 +2007,11 @@ function ProviderProfileDrawer({
             </SettingsFormField>
             <div className="grid gap-2">
               <div className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                {t("settings.provider.capabilitiesLabel")}
+                <ParameterHelpLabel
+                  label={t("settings.provider.capabilitiesLabel")}
+                  helpKey="settingsProviderCapabilities"
+                  uiType="settings"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {capabilityOptions.map((option) => (
@@ -2359,7 +2458,7 @@ function GenerationConfigCard({
             placeholder={t("settings.generation.namePlaceholder")}
           />
         </SettingsFormField>
-        <SettingsFormField label={t("settings.provider.apiInterfaceLabel")}>
+        <SettingsFormField label={t("settings.provider.apiInterfaceLabel")} helpKey="settingsProviderApiInterface">
           <SelectField
             value={draft.provider_kind}
             options={providerKindOptions}
@@ -2383,7 +2482,7 @@ function GenerationConfigCard({
       </div>
 
       {draft.provider_kind !== "mock" ? (
-        <SettingsFormField label={t("settings.provider.providerProfileLabel")}>
+        <SettingsFormField label={t("settings.provider.providerProfileLabel")} helpKey="settingsProviderProfile">
           <SelectField
             value={draft.provider_profile_id}
             options={[
@@ -2406,6 +2505,7 @@ function GenerationConfigCard({
             providerKind={draft.provider_kind === "openai" ? "openai" : "mock"}
             providerProfileId={draft.provider_profile_id}
             disabled={busy}
+            helpKey="settingsTextBriefModel"
             onChange={(brief_model) => onChange({ ...draft, brief_model })}
           />
           <ProviderModelInput
@@ -2416,6 +2516,7 @@ function GenerationConfigCard({
             providerKind={draft.provider_kind === "openai" ? "openai" : "mock"}
             providerProfileId={draft.provider_profile_id}
             disabled={busy}
+            helpKey="settingsTextCopyModel"
             onChange={(copy_model) => onChange({ ...draft, copy_model })}
           />
         </div>
@@ -2424,19 +2525,19 @@ function GenerationConfigCard({
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <SettingsFormField label={t("settings.generation.priority")}>
+        <SettingsFormField label={t("settings.generation.priority")} helpKey="settingsGenerationPriority">
           <input value={draft.priority} onChange={(event) => onChange({ ...draft, priority: event.target.value })} className={INPUT_CLASS} type="number" />
         </SettingsFormField>
-        <SettingsFormField label={t("settings.generation.maxConcurrency")}>
+        <SettingsFormField label={t("settings.generation.maxConcurrency")} helpKey="settingsGenerationMaxConcurrency">
           <input value={draft.max_concurrency} onChange={(event) => onChange({ ...draft, max_concurrency: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
         </SettingsFormField>
-        <SettingsFormField label={t("settings.generation.availabilityWindow")}>
+        <SettingsFormField label={t("settings.generation.availabilityWindow")} helpKey="settingsGenerationAvailabilityWindow">
           <input value={draft.availability_window_minutes} onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
-        <SettingsFormField label={t("settings.generation.failureThreshold")}>
+        <SettingsFormField label={t("settings.generation.failureThreshold")} helpKey="settingsGenerationFailureThreshold">
           <input value={draft.failure_threshold} onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
-        <SettingsFormField label={t("settings.generation.cooldownMinutes")}>
+        <SettingsFormField label={t("settings.generation.cooldownMinutes")} helpKey="settingsGenerationCooldownMinutes">
           <input value={draft.cooldown_minutes} onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
       </div>
@@ -2493,11 +2594,12 @@ function GenerationConfigImageFields({
         }
         providerProfileId={draft.provider_profile_id}
         disabled={pending}
+        helpKey="settingsImageModel"
         onChange={(model) => onChange({ ...draft, model })}
       />
       {draft.provider_kind === "google_gemini_image" ? (
         <div className="grid gap-3 sm:grid-cols-2">
-          <SettingsFormField label={t("settings.provider.geminiApiVersionLabel")}>
+          <SettingsFormField label={t("settings.provider.geminiApiVersionLabel")} helpKey="settingsGeminiApiVersion">
             <SelectField
               value={draft.gemini_api_version}
               options={[
@@ -2508,7 +2610,7 @@ function GenerationConfigImageFields({
               radius="lg"
             />
           </SettingsFormField>
-          <SettingsFormField label={t("settings.provider.geminiOutputMimeTypeLabel")}>
+          <SettingsFormField label={t("settings.provider.geminiOutputMimeTypeLabel")} helpKey="settingsGeminiOutputMimeType">
             <SelectField
               value={draft.gemini_output_mime_type}
               options={[
@@ -2525,7 +2627,7 @@ function GenerationConfigImageFields({
       ) : null}
       {draft.provider_kind === "openai_images" ? (
         <div className="grid gap-3 sm:grid-cols-2">
-          <SettingsFormField label={t("settings.provider.imagesQualityLabel")}>
+          <SettingsFormField label={t("settings.provider.imagesQualityLabel")} helpKey="settingsImagesQuality">
             <input
               value={draft.images_quality}
               onChange={(event) => onChange({ ...draft, images_quality: event.target.value })}
@@ -2533,7 +2635,7 @@ function GenerationConfigImageFields({
               placeholder={t("settings.provider.imagesQualityPlaceholder")}
             />
           </SettingsFormField>
-          <SettingsFormField label={t("settings.provider.imagesStyleLabel")}>
+          <SettingsFormField label={t("settings.provider.imagesStyleLabel")} helpKey="settingsImagesStyle">
             <input
               value={draft.images_style}
               onChange={(event) => onChange({ ...draft, images_style: event.target.value })}
@@ -2551,7 +2653,11 @@ function GenerationConfigImageFields({
             onChange={(event) => onChange({ ...draft, responses_background_enabled: event.target.checked })}
             className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
           />
-          {t("settings.provider.responsesBackground")}
+          <ParameterHelpLabel
+            label={t("settings.provider.responsesBackground")}
+            helpKey="settingsResponsesBackground"
+            uiType="settings"
+          />
         </label>
       ) : null}
     </div>
@@ -2627,6 +2733,7 @@ export function SettingsPage() {
 
   const activeMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
   const activeItems = itemsForSection(configQuery.data, activeSection);
+  const activeConfigGroups = activeSection === "queue" ? configCategoryGroups(activeItems) : [];
   const normalizedSectionSearch = sectionSearch.trim().toLowerCase();
   const visibleSections = normalizedSectionSearch
     ? SETTINGS_SECTIONS.filter(
@@ -3220,7 +3327,36 @@ export function SettingsPage() {
                     {genericSection ? (
                       <form onSubmit={handleSubmit} className={`${PANEL_CLASS} space-y-2`}>
                         {activeItems.length ? (
-                          activeSection === "upload" ? (
+                          activeSection === "queue" ? (
+                            <div className="space-y-1">
+                              {activeConfigGroups.map((group) => (
+                                <div key={group.category} className="border-t border-slate-100 py-2 first:border-t-0 dark:border-slate-800">
+                                  <div className="px-1 py-3">
+                                    <h3 className="text-sm font-semibold text-slate-950 dark:text-white">
+                                      {group.title}
+                                    </h3>
+                                  </div>
+                                  {group.items.map((item) => (
+                                    <ConfigField
+                                      key={item.key}
+                                      item={item}
+                                      value={drafts[item.key] ?? draftFromItem(item)}
+                                      secretTouched={Boolean(secretTouched[item.key])}
+                                      isResetting={resettingKey === item.key}
+                                      onChange={(nextValue, touchedSecret) => {
+                                        setDrafts((current) => ({ ...current, [item.key]: nextValue }));
+                                        setSavedMessage("");
+                                        if (touchedSecret) {
+                                          setSecretTouched((current) => ({ ...current, [item.key]: true }));
+                                        }
+                                      }}
+                                      onReset={() => resetMutation.mutate(item.key)}
+                                    />
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          ) : activeSection === "upload" ? (
                             <div className="grid gap-3 lg:grid-cols-2">
                               {activeItems.map((item) => (
                                 <ConfigField

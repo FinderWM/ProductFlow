@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookOpen,
   Check,
+  ChevronDown,
   GalleryHorizontalEnd,
   Languages,
   LayoutGrid,
@@ -15,6 +16,7 @@ import {
   Settings,
   ShieldCheck,
   Sun,
+  UserRound,
   Wand2,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
@@ -24,6 +26,7 @@ import { usePreferences } from "../lib/preferences";
 import { hasSessionApiPermission, hasSessionMenu } from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
+import type { SessionUser } from "../lib/types";
 
 interface TopNavProps {
   breadcrumbs?: string;
@@ -41,6 +44,11 @@ interface TopNavItem {
   priority: NavPriority;
   icon: typeof Activity;
   match: (pathname: string) => boolean;
+}
+
+interface AccountIdentity {
+  displayName: string;
+  username: string;
 }
 
 export interface DesktopNavLayoutInput {
@@ -263,6 +271,13 @@ function preferenceMenuClassName(open: boolean) {
   ].join(" ");
 }
 
+function accountMenuClassName(open: boolean) {
+  return [
+    "absolute right-0 top-11 z-50 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
+    open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
+  ].join(" ");
+}
+
 function desktopMoreMenuClassName(open: boolean) {
   return [
     "absolute right-0 top-10 z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
@@ -286,6 +301,12 @@ function preferenceBadgeClassName(active: boolean) {
       ? "border-slate-300 bg-white text-slate-950 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
       : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
   ].join(" ");
+}
+
+function accountIdentity(user: SessionUser | null | undefined, fallbackName: string): AccountIdentity {
+  const username = user?.username ?? "";
+  const displayName = user?.display_name?.trim() || username || fallbackName;
+  return { displayName, username };
 }
 
 type PreferenceOption<T extends string> = {
@@ -381,6 +402,105 @@ function PreferenceMenu<T extends string>({
   );
 }
 
+function AccountMenu({ identity, onLogout }: { identity: AccountIdentity; onLogout: () => void }) {
+  const { t } = usePreferences();
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const accountLabel = identity.username
+    ? `${identity.displayName} · ${identity.username}`
+    : identity.displayName;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="relative"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          setOpen(false);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        aria-label={`${t("nav.accountMenu")}: ${accountLabel}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={accountLabel}
+        className="inline-flex h-10 max-w-[220px] items-center gap-2 rounded-lg border border-slate-200 bg-white/85 px-2 text-left text-sm shadow-sm shadow-slate-950/[0.03] transition-colors hover:border-slate-300 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/70 dark:shadow-black/20 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:focus-visible:ring-violet-400 xl:max-w-[260px]"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+          <UserRound size={15} aria-hidden="true" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+            {identity.displayName}
+          </span>
+          {identity.username ? (
+            <span className="block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              {identity.username}
+            </span>
+          ) : null}
+        </span>
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      <div role="menu" aria-label={t("nav.accountMenu")} className={accountMenuClassName(open)}>
+        <div role="presentation" className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
+          <div className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+            {t("nav.currentAccount")}
+          </div>
+          <div className="mt-1 truncate text-sm font-semibold text-slate-950 dark:text-white">
+            {identity.displayName}
+          </div>
+          {identity.username ? (
+            <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{identity.username}</div>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          role="menuitem"
+          className="mt-1 flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm font-semibold text-slate-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:text-slate-300 dark:hover:bg-red-500/10 dark:hover:text-red-200"
+          onClick={() => {
+            setOpen(false);
+            onLogout();
+          }}
+        >
+          <LogOut size={15} aria-hidden="true" />
+          <span className="truncate">{t("nav.logout")}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const desktopNavAreaRef = useRef<HTMLDivElement | null>(null);
   const desktopMeasureRowRef = useRef<HTMLDivElement | null>(null);
@@ -424,6 +544,7 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const desktopVisibleNavItems = visibleNavItems.filter((item) => !desktopOverflowKeySet.has(item.to));
   const desktopOverflowNavItems = visibleNavItems.filter((item) => desktopOverflowKeySet.has(item.to));
   const desktopOverflowActive = desktopOverflowNavItems.some((item) => item.match(location.pathname));
+  const account = accountIdentity(session?.user, t("nav.account"));
 
   const clearDesktopMoreCloseTimer = useCallback(() => {
     if (desktopMoreCloseTimerRef.current !== null) {
@@ -693,17 +814,7 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
 
           <div className="hidden shrink-0 items-center justify-end gap-1.5 md:flex">
             {renderPreferenceControls()}
-            {onLogout ? (
-              <button
-                type="button"
-                onClick={onLogout}
-                aria-label={t("nav.logout")}
-                title={t("nav.logout")}
-                className="flex h-9 items-center rounded-lg px-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 min-[1440px]:px-3"
-              >
-                <LogOut size={15} className="min-[1440px]:mr-1.5" /> <span className="hidden min-[1440px]:inline">{t("nav.logout")}</span>
-              </button>
-            ) : null}
+            {onLogout ? <AccountMenu identity={account} onLogout={onLogout} /> : null}
           </div>
         </div>
       </nav>
@@ -711,6 +822,16 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
       {mobileMoreOpen ? (
         <div className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+5.25rem)] z-50 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/15 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/40 md:hidden">
           <div className="grid gap-1">
+            {onLogout ? (
+              <div className="mb-1 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900">
+                <div className="truncate text-sm font-semibold text-slate-950 dark:text-white">
+                  {account.displayName}
+                </div>
+                {account.username ? (
+                  <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{account.username}</div>
+                ) : null}
+              </div>
+            ) : null}
             {secondaryNavItems.map((item) => {
               const Icon = item.icon;
               const active = item.match(location.pathname);

@@ -1107,13 +1107,22 @@ Centralize text extraction before JSON parsing so every text provider method sup
     marking an active run `cancelled`.
   - `POST /api/products/{product_id}/workflow/runs/{run_id}/retry` returns `202 Accepted` after creating/enqueueing a new
     run from a failed run.
+  - `POST /api/products/{product_id}/workflow/failed-nodes/retry` returns `202 Accepted` after creating/enqueueing one new
+    run for every currently failed, non-cancelled, retryable node on the canvas.
   - `DELETE /api/workflow-nodes/{node_id}` returns `ProductWorkflowResponse` after deleting the node and connected edges.
   - `DELETE /api/products/{product_id}` returns `204 No Content` after deleting the product and related persisted data.
 - Application entrypoints:
   - `start_product_workflow_run(session, product_id, start_node_id=None) -> WorkflowRunKickoff`.
+  - `submit_failed_workflow_nodes_run(session, product_id) -> ProductWorkflow`.
   - `execute_product_workflow_run(run_id) -> None`.
   - `delete_workflow_node(session, node_id) -> ProductWorkflow`.
   - `delete_product(session, product_id) -> str`.
+- Runtime config key `workflow_node_max_retry_count` controls how many direct retries a failed workflow node may receive;
+  default is 10, the valid range is 0..100, and node `is_retryable`/`non_retryable_reason` must use the effective runtime
+  value.
+- Runtime config key `workflow_node_retry_delay_ms` controls the cooldown after a node failure before direct node retry is
+  allowed; default is 2000, the valid range is 0..3600000, and it belongs to `全局生成配置 / 工作流生成` with
+  `workflow_node_max_retry_count`.
 - Database:
   - `workflow_node_runs` must enforce at most one active row per `node_id` where `status IN ('queued', 'running')`,
     using a partial unique index such as `uq_workflow_node_runs_one_active_per_node`.
@@ -1134,6 +1143,13 @@ Centralize text extraction before JSON parsing so every text provider method sup
   intentionally keep the existing five-value contract.
 - Failed workflow runs are retryable through a new run. Retry must not create a duplicate run while any active run already
   owns a queued/running node run in the retry plan.
+- Failed workflow nodes are retryable independently from historical run-level retry. Batch failed-node retry must collect
+  the current canvas nodes with `status = failed` and `failure_reason != "已取消"`, reject the whole request if any selected
+  failed node is not retryable, and create one run with `progress_metadata.run_mode = "failed_nodes"`,
+  `manual_retry = true`, and sorted `retry_node_ids`.
+- A retryable failed node must remain temporarily non-retryable until the latest real failed node run (`failure_reason !=
+  "上游节点失败"`) has aged past `workflow_node_retry_delay_ms`. The serialized node should expose a temporary reason like
+  `节点失败后需等待 1234ms 后重试`.
 - Run responses and lightweight status responses expose `is_retryable`, `is_cancelable`, `queue_active_count`,
   `queue_running_count`, `queue_queued_count`, `queue_max_concurrent_tasks`, `queued_ahead_count`, and `queue_position`.
   Queue position for workflow runs is derived from queued node-run state, not Redis delivery metadata.
@@ -1184,6 +1200,14 @@ Centralize text extraction before JSON parsing so every text provider method sup
 - Retrying a failed run while no active run exists -> create/enqueue a new run and keep the failed run retryable in
   history.
 - Retrying while another active run owns any retry-plan node -> `400`, `相关节点运行中，不能重试`.
+- Retrying all failed nodes when there are no failed non-cancelled nodes -> `400`, `画布没有可重新运行的失败节点`.
+- Retrying all failed nodes when any failed node exceeded `workflow_node_max_retry_count` or the latest failure is
+  non-retryable -> `400`, `存在不可重试的失败节点，请调整节点设置或全局重试次数后重试`.
+- A node that reaches the runtime retry limit must serialize `is_retryable = false` and a reason like
+  `节点失败重试次数已达上限（10）`.
+- A retryable failed node inside the runtime retry-delay window must serialize `is_retryable = false` and a retry-delay
+  reason; after the window expires, serialization and run submission should treat it as retryable again unless another
+  non-retryable condition applies.
 - Concurrent duplicate active node-run insert hits the partial unique index -> rollback, reload existing overlapping
   active run, return it.
 - Global running capacity full during worker claim -> keep the workflow run `running`, keep the next node run `queued`, do
@@ -1394,6 +1418,15 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
   - `plan_id: str`
   - `item_ids?: list[str]` for legacy clients.
   - `items?: list[{id: str, instruction?: str | null}]`; when present, this takes precedence over `item_ids`.
+  - `image_generation_config?: {size?: str | null, generation_config_mode?: "auto" | "manual",
+    generation_config_id?: str | null, tool_options?: dict | null}`; when present, every created `image_generation` node
+    receives the same normalized base generation config.
+  - `reuse_public_copy_node?: bool`, default `false`.
+  - `reuse_public_reference_node?: bool`, default `false`.
+- Runtime config key `generation_tail_splitter_max_items` controls the maximum allowed tail `max_items`; the default is
+  36 and validation errors must report the effective configured limit.
+- Tail `max_items` is an upper bound only. Provider prompts and mock providers must choose a reasonable item count from the
+  actual source text, upstream context, and reference images, and must not force the model to output exactly `max_items`.
 - Tail node `output_json` contains:
   - `latest_plan` with `plan_id`, `status`, `items`, and metadata.
   - `applied_batches` with only the latest confirmed batch, `batch_id`, source `plan_id`, and created node metadata.
@@ -1410,11 +1443,23 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
 - `start_mode="after_node"` plans only the downstream closure of `start_node_id` and excludes the start node itself.
 - Tail split-plan apply accepts only a tail node with a pending `latest_plan` that matches request `plan_id`; at least one
   plan item must be selected. If `items` is supplied, every selected item instruction must be non-blank after trimming.
+- Saving or executing a tail node must validate `config_json.max_items` against
+  `get_runtime_settings().generation_tail_splitter_max_items`; do not encode a static upper bound in
+  `TailSplitterConfig` or frontend inputs.
+- Tail provider payloads may pass `max_items`, but prompt wording must say it is a maximum. Do not instruct the model to
+  fill all slots when the content only supports fewer independent image directions.
+- Tail config parsing must tolerate legacy nullable fields by normalizing `source_text` / `description` to `""`,
+  `max_items` to the default, and blank/null `generation_config_mode` to `"auto"`. Truly invalid values must surface
+  field-specific Chinese messages such as `最大拆分数必须是整数` or `生成配置模式必须是 auto 或 manual`, not the generic
+  `尾巴节点配置无效，请调整节点设置后重试`.
 - Applying a tail plan creates ordinary persisted workflow nodes and edges in one transaction:
   - one public `copy_generation` node and one public `reference_image` node for shared constraints/visual input;
   - one `image_generation` node plus one output `reference_image` node per selected plan item;
   - edges `tail_splitter -> image_generation`, public copy/reference to each `image_generation`, and each
     `image_generation -> output reference_image`.
+- Tail apply image config must be normalized through the same image size/tool-option rules used by normal image-generation
+  nodes. Invalid or disabled provider-specific `tool_options` fields must be filtered instead of persisted on created
+  nodes.
 - Do not create `tail_splitter -> public copy` or `tail_splitter -> public reference` edges. Public copy/reference nodes are
   independent helper inputs for generated image nodes.
 - Created nodes must carry `generated_by` metadata with at least `tail_node_id`, `plan_id`, `batch_id`, and role/item
@@ -1423,6 +1468,11 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
   replaces `applied_batches` with the latest batch, creates the selected nodes/edges as idle editable graph structure, and
   removes the matching pending confirmation. It must not create queued node runs for generated nodes and must not enqueue
   the waiting run only because a split plan was confirmed.
+- If `reuse_public_copy_node` or `reuse_public_reference_node` is true, apply may preserve the previous generated public
+  copy/reference node for the same tail and connect it to the newly created `image_generation` nodes. Preserved public
+  nodes keep their existing config, status, and output artifacts; all old per-item image/output nodes and old edges are
+  still removed. The new `applied_batches[0].node_ids` must include reused public node ids so a later apply can clean them
+  unless they are selected for reuse again.
 - After apply, the original waiting run resolves from the remaining durable state: if other node runs are already
   queued/running it stays or returns `running`; if other pending tail confirmations remain it stays
   `waiting_confirmation`; otherwise it becomes `succeeded` with `finished_at` set. Generated nodes remain `idle` until a
@@ -1457,6 +1507,8 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
   persists the edited instructions.
 - Good: confirming a rerun tail plan deletes the old generated branch, preserves manual nodes, completes the confirmation
   run when no other active work remains, and leaves the latest generated branch idle/editable.
+- Good: confirming a rerun tail plan with public-node reuse keeps the previous public copy/reference node outputs while
+  rebuilding only the selected image/output branches.
 - Good: after confirmation, manually running the tail with `start_mode="after_node"` dispatches independent generated
   image branches in one scheduler wave.
 - Base: tail plan can consume upstream copy/reference/image context but still keeps split output as explicit user-visible
@@ -1474,6 +1526,8 @@ Create a fresh workflow node from reusable intent only, then recreate selected i
 - Apply regression rejecting second apply of the same pending plan.
 - Regression proving generated public copy/reference nodes have no tail inbound edge.
 - Regression proving tail rerun confirmation deletes the old generated branch while preserving manual nodes.
+- Regression proving tail rerun confirmation can preserve previous generated public copy/reference nodes and their
+  outputs when reuse flags are true.
 - Run regression for `start_mode="after_node"` excluding the start node.
 - Run regression for `waiting_confirmation` being user-active but not durable-generation active.
 - Run regression for confirming a pending plan completing the waiting run without generated queued/running node runs.

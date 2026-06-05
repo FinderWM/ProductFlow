@@ -97,6 +97,53 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     assert rbac_users.json()["detail"] == "需要管理员权限"
 
 
+def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    alpha_role = admin_client.post("/api/rbac/roles", json={"code": "alpha_ops", "name": "Alpha Ops"})
+    assert alpha_role.status_code == 201
+    alpha_role_id = alpha_role.json()["id"]
+    beta_role = admin_client.post("/api/rbac/roles", json={"code": "beta_ops", "name": "Beta Ops"})
+    assert beta_role.status_code == 201
+    beta_role_id = beta_role.json()["id"]
+
+    for username, role_id in (
+        ("alpha-one", alpha_role_id),
+        ("alpha-two", alpha_role_id),
+        ("beta-one", beta_role_id),
+    ):
+        created_user = admin_client.post(
+            "/api/rbac/users",
+            json={"username": username, "display_name": username, "role_id": role_id},
+        )
+        assert created_user.status_code == 201
+
+    username_page = admin_client.get("/api/rbac/users", params={"username": "alpha", "page": 1, "page_size": 1})
+    assert username_page.status_code == 200
+    username_payload = username_page.json()
+    assert username_payload["total"] == 2
+    assert username_payload["page"] == 1
+    assert username_payload["page_size"] == 1
+    assert len(username_payload["items"]) == 1
+    assert username_payload["items"][0]["username"] == "alpha-one"
+
+    role_page = admin_client.get("/api/rbac/users", params={"role_id": alpha_role_id, "page": 1, "page_size": 10})
+    assert role_page.status_code == 200
+    role_payload = role_page.json()
+    assert role_payload["total"] == 2
+    assert {item["username"] for item in role_payload["items"]} == {"alpha-one", "alpha-two"}
+
+    roles = admin_client.get("/api/rbac/roles")
+    assert roles.status_code == 200
+    role_counts = {role["code"]: role["user_count"] for role in roles.json()}
+    assert role_counts["alpha_ops"] == 2
+    assert role_counts["beta_ops"] == 1
+
+
 def test_runtime_and_generation_option_apis_require_matching_rbac_permission(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 

@@ -1582,6 +1582,9 @@ def get_runtime_config_endpoint() -> RuntimeConfigResponse:
     return RuntimeConfigResponse(
         image_generation_max_dimension=settings.image_generation_max_dimension,
         image_tool_allowed_fields=list(parse_image_tool_allowed_fields(settings.image_tool_allowed_fields)),
+        generation_tail_splitter_max_items=settings.generation_tail_splitter_max_items,
+        workflow_node_max_retry_count=settings.workflow_node_max_retry_count,
+        workflow_node_retry_delay_ms=settings.workflow_node_retry_delay_ms,
         deletion_enabled=settings.deletion_enabled,
     )
 

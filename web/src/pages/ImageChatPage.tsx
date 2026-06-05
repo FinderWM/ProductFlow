@@ -24,6 +24,7 @@ import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDial
 import { ImageGenerationSettingsPanel } from "../components/ImageGenerationSettingsPanel";
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../components/ImageGenerationSettingsTabs";
 import { ImageToolControls } from "../components/ImageToolControls";
+import { ParameterHelpLabel } from "../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../components/PromptPreviewDialog";
 import {
   getResourceBlockedActionTitle,
@@ -36,7 +37,9 @@ import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
+import type { ParameterHelpKey } from "../lib/parameterHelp";
 import { useI18n } from "../lib/preferences";
+import { useSessionState } from "../lib/session";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
 import { imageRoundSizeLabel, placeholderStatusClass, placeholderStatusLabel } from "./image-chat/display";
 import { ImageChatHistoryPanel } from "./image-chat/ImageChatHistoryPanel";
@@ -156,6 +159,20 @@ function firstBlockedResource(resources: Array<ModerationFields | null | undefin
   return resources.find((resource) => isResourceBlocked(resource)) ?? null;
 }
 
+function isAdminReadonlyResource(
+  user: { id: string; is_admin: boolean } | null | undefined,
+  resource: { owner_user_id?: string | null } | null | undefined,
+): boolean {
+  return Boolean(user?.is_admin && resource?.owner_user_id && user.id !== resource.owner_user_id);
+}
+
+function hasAdminReadonlyResource(
+  user: { id: string; is_admin: boolean } | null | undefined,
+  resources: Array<{ owner_user_id?: string | null } | null | undefined>,
+): boolean {
+  return resources.some((resource) => isAdminReadonlyResource(user, resource));
+}
+
 function generationConfigOptionLabel(config: GenerationConfigOption, disabledLabel: string, frozenLabel: string): string {
   const markers = [
     !config.enabled ? disabledLabel : "",
@@ -172,6 +189,7 @@ type PendingDeleteAction =
 
 export function ImageChatPage() {
   const { t } = useI18n();
+  const sessionState = useSessionState();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { productId } = useParams();
@@ -371,7 +389,16 @@ export function ImageChatPage() {
   const currentProduct = isProductMode
     ? (productQuery.data ?? null)
     : (products.find((product) => product.id === targetProductId) ?? null);
+  const currentUser = sessionState?.user ?? null;
   const currentProductBlocked = isResourceBlocked(currentProduct);
+  const currentProductAdminReadonly = isAdminReadonlyResource(currentUser, currentProduct);
+  const adminReadonlyActionTitle = t("resource.adminReadonlyAction");
+  const createSessionBlockedTitle =
+    isProductMode && currentProductBlocked
+      ? blockedActionMessage(currentProduct)
+      : isProductMode && currentProductAdminReadonly
+        ? adminReadonlyActionTitle
+        : null;
 
   function blockedActionMessage(resource: ModerationFields | null | undefined) {
     return getResourceBlockedActionTitle(resource, t("resource.blockedAction"));
@@ -420,8 +447,8 @@ export function ImageChatPage() {
 
   const createSessionMutation = useMutation({
     mutationFn: () => {
-      if (isProductMode && currentProductBlocked) {
-        throw new Error(blockedActionMessage(currentProduct));
+      if (createSessionBlockedTitle) {
+        throw new Error(createSessionBlockedTitle);
       }
       return api.createImageSession(productId ? { product_id: productId } : {});
     },
@@ -449,8 +476,8 @@ export function ImageChatPage() {
     }
     if (sessionItems.length === 0 && !autoCreateTriggered.current) {
       autoCreateTriggered.current = true;
-      if (isProductMode && currentProductBlocked) {
-        setErrorMessage(blockedActionMessage(currentProduct));
+      if (createSessionBlockedTitle) {
+        setErrorMessage(createSessionBlockedTitle);
         return;
       }
       createSessionMutation.mutate();
@@ -465,8 +492,7 @@ export function ImageChatPage() {
     }
   }, [
     createSessionMutation,
-    currentProduct,
-    currentProductBlocked,
+    createSessionBlockedTitle,
     isProductMode,
     selectedSessionId,
     sessionItems,
@@ -618,25 +644,66 @@ export function ImageChatPage() {
   const selectedReferenceBlockedResource = firstBlockedResource(
     sessionReferenceAssets.filter((asset) => selectedReferenceAssetIds.includes(asset.id)),
   );
+  const selectedReferenceAssets = sessionReferenceAssets.filter((asset) => selectedReferenceAssetIds.includes(asset.id));
   const generationBlockedResource = firstBlockedResource([
     imageSession,
     isProductMode ? currentProduct : null,
     requiresGenerationBase ? branchBaseRound?.generated_asset : null,
     selectedReferenceBlockedResource,
   ]);
+  const generationAdminReadonly = hasAdminReadonlyResource(currentUser, [
+    imageSession,
+    isProductMode ? currentProduct : null,
+    requiresGenerationBase ? branchBaseRound?.generated_asset : null,
+    ...selectedReferenceAssets,
+  ]);
   const selectedResultBlockedResource = firstBlockedResource([
     imageSession,
     selectedRound?.generated_asset,
   ]);
+  const selectedResultAdminReadonly = hasAdminReadonlyResource(currentUser, [
+    imageSession,
+    selectedRound?.generated_asset,
+  ]);
   const sessionEditBlockedResource = firstBlockedResource([imageSession, isProductMode ? currentProduct : null]);
+  const sessionEditAdminReadonly = hasAdminReadonlyResource(currentUser, [imageSession, isProductMode ? currentProduct : null]);
   const productAttachBlockedResource = firstBlockedResource([imageSession, selectedRound?.generated_asset, currentProduct]);
+  const productAttachAdminReadonly = hasAdminReadonlyResource(currentUser, [
+    imageSession,
+    selectedRound?.generated_asset,
+    currentProduct,
+  ]);
   const sessionOrProductBlockedResource = firstBlockedResource([imageSession, isProductMode ? currentProduct : null]);
-  const createSessionBlockedTitle =
-    isProductMode && currentProductBlocked ? blockedActionMessage(currentProduct) : null;
-  const generationBlockedTitle = generationBlockedResource ? blockedActionMessage(generationBlockedResource) : null;
-  const sessionEditBlockedTitle = sessionEditBlockedResource ? blockedActionMessage(sessionEditBlockedResource) : null;
-  const selectedResultBlockedTitle = selectedResultBlockedResource ? blockedActionMessage(selectedResultBlockedResource) : null;
-  const productAttachBlockedTitle = productAttachBlockedResource ? blockedActionMessage(productAttachBlockedResource) : null;
+  const productReferenceEditBlockedTitle = currentProductAdminReadonly ? adminReadonlyActionTitle : null;
+  const generationBlockedTitle = generationBlockedResource
+    ? blockedActionMessage(generationBlockedResource)
+    : generationAdminReadonly
+      ? adminReadonlyActionTitle
+      : null;
+  const sessionEditBlockedTitle = sessionEditBlockedResource
+    ? blockedActionMessage(sessionEditBlockedResource)
+    : sessionEditAdminReadonly
+      ? adminReadonlyActionTitle
+      : null;
+  const selectedResultResourceBlockedTitle = selectedResultBlockedResource
+    ? blockedActionMessage(selectedResultBlockedResource)
+    : null;
+  const selectedResultBlockedTitle = selectedResultResourceBlockedTitle
+    ? selectedResultResourceBlockedTitle
+    : selectedResultAdminReadonly
+      ? adminReadonlyActionTitle
+      : null;
+  const productAttachBlockedTitle = productAttachBlockedResource
+    ? blockedActionMessage(productAttachBlockedResource)
+    : productAttachAdminReadonly
+      ? adminReadonlyActionTitle
+      : null;
+  const sessionListDeletionBlockedTitle =
+    isProductMode && currentProductBlocked
+      ? blockedActionMessage(currentProduct)
+      : isProductMode && currentProductAdminReadonly
+        ? adminReadonlyActionTitle
+        : null;
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -834,7 +901,7 @@ export function ImageChatPage() {
     !imageSession ||
     !draft.trim() ||
     generateMutation.isPending ||
-    Boolean(generationBlockedResource) ||
+    Boolean(generationBlockedTitle) ||
     Boolean(baseRequirementMessage || imageGenerationConfigRequirementMessage);
 
   const attachMutation = useMutation({
@@ -887,14 +954,15 @@ export function ImageChatPage() {
   const createSessionDisabled = createSessionMutation.isPending || Boolean(createSessionBlockedTitle);
   const renameSessionDisabled = !selectedSessionId || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle);
   const saveSelectedGalleryDisabled = saveGalleryMutation.isPending || Boolean(selectedResultBlockedTitle);
+  const sessionDeletionEnabled = deletionEnabled;
 
   function handleGenerate() {
     const prompt = draft.trim();
     if (!selectedSessionId || !imageSession || !prompt || generateMutation.isPending) {
       return;
     }
-    if (generationBlockedResource) {
-      setErrorMessage(blockedActionMessage(generationBlockedResource));
+    if (generationBlockedTitle) {
+      setErrorMessage(generationBlockedTitle);
       return;
     }
     if (baseRequirementMessage) {
@@ -943,8 +1011,8 @@ export function ImageChatPage() {
     if (!prompt || polishPromptMutation.isPending) {
       return;
     }
-    if (sessionEditBlockedResource) {
-      setErrorMessage(blockedActionMessage(sessionEditBlockedResource));
+    if (sessionEditBlockedTitle) {
+      setErrorMessage(sessionEditBlockedTitle);
       return;
     }
     if (promptPolishConfigRequirementMessage) {
@@ -958,6 +1026,10 @@ export function ImageChatPage() {
     if (!polishedPrompt.trim()) {
       return;
     }
+    if (sessionEditBlockedTitle) {
+      setErrorMessage(sessionEditBlockedTitle);
+      return;
+    }
     setDraft(polishedPrompt);
     setPolishedPrompt("");
     setSuccessMessage(t("chat.promptPolishApplied"));
@@ -968,8 +1040,8 @@ export function ImageChatPage() {
     if (!selectedSessionId || retryGenerationTaskMutation.isPending || !isImageSessionGenerationTaskRetryable(task)) {
       return;
     }
-    if (generationBlockedResource) {
-      setErrorMessage(blockedActionMessage(generationBlockedResource));
+    if (generationBlockedTitle) {
+      setErrorMessage(generationBlockedTitle);
       return;
     }
     pendingGeneratedRoundCountRef.current = imageSession?.rounds.length ?? 0;
@@ -984,6 +1056,10 @@ export function ImageChatPage() {
     ) {
       return;
     }
+    if (generationBlockedTitle) {
+      setErrorMessage(generationBlockedTitle);
+      return;
+    }
     cancelGenerationTaskMutation.mutate({ sessionId: selectedSessionId, taskId: task.id });
   }
 
@@ -996,8 +1072,8 @@ export function ImageChatPage() {
     ) {
       return;
     }
-    if (generationBlockedResource) {
-      setErrorMessage(blockedActionMessage(generationBlockedResource));
+    if (generationBlockedTitle) {
+      setErrorMessage(generationBlockedTitle);
       return;
     }
     pendingGeneratedRoundCountRef.current = imageSession.rounds.length;
@@ -1010,8 +1086,8 @@ export function ImageChatPage() {
       setRenameEnabled(false);
       return;
     }
-    if (sessionEditBlockedResource) {
-      setErrorMessage(blockedActionMessage(sessionEditBlockedResource));
+    if (sessionEditBlockedTitle) {
+      setErrorMessage(sessionEditBlockedTitle);
       return;
     }
     renameSessionMutation.mutate(nextTitle);
@@ -1025,8 +1101,8 @@ export function ImageChatPage() {
       setErrorMessage(t("chat.selectProductFirst"));
       return;
     }
-    if (productAttachBlockedResource) {
-      setErrorMessage(blockedActionMessage(productAttachBlockedResource));
+    if (productAttachBlockedTitle) {
+      setErrorMessage(productAttachBlockedTitle);
       return;
     }
     attachMutation.mutate({
@@ -1040,8 +1116,8 @@ export function ImageChatPage() {
     if (!selectedRound || saveGalleryMutation.isPending) {
       return;
     }
-    if (selectedResultBlockedResource) {
-      setErrorMessage(blockedActionMessage(selectedResultBlockedResource));
+    if (selectedResultBlockedTitle) {
+      setErrorMessage(selectedResultBlockedTitle);
       return;
     }
     saveGalleryMutation.mutate(selectedRound.generated_asset.id);
@@ -1068,9 +1144,17 @@ export function ImageChatPage() {
       setErrorMessage(t("chat.deleteDisabled"));
       return;
     }
+    if (sessionListDeletionBlockedTitle) {
+      setErrorMessage(sessionListDeletionBlockedTitle);
+      return;
+    }
     const session = sessionItems.find((item) => item.id === sessionId) ?? imageSession;
     if (isResourceBlocked(session)) {
       setErrorMessage(blockedActionMessage(session));
+      return;
+    }
+    if (isAdminReadonlyResource(currentUser, session)) {
+      setErrorMessage(adminReadonlyActionTitle);
       return;
     }
     setMobileSessionDrawerOpen(false);
@@ -1091,6 +1175,10 @@ export function ImageChatPage() {
       setErrorMessage(blockedActionMessage(blockedResource));
       return;
     }
+    if (isAdminReadonlyResource(currentUser, currentProduct)) {
+      setErrorMessage(adminReadonlyActionTitle);
+      return;
+    }
     setPendingDeleteAction({ kind: "productReference", assetId });
   }
 
@@ -1099,6 +1187,10 @@ export function ImageChatPage() {
     const blockedResource = firstBlockedResource([sessionEditBlockedResource, asset]);
     if (checked && blockedResource) {
       setErrorMessage(blockedActionMessage(blockedResource));
+      return;
+    }
+    if (checked && hasAdminReadonlyResource(currentUser, [imageSession, isProductMode ? currentProduct : null, asset])) {
+      setErrorMessage(adminReadonlyActionTitle);
       return;
     }
     setSelectedReferenceAssetIds((current) => {
@@ -1125,6 +1217,10 @@ export function ImageChatPage() {
       setErrorMessage(blockedActionMessage(blockedResource));
       return;
     }
+    if (hasAdminReadonlyResource(currentUser, [imageSession, isProductMode ? currentProduct : null, asset])) {
+      setErrorMessage(adminReadonlyActionTitle);
+      return;
+    }
     setPendingDeleteAction({ kind: "sessionReference", sessionId: selectedSessionId, assetId });
   }
 
@@ -1132,8 +1228,8 @@ export function ImageChatPage() {
     if (!selectedSessionId || uploadReferenceMutation.isPending || files.length === 0) {
       return;
     }
-    if (sessionEditBlockedResource) {
-      setErrorMessage(blockedActionMessage(sessionEditBlockedResource));
+    if (sessionEditBlockedTitle) {
+      setErrorMessage(sessionEditBlockedTitle);
       return;
     }
     uploadReferenceMutation.mutate({ sessionId: selectedSessionId, files });
@@ -1281,6 +1377,7 @@ export function ImageChatPage() {
           onDeleteReference={handleDeleteProductReference}
           onAttach={handleAttach}
           saveBlockedTitle={productAttachBlockedTitle}
+          editBlockedTitle={productReferenceEditBlockedTitle}
           t={t}
         />
       </section>
@@ -1294,6 +1391,8 @@ export function ImageChatPage() {
     configs,
     onModeChange,
     onConfigChange,
+    helpKey,
+    disabled = false,
   }: {
     title: string;
     mode: GenerationConfigSelectionMode;
@@ -1301,10 +1400,14 @@ export function ImageChatPage() {
     configs: GenerationConfigOption[];
     onModeChange: (mode: GenerationConfigSelectionMode) => void;
     onConfigChange: (configId: string | null) => void;
+    helpKey?: ParameterHelpKey;
+    disabled?: boolean;
   }) {
     return (
       <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
-        <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">{title}</div>
+        <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+          {helpKey ? <ParameterHelpLabel label={title} helpKey={helpKey} uiType="imageChat" /> : title}
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <SelectField
             value={mode}
@@ -1322,6 +1425,7 @@ export function ImageChatPage() {
             ariaLabel={title}
             radius="lg"
             visualSize="sm"
+            disabled={disabled}
           />
           <SelectField
             value={selectedConfigId ?? ""}
@@ -1343,7 +1447,7 @@ export function ImageChatPage() {
             ]}
             onChange={(value) => onConfigChange(value || null)}
             ariaLabel={title}
-            disabled={mode !== "manual"}
+            disabled={disabled || mode !== "manual"}
             radius="lg"
             visualSize="sm"
           />
@@ -1378,7 +1482,7 @@ export function ImageChatPage() {
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-950 dark:text-white" htmlFor={promptId}>
-                {t("chat.prompt")}
+                <ParameterHelpLabel label={t("chat.prompt")} helpKey="imageChatPrompt" uiType="imageChat" />
               </label>
               <textarea
                 id={promptId}
@@ -1401,6 +1505,8 @@ export function ImageChatPage() {
                   configs: promptPolishConfigs,
                   onModeChange: setPromptPolishConfigMode,
                   onConfigChange: setSelectedPromptPolishConfigId,
+                  helpKey: "imageChatPromptPolishConfig",
+                  disabled: Boolean(sessionEditBlockedTitle),
                 })}
                 <button
                   type="button"
@@ -1423,7 +1529,9 @@ export function ImageChatPage() {
                       <button
                         type="button"
                         onClick={handleUsePolishedPrompt}
-                        className="inline-flex items-center rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500"
+                        disabled={Boolean(sessionEditBlockedTitle)}
+                        title={sessionEditBlockedTitle ?? t("chat.usePolishedPrompt")}
+                        className="inline-flex items-center rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-60"
                       >
                         {t("chat.usePolishedPrompt")}
                       </button>
@@ -1447,6 +1555,8 @@ export function ImageChatPage() {
               configs: imageGenerationConfigs,
               onModeChange: setImageGenerationConfigMode,
               onConfigChange: setSelectedImageGenerationConfigId,
+              helpKey: "imageGenerationConfig",
+              disabled: Boolean(sessionEditBlockedTitle),
             })}
 
             <ImageGenerationSettingsPanel
@@ -1461,11 +1571,19 @@ export function ImageChatPage() {
               onToolOptionsChange={setToolOptions}
               onGenerationCountChange={(count) => setGenerationCount(clampGenerationCount(count))}
               showToolOptions={false}
+              helpUiType="imageChat"
+              disabled={Boolean(sessionEditBlockedTitle)}
             />
           </div>
         }
         advanced={
-          <ImageToolControls value={toolOptions} allowedFields={imageToolAllowedFields} onChange={setToolOptions} />
+          <ImageToolControls
+            value={toolOptions}
+            allowedFields={imageToolAllowedFields}
+            helpUiType="imageChat"
+            onChange={setToolOptions}
+            disabled={Boolean(sessionEditBlockedTitle)}
+          />
         }
       />
     );
@@ -1570,7 +1688,9 @@ export function ImageChatPage() {
             isLoading={sessionsQuery.isLoading}
             selectedSessionId={selectedSessionId}
             deletingSessionId={deleteSessionMutation.isPending ? (deleteSessionMutation.variables ?? null) : null}
-            deletionEnabled={deletionEnabled}
+            deletionEnabled={sessionDeletionEnabled}
+            deletionBlockedTitle={sessionListDeletionBlockedTitle}
+            currentUser={currentUser}
             variant="desktop"
             onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession}
@@ -1688,16 +1808,16 @@ export function ImageChatPage() {
                       href={api.toApiUrl(selectedRound.generated_asset.download_url)}
                       target="_blank"
                       rel="noreferrer"
-                      title={selectedResultBlockedTitle ?? t("chat.downloadCurrent")}
+                      title={selectedResultResourceBlockedTitle ?? t("chat.downloadCurrent")}
                       aria-label={t("chat.downloadCurrent")}
                       onClick={(event) => {
-                        if (selectedResultBlockedTitle) {
+                        if (selectedResultResourceBlockedTitle) {
                           event.preventDefault();
-                          setErrorMessage(selectedResultBlockedTitle);
+                          setErrorMessage(selectedResultResourceBlockedTitle);
                         }
                       }}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100"
-                      aria-disabled={Boolean(selectedResultBlockedResource)}
+                      aria-disabled={Boolean(selectedResultResourceBlockedTitle)}
                     >
                       <Download size={15} />
                     </a>
@@ -1863,6 +1983,7 @@ export function ImageChatPage() {
               type="button"
               onClick={handleGenerate}
               disabled={generateDisabled}
+              title={generationBlockedTitle ?? t("chat.startGenerate")}
               className="inline-flex w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
             >
               {generateMutation.isPending ? (
@@ -1930,7 +2051,9 @@ export function ImageChatPage() {
               isLoading={sessionsQuery.isLoading}
               selectedSessionId={selectedSessionId}
               deletingSessionId={deleteSessionMutation.isPending ? (deleteSessionMutation.variables ?? null) : null}
-              deletionEnabled={deletionEnabled}
+              deletionEnabled={sessionDeletionEnabled}
+              deletionBlockedTitle={sessionListDeletionBlockedTitle}
+              currentUser={currentUser}
               variant="mobile"
               onSelectSession={handleSelectSession}
               onDeleteSession={handleDeleteSession}
@@ -1994,15 +2117,15 @@ export function ImageChatPage() {
                 href={api.toApiUrl(selectedRound.generated_asset.download_url)}
                 target="_blank"
                 rel="noreferrer"
-                title={selectedResultBlockedTitle ?? t("chat.downloadCurrent")}
+                title={selectedResultResourceBlockedTitle ?? t("chat.downloadCurrent")}
                 aria-label={t("chat.downloadCurrent")}
                 onClick={(event) => {
-                  if (selectedResultBlockedTitle) {
+                  if (selectedResultResourceBlockedTitle) {
                     event.preventDefault();
-                    setErrorMessage(selectedResultBlockedTitle);
+                    setErrorMessage(selectedResultResourceBlockedTitle);
                   }
                 }}
-                aria-disabled={Boolean(selectedResultBlockedResource)}
+                aria-disabled={Boolean(selectedResultResourceBlockedTitle)}
                 className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
               >
                 <Download size={15} className="shrink-0" />
@@ -2084,6 +2207,7 @@ export function ImageChatPage() {
                 type="button"
                 onClick={handleGenerate}
                 disabled={generateDisabled}
+                title={generationBlockedTitle ?? t("chat.startGenerate")}
                 className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
               >
                 {generateMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Sparkles size={15} className="mr-2" />}

@@ -15,7 +15,12 @@ from productflow_backend.application.moderation import moderation_state_for_reso
 from productflow_backend.application.product_workflow.graph import ProductWorkflowStatusSnapshot
 from productflow_backend.application.product_workflow.run_state import (
     WORKFLOW_CANCELLED_REASON,
+    workflow_node_attempt_count,
+    workflow_node_attempt_runs,
     workflow_node_failed_run_is_retryable,
+    workflow_node_retry_count,
+    workflow_node_retry_delay_reason,
+    workflow_node_retry_limit_reason,
 )
 from productflow_backend.application.product_workflow.tail_confirmation import workflow_run_is_user_active
 from productflow_backend.application.product_workflows import latest_workflow_runs
@@ -400,12 +405,22 @@ class ApplyTailSplitPlanItemRequest(BaseModel):
     instruction: str | None = Field(default=None, max_length=8000)
 
 
+class ApplyTailSplitPlanImageGenerationConfigRequest(BaseModel):
+    size: str | None = Field(default=None, max_length=40)
+    generation_config_mode: Literal["auto", "manual"] = "auto"
+    generation_config_id: str | None = Field(default=None, max_length=80)
+    tool_options: dict[str, Any] | None = None
+
+
 class ApplyTailSplitPlanRequest(BaseModel):
     plan_id: str = Field(min_length=1, max_length=80)
     item_ids: list[str] = Field(default_factory=list)
     items: list[ApplyTailSplitPlanItemRequest] = Field(default_factory=list)
+    image_generation_config: ApplyTailSplitPlanImageGenerationConfigRequest | None = None
     position_x: int | None = None
     position_y: int | None = None
+    reuse_public_copy_node: bool = False
+    reuse_public_reference_node: bool = False
 
 
 def workflow_run_is_retryable(run: WorkflowRun) -> bool:
@@ -464,33 +479,8 @@ def _workflow_run_failure_reason(run: WorkflowRun) -> str | None:
     return reason if isinstance(reason, str) and reason.strip() else run.failure_reason
 
 
-def _workflow_node_attempt_runs(
-    node: WorkflowNode,
-    runs: list[WorkflowRun],
-) -> list[tuple[WorkflowRun, WorkflowNodeRun]]:
-    ordered_runs = sorted(runs, key=lambda item: (item.started_at, item.id))
-    attempts: list[tuple[WorkflowRun, WorkflowNodeRun]] = []
-    for run in ordered_runs:
-        for node_run in run.node_runs:
-            if node_run.node_id != node.id:
-                continue
-            if node_run.failure_reason == "上游节点失败":
-                continue
-            attempts.append((run, node_run))
-            break
-    return attempts
-
-
-def workflow_node_attempt_count(node: WorkflowNode, runs: list[WorkflowRun]) -> int:
-    return len(_workflow_node_attempt_runs(node, runs))
-
-
-def workflow_node_retry_count(node: WorkflowNode, runs: list[WorkflowRun]) -> int:
-    return max(0, workflow_node_attempt_count(node, runs) - 1)
-
-
 def workflow_node_latest_failed_run(node: WorkflowNode, runs: list[WorkflowRun]) -> WorkflowRun | None:
-    attempts = _workflow_node_attempt_runs(node, runs)
+    attempts = workflow_node_attempt_runs(node, runs)
     for run, node_run in reversed(attempts):
         if run.status == WorkflowRunStatus.FAILED and node_run.status == WorkflowNodeStatus.FAILED:
             return run
@@ -500,9 +490,17 @@ def workflow_node_latest_failed_run(node: WorkflowNode, runs: list[WorkflowRun])
 def workflow_node_non_retryable_reason(node: WorkflowNode, runs: list[WorkflowRun]) -> str | None:
     if node.status != WorkflowNodeStatus.FAILED:
         return None
+    retry_limit_reason = workflow_node_retry_limit_reason(node, runs)
+    if retry_limit_reason is not None:
+        return retry_limit_reason
+    failed_run = workflow_node_latest_failed_run(node, runs)
+    if failed_run is not None and not failed_run.is_retryable:
+        return _workflow_run_failure_reason(failed_run)
+    retry_delay_reason = workflow_node_retry_delay_reason(node, runs)
+    if retry_delay_reason is not None:
+        return retry_delay_reason
     if workflow_node_failed_run_is_retryable(node, runs):
         return None
-    failed_run = workflow_node_latest_failed_run(node, runs)
     if failed_run is None:
         return node.failure_reason
     return _workflow_run_failure_reason(failed_run)

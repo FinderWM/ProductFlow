@@ -168,9 +168,11 @@ class OpenAITextProvider(TextProvider):
                         "请输出字段：source_summary、items。\n"
                         "items 为数组，每项包含 title、instruction、visual_intent、source_refs。\n"
                         "要求：\n"
-                        "1. instruction 必须是可直接用于后续生图触发器的完整中文提示词；\n"
-                        "2. 每个 item 聚焦不同画面目标，不要只是同义改写；\n"
-                        "3. source_refs 必须是字符串数组，例如 [\"入口长文本：正视图\", \"参考图 1\"]；"
+                        "1. 最多拆分项是数量上限，不是必须输出的数量；请按实际内容输出 1 到该上限之间的合理数量；\n"
+                        "2. 不要为了填满上限硬拆，也不要把同一画面目标改写成多个 item；\n"
+                        "3. instruction 必须是可直接用于后续生图触发器的完整中文提示词；\n"
+                        "4. 每个 item 聚焦不同画面目标，不要只是同义改写；\n"
+                        "5. source_refs 必须是字符串数组，例如 [\"入口长文本：正视图\", \"参考图 1\"]；"
                         "没有来源时输出 []。"
                     ),
                 },

@@ -1,6 +1,7 @@
 import { Check, Image as ImageIcon, ImagePlus, Loader2, Trash2 } from "lucide-react";
 
 import { ImageDropZone } from "../../components/ImageDropZone";
+import { ParameterHelpLabel } from "../../components/ParameterHelp";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -39,7 +40,9 @@ export function SessionReferencePanel({
 }: SessionReferencePanelProps) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
-      <div className="mb-2 text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessionReferences")}</div>
+      <div className="mb-2 text-sm font-semibold text-slate-950 dark:text-white">
+        <ParameterHelpLabel label={t("chat.sessionReferences")} helpKey="imageSessionReferences" uiType="imageChat" />
+      </div>
       <ImageDropZone
         ariaLabel={t("chat.uploadSessionReference")}
         multiple
@@ -132,6 +135,7 @@ interface ProductAssociationPanelProps {
   onDeleteReference: (assetId: string) => void;
   onAttach: (target: "reference" | "main_source") => void;
   saveBlockedTitle?: string | null;
+  editBlockedTitle?: string | null;
   t: ImageChatTranslate;
 }
 
@@ -149,6 +153,7 @@ export function ProductAssociationPanel({
   onDeleteReference,
   onAttach,
   saveBlockedTitle = null,
+  editBlockedTitle = null,
   t,
 }: ProductAssociationPanelProps) {
   const productBlocked = isResourceBlocked(product);
@@ -219,8 +224,8 @@ export function ProductAssociationPanel({
                   type="button"
                   aria-label={t("chat.deleteProductReference")}
                   onClick={() => onDeleteReference(asset.id)}
-                  disabled={deleting || assetBlocked}
-                  title={assetBlocked ? assetBlockedTitle : t("chat.deleteProductReference")}
+                  disabled={deleting || assetBlocked || Boolean(editBlockedTitle)}
+                  title={editBlockedTitle ?? (assetBlocked ? assetBlockedTitle : t("chat.deleteProductReference"))}
                   className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded bg-white/90 text-zinc-500 opacity-100 shadow-sm ring-1 ring-zinc-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/90 dark:text-slate-300 dark:ring-slate-700 dark:hover:text-red-300 md:opacity-0 md:group-hover:opacity-100"
                 >
                   {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}

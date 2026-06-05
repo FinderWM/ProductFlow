@@ -20,6 +20,7 @@ import {
   Move,
   Play,
   Plus,
+  RotateCcw,
   Settings2,
   Sparkles,
   X,
@@ -40,8 +41,11 @@ import { api, ApiError } from "../lib/api";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
 import { useI18n } from "../lib/preferences";
+import { useSessionState } from "../lib/session";
 import type {
+  ApplyTailSplitPlanImageGenerationConfigInput,
   ApplyTailSplitPlanItemInput,
+  ApplyTailSplitPlanReuseOptions,
   CanvasTemplateSummary,
   CanvasTemplateScope,
   CanvasTemplateCategory,
@@ -55,6 +59,7 @@ import type {
 } from "../lib/types";
 import {
   ADD_NODE_OPTIONS,
+  DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS,
   MAX_INSPECTOR_WIDTH,
   MIN_INSPECTOR_WIDTH,
   NODE_WIDTH,
@@ -147,6 +152,14 @@ type WorkflowClipboard = {
 };
 
 const AUTO_IMAGE_OUTPUT_NODE_OFFSET_X = NODE_WIDTH + 80;
+type TailPublicNodeRole = "public_copy" | "public_reference";
+
+function isAdminViewingOtherOwner(
+  user: { id: string; is_admin: boolean } | null | undefined,
+  ownerUserId: string | null | undefined,
+): boolean {
+  return Boolean(user?.is_admin && ownerUserId && user.id !== ownerUserId);
+}
 
 function latestCreatedWorkflowNode(
   workflow: ProductWorkflow,
@@ -160,8 +173,27 @@ function latestCreatedWorkflowNode(
   );
 }
 
+function hasReusableTailPublicNode(
+  workflow: ProductWorkflow | null | undefined,
+  tailNodeId: string | null | undefined,
+  role: TailPublicNodeRole,
+): boolean {
+  if (!workflow || !tailNodeId) {
+    return false;
+  }
+  return workflow.nodes.some((node) => {
+    const generatedBy = node.config_json.generated_by;
+    if (!generatedBy || typeof generatedBy !== "object" || Array.isArray(generatedBy)) {
+      return false;
+    }
+    const metadata = generatedBy as Record<string, unknown>;
+    return metadata.tail_node_id === tailNodeId && metadata.role === role;
+  });
+}
+
 export function ProductDetailPage() {
   const { t } = useI18n();
+  const session = useSessionState();
   const { productId = "" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -173,6 +205,7 @@ export function ProductDetailPage() {
   const previousDraftNodeIdRef = useRef<string | null>(null);
   const lastOpenedTailPlanIdRef = useRef<string | null>(null);
   const skipNextCanvasBlankClickRef = useRef(false);
+  const canvasSelectionClearedRef = useRef(false);
   const workflowClipboardRef = useRef<WorkflowClipboard | null>(null);
   const undoStackRef = useRef<WorkflowHistoryStep[]>([]);
   const redoStackRef = useRef<WorkflowHistoryStep[]>([]);
@@ -247,19 +280,30 @@ export function ProductDetailPage() {
   });
   const productRecord = productQuery.data ?? null;
   const productBlocked = isResourceBlocked(productRecord);
+  const productAdminReadonly = isAdminViewingOtherOwner(session?.user, productRecord?.owner_user_id ?? null);
+  const adminReadonlyActionTitle = t("resource.adminReadonlyAction");
   const blockedProductActionMessage = useCallback(
     () => getResourceBlockedActionTitle(productRecord, t("resource.blockedAction")),
     [productRecord, t],
   );
-  const showBlockedProductError = useCallback(() => {
-    setNotice("");
-    setError(blockedProductActionMessage());
-  }, [blockedProductActionMessage]);
-  const assertProductUsable = useCallback(() => {
-    if (productBlocked) {
-      throw new ApiError(403, blockedProductActionMessage());
+  const productMutationBlocked = productBlocked || productAdminReadonly;
+  const productMutationBlockedTitle = productAdminReadonly
+    ? adminReadonlyActionTitle
+    : productBlocked
+      ? blockedProductActionMessage()
+      : "";
+  const showProductMutationBlockedError = useCallback(() => {
+    if (!productMutationBlockedTitle) {
+      return;
     }
-  }, [blockedProductActionMessage, productBlocked]);
+    setNotice("");
+    setError(productMutationBlockedTitle);
+  }, [productMutationBlockedTitle]);
+  const assertProductUsable = useCallback(() => {
+    if (productMutationBlocked) {
+      throw new ApiError(403, productMutationBlockedTitle || t("resource.blockedAction"));
+    }
+  }, [productMutationBlocked, productMutationBlockedTitle, t]);
 
   const historyQuery = useQuery({
     queryKey: ["product-history", productId],
@@ -322,6 +366,8 @@ export function ProductDetailPage() {
   const imageGenerationMaxDimension =
     runtimeConfigQuery.data?.image_generation_max_dimension ?? DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
   const imageToolAllowedFields = runtimeConfigQuery.data?.image_tool_allowed_fields ?? DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS;
+  const tailSplitterMaxItems =
+    runtimeConfigQuery.data?.generation_tail_splitter_max_items ?? DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS;
   const imageSizeOptions = useMemo(
     () => buildImageSizeOptions(imageGenerationMaxDimension),
     [imageGenerationMaxDimension],
@@ -331,11 +377,23 @@ export function ProductDetailPage() {
     [generationConfigOptionsQuery.data],
   );
 
-  const selectedNode =
-    workflow?.nodes.find((node) => node.id === selectedNodeId) ??
-    workflow?.nodes[0] ??
-    null;
+  const selectedNode = selectedNodeId
+    ? workflow?.nodes.find((node) => node.id === selectedNodeId) ?? null
+    : null;
   const selectedTailPendingPlan = pendingTailSplitPlan(selectedNode);
+  const selectedTailPublicReuseAvailability = useMemo(
+    () => ({
+      canReusePublicCopyNode:
+        selectedNode?.node_type === "tail_splitter"
+          ? hasReusableTailPublicNode(workflow, selectedNode.id, "public_copy")
+          : false,
+      canReusePublicReferenceNode:
+        selectedNode?.node_type === "tail_splitter"
+          ? hasReusableTailPublicNode(workflow, selectedNode.id, "public_reference")
+          : false,
+    }),
+    [selectedNode?.id, selectedNode?.node_type, workflow],
+  );
   const workflowStructureSignature = useMemo(
     () => (workflow ? getWorkflowStructureSignature(workflow) : null),
     [workflow],
@@ -382,7 +440,18 @@ export function ProductDetailPage() {
   }, [pendingTemplateAutoLayoutSignature, workflowStructureSignature]);
 
   useEffect(() => {
+    canvasSelectionClearedRef.current = false;
+  }, [productId, workflow?.id]);
+
+  useEffect(() => {
+    if (selectedNodeId || selectedNodeIds.length) {
+      canvasSelectionClearedRef.current = false;
+    }
+  }, [selectedNodeId, selectedNodeIds]);
+
+  useEffect(() => {
     if (!workflow?.nodes.length) {
+      canvasSelectionClearedRef.current = false;
       if (selectedNodeId) {
         setSelectedNodeId(null);
       }
@@ -391,7 +460,11 @@ export function ProductDetailPage() {
       }
       return;
     }
-    const reconciledSelection = reconcileSelectedNodeIds(selectedNodeIds, workflow.nodes, selectedNodeId);
+    const allowEmptySelection =
+      canvasSelectionClearedRef.current && !selectedNodeId && selectedNodeIds.length === 0;
+    const reconciledSelection = reconcileSelectedNodeIds(selectedNodeIds, workflow.nodes, selectedNodeId, {
+      allowEmptySelection,
+    });
     if (reconciledSelection.primaryNodeId !== selectedNodeId) {
       setSelectedNodeId(reconciledSelection.primaryNodeId);
     }
@@ -530,14 +603,15 @@ export function ProductDetailPage() {
   };
 
   const handleGuardedDraftChange = (nextDraft: NodeConfigDraft) => {
-    if (productBlocked) {
-      showBlockedProductError();
+    if (productMutationBlocked) {
+      showProductMutationBlockedError();
       return;
     }
     handleDraftChange(nextDraft);
   };
 
   const applyPrimarySelection = (nodeId: string, nodeIds: string[]) => {
+    canvasSelectionClearedRef.current = false;
     setSelectedNodeId(nodeId);
     setSelectedNodeIds(nodeIds);
     setActiveSidebarTab("details");
@@ -545,6 +619,33 @@ export function ProductDetailPage() {
 
   const clearMultiSelection = () => {
     setSelectedNodeIds(clearSelectedNodeGroup(selectedNodeId));
+  };
+
+  const clearCanvasSelection = () => {
+    if (!selectedNodeId && selectedNodeIds.length === 0) {
+      return;
+    }
+    const applyClear = () => {
+      canvasSelectionClearedRef.current = true;
+      setSelectedNodeId(null);
+      setSelectedNodeIds([]);
+      setTemplateSaveOpen(false);
+      if (mobileCanvasControlsActive && mobileCanvasMode === "select") {
+        setMobileCanvasMode("browse");
+      }
+    };
+    if (!selectedNode || !draftDirty) {
+      applyClear();
+      return;
+    }
+    void (async () => {
+      try {
+        await flushSelectedDraft();
+        applyClear();
+      } catch {
+        // Mutations already surface ApiError.detail in local error state.
+      }
+    })();
   };
 
   const selectNodeForDetails = (nodeId: string) => {
@@ -960,6 +1061,26 @@ export function ProductDetailPage() {
     },
   });
 
+  const retryFailedWorkflowNodesMutation = useMutation({
+    mutationFn: () => {
+      assertProductUsable();
+      return api.retryFailedWorkflowNodes(productId);
+    },
+    onSuccess: async (nextWorkflow) => {
+      setError("");
+      queryClient.setQueryData(["product-workflow", productId], nextWorkflow);
+      await queryClient.invalidateQueries({ queryKey: ["product-workflow-status", productId] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-queue"] });
+    },
+    onError: (mutationError) => {
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.detail
+          : t("detail.error.retryFailedNodes"),
+      );
+    },
+  });
+
   const createNodeMutation = useMutation({
     mutationFn: async (type: WorkflowNodeType) => {
       assertProductUsable();
@@ -1099,10 +1220,14 @@ export function ProductDetailPage() {
       nodeId,
       plan,
       items,
+      imageGenerationConfig,
+      reuseOptions,
     }: {
       nodeId: string;
       plan: TailSplitPlan;
       items: ApplyTailSplitPlanItemInput[];
+      imageGenerationConfig: ApplyTailSplitPlanImageGenerationConfigInput;
+      reuseOptions: ApplyTailSplitPlanReuseOptions;
     }) => {
       assertProductUsable();
       await flushSelectedDraft();
@@ -1112,8 +1237,11 @@ export function ProductDetailPage() {
         plan_id: plan.plan_id,
         item_ids: items.map((item) => item.id),
         items,
+        image_generation_config: imageGenerationConfig,
         position_x: (tailNode?.position_x ?? 120) + 80,
         position_y: tailNode?.position_y ?? 120,
+        reuse_public_copy_node: reuseOptions.reuse_public_copy_node,
+        reuse_public_reference_node: reuseOptions.reuse_public_reference_node,
       });
       return { nextWorkflow, previousWorkflow, itemCount: items.length };
     },
@@ -1534,8 +1662,8 @@ export function ProductDetailPage() {
   });
 
   const handleDeleteNode = (node: WorkflowNode) => {
-    if (productBlocked) {
-      showBlockedProductError();
+    if (productMutationBlocked) {
+      showProductMutationBlockedError();
       return;
     }
     if (node.node_type === "product_context") {
@@ -1659,6 +1787,28 @@ export function ProductDetailPage() {
     },
   });
 
+  const clearNodeImageMutation = useMutation({
+    mutationFn: () => {
+      assertProductUsable();
+      if (!selectedNode || selectedNode.node_type !== "reference_image") {
+        throw new Error(t("detail.error.selectImageNode"));
+      }
+      return api.clearWorkflowNodeImage(selectedNode.id);
+    },
+    onSuccess: (nextWorkflow) => {
+      setError("");
+      queryClient.setQueryData(["product-workflow", productId], nextWorkflow);
+      setSelectedNodeIds(clearSelectedNodeGroup(selectedNodeId));
+    },
+    onError: (mutationError) => {
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.detail
+          : t("detail.error.clearReferenceImage"),
+      );
+    },
+  });
+
   const selectedCopyHasOutput = Boolean(
     selectedNode?.node_type === "copy_generation" &&
       selectedNode.output_json &&
@@ -1686,7 +1836,7 @@ export function ProductDetailPage() {
   };
 
   useEffect(() => {
-    if (!selectedNode || !draftDirty || workflowActive || productBlocked) {
+    if (!selectedNode || !draftDirty || workflowActive || productMutationBlocked) {
       return;
     }
     setSaveStatus("saving");
@@ -1694,11 +1844,11 @@ export function ProductDetailPage() {
       void flushSelectedDraft();
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [draft, draftDirty, productBlocked, selectedNode?.id, workflowActive]);
+  }, [draft, draftDirty, productMutationBlocked, selectedNode?.id, workflowActive]);
 
   const handleRunWorkflow = async (startNodeId?: string, startMode: WorkflowRunStartMode = "from_node") => {
-    if (productBlocked) {
-      showBlockedProductError();
+    if (productMutationBlocked) {
+      showProductMutationBlockedError();
       return;
     }
     try {
@@ -1709,7 +1859,11 @@ export function ProductDetailPage() {
     }
   };
 
-  const handleConfirmTailSplitPlan = async (items: ApplyTailSplitPlanItemInput[]) => {
+  const handleConfirmTailSplitPlan = async (
+    items: ApplyTailSplitPlanItemInput[],
+    imageGenerationConfig: ApplyTailSplitPlanImageGenerationConfigInput,
+    reuseOptions: ApplyTailSplitPlanReuseOptions,
+  ) => {
     if (!selectedNode || selectedNode.node_type !== "tail_splitter" || !selectedTailPendingPlan) {
       return;
     }
@@ -1717,8 +1871,8 @@ export function ProductDetailPage() {
       setError(t("detail.tailPlan.selectAtLeastOne"));
       return;
     }
-    if (productBlocked) {
-      showBlockedProductError();
+    if (productMutationBlocked) {
+      showProductMutationBlockedError();
       return;
     }
     try {
@@ -1726,6 +1880,8 @@ export function ProductDetailPage() {
         nodeId: selectedNode.id,
         plan: selectedTailPendingPlan,
         items,
+        imageGenerationConfig,
+        reuseOptions,
       });
     } catch {
       // mutation handles UI errors
@@ -1740,14 +1896,36 @@ export function ProductDetailPage() {
   };
 
   const handleRetryWorkflowRun = (run: ProductWorkflow["runs"][number]) => {
-    if (productBlocked) {
-      showBlockedProductError();
+    if (productMutationBlocked) {
+      showProductMutationBlockedError();
       return;
     }
     if (!run.is_retryable || retryWorkflowRunMutation.isPending) {
       return;
     }
     retryWorkflowRunMutation.mutate(run.id);
+  };
+
+  const handleRetryFailedWorkflowNodes = async () => {
+    if (productMutationBlocked) {
+      showProductMutationBlockedError();
+      return;
+    }
+    const failedNodes = workflow?.nodes.filter((node) => node.status === "failed") ?? [];
+    if (!failedNodes.length) {
+      setError(t("detail.failedNodesRetry.empty"));
+      return;
+    }
+    if (failedNodes.some((node) => !node.is_retryable)) {
+      setError(t("detail.failedNodesRetry.nonRetryable"));
+      return;
+    }
+    try {
+      await flushSelectedDraft();
+      await retryFailedWorkflowNodesMutation.mutateAsync();
+    } catch {
+      // mutation handles UI errors
+    }
   };
 
   const openSidebarTab = (tab: SidebarTab) => {
@@ -1790,15 +1968,17 @@ export function ProductDetailPage() {
     uploadNodeImageMutation.isPending ||
     uploadNodeDocumentMutation.isPending ||
     bindNodeImageMutation.isPending ||
+    clearNodeImageMutation.isPending ||
     createUserCanvasTemplateMutation.isPending ||
     updateNodeCopyMutation.isPending;
-  const structureBusy = layoutMutationBusy || workflowActive || productBlocked;
-  const runSubmissionPending = runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending;
+  const structureBusy = layoutMutationBusy || workflowActive || productMutationBlocked;
+  const runSubmissionPending =
+    runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending || retryFailedWorkflowNodesMutation.isPending;
   const pendingStartNodeId = runWorkflowMutation.isPending ? (runWorkflowMutation.variables?.startNodeId ?? null) : null;
   const fullWorkflowRunBusy = runSubmissionPending || workflowActive;
-  const fullWorkflowRunDisabled = fullWorkflowRunBusy || productBlocked;
-  const blockedProductActionTitle = productBlocked ? blockedProductActionMessage() : "";
-  const fullWorkflowRunTitle = productBlocked
+  const fullWorkflowRunDisabled = fullWorkflowRunBusy || productMutationBlocked;
+  const blockedProductActionTitle = productMutationBlockedTitle;
+  const fullWorkflowRunTitle = productMutationBlocked
     ? blockedProductActionTitle
     : fullWorkflowRunBusy
       ? t("detail.workflowRunning")
@@ -1863,7 +2043,7 @@ export function ProductDetailPage() {
     return buildWorkflowCanvasActionItems(target, {
       primaryNode,
       targetNodes: workflowActionTargetNodes(target),
-      runActionState: productBlocked && runActionState
+      runActionState: productMutationBlocked && runActionState
         ? {
             ...runActionState,
             disabled: true,
@@ -1891,8 +2071,8 @@ export function ProductDetailPage() {
       workflowCanvasRef.current?.fitNodeIds(nodeIds);
       return;
     }
-    if (productBlocked) {
-      showBlockedProductError();
+    if (productMutationBlocked) {
+      showProductMutationBlockedError();
       return;
     }
     if (actionId === "run") {
@@ -1949,9 +2129,9 @@ export function ProductDetailPage() {
   };
 
   const commitNodePosition = (input: NodePositionCommitInput) => {
-    if (productBlocked) {
+    if (productMutationBlocked) {
       workflowCanvasRef.current?.clearOptimisticNodePosition(input.node.id);
-      showBlockedProductError();
+      showProductMutationBlockedError();
       return;
     }
     const rollbackWorkflow = queryClient.getQueryData<ProductWorkflow>([
@@ -2015,8 +2195,8 @@ export function ProductDetailPage() {
         return;
       }
 
-      if (productBlocked) {
-        showBlockedProductError();
+      if (productMutationBlocked) {
+        showProductMutationBlockedError();
         return;
       }
 
@@ -2077,8 +2257,8 @@ export function ProductDetailPage() {
     requestHistoryDirection,
     selectedNodeId,
     selectedNodeIds,
-    productBlocked,
-    showBlockedProductError,
+    productMutationBlocked,
+    showProductMutationBlockedError,
     structureBusy,
     t,
     canvasTemplateSaveOpen,
@@ -2127,6 +2307,20 @@ export function ProductDetailPage() {
   const sourceImage = getSourceImageDownload(product, t);
   const latestRun = workflow?.runs[0] ?? null;
   const selectedNodeCancelableRun = getWorkflowNodeCancelableRun(workflow, selectedNode);
+  const failedWorkflowNodes = workflow?.nodes.filter((node) => node.status === "failed") ?? [];
+  const retryableFailedWorkflowNodes = failedWorkflowNodes.filter((node) => node.is_retryable);
+  const failedWorkflowNodesRetryTitle = productMutationBlocked
+    ? blockedProductActionTitle
+    : failedWorkflowNodes.length === 0
+      ? t("detail.failedNodesRetry.empty")
+      : retryableFailedWorkflowNodes.length !== failedWorkflowNodes.length
+        ? t("detail.failedNodesRetry.nonRetryable")
+        : t("detail.failedNodesRetry.title", { count: failedWorkflowNodes.length });
+  const retryFailedWorkflowNodesDisabled =
+    productMutationBlocked ||
+    retryFailedWorkflowNodesMutation.isPending ||
+    failedWorkflowNodes.length === 0 ||
+    retryableFailedWorkflowNodes.length !== failedWorkflowNodes.length;
   const posters = historyQuery.data?.poster_variants ?? product.poster_variants;
   const posterSourceAssetIds = buildPosterSourceAssetMap({
     product,
@@ -2154,14 +2348,14 @@ export function ProductDetailPage() {
   const canvasTemplates = canvasTemplatesQuery.data?.items ?? [];
   const canvasTemplateCategories: CanvasTemplateCategory[] = canvasTemplateCategoriesQuery.data?.items ?? [];
   const userCanvasTemplateCategories: CanvasTemplateCategory[] = userCanvasTemplateCategoriesQuery.data?.items ?? [];
-  const canvasTemplateSaveDisabled = workflowInitialEntryMode === "blank" || productBlocked || !workflow;
+  const canvasTemplateSaveDisabled = workflowInitialEntryMode === "blank" || productMutationBlocked || !workflow;
   const canvasTemplateHasTailNode = Boolean(workflow?.nodes.some((node) => node.node_type === "tail_splitter"));
   const userTemplateMutationBusy =
     createUserTemplateGroupMutation.isPending ||
     createUserCanvasTemplateMutation.isPending ||
     updateUserTemplateGroupMutation.isPending ||
     archiveUserTemplateGroupMutation.isPending;
-  const autoLayoutBusy = structureBusy || !workflow || workflow.nodes.length === 0;
+  const autoLayoutBusy = layoutMutationBusy || productMutationBlocked || !workflow || workflow.nodes.length === 0;
 
   const renderWorkflowToolbarButtons = () => (
     <>
@@ -2186,7 +2380,7 @@ export function ProductDetailPage() {
           setCanvasTemplateRetainPromptText(true);
           setCanvasTemplateSaveOpen(true);
         }}
-        disabled={createUserCanvasTemplateMutation.isPending || productBlocked || !workflow}
+        disabled={createUserCanvasTemplateMutation.isPending || productMutationBlocked || !workflow}
         className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold"
         title={
           workflowInitialEntryMode === "blank"
@@ -2213,13 +2407,32 @@ export function ProductDetailPage() {
         {fullWorkflowRunBusy ? <Loader2 size={17} className="animate-spin" /> : <Play size={17} />}
         <span className="mt-1 leading-tight">{fullWorkflowRunBusy ? t("detail.running") : t("detail.runFullWorkflow")}</span>
       </button>
+      {failedWorkflowNodes.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => void handleRetryFailedWorkflowNodes()}
+          disabled={retryFailedWorkflowNodesDisabled || !workflow}
+          className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold text-red-600 dark:text-red-200"
+          title={failedWorkflowNodesRetryTitle}
+          aria-label={failedWorkflowNodesRetryTitle}
+        >
+          {retryFailedWorkflowNodesMutation.isPending ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <RotateCcw size={16} />
+          )}
+          <span className="mt-1 leading-tight">
+            {t("detail.failedNodesRetry.action", { count: failedWorkflowNodes.length })}
+          </span>
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={() => workflowCanvasRef.current?.triggerAutoLayout()}
         disabled={autoLayoutBusy}
         className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold"
-        title={productBlocked ? blockedProductActionTitle : t("detail.autoLayout")}
-        aria-label={productBlocked ? blockedProductActionTitle : t("detail.autoLayout")}
+        title={productMutationBlocked ? blockedProductActionTitle : t("detail.autoLayout")}
+        aria-label={productMutationBlocked ? blockedProductActionTitle : t("detail.autoLayout")}
       >
         <Sparkles size={16} />
         <span className="mt-1 leading-tight">{t("detail.autoLayout")}</span>
@@ -2282,8 +2495,8 @@ export function ProductDetailPage() {
                 onClick={() => createNodeMutation.mutate(option.type)}
                 disabled={structureBusy || !workflow}
                 className="btn-primary-spring inline-flex h-9 items-center rounded-xl px-4 text-xs font-semibold"
-                title={productBlocked ? blockedProductActionTitle : t("detail.addNode", { label: optionLabel })}
-                aria-label={productBlocked ? blockedProductActionTitle : t("detail.addNode", { label: optionLabel })}
+                title={productMutationBlocked ? blockedProductActionTitle : t("detail.addNode", { label: optionLabel })}
+                aria-label={productMutationBlocked ? blockedProductActionTitle : t("detail.addNode", { label: optionLabel })}
               >
                 {creatingThisNode ? (
                   <Loader2 size={13} className="mr-1.5 animate-spin" />
@@ -2377,6 +2590,7 @@ export function ProductDetailPage() {
           imageSizeOptions={imageSizeOptions}
           imageGenerationMaxDimension={imageGenerationMaxDimension}
           imageToolAllowedFields={imageToolAllowedFields}
+          tailSplitterMaxItems={tailSplitterMaxItems}
           generationConfigs={workflowGenerationConfigs}
           onPreviewImage={setPreviewImage}
           onDraftChange={handleGuardedDraftChange}
@@ -2389,11 +2603,12 @@ export function ProductDetailPage() {
           saveStatus={saveStatus}
           onUploadImage={(file) => uploadNodeImageMutation.mutate(file)}
           onUploadDocument={(file) => uploadNodeDocumentMutation.mutate(file)}
+          onClearImage={() => clearNodeImageMutation.mutate()}
           onDelete={() => handleDeleteNode(selectedNode)}
           busy={structureBusy}
-          cancelBusy={cancelWorkflowRunMutation.isPending}
+          cancelBusy={cancelWorkflowRunMutation.isPending || productMutationBlocked}
           runActionState={
-            productBlocked
+            productMutationBlocked
               ? {
                   ...getWorkflowNodeRunActionState(selectedNode, {
                     runSubmissionPending,
@@ -2426,7 +2641,13 @@ export function ProductDetailPage() {
           workflow={workflow}
           latestRun={latestRun}
           busyRunId={workflowRunActionBusyRunId ?? null}
+          failedNodeCount={failedWorkflowNodes.length}
+          retryableFailedNodeCount={retryableFailedWorkflowNodes.length}
+          retryFailedNodesBusy={retryFailedWorkflowNodesMutation.isPending}
+          retryFailedNodesTitle={failedWorkflowNodesRetryTitle}
+          mutationBlockedTitle={productMutationBlocked ? blockedProductActionTitle : null}
           onRetryRun={handleRetryWorkflowRun}
+          onRetryFailedNodes={() => void handleRetryFailedWorkflowNodes()}
         />
       ) : null}
       {activeSidebarTab === "images" ? (
@@ -2449,6 +2670,7 @@ export function ProductDetailPage() {
             })
           }
           fillReferenceBusy={fillReferenceBusy}
+          fillBlockedTitle={productMutationBlocked ? blockedProductActionTitle : null}
         />
       ) : null}
       {activeSidebarTab === "templates" ? (
@@ -2469,8 +2691,8 @@ export function ProductDetailPage() {
           applyBusy={applyTemplateGroupMutation.isPending}
           applyingTemplateKey={applyTemplateGroupMutation.variables?.key ?? null}
           onApplyTemplate={(template) => {
-            if (productBlocked) {
-              showBlockedProductError();
+            if (productMutationBlocked) {
+              showProductMutationBlockedError();
               return;
             }
             if (isResourceBlocked(template)) {
@@ -2479,10 +2701,10 @@ export function ProductDetailPage() {
             }
             applyTemplateGroupMutation.mutate(template);
           }}
-          userTemplateBusy={userTemplateMutationBusy}
+          userTemplateBusy={userTemplateMutationBusy || productMutationBlocked}
           onRenameUserTemplate={(template, title) => {
-            if (productBlocked) {
-              showBlockedProductError();
+            if (productMutationBlocked) {
+              showProductMutationBlockedError();
               return;
             }
             if (isResourceBlocked(template)) {
@@ -2497,8 +2719,8 @@ export function ProductDetailPage() {
             }
           }}
           onArchiveUserTemplate={(template) => {
-            if (productBlocked) {
-              showBlockedProductError();
+            if (productMutationBlocked) {
+              showProductMutationBlockedError();
               return;
             }
             if (isResourceBlocked(template)) {
@@ -2608,7 +2830,7 @@ export function ProductDetailPage() {
               getNodeActionToolbar={getWorkflowNodeActionToolbar}
               onNodeAction={executeWorkflowCanvasAction}
               keyboardShortcutsActive={workflowCanvasKeyboardShortcutsActive}
-              onClearSelection={clearMultiSelection}
+              onClearSelection={clearCanvasSelection}
               getNodeImage={(node) => getNodeImageDownload(node, product, t)}
               onPreviewImage={setPreviewImage}
             />
@@ -2660,8 +2882,8 @@ export function ProductDetailPage() {
                         </button>
                         <button
                           type="submit"
-                          disabled={createUserTemplateGroupMutation.isPending || productBlocked}
-                          title={productBlocked ? blockedProductActionTitle : t("detail.save")}
+                          disabled={createUserTemplateGroupMutation.isPending || productMutationBlocked}
+                          title={productMutationBlocked ? blockedProductActionTitle : t("detail.save")}
                           className="inline-flex h-11 items-center rounded-lg bg-zinc-950 px-3 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-400 lg:h-8"
                         >
                           {t("detail.save")}
@@ -2833,22 +3055,41 @@ export function ProductDetailPage() {
               {fullWorkflowRunBusy ? <Loader2 size={17} className="mb-1 shrink-0 animate-spin" /> : <Play size={17} className="mb-1 shrink-0" />}
               <span className="max-w-full text-center">{fullWorkflowRunBusy ? t("detail.running") : t("detail.runFullWorkflow")}</span>
             </button>
+            {failedWorkflowNodes.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => void handleRetryFailedWorkflowNodes()}
+                disabled={retryFailedWorkflowNodesDisabled || !workflow}
+                className="inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl border border-red-200 bg-white px-1 text-[10px] font-semibold leading-[1.05] text-red-600 transition-colors active:scale-[0.98] hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/35 dark:bg-slate-950/80 dark:text-red-200 dark:hover:bg-red-500/12"
+                title={failedWorkflowNodesRetryTitle}
+                aria-label={failedWorkflowNodesRetryTitle}
+              >
+                {retryFailedWorkflowNodesMutation.isPending ? (
+                  <Loader2 size={16} className="mb-1 shrink-0 animate-spin" />
+                ) : (
+                  <RotateCcw size={16} className="mb-1 shrink-0" />
+                )}
+                <span className="max-w-full text-center">
+                  {t("detail.failedNodesRetry.action", { count: failedWorkflowNodes.length })}
+                </span>
+              </button>
+            ) : null}
             {sidebarTabItems.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => openMobileSidebarTab(item.key)}
-              className={`inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl border px-1 text-[10px] font-semibold leading-[1.05] text-slate-600 transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400 ${
-                activeSidebarTab === item.key
-                  ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/55 dark:bg-violet-500/18 dark:text-violet-100"
-                  : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
-              }`}
-              aria-label={item.label}
-              title={item.label}
-            >
-              {item.icon}
-              <span className="mt-1 max-w-full text-center">{item.label}</span>
-            </button>
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => openMobileSidebarTab(item.key)}
+                className={`inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl border px-1 text-[10px] font-semibold leading-[1.05] text-slate-600 transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400 ${
+                  activeSidebarTab === item.key
+                    ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/55 dark:bg-violet-500/18 dark:text-violet-100"
+                    : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+                }`}
+                aria-label={item.label}
+                title={item.label}
+              >
+                {item.icon}
+                <span className="mt-1 max-w-full text-center">{item.label}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -2912,8 +3153,16 @@ export function ProductDetailPage() {
         nodeTitle={selectedNode?.title ?? ""}
         plan={selectedTailPendingPlan}
         busy={applyTailSplitPlanMutation.isPending}
+        imageSizeOptions={imageSizeOptions}
+        imageGenerationMaxDimension={imageGenerationMaxDimension}
+        imageToolAllowedFields={imageToolAllowedFields}
+        generationConfigs={workflowGenerationConfigs}
+        canReusePublicCopyNode={selectedTailPublicReuseAvailability.canReusePublicCopyNode}
+        canReusePublicReferenceNode={selectedTailPublicReuseAvailability.canReusePublicReferenceNode}
         onClose={() => setTailPlanDialogOpen(false)}
-        onConfirm={(itemIds) => void handleConfirmTailSplitPlan(itemIds)}
+        onConfirm={(itemIds, imageGenerationConfig, reuseOptions) =>
+          void handleConfirmTailSplitPlan(itemIds, imageGenerationConfig, reuseOptions)
+        }
       />
       {canvasTemplateSaveOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
@@ -3016,8 +3265,8 @@ export function ProductDetailPage() {
           if (!pendingDeleteAction) {
             return;
           }
-          if (productBlocked) {
-            showBlockedProductError();
+          if (productMutationBlocked) {
+            showProductMutationBlockedError();
             setPendingDeleteAction(null);
             return;
           }
@@ -3041,8 +3290,8 @@ export function ProductDetailPage() {
         busy={historyActionBusy}
         onClose={() => setPendingHistoryAction(null)}
         onConfirm={() => {
-          if (productBlocked) {
-            showBlockedProductError();
+          if (productMutationBlocked) {
+            showProductMutationBlockedError();
             setPendingHistoryAction(null);
             return;
           }

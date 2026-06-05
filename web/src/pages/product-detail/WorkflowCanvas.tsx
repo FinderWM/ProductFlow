@@ -556,13 +556,13 @@ function WorkflowCanvasSelectionBridge({ activeSessionRef }: WorkflowCanvasSelec
 
 interface WorkflowCanvasKeyboardBridgeProps {
   enabled: boolean;
-  hasMultiSelection: boolean;
+  hasSelection: boolean;
   onClearSelection: () => void;
 }
 
 function WorkflowCanvasKeyboardBridge({
   enabled,
-  hasMultiSelection,
+  hasSelection,
   onClearSelection,
 }: WorkflowCanvasKeyboardBridgeProps) {
   const clearSelectionPressed = useKeyPress(WORKFLOW_CLEAR_SELECTION_KEY_CODE, {
@@ -571,10 +571,10 @@ function WorkflowCanvasKeyboardBridge({
   });
 
   useEffect(() => {
-    if (enabled && hasMultiSelection && clearSelectionPressed) {
+    if (enabled && hasSelection && clearSelectionPressed) {
       onClearSelection();
     }
-  }, [clearSelectionPressed, enabled, hasMultiSelection, onClearSelection]);
+  }, [clearSelectionPressed, enabled, hasSelection, onClearSelection]);
 
   return null;
 }
@@ -1379,7 +1379,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         <WorkflowCanvasSelectionBridge activeSessionRef={selectionBoxSessionRef} />
         <WorkflowCanvasKeyboardBridge
           enabled={keyboardShortcutsActive}
-          hasMultiSelection={selectedNodeIds.length > 1}
+          hasSelection={Boolean(selectedNodeId) || selectedNodeIds.length > 0}
           onClearSelection={onClearSelection}
         />
         <WorkflowCanvasViewportBridge onViewportChange={recordViewport} onViewportChangeEnd={persistViewport} />

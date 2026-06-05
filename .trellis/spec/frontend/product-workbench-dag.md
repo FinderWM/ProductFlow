@@ -96,9 +96,10 @@
 - Canvas keyboard selection behavior should prefer ReactFlow key props/hooks for local selection and viewport activation:
   `selectionKeyCode`, `multiSelectionKeyCode`, `panActivationKeyCode`, `zoomActivationKeyCode`, and `useKeyPress` are
   appropriate for lasso, multi-select modifiers, Space pan activation, Ctrl/Meta zoom activation, and Escape
-  clear-selection. Backend-backed operations such as delete, duplicate, paste, undo, and redo remain ProductDetail-owned
-  shortcuts because they require confirmation, mutation calls, cache updates, or history restoration; keep ReactFlow
-  `deleteKeyCode` disabled unless those contracts are routed through ProductFlow handlers.
+  clear-selection. Escape must clear both the primary selected node and the selected node group, not only collapse
+  multi-select back to the primary node. Backend-backed operations such as delete, duplicate, paste, undo, and redo remain
+  ProductDetail-owned shortcuts because they require confirmation, mutation calls, cache updates, or history restoration;
+  keep ReactFlow `deleteKeyCode` disabled unless those contracts are routed through ProductFlow handlers.
 - ProductDetail node/group secondary actions must use one ProductFlow action model rendered through ReactFlow
   `NodeToolbar` on the selected node. The toolbar is the direct action surface on both desktop and mobile. Do not add a
   selected-card More button, mobile node action sheet, long-press action path, or ProductFlow desktop right-click context
@@ -180,8 +181,9 @@
   unless a layout/position mutation is already pending.
 - When an active run transitions to inactive, refresh artifact-bearing queries: `['product', productId]`,
   `['product-history', productId]`, and `['products']`.
-- Product creation is intentionally minimal: only product name and preview/main image are required; category, price,
-  description/context, reference images, copy, and image directions are configured later through canvas nodes.
+- Product creation keeps the same product-context text/document contracts as the workbench: product name and the selected
+  entry's required input remain the only required fields, while optional context document upload is a single-slot control
+  that hides the upload/drop zone after a document is selected and restores it only after removal.
 - Product list deletion must use `api.deleteProduct(productId)`, ask for explicit confirmation, and refresh `['products']`
   after success. Show `ApiError.detail` when active workflow runs block deletion.
 - `product_context` inspector edits generalized context fields: name, owner id, entry type, long text, one context image,
@@ -203,6 +205,25 @@
 - Product context document upload uses `api.uploadWorkflowNodeDocument(nodeId, { file })` with multipart field `document`.
   The upload response is the authoritative workflow payload; update `['product-workflow', productId]` from it and refresh
   product/artifact queries because the route creates a `context_document` SourceAsset.
+- Product context document UI is a single-slot control in both ProductDetail inspector and ProductCreatePage. In
+  ProductDetail, when `document_source_asset_id`, `document_filename`, or `document_text` is present, do not render a
+  clickable/drop-enabled upload zone. The user must remove the current document first; removal clears
+  `document_source_asset_id`, `document_filename`, `document_mime_type`, and `document_text` in the draft so
+  `nodeConfigFromDraft(...)` writes them as `null`. In ProductCreatePage, when `contextDocumentFile` is present, hide the
+  upload/drop zone, show the selected filename, and only restore uploading after local removal. This removes the node
+  binding or local selection only and does not delete historical `context_document` SourceAsset records.
+- Product context document text should be previewable through the shared Markdown editor/preview surface in read-only
+  mode so uploaded Markdown can render GFM and Mermaid blocks while still exposing the original source text. TXT/CSV/JSON
+  documents remain read-only raw text plus the same Markdown preview unless a future requirement adds MIME-specific
+  viewers. Document preview must be user-toggleable and collapsed by default in both ProductDetail inspector and
+  ProductCreatePage so long uploaded documents do not occupy the whole page until requested. In narrow sidebars or
+  creation forms, the selected-document status card must stack file metadata above the action row; do not place the file
+  name/hint and two action buttons in one flex row because the buttons can squeeze Chinese helper text into one-character
+  columns. The read-only source view for uploaded documents must render as a non-input viewer such as `pre`, not a
+  `textarea` or editable input with only a `readOnly` attribute. Memoize read-only source and rendered preview surfaces so
+  unrelated creation-form edits, especially long-text typing, do not re-render uploaded document Markdown/Mermaid content
+  when the document text has not changed. ProductCreatePage must submit the original uploaded `File`, not a regenerated
+  file built from preview text.
 - Product context image upload reuses `api.uploadWorkflowNodeImage(...)` for `product_context` nodes. The current preview
   should prefer `image_source_asset_id` / `context_image` and fall back to the product original image for legacy workflows.
 - `reference_image` nodes use `uploadWorkflowNodeImage(...)` for manual uploads and can also be filled by upstream
@@ -221,6 +242,13 @@
   right-click as the only way to retrieve product images.
 - Type-specific inspector forms are required for product context, reference image, copy generation, and image generation;
   avoid generic JSON editors for normal user flows.
+- Workbench inspector parameter help must use the shared `ParameterHelpButton` / `ParameterHelpLabel` components and the
+  global `web/src/lib/parameterHelp.ts` registry. Add help for non-obvious node parameters such as product context long
+  text/document/dynamic fields, reference role, copy instruction/generation config/tone/channel/visual guidance, tail
+  source/description/max items, image description/generation config, and provider tool options. Do not add help to obvious
+  fields such as node name, product name, labels, raw body text, image aspect/resolution/width/height, or upload buttons.
+  ProductDetail should pass `uiType="productDetail"` so registry-level `helpKey + uiType` styles can adjust the dialog
+  without changing inspector layout code.
 - A selected `copy_generation` node with a generated `copy_set_id` must edit `CopyPayloadV2` as the primary copy model:
   `summary`, `content.kind`, block/section text, labels, notes, and visual hints. The inspector must not show a derived
   fixed-field copy panel or maintain removed copy fields as draft state. Saving calls
@@ -718,7 +746,8 @@ polling.
 
 ```tsx
 const workflowActive = hasActiveWorkflow(workflow);
-const runSubmissionPending = runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending;
+const runSubmissionPending =
+  runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending || retryFailedWorkflowNodesMutation.isPending;
 const selectedNodeRunAction = getWorkflowNodeRunActionState(selectedNode, {
   runSubmissionPending,
   pendingStartNodeId,
@@ -742,11 +771,19 @@ pending state for individual node run actions, while keeping layout dragging ind
 - `WorkflowRunStartMode = "from_node" | "after_node"`.
 - API contracts:
   - `api.runProductWorkflow(productId, { start_node_id?, start_mode? })`
-  - `api.applyTailSplitPlan(nodeId, { plan_id, item_ids?, items?, position_x?, position_y? })`
+  - `api.retryFailedWorkflowNodes(productId)`
+  - `api.applyTailSplitPlan(nodeId, { plan_id, item_ids?, items?, image_generation_config?, position_x?, position_y?,
+    reuse_public_copy_node?, reuse_public_reference_node? })`
   - `items` entries are `{ id: string; instruction?: string | null }` and take precedence over `item_ids`.
+  - `image_generation_config` entries are one shared image-generation config for all image trigger nodes created by the
+    confirmed tail plan.
 - Tail node data:
   - `config_json` carries editable split input fields (for example source text/description/max items).
   - `output_json.latest_plan` carries pending/applied split-plan payload.
+- Tail max item input must read `/api/settings/runtime.generation_tail_splitter_max_items`; do not hardcode the old 12
+  item UI limit.
+- Tail max item copy must describe the value as the upper bound AI may output, not a required count. The user-facing label
+  can say `最多拆分数` / max split items, and helper text should clarify the actual count depends on content.
 
 ### 3. Contracts
 - ProductDetail must expose tail nodes as first-class ordinary nodes in add-node, node labels, iconography, and inspector.
@@ -757,6 +794,21 @@ pending state for individual node run actions, while keeping layout dragging ind
   before graph expansion.
 - The split-plan dialog shows plan items with remove-selection controls and editable instruction text. Confirm submits
   selected `{id, instruction}` entries; cancel keeps the graph unchanged.
+- The split-plan dialog also exposes one shared image-generation configuration section: generation config auto/manual
+  selector, size controls, and allowed image tool options. Confirm submits that same config for every generated
+  `image_generation` node; legacy clients may omit it.
+- When the current tail node already has previous generated public copy/reference nodes, the split-plan dialog must expose
+  checkbox controls for reusing each public node. Checked reuse options are submitted as
+  `reuse_public_copy_node` / `reuse_public_reference_node`, and the UI should default them on so previously valuable
+  shared outputs are not discarded accidentally. If no previous public node exists for a role, omit that option from the
+  dialog.
+- The Inspector `max_items` number control may show the runtime global limit as helper text, but backend validation remains
+  authoritative because users can type values beyond the HTML `max` attribute.
+- RunsPanel shows a `重跑失败节点` action only when the current workflow has failed nodes. The action is disabled if any
+  failed node is not retryable, uses backend `node.is_retryable` as the source of truth, and calls
+  `api.retryFailedWorkflowNodes(productId)` after flushing the current selected-node draft.
+- ProductDetail must not duplicate retry-delay math in the browser. Backend `node.is_retryable` and
+  `node.non_retryable_reason` are authoritative for both retry-count limits and `workflow_node_retry_delay_ms` cooldown.
 - Waiting confirmation must display a distinct status label and queue text so the user can tell the system is waiting for
   their confirmation rather than provider capacity.
 - Tail apply mutation invalidates/refreshes `["product-workflow", productId]` and selects a sensible post-apply focus
@@ -781,6 +833,8 @@ pending state for individual node run actions, while keeping layout dragging ind
 ### 5. Good/Base/Bad Cases
 - Good: user runs tail, edits one plan-item instruction, deselects another item, confirms, and only selected image branches
   are created with edited instructions while remaining idle for review/editing.
+- Good: user reruns a tail node, keeps the previous shared copy/reference checkboxes selected, confirms the new plan, and
+  sees those public nodes still connected to the new image branches.
 - Good: user chooses `从此节点开始运行后面的节点` on a tail node's previous generated branch anchor to avoid
   re-running the tail itself.
 - Good: a run card clearly shows `waiting_confirmation`, not a generic queued/running capacity message.
@@ -794,6 +848,8 @@ pending state for individual node run actions, while keeping layout dragging ind
 - `defaultConfigForType("tail_splitter")` and node label/icon/display contract tests.
 - ProductDetail helper tests for `运行此节点` and downstream-run toolbar actions.
 - ProductDetail tests for pending-plan dialog open/cancel/confirm, edited-instruction payload, and selected-item payload.
+- ProductDetail or API-backed regression proving tail public-node reuse sends the reuse flags and preserves previous
+  public-node outputs.
 - ProductDetail or API-backed regression proving tail confirmation leaves generated nodes idle until manual downstream run.
 - Workflow status helper tests proving `waiting_confirmation` is active and has distinct queue text.
 - API contract test for `applyTailSplitPlan` request shape.

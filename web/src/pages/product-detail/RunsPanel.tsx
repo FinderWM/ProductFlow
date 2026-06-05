@@ -37,7 +37,13 @@ interface RunsPanelProps {
   workflow: ProductWorkflow | null;
   latestRun: ProductWorkflow["runs"][number] | null;
   busyRunId: string | null;
+  failedNodeCount: number;
+  retryableFailedNodeCount: number;
+  retryFailedNodesBusy: boolean;
+  retryFailedNodesTitle: string;
+  mutationBlockedTitle?: string | null;
   onRetryRun: (run: WorkflowRun) => void;
+  onRetryFailedNodes: () => void;
 }
 
 function imagePromptItems(
@@ -67,9 +73,22 @@ function findWorkflowNode(workflow: ProductWorkflow, nodeId: string): WorkflowNo
   return workflow.nodes.find((node) => node.id === nodeId) ?? null;
 }
 
-export function RunsPanel({ workflow, latestRun, busyRunId, onRetryRun }: RunsPanelProps) {
+export function RunsPanel({
+  workflow,
+  latestRun,
+  busyRunId,
+  failedNodeCount,
+  retryableFailedNodeCount,
+  retryFailedNodesBusy,
+  retryFailedNodesTitle,
+  mutationBlockedTitle = null,
+  onRetryRun,
+  onRetryFailedNodes,
+}: RunsPanelProps) {
   const { t } = useI18n();
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
+  const retryFailedNodesDisabled =
+    Boolean(mutationBlockedTitle) || retryFailedNodesBusy || failedNodeCount === 0 || retryableFailedNodeCount !== failedNodeCount;
 
   if (!workflow) {
     return (
@@ -102,15 +121,33 @@ export function RunsPanel({ workflow, latestRun, busyRunId, onRetryRun }: RunsPa
 
   return (
     <section>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <div className="text-xs text-zinc-500 dark:text-slate-400">
           {workflow?.runs.length ? t("detail.runsCount", { count: workflow.runs.length }) : t("detail.noRunHistory")}
         </div>
-        {latestRun ? (
-          <div className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
-            {t("detail.latest", { time: formatDateTime(latestRun.started_at) })}
-          </div>
-        ) : null}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {failedNodeCount > 0 ? (
+            <button
+              type="button"
+              onClick={onRetryFailedNodes}
+              disabled={retryFailedNodesDisabled}
+              title={retryFailedNodesTitle}
+              className="inline-flex items-center rounded-lg border border-red-200 bg-white px-2.5 py-1 text-[11px] font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/35 dark:bg-[#0b1220] dark:text-red-200 dark:hover:bg-red-500/12"
+            >
+              {retryFailedNodesBusy ? (
+                <Loader2 size={12} className="mr-1 animate-spin" />
+              ) : (
+                <RotateCcw size={12} className="mr-1" />
+              )}
+              {t("detail.failedNodesRetry.action", { count: failedNodeCount })}
+            </button>
+          ) : null}
+          {latestRun ? (
+            <div className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
+              {t("detail.latest", { time: formatDateTime(latestRun.started_at) })}
+            </div>
+          ) : null}
+        </div>
       </div>
       {workflow?.runs.length ? (
         <div className="space-y-2">
@@ -159,7 +196,8 @@ export function RunsPanel({ workflow, latestRun, busyRunId, onRetryRun }: RunsPa
                       <button
                         type="button"
                         onClick={() => onRetryRun(run)}
-                        disabled={runBusy}
+                        disabled={runBusy || Boolean(mutationBlockedTitle)}
+                        title={mutationBlockedTitle ?? t("detail.retry")}
                         className="inline-flex shrink-0 items-center rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-60 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-red-400/50 dark:hover:bg-red-500/12 dark:hover:text-red-200"
                       >
                         {runBusy ? (

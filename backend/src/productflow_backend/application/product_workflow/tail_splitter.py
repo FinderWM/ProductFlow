@@ -16,10 +16,12 @@ from productflow_backend.application.contracts import (
     TailSplitterConfig,
     TailSplitterOutput,
 )
+from productflow_backend.application.image_generation_core import normalize_image_generation_tool_options
 from productflow_backend.application.product_workflow import graph as product_workflow_graph
 from productflow_backend.application.product_workflow.artifacts import image_asset_output
-from productflow_backend.application.product_workflow.context import collect_incoming_context
+from productflow_backend.application.product_workflow.context import collect_incoming_context, image_size_from_config
 from productflow_backend.application.time import now_utc
+from productflow_backend.config import get_runtime_settings
 from productflow_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType
 from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.infrastructure.db.models import (
@@ -54,9 +56,17 @@ class TailSplitPlanItemSelection:
     instruction: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TailSplitPlanImageGenerationConfig:
+    size: str | None = None
+    generation_config_mode: str | None = None
+    generation_config_id: str | None = None
+    tool_options: dict[str, Any] | None = None
+
+
 def normalize_tail_splitter_config(config_json: dict[str, Any] | None) -> dict[str, Any]:
     config = dict(config_json or {})
-    normalized = read_tail_splitter_config(config)
+    normalized = read_tail_splitter_config_for_runtime(config)
     return {**config, **normalized.model_dump(mode="json")}
 
 
@@ -64,7 +74,52 @@ def read_tail_splitter_config(config_json: dict[str, Any] | None) -> TailSplitte
     try:
         return TailSplitterConfig.model_validate(config_json or {})
     except ValidationError as exc:
-        raise ValueError(str(exc)) from exc
+        raise ValueError(_tail_splitter_validation_error_message(exc)) from exc
+
+
+def read_tail_splitter_config_for_runtime(
+    config_json: dict[str, Any] | None,
+    *,
+    max_items_limit: int | None = None,
+) -> TailSplitterConfig:
+    config = read_tail_splitter_config(config_json)
+    validate_tail_splitter_max_items(config.max_items, max_items_limit=max_items_limit)
+    return config
+
+
+def validate_tail_splitter_max_items(value: int, *, max_items_limit: int | None = None) -> int:
+    resolved_limit = (
+        int(max_items_limit)
+        if max_items_limit is not None
+        else int(get_runtime_settings().generation_tail_splitter_max_items)
+    )
+    if value > resolved_limit:
+        raise ValueError(f"最大拆分数不能超过 {resolved_limit}")
+    return value
+
+
+def _tail_splitter_validation_error_message(exc: ValidationError) -> str:
+    error = exc.errors()[0] if exc.errors() else {}
+    loc = tuple(error.get("loc", ()))
+    error_type = str(error.get("type") or "")
+    ctx_error = error.get("ctx", {}).get("error")
+    if ctx_error is not None:
+        return str(ctx_error)
+    if loc == ("max_items",):
+        return "最大拆分数必须是整数"
+    if loc == ("generation_config_mode",):
+        return "生成配置模式必须是 auto 或 manual"
+    if loc == ("generation_config_id",):
+        return "生成配置 ID 必须是文本"
+    if loc == ("description",):
+        return "拆分说明必须是文本"
+    if loc == ("source_text",):
+        return "拆分源文本必须是文本"
+    if loc == ("document_source",):
+        return "尾巴节点文档来源必须是对象"
+    if error_type:
+        return f"尾巴节点配置无效：{'.'.join(str(part) for part in loc) or 'config'} {error_type}"
+    return "尾巴节点配置无效，请调整节点设置后重试"
 
 
 def read_tail_splitter_output(output_json: dict[str, Any] | None) -> TailSplitterOutput:
@@ -133,8 +188,11 @@ def apply_tail_split_plan(
     plan_id: str,
     item_ids: list[str] | None,
     items: list[TailSplitPlanItemSelection] | None = None,
+    image_generation_config: TailSplitPlanImageGenerationConfig | None = None,
     position_x: int | None = None,
     position_y: int | None = None,
+    reuse_public_copy_node: bool = False,
+    reuse_public_reference_node: bool = False,
 ) -> AppliedTailSplitPlan:
     if tail_node.node_type != WorkflowNodeType.TAIL_SPLITTER:
         raise BusinessValidationError("只有尾巴节点可以应用拆分计划")
@@ -142,16 +200,47 @@ def apply_tail_split_plan(
     plan = pending_tail_split_plan_or_raise(tail_node, plan_id=plan_id)
     selected_items = _selected_plan_items(plan, item_ids=item_ids, items=items)
     tail_config = read_tail_splitter_config(tail_node.config_json)
+    image_node_base_config = _image_node_base_config(
+        tail_config=tail_config,
+        image_generation_config=image_generation_config,
+    )
     origin_x = position_x if position_x is not None else tail_node.position_x
     origin_y = position_y if position_y is not None else tail_node.position_y
     batch_id = str(uuid4())
+    reusable_public_copy_node = (
+        _tail_generated_public_node(workflow, tail_node, role="public_copy") if reuse_public_copy_node else None
+    )
+    reusable_public_reference_node = (
+        _tail_generated_public_node(workflow, tail_node, role="public_reference")
+        if reuse_public_reference_node
+        else None
+    )
+    preserved_node_ids = {
+        node.id for node in (reusable_public_copy_node, reusable_public_reference_node) if node is not None
+    }
 
-    delete_tail_generated_branch(session, workflow=workflow, tail_node=tail_node)
+    delete_tail_generated_branch(session, workflow=workflow, tail_node=tail_node, preserve_node_ids=preserved_node_ids)
     session.expire(workflow, ["nodes", "edges"])
     workflow = product_workflow_graph.get_workflow_or_raise(session, workflow.id)
     tail_node = product_workflow_graph.get_node_or_raise(session, tail_node.id)
+    reusable_public_copy_node = _get_preserved_node_or_none(
+        session,
+        node_id=reusable_public_copy_node.id if reusable_public_copy_node is not None else None,
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        tail_node_id=tail_node.id,
+        role="public_copy",
+    )
+    reusable_public_reference_node = _get_preserved_node_or_none(
+        session,
+        node_id=reusable_public_reference_node.id if reusable_public_reference_node is not None else None,
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.REFERENCE_IMAGE,
+        tail_node_id=tail_node.id,
+        role="public_reference",
+    )
 
-    shared_reference_node = _build_public_reference_node(
+    shared_reference_node = reusable_public_reference_node or _build_public_reference_node(
         session,
         workflow=workflow,
         tail_node=tail_node,
@@ -160,31 +249,17 @@ def apply_tail_split_plan(
         position_x=origin_x + TAIL_SPLITTER_PUBLIC_X_GAP,
         position_y=origin_y + TAIL_SPLITTER_PUBLIC_REFERENCE_Y_OFFSET,
     )
-    shared_copy_node = WorkflowNode(
-        workflow_id=workflow.id,
-        node_type=WorkflowNodeType.COPY_GENERATION,
-        title=TAIL_SPLITTER_PUBLIC_COPY_TITLE,
+    shared_copy_node = reusable_public_copy_node or _build_public_copy_node(
+        workflow=workflow,
+        tail_node=tail_node,
+        plan=plan,
+        batch_id=batch_id,
+        tail_config=tail_config,
         position_x=origin_x + TAIL_SPLITTER_PUBLIC_X_GAP,
         position_y=origin_y + TAIL_SPLITTER_PUBLIC_COPY_Y_OFFSET,
-        config_json={
-            "version": 2,
-            "instruction": _public_copy_instruction(plan),
-            "tone": "清晰可信",
-            "channel": "公共约束",
-            "output_mode": "blocks",
-            "generation_config_mode": tail_config.generation_config_mode,
-            "generation_config_id": (
-                tail_config.generation_config_id if tail_config.generation_config_mode == "manual" else None
-            ),
-            "generated_by": _generated_by_metadata(
-                tail_node_id=tail_node.id,
-                plan_id=plan.plan_id,
-                batch_id=batch_id,
-                role="public_copy",
-            ),
-        },
     )
-    session.add(shared_copy_node)
+    if reusable_public_copy_node is None:
+        session.add(shared_copy_node)
 
     created_nodes: list[WorkflowNode] = [shared_copy_node, shared_reference_node]
     item_node_ids: list[str] = []
@@ -197,12 +272,8 @@ def apply_tail_split_plan(
             position_x=origin_x + TAIL_SPLITTER_PUBLIC_X_GAP + TAIL_SPLITTER_IMAGE_X_GAP,
             position_y=row_y,
             config_json={
+                **image_node_base_config,
                 "instruction": item.instruction,
-                "size": product_workflow_graph.DEFAULT_IMAGE_SIZE,
-                "generation_config_mode": tail_config.generation_config_mode,
-                "generation_config_id": (
-                    tail_config.generation_config_id if tail_config.generation_config_mode == "manual" else None
-                ),
                 "generated_by": _generated_by_metadata(
                     tail_node_id=tail_node.id,
                     plan_id=plan.plan_id,
@@ -235,6 +306,7 @@ def apply_tail_split_plan(
         session.add(output_reference)
         created_nodes.extend([image_node, output_reference])
     session.flush()
+    created_node_ids = [node.id for node in created_nodes if node.id not in preserved_node_ids]
 
     item_nodes = created_nodes[2:]
     for image_node, output_reference in zip(item_nodes[::2], item_nodes[1::2], strict=True):
@@ -300,12 +372,19 @@ def apply_tail_split_plan(
     return AppliedTailSplitPlan(
         workflow=refreshed,
         batch_id=batch_id,
-        created_node_ids=[shared_copy_node.id, shared_reference_node.id, *item_node_ids],
+        created_node_ids=created_node_ids,
     )
 
 
-def delete_tail_generated_branch(session: Session, *, workflow: ProductWorkflow, tail_node: WorkflowNode) -> list[str]:
+def delete_tail_generated_branch(
+    session: Session,
+    *,
+    workflow: ProductWorkflow,
+    tail_node: WorkflowNode,
+    preserve_node_ids: set[str] | None = None,
+) -> list[str]:
     node_ids = set(_tail_generated_node_ids(workflow, tail_node))
+    node_ids -= preserve_node_ids or set()
     if not node_ids:
         return []
     session.execute(
@@ -364,10 +443,81 @@ def _selected_plan_items(
     return selected_items
 
 
+def _image_node_base_config(
+    *,
+    tail_config: TailSplitterConfig,
+    image_generation_config: TailSplitPlanImageGenerationConfig | None,
+) -> dict[str, Any]:
+    config: dict[str, Any] = {
+        "size": product_workflow_graph.DEFAULT_IMAGE_SIZE,
+        "generation_config_mode": tail_config.generation_config_mode,
+        "generation_config_id": (
+            tail_config.generation_config_id if tail_config.generation_config_mode == "manual" else None
+        ),
+    }
+    if image_generation_config is not None:
+        if image_generation_config.size is not None:
+            config["size"] = image_generation_config.size
+        mode = (image_generation_config.generation_config_mode or config["generation_config_mode"]).strip().lower()
+        if mode not in {"auto", "manual"}:
+            raise BusinessValidationError("生图生成配置模式必须是 auto 或 manual")
+        generation_config_id = (image_generation_config.generation_config_id or "").strip() or None
+        config["generation_config_mode"] = mode
+        config["generation_config_id"] = generation_config_id if mode == "manual" else None
+        if image_generation_config.tool_options is not None:
+            config["tool_options"] = image_generation_config.tool_options
+    try:
+        config["size"] = image_size_from_config(config) or product_workflow_graph.DEFAULT_IMAGE_SIZE
+    except ValueError as exc:
+        raise BusinessValidationError(str(exc)) from exc
+    if "tool_options" in config:
+        raw_tool_options = config.get("tool_options")
+        config["tool_options"] = normalize_image_generation_tool_options(
+            raw_tool_options if isinstance(raw_tool_options, dict) else None
+        )
+    return config
+
+
 def _public_copy_instruction(plan: TailSplitPlan) -> str:
     return (
         "提炼适用于当前整批图片的统一约束、风格和禁忌词，供所有下游生图触发器复用。"
         f"当前拆分摘要：{plan.source_summary}"
+    )
+
+
+def _build_public_copy_node(
+    *,
+    workflow: ProductWorkflow,
+    tail_node: WorkflowNode,
+    plan: TailSplitPlan,
+    batch_id: str,
+    tail_config: TailSplitterConfig,
+    position_x: int,
+    position_y: int,
+) -> WorkflowNode:
+    return WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title=TAIL_SPLITTER_PUBLIC_COPY_TITLE,
+        position_x=position_x,
+        position_y=position_y,
+        config_json={
+            "version": 2,
+            "instruction": _public_copy_instruction(plan),
+            "tone": "清晰可信",
+            "channel": "公共约束",
+            "output_mode": "blocks",
+            "generation_config_mode": tail_config.generation_config_mode,
+            "generation_config_id": (
+                tail_config.generation_config_id if tail_config.generation_config_mode == "manual" else None
+            ),
+            "generated_by": _generated_by_metadata(
+                tail_node_id=tail_node.id,
+                plan_id=plan.plan_id,
+                batch_id=batch_id,
+                role="public_copy",
+            ),
+        },
     )
 
 
@@ -428,6 +578,61 @@ def _tail_generated_node_ids(workflow: ProductWorkflow, tail_node: WorkflowNode)
             node_ids.add(node.id)
     node_ids.discard(tail_node.id)
     return list(node_ids)
+
+
+def _tail_generated_public_node(
+    workflow: ProductWorkflow,
+    tail_node: WorkflowNode,
+    *,
+    role: str,
+) -> WorkflowNode | None:
+    expected_type = {
+        "public_copy": WorkflowNodeType.COPY_GENERATION,
+        "public_reference": WorkflowNodeType.REFERENCE_IMAGE,
+    }.get(role)
+    if expected_type is None:
+        return None
+    nodes_by_id = {node.id: node for node in workflow.nodes}
+    output = read_tail_splitter_output(tail_node.output_json)
+    for batch in reversed(output.applied_batches):
+        for node_id in batch.node_ids:
+            node = nodes_by_id.get(node_id)
+            if (
+                node is not None
+                and node.node_type == expected_type
+                and _generated_by_matches(node, tail_node_id=tail_node.id, role=role)
+            ):
+                return node
+    candidates = [
+        node
+        for node in workflow.nodes
+        if node.node_type == expected_type and _generated_by_matches(node, tail_node_id=tail_node.id, role=role)
+    ]
+    return sorted(candidates, key=lambda node: node.created_at, reverse=True)[0] if candidates else None
+
+
+def _get_preserved_node_or_none(
+    session: Session,
+    *,
+    node_id: str | None,
+    workflow_id: str,
+    node_type: WorkflowNodeType,
+    tail_node_id: str,
+    role: str,
+) -> WorkflowNode | None:
+    if node_id is None:
+        return None
+    node = session.get(WorkflowNode, node_id)
+    if node is None or node.workflow_id != workflow_id or node.node_type != node_type:
+        return None
+    if not _generated_by_matches(node, tail_node_id=tail_node_id, role=role):
+        return None
+    return node
+
+
+def _generated_by_matches(node: WorkflowNode, *, tail_node_id: str, role: str) -> bool:
+    generated_by = _generated_by(node.config_json)
+    return generated_by.get("tail_node_id") == tail_node_id and generated_by.get("role") == role
 
 
 def _generated_by_metadata(

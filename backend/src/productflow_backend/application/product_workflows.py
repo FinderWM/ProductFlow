@@ -11,6 +11,7 @@ from productflow_backend.application.product_workflow.execution import (
     retry_product_workflow_run,
     run_product_workflow,
     start_product_workflow_run,
+    submit_failed_workflow_nodes_run,
     submit_product_workflow_run,
 )
 from productflow_backend.application.product_workflow.graph import (
@@ -24,6 +25,7 @@ from productflow_backend.application.product_workflow.mutations import (
     apply_node_group_template_to_workflow,
     apply_tail_split_plan,
     bind_workflow_node_image,
+    clear_workflow_node_image,
     create_workflow_edge,
     create_workflow_node,
     delete_workflow_edge,
@@ -81,6 +83,7 @@ __all__ = [
     "archive_canvas_template_category",
     "archive_global_canvas_template",
     "bind_workflow_node_image",
+    "clear_workflow_node_image",
     "copy_user_canvas_template_to_global",
     "create_canvas_template_category",
     "create_global_canvas_template",
@@ -112,6 +115,7 @@ __all__ = [
     "review_user_canvas_template",
     "run_product_workflow",
     "start_product_workflow_run",
+    "submit_failed_workflow_nodes_run",
     "submit_product_workflow_run",
     "update_canvas_template_category",
     "update_global_canvas_template",

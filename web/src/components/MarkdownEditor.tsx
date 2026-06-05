@@ -1,6 +1,6 @@
-import { Children, isValidElement, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { Children, isValidElement, memo, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Columns2, Eye, Maximize2, PencilLine, X } from "lucide-react";
+import { Columns2, Eye, FileText, Maximize2, PencilLine, X } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -16,8 +16,9 @@ type MermaidRenderState =
 
 interface MarkdownEditorProps {
   label: string;
+  labelHelp?: ReactNode;
   value: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
   modalTitle: string;
   placeholder?: string;
   helpText?: string;
@@ -25,6 +26,7 @@ interface MarkdownEditorProps {
   minRows?: number;
   disabled?: boolean;
   required?: boolean;
+  readOnly?: boolean;
 }
 
 interface MarkdownTextAreaProps {
@@ -35,6 +37,15 @@ interface MarkdownTextAreaProps {
   maxLength?: number;
   minRows?: number;
   disabled?: boolean;
+  readOnly?: boolean;
+  className?: string;
+  ariaLabel?: string;
+}
+
+interface MarkdownSourceViewerProps {
+  id: string;
+  value: string;
+  placeholder?: string;
   className?: string;
   ariaLabel?: string;
 }
@@ -43,6 +54,7 @@ const INLINE_PANEL_CLASS_NAME =
   "rounded-xl border border-slate-200 bg-white/80 shadow-sm dark:border-slate-700 dark:bg-[#0b1220]";
 const SEGMENT_BUTTON_CLASS_NAME =
   "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors";
+const noopMarkdownChange = () => undefined;
 
 function textFromChildren(children: ReactNode): string {
   return Children.toArray(children)
@@ -76,6 +88,7 @@ function MarkdownTextArea({
   maxLength,
   minRows = 6,
   disabled,
+  readOnly,
   className = "",
   ariaLabel,
 }: MarkdownTextAreaProps) {
@@ -83,16 +96,44 @@ function MarkdownTextArea({
     <textarea
       id={id}
       value={value}
-      onChange={(event) => onChange(event.target.value)}
+      onChange={(event) => {
+        if (!readOnly) {
+          onChange(event.target.value);
+        }
+      }}
       placeholder={placeholder}
       maxLength={maxLength}
       rows={minRows}
       disabled={disabled}
+      readOnly={readOnly}
       aria-label={ariaLabel}
-      className={`w-full resize-y px-3 py-2 text-sm leading-6 outline-none textarea-premium disabled:cursor-not-allowed disabled:opacity-70 ${className}`}
+      className={`w-full resize-y px-3 py-2 text-sm leading-6 outline-none textarea-premium disabled:cursor-not-allowed disabled:opacity-70 read-only:cursor-text ${className}`}
     />
   );
 }
+
+const MarkdownSourceViewer = memo(function MarkdownSourceViewer({
+  id,
+  value,
+  placeholder,
+  className = "",
+  ariaLabel,
+}: MarkdownSourceViewerProps) {
+  const displayValue = value || placeholder || "";
+  return (
+    <pre
+      id={id}
+      role="region"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      className={`min-h-32 w-full overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-6 outline-none textarea-premium focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-violet-400/20 ${
+        value ? "text-slate-700 dark:text-slate-200" : "text-slate-400 dark:text-slate-500"
+      } ${className}`}
+    >
+      {displayValue}
+    </pre>
+  );
+});
 
 function MermaidDiagram({ source }: { source: string }) {
   const { t } = useI18n();
@@ -173,7 +214,7 @@ function MermaidDiagram({ source }: { source: string }) {
   );
 }
 
-function MarkdownPreview({ value }: { value: string }) {
+const MarkdownPreview = memo(function MarkdownPreview({ value }: { value: string }) {
   const { t } = useI18n();
 
   if (!markdownHasVisibleContent(value)) {
@@ -250,21 +291,24 @@ function MarkdownPreview({ value }: { value: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 function ModeButtons({
   mode,
   onModeChange,
+  readOnly,
 }: {
   mode: MarkdownViewMode;
   onModeChange: (mode: MarkdownViewMode) => void;
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
+  const SourceIcon = readOnly ? FileText : PencilLine;
   return (
     <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
       <button type="button" onClick={() => onModeChange("edit")} className={modeButtonClassName(mode === "edit")}>
-        <PencilLine size={13} />
-        {t("markdown.edit")}
+        <SourceIcon size={13} />
+        {readOnly ? t("markdown.original") : t("markdown.edit")}
       </button>
       <button type="button" onClick={() => onModeChange("preview")} className={modeButtonClassName(mode === "preview")}>
         <Eye size={13} />
@@ -277,16 +321,19 @@ function ModeButtons({
 function DialogModeButtons({
   mode,
   onModeChange,
+  readOnly,
 }: {
   mode: MarkdownDialogMode;
   onModeChange: (mode: MarkdownDialogMode) => void;
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
+  const SourceIcon = readOnly ? FileText : PencilLine;
   return (
     <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
       <button type="button" onClick={() => onModeChange("edit")} className={modeButtonClassName(mode === "edit")}>
-        <PencilLine size={13} />
-        {t("markdown.edit")}
+        <SourceIcon size={13} />
+        {readOnly ? t("markdown.original") : t("markdown.edit")}
       </button>
       <button type="button" onClick={() => onModeChange("preview")} className={modeButtonClassName(mode === "preview")}>
         <Eye size={13} />
@@ -302,8 +349,9 @@ function DialogModeButtons({
 
 export function MarkdownEditor({
   label,
+  labelHelp,
   value,
-  onChange,
+  onChange = noopMarkdownChange,
   modalTitle,
   placeholder,
   helpText,
@@ -311,6 +359,7 @@ export function MarkdownEditor({
   minRows = 6,
   disabled,
   required,
+  readOnly,
 }: MarkdownEditorProps) {
   const { t } = useI18n();
   const labelId = useId();
@@ -321,6 +370,11 @@ export function MarkdownEditor({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<MarkdownDialogMode>("split");
   const characterCount = maxLength ? t("markdown.characterCount", { count: value.length, max: maxLength }) : null;
+  const labelText = (
+    <span className="truncate">
+      {label} {required ? <span className="text-red-500">*</span> : null}
+    </span>
+  );
 
   useEffect(() => {
     if (!dialogOpen) {
@@ -336,7 +390,14 @@ export function MarkdownEditor({
   }, [dialogOpen]);
 
   const preview = <MarkdownPreview value={value} />;
-  const editor = (
+  const sourceView = readOnly ? (
+    <MarkdownSourceViewer
+      id={inlineTextareaId}
+      value={value}
+      placeholder={placeholder}
+      ariaLabel={label}
+    />
+  ) : (
     <MarkdownTextArea
       id={inlineTextareaId}
       value={value}
@@ -352,18 +413,28 @@ export function MarkdownEditor({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label id={labelId} htmlFor={inlineTextareaId} className="text-sm font-medium text-zinc-700 dark:text-slate-300">
-          {label} {required ? <span className="text-red-500">*</span> : null}
-        </label>
+        {readOnly ? (
+          <div id={labelId} className="inline-flex min-w-0 items-center gap-1 text-sm font-medium text-zinc-700 dark:text-slate-300">
+            {labelText}
+            {labelHelp}
+          </div>
+        ) : (
+          <div className="inline-flex min-w-0 items-center gap-1">
+            <label id={labelId} htmlFor={inlineTextareaId} className="text-sm font-medium text-zinc-700 dark:text-slate-300">
+              {labelText}
+            </label>
+            {labelHelp}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
-          <ModeButtons mode={viewMode} onModeChange={setViewMode} />
+          <ModeButtons mode={viewMode} onModeChange={setViewMode} readOnly={readOnly} />
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
             disabled={disabled}
             className="btn-secondary-spring inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-semibold disabled:cursor-not-allowed"
-            aria-label={t("markdown.openLargeEditor")}
-            title={t("markdown.openLargeEditor")}
+            aria-label={readOnly ? t("markdown.openLargeViewer") : t("markdown.openLargeEditor")}
+            title={readOnly ? t("markdown.openLargeViewer") : t("markdown.openLargeEditor")}
           >
             <Maximize2 size={13} />
             {t("markdown.open")}
@@ -371,7 +442,7 @@ export function MarkdownEditor({
         </div>
       </div>
       <div className={INLINE_PANEL_CLASS_NAME}>
-        <div className={viewMode === "edit" ? "block" : "hidden"}>{editor}</div>
+        <div className={viewMode === "edit" ? "block" : "hidden"}>{sourceView}</div>
         <div className={viewMode === "preview" ? "max-h-96 overflow-auto p-3" : "hidden"}>{preview}</div>
       </div>
       <div className="flex items-start justify-between gap-3 text-xs text-zinc-400 dark:text-slate-500">
@@ -400,16 +471,18 @@ export function MarkdownEditor({
                 <h2 id={dialogTitleId} className="truncate text-base font-semibold text-slate-950 dark:text-white">
                   {modalTitle}
                 </h2>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("markdown.dialogDescription")}</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {readOnly ? t("markdown.readOnlyDialogDescription") : t("markdown.dialogDescription")}
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <DialogModeButtons mode={dialogMode} onModeChange={setDialogMode} />
+                <DialogModeButtons mode={dialogMode} onModeChange={setDialogMode} readOnly={readOnly} />
                 <button
                   type="button"
                   onClick={() => setDialogOpen(false)}
                   className="btn-secondary-spring inline-flex h-9 w-9 items-center justify-center rounded-xl"
-                  aria-label={t("markdown.closeLargeEditor")}
-                  title={t("markdown.closeLargeEditor")}
+                  aria-label={readOnly ? t("markdown.closeLargeViewer") : t("markdown.closeLargeEditor")}
+                  title={readOnly ? t("markdown.closeLargeViewer") : t("markdown.closeLargeEditor")}
                 >
                   <X size={16} />
                 </button>
@@ -421,20 +494,36 @@ export function MarkdownEditor({
               }`}
             >
               <section className={dialogMode === "preview" ? "hidden" : "flex h-full min-h-0 min-w-0 flex-col gap-2"}>
-                <label htmlFor={dialogTextareaId} className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  {t("markdown.source")}
-                </label>
-                <MarkdownTextArea
-                  id={dialogTextareaId}
-                  value={value}
-                  onChange={onChange}
-                  placeholder={placeholder}
-                  maxLength={maxLength}
-                  minRows={18}
-                  disabled={disabled}
-                  className="min-h-0 flex-1"
-                  ariaLabel={label}
-                />
+                {readOnly ? (
+                  <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                    {t("markdown.original")}
+                  </div>
+                ) : (
+                  <label htmlFor={dialogTextareaId} className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                    {t("markdown.source")}
+                  </label>
+                )}
+                {readOnly ? (
+                  <MarkdownSourceViewer
+                    id={dialogTextareaId}
+                    value={value}
+                    placeholder={placeholder}
+                    className="min-h-0 flex-1"
+                    ariaLabel={label}
+                  />
+                ) : (
+                  <MarkdownTextArea
+                    id={dialogTextareaId}
+                    value={value}
+                    onChange={onChange}
+                    placeholder={placeholder}
+                    maxLength={maxLength}
+                    minRows={18}
+                    disabled={disabled}
+                    className="min-h-0 flex-1"
+                    ariaLabel={label}
+                  />
+                )}
               </section>
               <section className={dialogMode === "edit" ? "hidden" : "h-full min-h-0 min-w-0 overflow-auto rounded-xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-700 dark:bg-slate-950/45"}>
                 <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
