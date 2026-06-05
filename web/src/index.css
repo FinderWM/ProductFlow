@@ -341,6 +341,12 @@ textarea {
     border-bottom: 0;
   }
 
+  .pf-side-shell-with-toc .pf-side-rail {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
   .pf-side-toc-inner {
     position: sticky;
     top: 6rem;
