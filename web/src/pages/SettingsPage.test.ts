@@ -17,13 +17,16 @@ import {
   providerProfileUpdatePayload,
   providerUsageFromGenerationConfigs,
   providerUsageLabelKeys,
-  settingsExportFilename,
-  settingsImportSummaryCounts,
   settingsSectionIds,
   shouldShowSettingsMigrationPanel,
   textConfigTestRecordForKey,
   type TextConfigTestState,
 } from "./SettingsPage";
+import {
+  isSettingsExportPayload,
+  settingsExportFilename,
+  settingsImportSummaryCounts,
+} from "./settings/importExport";
 import { translate } from "../lib/i18n";
 import type {
   ConfigItem,
@@ -606,5 +609,21 @@ describe("SettingsPage import/export helpers", () => {
       canvasTemplateCount: 7,
       providerProfilesWithApiKeyCount: 1,
     });
+  });
+
+  it("accepts only settings export payload shapes for import preview", () => {
+    const payload = {
+      metadata: { exported_at: "2026-05-14T01:02:03Z" },
+      runtime_config: {},
+      provider_profiles: [],
+      provider_bindings: [],
+      generation_configs: [],
+      canvas_template_categories: [],
+      canvas_templates: [],
+    };
+
+    expect(isSettingsExportPayload(payload)).toBe(true);
+    expect(isSettingsExportPayload({ ...payload, provider_profiles: {} })).toBe(false);
+    expect(isSettingsExportPayload(null)).toBe(false);
   });
 });
