@@ -111,8 +111,12 @@ Put workflow rules and orchestration in `backend/src/productflow_backend/applica
 
 - `application/use_cases.py` owns the core product flow:
   product creation, reference images, copy/copy-confirmation edits, product deletion, and history reads.
-- `application/image_sessions.py` owns continuous image-session behavior, including building provider context,
-  trimming title text, attaching generated assets back to products, and deleting session storage.
+- `application/image_sessions.py` owns continuous image-session orchestration, including session CRUD, durable generation
+  task lifecycle, worker failure settlement, attaching generated assets back to products, and deleting session storage.
+- `application/image_session_generation_request.py` owns side-effect-light continuous image generation request helpers:
+  tool option normalization, base/reference asset validation, branch context assembly, image API batch sizing, and
+  provider output size metadata. It may read stored files to build reference data URLs, but must not commit, enqueue,
+  call providers, or mutate ORM rows.
 - `application/contracts.py` contains Pydantic contracts shared with providers/renderers, such as
   `ProductInput`, `CreativeBriefPayload`, `CopyPayloadV2`, and `PosterGenerationInput`.
 - `application/time.py` is the shared application timestamp helper for timezone-aware UTC values.

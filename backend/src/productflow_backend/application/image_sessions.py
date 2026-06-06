@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from base64 import b64encode
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -30,20 +29,21 @@ from productflow_backend.application.generation_config_runtime import (
     generation_failure_reason,
     release_runtime_generation_config,
 )
-from productflow_backend.application.image_generation_core import (
-    normalize_image_generation_tool_options,
-    provider_output_with_actual_image_size,
-    unique_image_generation_ids,
-)
 from productflow_backend.application.image_generation_failures import (
     ImageGenerationFailureDecision,
     classify_image_generation_failure,
+)
+from productflow_backend.application.image_session_generation_request import (
+    build_branch_generation_context,
+    images_api_batch_count,
+    normalize_tool_options,
+    provider_output_with_actual_size,
+    validate_generation_request,
 )
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
 from productflow_backend.application.queue_submission import enqueue_or_mark_failed
 from productflow_backend.application.time import now_utc
-from productflow_backend.config import normalize_image_generation_size
 from productflow_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
     QUEUE_UNAVAILABLE_DETAIL,
@@ -62,7 +62,7 @@ from productflow_backend.infrastructure.db.models import (
 )
 from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.infrastructure.image.base import infer_extension
-from productflow_backend.infrastructure.image.chat_service import ImageChatService, ImageChatTurn
+from productflow_backend.infrastructure.image.chat_service import ImageChatService
 from productflow_backend.infrastructure.image.responses_provider import PROVIDER_TEXT_OUTPUT_MESSAGE
 from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, ensure_provider_config_bootstrapped
 from productflow_backend.infrastructure.queue import (
@@ -75,10 +75,8 @@ from productflow_backend.infrastructure.text.factory import get_text_provider
 ATTACH_TARGET = Literal["reference", "main_source"]
 DEFAULT_SESSION_TITLE = "未命名会话"
 DEFAULT_ASSISTANT_MESSAGE = "已按本轮选择的图片上下文生成候选，你可以从任意候选继续。"
-MAX_BRANCH_CONTEXT_IMAGES = 6
 IMAGE_SESSION_GENERATION_MAX_ATTEMPTS = 3
 IMAGE_SESSION_GENERATION_MAX_COUNT = 10
-IMAGE_SESSION_IMAGES_API_N_MAX_COUNT = 10
 IMAGE_SESSION_CAPACITY_RETRY_DELAY_MS = 2000
 IMAGE_SESSION_GENERATION_CONFIG_RETRY_DELAY_MS = 2000
 GENERIC_IMAGE_GENERATION_FAILURE = "图片生成失败，请稍后重试"
@@ -207,12 +205,6 @@ def _get_product_or_raise(
     return product
 
 
-def _session_data_url(storage: LocalStorage, path: str, mime_type: str) -> str:
-    raw = storage.resolve(path).read_bytes()
-    encoded = b64encode(raw).decode("utf-8")
-    return f"data:{mime_type};base64,{encoded}"
-
-
 def _trim_title(prompt: str) -> str:
     compact = " ".join(prompt.strip().split())
     return compact[:32] + ("..." if len(compact) > 32 else "")
@@ -224,133 +216,6 @@ def _get_product_original_assets(product: Product) -> list[SourceAsset]:
         key=lambda item: item.created_at,
         reverse=True,
     )
-
-
-def _find_session_asset_or_raise(
-    image_session: ImageSession,
-    asset_id: str,
-    *,
-    expected_kind: ImageSessionAssetKind | None = None,
-    missing_message: str = "会话图片不存在",
-) -> ImageSessionAsset:
-    asset = next((item for item in image_session.assets if item.id == asset_id), None)
-    if asset is None:
-        raise NotFoundError(missing_message)
-    if expected_kind is not None and asset.kind != expected_kind:
-        if expected_kind == ImageSessionAssetKind.GENERATED_IMAGE:
-            raise BusinessValidationError("只能从会话生成图继续")
-        raise BusinessValidationError("只能选择会话参考图参与本轮生成")
-    ensure_resource_usable(asset)
-    return asset
-
-
-def _unique_ids(ids: list[str] | None) -> list[str]:
-    return unique_image_generation_ids(ids)
-
-
-def _has_prior_generation_request(
-    image_session: ImageSession,
-    *,
-    current_generation_task_id: str | None = None,
-) -> bool:
-    if current_generation_task_id is not None:
-        tasks = sorted(image_session.generation_tasks, key=lambda task: (task.created_at, task.id))
-        if tasks:
-            return tasks[0].id != current_generation_task_id
-    if image_session.rounds:
-        return True
-    if current_generation_task_id is None:
-        return bool(image_session.generation_tasks)
-
-    tasks = sorted(image_session.generation_tasks, key=lambda task: (task.created_at, task.id))
-    if not tasks:
-        return False
-    return tasks[0].id != current_generation_task_id
-
-
-def _build_branch_generation_context(
-    image_session: ImageSession,
-    storage: LocalStorage,
-    *,
-    base_asset_id: str | None,
-    selected_reference_asset_ids: list[str] | None,
-) -> tuple[list[ImageChatTurn], list[str], str | None, str | None, list[str]]:
-    """构建卡片式分支上下文：只使用显式 base 和本轮勾选参考图。"""
-    manual_references: list[str] = []
-    normalized_base_asset_id: str | None = None
-    selected_reference_ids = _unique_ids(selected_reference_asset_ids)
-    if (1 if base_asset_id else 0) + len(selected_reference_ids) > MAX_BRANCH_CONTEXT_IMAGES:
-        raise BusinessValidationError("本轮最多选择 6 张图片上下文（含分支基图）")
-
-    if base_asset_id:
-        base_asset = _find_session_asset_or_raise(
-            image_session,
-            base_asset_id,
-            expected_kind=ImageSessionAssetKind.GENERATED_IMAGE,
-        )
-        normalized_base_asset_id = base_asset.id
-        manual_references.append(_session_data_url(storage, storage.object_key_for(base_asset), base_asset.mime_type))
-
-    normalized_reference_ids: list[str] = []
-    for asset_id in selected_reference_ids:
-        reference_asset = _find_session_asset_or_raise(
-            image_session,
-            asset_id,
-            expected_kind=ImageSessionAssetKind.REFERENCE_UPLOAD,
-            missing_message="会话参考图不存在",
-        )
-        normalized_reference_ids.append(reference_asset.id)
-        manual_references.append(
-            _session_data_url(storage, storage.object_key_for(reference_asset), reference_asset.mime_type)
-        )
-
-    return [], manual_references[:6], None, normalized_base_asset_id, normalized_reference_ids
-
-
-def _validate_generation_request(
-    image_session: ImageSession,
-    *,
-    size: str,
-    base_asset_id: str | None,
-    selected_reference_asset_ids: list[str] | None,
-    generation_count: int,
-    tool_options: dict[str, Any] | None = None,
-    current_generation_task_id: str | None = None,
-    max_generation_count: int = IMAGE_SESSION_GENERATION_MAX_COUNT,
-) -> tuple[str, str | None, list[str]]:
-    if not 1 <= generation_count <= max_generation_count:
-        raise BusinessValidationError(f"一次生成数量必须在 1-{max_generation_count} 张之间")
-    normalized_size = normalize_image_generation_size(size)
-    selected_reference_ids = _unique_ids(selected_reference_asset_ids)
-    if (1 if base_asset_id else 0) + len(selected_reference_ids) > MAX_BRANCH_CONTEXT_IMAGES:
-        raise BusinessValidationError("本轮最多选择 6 张图片上下文（含分支基图）")
-
-    normalized_base_asset_id: str | None = None
-    if base_asset_id:
-        base_asset = _find_session_asset_or_raise(
-            image_session,
-            base_asset_id,
-            expected_kind=ImageSessionAssetKind.GENERATED_IMAGE,
-        )
-        normalized_base_asset_id = base_asset.id
-    elif _has_prior_generation_request(image_session, current_generation_task_id=current_generation_task_id):
-        raise BusinessValidationError("后续生图必须选择一张本会话已生成图片作为基图")
-
-    normalized_reference_ids: list[str] = []
-    for asset_id in selected_reference_ids:
-        reference_asset = _find_session_asset_or_raise(
-            image_session,
-            asset_id,
-            expected_kind=ImageSessionAssetKind.REFERENCE_UPLOAD,
-            missing_message="会话参考图不存在",
-        )
-        normalized_reference_ids.append(reference_asset.id)
-
-    return normalized_size, normalized_base_asset_id, normalized_reference_ids
-
-
-def _normalize_tool_options(tool_options: dict[str, Any] | None) -> dict[str, Any] | None:
-    return normalize_image_generation_tool_options(tool_options)
 
 
 def _generation_config_selection(
@@ -426,29 +291,6 @@ def polish_image_session_prompt(
 
 def _image_task_generation_config_selection(task: ImageSessionGenerationTask) -> GenerationConfigSelection:
     return _generation_config_selection(task.generation_config_mode, task.requested_generation_config_id)
-
-
-def _images_api_batch_count(
-    *,
-    provider_kind: str,
-    remaining_count: int,
-) -> int:
-    if provider_kind != "openai_images":
-        return 1
-    return max(1, min(remaining_count, IMAGE_SESSION_IMAGES_API_N_MAX_COUNT))
-
-
-def _provider_output_with_actual_size(
-    provider_output_json: dict[str, Any] | None,
-    *,
-    requested_size: str,
-    image_bytes: bytes,
-) -> dict[str, Any]:
-    return provider_output_with_actual_image_size(
-        provider_output_json,
-        requested_size=requested_size,
-        image_bytes=image_bytes,
-    )
 
 
 def list_image_sessions(
@@ -724,15 +566,15 @@ def _execute_image_session_round_generation(
     if generation_task is not None and generation_config_selection is None:
         generation_config_selection = _image_task_generation_config_selection(generation_task)
     generation_config_selection = generation_config_selection or GenerationConfigSelection()
-    normalized_tool_options = _normalize_tool_options(tool_options)
-    normalized_size, normalized_base_asset_id, normalized_reference_ids = _validate_generation_request(
+    normalized_tool_options = normalize_tool_options(tool_options)
+    normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
         image_session,
         size=size,
         base_asset_id=base_asset_id,
         selected_reference_asset_ids=selected_reference_asset_ids,
         generation_count=generation_count,
-        tool_options=normalized_tool_options,
         current_generation_task_id=generation_task_id,
+        max_generation_count=IMAGE_SESSION_GENERATION_MAX_COUNT,
     )
     (
         history,
@@ -740,7 +582,7 @@ def _execute_image_session_round_generation(
         previous_response_id,
         _validated_base_asset_id,
         _validated_reference_ids,
-    ) = _build_branch_generation_context(
+    ) = build_branch_generation_context(
         image_session,
         storage,
         base_asset_id=normalized_base_asset_id,
@@ -842,7 +684,7 @@ def _execute_image_session_round_generation(
                 result = pending_provider_results.pop(0)
             else:
                 remaining_count = generation_count - candidate_index + 1
-                batch_count = _images_api_batch_count(
+                batch_count = images_api_batch_count(
                     provider_kind=service.provider_kind,
                     remaining_count=remaining_count,
                 )
@@ -913,7 +755,7 @@ def _execute_image_session_round_generation(
                 previous_response_id=None,
                 image_generation_call_id=result.image_generation_call_id,
                 provider_request_json=result.provider_request_json,
-                provider_output_json=_provider_output_with_actual_size(
+                provider_output_json=provider_output_with_actual_size(
                     result.provider_output_json,
                     requested_size=normalized_size,
                     image_bytes=result.bytes_data,
@@ -1069,16 +911,16 @@ def create_image_session_generation_task(
         missing_message="连续生图会话不存在",
     )
     ensure_resource_usable(image_session)
-    normalized_tool_options = _normalize_tool_options(tool_options)
+    normalized_tool_options = normalize_tool_options(tool_options)
     generation_config_selection = _generation_config_selection(generation_config_mode, generation_config_id)
     _validate_manual_image_generation_config_selection(session, generation_config_selection)
-    normalized_size, normalized_base_asset_id, normalized_reference_ids = _validate_generation_request(
+    normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
         image_session,
         size=size,
         base_asset_id=base_asset_id,
         selected_reference_asset_ids=selected_reference_asset_ids,
         generation_count=generation_count,
-        tool_options=normalized_tool_options,
+        max_generation_count=IMAGE_SESSION_GENERATION_MAX_COUNT,
     )
     ensure_generation_capacity(session)
     task = ImageSessionGenerationTask(
