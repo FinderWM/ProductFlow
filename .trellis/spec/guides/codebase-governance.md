@@ -53,6 +53,15 @@ When adding an API permission, update all of these together:
 - frontend helper tests when the condition is composite
 - RBAC catalog or authorization tests when behavior changes
 
+Backend route gates are enforced by `backend/tests/test_route_rbac_contract.py`:
+
+- Every public route must be listed in the test allowlist by method and path.
+- Every private `/api` route must expose `require_api_permission(...)` or `require_any_api_permission(...)` through the
+  FastAPI dependency tree.
+- Admin governance routes must expose both `require_admin` and their action permission in the test prefix matrix.
+- When adding a protected route, run
+  `uv run --directory backend pytest tests/test_route_rbac_contract.py tests/test_auth_rbac.py`.
+
 ## Extension Points
 
 Use existing extension seams before creating new abstractions:
