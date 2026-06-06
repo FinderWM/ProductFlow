@@ -41,6 +41,12 @@ import { api, ApiError } from "../lib/api";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
 import { useI18n } from "../lib/preferences";
+import {
+  API_INSPIRATIONS_GENERATE,
+  API_INSPIRATIONS_WRITE,
+  API_STATUS_READ,
+  hasSessionApiPermission,
+} from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import type {
   ApplyTailSplitPlanImageGenerationConfigInput,
@@ -292,18 +298,40 @@ export function ProductDetailPage() {
     : productBlocked
       ? blockedProductActionMessage()
       : "";
-  const showProductMutationBlockedError = useCallback(() => {
-    if (!productMutationBlockedTitle) {
+  const canWriteProductWorkflow = hasSessionApiPermission(session, API_INSPIRATIONS_WRITE);
+  const canGenerateProductWorkflow = hasSessionApiPermission(session, API_INSPIRATIONS_GENERATE);
+  const canReadGenerationQueue = hasSessionApiPermission(session, API_STATUS_READ);
+  const productWriteBlockedTitle =
+    productMutationBlockedTitle || (canWriteProductWorkflow ? "" : t("detail.permission.inspirationsWriteRequired"));
+  const productGenerateBlockedTitle =
+    productMutationBlockedTitle ||
+    (canGenerateProductWorkflow ? "" : t("detail.permission.inspirationsGenerateRequired"));
+  const productWriteBlocked = productMutationBlocked || !canWriteProductWorkflow;
+  const productGenerateBlocked = productMutationBlocked || !canGenerateProductWorkflow;
+  const showProductWriteBlockedError = useCallback(() => {
+    if (!productWriteBlockedTitle) {
       return;
     }
     setNotice("");
-    setError(productMutationBlockedTitle);
-  }, [productMutationBlockedTitle]);
-  const assertProductUsable = useCallback(() => {
-    if (productMutationBlocked) {
-      throw new ApiError(403, productMutationBlockedTitle || t("resource.blockedAction"));
+    setError(productWriteBlockedTitle);
+  }, [productWriteBlockedTitle]);
+  const showProductGenerateBlockedError = useCallback(() => {
+    if (!productGenerateBlockedTitle) {
+      return;
     }
-  }, [productMutationBlocked, productMutationBlockedTitle, t]);
+    setNotice("");
+    setError(productGenerateBlockedTitle);
+  }, [productGenerateBlockedTitle]);
+  const assertProductWritable = useCallback(() => {
+    if (productWriteBlocked) {
+      throw new ApiError(403, productWriteBlockedTitle || t("detail.permission.inspirationsWriteRequired"));
+    }
+  }, [productWriteBlocked, productWriteBlockedTitle, t]);
+  const assertProductGeneratable = useCallback(() => {
+    if (productGenerateBlocked) {
+      throw new ApiError(403, productGenerateBlockedTitle || t("detail.permission.inspirationsGenerateRequired"));
+    }
+  }, [productGenerateBlocked, productGenerateBlockedTitle, t]);
 
   const historyQuery = useQuery({
     queryKey: ["product-history", productId],
@@ -361,6 +389,7 @@ export function ProductDetailPage() {
   const queueOverviewQuery = useQuery({
     queryKey: ["generation-queue"],
     queryFn: api.getGenerationQueueOverview,
+    enabled: canReadGenerationQueue,
     refetchInterval: (query) => ((query.state.data?.active_count ?? 0) > 0 || workflowActive ? 1500 : false),
   });
   const imageGenerationMaxDimension =
@@ -603,8 +632,8 @@ export function ProductDetailPage() {
   };
 
   const handleGuardedDraftChange = (nextDraft: NodeConfigDraft) => {
-    if (productMutationBlocked) {
-      showProductMutationBlockedError();
+    if (productWriteBlocked) {
+      showProductWriteBlockedError();
       return;
     }
     handleDraftChange(nextDraft);
@@ -816,7 +845,7 @@ export function ProductDetailPage() {
   const executeDeleteNodesStep = async (
     step: Extract<WorkflowHistoryStep, { kind: "deleteNodes" }>,
   ): Promise<WorkflowHistoryStep> => {
-    assertProductUsable();
+    assertProductWritable();
     const currentWorkflow = getCurrentWorkflow();
     const nodeIdSet = new Set(step.nodeIds);
     const nodesToRestore = currentWorkflow?.nodes.filter((node) => nodeIdSet.has(node.id)) ?? [];
@@ -840,7 +869,7 @@ export function ProductDetailPage() {
   const executeRestoreNodesStep = async (
     step: Extract<WorkflowHistoryStep, { kind: "restoreNodes" }>,
   ): Promise<WorkflowHistoryStep> => {
-    assertProductUsable();
+    assertProductWritable();
     const oldToNewNodeIds = new Map<string, string>();
     let nextWorkflow = getCurrentWorkflow();
     const createdNodeIds: string[] = [];
@@ -885,7 +914,7 @@ export function ProductDetailPage() {
   const executeDeleteEdgesStep = async (
     step: Extract<WorkflowHistoryStep, { kind: "deleteEdges" }>,
   ): Promise<WorkflowHistoryStep> => {
-    assertProductUsable();
+    assertProductWritable();
     const currentWorkflow = getCurrentWorkflow();
     const edgeIdSet = new Set(step.edgeIds);
     const edgesToRestore = currentWorkflow?.edges.filter((edge) => edgeIdSet.has(edge.id)) ?? [];
@@ -903,7 +932,7 @@ export function ProductDetailPage() {
   const executeRestoreEdgesStep = async (
     step: Extract<WorkflowHistoryStep, { kind: "restoreEdges" }>,
   ): Promise<WorkflowHistoryStep> => {
-    assertProductUsable();
+    assertProductWritable();
     let nextWorkflow = getCurrentWorkflow();
     const createdEdgeIds: string[] = [];
     for (const edge of step.edges) {
@@ -926,7 +955,7 @@ export function ProductDetailPage() {
   const executeMoveNodesStep = async (
     step: Extract<WorkflowHistoryStep, { kind: "moveNodes" }>,
   ): Promise<WorkflowHistoryStep> => {
-    assertProductUsable();
+    assertProductWritable();
     for (const move of step.moves) {
       const nextWorkflow = await api.updateWorkflowNode(move.nodeId, {
         position_x: move.to.x,
@@ -999,7 +1028,7 @@ export function ProductDetailPage() {
 
   const runWorkflowMutation = useMutation({
     mutationFn: (input?: RunWorkflowInput) => {
-      assertProductUsable();
+      assertProductGeneratable();
       return api.runProductWorkflow(
         productId,
         input?.startNodeId
@@ -1027,7 +1056,10 @@ export function ProductDetailPage() {
   });
 
   const cancelWorkflowRunMutation = useMutation({
-    mutationFn: (runId: string) => api.cancelProductWorkflowRun(productId, runId),
+    mutationFn: (runId: string) => {
+      assertProductGeneratable();
+      return api.cancelProductWorkflowRun(productId, runId);
+    },
     onSuccess: async (nextWorkflow) => {
       setError("");
       queryClient.setQueryData(["product-workflow", productId], nextWorkflow);
@@ -1045,7 +1077,7 @@ export function ProductDetailPage() {
 
   const retryWorkflowRunMutation = useMutation({
     mutationFn: (runId: string) => {
-      assertProductUsable();
+      assertProductGeneratable();
       return api.retryProductWorkflowRun(productId, runId);
     },
     onSuccess: (nextWorkflow) => {
@@ -1063,7 +1095,7 @@ export function ProductDetailPage() {
 
   const retryFailedWorkflowNodesMutation = useMutation({
     mutationFn: () => {
-      assertProductUsable();
+      assertProductGeneratable();
       return api.retryFailedWorkflowNodes(productId);
     },
     onSuccess: async (nextWorkflow) => {
@@ -1083,7 +1115,7 @@ export function ProductDetailPage() {
 
   const createNodeMutation = useMutation({
     mutationFn: async (type: WorkflowNodeType) => {
-      assertProductUsable();
+      assertProductWritable();
       const currentWorkflow = workflowQuery.data;
       if (!currentWorkflow) {
         throw new Error(t("detail.error.workflowNotLoaded"));
@@ -1174,7 +1206,7 @@ export function ProductDetailPage() {
 
   const applyTemplateGroupMutation = useMutation({
     mutationFn: async (template: CanvasTemplateSummary) => {
-      assertProductUsable();
+      assertProductWritable();
       await flushSelectedDraft();
       const previousWorkflow = queryClient.getQueryData<ProductWorkflow>(["product-workflow", productId]) ?? workflow;
       const previousNodeIds = new Set(previousWorkflow?.nodes.map((node) => node.id) ?? []);
@@ -1229,7 +1261,7 @@ export function ProductDetailPage() {
       imageGenerationConfig: ApplyTailSplitPlanImageGenerationConfigInput;
       reuseOptions: ApplyTailSplitPlanReuseOptions;
     }) => {
-      assertProductUsable();
+      assertProductWritable();
       await flushSelectedDraft();
       const previousWorkflow = getCurrentWorkflow();
       const tailNode = previousWorkflow?.nodes.find((node) => node.id === nodeId) ?? null;
@@ -1266,7 +1298,7 @@ export function ProductDetailPage() {
 
   const duplicateNodeGroupMutation = useMutation({
     mutationFn: async ({ nodeIds, source }: { nodeIds: string[]; source: "paste" | "duplicate" }) => {
-      assertProductUsable();
+      assertProductWritable();
       if (!nodeIds.length) {
         throw new Error(t("detail.error.selectNodesToDuplicate"));
       }
@@ -1315,7 +1347,7 @@ export function ProductDetailPage() {
 
   const createUserTemplateGroupMutation = useMutation({
     mutationFn: async () => {
-      assertProductUsable();
+      assertProductWritable();
       if (selectedNodeIds.length < 2) {
         throw new Error(t("detail.error.selectNodesToSave"));
       }
@@ -1355,7 +1387,7 @@ export function ProductDetailPage() {
 
   const createUserCanvasTemplateMutation = useMutation({
     mutationFn: async () => {
-      assertProductUsable();
+      assertProductWritable();
       const title = canvasTemplateSaveTitle.trim();
       if (!title) {
         throw new Error(t("detail.error.templateNameRequired"));
@@ -1397,7 +1429,7 @@ export function ProductDetailPage() {
 
   const updateUserTemplateGroupMutation = useMutation({
     mutationFn: ({ templateId, title }: { templateId: string; title: string }) => {
-      assertProductUsable();
+      assertProductWritable();
       return api.updateUserTemplateGroup(templateId, { title });
     },
     onSuccess: async () => {
@@ -1411,7 +1443,7 @@ export function ProductDetailPage() {
 
   const archiveUserTemplateGroupMutation = useMutation({
     mutationFn: (templateId: string) => {
-      assertProductUsable();
+      assertProductWritable();
       return api.archiveUserTemplateGroup(templateId);
     },
     onSuccess: async () => {
@@ -1427,7 +1459,7 @@ export function ProductDetailPage() {
 
   const updateNodeConfigMutation = useMutation({
     mutationFn: (node: WorkflowNode) => {
-      assertProductUsable();
+      assertProductWritable();
       return api.updateWorkflowNode(node.id, {
         title: draft.title,
         config_json: nodeConfigFromDraft(node, draft, imageToolAllowedFields),
@@ -1449,7 +1481,7 @@ export function ProductDetailPage() {
 
   const updateNodeCopyMutation = useMutation({
     mutationFn: (node: WorkflowNode) => {
-      assertProductUsable();
+      assertProductWritable();
       if (!draft.copyStructuredPayload) {
         throw new Error(t("detail.error.missingStructuredCopy"));
       }
@@ -1484,7 +1516,7 @@ export function ProductDetailPage() {
       moveGroupSize: number;
       rollbackWorkflow?: ProductWorkflow;
     }) => {
-      assertProductUsable();
+      assertProductWritable();
       return api.updateWorkflowNode(input.node.id, {
         position_x: input.position_x,
         position_y: input.position_y,
@@ -1557,7 +1589,7 @@ export function ProductDetailPage() {
 
   const createEdgeMutation = useMutation({
     mutationFn: async (input: { sourceNodeId: string; targetNodeId: string }) => {
-      assertProductUsable();
+      assertProductWritable();
       const currentWorkflow = queryClient.getQueryData<ProductWorkflow>(["product-workflow", productId]) ?? workflow;
       const previousEdgeIds = new Set(currentWorkflow?.edges.map((edge) => edge.id) ?? []);
       const source = currentWorkflow?.nodes.find((node) => node.id === input.sourceNodeId);
@@ -1599,7 +1631,7 @@ export function ProductDetailPage() {
 
   const deleteEdgeMutation = useMutation({
     mutationFn: async (edgeId: string) => {
-      assertProductUsable();
+      assertProductWritable();
       const currentWorkflow = getCurrentWorkflow();
       const edge = currentWorkflow?.edges.find((workflowEdge) => workflowEdge.id === edgeId);
       const restoreStep: WorkflowHistoryStep = edge
@@ -1627,7 +1659,7 @@ export function ProductDetailPage() {
 
   const deleteNodeMutation = useMutation({
     mutationFn: async (nodeId: string) => {
-      assertProductUsable();
+      assertProductWritable();
       const currentWorkflow = getCurrentWorkflow();
       const node = currentWorkflow?.nodes.find((workflowNode) => workflowNode.id === nodeId);
       if (node?.node_type === "product_context") {
@@ -1662,8 +1694,8 @@ export function ProductDetailPage() {
   });
 
   const handleDeleteNode = (node: WorkflowNode) => {
-    if (productMutationBlocked) {
-      showProductMutationBlockedError();
+    if (productWriteBlocked) {
+      showProductWriteBlockedError();
       return;
     }
     if (node.node_type === "product_context") {
@@ -1675,7 +1707,7 @@ export function ProductDetailPage() {
 
   const deleteSelectedNodesMutation = useMutation({
     mutationFn: async (nodeIds: string[]) => {
-      assertProductUsable();
+      assertProductWritable();
       if (nodeIds.length < 2) {
         throw new Error(t("detail.error.selectNodesToDelete"));
       }
@@ -1720,7 +1752,7 @@ export function ProductDetailPage() {
 
   const uploadNodeImageMutation = useMutation({
     mutationFn: (file: File) => {
-      assertProductUsable();
+      assertProductWritable();
       if (!selectedNode) {
         throw new Error(t("detail.error.selectImageNode"));
       }
@@ -1745,7 +1777,7 @@ export function ProductDetailPage() {
 
   const uploadNodeDocumentMutation = useMutation({
     mutationFn: (file: File) => {
-      assertProductUsable();
+      assertProductWritable();
       if (!selectedNode || selectedNode.node_type !== "product_context") {
         throw new Error(t("detail.error.selectContextNode"));
       }
@@ -1766,7 +1798,7 @@ export function ProductDetailPage() {
 
   const bindNodeImageMutation = useMutation({
     mutationFn: (input: { source_asset_id?: string; poster_variant_id?: string }) => {
-      assertProductUsable();
+      assertProductWritable();
       if (!selectedNode || selectedNode.node_type !== "reference_image") {
         throw new Error(t("detail.error.selectImageNode"));
       }
@@ -1789,7 +1821,7 @@ export function ProductDetailPage() {
 
   const clearNodeImageMutation = useMutation({
     mutationFn: () => {
-      assertProductUsable();
+      assertProductWritable();
       if (!selectedNode || selectedNode.node_type !== "reference_image") {
         throw new Error(t("detail.error.selectImageNode"));
       }
@@ -1836,7 +1868,7 @@ export function ProductDetailPage() {
   };
 
   useEffect(() => {
-    if (!selectedNode || !draftDirty || workflowActive || productMutationBlocked) {
+    if (!selectedNode || !draftDirty || workflowActive || productWriteBlocked) {
       return;
     }
     setSaveStatus("saving");
@@ -1844,11 +1876,11 @@ export function ProductDetailPage() {
       void flushSelectedDraft();
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [draft, draftDirty, productMutationBlocked, selectedNode?.id, workflowActive]);
+  }, [draft, draftDirty, productWriteBlocked, selectedNode?.id, workflowActive]);
 
   const handleRunWorkflow = async (startNodeId?: string, startMode: WorkflowRunStartMode = "from_node") => {
-    if (productMutationBlocked) {
-      showProductMutationBlockedError();
+    if (productGenerateBlocked) {
+      showProductGenerateBlockedError();
       return;
     }
     try {
@@ -1871,8 +1903,8 @@ export function ProductDetailPage() {
       setError(t("detail.tailPlan.selectAtLeastOne"));
       return;
     }
-    if (productMutationBlocked) {
-      showProductMutationBlockedError();
+    if (productWriteBlocked) {
+      showProductWriteBlockedError();
       return;
     }
     try {
@@ -1889,6 +1921,10 @@ export function ProductDetailPage() {
   };
 
   const handleCancelWorkflowRun = (run: ProductWorkflow["runs"][number]) => {
+    if (productGenerateBlocked) {
+      showProductGenerateBlockedError();
+      return;
+    }
     if (!run.is_cancelable || cancelWorkflowRunMutation.isPending) {
       return;
     }
@@ -1896,8 +1932,8 @@ export function ProductDetailPage() {
   };
 
   const handleRetryWorkflowRun = (run: ProductWorkflow["runs"][number]) => {
-    if (productMutationBlocked) {
-      showProductMutationBlockedError();
+    if (productGenerateBlocked) {
+      showProductGenerateBlockedError();
       return;
     }
     if (!run.is_retryable || retryWorkflowRunMutation.isPending) {
@@ -1907,8 +1943,8 @@ export function ProductDetailPage() {
   };
 
   const handleRetryFailedWorkflowNodes = async () => {
-    if (productMutationBlocked) {
-      showProductMutationBlockedError();
+    if (productGenerateBlocked) {
+      showProductGenerateBlockedError();
       return;
     }
     const failedNodes = workflow?.nodes.filter((node) => node.status === "failed") ?? [];
@@ -1971,15 +2007,14 @@ export function ProductDetailPage() {
     clearNodeImageMutation.isPending ||
     createUserCanvasTemplateMutation.isPending ||
     updateNodeCopyMutation.isPending;
-  const structureBusy = layoutMutationBusy || workflowActive || productMutationBlocked;
+  const structureBusy = layoutMutationBusy || workflowActive || productWriteBlocked;
   const runSubmissionPending =
     runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending || retryFailedWorkflowNodesMutation.isPending;
   const pendingStartNodeId = runWorkflowMutation.isPending ? (runWorkflowMutation.variables?.startNodeId ?? null) : null;
   const fullWorkflowRunBusy = runSubmissionPending || workflowActive;
-  const fullWorkflowRunDisabled = fullWorkflowRunBusy || productMutationBlocked;
-  const blockedProductActionTitle = productMutationBlockedTitle;
-  const fullWorkflowRunTitle = productMutationBlocked
-    ? blockedProductActionTitle
+  const fullWorkflowRunDisabled = fullWorkflowRunBusy || productGenerateBlocked;
+  const fullWorkflowRunTitle = productGenerateBlocked
+    ? productGenerateBlockedTitle
     : fullWorkflowRunBusy
       ? t("detail.workflowRunning")
       : t("detail.runWorkflow");
@@ -2043,12 +2078,12 @@ export function ProductDetailPage() {
     return buildWorkflowCanvasActionItems(target, {
       primaryNode,
       targetNodes: workflowActionTargetNodes(target),
-      runActionState: productMutationBlocked && runActionState
+      runActionState: productGenerateBlocked && runActionState
         ? {
             ...runActionState,
             disabled: true,
             pending: false,
-            title: blockedProductActionTitle,
+            title: productGenerateBlockedTitle,
           }
         : runActionState,
       structureBusy,
@@ -2071,20 +2106,28 @@ export function ProductDetailPage() {
       workflowCanvasRef.current?.fitNodeIds(nodeIds);
       return;
     }
-    if (productMutationBlocked) {
-      showProductMutationBlockedError();
-      return;
-    }
     if (actionId === "run") {
+      if (productGenerateBlocked) {
+        showProductGenerateBlockedError();
+        return;
+      }
       if (target.kind === "single") {
         void handleRunWorkflow(target.nodeId);
       }
       return;
     }
     if (actionId === "runAfter") {
+      if (productGenerateBlocked) {
+        showProductGenerateBlockedError();
+        return;
+      }
       if (target.kind === "single") {
         void handleRunWorkflow(target.nodeId, "after_node");
       }
+      return;
+    }
+    if (productWriteBlocked) {
+      showProductWriteBlockedError();
       return;
     }
     if (actionId === "duplicate") {
@@ -2129,9 +2172,9 @@ export function ProductDetailPage() {
   };
 
   const commitNodePosition = (input: NodePositionCommitInput) => {
-    if (productMutationBlocked) {
+    if (productWriteBlocked) {
       workflowCanvasRef.current?.clearOptimisticNodePosition(input.node.id);
-      showProductMutationBlockedError();
+      showProductWriteBlockedError();
       return;
     }
     const rollbackWorkflow = queryClient.getQueryData<ProductWorkflow>([
@@ -2195,8 +2238,8 @@ export function ProductDetailPage() {
         return;
       }
 
-      if (productMutationBlocked) {
-        showProductMutationBlockedError();
+      if (productWriteBlocked) {
+        showProductWriteBlockedError();
         return;
       }
 
@@ -2257,8 +2300,8 @@ export function ProductDetailPage() {
     requestHistoryDirection,
     selectedNodeId,
     selectedNodeIds,
-    productMutationBlocked,
-    showProductMutationBlockedError,
+    productWriteBlocked,
+    showProductWriteBlockedError,
     structureBusy,
     t,
     canvasTemplateSaveOpen,
@@ -2309,15 +2352,15 @@ export function ProductDetailPage() {
   const selectedNodeCancelableRun = getWorkflowNodeCancelableRun(workflow, selectedNode);
   const failedWorkflowNodes = workflow?.nodes.filter((node) => node.status === "failed") ?? [];
   const retryableFailedWorkflowNodes = failedWorkflowNodes.filter((node) => node.is_retryable);
-  const failedWorkflowNodesRetryTitle = productMutationBlocked
-    ? blockedProductActionTitle
+  const failedWorkflowNodesRetryTitle = productGenerateBlocked
+    ? productGenerateBlockedTitle
     : failedWorkflowNodes.length === 0
       ? t("detail.failedNodesRetry.empty")
       : retryableFailedWorkflowNodes.length !== failedWorkflowNodes.length
         ? t("detail.failedNodesRetry.nonRetryable")
         : t("detail.failedNodesRetry.title", { count: failedWorkflowNodes.length });
   const retryFailedWorkflowNodesDisabled =
-    productMutationBlocked ||
+    productGenerateBlocked ||
     retryFailedWorkflowNodesMutation.isPending ||
     failedWorkflowNodes.length === 0 ||
     retryableFailedWorkflowNodes.length !== failedWorkflowNodes.length;
@@ -2343,19 +2386,19 @@ export function ProductDetailPage() {
     !templateSaveOpen &&
     !canvasTemplateSaveOpen;
   const fillReferenceBusy = bindNodeImageMutation.isPending;
-  const queueOverview = queueOverviewQuery.data ?? null;
+  const queueOverview = canReadGenerationQueue ? (queueOverviewQuery.data ?? null) : null;
   const showQueueOverview = Boolean(queueOverview && queueOverview.active_count > 0);
   const canvasTemplates = canvasTemplatesQuery.data?.items ?? [];
   const canvasTemplateCategories: CanvasTemplateCategory[] = canvasTemplateCategoriesQuery.data?.items ?? [];
   const userCanvasTemplateCategories: CanvasTemplateCategory[] = userCanvasTemplateCategoriesQuery.data?.items ?? [];
-  const canvasTemplateSaveDisabled = workflowInitialEntryMode === "blank" || productMutationBlocked || !workflow;
+  const canvasTemplateSaveDisabled = workflowInitialEntryMode === "blank" || productWriteBlocked || !workflow;
   const canvasTemplateHasTailNode = Boolean(workflow?.nodes.some((node) => node.node_type === "tail_splitter"));
   const userTemplateMutationBusy =
     createUserTemplateGroupMutation.isPending ||
     createUserCanvasTemplateMutation.isPending ||
     updateUserTemplateGroupMutation.isPending ||
     archiveUserTemplateGroupMutation.isPending;
-  const autoLayoutBusy = layoutMutationBusy || productMutationBlocked || !workflow || workflow.nodes.length === 0;
+  const autoLayoutBusy = layoutMutationBusy || productWriteBlocked || !workflow || workflow.nodes.length === 0;
 
   const renderWorkflowToolbarButtons = () => (
     <>
@@ -2370,7 +2413,7 @@ export function ProductDetailPage() {
             setError(
               workflowInitialEntryMode === "blank"
                 ? t("detail.saveCanvasTemplateBlankDisabled")
-                : blockedProductActionTitle || t("detail.error.workflowNotLoaded"),
+                : productWriteBlockedTitle || t("detail.error.workflowNotLoaded"),
             );
             return;
           }
@@ -2380,7 +2423,7 @@ export function ProductDetailPage() {
           setCanvasTemplateRetainPromptText(true);
           setCanvasTemplateSaveOpen(true);
         }}
-        disabled={createUserCanvasTemplateMutation.isPending || productMutationBlocked || !workflow}
+        disabled={createUserCanvasTemplateMutation.isPending || productWriteBlocked || !workflow}
         className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold"
         title={
           workflowInitialEntryMode === "blank"
@@ -2431,8 +2474,8 @@ export function ProductDetailPage() {
         onClick={() => workflowCanvasRef.current?.triggerAutoLayout()}
         disabled={autoLayoutBusy}
         className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold"
-        title={productMutationBlocked ? blockedProductActionTitle : t("detail.autoLayout")}
-        aria-label={productMutationBlocked ? blockedProductActionTitle : t("detail.autoLayout")}
+        title={productWriteBlocked ? productWriteBlockedTitle : t("detail.autoLayout")}
+        aria-label={productWriteBlocked ? productWriteBlockedTitle : t("detail.autoLayout")}
       >
         <Sparkles size={16} />
         <span className="mt-1 leading-tight">{t("detail.autoLayout")}</span>
@@ -2495,8 +2538,8 @@ export function ProductDetailPage() {
                 onClick={() => createNodeMutation.mutate(option.type)}
                 disabled={structureBusy || !workflow}
                 className="btn-primary-spring inline-flex h-9 items-center rounded-xl px-4 text-xs font-semibold"
-                title={productMutationBlocked ? blockedProductActionTitle : t("detail.addNode", { label: optionLabel })}
-                aria-label={productMutationBlocked ? blockedProductActionTitle : t("detail.addNode", { label: optionLabel })}
+                title={productWriteBlocked ? productWriteBlockedTitle : t("detail.addNode", { label: optionLabel })}
+                aria-label={productWriteBlocked ? productWriteBlockedTitle : t("detail.addNode", { label: optionLabel })}
               >
                 {creatingThisNode ? (
                   <Loader2 size={13} className="mr-1.5 animate-spin" />
@@ -2606,9 +2649,9 @@ export function ProductDetailPage() {
           onClearImage={() => clearNodeImageMutation.mutate()}
           onDelete={() => handleDeleteNode(selectedNode)}
           busy={structureBusy}
-          cancelBusy={cancelWorkflowRunMutation.isPending || productMutationBlocked}
+          cancelBusy={cancelWorkflowRunMutation.isPending || productGenerateBlocked}
           runActionState={
-            productMutationBlocked
+            productGenerateBlocked
               ? {
                   ...getWorkflowNodeRunActionState(selectedNode, {
                     runSubmissionPending,
@@ -2616,7 +2659,7 @@ export function ProductDetailPage() {
                   }),
                   disabled: true,
                   pending: false,
-                  title: blockedProductActionTitle,
+                  title: productGenerateBlockedTitle,
                 }
               : getWorkflowNodeRunActionState(selectedNode, {
                   runSubmissionPending,
@@ -2645,7 +2688,7 @@ export function ProductDetailPage() {
           retryableFailedNodeCount={retryableFailedWorkflowNodes.length}
           retryFailedNodesBusy={retryFailedWorkflowNodesMutation.isPending}
           retryFailedNodesTitle={failedWorkflowNodesRetryTitle}
-          mutationBlockedTitle={productMutationBlocked ? blockedProductActionTitle : null}
+          mutationBlockedTitle={productGenerateBlocked ? productGenerateBlockedTitle : null}
           onRetryRun={handleRetryWorkflowRun}
           onRetryFailedNodes={() => void handleRetryFailedWorkflowNodes()}
         />
@@ -2670,7 +2713,7 @@ export function ProductDetailPage() {
             })
           }
           fillReferenceBusy={fillReferenceBusy}
-          fillBlockedTitle={productMutationBlocked ? blockedProductActionTitle : null}
+          fillBlockedTitle={productWriteBlocked ? productWriteBlockedTitle : null}
         />
       ) : null}
       {activeSidebarTab === "templates" ? (
@@ -2691,8 +2734,8 @@ export function ProductDetailPage() {
           applyBusy={applyTemplateGroupMutation.isPending}
           applyingTemplateKey={applyTemplateGroupMutation.variables?.key ?? null}
           onApplyTemplate={(template) => {
-            if (productMutationBlocked) {
-              showProductMutationBlockedError();
+            if (productWriteBlocked) {
+              showProductWriteBlockedError();
               return;
             }
             if (isResourceBlocked(template)) {
@@ -2701,10 +2744,10 @@ export function ProductDetailPage() {
             }
             applyTemplateGroupMutation.mutate(template);
           }}
-          userTemplateBusy={userTemplateMutationBusy || productMutationBlocked}
+          userTemplateBusy={userTemplateMutationBusy || productWriteBlocked}
           onRenameUserTemplate={(template, title) => {
-            if (productMutationBlocked) {
-              showProductMutationBlockedError();
+            if (productWriteBlocked) {
+              showProductWriteBlockedError();
               return;
             }
             if (isResourceBlocked(template)) {
@@ -2719,8 +2762,8 @@ export function ProductDetailPage() {
             }
           }}
           onArchiveUserTemplate={(template) => {
-            if (productMutationBlocked) {
-              showProductMutationBlockedError();
+            if (productWriteBlocked) {
+              showProductWriteBlockedError();
               return;
             }
             if (isResourceBlocked(template)) {
@@ -2882,8 +2925,8 @@ export function ProductDetailPage() {
                         </button>
                         <button
                           type="submit"
-                          disabled={createUserTemplateGroupMutation.isPending || productMutationBlocked}
-                          title={productMutationBlocked ? blockedProductActionTitle : t("detail.save")}
+                          disabled={createUserTemplateGroupMutation.isPending || productWriteBlocked}
+                          title={productWriteBlocked ? productWriteBlockedTitle : t("detail.save")}
                           className="inline-flex h-11 items-center rounded-lg bg-zinc-950 px-3 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-400 lg:h-8"
                         >
                           {t("detail.save")}
@@ -3265,8 +3308,8 @@ export function ProductDetailPage() {
           if (!pendingDeleteAction) {
             return;
           }
-          if (productMutationBlocked) {
-            showProductMutationBlockedError();
+          if (productWriteBlocked) {
+            showProductWriteBlockedError();
             setPendingDeleteAction(null);
             return;
           }
@@ -3290,8 +3333,8 @@ export function ProductDetailPage() {
         busy={historyActionBusy}
         onClose={() => setPendingHistoryAction(null)}
         onConfirm={() => {
-          if (productMutationBlocked) {
-            showProductMutationBlockedError();
+          if (productWriteBlocked) {
+            showProductWriteBlockedError();
             setPendingHistoryAction(null);
             return;
           }

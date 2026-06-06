@@ -20,6 +20,7 @@ interface SessionReferencePanelProps {
   uploadBusy: boolean;
   deletingAssetId: string | null;
   disabled: boolean;
+  selectionDisabled?: boolean;
   onFiles: (files: File[]) => void;
   onToggle: (assetId: string, checked: boolean) => void;
   onDelete: (assetId: string) => void;
@@ -33,6 +34,7 @@ export function SessionReferencePanel({
   uploadBusy,
   deletingAssetId,
   disabled,
+  selectionDisabled = disabled,
   onFiles,
   onToggle,
   onDelete,
@@ -94,7 +96,7 @@ export function SessionReferencePanel({
                   <input
                     type="checkbox"
                     checked={selected}
-                    disabled={disabled || selectionLimitReached || (assetBlocked && !selected)}
+                    disabled={selectionDisabled || selectionLimitReached || (assetBlocked && !selected)}
                     onChange={(event) => onToggle(asset.id, event.target.checked)}
                     aria-label={t("chat.useReference")}
                     title={assetBlocked ? assetBlockedTitle : t("chat.useReference")}

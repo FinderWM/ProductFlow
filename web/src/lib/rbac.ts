@@ -2,8 +2,12 @@ import type { SessionState } from "./types";
 
 export const API_INSPIRATIONS_READ = "inspirations:read";
 export const API_INSPIRATIONS_WRITE = "inspirations:write";
+export const API_INSPIRATIONS_GENERATE = "inspirations:generate";
 export const API_IMAGE_CHAT_READ = "image_chat:read";
+export const API_IMAGE_CHAT_WRITE = "image_chat:write";
+export const API_IMAGE_CHAT_GENERATE = "image_chat:generate";
 export const API_GALLERY_READ = "gallery:read";
+export const API_GALLERY_WRITE = "gallery:write";
 export const API_STATUS_READ = "status:read";
 export const API_USAGE_STATS_READ = "usage_stats:read";
 export const API_SETTINGS_READ = "settings:read";

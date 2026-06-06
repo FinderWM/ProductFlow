@@ -39,6 +39,13 @@ import { formatDateTime } from "../lib/format";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import type { ParameterHelpKey } from "../lib/parameterHelp";
 import { useI18n } from "../lib/preferences";
+import {
+  API_GALLERY_WRITE,
+  API_IMAGE_CHAT_GENERATE,
+  API_IMAGE_CHAT_WRITE,
+  API_INSPIRATIONS_WRITE,
+  hasSessionApiPermission,
+} from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
 import { imageRoundSizeLabel, placeholderStatusClass, placeholderStatusLabel } from "./image-chat/display";
@@ -186,6 +193,12 @@ type PendingDeleteAction =
   | { kind: "session"; sessionId: string }
   | { kind: "productReference"; assetId: string }
   | { kind: "sessionReference"; sessionId: string; assetId: string };
+
+function assertImageChatActionAllowed(blockedTitle: string | null) {
+  if (blockedTitle) {
+    throw new ApiError(403, blockedTitle);
+  }
+}
 
 export function ImageChatPage() {
   const { t } = useI18n();
@@ -393,12 +406,20 @@ export function ImageChatPage() {
   const currentProductBlocked = isResourceBlocked(currentProduct);
   const currentProductAdminReadonly = isAdminReadonlyResource(currentUser, currentProduct);
   const adminReadonlyActionTitle = t("resource.adminReadonlyAction");
+  const canWriteImageChat = hasSessionApiPermission(sessionState, API_IMAGE_CHAT_WRITE);
+  const canGenerateImageChat = hasSessionApiPermission(sessionState, API_IMAGE_CHAT_GENERATE);
+  const canWriteGallery = hasSessionApiPermission(sessionState, API_GALLERY_WRITE);
+  const canWriteInspirations = hasSessionApiPermission(sessionState, API_INSPIRATIONS_WRITE);
+  const imageChatWritePermissionTitle = canWriteImageChat ? null : t("chat.permission.imageChatWriteRequired");
+  const imageChatGeneratePermissionTitle = canGenerateImageChat ? null : t("chat.permission.imageChatGenerateRequired");
+  const galleryWritePermissionTitle = canWriteGallery ? null : t("chat.permission.galleryWriteRequired");
+  const inspirationsWritePermissionTitle = canWriteInspirations ? null : t("chat.permission.inspirationsWriteRequired");
   const createSessionBlockedTitle =
     isProductMode && currentProductBlocked
       ? blockedActionMessage(currentProduct)
       : isProductMode && currentProductAdminReadonly
         ? adminReadonlyActionTitle
-        : null;
+        : imageChatWritePermissionTitle;
 
   function blockedActionMessage(resource: ModerationFields | null | undefined) {
     return getResourceBlockedActionTitle(resource, t("resource.blockedAction"));
@@ -674,17 +695,22 @@ export function ImageChatPage() {
     currentProduct,
   ]);
   const sessionOrProductBlockedResource = firstBlockedResource([imageSession, isProductMode ? currentProduct : null]);
-  const productReferenceEditBlockedTitle = currentProductAdminReadonly ? adminReadonlyActionTitle : null;
+  const productReferenceEditBlockedTitle = currentProductAdminReadonly
+    ? adminReadonlyActionTitle
+    : inspirationsWritePermissionTitle;
   const generationBlockedTitle = generationBlockedResource
     ? blockedActionMessage(generationBlockedResource)
     : generationAdminReadonly
       ? adminReadonlyActionTitle
-      : null;
+      : imageChatGeneratePermissionTitle;
+  const generationSettingsBlockedTitle = generationAdminReadonly
+    ? adminReadonlyActionTitle
+    : imageChatGeneratePermissionTitle;
   const sessionEditBlockedTitle = sessionEditBlockedResource
     ? blockedActionMessage(sessionEditBlockedResource)
     : sessionEditAdminReadonly
       ? adminReadonlyActionTitle
-      : null;
+      : imageChatWritePermissionTitle;
   const selectedResultResourceBlockedTitle = selectedResultBlockedResource
     ? blockedActionMessage(selectedResultBlockedResource)
     : null;
@@ -692,18 +718,18 @@ export function ImageChatPage() {
     ? selectedResultResourceBlockedTitle
     : selectedResultAdminReadonly
       ? adminReadonlyActionTitle
-      : null;
+      : galleryWritePermissionTitle;
   const productAttachBlockedTitle = productAttachBlockedResource
     ? blockedActionMessage(productAttachBlockedResource)
     : productAttachAdminReadonly
       ? adminReadonlyActionTitle
-      : null;
+      : imageChatWritePermissionTitle;
   const sessionListDeletionBlockedTitle =
     isProductMode && currentProductBlocked
       ? blockedActionMessage(currentProduct)
       : isProductMode && currentProductAdminReadonly
         ? adminReadonlyActionTitle
-        : null;
+        : imageChatWritePermissionTitle;
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -714,7 +740,10 @@ export function ImageChatPage() {
   });
 
   const renameSessionMutation = useMutation({
-    mutationFn: (title: string) => api.updateImageSession(selectedSessionId!, { title }),
+    mutationFn: (title: string) => {
+      assertImageChatActionAllowed(sessionEditBlockedTitle);
+      return api.updateImageSession(selectedSessionId!, { title });
+    },
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
@@ -728,8 +757,10 @@ export function ImageChatPage() {
   });
 
   const uploadReferenceMutation = useMutation({
-    mutationFn: (input: { sessionId: string; files: File[] }) =>
-      api.addImageSessionReferenceImages(input.sessionId, input.files),
+    mutationFn: (input: { sessionId: string; files: File[] }) => {
+      assertImageChatActionAllowed(sessionEditBlockedTitle);
+      return api.addImageSessionReferenceImages(input.sessionId, input.files);
+    },
     onSuccess: (updated, input) => {
       const previousReferenceIds = new Set(
         input.sessionId === selectedSessionId ? sessionReferenceAssets.map((asset) => asset.id) : [],
@@ -760,8 +791,10 @@ export function ImageChatPage() {
   });
 
   const deleteSessionReferenceMutation = useMutation({
-    mutationFn: (input: { sessionId: string; assetId: string }) =>
-      api.deleteImageSessionReferenceImage(input.sessionId, input.assetId),
+    mutationFn: (input: { sessionId: string; assetId: string }) => {
+      assertImageChatActionAllowed(sessionEditBlockedTitle);
+      return api.deleteImageSessionReferenceImage(input.sessionId, input.assetId);
+    },
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
@@ -786,7 +819,10 @@ export function ImageChatPage() {
   });
 
   const deleteSessionMutation = useMutation({
-    mutationFn: (sessionId: string) => api.deleteImageSession(sessionId),
+    mutationFn: (sessionId: string) => {
+      assertImageChatActionAllowed(sessionListDeletionBlockedTitle);
+      return api.deleteImageSession(sessionId);
+    },
     onSuccess: async (_response, deletedSessionId) => {
       const remainingSessions = sessionItems.filter((item) => item.id !== deletedSessionId);
       setPendingDeleteAction(null);
@@ -813,7 +849,10 @@ export function ImageChatPage() {
   });
 
   const generateMutation = useMutation({
-    mutationFn: (payload: ImageGenerationSubmitPayload) => api.generateImageSessionRound(selectedSessionId!, payload),
+    mutationFn: (payload: ImageGenerationSubmitPayload) => {
+      assertImageChatActionAllowed(generationBlockedTitle);
+      return api.generateImageSessionRound(selectedSessionId!, payload);
+    },
     onSuccess: (updated, variables) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
@@ -846,12 +885,14 @@ export function ImageChatPage() {
   });
 
   const polishPromptMutation = useMutation({
-    mutationFn: (prompt: string) =>
-      api.polishImageSessionPrompt({
+    mutationFn: (prompt: string) => {
+      assertImageChatActionAllowed(generationSettingsBlockedTitle);
+      return api.polishImageSessionPrompt({
         prompt,
         generation_config_mode: promptPolishConfigMode,
         generation_config_id: promptPolishConfigMode === "manual" ? selectedPromptPolishConfigId : null,
-      }),
+      });
+    },
     onSuccess: (response) => {
       setPolishedPrompt(response.prompt);
       setSuccessMessage(t("chat.promptPolished"));
@@ -863,8 +904,10 @@ export function ImageChatPage() {
   });
 
   const retryGenerationTaskMutation = useMutation({
-    mutationFn: (input: { sessionId: string; taskId: string }) =>
-      api.retryImageSessionGenerationTask(input.sessionId, input.taskId),
+    mutationFn: (input: { sessionId: string; taskId: string }) => {
+      assertImageChatActionAllowed(generationBlockedTitle);
+      return api.retryImageSessionGenerationTask(input.sessionId, input.taskId);
+    },
     onSuccess: (updated, input) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
@@ -882,8 +925,10 @@ export function ImageChatPage() {
   });
 
   const cancelGenerationTaskMutation = useMutation({
-    mutationFn: (input: { sessionId: string; taskId: string }) =>
-      api.cancelImageSessionGenerationTask(input.sessionId, input.taskId),
+    mutationFn: (input: { sessionId: string; taskId: string }) => {
+      assertImageChatActionAllowed(generationBlockedTitle);
+      return api.cancelImageSessionGenerationTask(input.sessionId, input.taskId);
+    },
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["image-session-status", updated.id] });
@@ -905,11 +950,13 @@ export function ImageChatPage() {
     Boolean(baseRequirementMessage || imageGenerationConfigRequirementMessage);
 
   const attachMutation = useMutation({
-    mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; productId?: string }) =>
-      api.attachImageSessionAssetToProduct(selectedSessionId!, payload.assetId, {
+    mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; productId?: string }) => {
+      assertImageChatActionAllowed(productAttachBlockedTitle);
+      return api.attachImageSessionAssetToProduct(selectedSessionId!, payload.assetId, {
         target: payload.target,
         product_id: payload.productId,
-      }),
+      });
+    },
     onSuccess: async (response) => {
       setSuccessMessage(response.message);
       setErrorMessage("");
@@ -922,7 +969,10 @@ export function ImageChatPage() {
   });
 
   const saveGalleryMutation = useMutation({
-    mutationFn: (assetId: string) => api.saveGalleryEntry(assetId),
+    mutationFn: (assetId: string) => {
+      assertImageChatActionAllowed(selectedResultBlockedTitle);
+      return api.saveGalleryEntry(assetId);
+    },
     onSuccess: async () => {
       setSuccessMessage(t("chat.savedGallery"));
       setErrorMessage("");
@@ -934,7 +984,10 @@ export function ImageChatPage() {
   });
 
   const deleteProductReferenceMutation = useMutation({
-    mutationFn: (assetId: string) => api.deleteSourceAsset(assetId),
+    mutationFn: (assetId: string) => {
+      assertImageChatActionAllowed(productReferenceEditBlockedTitle);
+      return api.deleteSourceAsset(assetId);
+    },
     onSuccess: async (updated) => {
       queryClient.setQueryData(["product", updated.id], updated);
       setPendingDeleteAction(null);
@@ -1011,8 +1064,8 @@ export function ImageChatPage() {
     if (!prompt || polishPromptMutation.isPending) {
       return;
     }
-    if (sessionEditBlockedTitle) {
-      setErrorMessage(sessionEditBlockedTitle);
+    if (generationSettingsBlockedTitle) {
+      setErrorMessage(generationSettingsBlockedTitle);
       return;
     }
     if (promptPolishConfigRequirementMessage) {
@@ -1026,8 +1079,8 @@ export function ImageChatPage() {
     if (!polishedPrompt.trim()) {
       return;
     }
-    if (sessionEditBlockedTitle) {
-      setErrorMessage(sessionEditBlockedTitle);
+    if (generationSettingsBlockedTitle) {
+      setErrorMessage(generationSettingsBlockedTitle);
       return;
     }
     setDraft(polishedPrompt);
@@ -1474,6 +1527,7 @@ export function ImageChatPage() {
                   : null
               }
               disabled={!selectedSessionId || Boolean(sessionEditBlockedTitle)}
+              selectionDisabled={Boolean(generationSettingsBlockedTitle)}
               onFiles={handleUploadReferenceFiles}
               onToggle={handleReferenceToggle}
               onDelete={handleDeleteSessionReference}
@@ -1491,8 +1545,8 @@ export function ImageChatPage() {
                   setDraft(event.target.value);
                   setPolishedPrompt("");
                 }}
-                disabled={Boolean(sessionEditBlockedTitle)}
-                title={sessionEditBlockedTitle ?? t("chat.prompt")}
+                disabled={Boolean(generationSettingsBlockedTitle)}
+                title={generationSettingsBlockedTitle ?? t("chat.prompt")}
                 rows={6}
                 placeholder={isProductMode ? t("chat.productPromptPlaceholder") : t("chat.freePromptPlaceholder")}
                 className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
@@ -1506,13 +1560,13 @@ export function ImageChatPage() {
                   onModeChange: setPromptPolishConfigMode,
                   onConfigChange: setSelectedPromptPolishConfigId,
                   helpKey: "imageChatPromptPolishConfig",
-                  disabled: Boolean(sessionEditBlockedTitle),
+                  disabled: Boolean(generationSettingsBlockedTitle),
                 })}
                 <button
                   type="button"
                   onClick={handlePolishPrompt}
-                  disabled={!draft.trim() || polishPromptMutation.isPending || Boolean(sessionEditBlockedTitle)}
-                  title={sessionEditBlockedTitle ?? t("chat.polishPrompt")}
+                  disabled={!draft.trim() || polishPromptMutation.isPending || Boolean(generationSettingsBlockedTitle)}
+                  title={generationSettingsBlockedTitle ?? t("chat.polishPrompt")}
                   className="inline-flex w-full items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25"
                 >
                   {polishPromptMutation.isPending ? (
@@ -1529,8 +1583,8 @@ export function ImageChatPage() {
                       <button
                         type="button"
                         onClick={handleUsePolishedPrompt}
-                        disabled={Boolean(sessionEditBlockedTitle)}
-                        title={sessionEditBlockedTitle ?? t("chat.usePolishedPrompt")}
+                        disabled={Boolean(generationSettingsBlockedTitle)}
+                        title={generationSettingsBlockedTitle ?? t("chat.usePolishedPrompt")}
                         className="inline-flex items-center rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-60"
                       >
                         {t("chat.usePolishedPrompt")}
@@ -1556,7 +1610,7 @@ export function ImageChatPage() {
               onModeChange: setImageGenerationConfigMode,
               onConfigChange: setSelectedImageGenerationConfigId,
               helpKey: "imageGenerationConfig",
-              disabled: Boolean(sessionEditBlockedTitle),
+              disabled: Boolean(generationSettingsBlockedTitle),
             })}
 
             <ImageGenerationSettingsPanel
@@ -1572,7 +1626,7 @@ export function ImageChatPage() {
               onGenerationCountChange={(count) => setGenerationCount(clampGenerationCount(count))}
               showToolOptions={false}
               helpUiType="imageChat"
-              disabled={Boolean(sessionEditBlockedTitle)}
+              disabled={Boolean(generationSettingsBlockedTitle)}
             />
           </div>
         }
@@ -1582,7 +1636,7 @@ export function ImageChatPage() {
             allowedFields={imageToolAllowedFields}
             helpUiType="imageChat"
             onChange={setToolOptions}
-            disabled={Boolean(sessionEditBlockedTitle)}
+            disabled={Boolean(generationSettingsBlockedTitle)}
           />
         }
       />
@@ -2267,11 +2321,26 @@ export function ImageChatPage() {
             return;
           }
           if (pendingDeleteAction.kind === "session") {
+            if (sessionListDeletionBlockedTitle) {
+              setErrorMessage(sessionListDeletionBlockedTitle);
+              setPendingDeleteAction(null);
+              return;
+            }
             deleteSessionMutation.mutate(pendingDeleteAction.sessionId);
             return;
           }
           if (pendingDeleteAction.kind === "productReference") {
+            if (productReferenceEditBlockedTitle) {
+              setErrorMessage(productReferenceEditBlockedTitle);
+              setPendingDeleteAction(null);
+              return;
+            }
             deleteProductReferenceMutation.mutate(pendingDeleteAction.assetId);
+            return;
+          }
+          if (sessionEditBlockedTitle) {
+            setErrorMessage(sessionEditBlockedTitle);
+            setPendingDeleteAction(null);
             return;
           }
           deleteSessionReferenceMutation.mutate({
