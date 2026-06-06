@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Sparkles, X } from "lucide-react";
 
 import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSettingsPanel";
-import { ParameterHelpLabel } from "../../components/ParameterHelp";
 import { SelectField } from "../../components/SelectField";
 import { compactImageToolOptions } from "../../lib/imageToolOptions";
 import type { ImageSizeOption } from "../../lib/imageSizes";
@@ -11,8 +10,7 @@ import type {
   ApplyTailSplitPlanImageGenerationConfigInput,
   ApplyTailSplitPlanItemInput,
   ApplyTailSplitPlanReuseOptions,
-  GenerationConfigOption,
-  GenerationConfigSelectionMode,
+  GenerationResourceGroup,
   ImageToolOptionKey,
   ImageToolOptions,
   TailSplitPlan,
@@ -26,7 +24,7 @@ interface TailSplitPlanDialogProps {
   imageSizeOptions: ImageSizeOption[];
   imageGenerationMaxDimension: number;
   imageToolAllowedFields: readonly ImageToolOptionKey[];
-  generationConfigs: GenerationConfigOption[];
+  resourceGroups: GenerationResourceGroup[];
   canReusePublicCopyNode: boolean;
   canReusePublicReferenceNode: boolean;
   onClose: () => void;
@@ -45,7 +43,7 @@ export function TailSplitPlanDialog({
   imageSizeOptions,
   imageGenerationMaxDimension,
   imageToolAllowedFields,
-  generationConfigs,
+  resourceGroups,
   canReusePublicCopyNode,
   canReusePublicReferenceNode,
   onClose,
@@ -55,8 +53,7 @@ export function TailSplitPlanDialog({
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [instructionDrafts, setInstructionDrafts] = useState<Record<string, string>>({});
   const [imageSize, setImageSize] = useState("1024x1024");
-  const [generationConfigMode, setGenerationConfigMode] = useState<GenerationConfigSelectionMode>("auto");
-  const [generationConfigId, setGenerationConfigId] = useState<string | null>(null);
+  const [resourceGroupId, setResourceGroupId] = useState<string | null>(null);
   const [toolOptions, setToolOptions] = useState<ImageToolOptions>({});
   const [reusePublicCopyNode, setReusePublicCopyNode] = useState(false);
   const [reusePublicReferenceNode, setReusePublicReferenceNode] = useState(false);
@@ -68,25 +65,20 @@ export function TailSplitPlanDialog({
     setSelectedItemIds(plan.items.map((item) => item.id));
     setInstructionDrafts(Object.fromEntries(plan.items.map((item) => [item.id, item.instruction])));
     setImageSize("1024x1024");
-    setGenerationConfigMode("auto");
-    setGenerationConfigId(null);
+    setResourceGroupId(resourceGroups.find((group) => group.enabled && !group.archived_at)?.id ?? null);
     setToolOptions({});
     setReusePublicCopyNode(canReusePublicCopyNode);
     setReusePublicReferenceNode(canReusePublicReferenceNode);
-  }, [canReusePublicCopyNode, canReusePublicReferenceNode, open, plan]);
+  }, [canReusePublicCopyNode, canReusePublicReferenceNode, open, plan, resourceGroups]);
 
-  const imageGenerationConfigs = useMemo(
-    () => generationConfigs.filter((config) => config.purpose === "image"),
-    [generationConfigs],
-  );
   useEffect(() => {
     if (
-      generationConfigId &&
-      !imageGenerationConfigs.some((config) => config.id === generationConfigId && config.enabled)
+      resourceGroupId &&
+      !resourceGroups.some((group) => group.id === resourceGroupId && group.enabled && !group.archived_at)
     ) {
-      setGenerationConfigId(null);
+      setResourceGroupId(null);
     }
-  }, [generationConfigId, imageGenerationConfigs]);
+  }, [resourceGroupId, resourceGroups]);
 
   const selectedCount = selectedItemIds.length;
   const selectedIdSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
@@ -101,15 +93,16 @@ export function TailSplitPlanDialog({
     [instructionDrafts, plan, selectedIdSet],
   );
   const hasBlankSelectedInstruction = selectedItems.some((item) => !item.instruction);
-  const requiresManualGenerationConfig = generationConfigMode === "manual" && !generationConfigId;
+  const requiresResourceGroup = !resourceGroupId;
   const imageGenerationConfig = useMemo<ApplyTailSplitPlanImageGenerationConfigInput>(
     () => ({
       size: imageSize,
-      generation_config_mode: generationConfigMode,
-      generation_config_id: generationConfigMode === "manual" ? generationConfigId : null,
+      resource_group_id: resourceGroupId,
+      generation_config_mode: "auto",
+      generation_config_id: null,
       tool_options: compactImageToolOptions(toolOptions, imageToolAllowedFields) ?? null,
     }),
-    [generationConfigId, generationConfigMode, imageSize, imageToolAllowedFields, toolOptions],
+    [imageSize, imageToolAllowedFields, resourceGroupId, toolOptions],
   );
   const reuseOptions = useMemo<ApplyTailSplitPlanReuseOptions>(
     () => ({
@@ -217,53 +210,29 @@ export function TailSplitPlanDialog({
               </div>
               <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-slate-950/60">
                 <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  <ParameterHelpLabel
-                    label={t("detail.inspector.imageGenerationConfig")}
-                    helpKey="imageGenerationConfig"
-                    uiType="productDetail"
-                  />
+                  {t("detail.inspector.resourceGroup")}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <SelectField
-                    value={generationConfigMode}
-                    options={[
-                      { value: "auto", label: t("detail.inspector.generationConfigAuto") },
-                      { value: "manual", label: t("detail.inspector.generationConfigManual") },
-                    ]}
-                    onChange={(value) => {
-                      const nextMode: GenerationConfigSelectionMode = value === "manual" ? "manual" : "auto";
-                      setGenerationConfigMode(nextMode);
-                      if (nextMode === "auto") {
-                        setGenerationConfigId(null);
-                      }
-                    }}
-                    ariaLabel={t("detail.inspector.imageGenerationConfig")}
-                    radius="lg"
-                    visualSize="sm"
-                  />
-                  <SelectField
-                    value={generationConfigId ?? ""}
-                    options={[
-                      {
-                        value: "",
-                        label: imageGenerationConfigs.length
-                          ? t("detail.inspector.selectGenerationConfig")
-                          : t("detail.inspector.noGenerationConfigs"),
-                        disabled: generationConfigMode === "manual",
-                      },
-                      ...imageGenerationConfigs.map((config) => ({
-                        value: config.id,
-                        label: generationConfigOptionLabel(config, t),
-                        disabled: !config.enabled,
-                      })),
-                    ]}
-                    onChange={(value) => setGenerationConfigId(value || null)}
-                    ariaLabel={t("detail.inspector.imageGenerationConfig")}
-                    disabled={generationConfigMode !== "manual"}
-                    radius="lg"
-                    visualSize="sm"
-                  />
-                </div>
+                <SelectField
+                  value={resourceGroupId ?? ""}
+                  options={[
+                    {
+                      value: "",
+                      label: resourceGroups.length
+                        ? t("detail.inspector.selectResourceGroup")
+                        : t("detail.inspector.noResourceGroups"),
+                      disabled: true,
+                    },
+                    ...resourceGroups.map((group) => ({
+                      value: group.id,
+                      label: resourceGroupLabel(group, t),
+                      disabled: !group.enabled || Boolean(group.archived_at),
+                    })),
+                  ]}
+                  onChange={(value) => setResourceGroupId(value || null)}
+                  ariaLabel={t("detail.inspector.resourceGroup")}
+                  radius="lg"
+                  visualSize="sm"
+                />
               </div>
               <ImageGenerationSettingsPanel
                 surface="plain"
@@ -370,8 +339,8 @@ export function TailSplitPlanDialog({
               ? t("detail.tailPlan.footerEmpty")
               : hasBlankSelectedInstruction
                 ? t("detail.tailPlan.instructionEmpty")
-                : requiresManualGenerationConfig
-                  ? t("detail.tailPlan.imageGenerationConfigRequired")
+                : requiresResourceGroup
+                  ? t("detail.tailPlan.resourceGroupRequired")
                 : t("detail.tailPlan.footerReady")}
           </div>
           <div className="flex items-center gap-2">
@@ -386,7 +355,7 @@ export function TailSplitPlanDialog({
             <button
               type="button"
               onClick={() => onConfirm(selectedItems, imageGenerationConfig, reuseOptions)}
-              disabled={busy || !selectedCount || hasBlankSelectedInstruction || requiresManualGenerationConfig}
+              disabled={busy || !selectedCount || hasBlankSelectedInstruction || requiresResourceGroup}
               className="inline-flex items-center rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-fuchsia-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-fuchsia-500 dark:to-violet-500"
             >
               {t("detail.tailPlan.confirm")}
@@ -398,14 +367,11 @@ export function TailSplitPlanDialog({
   );
 }
 
-function generationConfigOptionLabel(
-  config: GenerationConfigOption,
+function resourceGroupLabel(
+  group: GenerationResourceGroup,
   t: ReturnType<typeof useI18n>["t"],
 ): string {
-  const markers = [
-    !config.enabled ? t("detail.inspector.generationConfigDisabled") : "",
-    config.frozen_until ? t("detail.inspector.generationConfigFrozen") : "",
-  ].filter(Boolean);
+  const markers = [!group.enabled ? t("detail.inspector.resourceGroupDisabled") : ""].filter(Boolean);
   const suffix = markers.length ? ` (${markers.join(" · ")})` : "";
-  return `${config.name}${suffix}`;
+  return `${group.name}${suffix}`;
 }

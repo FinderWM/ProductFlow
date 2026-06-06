@@ -82,22 +82,23 @@ describe("draftFromNode", () => {
     expect(defaultTitleForType("image_generation", 1)).toBe("生图触发器节点 1");
   });
 
-  it("round-trips manual generation config selection on generative nodes", () => {
+  it("round-trips resource group selection and forces auto scheduling on generative nodes", () => {
     const node = {
       ...baseNode,
       config_json: {
         instruction: "生成文案",
+        resource_group_id: "group-text",
         generation_config_mode: "manual",
         generation_config_id: "config-text",
       },
     };
     const draft = draftFromNode(node, product);
 
-    expect(draft.generationConfigMode).toBe("manual");
-    expect(draft.generationConfigId).toBe("config-text");
+    expect(draft.resourceGroupId).toBe("group-text");
     expect(nodeConfigFromDraft(node, draft)).toMatchObject({
-      generation_config_mode: "manual",
-      generation_config_id: "config-text",
+      resource_group_id: "group-text",
+      generation_config_mode: "auto",
+      generation_config_id: null,
     });
   });
 

@@ -59,6 +59,7 @@ class TailSplitPlanItemSelection:
 @dataclass(frozen=True, slots=True)
 class TailSplitPlanImageGenerationConfig:
     size: str | None = None
+    resource_group_id: str | None = None
     generation_config_mode: str | None = None
     generation_config_id: str | None = None
     tool_options: dict[str, Any] | None = None
@@ -199,9 +200,8 @@ def apply_tail_split_plan(
     workflow = product_workflow_graph.get_workflow_or_raise(session, tail_node.workflow_id)
     plan = pending_tail_split_plan_or_raise(tail_node, plan_id=plan_id)
     selected_items = _selected_plan_items(plan, item_ids=item_ids, items=items)
-    tail_config = read_tail_splitter_config(tail_node.config_json)
     image_node_base_config = _image_node_base_config(
-        tail_config=tail_config,
+        tail_resource_group_id=_resource_group_id_from_config(tail_node.config_json),
         image_generation_config=image_generation_config,
     )
     origin_x = position_x if position_x is not None else tail_node.position_x
@@ -254,7 +254,7 @@ def apply_tail_split_plan(
         tail_node=tail_node,
         plan=plan,
         batch_id=batch_id,
-        tail_config=tail_config,
+        resource_group_id=_resource_group_id_from_config(tail_node.config_json),
         position_x=origin_x + TAIL_SPLITTER_PUBLIC_X_GAP,
         position_y=origin_y + TAIL_SPLITTER_PUBLIC_COPY_Y_OFFSET,
     )
@@ -445,25 +445,26 @@ def _selected_plan_items(
 
 def _image_node_base_config(
     *,
-    tail_config: TailSplitterConfig,
+    tail_resource_group_id: str | None,
     image_generation_config: TailSplitPlanImageGenerationConfig | None,
 ) -> dict[str, Any]:
     config: dict[str, Any] = {
         "size": product_workflow_graph.DEFAULT_IMAGE_SIZE,
-        "generation_config_mode": tail_config.generation_config_mode,
-        "generation_config_id": (
-            tail_config.generation_config_id if tail_config.generation_config_mode == "manual" else None
-        ),
+        "resource_group_id": tail_resource_group_id,
+        "generation_config_mode": "auto",
+        "generation_config_id": None,
     }
     if image_generation_config is not None:
         if image_generation_config.size is not None:
             config["size"] = image_generation_config.size
+        if image_generation_config.resource_group_id is not None:
+            config["resource_group_id"] = image_generation_config.resource_group_id.strip() or None
         mode = (image_generation_config.generation_config_mode or config["generation_config_mode"]).strip().lower()
-        if mode not in {"auto", "manual"}:
-            raise BusinessValidationError("生图生成配置模式必须是 auto 或 manual")
         generation_config_id = (image_generation_config.generation_config_id or "").strip() or None
-        config["generation_config_mode"] = mode
-        config["generation_config_id"] = generation_config_id if mode == "manual" else None
+        if mode == "manual" or generation_config_id is not None:
+            raise BusinessValidationError("生成入口只能选择供应商生成分组")
+        if mode != "auto":
+            raise BusinessValidationError("生图生成配置模式必须是 auto")
         if image_generation_config.tool_options is not None:
             config["tool_options"] = image_generation_config.tool_options
     try:
@@ -491,7 +492,7 @@ def _build_public_copy_node(
     tail_node: WorkflowNode,
     plan: TailSplitPlan,
     batch_id: str,
-    tail_config: TailSplitterConfig,
+    resource_group_id: str | None,
     position_x: int,
     position_y: int,
 ) -> WorkflowNode:
@@ -507,10 +508,9 @@ def _build_public_copy_node(
             "tone": "清晰可信",
             "channel": "公共约束",
             "output_mode": "blocks",
-            "generation_config_mode": tail_config.generation_config_mode,
-            "generation_config_id": (
-                tail_config.generation_config_id if tail_config.generation_config_mode == "manual" else None
-            ),
+            "resource_group_id": resource_group_id,
+            "generation_config_mode": "auto",
+            "generation_config_id": None,
             "generated_by": _generated_by_metadata(
                 tail_node_id=tail_node.id,
                 plan_id=plan.plan_id,
@@ -567,6 +567,13 @@ def _build_public_reference_node(
             node.last_run_at = now_utc()
     session.add(node)
     return node
+
+
+def _resource_group_id_from_config(config_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(config_json, dict):
+        return None
+    value = config_json.get("resource_group_id")
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _tail_generated_node_ids(workflow: ProductWorkflow, tail_node: WorkflowNode) -> list[str]:

@@ -11,12 +11,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from productflow_backend.application.admission import ensure_generation_capacity
+from productflow_backend.application.auth import require_generation_resource_group_for_user
 from productflow_backend.application.contracts import ProductInput, TailSplitPlanInput
 from productflow_backend.application.copy_payloads import (
     normalize_copy_node_config,
     normalize_copy_payload,
 )
 from productflow_backend.application.generation_config_runtime import (
+    GenerationConfigSelection,
     GenerationConfigWaitError,
     claim_runtime_generation_config,
     generation_config_selection_from_config,
@@ -104,6 +106,13 @@ from productflow_backend.infrastructure.storage import LocalStorage
 logger = logging.getLogger(__name__)
 
 COPY_PROVIDER_CONTRACT_MAX_ATTEMPTS = 2
+WORKFLOW_RESOURCE_GROUP_NODE_TYPES = frozenset(
+    {
+        WorkflowNodeType.COPY_GENERATION,
+        WorkflowNodeType.TAIL_SPLITTER,
+        WorkflowNodeType.IMAGE_GENERATION,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +188,75 @@ def _workflow_run_retry_node_ids(run: WorkflowRun) -> set[str] | None:
     return retry_node_ids
 
 
+def _generation_resource_group_config_error(message: str, *, for_execution: bool) -> BusinessValidationError:
+    if for_execution:
+        raise WorkflowSafeExecutionError(
+            message,
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_config",
+        )
+    raise BusinessValidationError(message)
+
+
+def _workflow_generation_config_selection(
+    raw_config: dict[str, Any] | None,
+    *,
+    for_execution: bool = False,
+) -> GenerationConfigSelection:
+    selection = generation_config_selection_from_config(raw_config)
+    if selection.mode == "manual" or selection.generation_config_id is not None:
+        _generation_resource_group_config_error("生成入口只能选择供应商生成分组", for_execution=for_execution)
+    if not selection.resource_group_id:
+        _generation_resource_group_config_error("请选择供应商生成分组", for_execution=for_execution)
+    return GenerationConfigSelection(resource_group_id=selection.resource_group_id)
+
+
+def _validate_workflow_generation_resource_groups(
+    session: Session,
+    *,
+    workflow: ProductWorkflow,
+    node_ids_to_run: set[str],
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+) -> None:
+    for node in workflow.nodes:
+        if node.id not in node_ids_to_run or node.node_type not in WORKFLOW_RESOURCE_GROUP_NODE_TYPES:
+            continue
+        selection = _workflow_generation_config_selection(node.config_json)
+        require_generation_resource_group_for_user(
+            session,
+            user_id=actor_user_id,
+            is_admin=actor_is_admin,
+            resource_group_id=selection.resource_group_id,
+        )
+
+
+def _workflow_generation_config_selection_for_execution(
+    session: Session,
+    *,
+    workflow: ProductWorkflow,
+    node: WorkflowNode,
+) -> GenerationConfigSelection:
+    selection = _workflow_generation_config_selection(node.config_json, for_execution=True)
+    product = workflow.product
+    try:
+        group = require_generation_resource_group_for_user(
+            session,
+            user_id=product.owner_user_id,
+            is_admin=bool(product.owner and product.owner.is_admin),
+            resource_group_id=selection.resource_group_id,
+        )
+    except BusinessValidationError as exc:
+        raise WorkflowSafeExecutionError(
+            str(exc),
+            retryable=False,
+            retry_hint="check_settings",
+            failure_category="invalid_node_config",
+        ) from exc
+    return GenerationConfigSelection(resource_group_id=group.id)
+
+
 def start_product_workflow_run(
     session: Session,
     *,
@@ -187,6 +265,8 @@ def start_product_workflow_run(
     start_mode: str = "from_node",
     progress_metadata: dict[str, Any] | None = None,
     node_ids_to_run_override: set[str] | None = None,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> WorkflowRunKickoff:
     ensure_provider_config_bootstrapped(session)
     workflow = get_or_create_product_workflow(session, product_id)
@@ -212,6 +292,17 @@ def start_product_workflow_run(
     node_ids_to_run = _exclude_generated_nodes_for_running_tails(workflow, node_ids_to_run)
     if not node_ids_to_run:
         raise BusinessValidationError("工作流没有可运行节点")
+    validation_actor_user_id = actor_user_id or workflow.product.owner_user_id
+    validation_actor_is_admin = actor_is_admin or (
+        actor_user_id is None and bool(workflow.product.owner and workflow.product.owner.is_admin)
+    )
+    _validate_workflow_generation_resource_groups(
+        session,
+        workflow=workflow,
+        node_ids_to_run=node_ids_to_run,
+        actor_user_id=validation_actor_user_id,
+        actor_is_admin=validation_actor_is_admin,
+    )
     active_run = _active_workflow_run_for_nodes(workflow, node_ids_to_run)
     if active_run is not None:
         return WorkflowRunKickoff(
@@ -283,6 +374,8 @@ def retry_product_workflow_run(
     product_id: str,
     run_id: str | None = None,
     enqueue: Callable[[str], None] | None = None,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> ProductWorkflow:
     workflow = get_or_create_product_workflow(session, product_id)
     run = session.get(WorkflowRun, run_id) if run_id else _latest_failed_workflow_run(workflow)
@@ -301,6 +394,8 @@ def retry_product_workflow_run(
         product_id=product_id,
         progress_metadata=_workflow_run_retry_progress_metadata(run),
         node_ids_to_run_override=retry_node_ids,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
     )
     if kickoff.should_enqueue:
         enqueue_or_mark_failed(
@@ -322,6 +417,8 @@ def submit_failed_workflow_nodes_run(
     *,
     product_id: str,
     enqueue: Callable[[str], None] | None = None,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> ProductWorkflow:
     workflow = get_or_create_product_workflow(session, product_id)
     node_ids_to_run = _failed_workflow_node_ids_to_retry(workflow)
@@ -336,6 +433,8 @@ def submit_failed_workflow_nodes_run(
             "retry_node_ids": sorted(node_ids_to_run),
         },
         node_ids_to_run_override=node_ids_to_run,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
     )
     if kickoff.should_enqueue:
         enqueue_or_mark_failed(
@@ -378,12 +477,16 @@ def run_product_workflow(
     start_node_id: str | None = None,
     start_mode: str = "from_node",
     dependencies: WorkflowExecutionDependencies | None = None,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> ProductWorkflow:
     kickoff = start_product_workflow_run(
         session,
         product_id=product_id,
         start_node_id=start_node_id,
         start_mode=start_mode,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
     )
     if kickoff.created:
         _execute_product_workflow_run(
@@ -411,6 +514,8 @@ def submit_product_workflow_run(
     start_mode: str = "from_node",
     enqueue: Callable[[str], None] | None = None,
     progress_metadata: dict[str, Any] | None = None,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
 ) -> ProductWorkflow:
     kickoff = start_product_workflow_run(
         session,
@@ -418,6 +523,8 @@ def submit_product_workflow_run(
         start_node_id=start_node_id,
         start_mode=start_mode,
         progress_metadata=progress_metadata,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
     )
     if kickoff.should_enqueue:
         enqueue_or_mark_failed(
@@ -696,6 +803,7 @@ def _execute_workflow_node_run(
     node_run.status = WorkflowNodeStatus.SUCCEEDED
     node_run.output_json = output
     node_run.copy_set_id = output.get("copy_set_id")
+    node_run.resource_group_id = output.get("resource_group_id")
     if isinstance(output.get("generated_poster_variant_ids"), list):
         poster_ids = output["generated_poster_variant_ids"]
     else:
@@ -1196,9 +1304,15 @@ def _execute_copy_generation(
         incoming_context,
     )
     config = config.model_copy(update={"instruction": instruction})
+    generation_config_selection = _workflow_generation_config_selection_for_execution(
+        session,
+        workflow=workflow,
+        node=node,
+    )
     runtime_claim = claim_runtime_generation_config(
         purpose="text",
-        selection=generation_config_selection_from_config(node.config_json),
+        selection=generation_config_selection,
+        session=session,
     )
     try:
         provider = dependencies.text_provider(runtime_claim.generation_config_id, session=session)
@@ -1212,6 +1326,7 @@ def _execute_copy_generation(
             node_id=node.id,
         )
     except BaseException as exc:  # noqa: BLE001
+        session.rollback()
         release_runtime_generation_config(
             runtime_claim,
             success=False,
@@ -1225,6 +1340,7 @@ def _execute_copy_generation(
     release_runtime_generation_config(
         runtime_claim,
         success=True,
+        session=session,
         user_id=product.owner_user_id,
         generated_unit_count=2,
     )
@@ -1234,6 +1350,7 @@ def _execute_copy_generation(
         provider_name=provider.provider_name,
         model_name=brief_model,
         prompt_version=provider.prompt_version,
+        resource_group_id=runtime_claim.resource_group_id,
     )
     session.add(brief)
     session.flush()
@@ -1248,6 +1365,7 @@ def _execute_copy_generation(
         provider_name=provider.provider_name,
         model_name=copy_model,
         prompt_version=provider.prompt_version,
+        resource_group_id=runtime_claim.resource_group_id,
     )
     session.add(copy_set)
     session.flush()
@@ -1261,6 +1379,7 @@ def _execute_copy_generation(
     }
     output["context_sources"] = incoming_context.text_sources[:8]
     output["generation_config_id"] = runtime_claim.generation_config_id
+    output["resource_group_id"] = runtime_claim.resource_group_id
     return output
 
 
@@ -1295,9 +1414,15 @@ def _execute_tail_splitter(
         reference_images=reference_images,
         max_items=config.max_items,
     )
+    generation_config_selection = _workflow_generation_config_selection_for_execution(
+        session,
+        workflow=workflow,
+        node=node,
+    )
     runtime_claim = claim_runtime_generation_config(
         purpose="text",
-        selection=generation_config_selection_from_config(node.config_json),
+        selection=generation_config_selection,
+        session=session,
     )
     try:
         provider = dependencies.text_provider(runtime_claim.generation_config_id, session=session)
@@ -1307,6 +1432,7 @@ def _execute_tail_splitter(
             node_id=node.id,
         )
     except BaseException as exc:  # noqa: BLE001
+        session.rollback()
         release_runtime_generation_config(
             runtime_claim,
             success=False,
@@ -1320,6 +1446,7 @@ def _execute_tail_splitter(
     release_runtime_generation_config(
         runtime_claim,
         success=True,
+        session=session,
         user_id=product.owner_user_id,
         generated_unit_count=len(draft.items),
     )
@@ -1332,6 +1459,7 @@ def _execute_tail_splitter(
     }
     output["context_sources"] = incoming_context.text_sources[:8]
     output["generation_config_id"] = runtime_claim.generation_config_id
+    output["resource_group_id"] = runtime_claim.resource_group_id
     output["provider_name"] = provider.provider_name
     output["model_name"] = model_name
     output["prompt_version"] = provider.prompt_version

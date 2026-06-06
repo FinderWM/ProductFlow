@@ -8,6 +8,7 @@ from helpers import _execute_workflow_queue_inline, _login, _wait_for_workflow_r
 
 from productflow_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType, WorkflowRunStatus
 from productflow_backend.domain.workflow_rules import WorkflowRuleNode, should_execute_missing_upstream
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
 
 
 @pytest.fixture(autouse=True)
@@ -29,11 +30,7 @@ def _tail_generated_node(workflow, *, tail_node_id: str, role: str):
         generated_by = _tail_generated_by(node)
         return generated_by.get("tail_node_id") == tail_node_id and generated_by.get("role") == role
 
-    return next(
-        node
-        for node in workflow.nodes
-        if matches_role(node)
-    )
+    return next(node for node in workflow.nodes if matches_role(node))
 
 
 def test_mock_tail_splitter_treats_max_items_as_upper_bound() -> None:
@@ -308,8 +305,7 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
             "items": selected_items,
             "image_generation_config": {
                 "size": "1536x1024",
-                "generation_config_mode": "manual",
-                "generation_config_id": "image-config-1",
+                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
                 "tool_options": {"quality": "high", "background": "transparent", "n": 2},
             },
             "position_x": tail_node["position_x"] + 80,
@@ -374,8 +370,12 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
     assert edited_image_node["config_json"]["instruction"] == "编辑后的第一条生图指令"
     generated_image_nodes = [node for node in generated_nodes if node["node_type"] == "image_generation"]
     assert all(node["config_json"]["size"] == "1536x1024" for node in generated_image_nodes)
-    assert all(node["config_json"]["generation_config_mode"] == "manual" for node in generated_image_nodes)
-    assert all(node["config_json"]["generation_config_id"] == "image-config-1" for node in generated_image_nodes)
+    assert all(
+        node["config_json"]["resource_group_id"] == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+        for node in generated_image_nodes
+    )
+    assert all(node["config_json"]["generation_config_mode"] == "auto" for node in generated_image_nodes)
+    assert all(node["config_json"]["generation_config_id"] is None for node in generated_image_nodes)
     assert all(node["config_json"]["tool_options"] == {"quality": "high"} for node in generated_image_nodes)
 
     second_apply = client.post(
@@ -677,11 +677,8 @@ def test_tail_splitter_reapply_can_reuse_previous_public_nodes(db_session) -> No
     assert {
         (edge.source_node_id, edge.target_node_id)
         for edge in workflow.edges
-        if edge.target_node_id in new_image_node_ids
-        and edge.source_node_id in public_node_ids
-    } == {
-        (public_copy_node.id, image_node_id) for image_node_id in new_image_node_ids
-    } | {
+        if edge.target_node_id in new_image_node_ids and edge.source_node_id in public_node_ids
+    } == {(public_copy_node.id, image_node_id) for image_node_id in new_image_node_ids} | {
         (public_reference_node.id, image_node_id) for image_node_id in new_image_node_ids
     }
 
@@ -754,9 +751,7 @@ def test_run_after_tail_dispatches_independent_generated_branches_in_one_wave(
         and node.config_json.get("generated_by", {}).get("batch_id") == batch["batch_id"]
     ]
     image_node_ids = {
-        node.id
-        for node in generated_nodes
-        if node.config_json["generated_by"]["role"] == "image_trigger"
+        node.id for node in generated_nodes if node.config_json["generated_by"]["role"] == "image_trigger"
     }
     public_copy_node = next(
         node for node in generated_nodes if node.config_json["generated_by"]["role"] == "public_copy"
@@ -787,11 +782,7 @@ def test_run_after_tail_dispatches_independent_generated_branches_in_one_wave(
     db_session.expire_all()
     run = db_session.get(WorkflowRun, kickoff.run_id)
     assert run is not None
-    dispatched_node_ids = {
-        node_run.node_id
-        for node_run in run.node_runs
-        if node_run.id in dispatched_node_run_ids
-    }
+    dispatched_node_ids = {node_run.node_id for node_run in run.node_runs if node_run.id in dispatched_node_run_ids}
     assert image_node_ids.issubset(dispatched_node_ids)
 
 

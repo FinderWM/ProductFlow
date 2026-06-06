@@ -23,6 +23,10 @@ import type {
   GenerationConfigCreateRequest,
   GenerationConfigOption,
   GenerationConfigSelectionMode,
+  GenerationResourceGroup,
+  GenerationResourceGroupCreateRequest,
+  GenerationResourceGroupTag,
+  GenerationResourceGroupUpdateRequest,
   GenerationConfigStatusSummary,
   GenerationConfigUpdateRequest,
   GenerationQueueOverview,
@@ -63,6 +67,7 @@ import type {
   UpdateGlobalCanvasTemplateInput,
   UpdateUserTemplateGroupInput,
   UserUsageStatsResponse,
+  UserGenerationResourceGroupGrants,
 } from "./types";
 import { md5Hex } from "./md5";
 
@@ -193,6 +198,18 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  getUserGenerationResourceGroupGrants(userId: string): Promise<UserGenerationResourceGroupGrants> {
+    return request(`/api/rbac/users/${encodeURIComponent(userId)}/generation-resource-groups`);
+  },
+  updateUserGenerationResourceGroupGrants(
+    userId: string,
+    payload: { resource_group_ids: string[] },
+  ): Promise<UserGenerationResourceGroupGrants> {
+    return request(`/api/rbac/users/${encodeURIComponent(userId)}/generation-resource-groups`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
   listProducts(input?: {
     page?: number;
     page_size?: number;
@@ -225,8 +242,13 @@ export const api = {
   deleteProduct(productId: string): Promise<void> {
     return request(`/api/products/${productId}`, { method: "DELETE" });
   },
-  getProductHistory(productId: string): Promise<ProductHistory> {
-    return request(`/api/products/${productId}/history`);
+  getProductHistory(productId: string, input?: { resource_group_id?: string | null }): Promise<ProductHistory> {
+    const params = new URLSearchParams();
+    if (input?.resource_group_id) {
+      params.set("resource_group_id", input.resource_group_id);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/products/${productId}/history${suffix}`);
   },
   getConfig(): Promise<ConfigResponse> {
     return request("/api/settings");
@@ -300,6 +322,32 @@ export const api = {
   },
   listGenerationConfigOptions(): Promise<GenerationConfigOption[]> {
     return request("/api/settings/generation-config-options");
+  },
+  listGenerationResourceGroups(): Promise<GenerationResourceGroup[]> {
+    return request("/api/settings/generation-resource-groups");
+  },
+  listMyGenerationResourceGroups(): Promise<GenerationResourceGroup[]> {
+    return request("/api/settings/my-generation-resource-groups");
+  },
+  createGenerationResourceGroup(payload: GenerationResourceGroupCreateRequest): Promise<GenerationResourceGroup> {
+    return request("/api/settings/generation-resource-groups", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateGenerationResourceGroup(
+    resourceGroupId: string,
+    payload: GenerationResourceGroupUpdateRequest,
+  ): Promise<GenerationResourceGroup> {
+    return request(`/api/settings/generation-resource-groups/${encodeURIComponent(resourceGroupId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  archiveGenerationResourceGroup(resourceGroupId: string): Promise<GenerationResourceGroup> {
+    return request(`/api/settings/generation-resource-groups/${encodeURIComponent(resourceGroupId)}`, {
+      method: "DELETE",
+    });
   },
   createGenerationConfig(payload: GenerationConfigCreateRequest): Promise<GenerationConfig> {
     return request("/api/settings/generation-configs", {
@@ -459,6 +507,7 @@ export const api = {
       selected_reference_asset_ids?: string[];
       generation_count?: number;
       tool_options?: ImageToolOptions | null;
+      resource_group_id: string;
       generation_config_mode?: GenerationConfigSelectionMode;
       generation_config_id?: string | null;
     },
@@ -470,9 +519,16 @@ export const api = {
   },
   polishImageSessionPrompt(input: {
     prompt: string;
+    resource_group_id: string;
     generation_config_mode?: GenerationConfigSelectionMode;
     generation_config_id?: string | null;
-  }): Promise<{ prompt: string; model_name: string; generation_config_id: string }> {
+  }): Promise<{
+    prompt: string;
+    model_name: string;
+    generation_config_id: string;
+    resource_group_id: string;
+    resource_group: GenerationResourceGroupTag;
+  }> {
     return request("/api/image-sessions/prompt-polish", {
       method: "POST",
       body: JSON.stringify(input),
@@ -494,8 +550,13 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
-  listGalleryEntries(): Promise<GalleryEntryListResponse> {
-    return request("/api/gallery");
+  listGalleryEntries(input?: { resource_group_id?: string | null }): Promise<GalleryEntryListResponse> {
+    const params = new URLSearchParams();
+    if (input?.resource_group_id) {
+      params.set("resource_group_id", input.resource_group_id);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/gallery${suffix}`);
   },
   saveGalleryEntry(imageSessionAssetId: string): Promise<GalleryEntry> {
     return request("/api/gallery", {

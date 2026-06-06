@@ -133,9 +133,9 @@ def test_product_workflow_status_endpoint_returns_lightweight_state(db_session) 
 
     persisted_workflow = get_or_create_product_workflow(db_session, product_id)
     workflow = serialize_product_workflow(persisted_workflow).model_dump(mode="json")
-    status_payload = serialize_product_workflow_status(
-        get_product_workflow_status(db_session, product_id)
-    ).model_dump(mode="json")
+    status_payload = serialize_product_workflow_status(get_product_workflow_status(db_session, product_id)).model_dump(
+        mode="json"
+    )
     assert status_payload["id"] == workflow["id"]
     assert status_payload["product_id"] == product_id
     assert status_payload["title"] == workflow["title"]
@@ -220,6 +220,8 @@ def test_product_workflow_status_endpoint_returns_lightweight_state(db_session) 
         "node_id",
         "status",
         "failure_reason",
+        "resource_group_id",
+        "resource_group",
         "started_at",
         "finished_at",
     }
@@ -467,6 +469,7 @@ def test_reference_workflow_node_can_bind_existing_source_or_poster_image(config
     ]
     assert sorted(reference_asset_ids_after_rebound) == sorted(reference_asset_ids_after_conflicting_upload)
 
+
 def test_reference_workflow_node_bind_poster_reports_missing_file_as_bad_request(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -499,6 +502,7 @@ def test_reference_workflow_node_bind_poster_reports_missing_file_as_bad_request
 
     assert response.status_code == 400
     assert response.json()["detail"] == "海报文件不存在"
+
 
 def test_image_generation_fill_replaces_reference_node_current_image(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
@@ -557,6 +561,7 @@ def test_image_generation_fill_replaces_reference_node_current_image(configured_
         asset["id"] for asset in product_after.json()["source_assets"] if asset["kind"] == "reference_image"
     }
     assert {old_asset_id, new_asset_id}.issubset(reference_asset_ids)
+
 
 def test_image_generation_fills_multiple_targets_with_concurrent_provider_calls(
     configured_env: Path,

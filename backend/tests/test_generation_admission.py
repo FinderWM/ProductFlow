@@ -7,10 +7,15 @@ from fastapi.testclient import TestClient
 from helpers import _login, _make_demo_image_bytes
 
 from productflow_backend.application.image_sessions import create_image_session, create_image_session_generation_task
-from productflow_backend.application.product_workflows import start_product_workflow_run
+from productflow_backend.application.product_workflows import get_or_create_product_workflow, start_product_workflow_run
 from productflow_backend.application.use_cases import create_product
 from productflow_backend.domain.enums import JobStatus, WorkflowNodeStatus
-from productflow_backend.infrastructure.db.models import AppSetting, WorkflowNode, WorkflowNodeRun
+from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    AppSetting,
+    WorkflowNode,
+    WorkflowNodeRun,
+)
 
 
 def _set_generation_cap(db_session, value: int) -> None:
@@ -19,7 +24,7 @@ def _set_generation_cap(db_session, value: int) -> None:
 
 
 def _create_product(db_session, name: str):
-    return create_product(
+    product = create_product(
         db_session,
         name=name,
         category=None,
@@ -29,6 +34,12 @@ def _create_product(db_session, name: str):
         filename=f"{name}.png",
         content_type="image/png",
     )
+    workflow = get_or_create_product_workflow(db_session, product.id)
+    for node in workflow.nodes:
+        if node.node_type in {"copy_generation", "image_generation"}:
+            node.config_json = {**(node.config_json or {}), "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID}
+    db_session.commit()
+    return product
 
 
 def test_generation_cap_accepts_and_queues_workflow_run_creation(
@@ -45,7 +56,7 @@ def test_generation_cap_accepts_and_queues_workflow_run_creation(
     )
 
     busy_product = _create_product(db_session, "占用并发商品")
-    busy = start_product_workflow_run(db_session, product_id=busy_product.id)
+    busy = start_product_workflow_run(db_session, product_id=busy_product.id, actor_is_admin=True)
     busy_node_run = db_session.query(WorkflowNodeRun).filter_by(workflow_run_id=busy.run_id).first()
     assert busy_node_run is not None
     busy_node = db_session.get(WorkflowNode, busy_node_run.node_id)
@@ -89,6 +100,7 @@ def test_generation_cap_accepts_and_queues_image_session_generation_task_creatio
         image_session_id=image_session.id,
         prompt="第一张正在跑",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ).task
     running.status = JobStatus.RUNNING
     db_session.commit()
@@ -103,7 +115,11 @@ def test_generation_cap_accepts_and_queues_image_session_generation_task_creatio
 
     generated = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "这次应该被并发上限拦截", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "这次应该被并发上限拦截",
+            "size": "1024x1024",
+        },
     )
 
     assert generated.status_code == 202
@@ -129,6 +145,7 @@ def test_active_generation_task_count_includes_image_session_generation_tasks(
         image_session_id=image_session.id,
         prompt="占用连续生图任务",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     assert active_generation_task_count(db_session) == 1
@@ -154,12 +171,14 @@ def test_generation_queue_overview_and_positions_include_durable_tasks(
         image_session_id=image_session.id,
         prompt="第一个连续生图任务",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ).task
     second = create_image_session_generation_task(
         db_session,
         image_session_id=second_image_session.id,
         prompt="第二个连续生图任务",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ).task
     second.status = JobStatus.RUNNING
     db_session.commit()
@@ -201,6 +220,7 @@ def test_generation_queue_overview_endpoint_returns_public_snapshot(
         image_session_id=image_session.id,
         prompt="运行中的连续生图任务",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ).task
     running.status = JobStatus.RUNNING
     db_session.commit()

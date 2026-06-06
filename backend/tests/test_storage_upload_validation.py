@@ -12,6 +12,8 @@ from helpers import (
     _read_image_size,
 )
 
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
+
 
 @pytest.fixture(autouse=True)
 def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,6 +53,7 @@ def test_product_asset_variant_urls_serve_preview_and_thumbnail(configured_env: 
     assert thumbnail.headers["content-type"].startswith("image/")
     assert max(_read_image_size(thumbnail.content)) <= 320
 
+
 def test_product_create_rejects_invalid_price_and_invalid_image(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -72,6 +75,7 @@ def test_product_create_rejects_invalid_price_and_invalid_image(configured_env: 
     )
     assert invalid_image.status_code == 400
 
+
 def test_image_generation_calibrates_oversized_size(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -83,7 +87,11 @@ def test_image_generation_calibrates_oversized_size(configured_env: Path) -> Non
     assert created.status_code == 201
     generated = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "生成一张图", "size": "99999x99999"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成一张图",
+            "size": "99999x99999",
+        },
     )
     assert generated.status_code == 202
     assert generated.json()["rounds"][-1]["size"] == "2880x2880"

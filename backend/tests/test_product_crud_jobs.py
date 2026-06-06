@@ -31,7 +31,9 @@ from productflow_backend.domain.enums import (
     WorkflowRunStatus,
 )
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     CopySet,
+    GenerationResourceGroup,
     PosterVariant,
     Product,
     ProductWorkflow,
@@ -156,6 +158,12 @@ def test_product_create_materializes_full_canvas_template(configured_env: Path, 
                 "node_key": template_node.key,
             },
         }
+        if template_node.node_type in {
+            WorkflowNodeType.COPY_GENERATION,
+            WorkflowNodeType.IMAGE_GENERATION,
+            WorkflowNodeType.TAIL_SPLITTER,
+        }:
+            expected_config["resource_group_id"] = DEFAULT_GENERATION_RESOURCE_GROUP_ID
         matched_node = None
         for node in unmatched_nodes:
             if (
@@ -533,6 +541,108 @@ def test_legacy_jobrun_routes_are_removed(configured_env: Path) -> None:
     assert set(history.json()) == {"copy_sets", "poster_variants"}
 
 
+def test_product_history_can_filter_by_resource_group(configured_env: Path, db_session) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/products",
+        data={"name": "分组历史商品"},
+        files={"image": ("history.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+    product_id = created.json()["id"]
+
+    premium_group = GenerationResourceGroup(key="premium-history", name="高阶历史分组", sort_order=20)
+    db_session.add(premium_group)
+    db_session.flush()
+
+    legacy_copy = CopySet(
+        product_id=product_id,
+        structured_payload={"summary": "legacy", "content": {"kind": "freeform", "text": "legacy"}},
+        provider_name="mock",
+        model_name="mock-text",
+        prompt_version="v1",
+        resource_group_id=None,
+    )
+    default_copy = CopySet(
+        product_id=product_id,
+        structured_payload={"summary": "default", "content": {"kind": "freeform", "text": "default"}},
+        provider_name="mock",
+        model_name="mock-text",
+        prompt_version="v1",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    )
+    premium_copy = CopySet(
+        product_id=product_id,
+        structured_payload={"summary": "premium", "content": {"kind": "freeform", "text": "premium"}},
+        provider_name="mock",
+        model_name="mock-text",
+        prompt_version="v1",
+        resource_group_id=premium_group.id,
+    )
+    db_session.add_all([legacy_copy, default_copy, premium_copy])
+    db_session.flush()
+    db_session.add_all(
+        [
+            PosterVariant(
+                product_id=product_id,
+                copy_set_id=legacy_copy.id,
+                kind=PosterKind.MAIN_IMAGE,
+                template_name="legacy",
+                storage_path="products/history/legacy.png",
+                width=800,
+                height=800,
+                resource_group_id=None,
+            ),
+            PosterVariant(
+                product_id=product_id,
+                copy_set_id=default_copy.id,
+                kind=PosterKind.MAIN_IMAGE,
+                template_name="default",
+                storage_path="products/history/default.png",
+                width=800,
+                height=800,
+                resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            ),
+            PosterVariant(
+                product_id=product_id,
+                copy_set_id=premium_copy.id,
+                kind=PosterKind.MAIN_IMAGE,
+                template_name="premium",
+                storage_path="products/history/premium.png",
+                width=800,
+                height=800,
+                resource_group_id=premium_group.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    default_history = client.get(
+        f"/api/products/{product_id}/history",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    )
+    assert default_history.status_code == 200
+    default_payload = default_history.json()
+    assert {item["id"] for item in default_payload["copy_sets"]} == {legacy_copy.id, default_copy.id}
+    assert {item["copy_set_id"] for item in default_payload["poster_variants"]} == {legacy_copy.id, default_copy.id}
+    assert {item["resource_group"]["key"] for item in default_payload["copy_sets"]} == {"default"}
+
+    premium_history = client.get(
+        f"/api/products/{product_id}/history",
+        params={"resource_group_id": premium_group.id},
+    )
+    assert premium_history.status_code == 200
+    premium_payload = premium_history.json()
+    assert [item["id"] for item in premium_payload["copy_sets"]] == [premium_copy.id]
+    assert [item["copy_set_id"] for item in premium_payload["poster_variants"]] == [premium_copy.id]
+    assert premium_payload["copy_sets"][0]["resource_group"]["key"] == "premium-history"
+
+
 def test_product_can_be_deleted_from_api(configured_env: Path, db_session) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -577,6 +687,7 @@ def test_product_can_be_deleted_from_api(configured_env: Path, db_session) -> No
     assert persisted is not None
     assert persisted.deleted_at is not None
     assert product_root.exists()
+
 
 def test_reference_images_can_be_attached_to_product(db_session, configured_env: Path) -> None:
     product = create_product(

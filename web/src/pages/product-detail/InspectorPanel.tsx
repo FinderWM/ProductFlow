@@ -37,8 +37,7 @@ import type {
   CopyBlock,
   CopyPayloadV2,
   CopySection,
-  GenerationConfigOption,
-  GenerationConfigSelectionMode,
+  GenerationResourceGroup,
   ImageToolOptionKey,
   ProductDetail,
   ProductInitialWorkflowEntry,
@@ -105,13 +104,10 @@ function referenceRolePresetValue(role: string): string {
   return REFERENCE_ROLE_OPTIONS.some((option) => option.value === role) ? role : "__custom__";
 }
 
-function generationConfigOptionLabel(config: GenerationConfigOption, t: TFunction): string {
-  const markers = [
-    !config.enabled ? t("detail.inspector.generationConfigDisabled") : "",
-    config.frozen_until ? t("detail.inspector.generationConfigFrozen") : "",
-  ].filter(Boolean);
+function resourceGroupOptionLabel(group: GenerationResourceGroup, t: TFunction): string {
+  const markers = [!group.enabled ? t("detail.inspector.resourceGroupDisabled") : ""].filter(Boolean);
   const suffix = markers.length ? ` (${markers.join(" · ")})` : "";
-  return `${config.name}${suffix}`;
+  return `${group.name}${suffix}`;
 }
 
 function FieldLabel({
@@ -203,7 +199,7 @@ interface InspectorPanelProps {
   imageGenerationMaxDimension: number;
   imageToolAllowedFields: readonly ImageToolOptionKey[];
   tailSplitterMaxItems: number;
-  generationConfigs: GenerationConfigOption[];
+  resourceGroups: GenerationResourceGroup[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   onPreviewImage: (image: DownloadableImage) => void;
   onRun: () => void;
@@ -228,7 +224,7 @@ export function InspectorPanel({
   imageGenerationMaxDimension,
   imageToolAllowedFields,
   tailSplitterMaxItems,
-  generationConfigs,
+  resourceGroups,
   onDraftChange,
   onPreviewImage,
   onRun,
@@ -467,7 +463,7 @@ export function InspectorPanel({
           <CopyNodeInspector
             node={node}
             draft={draft}
-            generationConfigs={generationConfigs.filter((config) => config.purpose === "text")}
+            resourceGroups={resourceGroups}
             onDraftChange={onDraftChange}
             t={t}
           />
@@ -476,7 +472,7 @@ export function InspectorPanel({
           <TailSplitterInspector
             draft={draft}
             tailSplitterMaxItems={tailSplitterMaxItems}
-            generationConfigs={generationConfigs.filter((config) => config.purpose === "text")}
+            resourceGroups={resourceGroups}
             onDraftChange={onDraftChange}
             t={t}
           />
@@ -488,7 +484,7 @@ export function InspectorPanel({
             imageSizeOptions={imageSizeOptions}
             imageGenerationMaxDimension={imageGenerationMaxDimension}
             imageToolAllowedFields={imageToolAllowedFields}
-            generationConfigs={generationConfigs.filter((config) => config.purpose === "image")}
+            resourceGroups={resourceGroups}
             onDraftChange={onDraftChange}
             downstreamReferenceCount={downstreamReferenceCount}
             onPreviewPrompt={setPromptPreview}
@@ -988,18 +984,16 @@ function ReferenceImageInspector({
   );
 }
 
-function GenerationConfigSelector({
+function ResourceGroupSelector({
   label,
-  helpKey,
   draft,
-  generationConfigs,
+  resourceGroups,
   onDraftChange,
   t,
 }: {
   label: string;
-  helpKey?: ParameterHelpKey;
   draft: NodeConfigDraft;
-  generationConfigs: GenerationConfigOption[];
+  resourceGroups: GenerationResourceGroup[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   t: TFunction;
 }) {
@@ -1007,51 +1001,34 @@ function GenerationConfigSelector({
     <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
       <FieldLabel
         label={label}
-        helpKey={helpKey}
         className="text-xs font-semibold text-slate-700 dark:text-slate-200"
       />
-      <div className="grid grid-cols-2 gap-2">
-        <SelectField
-          value={draft.generationConfigMode}
-          options={[
-            { value: "auto", label: t("detail.inspector.generationConfigAuto") },
-            { value: "manual", label: t("detail.inspector.generationConfigManual") },
-          ]}
-          onChange={(value) => {
-            const generationConfigMode: GenerationConfigSelectionMode = value === "manual" ? "manual" : "auto";
-            onDraftChange({
-              ...draft,
-              generationConfigMode,
-              generationConfigId: generationConfigMode === "manual" ? draft.generationConfigId : null,
-            });
-          }}
-          ariaLabel={label}
-          radius="lg"
-          visualSize="sm"
-        />
-        <SelectField
-          value={draft.generationConfigId ?? ""}
-          options={[
-            {
-              value: "",
-              label: generationConfigs.length
-                ? t("detail.inspector.selectGenerationConfig")
-                : t("detail.inspector.noGenerationConfigs"),
-              disabled: draft.generationConfigMode === "manual",
-            },
-            ...generationConfigs.map((config) => ({
-              value: config.id,
-              label: generationConfigOptionLabel(config, t),
-              disabled: !config.enabled,
-            })),
-          ]}
-          onChange={(value) => onDraftChange({ ...draft, generationConfigId: value || null })}
-          ariaLabel={label}
-          disabled={draft.generationConfigMode !== "manual"}
-          radius="lg"
-          visualSize="sm"
-        />
-      </div>
+      <SelectField
+        value={draft.resourceGroupId ?? ""}
+        options={[
+          {
+            value: "",
+            label: resourceGroups.length ? t("detail.inspector.selectResourceGroup") : t("detail.inspector.noResourceGroups"),
+            disabled: true,
+          },
+          ...resourceGroups.map((group) => ({
+            value: group.id,
+            label: resourceGroupOptionLabel(group, t),
+            disabled: !group.enabled || Boolean(group.archived_at),
+          })),
+        ]}
+        onChange={(value) =>
+          onDraftChange({
+            ...draft,
+            resourceGroupId: value || null,
+            generationConfigMode: "auto",
+            generationConfigId: null,
+          })
+        }
+        ariaLabel={label}
+        radius="lg"
+        visualSize="sm"
+      />
     </div>
   );
 }
@@ -1059,13 +1036,13 @@ function GenerationConfigSelector({
 function CopyNodeInspector({
   node,
   draft,
-  generationConfigs,
+  resourceGroups,
   onDraftChange,
   t,
 }: {
   node: WorkflowNode;
   draft: NodeConfigDraft;
-  generationConfigs: GenerationConfigOption[];
+  resourceGroups: GenerationResourceGroup[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   t: TFunction;
 }) {
@@ -1081,11 +1058,10 @@ function CopyNodeInspector({
         onChange={(value) => onDraftChange({ ...draft, instruction: value })}
         helpKey="copyInstruction"
       />
-      <GenerationConfigSelector
-        label={t("detail.inspector.textGenerationConfig")}
-        helpKey="copyTextGenerationConfig"
+      <ResourceGroupSelector
+        label={t("detail.inspector.resourceGroup")}
         draft={draft}
-        generationConfigs={generationConfigs}
+        resourceGroups={resourceGroups}
         onDraftChange={onDraftChange}
         t={t}
       />
@@ -1133,13 +1109,13 @@ function CopyNodeInspector({
 function TailSplitterInspector({
   draft,
   tailSplitterMaxItems,
-  generationConfigs,
+  resourceGroups,
   onDraftChange,
   t,
 }: {
   draft: NodeConfigDraft;
   tailSplitterMaxItems: number;
-  generationConfigs: GenerationConfigOption[];
+  resourceGroups: GenerationResourceGroup[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   t: TFunction;
 }) {
@@ -1175,11 +1151,10 @@ function TailSplitterInspector({
           {t("detail.inspector.tailMaxItemsHint", { max: tailSplitterMaxItems })}
         </span>
       </div>
-      <GenerationConfigSelector
-        label={t("detail.inspector.textGenerationConfig")}
-        helpKey="copyTextGenerationConfig"
+      <ResourceGroupSelector
+        label={t("detail.inspector.resourceGroup")}
         draft={draft}
-        generationConfigs={generationConfigs}
+        resourceGroups={resourceGroups}
         onDraftChange={onDraftChange}
         t={t}
       />
@@ -1623,7 +1598,7 @@ function ImageGenerationInspector({
   imageSizeOptions,
   imageGenerationMaxDimension,
   imageToolAllowedFields,
-  generationConfigs,
+  resourceGroups,
   onDraftChange,
   downstreamReferenceCount,
   onPreviewPrompt,
@@ -1634,7 +1609,7 @@ function ImageGenerationInspector({
   imageSizeOptions: ImageSizeOption[];
   imageGenerationMaxDimension: number;
   imageToolAllowedFields: readonly ImageToolOptionKey[];
-  generationConfigs: GenerationConfigOption[];
+  resourceGroups: GenerationResourceGroup[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   downstreamReferenceCount: number;
   onPreviewPrompt: (preview: PromptPreview) => void;
@@ -1676,11 +1651,10 @@ function ImageGenerationInspector({
               onChange={(value) => onDraftChange({ ...draft, instruction: value })}
               helpKey="imageDescription"
             />
-            <GenerationConfigSelector
-              label={t("detail.inspector.imageGenerationConfig")}
-              helpKey="imageGenerationConfig"
+            <ResourceGroupSelector
+              label={t("detail.inspector.resourceGroup")}
               draft={draft}
-              generationConfigs={generationConfigs}
+              resourceGroups={resourceGroups}
               onDraftChange={onDraftChange}
               t={t}
             />

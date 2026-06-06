@@ -26,6 +26,7 @@ import {
 } from "./branching";
 
 const createdAt = "2026-04-27T00:00:00Z";
+const resourceGroup = { id: "group-default", key: "default", name: "默认分组" };
 
 function asset(id: string): ImageSessionAsset {
   return {
@@ -53,6 +54,8 @@ function round(overrides: Partial<ImageSessionRound>): ImageSessionRound {
     previous_response_id: null,
     image_generation_call_id: null,
     generation_config_id: null,
+    resource_group_id: resourceGroup.id,
+    resource_group: resourceGroup,
     generation_group_id: null,
     candidate_index: 1,
     candidate_count: 1,
@@ -78,6 +81,8 @@ function task(overrides: Partial<ImageSessionGenerationTask>): ImageSessionGener
     generation_config_mode: "auto",
     requested_generation_config_id: null,
     used_generation_config_id: null,
+    resource_group_id: resourceGroup.id,
+    resource_group: resourceGroup,
     generation_count: 1,
     completed_candidates: 0,
     active_candidate_index: null,
@@ -446,6 +451,7 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: ["ref-1"],
       generation_count: 3,
       tool_options: { quality: "high" as const },
+      resource_group_id: resourceGroup.id,
     };
     const tasks = [
       task({
@@ -481,6 +487,7 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: [],
       generation_count: 1,
       tool_options: null,
+      resource_group_id: resourceGroup.id,
     };
     const tasks = [
       task({
@@ -507,6 +514,7 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: [],
       generation_count: 10,
       tool_options: null,
+      resource_group_id: resourceGroup.id,
     };
 
     expect(
@@ -534,6 +542,7 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: [],
       generation_count: 1,
       tool_options: null,
+      resource_group_id: resourceGroup.id,
     };
 
     expect(
@@ -599,6 +608,8 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 3,
       tool_options: { model: "image-model", quality: "high" },
+      resource_group_id: "group-cancelled",
+      resource_group: { id: "group-cancelled", key: "cancelled", name: "Cancelled group" },
       generation_config_mode: "manual",
       requested_generation_config_id: "config-1",
     });
@@ -612,6 +623,7 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 3,
       tool_options: { model: "image-model", quality: "high" },
+      resource_group_id: "group-cancelled",
       generation_config_mode: "manual",
       generation_config_id: "config-1",
     });
@@ -717,6 +729,7 @@ describe("image chat branching helpers", () => {
         quality: "high" as const,
         output_format: "png" as const,
       },
+      resource_group_id: resourceGroup.id,
     };
 
     const signature = buildImageGenerationSubmitSignature(payload);
@@ -747,6 +760,7 @@ describe("image chat branching helpers", () => {
         generation_config_id: "config-1",
       }),
     );
+    expect(signature).not.toBe(buildImageGenerationSubmitSignature({ ...payload, resource_group_id: "other-group" }));
   });
 
   it("blocks identical duplicate submits only inside the short guard window", () => {
@@ -757,6 +771,7 @@ describe("image chat branching helpers", () => {
       selected_reference_asset_ids: [],
       generation_count: 1,
       tool_options: null,
+      resource_group_id: resourceGroup.id,
     });
 
     expect(shouldBlockDuplicateGenerationSubmit({ signature, submittedAt: 1_000 }, signature, 2_000, 1_800)).toBe(true);

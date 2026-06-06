@@ -12,7 +12,7 @@ from productflow_backend.application.auth import ensure_auth_bootstrapped
 from productflow_backend.application.ownership import resolve_owner_user_id
 from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.domain.rbac import ADMIN_USER_ID
-from productflow_backend.infrastructure.db.models import AuthUser, Product
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, AuthUser, Product
 
 RESOURCE_DISABLED_MESSAGE = "资源已被管理员屏蔽，暂不可使用"
 
@@ -27,6 +27,11 @@ def _create_user_client(app, admin_client: TestClient, username: str) -> TestCli
         json={"username": username, "display_name": username.title()},
     )
     assert created_user.status_code == 201
+    grant = admin_client.put(
+        f"/api/rbac/users/{created_user.json()['id']}/generation-resource-groups",
+        json={"resource_group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID]},
+    )
+    assert grant.status_code == 200
 
     client = TestClient(app)
     password_md5 = _password_md5(f"{username}-password")
@@ -172,7 +177,11 @@ def test_image_session_owner_isolation_and_gallery_owner(configured_env: Path) -
 
     generated = alice_client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "生成一张白底产品图", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成一张白底产品图",
+            "size": "1024x1024",
+        },
     )
     assert generated.status_code == 202
     asset_id = generated.json()["rounds"][0]["generated_asset"]["id"]
@@ -188,7 +197,12 @@ def test_image_session_owner_isolation_and_gallery_owner(configured_env: Path) -
 
     admin_generate_other = admin_client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "管理员不代用户生成", "size": "1024x1024", "base_asset_id": asset_id},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "管理员不代用户生成",
+            "size": "1024x1024",
+            "base_asset_id": asset_id,
+        },
     )
     assert admin_generate_other.status_code == 400
     assert admin_generate_other.json()["detail"] == "管理员不能直接编辑其他用户资源"
@@ -263,7 +277,11 @@ def test_gallery_moderation_keeps_owner_visibility_and_hides_from_others(configu
     session_id = created_session.json()["id"]
     generated = alice_client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "生成一张白底产品图", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成一张白底产品图",
+            "size": "1024x1024",
+        },
     )
     assert generated.status_code == 202
     asset_id = generated.json()["rounds"][0]["generated_asset"]["id"]
@@ -388,7 +406,11 @@ def test_image_session_and_gallery_moderation_blocks_usage(configured_env: Path)
 
     generated = alice_client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "生成一张白底产品图", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成一张白底产品图",
+            "size": "1024x1024",
+        },
     )
     assert generated.status_code == 202
     asset_id = generated.json()["rounds"][0]["generated_asset"]["id"]
@@ -445,7 +467,12 @@ def test_image_session_and_gallery_moderation_blocks_usage(configured_env: Path)
 
     generate_disabled_session = alice_client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "继续生成", "size": "1024x1024", "base_asset_id": asset_id},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "继续生成",
+            "size": "1024x1024",
+            "base_asset_id": asset_id,
+        },
     )
     assert generate_disabled_session.status_code == 400
     assert generate_disabled_session.json()["detail"] == RESOURCE_DISABLED_MESSAGE

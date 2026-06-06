@@ -20,6 +20,7 @@ from productflow_backend.application.admission import (
     get_generation_task_queue_metadata,
     get_queued_generation_positions,
 )
+from productflow_backend.application.auth import require_generation_resource_group_for_user
 from productflow_backend.application.generation_config_runtime import (
     GenerationConfigSelection,
     GenerationConfigWaitError,
@@ -110,6 +111,7 @@ class ImagePromptPolishResult:
     prompt: str
     model_name: str
     generation_config_id: str
+    resource_group_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +143,9 @@ def _image_session_query():
         .options(
             selectinload(ImageSession.assets),
             selectinload(ImageSession.rounds).selectinload(ImageSessionRound.generated_asset),
+            selectinload(ImageSession.rounds).selectinload(ImageSessionRound.resource_group),
             selectinload(ImageSession.generation_tasks),
+            selectinload(ImageSession.generation_tasks).selectinload(ImageSessionGenerationTask.resource_group),
             selectinload(ImageSession.owner),
             selectinload(ImageSession.deleted_by),
             selectinload(ImageSession.product).selectinload(Product.source_assets),
@@ -152,7 +156,9 @@ def _image_session_query():
 
 
 def _image_session_status_query():
-    return select(ImageSession).options(selectinload(ImageSession.generation_tasks))
+    return select(ImageSession).options(
+        selectinload(ImageSession.generation_tasks).selectinload(ImageSessionGenerationTask.resource_group)
+    )
 
 
 def _get_image_session_or_raise(
@@ -219,16 +225,18 @@ def _get_product_original_assets(product: Product) -> list[SourceAsset]:
 
 
 def _generation_config_selection(
+    resource_group_id: str | None,
     mode: str | None,
     generation_config_id: str | None,
 ) -> GenerationConfigSelection:
     normalized_mode = (mode or "auto").strip().lower()
     normalized_id = (generation_config_id or "").strip() or None
-    if normalized_mode != "manual":
-        return GenerationConfigSelection(mode="auto", generation_config_id=None)
-    if normalized_id is None:
-        raise BusinessValidationError("手动指定生成配置时必须选择配置")
-    return GenerationConfigSelection(mode="manual", generation_config_id=normalized_id)
+    if normalized_mode == "manual" or normalized_id is not None:
+        raise BusinessValidationError("生成入口只能选择供应商生成分组")
+    normalized_group_id = (resource_group_id or "").strip()
+    if not normalized_group_id:
+        raise BusinessValidationError("请选择供应商生成分组")
+    return GenerationConfigSelection(mode="auto", generation_config_id=None, resource_group_id=normalized_group_id)
 
 
 def _validate_manual_image_generation_config_selection(
@@ -251,15 +259,29 @@ def _validate_manual_image_generation_config_selection(
 
 def polish_image_session_prompt(
     *,
+    session: Session,
     prompt: str,
+    resource_group_id: str | None,
     generation_config_mode: str = "auto",
     generation_config_id: str | None = None,
     user_id: str | None = None,
+    user_is_admin: bool = False,
 ) -> ImagePromptPolishResult:
     normalized_prompt = prompt.strip()
     if not normalized_prompt:
         raise BusinessValidationError("画面描述不能为空")
-    generation_config_selection = _generation_config_selection(generation_config_mode, generation_config_id)
+    generation_config_selection = _generation_config_selection(
+        resource_group_id,
+        generation_config_mode,
+        generation_config_id,
+    )
+    group = require_generation_resource_group_for_user(
+        session,
+        user_id=user_id,
+        is_admin=user_is_admin,
+        resource_group_id=generation_config_selection.resource_group_id,
+    )
+    generation_config_selection = GenerationConfigSelection(resource_group_id=group.id)
     try:
         runtime_claim = claim_runtime_generation_config(purpose="text", selection=generation_config_selection)
     except (GenerationConfigWaitError, ValueError) as exc:
@@ -286,11 +308,16 @@ def polish_image_session_prompt(
         prompt=polished_prompt,
         model_name=model_name,
         generation_config_id=runtime_claim.generation_config_id,
+        resource_group_id=runtime_claim.resource_group_id,
     )
 
 
 def _image_task_generation_config_selection(task: ImageSessionGenerationTask) -> GenerationConfigSelection:
-    return _generation_config_selection(task.generation_config_mode, task.requested_generation_config_id)
+    return _generation_config_selection(
+        task.resource_group_id,
+        task.generation_config_mode,
+        task.requested_generation_config_id,
+    )
 
 
 def list_image_sessions(
@@ -565,7 +592,8 @@ def _execute_image_session_round_generation(
     generation_task = session.get(ImageSessionGenerationTask, generation_task_id) if generation_task_id else None
     if generation_task is not None and generation_config_selection is None:
         generation_config_selection = _image_task_generation_config_selection(generation_task)
-    generation_config_selection = generation_config_selection or GenerationConfigSelection()
+    if generation_config_selection is None:
+        raise BusinessValidationError("请选择供应商生成分组")
     normalized_tool_options = normalize_tool_options(tool_options)
     normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
         image_session,
@@ -627,10 +655,12 @@ def _execute_image_session_round_generation(
         raise
     if generation_task is not None:
         generation_task.used_generation_config_id = runtime_claim.generation_config_id
+        generation_task.resource_group_id = runtime_claim.resource_group_id
         generation_task.progress_phase = "generation_config_claimed"
         generation_task.progress_updated_at = now_utc()
         generation_task.progress_metadata = {
             "generation_config_id": runtime_claim.generation_config_id,
+            "resource_group_id": runtime_claim.resource_group_id,
             "candidate_count": generation_count,
             "completed_candidates": completed_candidates,
         }
@@ -767,6 +797,7 @@ def _execute_image_session_round_generation(
                 selected_reference_asset_ids=normalized_reference_ids,
                 generated_asset_id=asset.id,
                 generation_config_id=runtime_claim.generation_config_id,
+                resource_group_id=runtime_claim.resource_group_id,
             )
             session.add(round_item)
             session.flush()
@@ -858,6 +889,7 @@ def generate_image_session_round(
     image_session_id: str,
     prompt: str,
     size: str,
+    resource_group_id: str | None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
@@ -877,7 +909,11 @@ def generate_image_session_round(
         generation_count=generation_count,
         tool_options=tool_options,
         storage=storage,
-        generation_config_selection=_generation_config_selection(generation_config_mode, generation_config_id),
+        generation_config_selection=_generation_config_selection(
+            resource_group_id,
+            generation_config_mode,
+            generation_config_id,
+        ),
     ).image_session
 
 
@@ -887,6 +923,7 @@ def create_image_session_generation_task(
     image_session_id: str,
     prompt: str,
     size: str,
+    resource_group_id: str | None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
@@ -912,8 +949,22 @@ def create_image_session_generation_task(
     )
     ensure_resource_usable(image_session)
     normalized_tool_options = normalize_tool_options(tool_options)
-    generation_config_selection = _generation_config_selection(generation_config_mode, generation_config_id)
-    _validate_manual_image_generation_config_selection(session, generation_config_selection)
+    generation_config_selection = _generation_config_selection(
+        resource_group_id,
+        generation_config_mode,
+        generation_config_id,
+    )
+    group_actor_user_id = actor_user_id or image_session.owner_user_id
+    group_actor_is_admin = actor_is_admin or (
+        actor_user_id is None and bool(image_session.owner and image_session.owner.is_admin)
+    )
+    group = require_generation_resource_group_for_user(
+        session,
+        user_id=group_actor_user_id,
+        is_admin=group_actor_is_admin,
+        resource_group_id=generation_config_selection.resource_group_id,
+    )
+    generation_config_selection = GenerationConfigSelection(resource_group_id=group.id)
     normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
         image_session,
         size=size,
@@ -933,6 +984,7 @@ def create_image_session_generation_task(
         tool_options=normalized_tool_options,
         generation_config_mode=generation_config_selection.mode,
         requested_generation_config_id=generation_config_selection.generation_config_id,
+        resource_group_id=generation_config_selection.resource_group_id,
         generation_count=generation_count,
     )
     session.add(task)
@@ -951,6 +1003,7 @@ def submit_image_session_generation_task(
     image_session_id: str,
     prompt: str,
     size: str,
+    resource_group_id: str | None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
@@ -970,6 +1023,7 @@ def submit_image_session_generation_task(
         selected_reference_asset_ids=selected_reference_asset_ids,
         generation_count=generation_count,
         tool_options=tool_options,
+        resource_group_id=resource_group_id,
         generation_config_mode=generation_config_mode,
         generation_config_id=generation_config_id,
         actor_user_id=actor_user_id,
@@ -1027,6 +1081,12 @@ def retry_image_session_generation_task(
         raise BusinessValidationError("只有失败的生成任务可以重试")
     if not task.is_retryable:
         raise BusinessValidationError("该生成任务不可重试")
+    require_generation_resource_group_for_user(
+        session,
+        user_id=actor_user_id,
+        is_admin=actor_is_admin,
+        resource_group_id=task.resource_group_id,
+    )
 
     _reset_image_generation_task_for_retry(
         session,
@@ -1359,6 +1419,7 @@ def _reset_image_generation_task_for_generation_config_wait(session: Session, *,
     task.progress_metadata = {
         "generation_config_mode": task.generation_config_mode,
         "requested_generation_config_id": task.requested_generation_config_id,
+        "resource_group_id": task.resource_group_id,
     }
     task.used_generation_config_id = None
     task.attempts = max(0, int(task.attempts or 0) - 1)

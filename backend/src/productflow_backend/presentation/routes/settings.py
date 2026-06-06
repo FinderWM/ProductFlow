@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from productflow_backend import __version__
+from productflow_backend.application.auth import list_available_generation_resource_groups_for_user
 from productflow_backend.application.canvas_templates import CanvasTemplate as CanvasTemplatePayload
 from productflow_backend.application.contracts import CopyNodeConfigV2, ProductInput
 from productflow_backend.application.time import now_utc
@@ -36,13 +37,17 @@ from productflow_backend.domain.rbac import (
     API_STATUS_READ,
 )
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
     AppSetting,
     AuthUser,
     GenerationConfig,
     GenerationConfigDailyStat,
     GenerationConfigState,
+    GenerationResourceGroup,
     ProviderBinding,
     ProviderProfile,
+    UserGenerationResourceGroupGrant,
 )
 from productflow_backend.infrastructure.db.models import (
     CanvasTemplate as DbCanvasTemplate,
@@ -57,7 +62,9 @@ from productflow_backend.infrastructure.provider_config import (
     TEXT_PROVIDER_KINDS,
     UNSET_PROVIDER_FIELD,
     add_generation_config,
+    add_generation_resource_group,
     archive_generation_config,
+    archive_generation_resource_group,
     archive_provider_profile,
     capability_for_provider_kind,
     create_provider_profile,
@@ -65,12 +72,14 @@ from productflow_backend.infrastructure.provider_config import (
     generation_config_status_summary,
     is_real_image_provider_kind,
     list_generation_configs,
+    list_generation_resource_groups,
     list_provider_bindings,
     list_provider_profiles,
     normalize_provider_binding_model_settings,
     normalize_provider_binding_runtime_config,
     resolve_text_provider_config_from_draft,
     update_generation_config,
+    update_generation_resource_group,
     update_provider_binding,
     update_provider_profile,
     validate_provider_capabilities,
@@ -83,7 +92,12 @@ from productflow_backend.infrastructure.provider_models import (
 )
 from productflow_backend.infrastructure.text.mock_provider import MockTextProvider
 from productflow_backend.infrastructure.text.openai_provider import OpenAITextProvider
-from productflow_backend.presentation.deps import get_session, require_any_api_permission, require_api_permission
+from productflow_backend.presentation.deps import (
+    get_current_user,
+    get_session,
+    require_any_api_permission,
+    require_api_permission,
+)
 from productflow_backend.presentation.schemas.settings import (
     ConfigItemResponse,
     ConfigOptionResponse,
@@ -98,6 +112,9 @@ from productflow_backend.presentation.schemas.settings import (
     GenerationConfigStatusConfigResponse,
     GenerationConfigStatusSummaryResponse,
     GenerationConfigUpdateRequest,
+    GenerationResourceGroupCreateRequest,
+    GenerationResourceGroupResponse,
+    GenerationResourceGroupUpdateRequest,
     ProviderBindingResponse,
     ProviderBindingUpdateRequest,
     ProviderConfigResponse,
@@ -112,6 +129,7 @@ from productflow_backend.presentation.schemas.settings import (
     SettingsExportDocument,
     SettingsExportMetadataResponse,
     SettingsGenerationConfigExport,
+    SettingsGenerationResourceGroupExport,
     SettingsImportCommitResponse,
     SettingsImportPreviewResponse,
     SettingsProviderBindingExport,
@@ -142,6 +160,7 @@ class _SettingsImportBundle:
     normalized_runtime_config: dict[str, str]
     provider_profiles: list[dict[str, Any]]
     provider_bindings: list[dict[str, Any]]
+    generation_resource_groups: list[dict[str, Any]]
     generation_configs: list[dict[str, Any]]
     canvas_template_categories: list[dict[str, Any]]
     canvas_templates: list[dict[str, Any]]
@@ -255,6 +274,20 @@ def _serialize_provider_binding(binding) -> ProviderBindingResponse:
     )
 
 
+def _serialize_generation_resource_group(group: GenerationResourceGroup) -> GenerationResourceGroupResponse:
+    return GenerationResourceGroupResponse(
+        id=group.id,
+        key=group.key,
+        name=group.name,
+        description=group.description,
+        sort_order=group.sort_order,
+        enabled=group.enabled,
+        archived_at=_serialize_dt(group.archived_at),
+        created_at=group.created_at.isoformat(),
+        updated_at=group.updated_at.isoformat(),
+    )
+
+
 def _serialize_dt(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -359,6 +392,7 @@ def _serialize_generation_config(
 ) -> GenerationConfigResponse:
     return GenerationConfigResponse(
         id=generation_config.id,
+        resource_group_id=generation_config.resource_group_id,
         purpose=generation_config.purpose,
         name=generation_config.name,
         provider_kind=generation_config.provider_kind,
@@ -387,6 +421,7 @@ def _serialize_generation_config_status_config(
 ) -> GenerationConfigStatusConfigResponse:
     return GenerationConfigStatusConfigResponse(
         id=generation_config.id,
+        resource_group_id=generation_config.resource_group_id,
         purpose=generation_config.purpose,
         name=generation_config.name,
         provider_kind=generation_config.provider_kind,
@@ -405,6 +440,7 @@ def _serialize_generation_config_option(generation_config: GenerationConfig) -> 
     state = generation_config.state
     return GenerationConfigOptionResponse(
         id=generation_config.id,
+        resource_group_id=generation_config.resource_group_id,
         purpose=generation_config.purpose,
         name=generation_config.name,
         provider_kind=generation_config.provider_kind,
@@ -466,6 +502,9 @@ def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
     return ProviderConfigResponse(
         profiles=[_serialize_provider_profile(profile) for profile in list_provider_profiles(session)],
         bindings=[_serialize_provider_binding(binding) for binding in list_provider_bindings(session)],
+        generation_resource_groups=[
+            _serialize_generation_resource_group(group) for group in list_generation_resource_groups(session)
+        ],
         generation_configs=[
             _serialize_generation_config(generation_config, today_stats=today_stats)
             for generation_config in generation_configs
@@ -545,6 +584,17 @@ def _serialize_canvas_template_export(template: DbCanvasTemplate) -> SettingsCan
     )
 
 
+def _settings_generation_resource_group_export(group: GenerationResourceGroup) -> SettingsGenerationResourceGroupExport:
+    return SettingsGenerationResourceGroupExport(
+        id=group.id,
+        key=group.key,
+        name=group.name,
+        description=group.description,
+        sort_order=group.sort_order,
+        enabled=group.enabled,
+    )
+
+
 def _build_settings_export_document(session: Session) -> SettingsExportDocument:
     ensure_provider_config_bootstrapped(session)
     settings = get_runtime_settings()
@@ -558,6 +608,7 @@ def _build_settings_export_document(session: Session) -> SettingsExportDocument:
         .order_by(ProviderProfile.created_at, ProviderProfile.name)
     ).all()
     bindings = session.scalars(select(ProviderBinding).order_by(ProviderBinding.purpose)).all()
+    generation_resource_groups = list_generation_resource_groups(session)
     generation_configs = list_generation_configs(session)
     template_categories = session.scalars(
         select(DbCanvasTemplateCategory)
@@ -608,9 +659,13 @@ def _build_settings_export_document(session: Session) -> SettingsExportDocument:
             )
             for binding in bindings
         ],
+        generation_resource_groups=[
+            _settings_generation_resource_group_export(group) for group in generation_resource_groups
+        ],
         generation_configs=[
             SettingsGenerationConfigExport(
                 id=generation_config.id,
+                resource_group_id=generation_config.resource_group_id,
                 name=generation_config.name,
                 purpose=generation_config.purpose,
                 provider_kind=generation_config.provider_kind,
@@ -669,6 +724,66 @@ def _dedupe_ordered(values: list[str]) -> list[str]:
 def _normalize_optional_text(value: str | None) -> str | None:
     normalized = "" if value is None else str(value).strip()
     return normalized or None
+
+
+def _normalize_import_generation_resource_groups(document: SettingsExportDocument) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_keys: set[str] = set()
+    source_groups = document.generation_resource_groups or [
+        SettingsGenerationResourceGroupExport(
+            id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            key=DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
+            name="默认分组",
+            description="系统内置默认供应商生成能力分组",
+            sort_order=0,
+            enabled=True,
+        )
+    ]
+    for group in source_groups:
+        group_id = group.id.strip()
+        key = group.key.strip().lower()
+        name = group.name.strip()
+        if not group_id:
+            raise ValueError("生成分组 id 不能为空")
+        if not key:
+            raise ValueError("生成分组 key 不能为空")
+        if not name:
+            raise ValueError("生成分组名称不能为空")
+        if group_id in seen_ids or key in seen_keys:
+            raise ValueError("生成分组不能重复")
+        if group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
+            if key != DEFAULT_GENERATION_RESOURCE_GROUP_KEY:
+                raise ValueError("内置 default 分组 key 不正确")
+            if not group.enabled:
+                raise ValueError("内置 default 分组不能停用")
+        seen_ids.add(group_id)
+        seen_keys.add(key)
+        groups.append(
+            {
+                "id": group_id,
+                "key": key,
+                "name": name,
+                "description": _normalize_optional_text(group.description),
+                "sort_order": group.sort_order,
+                "enabled": group.enabled,
+            }
+        )
+    if DEFAULT_GENERATION_RESOURCE_GROUP_KEY in seen_keys and DEFAULT_GENERATION_RESOURCE_GROUP_ID not in seen_ids:
+        raise ValueError("内置 default 分组 id 不正确")
+    if DEFAULT_GENERATION_RESOURCE_GROUP_ID not in seen_ids and DEFAULT_GENERATION_RESOURCE_GROUP_KEY not in seen_keys:
+        groups.insert(
+            0,
+            {
+                "id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+                "key": DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
+                "name": "默认分组",
+                "description": "系统内置默认供应商生成能力分组",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+    return groups
 
 
 def _normalize_import_profiles(document: SettingsExportDocument) -> list[dict[str, Any]]:
@@ -766,11 +881,14 @@ def _normalize_import_generation_configs(
     document: SettingsExportDocument,
     profiles: list[dict[str, Any]],
     bindings: list[dict[str, Any]],
+    generation_resource_groups: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    resource_group_ids = {group["id"] for group in generation_resource_groups}
     if not document.generation_configs:
         return [
             {
                 "id": None,
+                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
                 "name": "默认文案配置" if binding["purpose"] == "text" else "默认图片配置",
                 "purpose": binding["purpose"],
                 "provider_kind": binding["provider_kind"],
@@ -812,6 +930,9 @@ def _normalize_import_generation_configs(
             model_settings=item.model_settings,
         )
         provider_profile_id = item.provider_profile_id
+        resource_group_id = item.resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID
+        if resource_group_id not in resource_group_ids:
+            raise ValueError("生成配置引用的分组不存在")
         if item.provider_kind == "mock":
             provider_profile_id = None
         else:
@@ -828,6 +949,7 @@ def _normalize_import_generation_configs(
         generation_configs.append(
             {
                 "id": config_id,
+                "resource_group_id": resource_group_id,
                 "name": item.name.strip(),
                 "purpose": item.purpose,
                 "provider_kind": item.provider_kind,
@@ -985,7 +1107,8 @@ def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
     normalized_runtime_config = _normalize_runtime_import_config(document)
     profiles = _normalize_import_profiles(document)
     bindings = _normalize_import_bindings(document, profiles)
-    generation_configs = _normalize_import_generation_configs(document, profiles, bindings)
+    generation_resource_groups = _normalize_import_generation_resource_groups(document)
+    generation_configs = _normalize_import_generation_configs(document, profiles, bindings, generation_resource_groups)
     canvas_template_categories = _normalize_import_canvas_template_categories(document)
     canvas_templates = _normalize_import_canvas_templates(document, canvas_template_categories)
     if any(
@@ -998,6 +1121,7 @@ def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
         runtime_config_count=len(normalized_runtime_config),
         provider_profile_count=len(profiles),
         provider_binding_count=len(bindings),
+        generation_resource_group_count=len(generation_resource_groups),
         generation_config_count=len(generation_configs),
         canvas_template_category_count=len(canvas_template_categories),
         canvas_template_count=len(canvas_templates),
@@ -1012,6 +1136,7 @@ def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
         normalized_runtime_config=normalized_runtime_config,
         provider_profiles=profiles,
         provider_bindings=bindings,
+        generation_resource_groups=generation_resource_groups,
         generation_configs=generation_configs,
         canvas_template_categories=canvas_template_categories,
         canvas_templates=canvas_templates,
@@ -1114,8 +1239,23 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
         session.execute(delete(GenerationConfigDailyStat))
         session.execute(delete(GenerationConfigState))
         session.execute(delete(GenerationConfig))
+        session.execute(delete(UserGenerationResourceGroupGrant))
+        session.execute(delete(GenerationResourceGroup))
         session.execute(delete(ProviderBinding))
         session.execute(delete(ProviderProfile))
+        session.flush()
+
+        for group in bundle.generation_resource_groups:
+            session.add(
+                GenerationResourceGroup(
+                    id=group["id"],
+                    key=group["key"],
+                    name=group["name"],
+                    description=group["description"],
+                    sort_order=group["sort_order"],
+                    enabled=group["enabled"],
+                )
+            )
         session.flush()
 
         for profile in bundle.provider_profiles:
@@ -1137,6 +1277,7 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
             add_generation_config(
                 session,
                 generation_config_id=generation_config["id"],
+                resource_group_id=generation_config["resource_group_id"],
                 name=generation_config["name"],
                 purpose=generation_config["purpose"],
                 provider_kind=generation_config["provider_kind"],
@@ -1220,6 +1361,99 @@ def list_generation_config_options_endpoint(
         _serialize_generation_config_option(generation_config)
         for generation_config in list_generation_configs(session)
     ]
+
+
+@router.get(
+    "/generation-resource-groups",
+    response_model=list[GenerationResourceGroupResponse],
+    dependencies=[READ_SETTINGS_PERMISSION],
+)
+def list_generation_resource_groups_endpoint(
+    session: Session = Depends(get_session),
+) -> list[GenerationResourceGroupResponse]:
+    ensure_provider_config_bootstrapped(session)
+    return [_serialize_generation_resource_group(group) for group in list_generation_resource_groups(session)]
+
+
+@router.post(
+    "/generation-resource-groups",
+    response_model=GenerationResourceGroupResponse,
+    dependencies=[WRITE_SETTINGS_PERMISSION],
+)
+def create_generation_resource_group_endpoint(
+    payload: GenerationResourceGroupCreateRequest,
+    session: Session = Depends(get_session),
+) -> GenerationResourceGroupResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        group = add_generation_resource_group(
+            session,
+            key=payload.key,
+            name=payload.name,
+            description=payload.description,
+            sort_order=payload.sort_order,
+            enabled=payload.enabled,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_generation_resource_group(group)
+
+
+@router.patch(
+    "/generation-resource-groups/{resource_group_id}",
+    response_model=GenerationResourceGroupResponse,
+    dependencies=[WRITE_SETTINGS_PERMISSION],
+)
+def update_generation_resource_group_endpoint(
+    resource_group_id: str,
+    payload: GenerationResourceGroupUpdateRequest,
+    session: Session = Depends(get_session),
+) -> GenerationResourceGroupResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        fields_set = payload.model_fields_set
+        group = update_generation_resource_group(
+            session,
+            resource_group_id,
+            key=payload.key,
+            name=payload.name,
+            description=payload.description if "description" in fields_set else UNSET_PROVIDER_FIELD,
+            sort_order=payload.sort_order,
+            enabled=payload.enabled,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_generation_resource_group(group)
+
+
+@router.delete(
+    "/generation-resource-groups/{resource_group_id}",
+    response_model=GenerationResourceGroupResponse,
+    dependencies=[WRITE_SETTINGS_PERMISSION],
+)
+def archive_generation_resource_group_endpoint(
+    resource_group_id: str,
+    session: Session = Depends(get_session),
+) -> GenerationResourceGroupResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        group = archive_generation_resource_group(session, resource_group_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_generation_resource_group(group)
+
+
+@router.get(
+    "/my-generation-resource-groups",
+    response_model=list[GenerationResourceGroupResponse],
+    dependencies=[READ_GENERATION_RUNTIME_PERMISSION],
+)
+def list_my_generation_resource_groups_endpoint(
+    current_user: AuthUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> list[GenerationResourceGroupResponse]:
+    groups = list_available_generation_resource_groups_for_user(session, user=current_user)
+    return [_serialize_generation_resource_group(group) for group in groups]
 
 
 @router.post(
@@ -1318,6 +1552,7 @@ def create_generation_config_endpoint(
         ensure_provider_config_bootstrapped(session)
         generation_config = add_generation_config(
             session,
+            resource_group_id=payload.resource_group_id,
             name=payload.name,
             purpose=payload.purpose,
             provider_kind=payload.provider_kind,
@@ -1359,6 +1594,7 @@ def update_generation_config_endpoint(
         generation_config = update_generation_config(
             session,
             generation_config_id,
+            resource_group_id=payload.resource_group_id if "resource_group_id" in fields_set else None,
             name=payload.name,
             purpose=payload.purpose,
             provider_kind=payload.provider_kind,

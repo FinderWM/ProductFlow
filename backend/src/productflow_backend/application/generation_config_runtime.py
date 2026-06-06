@@ -9,6 +9,7 @@ from dramatiq.middleware.time_limit import TimeLimitExceeded
 from sqlalchemy.orm import Session
 
 from productflow_backend.application.usage_stats import record_user_usage_result
+from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
@@ -30,6 +31,7 @@ class GenerationConfigWaitError(RuntimeError):
 class GenerationConfigSelection:
     mode: GenerationConfigMode = "auto"
     generation_config_id: str | None = None
+    resource_group_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -45,21 +47,30 @@ class RuntimeGenerationConfigClaim:
     def purpose(self) -> str:
         return self.claim.purpose
 
+    @property
+    def resource_group_id(self) -> str:
+        return self.claim.resource_group_id
+
 
 def generation_config_selection_from_config(raw_config: dict[str, Any] | None) -> GenerationConfigSelection:
     config = raw_config or {}
     mode = str(config.get("generation_config_mode") or "auto").strip().lower()
     generation_config_id = _optional_text(config.get("generation_config_id"))
+    resource_group_id = _optional_text(config.get("resource_group_id"))
     if mode != "manual":
-        return GenerationConfigSelection(mode="auto", generation_config_id=None)
-    return GenerationConfigSelection(mode="manual", generation_config_id=generation_config_id)
+        return GenerationConfigSelection(mode="auto", generation_config_id=None, resource_group_id=resource_group_id)
+    return GenerationConfigSelection(
+        mode="manual",
+        generation_config_id=generation_config_id,
+        resource_group_id=resource_group_id,
+    )
 
 
 def generation_config_id_for_claim(selection: GenerationConfigSelection) -> str | None:
     if selection.mode != "manual":
         return None
     if not selection.generation_config_id:
-        raise ValueError("手动指定生成配置时必须选择配置")
+        raise BusinessValidationError("手动指定生成配置时必须选择配置")
     return selection.generation_config_id
 
 
@@ -70,7 +81,7 @@ def claim_runtime_generation_config(
     session: Session | None = None,
 ) -> RuntimeGenerationConfigClaim:
     if purpose not in {TEXT_PURPOSE, IMAGE_PURPOSE}:
-        raise ValueError("用途必须是 text 或 image")
+        raise BusinessValidationError("用途必须是 text 或 image")
     resolved_selection = selection or GenerationConfigSelection()
     owns_session = session is None
     working_session = session or get_session_factory()()
@@ -78,6 +89,7 @@ def claim_runtime_generation_config(
         claim = claim_generation_config(
             working_session,
             purpose=purpose,
+            resource_group_id=resolved_selection.resource_group_id,
             generation_config_id=generation_config_id_for_claim(resolved_selection),
         )
         if claim is None:

@@ -74,6 +74,34 @@ class ProviderBindingResponse(BaseModel):
     updated_at: str
 
 
+class GenerationResourceGroupResponse(BaseModel):
+    id: str
+    key: str
+    name: str
+    description: str | None = None
+    sort_order: int
+    enabled: bool
+    archived_at: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class GenerationResourceGroupCreateRequest(BaseModel):
+    key: str = Field(min_length=2, max_length=80)
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = None
+    sort_order: int = 100
+    enabled: bool = True
+
+
+class GenerationResourceGroupUpdateRequest(BaseModel):
+    key: str | None = Field(default=None, min_length=2, max_length=80)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = None
+    sort_order: int | None = None
+    enabled: bool | None = None
+
+
 class GenerationConfigStateResponse(BaseModel):
     current_concurrency: int
     frozen_until: str | None = None
@@ -115,6 +143,7 @@ class GenerationConfigStatAggregateResponse(BaseModel):
 
 class GenerationConfigResponse(BaseModel):
     id: str
+    resource_group_id: str
     purpose: str
     name: str
     provider_kind: str
@@ -136,6 +165,7 @@ class GenerationConfigResponse(BaseModel):
 
 class GenerationConfigOptionResponse(BaseModel):
     id: str
+    resource_group_id: str
     purpose: str
     name: str
     provider_kind: str
@@ -146,6 +176,7 @@ class GenerationConfigOptionResponse(BaseModel):
 
 class GenerationConfigStatusConfigResponse(BaseModel):
     id: str
+    resource_group_id: str
     purpose: str
     name: str
     provider_kind: str
@@ -180,6 +211,7 @@ class GenerationConfigStatusSummaryResponse(BaseModel):
 class ProviderConfigResponse(BaseModel):
     profiles: list[ProviderProfileResponse]
     bindings: list[ProviderBindingResponse]
+    generation_resource_groups: list[GenerationResourceGroupResponse] = Field(default_factory=list)
     generation_configs: list[GenerationConfigResponse] = Field(default_factory=list)
     status_summary: GenerationConfigStatusSummaryResponse | None = None
 
@@ -225,6 +257,7 @@ class ProviderBindingUpdateRequest(BaseModel):
 
 
 class GenerationConfigCreateRequest(BaseModel):
+    resource_group_id: str | None = Field(default=None, max_length=36)
     name: str = Field(min_length=1)
     purpose: str = Field(min_length=1, max_length=40)
     provider_kind: str = Field(min_length=1, max_length=40)
@@ -240,6 +273,7 @@ class GenerationConfigCreateRequest(BaseModel):
 
 
 class GenerationConfigUpdateRequest(BaseModel):
+    resource_group_id: str | None = Field(default=None, max_length=36)
     name: str | None = None
     purpose: str | None = None
     provider_kind: str | None = None
@@ -314,8 +348,18 @@ class SettingsProviderBindingExport(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class SettingsGenerationResourceGroupExport(BaseModel):
+    id: str = Field(min_length=1, max_length=36)
+    key: str = Field(min_length=2, max_length=80)
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = None
+    sort_order: int = 100
+    enabled: bool = True
+
+
 class SettingsGenerationConfigExport(BaseModel):
     id: str | None = Field(default=None, max_length=36)
+    resource_group_id: str | None = Field(default=None, max_length=36)
     name: str = Field(min_length=1, max_length=120)
     purpose: str = Field(min_length=1, max_length=40)
     provider_kind: str = Field(min_length=1, max_length=40)
@@ -364,6 +408,7 @@ class SettingsExportDocument(BaseModel):
     runtime_config: dict[str, Any]
     provider_profiles: list[SettingsProviderProfileExport] = Field(default_factory=list)
     provider_bindings: list[SettingsProviderBindingExport] = Field(default_factory=list)
+    generation_resource_groups: list[SettingsGenerationResourceGroupExport] = Field(default_factory=list)
     generation_configs: list[SettingsGenerationConfigExport] = Field(default_factory=list)
     canvas_template_categories: list[SettingsCanvasTemplateCategoryExport] = Field(default_factory=list)
     canvas_templates: list[SettingsCanvasTemplateExport] = Field(default_factory=list)
@@ -374,6 +419,7 @@ class SettingsImportPreviewResponse(BaseModel):
     runtime_config_count: int
     provider_profile_count: int
     provider_binding_count: int
+    generation_resource_group_count: int = 0
     generation_config_count: int = 0
     canvas_template_category_count: int = 0
     canvas_template_count: int = 0

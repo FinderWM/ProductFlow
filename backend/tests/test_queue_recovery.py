@@ -7,7 +7,7 @@ import pytest
 
 from productflow_backend.application.image_sessions import create_image_session, create_image_session_generation_task
 from productflow_backend.domain.enums import JobStatus
-from productflow_backend.infrastructure.db.models import AppSetting
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, AppSetting
 from productflow_backend.infrastructure.queue import recover_unfinished_image_session_generation_tasks
 
 
@@ -22,6 +22,7 @@ def test_recover_unfinished_image_session_generation_tasks_requeues_queued_tasks
         image_session_id=image_session.id,
         prompt="queued 任务应补发",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     sent: list[str] = []
     monkeypatch.setattr(
@@ -48,6 +49,7 @@ def test_recover_unfinished_image_session_generation_tasks_resets_stale_running_
         image_session_id=image_session.id,
         prompt="stale running 任务应重置",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     result.task.status = JobStatus.RUNNING
     result.task.started_at = datetime.now(UTC) - timedelta(hours=2)
@@ -85,6 +87,7 @@ def test_recover_unfinished_image_session_generation_tasks_uses_progress_heartbe
         image_session_id=image_session.id,
         prompt="started_at 旧，但 progress 新，不应重置",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     result.task.status = JobStatus.RUNNING
     result.task.started_at = datetime.now(UTC) - timedelta(hours=2)
@@ -119,6 +122,7 @@ def test_recover_unfinished_image_session_generation_tasks_fails_stale_partial_t
         image_session_id=image_session.id,
         prompt="已生成一张后闲置",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         generation_count=2,
     )
     result.task.status = JobStatus.RUNNING
@@ -160,6 +164,7 @@ def test_recover_unfinished_image_session_generation_tasks_uses_runtime_stale_cu
         image_session_id=image_session.id,
         prompt="默认 90 分钟内不应重置",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     result.task.status = JobStatus.RUNNING
     result.task.started_at = datetime.now(UTC) - timedelta(minutes=60)

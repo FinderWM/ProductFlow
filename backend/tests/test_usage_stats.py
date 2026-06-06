@@ -18,7 +18,11 @@ from productflow_backend.application.generation_config_runtime import (
 from productflow_backend.application.usage_stats import list_user_usage_stats, record_user_usage_result
 from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.domain.rbac import ADMIN_USER_ID
-from productflow_backend.infrastructure.db.models import AuthUser, UserDailyUsageStat
+from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    AuthUser,
+    UserDailyUsageStat,
+)
 from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, TEXT_PURPOSE, GenerationConfigClaim
 
@@ -49,6 +53,7 @@ def _runtime_claim() -> RuntimeGenerationConfigClaim:
     return RuntimeGenerationConfigClaim(
         claim=GenerationConfigClaim(
             generation_config_id="generation-config-1",
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             purpose=TEXT_PURPOSE,
             provider_kind="mock",
             score=1.0,

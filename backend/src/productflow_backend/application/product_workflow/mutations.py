@@ -54,6 +54,7 @@ from productflow_backend.domain.enums import (
 )
 from productflow_backend.domain.errors import BusinessError, BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     CopySet,
     PosterVariant,
     ProductWorkflow,
@@ -70,6 +71,23 @@ NODE_GROUP_TEMPLATE_COLLISION_NODE_WIDTH = 248
 NODE_GROUP_TEMPLATE_COLLISION_NODE_HEIGHT = 248
 NODE_GROUP_TEMPLATE_COLLISION_GAP = 32
 NODE_GROUP_TEMPLATE_CONTEXT_ANCHOR_GAP = 220
+GENERATION_RESOURCE_GROUP_NODE_TYPES = frozenset(
+    {
+        WorkflowNodeType.COPY_GENERATION,
+        WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.TAIL_SPLITTER,
+    }
+)
+
+
+def _default_generation_resource_group_config(
+    node_type: WorkflowNodeType,
+    config_json: dict[str, Any] | None,
+) -> dict[str, Any]:
+    config = dict(config_json or {})
+    if node_type in GENERATION_RESOURCE_GROUP_NODE_TYPES:
+        config.setdefault("resource_group_id", DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+    return config
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +262,13 @@ def apply_workflow_node_patch(
         normalized_config = normalize_workflow_node_config(node.node_type, config_json)
         if node.node_type == WorkflowNodeType.PRODUCT_CONTEXT:
             normalized_config = _preserve_product_context_runtime_config(node, normalized_config)
+        if (
+            node.node_type in GENERATION_RESOURCE_GROUP_NODE_TYPES
+            and "resource_group_id" not in normalized_config
+            and isinstance(node.config_json, dict)
+            and node.config_json.get("resource_group_id")
+        ):
+            normalized_config["resource_group_id"] = node.config_json["resource_group_id"]
         config_changed = normalized_config != (node.config_json or {})
         if config_changed:
             node.config_json = normalized_config
@@ -324,7 +349,9 @@ def create_workflow_node(
         config_json=(
             _product_context_runtime_config(workflow, config_json)
             if node_type == WorkflowNodeType.PRODUCT_CONTEXT
-            else normalize_workflow_node_config(node_type, config_json)
+            else normalize_workflow_node_config(
+                node_type, _default_generation_resource_group_config(node_type, config_json)
+            )
         ),
     )
     session.add(node)
@@ -379,10 +406,9 @@ def materialize_node_group_template_to_workflow(
         product_workflow_graph.get_product_or_raise(session, product_id)
         raise BusinessValidationError("需要先创建或打开画布后才能添加模板")
     # 模板里的商品资料节点是占位符，落到已有画布时要映射到当前商品资料节点。
-    needs_product_context = any(
-        node.node_type == WorkflowNodeType.PRODUCT_CONTEXT
-        for node in template.nodes
-    ) or bool(template.default_external_connections)
+    needs_product_context = any(node.node_type == WorkflowNodeType.PRODUCT_CONTEXT for node in template.nodes) or bool(
+        template.default_external_connections
+    )
     product_context_node = _single_product_context_node(workflow) if needs_product_context else None
     insertable_template_nodes = _insertable_template_nodes(template.nodes)
     if not insertable_template_nodes:
@@ -390,13 +416,10 @@ def materialize_node_group_template_to_workflow(
     existing_nodes_by_template_key = {
         node.key: product_context_node
         for node in template.nodes
-        if node.node_type == WorkflowNodeType.PRODUCT_CONTEXT
-        and product_context_node is not None
+        if node.node_type == WorkflowNodeType.PRODUCT_CONTEXT and product_context_node is not None
     }
     external_source_nodes = (
-        {"existing_product_context": product_context_node}
-        if product_context_node is not None
-        else {}
+        {"existing_product_context": product_context_node} if product_context_node is not None else {}
     )
     position_x_offset, position_y_offset = _node_group_template_offsets(
         template_nodes=insertable_template_nodes,
@@ -879,6 +902,7 @@ def _run_has_queued_or_running_node_runs(run: WorkflowRun) -> bool:
         or WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_is_running(node_run.status)
         for node_run in run.node_runs
     )
+
 
 def create_workflow_edge(
     session: Session,

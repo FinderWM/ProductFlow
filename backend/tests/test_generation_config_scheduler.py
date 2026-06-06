@@ -7,15 +7,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     GenerationConfig,
     GenerationConfigDailyStat,
     GenerationConfigState,
+    GenerationResourceGroup,
 )
 from productflow_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
     TEXT_PURPOSE,
     _ensure_generation_config_state,
     add_generation_config,
+    add_generation_resource_group,
     claim_generation_config,
     ensure_provider_config_bootstrapped,
     list_generation_configs,
@@ -33,9 +36,11 @@ def _add_mock_config(
     max_concurrency: int = 1,
     enabled: bool = True,
     failure_threshold: int = 3,
+    resource_group_id: str | None = None,
 ) -> GenerationConfig:
     return add_generation_config(
         session,
+        resource_group_id=resource_group_id,
         name=name,
         purpose=purpose,
         provider_kind="mock",
@@ -61,9 +66,13 @@ def test_bootstrap_creates_default_generation_configs_and_states(db_session: Ses
     configs = list_generation_configs(db_session)
     purposes = {item.purpose for item in configs}
     state_ids = set(db_session.scalars(select(GenerationConfigState.generation_config_id)).all())
+    default_group = db_session.get(GenerationResourceGroup, DEFAULT_GENERATION_RESOURCE_GROUP_ID)
 
     assert purposes == {TEXT_PURPOSE, IMAGE_PURPOSE}
     assert {item.id for item in configs}.issubset(state_ids)
+    assert default_group is not None
+    assert default_group.key == "default"
+    assert {item.resource_group_id for item in configs} == {DEFAULT_GENERATION_RESOURCE_GROUP_ID}
 
 
 def test_generation_config_state_requires_existing_config(db_session: Session) -> None:
@@ -79,6 +88,29 @@ def test_auto_claim_prefers_higher_priority_healthy_config(db_session: Session) 
 
     assert claim is not None
     assert claim.generation_config_id == preferred.id
+    assert claim.resource_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+
+
+def test_claim_generation_config_is_scoped_by_resource_group(db_session: Session) -> None:
+    ensure_provider_config_bootstrapped(db_session)
+    group = add_generation_resource_group(db_session, key="campaign", name="活动分组")
+    grouped_config = _add_mock_config(
+        db_session,
+        purpose=IMAGE_PURPOSE,
+        name="活动图片",
+        priority=1000,
+        resource_group_id=group.id,
+    )
+
+    default_claim = claim_generation_config(db_session, purpose=IMAGE_PURPOSE)
+    grouped_claim = claim_generation_config(db_session, purpose=IMAGE_PURPOSE, resource_group_id=group.id)
+
+    assert default_claim is not None
+    assert default_claim.generation_config_id != grouped_config.id
+    assert default_claim.resource_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+    assert grouped_claim is not None
+    assert grouped_claim.generation_config_id == grouped_config.id
+    assert grouped_claim.resource_group_id == group.id
 
 
 def test_claim_respects_max_concurrency(db_session: Session) -> None:

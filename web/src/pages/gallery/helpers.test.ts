@@ -8,6 +8,7 @@ const gridRowUnitPx = 8;
 const gridGapPx = 16;
 const regularSquareTileWidthPx = 308;
 const featuredSquareTileWidthPx = 420;
+const defaultResourceGroup = { id: "group-default", key: "default", name: "默认分组" };
 
 function renderedGridHeight(rowSpan: number): number {
   return rowSpan * gridRowUnitPx + (rowSpan - 1) * gridGapPx;
@@ -41,6 +42,8 @@ function entry(overrides: Partial<GalleryEntry>): GalleryEntry {
     provider_response_id: null,
     image_generation_call_id: null,
     generation_group_id: null,
+    resource_group_id: defaultResourceGroup.id,
+    resource_group: defaultResourceGroup,
     candidate_index: 1,
     candidate_count: 1,
     base_asset_id: null,

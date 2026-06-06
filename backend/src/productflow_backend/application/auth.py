@@ -28,13 +28,19 @@ from productflow_backend.domain.rbac import (
 from productflow_backend.infrastructure.db.models import (
     AuthRole,
     AuthUser,
+    GenerationResourceGroup,
     RbacApiPermission,
     RbacMenu,
     RoleApiPermission,
     RoleMenuPermission,
+    UserGenerationResourceGroupGrant,
     utcnow,
 )
 from productflow_backend.infrastructure.db.session import get_engine, get_session_factory
+from productflow_backend.infrastructure.provider_config import (
+    ensure_provider_config_bootstrapped,
+    require_generation_resource_group,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -388,6 +394,145 @@ def replace_role_permissions(
     return next_menu_codes, next_api_codes
 
 
+def list_available_generation_resource_groups_for_user(
+    session: Session,
+    *,
+    user: AuthUser,
+) -> list[GenerationResourceGroup]:
+    ensure_auth_bootstrapped(session)
+    ensure_provider_config_bootstrapped(session)
+    if user.is_admin:
+        return list(
+            session.scalars(
+                select(GenerationResourceGroup)
+                .where(
+                    GenerationResourceGroup.enabled.is_(True),
+                    GenerationResourceGroup.archived_at.is_(None),
+                )
+                .order_by(
+                    GenerationResourceGroup.sort_order,
+                    GenerationResourceGroup.created_at,
+                    GenerationResourceGroup.name,
+                )
+            ).all()
+        )
+    return list(
+        session.scalars(
+            select(GenerationResourceGroup)
+            .join(
+                UserGenerationResourceGroupGrant,
+                UserGenerationResourceGroupGrant.resource_group_id == GenerationResourceGroup.id,
+            )
+            .where(
+                UserGenerationResourceGroupGrant.user_id == user.id,
+                GenerationResourceGroup.enabled.is_(True),
+                GenerationResourceGroup.archived_at.is_(None),
+            )
+            .order_by(
+                GenerationResourceGroup.sort_order,
+                GenerationResourceGroup.created_at,
+                GenerationResourceGroup.name,
+            )
+        ).all()
+    )
+
+
+def require_generation_resource_group_for_user(
+    session: Session,
+    *,
+    user_id: str | None,
+    is_admin: bool,
+    resource_group_id: str | None,
+) -> GenerationResourceGroup:
+    ensure_auth_bootstrapped(session)
+    ensure_provider_config_bootstrapped(session)
+    normalized_group_id = str(resource_group_id or "").strip()
+    if not normalized_group_id:
+        raise BusinessValidationError("请选择供应商生成分组")
+    try:
+        group = require_generation_resource_group(session, normalized_group_id, require_enabled=True)
+    except ValueError as exc:
+        raise BusinessValidationError(str(exc)) from exc
+    if is_admin:
+        return group
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        raise BusinessValidationError("账号未授权使用该供应商生成分组")
+    grant_exists = session.scalar(
+        select(UserGenerationResourceGroupGrant.resource_group_id).where(
+            UserGenerationResourceGroupGrant.user_id == normalized_user_id,
+            UserGenerationResourceGroupGrant.resource_group_id == group.id,
+        )
+    )
+    if grant_exists is None:
+        raise BusinessValidationError("账号未授权使用该供应商生成分组")
+    return group
+
+
+def get_user_generation_resource_group_grant_ids(session: Session, *, user_id: str) -> list[str]:
+    ensure_auth_bootstrapped(session)
+    ensure_provider_config_bootstrapped(session)
+    user = _get_user_or_raise(session, user_id)
+    if user.is_admin:
+        return list(
+            session.scalars(
+                select(GenerationResourceGroup.id)
+                .where(
+                    GenerationResourceGroup.enabled.is_(True),
+                    GenerationResourceGroup.archived_at.is_(None),
+                )
+                .order_by(
+                    GenerationResourceGroup.sort_order,
+                    GenerationResourceGroup.created_at,
+                    GenerationResourceGroup.name,
+                )
+            ).all()
+        )
+    return list(
+        session.scalars(
+            select(UserGenerationResourceGroupGrant.resource_group_id)
+            .join(
+                GenerationResourceGroup,
+                GenerationResourceGroup.id == UserGenerationResourceGroupGrant.resource_group_id,
+            )
+            .where(
+                UserGenerationResourceGroupGrant.user_id == user.id,
+                GenerationResourceGroup.archived_at.is_(None),
+            )
+            .order_by(
+                GenerationResourceGroup.sort_order,
+                GenerationResourceGroup.created_at,
+                GenerationResourceGroup.name,
+            )
+        ).all()
+    )
+
+
+def replace_user_generation_resource_group_grants(
+    session: Session,
+    *,
+    user_id: str,
+    resource_group_ids: Iterable[str],
+) -> list[str]:
+    ensure_auth_bootstrapped(session)
+    ensure_provider_config_bootstrapped(session)
+    user = _get_user_or_raise(session, user_id)
+    if user.is_admin:
+        raise BusinessValidationError("管理员账号默认拥有全部分组")
+    normalized_ids = _dedupe_generation_resource_group_ids(resource_group_ids)
+    for resource_group_id in normalized_ids:
+        require_generation_resource_group(session, resource_group_id)
+    session.query(UserGenerationResourceGroupGrant).filter(
+        UserGenerationResourceGroupGrant.user_id == user.id,
+    ).delete()
+    session.add_all(
+        UserGenerationResourceGroupGrant(user_id=user.id, resource_group_id=resource_group_id)
+        for resource_group_id in normalized_ids
+    )
+    session.commit()
+    return get_user_generation_resource_group_grant_ids(session, user_id=user.id)
+
+
 def _ensure_role(session: Session, *, code: str, name: str, is_admin: bool) -> AuthRole:
     role = session.scalar(select(AuthRole).where(AuthRole.code == code))
     if role is not None:
@@ -533,3 +678,15 @@ def _normalize_role_name(name: str) -> str:
     if len(normalized) > 80:
         raise BusinessValidationError("角色名称不能超过 80 个字符")
     return normalized
+
+
+def _dedupe_generation_resource_group_ids(resource_group_ids: Iterable[str]) -> list[str]:
+    normalized_ids: list[str] = []
+    seen: set[str] = set()
+    for raw_id in resource_group_ids:
+        resource_group_id = str(raw_id or "").strip()
+        if not resource_group_id or resource_group_id in seen:
+            continue
+        seen.add(resource_group_id)
+        normalized_ids.append(resource_group_id)
+    return normalized_ids

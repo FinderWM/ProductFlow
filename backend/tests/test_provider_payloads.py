@@ -43,6 +43,7 @@ from productflow_backend.domain.enums import (
     PosterKind,
 )
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     ProviderBinding,
     ProviderProfile,
@@ -112,10 +113,13 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
     from productflow_backend.infrastructure.prompts import render_prompt_template
     from productflow_backend.infrastructure.text.openai_provider import OpenAITextProvider
 
-    assert render_prompt_template(
-        "示例 JSON：{\"title\":\"{title}\"}；未知：{unknown}；坏括号：{",
-        {"title": "主标题"},
-    ) == "示例 JSON：{\"title\":\"主标题\"}；未知：{unknown}；坏括号：{"
+    assert (
+        render_prompt_template(
+            '示例 JSON：{"title":"{title}"}；未知：{unknown}；坏括号：{',
+            {"title": "主标题"},
+        )
+        == '示例 JSON：{"title":"主标题"}；未知：{unknown}；坏括号：{'
+    )
 
     session = get_session_factory()()
     try:
@@ -255,13 +259,13 @@ def test_openai_text_provider_reads_sse_text_response() -> None:
     provider = object.__new__(OpenAITextProvider)
     response = "\n".join(
         [
-            'event: response.output_text.delta',
+            "event: response.output_text.delta",
             'data: {"type":"response.output_text.delta","delta":"{\\"version\\":2,"}',
             "",
-            'event: response.output_text.delta',
+            "event: response.output_text.delta",
             'data: {"type":"response.output_text.delta","delta":"\\"summary\\":\\"促销文案\\","}',
             "",
-            'event: response.output_text.delta',
+            "event: response.output_text.delta",
             (
                 'data: {"type":"response.output_text.delta","delta":"\\"content\\":'
                 '{\\"kind\\":\\"freeform\\",\\"text\\":\\"五一促销\\"}}"}'
@@ -758,6 +762,7 @@ def test_mock_image_provider_does_not_read_runtime_settings_during_generation(
     assert generated.height == 512
     assert generated.bytes_data
 
+
 def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -856,6 +861,7 @@ def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
         "provider_name": "capturing",
         "model_name": "capturing-v1",
         "generation_config_id": provider_result["generation_config_id"],
+        "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         "provider_response_id": "resp_workflow_1",
         "provider_response_status": "completed",
         "actual_size": "800x800",
@@ -864,6 +870,7 @@ def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
     assert len(captured_inputs) == 1
     assert captured_inputs[0].copy_prompt_mode == "image_edit"
     assert captured_inputs[0].instruction and "暖色露营场景" in captured_inputs[0].instruction
+
 
 def test_image_session_openai_responses_uses_explicit_branch_context(
     configured_env: Path,
@@ -938,7 +945,11 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
 
     first = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "生成日漫风商品场景", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成日漫风商品场景",
+            "size": "1024x1024",
+        },
     )
     assert first.status_code == 202
     first_round = first.json()["rounds"][-1]
@@ -950,7 +961,11 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
 
     second_without_base = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "保持主体，把背景改成晴天街角", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "保持主体，把背景改成晴天街角",
+            "size": "1024x1024",
+        },
     )
     assert second_without_base.status_code == 400
     assert second_without_base.json()["detail"] == "后续生图必须选择一张本会话已生成图片作为基图"
@@ -958,6 +973,7 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
     branched = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "只从第一张和手动选择的参考图继续",
             "size": "1024x1024",
             "base_asset_id": first_asset_id,
@@ -988,6 +1004,7 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
     assert all(item["image_url"].startswith("data:image/png;base64,") for item in branch_images)
     assert "/images/generations" not in str(calls)
     assert "/images/edits" not in str(calls)
+
 
 def test_openai_responses_poster_provider_uses_image_generation_tool(
     configured_env: Path,
@@ -1211,10 +1228,7 @@ def test_openai_responses_image_client_polls_background_response_and_reports_pro
             return {
                 "id": self.id,
                 "status": self.status,
-                "output": [
-                    output.model_dump(mode=mode, exclude_none=exclude_none)
-                    for output in self.output
-                ],
+                "output": [output.model_dump(mode=mode, exclude_none=exclude_none) for output in self.output],
             }
 
     class DummyResponses:
@@ -2104,6 +2118,7 @@ def test_generated_poster_mode_uses_image_provider(
         "workflow:mock:mock-generated-r1:mock-image-v1" in poster.template_name
         for poster in product_after_poster.poster_variants
     )
+
 
 def test_default_image_prompts_are_low_pollution_context_carriers(configured_env: Path) -> None:
     from productflow_backend.infrastructure.image.chat_service import ImageChatService

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from copy import deepcopy
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,11 +12,31 @@ from productflow_backend.application.product_workflow.context import normalize_p
 from productflow_backend.application.product_workflow.user_templates import get_canvas_template
 from productflow_backend.domain.enums import WorkflowNodeType
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
-from productflow_backend.infrastructure.db.models import Product, ProductWorkflow, WorkflowEdge, WorkflowNode
+from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    Product,
+    ProductWorkflow,
+    WorkflowEdge,
+    WorkflowNode,
+)
 
 DEFAULT_PRODUCT_CREATION_CANVAS_TEMPLATE_KEYS = frozenset({"", "default", "basic", "blank", "minimal"})
 TEMPLATE_METADATA_CONFIG_KEY = "_canvas_template"
 InitialWorkflowEntry = str
+GENERATION_RESOURCE_GROUP_NODE_TYPES = frozenset(
+    {
+        WorkflowNodeType.COPY_GENERATION,
+        WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.TAIL_SPLITTER,
+    }
+)
+
+
+def _default_resource_group_config(node_type: WorkflowNodeType, config_json: dict[str, Any]) -> dict[str, Any]:
+    config = dict(config_json)
+    if node_type in GENERATION_RESOURCE_GROUP_NODE_TYPES:
+        config.setdefault("resource_group_id", DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+    return config
 
 
 def resolve_product_creation_canvas_template(
@@ -104,7 +125,7 @@ def materialize_canvas_template_graph(
     for node_spec in template.nodes:
         if node_spec.key in nodes_by_template_key:
             continue
-        config_json = deepcopy(node_spec.config_json)
+        config_json = _default_resource_group_config(node_spec.node_type, deepcopy(node_spec.config_json))
         if template.source == "builtin":
             config_json[TEMPLATE_METADATA_CONFIG_KEY] = {
                 "source": template.source,

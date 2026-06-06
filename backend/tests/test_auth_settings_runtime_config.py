@@ -19,6 +19,7 @@ from productflow_backend.config import (
     normalize_config_values,
 )
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     GenerationConfig,
     GenerationConfigDailyStat,
@@ -482,6 +483,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
         "runtime_config_count": len(RUNTIME_CONFIG_KEYS),
         "provider_profile_count": 1,
         "provider_binding_count": 2,
+        "generation_resource_group_count": 1,
         "generation_config_count": 2,
         "canvas_template_category_count": len(document["canvas_template_categories"]),
         "canvas_template_count": len(document["canvas_templates"]),
@@ -534,6 +536,29 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
     rejected_version = client.post("/api/settings/import/preview", json=unknown_version)
     assert rejected_version.status_code == 400
     assert rejected_version.json()["detail"] == "配置文件版本不支持"
+
+    invalid_default_group_key = deepcopy(document)
+    invalid_default_group_key["generation_resource_groups"] = [
+        {
+            **document["generation_resource_groups"][0],
+            "id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "key": "renamed-default",
+        }
+    ]
+    rejected_default_group_key = client.post("/api/settings/import/preview", json=invalid_default_group_key)
+    assert rejected_default_group_key.status_code == 400
+    assert rejected_default_group_key.json()["detail"] == "内置 default 分组 key 不正确"
+
+    disabled_default_group = deepcopy(document)
+    disabled_default_group["generation_resource_groups"] = [
+        {
+            **document["generation_resource_groups"][0],
+            "enabled": False,
+        }
+    ]
+    rejected_disabled_default_group = client.post("/api/settings/import/preview", json=disabled_default_group)
+    assert rejected_disabled_default_group.status_code == 400
+    assert rejected_disabled_default_group.json()["detail"] == "内置 default 分组不能停用"
 
     invalid_binding = dict(document)
     invalid_binding["runtime_config"] = {**document["runtime_config"], "generation_max_concurrent_tasks": 5}
@@ -1679,7 +1704,11 @@ def test_settings_api_normalizes_custom_image_sizes_for_generation(configured_en
 
     generated = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "生成一张自定义尺寸商品图", "size": "512x512"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成一张自定义尺寸商品图",
+            "size": "512x512",
+        },
     )
 
     assert generated.status_code == 202
@@ -1737,7 +1766,11 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
     assert created.status_code == 201
     generated = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "尺寸应被运行时上限校准", "size": "3840x2160"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "尺寸应被运行时上限校准",
+            "size": "3840x2160",
+        },
     )
     assert generated.status_code == 202
     assert generated.json()["rounds"][-1]["size"] == "2048x1152"

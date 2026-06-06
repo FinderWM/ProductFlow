@@ -9,6 +9,7 @@ from pathlib import Path
 from dramatiq.middleware.time_limit import TimeLimitExceeded
 from sqlalchemy.orm import Session
 
+from productflow_backend.application.auth import require_generation_resource_group_for_user
 from productflow_backend.application.contracts import PosterGenerationInput
 from productflow_backend.application.copy_payloads import copy_payload_context_text, normalize_copy_payload
 from productflow_backend.application.generation_config_runtime import (
@@ -92,6 +93,8 @@ def should_claim_workflow_image_generation_config(
     selection: GenerationConfigSelection,
     session: Session | None = None,
 ) -> bool:
+    if selection.resource_group_id:
+        return True
     if configured_mode == "generated" or selection.mode == "manual":
         return True
     provider_config = resolve_image_provider_config(
@@ -126,6 +129,45 @@ def _is_workflow_context_copy_set(copy_set: CopySet) -> bool:
     return isinstance(payload, dict) and payload.get("purpose") == "workflow_context"
 
 
+def _workflow_image_generation_config_selection_for_execution(
+    session: Session,
+    *,
+    workflow: ProductWorkflow,
+    node: WorkflowNode,
+) -> GenerationConfigSelection:
+    selection = generation_config_selection_from_config(node.config_json)
+    if selection.mode == "manual" or selection.generation_config_id is not None:
+        raise WorkflowSafeExecutionError(
+            "生成入口只能选择供应商生成分组",
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_config",
+        )
+    if not selection.resource_group_id:
+        raise WorkflowSafeExecutionError(
+            "请选择供应商生成分组",
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_config",
+        )
+    product = workflow.product
+    try:
+        group = require_generation_resource_group_for_user(
+            session,
+            user_id=product.owner_user_id,
+            is_admin=bool(product.owner and product.owner.is_admin),
+            resource_group_id=selection.resource_group_id,
+        )
+    except BusinessValidationError as exc:
+        raise WorkflowSafeExecutionError(
+            str(exc),
+            retryable=False,
+            retry_hint="check_settings",
+            failure_category="invalid_node_config",
+        ) from exc
+    return GenerationConfigSelection(resource_group_id=group.id)
+
+
 def execute_workflow_image_generation(
     session: Session,
     *,
@@ -138,9 +180,14 @@ def execute_workflow_image_generation(
     settings = get_runtime_settings()
     kind = poster_kind_from_config(node.config_json)
     configured_generation_mode = settings.poster_generation_mode
-    generation_config_selection = generation_config_selection_from_config(node.config_json)
+    generation_config_selection = _workflow_image_generation_config_selection_for_execution(
+        session,
+        workflow=workflow,
+        node=node,
+    )
     runtime_claim = None
     used_generation_config_id: str | None = None
+    used_resource_group_id: str | None = generation_config_selection.resource_group_id
     poster_generation_mode = configured_generation_mode
     if should_claim_workflow_image_generation_config(
         configured_mode=configured_generation_mode,
@@ -150,8 +197,10 @@ def execute_workflow_image_generation(
         runtime_claim = claim_runtime_generation_config(
             purpose="image",
             selection=generation_config_selection,
+            session=session,
         )
         used_generation_config_id = runtime_claim.generation_config_id
+        used_resource_group_id = runtime_claim.resource_group_id
         poster_generation_mode = effective_workflow_image_generation_mode(
             configured_generation_mode,
             runtime_claim.claim.provider_kind,
@@ -239,6 +288,7 @@ def execute_workflow_image_generation(
         release_runtime_generation_config(
             runtime_claim,
             success=poster_generation_mode == "generated",
+            session=session,
             user_id=product.owner_user_id,
             generated_unit_count=len(downstream_nodes) if poster_generation_mode == "generated" else 0,
             record_result=poster_generation_mode == "generated",
@@ -246,6 +296,7 @@ def execute_workflow_image_generation(
         runtime_claim = None
         if should_create_context_copy_set:
             copy_set = create_context_copy_set(session, product=product, product_context=product_context, node=node)
+            copy_set.resource_group_id = used_resource_group_id
         if copy_set is None:
             raise RuntimeError("图片生成缺少文案上下文")
         for generated_image, target_node in zip(generated_images, downstream_nodes, strict=True):
@@ -264,6 +315,7 @@ def execute_workflow_image_generation(
                 template_name=generated_image.template_name,
                 mime_type=mime_type,
                 **storage.metadata_for(relative_path).as_model_kwargs(),
+                resource_group_id=used_resource_group_id,
                 width=generated_image.width,
                 height=generated_image.height,
             )
@@ -292,6 +344,7 @@ def execute_workflow_image_generation(
                 "provider_name": generated_image.provider_name,
                 "model_name": generated_image.model_name,
                 "generation_config_id": used_generation_config_id,
+                "resource_group_id": used_resource_group_id,
                 "provider_response_id": generated_image.provider_response_id,
                 "provider_response_status": generated_image.provider_response_status,
             }
@@ -327,9 +380,11 @@ def execute_workflow_image_generation(
             },
             "context_sources": incoming_context.text_sources[:8],
             "generation_config_id": used_generation_config_id,
+            "resource_group_id": used_resource_group_id,
             "summary": f"已填充 {len(filled_reference_node_ids)} 个参考图",
         }
     except BaseException as exc:  # noqa: BLE001
+        session.rollback()
         release_runtime_generation_config(
             runtime_claim,
             success=False,

@@ -318,12 +318,14 @@ def delete_source_asset_endpoint(
 @router.get("/products/{product_id}/history", response_model=ProductHistoryResponse)
 def get_product_history_endpoint(
     product_id: str,
+    resource_group_id: str | None = Query(default=None),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
 ) -> ProductHistoryResponse:
     history = get_product_history(
         session,
         product_id,
+        resource_group_id=resource_group_id,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
     )

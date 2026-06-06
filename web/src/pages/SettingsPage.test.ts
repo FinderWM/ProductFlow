@@ -81,6 +81,7 @@ function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProf
 function generationConfig(overrides: Partial<GenerationConfig> & Pick<GenerationConfig, "purpose">): GenerationConfig {
   return {
     id: overrides.id ?? `${overrides.purpose}-config`,
+    resource_group_id: overrides.resource_group_id ?? "group-default",
     purpose: overrides.purpose,
     name: overrides.name ?? `${overrides.purpose} config`,
     provider_kind: overrides.provider_kind ?? "openai",
@@ -427,6 +428,7 @@ describe("SettingsPage provider profile helpers", () => {
     expect(
       generationConfigPayloadFromDraft({
         id: null,
+        resource_group_id: "group-default",
         purpose: "image",
         name: "Gemini image",
         provider_kind: "google_gemini_image",
@@ -447,6 +449,7 @@ describe("SettingsPage provider profile helpers", () => {
         cooldown_minutes: "20",
       }),
     ).toEqual({
+      resource_group_id: "group-default",
       name: "Gemini image",
       purpose: "image",
       provider_kind: "google_gemini_image",
@@ -466,6 +469,7 @@ describe("SettingsPage provider profile helpers", () => {
     expect(
       generationConfigPayloadFromDraft({
         id: null,
+        resource_group_id: "group-default",
         purpose: "text",
         name: "Primary text",
         provider_kind: "openai",
@@ -486,6 +490,7 @@ describe("SettingsPage provider profile helpers", () => {
         cooldown_minutes: "10",
       }),
     ).toEqual({
+      resource_group_id: "group-default",
       name: "Primary text",
       purpose: "text",
       provider_kind: "openai",
@@ -508,6 +513,7 @@ describe("SettingsPage provider profile helpers", () => {
     expect(
       generationConfigPayloadFromDraft({
         id: null,
+        resource_group_id: "group-default",
         purpose: "text",
         name: "Default policy text",
         provider_kind: "mock",
@@ -589,6 +595,7 @@ describe("SettingsPage import/export helpers", () => {
       runtime_config_count: 14,
       provider_profile_count: 2,
       provider_binding_count: 2,
+      generation_resource_group_count: 1,
       generation_config_count: 2,
       canvas_template_category_count: 3,
       canvas_template_count: 7,
@@ -604,6 +611,7 @@ describe("SettingsPage import/export helpers", () => {
       runtimeConfigCount: 14,
       providerProfileCount: 2,
       providerBindingCount: 2,
+      generationResourceGroupCount: 1,
       generationConfigCount: 2,
       canvasTemplateCategoryCount: 3,
       canvasTemplateCount: 7,
@@ -617,6 +625,7 @@ describe("SettingsPage import/export helpers", () => {
       runtime_config: {},
       provider_profiles: [],
       provider_bindings: [],
+      generation_resource_groups: [],
       generation_configs: [],
       canvas_template_categories: [],
       canvas_templates: [],
@@ -624,6 +633,7 @@ describe("SettingsPage import/export helpers", () => {
 
     expect(isSettingsExportPayload(payload)).toBe(true);
     expect(isSettingsExportPayload({ ...payload, provider_profiles: {} })).toBe(false);
+    expect(isSettingsExportPayload({ ...payload, generation_resource_groups: {} })).toBe(false);
     expect(isSettingsExportPayload(null)).toBe(false);
   });
 });

@@ -262,6 +262,7 @@ const thumbUrl = product.latest_generated_image_thumbnail_url ?? product.latest_
   - `SettingsExportMetadata`
   - `SettingsProviderProfileExport`
   - `SettingsProviderBindingExport`
+  - `SettingsExportGenerationResourceGroup`
   - `SettingsGenerationConfigExport`
   - `SettingsCanvasTemplateCategoryExport`
   - `SettingsCanvasTemplateExport`
@@ -274,17 +275,20 @@ const thumbUrl = product.latest_generated_image_thumbnail_url ?? product.latest_
 - `runtime_config` must not include legacy `admin_access_required`; account login is always required by the backend.
 - `provider_profiles` may include `api_key`; SettingsPage must treat exported files as sensitive and show confirmation
   copy before download.
-- `generation_configs` is the runtime provider-selection payload. It includes `purpose`, `name`, `provider_kind`,
-  `provider_profile_id`, `model_settings`, `config`, `priority`, `max_concurrency`, `enabled`,
+- `generation_resource_groups` is the provider/generation grouping payload. It includes `id`, `key`, `name`,
+  `description`, `sort_order`, `enabled`, `archived_at`, `created_at`, and `updated_at`.
+- `generation_configs` is the runtime provider-selection payload. It includes `resource_group_id`, `purpose`, `name`,
+  `provider_kind`, `provider_profile_id`, `model_settings`, `config`, `priority`, `max_concurrency`, `enabled`,
   `availability_window_minutes`, `failure_threshold`, and `cooldown_minutes`.
 - `provider_bindings` is compatibility data only. New UI and workflow/image-chat selectors should read
   `generation_configs` or `generation-config-options`.
 - `canvas_template_categories` and `canvas_templates` mirror backend export rows and preserve backend `snake_case` fields,
   including `scope`, `owner_user_id`, `enabled`, `disabled_reason`, `review_status`, `review_note`, and timestamps.
 - Import preview response fields are flat DTO fields such as `runtime_config_count`,
-  `provider_profile_count`, `provider_binding_count`, `generation_config_count`, `canvas_template_category_count`,
-  `canvas_template_count`, `includes_api_keys`, and `provider_profiles_with_api_key_count`; do not invent a nested
-  `metadata.summary` layer unless the backend schema changes in the same commit.
+  `provider_profile_count`, `provider_binding_count`, `generation_resource_group_count`, `generation_config_count`,
+  `canvas_template_category_count`, `canvas_template_count`, `includes_api_keys`, and
+  `provider_profiles_with_api_key_count`; do not invent a nested `metadata.summary` layer unless the backend schema
+  changes in the same commit.
 - Import commit returns refreshed settings/provider config data or enough data for SettingsPage to invalidate and refetch
   `['config']`, `['provider-config']`, `['runtime-config']`, `['canvas-templates']`, and
   `['canvas-template-categories']`.
@@ -294,33 +298,37 @@ const thumbUrl = product.latest_generated_image_thumbnail_url ?? product.latest_
   query parameters in backend `YYYY-MM-DD` stat-date format. Keep `today_*` fields as today's local stat bucket, use
   `range_*` fields for the selected date range, and render per-config `range_stat` instead of recalculating stats from
   frontend history.
-- Workflow and image-chat request DTOs preserve backend snake_case fields:
-  `generation_config_mode: "auto" | "manual"` and `generation_config_id: string | null`.
+- Workflow and image-chat request DTOs preserve backend snake_case fields. User-facing generation submits
+  `resource_group_id`; normal image-chat submits `generation_config_mode: "auto"` and `generation_config_id: null`.
 
 #### 4. Validation & Error Matrix
 - Invalid JSON file -> SettingsPage shows a local invalid-file error before calling the API.
 - API 400 from preview/commit -> show `ApiError.detail`.
 - User cancels export/import confirmation -> do not call the API.
 - Successful import -> invalidate settings/runtime/session queries so UI reflects the imported values.
-- Manual generation config mode with a blank config id -> page should keep the control visible and backend validation
-  remains authoritative.
+- Export payload missing `generation_resource_groups` -> local payload validation rejects the file before preview.
+- Missing `resource_group_id` in generation config export rows -> backend import handles only legacy payloads; frontend
+  current exports must include it.
 
 #### 5. Good/Base/Bad Cases
-- Good: export downloads exactly the typed backend payload, including `generation_configs`, then importing that JSON
-  previews the same counts.
+- Good: export downloads exactly the typed backend payload, including `generation_resource_groups` and
+  `generation_configs`, then importing that JSON previews the same counts.
 - Good: export/import previews include template category/template counts and key/name summaries.
 - Good: preview with `includes_api_keys=true` shows sensitive-file warning before commit.
-- Good: workflow and image-chat selectors use `GenerationConfigOption[]` filtered by `purpose`.
+- Good: SettingsPage config cards use group DTOs for assignment, while image-chat generation uses only account-available
+  group DTOs.
 - Base: import file contains `mock` generation configs and no provider API keys.
 - Bad: adding `admin_access_required` back to `RuntimeConfig` or SettingsPage security controls.
 - Bad: frontend reads `preview.metadata.summary` when backend returns flat preview fields.
 - Bad: converting DTO fields to camelCase in `types.ts` without an explicit API mapping layer.
 - Bad: reusing provider profile DTOs for generation config selectors and accidentally exposing `api_key`.
+- Bad: showing concrete generation-config choices in image-chat normal generation after groups are available.
 
 #### 6. Tests Required
 - SettingsPage tests for export confirmation and generated JSON download path.
 - SettingsPage tests for import preview summary, API-key warning, commit confirmation, and query invalidation.
-- Helper tests proving workflow/image-chat payloads round-trip `generation_config_mode` and `generation_config_id`.
+- Helper tests proving workflow/image-chat payloads round-trip `resource_group_id`; image-chat normal generation keeps
+  `generation_config_mode: "auto"` and `generation_config_id: null`.
 - `pnpm --dir web build` after any settings migration DTO change.
 
 #### 7. Wrong vs Correct
@@ -349,6 +357,105 @@ Correct:
 
 ```ts
 generation_config_id: selectedConfigId
+```
+
+---
+
+### Scenario: Generation resource group frontend DTOs
+
+#### 1. Scope / Trigger
+- Trigger: changes to generation group settings UI, RBAC user grants, image-chat generation, workflow inspector
+  generation settings, gallery/product-history filters, or generated-result DTOs.
+- This is a cross-layer DTO contract. Frontend types mirror backend `snake_case` fields and page code must keep group
+  selection separate from concrete provider config management.
+
+#### 2. Signatures
+- Shared DTOs in `web/src/lib/types.ts`:
+  - `GenerationResourceGroup`
+  - `GenerationResourceGroupTag`
+  - `GenerationResourceGroupCreateRequest`
+  - `GenerationResourceGroupUpdateRequest`
+  - `UserGenerationResourceGroupGrants`
+- API methods in `web/src/lib/api.ts`:
+  - `listGenerationResourceGroups()`
+  - `listMyGenerationResourceGroups()`
+  - `createGenerationResourceGroup(payload)`
+  - `updateGenerationResourceGroup(id, payload)`
+  - `archiveGenerationResourceGroup(id)`
+  - `getUserGenerationResourceGroupGrants(userId)`
+  - `updateUserGenerationResourceGroupGrants(userId, { resource_group_ids })`
+- Generated result DTOs carry `resource_group_id?: string | null` plus required
+  `resource_group: GenerationResourceGroupTag`.
+
+#### 3. Contracts
+- SettingsPage owns group CRUD and generation config group assignment. Mutations invalidate `['provider-config']`,
+  `['my-generation-resource-groups']`, `['generation-config-options']`, and generation status queries when relevant.
+- RBAC page uses the full group list for admin grant editing and account grant replacement. Admin users render a read-only
+  group-grant panel because backend grants all enabled groups automatically.
+- ImageChatPage reads `['my-generation-resource-groups']`, defaults to the first enabled group, requires one selected
+  group before submit, and sends `resource_group_id` with `generation_config_mode: "auto"`.
+- ProductDetail workflow inspector and tail-plan generation require a selected group for generation-capable nodes.
+- Gallery and product history filters pass `resource_group_id` as a query parameter only when a concrete group is
+  selected; the all-groups option omits it.
+- Generated result cards, previews, node-run rows, and history entries should display `resource_group.name` from the DTO.
+  Do not derive labels from config ids or provider names.
+
+#### 4. Validation & Error Matrix
+- `listMyGenerationResourceGroups()` returns no enabled groups -> generation controls are disabled and show the
+  group-required message.
+- Selected group disappears, becomes disabled, or is archived after refetch -> page resets to the first enabled group or
+  clears selection.
+- Generation submit without selected group -> page shows local validation and does not call the API.
+- Gallery/product-history "all groups" selected -> omit `resource_group_id`; selected group -> include the exact id.
+- Missing required `resource_group` tag in a generated-result factory/test -> `just web-build` fails.
+
+#### 5. Good/Base/Bad Cases
+- Good: image-chat displays a compact "生成分组" selector with `默认分组`, and generated round metadata shows the same
+  group label.
+- Good: SettingsPage can create a group, then generation config cards assign text/image configs to that group.
+- Good: RBAC grant panel exposes checkbox grants for non-admin users and read-only copy for admins.
+- Base: a local default setup has one enabled `default` group.
+- Bad: image-chat exposes `GenerationConfigOption` or provider profile details in the normal submit UI.
+- Bad: a gallery card renders group text by checking `resource_group_id === defaultId` in the component.
+
+#### 6. Tests Required
+- SettingsPage tests cover group payloads, import/export counts, and generation config `resource_group_id`.
+- Image-chat helper tests include `resource_group_id` in submit signatures, task placeholders, and regenerate payloads.
+- ProductDetail workflow config tests round-trip node `resource_group_id` and keep generated config mode automatic.
+- Gallery/product-history tests cover filter query params and required `resource_group` result tags.
+- Run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build`.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```ts
+api.generateImageSessionRound(sessionId, {
+  generation_config_mode: "manual",
+  generation_config_id: selectedConfigId,
+});
+```
+
+Correct:
+
+```ts
+api.generateImageSessionRound(sessionId, {
+  resource_group_id: selectedResourceGroupId,
+  generation_config_mode: "auto",
+  generation_config_id: null,
+});
+```
+
+Wrong:
+
+```tsx
+<span>{entry.provider_name ?? "默认分组"}</span>
+```
+
+Correct:
+
+```tsx
+<span>{entry.resource_group.name}</span>
 ```
 
 ---

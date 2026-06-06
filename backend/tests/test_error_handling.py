@@ -22,7 +22,7 @@ from productflow_backend.domain.errors import (
     NotFoundError,
     QueueUnavailableError,
 )
-from productflow_backend.infrastructure.db.models import CopySet
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, CopySet
 from productflow_backend.infrastructure.logging import current_log_context
 from productflow_backend.presentation import errors as presentation_errors
 from productflow_backend.presentation.api import create_app
@@ -138,12 +138,16 @@ def test_image_session_route_uses_global_business_error_handler(configured_env) 
     session_id = created.json()["id"]
     first = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "首轮排队", "size": "1024x1024"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "首轮排队", "size": "1024x1024"},
     )
     assert first.status_code == 202
     invalid = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "第二轮缺少基图", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "第二轮缺少基图",
+            "size": "1024x1024",
+        },
     )
 
     assert invalid.status_code == 400
@@ -230,6 +234,7 @@ def test_high_risk_business_paths_raise_typed_validation_errors(db_session, conf
             image_session_id=image_session.id,
             prompt="数量越界",
             size="1024x1024",
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             generation_count=11,
         )
 

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { ResourceBlockedNotice, ResourceMetaBadges } from "../components/ResourceGovernance";
+import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api } from "../lib/api";
 import { formatDateTime } from "../lib/format";
@@ -19,6 +20,7 @@ function metadataRows(entry: GalleryEntry, locale: ReturnType<typeof useI18n>["l
     ["gallery.meta.model", [entry.provider_name, entry.model_name].filter(Boolean).join(" / ") || t("common.unknown")],
     ["gallery.meta.session", entry.image_session_title],
     ["gallery.meta.product", entry.product_name ?? t("gallery.global")],
+    ["gallery.meta.resourceGroup", entry.resource_group.name],
     [
       "gallery.meta.candidate",
       entry.candidate_index != null && entry.candidate_count != null
@@ -38,15 +40,39 @@ export function GalleryPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [previewEntry, setPreviewEntry] = useState<GalleryEntry | null>(null);
+  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState("");
   const [gridContentWidth, setGridContentWidth] = useState<number | null>(null);
   const [isDesktopGrid, setIsDesktopGrid] = useState(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
 
   const galleryQuery = useQuery({
-    queryKey: ["gallery"],
-    queryFn: api.listGalleryEntries,
+    queryKey: ["gallery", selectedResourceGroupId || "all"],
+    queryFn: () => api.listGalleryEntries({ resource_group_id: selectedResourceGroupId || null }),
+  });
+  const resourceGroupsQuery = useQuery({
+    queryKey: ["my-generation-resource-groups"],
+    queryFn: api.listMyGenerationResourceGroups,
   });
   const entries = galleryQuery.data?.items ?? [];
+  const resourceGroups = resourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [];
+  const resourceGroupFilter = (
+    <label className="block min-w-[220px]">
+      <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+        {t("gallery.resourceGroupFilter")}
+      </span>
+      <SelectField
+        value={selectedResourceGroupId}
+        options={[
+          { value: "", label: t("gallery.allResourceGroups") },
+          ...resourceGroups.map((group) => ({ value: group.id, label: group.name })),
+        ]}
+        onChange={setSelectedResourceGroupId}
+        ariaLabel={t("gallery.resourceGroupFilter")}
+        radius="lg"
+        visualSize="sm"
+      />
+    </label>
+  );
 
   useEffect(() => {
     const updateGridMetrics = () => {
@@ -133,12 +159,15 @@ export function GalleryPage() {
             </section>
 
             <section className="pf-gallery-feed px-4 py-8 sm:px-6 lg:px-10">
-              <div className="mx-auto mb-6 flex max-w-7xl items-end justify-between gap-4 border-b border-white/10 pb-5">
+              <div className="mx-auto mb-6 flex max-w-7xl flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <div className="text-xs font-bold uppercase text-indigo-300">{t("gallery.feed")}</div>
                   <h2 className="mt-2 text-2xl font-black text-white">{t("gallery.works")}</h2>
                 </div>
-                <div className="text-sm font-medium text-white/55">{t("gallery.count", { count: entries.length })}</div>
+                <div className="flex flex-col gap-3 sm:items-end">
+                  <div className="text-sm font-medium text-white/55">{t("gallery.count", { count: entries.length })}</div>
+                  {resourceGroupFilter}
+                </div>
               </div>
 
               <div
@@ -174,6 +203,7 @@ export function GalleryPage() {
                           </div>
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/70">
                             <span>{galleryEntrySizeLabel(entry, locale)}</span>
+                            <span>{entry.resource_group.name}</span>
                             <span>{formatDateTime(entry.created_at)}</span>
                           </div>
                           <ResourceMetaBadges resource={entry} className="mt-2" />
@@ -188,6 +218,7 @@ export function GalleryPage() {
           </>
         ) : (
           <div className="flex min-h-[calc(100svh-80px)] flex-col items-center justify-center bg-[#f3eadc] px-6 text-sm text-slate-600">
+            <div className="mb-8 w-full max-w-xs">{resourceGroupFilter}</div>
             <ImageIcon size={30} className="mb-4 text-indigo-500" />
             <div className="text-5xl font-black text-slate-950">{t("gallery.title")}</div>
             <div className="mt-4 text-center">{t("gallery.empty")}</div>

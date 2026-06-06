@@ -64,6 +64,15 @@ class UpdateTrustedUserRequest(BaseModel):
     enabled: bool
 
 
+class UserGenerationResourceGroupGrantResponse(BaseModel):
+    user_id: str
+    resource_group_ids: list[str]
+
+
+class UpdateUserGenerationResourceGroupGrantsRequest(BaseModel):
+    resource_group_ids: list[str] = Field(default_factory=list)
+
+
 class CreateRoleRequest(BaseModel):
     code: str = Field(min_length=2, max_length=40)
     name: str = Field(min_length=1, max_length=80)

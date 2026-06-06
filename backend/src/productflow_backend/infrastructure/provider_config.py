@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
@@ -10,10 +11,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from productflow_backend.config import Settings, build_settings_with_overrides, get_runtime_settings
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
     AppSetting,
     GenerationConfig,
     GenerationConfigDailyStat,
     GenerationConfigState,
+    GenerationResourceGroup,
     ProviderBinding,
     ProviderProfile,
 )
@@ -42,6 +46,8 @@ PROVIDER_CAPABILITIES = {
 UNSET_PROVIDER_FIELD = object()
 DEFAULT_GENERATION_CONFIG_PRIORITY = 100
 DEFAULT_GENERATION_CONFIG_MAX_CONCURRENCY = 1
+DEFAULT_GENERATION_RESOURCE_GROUP_NAME = "默认分组"
+RESOURCE_GROUP_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]{1,79}$")
 
 
 def _as_aware_utc(value: datetime) -> datetime:
@@ -97,6 +103,7 @@ class ResolvedImageProviderConfig:
 @dataclass(frozen=True, slots=True)
 class GenerationConfigClaim:
     generation_config_id: str
+    resource_group_id: str
     purpose: str
     provider_kind: str
     score: float
@@ -137,7 +144,9 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
             owned_session.close()
         return
 
+    _ensure_default_generation_resource_group(session)
     if _generation_config_exists(session):
+        _ensure_generation_configs_have_default_resource_group(session)
         _ensure_generation_config_states(session)
         if commit:
             session.commit()
@@ -149,6 +158,7 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
     if existing_bindings:
         for binding in existing_bindings:
             _add_generation_config_from_binding(session, binding)
+        _ensure_generation_configs_have_default_resource_group(session)
         _ensure_generation_config_states(session)
         if commit:
             session.commit()
@@ -270,12 +280,152 @@ def list_generation_configs(session: Session) -> list[GenerationConfig]:
             select(GenerationConfig)
             .options(
                 selectinload(GenerationConfig.provider_profile),
+                selectinload(GenerationConfig.resource_group),
                 selectinload(GenerationConfig.state),
             )
             .where(GenerationConfig.archived_at.is_(None))
-            .order_by(GenerationConfig.purpose, GenerationConfig.priority.desc(), GenerationConfig.created_at)
+            .order_by(
+                GenerationConfig.resource_group_id,
+                GenerationConfig.purpose,
+                GenerationConfig.priority.desc(),
+                GenerationConfig.created_at,
+            )
         ).all()
     )
+
+
+def list_generation_resource_groups(
+    session: Session,
+    *,
+    include_archived: bool = False,
+) -> list[GenerationResourceGroup]:
+    ensure_provider_config_bootstrapped(session)
+    statement = select(GenerationResourceGroup).order_by(
+        GenerationResourceGroup.sort_order,
+        GenerationResourceGroup.created_at,
+        GenerationResourceGroup.name,
+    )
+    if not include_archived:
+        statement = statement.where(GenerationResourceGroup.archived_at.is_(None))
+    return list(session.scalars(statement).all())
+
+
+def add_generation_resource_group(
+    session: Session,
+    *,
+    key: str,
+    name: str,
+    description: str | None = None,
+    sort_order: int = 100,
+    enabled: bool = True,
+    commit: bool = True,
+) -> GenerationResourceGroup:
+    _ensure_default_generation_resource_group(session)
+    normalized_key = _normalize_resource_group_key(key)
+    if normalized_key == DEFAULT_GENERATION_RESOURCE_GROUP_KEY:
+        raise ValueError("default 是系统内置分组")
+    if session.scalar(select(GenerationResourceGroup.id).where(GenerationResourceGroup.key == normalized_key)):
+        raise ValueError("分组 key 已存在")
+    group = GenerationResourceGroup(
+        key=normalized_key,
+        name=_normalize_required_text(name, "分组名称"),
+        description=_normalize_optional_text(description),
+        sort_order=int(sort_order),
+        enabled=enabled,
+    )
+    session.add(group)
+    if commit:
+        session.commit()
+        session.refresh(group)
+    else:
+        session.flush()
+    return group
+
+
+def update_generation_resource_group(
+    session: Session,
+    resource_group_id: str,
+    *,
+    key: str | None = None,
+    name: str | None = None,
+    description: str | None | object = UNSET_PROVIDER_FIELD,
+    sort_order: int | None = None,
+    enabled: bool | None = None,
+    commit: bool = True,
+) -> GenerationResourceGroup:
+    group = require_generation_resource_group(session, resource_group_id)
+    if key is not None:
+        if group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
+            raise ValueError("内置 default 分组不能修改 key")
+        normalized_key = _normalize_resource_group_key(key)
+        if normalized_key == DEFAULT_GENERATION_RESOURCE_GROUP_KEY:
+            raise ValueError("default 是系统内置分组")
+        existing_id = session.scalar(
+            select(GenerationResourceGroup.id).where(
+                GenerationResourceGroup.key == normalized_key,
+                GenerationResourceGroup.id != group.id,
+            )
+        )
+        if existing_id is not None:
+            raise ValueError("分组 key 已存在")
+        group.key = normalized_key
+    if name is not None:
+        group.name = _normalize_required_text(name, "分组名称")
+    if description is not UNSET_PROVIDER_FIELD:
+        group.description = _normalize_optional_text(description if isinstance(description, str) else None)
+    if sort_order is not None:
+        group.sort_order = int(sort_order)
+    if enabled is not None:
+        if group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID and not enabled:
+            raise ValueError("内置 default 分组不能停用")
+        group.enabled = enabled
+    if commit:
+        session.commit()
+        session.refresh(group)
+    else:
+        session.flush()
+    return group
+
+
+def archive_generation_resource_group(session: Session, resource_group_id: str) -> GenerationResourceGroup:
+    group = require_generation_resource_group(session, resource_group_id)
+    if group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID or group.key == DEFAULT_GENERATION_RESOURCE_GROUP_KEY:
+        raise ValueError("内置 default 分组不能归档")
+    active_config_id = session.scalar(
+        select(GenerationConfig.id).where(
+            GenerationConfig.resource_group_id == group.id,
+            GenerationConfig.archived_at.is_(None),
+        )
+    )
+    if active_config_id is not None:
+        raise ValueError("分组仍有生成配置使用，不能归档")
+    group.archived_at = datetime.now(UTC)
+    group.enabled = False
+    session.commit()
+    session.refresh(group)
+    return group
+
+
+def require_generation_resource_group(
+    session: Session,
+    resource_group_id: str | None,
+    *,
+    require_enabled: bool = False,
+) -> GenerationResourceGroup:
+    group_id = _normalize_resource_group_id(resource_group_id)
+    if group_id is None:
+        group = _ensure_default_generation_resource_group(session)
+    else:
+        group = session.get(GenerationResourceGroup, group_id)
+    if group is None or group.archived_at is not None:
+        raise ValueError("供应商生成分组不存在")
+    if require_enabled and not group.enabled:
+        raise ValueError("供应商生成分组已停用")
+    return group
+
+
+def default_generation_resource_group_id(session: Session) -> str:
+    return _ensure_default_generation_resource_group(session).id
 
 
 def create_provider_profile(
@@ -389,6 +539,7 @@ def add_generation_config(
     session: Session,
     *,
     generation_config_id: str | None = None,
+    resource_group_id: str | None = None,
     name: str,
     purpose: str,
     provider_kind: str,
@@ -417,12 +568,14 @@ def add_generation_config(
     )
     if provider_kind == "mock":
         provider_profile_id = None
+    resource_group = require_generation_resource_group(session, resource_group_id)
     settings = get_runtime_settings()
     generation_config_kwargs = {
         "name": _normalize_required_text(name, "配置名称"),
         "purpose": purpose,
         "provider_kind": provider_kind,
         "provider_profile_id": provider_profile_id,
+        "resource_group_id": resource_group.id,
         "model_settings_json": _normalize_binding_model_settings(purpose=purpose, model_settings=model_settings),
         "config_json": _normalize_binding_config(purpose=purpose, provider_kind=provider_kind, config=config),
         "priority": int(priority),
@@ -453,6 +606,7 @@ def update_generation_config(
     session: Session,
     generation_config_id: str,
     *,
+    resource_group_id: str | None = None,
     name: str | None = None,
     purpose: str | None = None,
     provider_kind: str | None = None,
@@ -481,6 +635,11 @@ def update_generation_config(
     next_availability_window = int(availability_window_minutes or generation_config.availability_window_minutes)
     next_failure_threshold = int(failure_threshold or generation_config.failure_threshold)
     next_cooldown = int(cooldown_minutes or generation_config.cooldown_minutes)
+    next_resource_group = (
+        require_generation_resource_group(session, resource_group_id)
+        if resource_group_id is not None
+        else require_generation_resource_group(session, generation_config.resource_group_id)
+    )
     _validate_generation_config_payload(
         session,
         purpose=next_purpose,
@@ -495,6 +654,7 @@ def update_generation_config(
     )
     if name is not None:
         generation_config.name = _normalize_required_text(name, "配置名称")
+    generation_config.resource_group_id = next_resource_group.id
     generation_config.purpose = next_purpose
     generation_config.provider_kind = next_provider_kind
     generation_config.provider_profile_id = None if next_provider_kind == "mock" else next_provider_profile_id
@@ -551,10 +711,12 @@ def update_provider_binding(
     """
 
     ensure_provider_config_bootstrapped(session)
-    existing = _default_generation_config(session, purpose, include_disabled=True)
+    default_group_id = default_generation_resource_group_id(session)
+    existing = _default_generation_config(session, purpose, resource_group_id=default_group_id, include_disabled=True)
     if existing is None:
         add_generation_config(
             session,
+            resource_group_id=default_group_id,
             name="默认文案配置" if purpose == TEXT_PURPOSE else "默认图片配置",
             purpose=purpose,
             provider_kind=provider_kind,
@@ -742,14 +904,17 @@ def claim_generation_config(
     session: Session,
     *,
     purpose: str,
+    resource_group_id: str | None = None,
     generation_config_id: str | None = None,
     now: datetime | None = None,
 ) -> GenerationConfigClaim | None:
     ensure_provider_config_bootstrapped(session, commit=False)
     resolved_now = now or datetime.now(UTC)
+    resource_group = require_generation_resource_group(session, resource_group_id, require_enabled=True)
     candidates = _candidate_generation_configs(
         session,
         purpose=purpose,
+        resource_group_id=resource_group.id,
         generation_config_id=generation_config_id,
         now=resolved_now,
     )
@@ -773,6 +938,7 @@ def claim_generation_config(
             session.flush()
             return GenerationConfigClaim(
                 generation_config_id=generation_config.id,
+                resource_group_id=generation_config.resource_group_id,
                 purpose=generation_config.purpose,
                 provider_kind=generation_config.provider_kind,
                 score=score,
@@ -1063,6 +1229,7 @@ def _add_generation_config_from_binding(session: Session, binding: ProviderBindi
         purpose=binding.purpose,
         provider_kind=binding.provider_kind,
         provider_profile_id=None if binding.provider_kind == "mock" else binding.provider_profile_id,
+        resource_group_id=default_generation_resource_group_id(session),
         model_settings_json=dict(binding.model_settings_json or {}),
         config_json=dict(binding.config_json or {}),
         priority=DEFAULT_GENERATION_CONFIG_PRIORITY,
@@ -1081,14 +1248,22 @@ def _default_generation_config(
     session: Session,
     purpose: str,
     *,
+    resource_group_id: str | None = None,
     include_disabled: bool = False,
 ) -> GenerationConfig | None:
+    resolved_resource_group_id = _normalize_resource_group_id(resource_group_id)
     statement = (
         select(GenerationConfig)
-        .options(selectinload(GenerationConfig.provider_profile), selectinload(GenerationConfig.state))
+        .options(
+            selectinload(GenerationConfig.provider_profile),
+            selectinload(GenerationConfig.resource_group),
+            selectinload(GenerationConfig.state),
+        )
         .where(GenerationConfig.purpose == purpose, GenerationConfig.archived_at.is_(None))
         .order_by(GenerationConfig.priority.desc(), GenerationConfig.created_at)
     )
+    if resolved_resource_group_id is not None:
+        statement = statement.where(GenerationConfig.resource_group_id == resolved_resource_group_id)
     if not include_disabled:
         statement = statement.where(GenerationConfig.enabled.is_(True))
     return session.scalar(statement)
@@ -1103,7 +1278,11 @@ def _select_generation_config_for_resolution(
     if generation_config_id:
         generation_config = session.scalar(
             select(GenerationConfig)
-            .options(selectinload(GenerationConfig.provider_profile), selectinload(GenerationConfig.state))
+            .options(
+                selectinload(GenerationConfig.provider_profile),
+                selectinload(GenerationConfig.resource_group),
+                selectinload(GenerationConfig.state),
+            )
             .where(
                 GenerationConfig.id == generation_config_id,
                 GenerationConfig.purpose == purpose,
@@ -1141,6 +1320,45 @@ def _ensure_generation_config_states(session: Session) -> None:
         _ensure_generation_config_state(session, config_id)
 
 
+def _ensure_default_generation_resource_group(session: Session) -> GenerationResourceGroup:
+    group = session.get(GenerationResourceGroup, DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+    if group is None:
+        group = session.scalar(
+            select(GenerationResourceGroup).where(
+                GenerationResourceGroup.key == DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
+            )
+        )
+    if group is None:
+        group = GenerationResourceGroup(
+            id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            key=DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
+            name=DEFAULT_GENERATION_RESOURCE_GROUP_NAME,
+            description="系统内置默认供应商生成能力分组",
+            sort_order=0,
+            enabled=True,
+        )
+        session.add(group)
+        session.flush()
+        return group
+    group.key = DEFAULT_GENERATION_RESOURCE_GROUP_KEY
+    group.name = group.name or DEFAULT_GENERATION_RESOURCE_GROUP_NAME
+    group.sort_order = min(int(group.sort_order or 0), 0)
+    group.enabled = True
+    group.archived_at = None
+    session.flush()
+    return group
+
+
+def _ensure_generation_configs_have_default_resource_group(session: Session) -> None:
+    default_group_id = default_generation_resource_group_id(session)
+    session.execute(
+        update(GenerationConfig)
+        .where(GenerationConfig.resource_group_id.is_(None))
+        .values(resource_group_id=default_group_id)
+    )
+    session.flush()
+
+
 def _ensure_generation_config_state(session: Session, generation_config_id: str) -> GenerationConfigState:
     exists = session.scalar(select(GenerationConfig.id).where(GenerationConfig.id == generation_config_id))
     if exists is None:
@@ -1156,8 +1374,14 @@ def _ensure_generation_config_state(session: Session, generation_config_id: str)
 def _sync_compat_provider_bindings(session: Session) -> None:
     """Mirror default generation configs into legacy provider_bindings rows."""
 
+    default_group_id = default_generation_resource_group_id(session)
     for purpose in sorted(PROVIDER_PURPOSES):
-        generation_config = _default_generation_config(session, purpose, include_disabled=True)
+        generation_config = _default_generation_config(
+            session,
+            purpose,
+            resource_group_id=default_group_id,
+            include_disabled=True,
+        )
         if generation_config is None:
             continue
         binding = _get_binding(session, purpose)
@@ -1281,6 +1505,7 @@ def _candidate_generation_configs(
     session: Session,
     *,
     purpose: str,
+    resource_group_id: str,
     generation_config_id: str | None,
     now: datetime,
 ) -> list[tuple[GenerationConfig, float]]:
@@ -1288,8 +1513,16 @@ def _candidate_generation_configs(
         raise ValueError("用途必须是 text 或 image")
     statement = (
         select(GenerationConfig)
-        .options(selectinload(GenerationConfig.provider_profile), selectinload(GenerationConfig.state))
-        .where(GenerationConfig.purpose == purpose, GenerationConfig.archived_at.is_(None))
+        .options(
+            selectinload(GenerationConfig.provider_profile),
+            selectinload(GenerationConfig.resource_group),
+            selectinload(GenerationConfig.state),
+        )
+        .where(
+            GenerationConfig.purpose == purpose,
+            GenerationConfig.resource_group_id == resource_group_id,
+            GenerationConfig.archived_at.is_(None),
+        )
     )
     if generation_config_id:
         statement = statement.where(GenerationConfig.id == generation_config_id)
@@ -1636,6 +1869,18 @@ def _normalize_required_text(value: str, label: str) -> str:
 def _normalize_optional_text(value: str | None) -> str | None:
     normalized = "" if value is None else str(value).strip()
     return normalized or None
+
+
+def _normalize_resource_group_id(value: str | None) -> str | None:
+    normalized = _normalize_optional_text(value)
+    return normalized
+
+
+def _normalize_resource_group_key(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if not RESOURCE_GROUP_KEY_RE.fullmatch(normalized):
+        raise ValueError("分组 key 只能包含小写字母、数字、下划线和连字符")
+    return normalized
 
 
 def _optional_str(value: Any) -> str | None:

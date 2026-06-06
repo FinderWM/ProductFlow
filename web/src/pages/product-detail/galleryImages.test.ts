@@ -8,6 +8,7 @@ import {
 } from "./galleryImages";
 
 const createdAt = "2026-04-26T00:00:00Z";
+const defaultResourceGroup = { id: "group-default", key: "default", name: "默认分组" };
 
 function sourceAsset(overrides: Partial<SourceAsset>): SourceAsset {
   return {
@@ -33,6 +34,8 @@ function poster(overrides: Partial<PosterVariant>): PosterVariant {
     mime_type: "image/png",
     width: 1024,
     height: 1024,
+    resource_group_id: defaultResourceGroup.id,
+    resource_group: defaultResourceGroup,
     download_url: "/media/poster.png",
     preview_url: "/media/poster-preview.png",
     thumbnail_url: "/media/poster-thumb.png",

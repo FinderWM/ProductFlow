@@ -30,6 +30,10 @@ from productflow_backend.infrastructure.db.models import (
     WorkflowRun,
 )
 from productflow_backend.presentation.image_variants import build_stored_image_urls
+from productflow_backend.presentation.schemas.generation_resource_groups import (
+    GenerationResourceGroupTagResponse,
+    serialize_generation_resource_group_tag,
+)
 from productflow_backend.presentation.schemas.moderation import ResourceModerationFields, serialize_moderation_fields
 
 
@@ -51,6 +55,8 @@ class CreativeBriefSummaryResponse(BaseModel):
     provider_name: str
     model_name: str
     prompt_version: str
+    resource_group_id: str | None = None
+    resource_group: GenerationResourceGroupTagResponse
     created_at: datetime
 
 
@@ -63,6 +69,8 @@ class CopySetResponse(BaseModel):
     provider_name: str
     model_name: str
     prompt_version: str
+    resource_group_id: str | None = None
+    resource_group: GenerationResourceGroupTagResponse
     created_at: datetime
     updated_at: datetime
     edited_at: datetime | None = None
@@ -78,6 +86,8 @@ class PosterVariantResponse(ResourceModerationFields):
     mime_type: str
     width: int
     height: int
+    resource_group_id: str | None = None
+    resource_group: GenerationResourceGroupTagResponse
     download_url: str
     preview_url: str
     thumbnail_url: str
@@ -167,6 +177,11 @@ def serialize_brief(brief: CreativeBrief) -> CreativeBriefSummaryResponse:
         provider_name=brief.provider_name,
         model_name=brief.model_name,
         prompt_version=brief.prompt_version,
+        resource_group_id=brief.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            brief.resource_group,
+            resource_group_id=brief.resource_group_id,
+        ),
         created_at=brief.created_at,
     )
 
@@ -181,6 +196,11 @@ def serialize_copy_set(copy_set: CopySet) -> CopySetResponse:
         provider_name=copy_set.provider_name,
         model_name=copy_set.model_name,
         prompt_version=copy_set.prompt_version,
+        resource_group_id=copy_set.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            copy_set.resource_group,
+            resource_group_id=copy_set.resource_group_id,
+        ),
         created_at=copy_set.created_at,
         updated_at=copy_set.updated_at,
         edited_at=copy_set.edited_at,
@@ -199,6 +219,11 @@ def serialize_poster_variant(poster: PosterVariant) -> PosterVariantResponse:
         mime_type=poster.mime_type,
         width=poster.width,
         height=poster.height,
+        resource_group_id=poster.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            poster.resource_group,
+            resource_group_id=poster.resource_group_id,
+        ),
         **serialize_moderation_fields(poster).model_dump(),
         **urls,
         created_at=poster.created_at,

@@ -5,6 +5,10 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from productflow_backend.infrastructure.db.models import ImageGalleryEntry
+from productflow_backend.presentation.schemas.generation_resource_groups import (
+    GenerationResourceGroupTagResponse,
+    serialize_generation_resource_group_tag,
+)
 from productflow_backend.presentation.schemas.image_sessions import (
     ImageSessionAssetResponse,
     extract_actual_image_size,
@@ -38,6 +42,8 @@ class GalleryEntryResponse(ResourceModerationFields):
     provider_response_id: str | None = None
     image_generation_call_id: str | None = None
     generation_group_id: str | None = None
+    resource_group_id: str | None = None
+    resource_group: GenerationResourceGroupTagResponse
     candidate_index: int | None = None
     candidate_count: int | None = None
     base_asset_id: str | None = None
@@ -54,6 +60,8 @@ def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:
     round_item = entry.round
     image_session = entry.asset.session
     product = image_session.product
+    resource_group = entry.resource_group or (round_item.resource_group if round_item else None)
+    resource_group_id = entry.resource_group_id or (round_item.resource_group_id if round_item else None)
     return GalleryEntryResponse(
         id=entry.id,
         owner_user_id=entry.owner_user_id,
@@ -74,6 +82,11 @@ def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:
         provider_response_id=round_item.provider_response_id if round_item else None,
         image_generation_call_id=round_item.image_generation_call_id if round_item else None,
         generation_group_id=round_item.generation_group_id if round_item else None,
+        resource_group_id=resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            resource_group,
+            resource_group_id=resource_group_id,
+        ),
         candidate_index=round_item.candidate_index if round_item else None,
         candidate_count=round_item.candidate_count if round_item else None,
         base_asset_id=round_item.base_asset_id if round_item else None,

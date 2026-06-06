@@ -6,7 +6,7 @@ import {
 } from "../../components/ResourceGovernance";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
-import type { PosterVariant, ProductDetail, SourceAsset, WorkflowNode } from "../../lib/types";
+import type { GenerationResourceGroup, PosterVariant, ProductDetail, SourceAsset, WorkflowNode } from "../../lib/types";
 
 import { PosterThumb, SourceAssetThumb } from "./ImageDownloadComponents";
 import { workflowNodeDisplayTitle } from "./nodeDisplay";
@@ -16,6 +16,9 @@ interface ImagesPanelProps {
   posters: PosterVariant[];
   referenceAssets: SourceAsset[];
   artifactCount: number;
+  resourceGroups: GenerationResourceGroup[];
+  selectedResourceGroupId: string;
+  onResourceGroupChange: (resourceGroupId: string) => void;
   selectedReferenceNode: WorkflowNode | null;
   posterSourceAssetIds: Map<string, string>;
   onPreviewImage: (image: DownloadableImage) => void;
@@ -30,6 +33,9 @@ export function ImagesPanel({
   posters,
   referenceAssets,
   artifactCount,
+  resourceGroups,
+  selectedResourceGroupId,
+  onResourceGroupChange,
   selectedReferenceNode,
   posterSourceAssetIds,
   onPreviewImage,
@@ -46,6 +52,23 @@ export function ImagesPanel({
     <section>
       <div className="mb-3 space-y-2 text-xs text-zinc-500 dark:text-slate-400">
         <ResourceBlockedNotice resource={product} />
+        <label className="block">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+            {t("detail.images.resourceGroupFilter")}
+          </span>
+          <select
+            value={selectedResourceGroupId}
+            onChange={(event) => onResourceGroupChange(event.target.value)}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400"
+          >
+            <option value="">{t("detail.images.allResourceGroups")}</option>
+            {resourceGroups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <div>{artifactCount ? t("detail.downloadableCount", { count: artifactCount }) : t("detail.waitingAssets")}</div>
         {canFillReference ? (
           <div className="text-indigo-600 dark:text-violet-400 font-semibold">
@@ -81,6 +104,7 @@ export function ImagesPanel({
                   useAsReferenceBusy={fillReferenceBusy}
                 />
                 <ResourceMetaBadges resource={poster} showReason />
+                <ResourceGroupBadge name={poster.resource_group.name} />
               </div>
             );
           })}
@@ -112,5 +136,13 @@ export function ImagesPanel({
         </div>
       )}
     </section>
+  );
+}
+
+function ResourceGroupBadge({ name }: { name: string }) {
+  return (
+    <div className="inline-flex max-w-full rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
+      <span className="truncate">{name}</span>
+    </div>
   );
 }

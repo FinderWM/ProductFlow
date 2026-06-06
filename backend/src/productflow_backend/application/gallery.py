@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -11,6 +11,7 @@ from productflow_backend.application.ownership import ensure_actor_can_mutate_ow
 from productflow_backend.domain.enums import ImageSessionAssetKind
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ImageGalleryEntry,
     ImageSession,
     ImageSessionAsset,
@@ -34,6 +35,8 @@ def _gallery_entry_query():
             selectinload(ImageGalleryEntry.owner),
             selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.owner),
             selectinload(ImageGalleryEntry.round),
+            selectinload(ImageGalleryEntry.resource_group),
+            selectinload(ImageGalleryEntry.round).selectinload(ImageSessionRound.resource_group),
         )
         .order_by(desc(ImageGalleryEntry.created_at))
     )
@@ -42,10 +45,23 @@ def _gallery_entry_query():
 def list_gallery_entries(
     session: Session,
     *,
+    resource_group_id: str | None = None,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
 ) -> list[ImageGalleryEntry]:
-    entries = list(session.scalars(_gallery_entry_query()).all())
+    statement = _gallery_entry_query()
+    normalized_group_id = (resource_group_id or "").strip() or None
+    if normalized_group_id is not None:
+        if normalized_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
+            statement = statement.where(
+                or_(
+                    ImageGalleryEntry.resource_group_id == normalized_group_id,
+                    ImageGalleryEntry.resource_group_id.is_(None),
+                )
+            )
+        else:
+            statement = statement.where(ImageGalleryEntry.resource_group_id == normalized_group_id)
+    entries = list(session.scalars(statement).all())
     if actor_is_admin or actor_user_id is None:
         return entries
     return [
@@ -101,6 +117,7 @@ def save_generated_asset_to_gallery(
         owner_user_id=asset.owner_user_id,
         image_session_asset_id=asset.id,
         image_session_round_id=round_item.id,
+        resource_group_id=round_item.resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     session.add(entry)
     try:

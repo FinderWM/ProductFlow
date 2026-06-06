@@ -22,10 +22,11 @@ from productflow_backend.application.image_sessions import (
 )
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.domain.rbac import API_IMAGE_CHAT_GENERATE, API_IMAGE_CHAT_READ, API_IMAGE_CHAT_WRITE
-from productflow_backend.infrastructure.db.models import AuthUser, ImageSessionAsset
+from productflow_backend.infrastructure.db.models import AuthUser, GenerationResourceGroup, ImageSessionAsset
 from productflow_backend.infrastructure.storage import ImageVariantName, LocalStorage
 from productflow_backend.presentation.deps import get_session, require_api_permission, require_deletion_enabled
 from productflow_backend.presentation.image_variants import build_variant_filename
+from productflow_backend.presentation.schemas.generation_resource_groups import serialize_generation_resource_group_tag
 from productflow_backend.presentation.schemas.image_sessions import (
     AttachImageSessionAssetRequest,
     CreateImageSessionRequest,
@@ -199,18 +200,28 @@ def delete_image_session_reference_image_endpoint(
 @router.post("/image-sessions/prompt-polish", response_model=PolishImageSessionPromptResponse)
 def polish_image_session_prompt_endpoint(
     payload: PolishImageSessionPromptRequest,
+    session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_IMAGE_CHAT_GENERATE)),
 ) -> PolishImageSessionPromptResponse:
     result = polish_image_session_prompt(
+        session=session,
         prompt=payload.prompt,
+        resource_group_id=payload.resource_group_id,
         generation_config_mode=payload.generation_config_mode,
         generation_config_id=payload.generation_config_id,
         user_id=current_user.id,
+        user_is_admin=current_user.is_admin,
     )
+    resource_group = session.get(GenerationResourceGroup, result.resource_group_id)
     return PolishImageSessionPromptResponse(
         prompt=result.prompt,
         model_name=result.model_name,
         generation_config_id=result.generation_config_id,
+        resource_group_id=result.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            resource_group,
+            resource_group_id=result.resource_group_id,
+        ),
     )
 
 
@@ -230,6 +241,7 @@ def generate_image_session_round_endpoint(
         image_session_id=image_session_id,
         prompt=payload.prompt,
         size=payload.size,
+        resource_group_id=payload.resource_group_id,
         base_asset_id=payload.base_asset_id,
         selected_reference_asset_ids=payload.selected_reference_asset_ids,
         generation_count=payload.generation_count,

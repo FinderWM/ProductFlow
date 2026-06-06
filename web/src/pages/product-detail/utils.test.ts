@@ -42,6 +42,10 @@ const baseNode: WorkflowNode = {
   created_at: "2026-04-26T00:00:00Z",
   updated_at: "2026-04-26T00:00:00Z",
 };
+const defaultResourceGroup = { id: "group-default", key: "default", name: "默认分组" };
+
+type WorkflowNodeRunDraft = Partial<WorkflowRun["node_runs"][number]>;
+type WorkflowNodeRunStatusDraft = Partial<WorkflowRunStatusSummary["node_runs"][number]>;
 
 function stubT(values: Partial<Record<TranslationKey, string>>) {
   return (key: TranslationKey, params?: TranslationParams): string => {
@@ -70,29 +74,46 @@ function workflowWith(overrides: Partial<ProductWorkflow>): ProductWorkflow {
   };
 }
 
-function workflowRun(overrides: Partial<WorkflowRun>): WorkflowRun {
+function workflowNodeRun(overrides: WorkflowNodeRunDraft): WorkflowRun["node_runs"][number] {
   return {
-    id: "run-1",
-    workflow_id: "workflow-1",
+    id: "node-run-1",
+    workflow_run_id: "run-1",
+    node_id: "node-1",
     status: "running",
+    output_json: null,
+    failure_reason: null,
+    copy_set_id: null,
+    poster_variant_id: null,
+    image_session_asset_id: null,
+    resource_group_id: defaultResourceGroup.id,
+    resource_group: defaultResourceGroup,
     started_at: "2026-04-26T00:00:00Z",
     finished_at: null,
-    failure_reason: null,
-    progress_metadata: null,
-    is_retryable: false,
-    is_cancelable: true,
-    queue_active_count: 1,
-    queue_running_count: 0,
-    queue_queued_count: 1,
-    queue_max_concurrent_tasks: 3,
-    queued_ahead_count: 0,
-    queue_position: 1,
-    node_runs: [],
     ...overrides,
   };
 }
 
-function workflowRunStatus(overrides: Partial<WorkflowRunStatusSummary>): WorkflowRunStatusSummary {
+function workflowNodeRunStatus(
+  overrides: WorkflowNodeRunStatusDraft,
+): WorkflowRunStatusSummary["node_runs"][number] {
+  return {
+    id: "node-run-1",
+    workflow_run_id: "run-1",
+    node_id: "node-1",
+    status: "running",
+    failure_reason: null,
+    resource_group_id: defaultResourceGroup.id,
+    resource_group: defaultResourceGroup,
+    started_at: "2026-04-26T00:00:00Z",
+    finished_at: null,
+    ...overrides,
+  };
+}
+
+function workflowRun(
+  overrides: Partial<Omit<WorkflowRun, "node_runs">> & { node_runs?: WorkflowNodeRunDraft[] },
+): WorkflowRun {
+  const { node_runs: nodeRuns, ...runOverrides } = overrides;
   return {
     id: "run-1",
     workflow_id: "workflow-1",
@@ -109,8 +130,33 @@ function workflowRunStatus(overrides: Partial<WorkflowRunStatusSummary>): Workfl
     queue_max_concurrent_tasks: 3,
     queued_ahead_count: 0,
     queue_position: 1,
-    node_runs: [],
-    ...overrides,
+    node_runs: nodeRuns?.map(workflowNodeRun) ?? [],
+    ...runOverrides,
+  };
+}
+
+function workflowRunStatus(
+  overrides: Partial<Omit<WorkflowRunStatusSummary, "node_runs">> & { node_runs?: WorkflowNodeRunStatusDraft[] },
+): WorkflowRunStatusSummary {
+  const { node_runs: nodeRuns, ...runOverrides } = overrides;
+  return {
+    id: "run-1",
+    workflow_id: "workflow-1",
+    status: "running",
+    started_at: "2026-04-26T00:00:00Z",
+    finished_at: null,
+    failure_reason: null,
+    progress_metadata: null,
+    is_retryable: false,
+    is_cancelable: true,
+    queue_active_count: 1,
+    queue_running_count: 0,
+    queue_queued_count: 1,
+    queue_max_concurrent_tasks: 3,
+    queued_ahead_count: 0,
+    queue_position: 1,
+    node_runs: nodeRuns?.map(workflowNodeRunStatus) ?? [],
+    ...runOverrides,
   };
 }
 

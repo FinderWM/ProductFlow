@@ -16,6 +16,7 @@ from productflow_backend.domain.enums import WorkflowNodeType
 from productflow_backend.domain.errors import NotFoundError
 from productflow_backend.domain.workflow_rules import WorkflowRuleEdge, WorkflowRuleNode, topological_node_ids
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     Product,
     ProductWorkflow,
     WorkflowEdge,
@@ -229,7 +230,10 @@ def default_node_specs(product: Product) -> list[dict[str, Any]]:
             "title": "文案",
             "position_x": 320,
             "position_y": 80,
-            "config_json": {"instruction": f"围绕 {product.name} 生成一版适合商品图的文案"},
+            "config_json": {
+                "instruction": f"围绕 {product.name} 生成一版适合商品图的文案",
+                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            },
         },
         {
             "key": "image",
@@ -240,6 +244,7 @@ def default_node_specs(product: Product) -> list[dict[str, Any]]:
             "config_json": {
                 "instruction": "结合商品和文案生成商品图",
                 "size": DEFAULT_IMAGE_SIZE,
+                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             },
         },
         {

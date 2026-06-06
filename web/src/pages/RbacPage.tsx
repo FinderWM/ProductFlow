@@ -21,7 +21,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { useI18n } from "../lib/preferences";
-import type { RbacApiPermission, RbacPermissionCatalog, RbacRolePermissions, RbacUser } from "../lib/types";
+import type { GenerationResourceGroup, RbacApiPermission, RbacPermissionCatalog, RbacRolePermissions, RbacUser } from "../lib/types";
 
 const RBAC_USER_PAGE_SIZE = 20;
 
@@ -125,6 +125,8 @@ export function RbacPage() {
   const [userRoleFilter, setUserRoleFilter] = useState("");
   const [userPage, setUserPage] = useState(1);
   const [pendingUserAction, setPendingUserAction] = useState<PendingUserAction | null>(null);
+  const [resourceGroupGrantUser, setResourceGroupGrantUser] = useState<RbacUser | null>(null);
+  const [resourceGroupGrantDraft, setResourceGroupGrantDraft] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -143,6 +145,10 @@ export function RbacPage() {
   const permissionCatalogQuery = useQuery({
     queryKey: ["rbac-permission-catalog"],
     queryFn: api.listRbacPermissionCatalog,
+  });
+  const generationResourceGroupsQuery = useQuery({
+    queryKey: ["generation-resource-groups"],
+    queryFn: api.listGenerationResourceGroups,
   });
   const roles = rolesQuery.data ?? [];
   const normalizedRoleSearch = roleSearch.trim().toLocaleLowerCase();
@@ -168,11 +174,23 @@ export function RbacPage() {
     () => (permissionCatalogQuery.data ? buildPermissionGroups(permissionCatalogQuery.data) : []),
     [permissionCatalogQuery.data],
   );
+  const generationResourceGroups = useMemo(
+    () =>
+      (generationResourceGroupsQuery.data ?? [])
+        .filter((group) => !group.archived_at)
+        .sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name)),
+    [generationResourceGroupsQuery.data],
+  );
 
   const rolePermissionsQuery = useQuery({
     queryKey: ["rbac-role-permissions", selectedPermissionRole?.id ?? ""],
     queryFn: () => api.getRbacRolePermissions(selectedPermissionRole!.id),
     enabled: Boolean(selectedPermissionRole?.id),
+  });
+  const resourceGroupGrantsQuery = useQuery({
+    queryKey: ["rbac-user-generation-resource-groups", resourceGroupGrantUser?.id ?? ""],
+    queryFn: () => api.getUserGenerationResourceGroupGrants(resourceGroupGrantUser!.id),
+    enabled: Boolean(resourceGroupGrantUser && !resourceGroupGrantUser.is_admin),
   });
 
   useEffect(() => {
@@ -210,6 +228,20 @@ export function RbacPage() {
       setRolePermissionDraft(rolePermissionDraftFromResponse(rolePermissionsQuery.data));
     }
   }, [rolePermissionsQuery.data, selectedPermissionRole?.id]);
+
+  useEffect(() => {
+    if (!resourceGroupGrantUser) {
+      setResourceGroupGrantDraft([]);
+      return;
+    }
+    if (resourceGroupGrantUser.is_admin) {
+      setResourceGroupGrantDraft([]);
+      return;
+    }
+    if (resourceGroupGrantsQuery.data?.user_id === resourceGroupGrantUser.id) {
+      setResourceGroupGrantDraft([...resourceGroupGrantsQuery.data.resource_group_ids]);
+    }
+  }, [resourceGroupGrantUser, resourceGroupGrantsQuery.data]);
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -290,6 +322,20 @@ export function RbacPage() {
     onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.savePermissionsFailed"))),
   });
 
+  const saveResourceGroupGrantsMutation = useMutation({
+    mutationFn: () =>
+      api.updateUserGenerationResourceGroupGrants(resourceGroupGrantUser!.id, {
+        resource_group_ids: resourceGroupGrantDraft,
+      }),
+    onSuccess: async (payload) => {
+      setResourceGroupGrantDraft([...payload.resource_group_ids]);
+      setMessage(t("rbac.resourceGroupsSaved"));
+      setError("");
+      await queryClient.invalidateQueries({ queryKey: ["rbac-user-generation-resource-groups", payload.user_id] });
+    },
+    onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.saveResourceGroupsFailed"))),
+  });
+
   const handleCreateUser = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMessage("");
@@ -338,6 +384,8 @@ export function RbacPage() {
 
   const loading = usersQuery.isLoading || rolesQuery.isLoading;
   const permissionsLoading = permissionCatalogQuery.isLoading || rolePermissionsQuery.isLoading;
+  const resourceGroupGrantsLoading =
+    generationResourceGroupsQuery.isLoading || resourceGroupGrantsQuery.isLoading;
   const userFiltersActive = Boolean(userSearch || userRoleFilter);
   const pendingUserActionBusy = resetPasswordMutation.isPending || updateUserMutation.isPending;
   const pendingUserActionTitle = pendingUserAction
@@ -693,6 +741,85 @@ export function RbacPage() {
               </div>
             </section>
 
+            {resourceGroupGrantUser ? (
+              <section className="pf-panel p-4">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold">{t("rbac.resourceGroupGrants")}</h2>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {resourceGroupGrantUser.display_name} · {resourceGroupGrantUser.username}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setResourceGroupGrantUser(null)}
+                      className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => saveResourceGroupGrantsMutation.mutate()}
+                      disabled={
+                        resourceGroupGrantUser.is_admin ||
+                        resourceGroupGrantsLoading ||
+                        saveResourceGroupGrantsMutation.isPending
+                      }
+                      className="inline-flex h-9 items-center justify-center rounded-md bg-slate-950 px-3 text-xs font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                    >
+                      {saveResourceGroupGrantsMutation.isPending ? (
+                        <Loader2 size={14} className="mr-1.5 animate-spin" />
+                      ) : (
+                        <Save size={14} className="mr-1.5" />
+                      )}
+                      {t("rbac.saveResourceGroups")}
+                    </button>
+                  </div>
+                </div>
+                {resourceGroupGrantUser.is_admin ? (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                    {t("rbac.adminResourceGroupsReadonly")}
+                  </div>
+                ) : resourceGroupGrantsLoading ? (
+                  <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                    <Loader2 size={16} className="animate-spin" />
+                    {t("app.loading")}
+                  </div>
+                ) : generationResourceGroupsQuery.isError || resourceGroupGrantsQuery.isError ? (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm font-medium text-red-700 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-200">
+                    {t("rbac.resourceGroupsLoadFailed")}
+                  </div>
+                ) : generationResourceGroups.length ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {generationResourceGroups.map((group) => (
+                      <ResourceGroupGrantCheckbox
+                        key={group.id}
+                        group={group}
+                        checked={resourceGroupGrantDraft.includes(group.id)}
+                        disabled={saveResourceGroupGrantsMutation.isPending}
+                        onToggle={(checked) => {
+                          setResourceGroupGrantDraft((current) => {
+                            const next = new Set(current);
+                            if (checked) {
+                              next.add(group.id);
+                            } else {
+                              next.delete(group.id);
+                            }
+                            return [...next].sort();
+                          });
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                    {t("rbac.noResourceGroups")}
+                  </div>
+                )}
+              </section>
+            ) : null}
+
             <section className="pf-table-panel">
               <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -806,6 +933,16 @@ export function RbacPage() {
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setResourceGroupGrantUser(user)}
+                                  disabled={pendingUserActionBusy}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-all hover:scale-[1.03] hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-violet-400/40 dark:hover:bg-violet-500/10 dark:hover:text-violet-100"
+                                  aria-label={t("rbac.editResourceGroups")}
+                                  title={t("rbac.editResourceGroups")}
+                                >
+                                  <ShieldCheck size={14} aria-hidden="true" />
+                                </button>
                                 {!user.is_admin ? (
                                   <>
                                     <button
@@ -882,6 +1019,51 @@ export function RbacPage() {
         onConfirm={handleConfirmUserAction}
       />
     </div>
+  );
+}
+
+function ResourceGroupGrantCheckbox({
+  group,
+  checked,
+  disabled,
+  onToggle,
+}: {
+  group: GenerationResourceGroup;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: (checked: boolean) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <label
+      className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm ${
+        group.enabled
+          ? "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
+          : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onToggle(event.target.checked)}
+        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400"
+      />
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-2 font-medium text-slate-900 dark:text-slate-100">
+          {group.name}
+          {!group.enabled ? (
+            <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              {t("rbac.resourceGroupDisabled")}
+            </span>
+          ) : null}
+        </span>
+        <span className="mt-1 block font-mono text-xs text-slate-500 dark:text-slate-400">{group.key}</span>
+        {group.description ? (
+          <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{group.description}</span>
+        ) : null}
+      </span>
+    </label>
   );
 }
 

@@ -15,6 +15,10 @@ from productflow_backend.infrastructure.db.models import (
     ImageSessionRound,
 )
 from productflow_backend.presentation.image_variants import build_stored_image_urls
+from productflow_backend.presentation.schemas.generation_resource_groups import (
+    GenerationResourceGroupTagResponse,
+    serialize_generation_resource_group_tag,
+)
 from productflow_backend.presentation.schemas.moderation import ResourceModerationFields, serialize_moderation_fields
 from productflow_backend.presentation.schemas.validators import validate_image_generation_size
 
@@ -43,6 +47,8 @@ class ImageSessionRoundResponse(BaseModel):
     previous_response_id: str | None = None
     image_generation_call_id: str | None = None
     generation_config_id: str | None = None
+    resource_group_id: str | None = None
+    resource_group: GenerationResourceGroupTagResponse
     generation_group_id: str | None = None
     candidate_index: int = 1
     candidate_count: int = 1
@@ -65,6 +71,8 @@ class ImageSessionGenerationTaskResponse(BaseModel):
     generation_config_mode: Literal["auto", "manual"] = "auto"
     requested_generation_config_id: str | None = None
     used_generation_config_id: str | None = None
+    resource_group_id: str | None = None
+    resource_group: GenerationResourceGroupTagResponse
     generation_count: int
     completed_candidates: int
     active_candidate_index: int | None = None
@@ -173,6 +181,7 @@ class ImageToolOptionsRequest(BaseModel):
 
 class GenerateImageSessionRoundRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
+    resource_group_id: str = Field(min_length=1, max_length=36)
     size: str = Field(default="1024x1024")
     base_asset_id: str | None = None
     selected_reference_asset_ids: list[str] = Field(default_factory=list, max_length=6)
@@ -189,6 +198,7 @@ class GenerateImageSessionRoundRequest(BaseModel):
 
 class PolishImageSessionPromptRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
+    resource_group_id: str = Field(min_length=1, max_length=36)
     generation_config_mode: Literal["auto", "manual"] = "auto"
     generation_config_id: str | None = Field(default=None, min_length=1, max_length=36)
 
@@ -197,6 +207,8 @@ class PolishImageSessionPromptResponse(BaseModel):
     prompt: str
     model_name: str
     generation_config_id: str
+    resource_group_id: str
+    resource_group: GenerationResourceGroupTagResponse
 
 
 class AttachImageSessionAssetRequest(BaseModel):
@@ -267,6 +279,11 @@ def serialize_image_session_round(round_item: ImageSessionRound) -> ImageSession
         previous_response_id=round_item.previous_response_id,
         image_generation_call_id=round_item.image_generation_call_id,
         generation_config_id=round_item.generation_config_id,
+        resource_group_id=round_item.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            round_item.resource_group,
+            resource_group_id=round_item.resource_group_id,
+        ),
         generation_group_id=round_item.generation_group_id,
         candidate_index=round_item.candidate_index,
         candidate_count=round_item.candidate_count,
@@ -297,6 +314,11 @@ def serialize_image_session_generation_task(
         generation_config_mode="manual" if task.generation_config_mode == "manual" else "auto",
         requested_generation_config_id=task.requested_generation_config_id,
         used_generation_config_id=task.used_generation_config_id,
+        resource_group_id=task.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            task.resource_group,
+            resource_group_id=task.resource_group_id,
+        ),
         generation_count=task.generation_count,
         completed_candidates=task.completed_candidates,
         active_candidate_index=task.active_candidate_index,

@@ -6,6 +6,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login
 
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
+
 
 def _password_md5(value: str) -> str:
     return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
@@ -95,6 +97,55 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     rbac_users = user_client.get("/api/rbac/users")
     assert rbac_users.status_code == 403
     assert rbac_users.json()["detail"] == "需要管理员权限"
+
+
+def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_group = admin_client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "campaign", "name": "活动分组", "sort_order": 20, "enabled": True},
+    )
+    assert created_group.status_code == 200
+    group_id = created_group.json()["id"]
+
+    admin_groups = admin_client.get("/api/settings/my-generation-resource-groups")
+    assert admin_groups.status_code == 200
+    assert group_id in {group["id"] for group in admin_groups.json()}
+
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "campaign-user", "display_name": "Campaign User"},
+    )
+    assert created_user.status_code == 201
+    user_id = created_user.json()["id"]
+
+    user_client = TestClient(app)
+    password_md5 = _password_md5("campaign-password")
+    set_password = user_client.post(
+        "/api/auth/password",
+        json={"username": "campaign-user", "client_password_md5": password_md5},
+    )
+    assert set_password.status_code == 200
+
+    before_grant = user_client.get("/api/settings/my-generation-resource-groups")
+    assert before_grant.status_code == 200
+    assert before_grant.json() == []
+
+    grant = admin_client.put(
+        f"/api/rbac/users/{user_id}/generation-resource-groups",
+        json={"resource_group_ids": [group_id]},
+    )
+    assert grant.status_code == 200
+    assert grant.json() == {"user_id": user_id, "resource_group_ids": [group_id]}
+
+    after_grant = user_client.get("/api/settings/my-generation-resource-groups")
+    assert after_grant.status_code == 200
+    assert [group["id"] for group in after_grant.json()] == [group_id]
 
 
 def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Path) -> None:
@@ -413,6 +464,11 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
         json={"username": "tail-ops", "display_name": "Tail Ops", "role_id": role_id},
     )
     assert created_user.status_code == 201
+    grant = admin_client.put(
+        f"/api/rbac/users/{created_user.json()['id']}/generation-resource-groups",
+        json={"resource_group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID]},
+    )
+    assert grant.status_code == 200
 
     user_client = TestClient(app)
     password_md5 = _password_md5("tail-ops-password")
@@ -435,9 +491,14 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
 
     workflow = user_client.get(f"/api/products/{product_id}/workflow")
     assert workflow.status_code == 200
-    tail_node_id = next(
-        node["id"] for node in workflow.json()["nodes"] if node["node_type"] == "tail_splitter"
+    tail_node = next(node for node in workflow.json()["nodes"] if node["node_type"] == "tail_splitter")
+    tail_node_id = tail_node["id"]
+
+    configured_tail = user_client.patch(
+        f"/api/workflow-nodes/{tail_node_id}",
+        json={"config_json": {**tail_node["config_json"], "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID}},
     )
+    assert configured_tail.status_code == 200
 
     apply_with_write_permission = user_client.post(
         f"/api/workflow-nodes/{tail_node_id}/tail-split-plan/apply",

@@ -37,6 +37,10 @@ from productflow_backend.infrastructure.db.models import (
     WorkflowNodeRun,
     WorkflowRun,
 )
+from productflow_backend.presentation.schemas.generation_resource_groups import (
+    GenerationResourceGroupTagResponse,
+    serialize_generation_resource_group_tag,
+)
 
 WorkflowNodeDisplayStatus = WorkflowNodeStatus | Literal["cancelled"]
 WorkflowRetryHint = Literal["retry_later", "revise_input", "check_settings"]
@@ -83,6 +87,8 @@ class WorkflowNodeRunResponse(BaseModel):
     copy_set_id: str | None = None
     poster_variant_id: str | None = None
     image_session_asset_id: str | None = None
+    resource_group_id: str | None = None
+    resource_group: GenerationResourceGroupTagResponse
     started_at: datetime
     finished_at: datetime | None = None
 
@@ -93,6 +99,8 @@ class WorkflowNodeRunStatusResponse(BaseModel):
     node_id: str
     status: WorkflowNodeDisplayStatus
     failure_reason: str | None = None
+    resource_group_id: str | None = None
+    resource_group: GenerationResourceGroupTagResponse
     started_at: datetime
     finished_at: datetime | None = None
 
@@ -407,6 +415,7 @@ class ApplyTailSplitPlanItemRequest(BaseModel):
 
 class ApplyTailSplitPlanImageGenerationConfigRequest(BaseModel):
     size: str | None = Field(default=None, max_length=40)
+    resource_group_id: str | None = Field(default=None, max_length=36)
     generation_config_mode: Literal["auto", "manual"] = "auto"
     generation_config_id: str | None = Field(default=None, max_length=80)
     tool_options: dict[str, Any] | None = None
@@ -562,6 +571,11 @@ def serialize_workflow_node_run(node_run: WorkflowNodeRun) -> WorkflowNodeRunRes
         copy_set_id=node_run.copy_set_id,
         poster_variant_id=node_run.poster_variant_id,
         image_session_asset_id=node_run.image_session_asset_id,
+        resource_group_id=node_run.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            node_run.resource_group,
+            resource_group_id=node_run.resource_group_id,
+        ),
         started_at=node_run.started_at,
         finished_at=node_run.finished_at,
     )
@@ -574,6 +588,11 @@ def serialize_workflow_node_run_status(node_run: WorkflowNodeRun) -> WorkflowNod
         node_id=node_run.node_id,
         status=workflow_node_run_display_status(node_run),
         failure_reason=node_run.failure_reason,
+        resource_group_id=node_run.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            node_run.resource_group,
+            resource_group_id=node_run.resource_group_id,
+        ),
         started_at=node_run.started_at,
         finished_at=node_run.finished_at,
     )

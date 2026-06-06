@@ -32,6 +32,9 @@ from productflow_backend.domain.enums import (
 )
 from productflow_backend.domain.rbac import ADMIN_USER_ID
 
+DEFAULT_GENERATION_RESOURCE_GROUP_ID = "00000000-0000-0000-0000-000000000100"
+DEFAULT_GENERATION_RESOURCE_GROUP_KEY = "default"
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
@@ -234,6 +237,37 @@ class UserDailyUsageStat(Base, TimestampMixin):
     )
 
 
+class GenerationResourceGroup(Base, TimestampMixin):
+    """供应商+生成能力分组，普通生成入口只选择分组。"""
+
+    __tablename__ = "generation_resource_groups"
+    __table_args__ = (
+        Index("uq_generation_resource_groups_key", "key", unique=True),
+        Index("ix_generation_resource_groups_enabled", "enabled"),
+        Index("ix_generation_resource_groups_archived_at", "archived_at"),
+        Index("ix_generation_resource_groups_sort", "sort_order", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserGenerationResourceGroupGrant(Base):
+    """账号级供应商能力分组授权。"""
+
+    __tablename__ = "user_generation_resource_group_grants"
+    __table_args__ = (Index("ix_user_generation_resource_group_grants_group", "resource_group_id"),)
+
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    resource_group_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class CanvasTemplateCategory(Base, TimestampMixin):
     """数据库化画布模板分类，支持全局和用户个人范围。"""
 
@@ -396,6 +430,7 @@ class GenerationConfig(Base, TimestampMixin):
         Index("ix_generation_configs_enabled", "enabled"),
         Index("ix_generation_configs_archived_at", "archived_at"),
         Index("ix_generation_configs_sort", "purpose", "priority", "created_at"),
+        Index("ix_generation_configs_resource_group", "resource_group_id", "purpose", "enabled"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -405,6 +440,10 @@ class GenerationConfig(Base, TimestampMixin):
     provider_profile_id: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,
+    )
+    resource_group_id: Mapped[str] = mapped_column(
+        String(36),
+        default=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     model_settings_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -420,6 +459,10 @@ class GenerationConfig(Base, TimestampMixin):
         back_populates="generation_configs",
         primaryjoin=lambda: child_parent_join(GenerationConfig.provider_profile_id, ProviderProfile.id),
         foreign_keys=lambda: [GenerationConfig.provider_profile_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(GenerationConfig.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [GenerationConfig.resource_group_id],
     )
     state: Mapped[GenerationConfigState | None] = relationship(
         back_populates="generation_config",
@@ -809,6 +852,7 @@ class WorkflowNodeRun(Base):
         String(36),
         nullable=True,
     )
+    resource_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -821,6 +865,10 @@ class WorkflowNodeRun(Base):
         back_populates="node_runs",
         primaryjoin=lambda: child_parent_join(WorkflowNodeRun.node_id, WorkflowNode.id),
         foreign_keys=lambda: [WorkflowNodeRun.node_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(WorkflowNodeRun.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [WorkflowNodeRun.resource_group_id],
     )
 
 
@@ -880,6 +928,7 @@ class CreativeBrief(Base):
     provider_name: Mapped[str] = mapped_column(String(50))
     model_name: Mapped[str] = mapped_column(String(100))
     prompt_version: Mapped[str] = mapped_column(String(32))
+    resource_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     product: Mapped[Product] = relationship(
@@ -891,6 +940,10 @@ class CreativeBrief(Base):
         back_populates="creative_brief",
         primaryjoin=lambda: parent_child_join(CreativeBrief.id, CopySet.creative_brief_id),
         foreign_keys=lambda: [CopySet.creative_brief_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(CreativeBrief.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [CreativeBrief.resource_group_id],
     )
 
 
@@ -913,6 +966,7 @@ class CopySet(Base, TimestampMixin):
     provider_name: Mapped[str] = mapped_column(String(50))
     model_name: Mapped[str] = mapped_column(String(100))
     prompt_version: Mapped[str] = mapped_column(String(32))
+    resource_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -930,6 +984,10 @@ class CopySet(Base, TimestampMixin):
         back_populates="copy_set",
         primaryjoin=lambda: parent_child_join(CopySet.id, PosterVariant.copy_set_id),
         foreign_keys=lambda: [PosterVariant.copy_set_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(CopySet.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [CopySet.resource_group_id],
     )
 
 
@@ -949,6 +1007,7 @@ class PosterVariant(Base):
     storage_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
     storage_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
     storage_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    resource_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     width: Mapped[int] = mapped_column()
     height: Mapped[int] = mapped_column()
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -973,6 +1032,10 @@ class PosterVariant(Base):
     disabled_by: Mapped[AuthUser | None] = relationship(
         primaryjoin=lambda: child_parent_join(PosterVariant.disabled_by_user_id, AuthUser.id),
         foreign_keys=lambda: [PosterVariant.disabled_by_user_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(PosterVariant.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [PosterVariant.resource_group_id],
     )
 
 
@@ -1123,6 +1186,7 @@ class ImageSessionRound(Base):
         nullable=True,
     )
     generation_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    resource_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     candidate_index: Mapped[int] = mapped_column(Integer, default=1)
     candidate_count: Mapped[int] = mapped_column(Integer, default=1)
     base_asset_id: Mapped[str | None] = mapped_column(
@@ -1148,6 +1212,10 @@ class ImageSessionRound(Base):
     base_asset: Mapped[ImageSessionAsset | None] = relationship(
         primaryjoin=lambda: child_parent_join(ImageSessionRound.base_asset_id, ImageSessionAsset.id),
         foreign_keys=lambda: [ImageSessionRound.base_asset_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSessionRound.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [ImageSessionRound.resource_group_id],
     )
 
 
@@ -1190,6 +1258,7 @@ class ImageSessionGenerationTask(Base):
     progress_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_generation_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    resource_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1204,6 +1273,10 @@ class ImageSessionGenerationTask(Base):
     base_asset: Mapped[ImageSessionAsset | None] = relationship(
         primaryjoin=lambda: child_parent_join(ImageSessionGenerationTask.base_asset_id, ImageSessionAsset.id),
         foreign_keys=lambda: [ImageSessionGenerationTask.base_asset_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSessionGenerationTask.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [ImageSessionGenerationTask.resource_group_id],
     )
 
 
@@ -1230,6 +1303,7 @@ class ImageGalleryEntry(Base):
         String(36),
         nullable=True,
     )
+    resource_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
@@ -1254,4 +1328,8 @@ class ImageGalleryEntry(Base):
     round: Mapped[ImageSessionRound | None] = relationship(
         primaryjoin=lambda: child_parent_join(ImageGalleryEntry.image_session_round_id, ImageSessionRound.id),
         foreign_keys=lambda: [ImageGalleryEntry.image_session_round_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageGalleryEntry.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [ImageGalleryEntry.resource_group_id],
     )

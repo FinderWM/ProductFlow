@@ -407,6 +407,128 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
     return None
 ```
 
+## Scenario: Generation resource group scheduling boundary
+
+### 1. Scope / Trigger
+
+- Trigger: changing provider profile/generation config settings, generation scheduling, account grants, workflow
+  generation requests, image-session generation requests, generated-result serializers, settings import/export, or gallery
+  and product history filters.
+- This is a cross-layer contract because `generation_resource_groups`, `generation_configs.resource_group_id`, account
+  grants, durable generation rows, API schemas, and frontend selectors must all agree on the selected group.
+
+### 2. Signatures
+
+- Built-in group id: `DEFAULT_GENERATION_RESOURCE_GROUP_ID = "00000000-0000-0000-0000-000000000100"`.
+- DB table: `generation_resource_groups`
+  - `id: String(36)`
+  - `key: String(80)` unique
+  - `name: String(120)`
+  - `description: Text | null`
+  - `sort_order: int`
+  - `enabled: bool`
+  - `archived_at: datetime | null`
+- DB table: `user_generation_resource_group_grants`
+  - unique `(user_id, resource_group_id)`
+- DB columns:
+  - `generation_configs.resource_group_id: String(36)`
+  - generated-result rows that are shown or filtered by group carry nullable `resource_group_id`; legacy null values
+    display as the built-in default group.
+- API:
+  - `GET/POST/PATCH/DELETE /api/settings/generation-resource-groups`
+  - `GET /api/settings/my-generation-resource-groups`
+  - `GET/PUT /api/rbac/users/{user_id}/generation-resource-groups`
+  - generation submit/status/result DTOs expose `resource_group_id` and `resource_group { id, key, name }`.
+- Runtime selection:
+  - `GenerationConfigSelection(resource_group_id=...)`
+  - `claim_generation_config(session, purpose, resource_group_id=..., generation_config_id=None)`
+
+### 3. Contracts
+
+- `ensure_provider_config_bootstrapped(session)` must ensure the built-in `default` group exists before creating or
+  backfilling generation configs.
+- Existing provider profiles and text/image generation configs belong to the `default` group during migration/bootstrap.
+- Admin users can use every enabled, non-archived group. Non-admin users can use only enabled, non-archived groups granted
+  through `user_generation_resource_group_grants`.
+- User-facing generation entry points must submit exactly one `resource_group_id`. Frontend selectors show available
+  groups only and hide concrete generation config selection for normal generation flows.
+- Backend entry points must validate that the selected group exists, is enabled, is not archived, and is authorized for
+  the actor before enqueueing durable work.
+- Text scheduling can claim only text configs in the selected group; image scheduling can claim only image configs in the
+  selected group. Provider/profile availability, freeze state, and concurrency checks still apply inside that group.
+- Generated briefs, copy sets, poster variants, workflow node runs, image-session tasks, image-session rounds, and gallery
+  entries must serialize a group tag. If a legacy row has `resource_group_id is None`, serializers and default-group
+  filters treat it as `default`.
+- Settings import/export documents include `generation_resource_groups`, and imported generation configs must reference an
+  imported group or fall back to `default` only for legacy payloads that lack group data.
+
+### 4. Validation & Error Matrix
+
+- Missing `resource_group_id` on generation submit -> `400`, group-required detail.
+- Unknown group id -> `400` or typed validation detail stating the group is unavailable.
+- Disabled or archived group -> `400`, unavailable-group detail.
+- Non-admin actor without a grant -> `403` or typed validation detail from the owning generation use case.
+- Group has no currently claimable config for the requested purpose -> durable task remains queued for scheduler retry;
+  the selected group stays recorded on the task/run.
+- `default` group archive or disable attempt -> settings API returns `400`.
+- Imported generation config references a missing group id -> import preview/commit returns `400`.
+- Filtering product history or gallery by `default` includes legacy null-group rows; filtering by another group matches
+  only that exact group id.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a non-admin account granted `campaign` can generate image-chat rounds with `resource_group_id=campaign`, and the
+  scheduler claims only image configs whose `resource_group_id` is `campaign`.
+- Good: an admin sees `default` plus every other enabled group in `/api/settings/my-generation-resource-groups`.
+- Base: local/mock setups have one enabled `default` group with text and image generation configs.
+- Base: older generated rows with null group fields render as `default` and are returned by the default-group filter.
+- Bad: accepting a manual `generation_config_id` from a normal user flow and using it to bypass group authorization.
+- Bad: returning generated result DTOs without a `resource_group` tag because the raw row has a null group id.
+- Bad: authorizing a group through role permissions only; group grants are account-level.
+
+### 6. Tests Required
+
+- Migration/bootstrap test creates `default`, backfills existing generation configs, and preserves legacy result display.
+- Settings API tests cover create/update/archive groups, default-group protection, import/export counts, and generation
+  config group assignment.
+- RBAC tests cover admin all-groups behavior and account-level grant replacement for non-admin users.
+- Scheduler tests cover purpose plus group filtering for automatic claims and manual config compatibility.
+- Workflow and image-session tests cover missing, unauthorized, disabled, archived, and valid group selection.
+- Serializer/filter tests cover product history, workflow status/detail, image-session detail/status, and gallery group
+  tags, including default-filter legacy null rows.
+- Frontend gates must run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` after DTO/selector
+  changes.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+claim = claim_generation_config(session, purpose="image", generation_config_id=request.generation_config_id)
+```
+
+Correct:
+
+```python
+group = require_generation_resource_group_for_user(session, request.resource_group_id, user=actor)
+claim = claim_generation_config(session, purpose="image", resource_group_id=group.id)
+```
+
+Wrong:
+
+```python
+return PosterVariantResponse(resource_group=None, resource_group_id=poster.resource_group_id)
+```
+
+Correct:
+
+```python
+return PosterVariantResponse(
+    resource_group_id=poster.resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    resource_group=serialize_generation_resource_group_tag(group, resource_group_id=poster.resource_group_id),
+)
+```
+
 ## Scenario: Runtime account auth and RBAC boundary
 
 ### 1. Scope / Trigger

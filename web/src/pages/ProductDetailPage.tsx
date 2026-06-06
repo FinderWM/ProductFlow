@@ -55,7 +55,7 @@ import type {
   CanvasTemplateSummary,
   CanvasTemplateScope,
   CanvasTemplateCategory,
-  GenerationConfigOption,
+  GenerationResourceGroup,
   ProductWorkflow,
   ProductWorkflowStatus,
   TailSplitPlan,
@@ -152,6 +152,21 @@ type PendingHistoryAction = {
   direction: "undo" | "redo";
   step: WorkflowHistoryStep;
 };
+
+const RESOURCE_GROUP_REQUIRED_NODE_TYPES = new Set<WorkflowNodeType>([
+  "copy_generation",
+  "image_generation",
+  "tail_splitter",
+]);
+
+function workflowNodeResourceGroupId(node: WorkflowNode): string | null {
+  const value = node.config_json.resource_group_id;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function workflowNodeRequiresResourceGroup(node: WorkflowNode): boolean {
+  return RESOURCE_GROUP_REQUIRED_NODE_TYPES.has(node.node_type);
+}
 
 type WorkflowClipboard = {
   nodeIds: string[];
@@ -274,6 +289,7 @@ export function ProductDetailPage() {
     useState<PendingDeleteAction | null>(null);
   const [pendingHistoryAction, setPendingHistoryAction] = useState<PendingHistoryAction | null>(null);
   const [tailPlanDialogOpen, setTailPlanDialogOpen] = useState(false);
+  const [selectedHistoryResourceGroupId, setSelectedHistoryResourceGroupId] = useState("");
   const [historyActionBusy, setHistoryActionBusy] = useState(false);
   const [error, setError] = useState("");
   const normalizedTemplateSearch = templateSearch.trim();
@@ -334,8 +350,11 @@ export function ProductDetailPage() {
   }, [productGenerateBlocked, productGenerateBlockedTitle, t]);
 
   const historyQuery = useQuery({
-    queryKey: ["product-history", productId],
-    queryFn: () => api.getProductHistory(productId),
+    queryKey: ["product-history", productId, selectedHistoryResourceGroupId || "all"],
+    queryFn: () =>
+      api.getProductHistory(productId, {
+        resource_group_id: selectedHistoryResourceGroupId || null,
+      }),
     enabled: Boolean(productId),
   });
 
@@ -382,9 +401,9 @@ export function ProductDetailPage() {
     queryKey: ["runtime-config"],
     queryFn: api.getRuntimeConfig,
   });
-  const generationConfigOptionsQuery = useQuery({
-    queryKey: ["generation-config-options"],
-    queryFn: api.listGenerationConfigOptions,
+  const generationResourceGroupsQuery = useQuery({
+    queryKey: ["my-generation-resource-groups"],
+    queryFn: api.listMyGenerationResourceGroups,
   });
   const queueOverviewQuery = useQuery({
     queryKey: ["generation-queue"],
@@ -401,9 +420,9 @@ export function ProductDetailPage() {
     () => buildImageSizeOptions(imageGenerationMaxDimension),
     [imageGenerationMaxDimension],
   );
-  const workflowGenerationConfigs = useMemo<GenerationConfigOption[]>(
-    () => generationConfigOptionsQuery.data ?? [],
-    [generationConfigOptionsQuery.data],
+  const workflowResourceGroups = useMemo<GenerationResourceGroup[]>(
+    () => generationResourceGroupsQuery.data ?? [],
+    [generationResourceGroupsQuery.data],
   );
 
   const selectedNode = selectedNodeId
@@ -1883,6 +1902,22 @@ export function ProductDetailPage() {
       showProductGenerateBlockedError();
       return;
     }
+    const targetNodes = startNodeId
+      ? (workflow?.nodes.filter((node) => node.id === startNodeId) ?? [])
+      : (workflow?.nodes ?? []);
+    const missingResourceGroup = targetNodes.some((node) => {
+      if (!workflowNodeRequiresResourceGroup(node)) {
+        return false;
+      }
+      if (selectedNode?.id === node.id) {
+        return !draft.resourceGroupId;
+      }
+      return !workflowNodeResourceGroupId(node);
+    });
+    if (missingResourceGroup) {
+      setError(t("detail.inspector.resourceGroupRequired"));
+      return;
+    }
     try {
       await flushSelectedDraft();
       await runWorkflowMutation.mutateAsync(startNodeId ? { startNodeId, startMode } : undefined);
@@ -2634,7 +2669,7 @@ export function ProductDetailPage() {
           imageGenerationMaxDimension={imageGenerationMaxDimension}
           imageToolAllowedFields={imageToolAllowedFields}
           tailSplitterMaxItems={tailSplitterMaxItems}
-          generationConfigs={workflowGenerationConfigs}
+          resourceGroups={workflowResourceGroups}
           onPreviewImage={setPreviewImage}
           onDraftChange={handleGuardedDraftChange}
           onRun={() => void handleRunWorkflow(selectedNode.id)}
@@ -2661,6 +2696,16 @@ export function ProductDetailPage() {
                   pending: false,
                   title: productGenerateBlockedTitle,
                 }
+              : workflowNodeRequiresResourceGroup(selectedNode) && !draft.resourceGroupId
+                ? {
+                    ...getWorkflowNodeRunActionState(selectedNode, {
+                      runSubmissionPending,
+                      pendingStartNodeId,
+                    }),
+                    disabled: true,
+                    pending: false,
+                    title: t("detail.inspector.resourceGroupRequired"),
+                  }
               : getWorkflowNodeRunActionState(selectedNode, {
                   runSubmissionPending,
                   pendingStartNodeId,
@@ -2699,6 +2744,9 @@ export function ProductDetailPage() {
           posters={posters}
           referenceAssets={referenceAssets}
           artifactCount={artifactCount}
+          resourceGroups={workflowResourceGroups}
+          selectedResourceGroupId={selectedHistoryResourceGroupId}
+          onResourceGroupChange={setSelectedHistoryResourceGroupId}
           selectedReferenceNode={selectedReferenceNode}
           posterSourceAssetIds={posterSourceAssetIds}
           onPreviewImage={setPreviewImage}
@@ -3199,7 +3247,7 @@ export function ProductDetailPage() {
         imageSizeOptions={imageSizeOptions}
         imageGenerationMaxDimension={imageGenerationMaxDimension}
         imageToolAllowedFields={imageToolAllowedFields}
-        generationConfigs={workflowGenerationConfigs}
+        resourceGroups={workflowResourceGroups}
         canReusePublicCopyNode={selectedTailPublicReuseAvailability.canReusePublicCopyNode}
         canReusePublicReferenceNode={selectedTailPublicReuseAvailability.canReusePublicReferenceNode}
         onClose={() => setTailPlanDialogOpen(false)}

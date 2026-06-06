@@ -78,6 +78,7 @@ ARTIFACT_SPECIFIC_CONFIG_KEYS = frozenset(
         "poster_variant_ids",
         "preview_url",
         "product_id",
+        "resource_group_id",
         "source_asset_id",
         "source_asset_ids",
         "source_poster_variant_id",

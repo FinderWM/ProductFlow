@@ -50,6 +50,9 @@ import type {
   GenerationConfig,
   GenerationConfigCreateRequest,
   GenerationConfigUpdateRequest,
+  GenerationResourceGroup,
+  GenerationResourceGroupCreateRequest,
+  GenerationResourceGroupUpdateRequest,
   ProviderModel,
   ProviderProfile,
   ProviderProfileCreateRequest,
@@ -117,6 +120,7 @@ export interface ProviderDrawerViewState {
 
 export interface GenerationConfigDraft {
   id: string | null;
+  resource_group_id: string;
   purpose: "text" | "image";
   name: string;
   provider_kind: TextProviderKind | ImageProviderKind;
@@ -135,6 +139,15 @@ export interface GenerationConfigDraft {
   availability_window_minutes: string;
   failure_threshold: string;
   cooldown_minutes: string;
+}
+
+export interface GenerationResourceGroupDraft {
+  id: string | null;
+  key: string;
+  name: string;
+  description: string;
+  sort_order: string;
+  enabled: boolean;
 }
 
 export interface TextConfigTestDraft {
@@ -591,6 +604,7 @@ function generationConfigsForPurpose(
 function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfigDraft {
   return {
     id: null,
+    resource_group_id: "",
     purpose,
     name: purpose === "text" ? "Text config" : "Image config",
     provider_kind: purpose === "text" ? "mock" : "mock",
@@ -625,6 +639,7 @@ function generationConfigDraft(config: GenerationConfig): GenerationConfigDraft 
         : "mock";
   return {
     id: config.id,
+    resource_group_id: config.resource_group_id,
     purpose: config.purpose,
     name: config.name,
     provider_kind: providerKind,
@@ -689,6 +704,7 @@ export function generationConfigPayloadFromDraft(
             }
           : {};
   return {
+    resource_group_id: draft.resource_group_id || null,
     name: draft.name.trim(),
     purpose: draft.purpose,
     provider_kind: draft.provider_kind,
@@ -701,6 +717,40 @@ export function generationConfigPayloadFromDraft(
     availability_window_minutes: optionalNumberDraftValue(draft.availability_window_minutes),
     failure_threshold: optionalNumberDraftValue(draft.failure_threshold),
     cooldown_minutes: optionalNumberDraftValue(draft.cooldown_minutes),
+  };
+}
+
+function emptyGenerationResourceGroupDraft(): GenerationResourceGroupDraft {
+  return {
+    id: null,
+    key: "",
+    name: "",
+    description: "",
+    sort_order: "100",
+    enabled: true,
+  };
+}
+
+function generationResourceGroupDraft(group: GenerationResourceGroup): GenerationResourceGroupDraft {
+  return {
+    id: group.id,
+    key: group.key,
+    name: group.name,
+    description: group.description ?? "",
+    sort_order: String(group.sort_order),
+    enabled: group.enabled,
+  };
+}
+
+function generationResourceGroupPayloadFromDraft(
+  draft: GenerationResourceGroupDraft,
+): GenerationResourceGroupCreateRequest | GenerationResourceGroupUpdateRequest {
+  return {
+    key: draft.key.trim(),
+    name: draft.name.trim(),
+    description: draft.description.trim() || null,
+    sort_order: numberDraftValue(draft.sort_order, 100),
+    enabled: draft.enabled,
   };
 }
 
@@ -890,12 +940,17 @@ function SettingsMigrationPanel({
               </button>
             </div>
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
               {t("settings.migration.runtimeCount", { count: counts.runtimeConfigCount })}
             </div>
             <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
               {t("settings.migration.profileCount", { count: counts.providerProfileCount })}
+            </div>
+            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+              {t("settings.migration.generationResourceGroupCount", {
+                count: counts.generationResourceGroupCount,
+              })}
             </div>
             <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
               {t("settings.migration.generationConfigCount", { count: counts.generationConfigCount })}
@@ -1388,6 +1443,9 @@ interface ProvidersSectionProps {
   drawerOpen: boolean;
   pending: boolean;
   togglingProfileId: string | null;
+  resourceGroupDrafts: Record<string, GenerationResourceGroupDraft>;
+  resourceGroupPending: boolean;
+  archivingResourceGroupId: string | null;
   onProfileFormChange: (next: ProviderProfileFormState) => void;
   onOpenCreate: () => void;
   onEditProfile: (profile: ProviderProfile) => void;
@@ -1395,6 +1453,9 @@ interface ProvidersSectionProps {
   onSubmitProfile: () => void;
   onDeleteProfile: (profile: ProviderProfile) => void;
   onToggleProfileEnabled: (profileId: string, enabled: boolean) => void;
+  onResourceGroupChange: (key: string, next: GenerationResourceGroupDraft) => void;
+  onSaveResourceGroup: (draft: GenerationResourceGroupDraft) => void;
+  onArchiveResourceGroup: (groupId: string) => void;
 }
 
 function ProvidersSection({
@@ -1404,6 +1465,9 @@ function ProvidersSection({
   drawerOpen,
   pending,
   togglingProfileId,
+  resourceGroupDrafts,
+  resourceGroupPending,
+  archivingResourceGroupId,
   onProfileFormChange,
   onOpenCreate,
   onEditProfile,
@@ -1411,6 +1475,9 @@ function ProvidersSection({
   onSubmitProfile,
   onDeleteProfile,
   onToggleProfileEnabled,
+  onResourceGroupChange,
+  onSaveResourceGroup,
+  onArchiveResourceGroup,
 }: ProvidersSectionProps) {
   const { t } = useI18n();
   const profiles = (data?.profiles ?? []).filter((profile) => !profile.archived_at);
@@ -1484,6 +1551,205 @@ function ProvidersSection({
         onClose={onCloseDrawer}
         onSubmit={onSubmitProfile}
       />
+
+      <GenerationResourceGroupSection
+        groups={data?.generation_resource_groups ?? []}
+        drafts={resourceGroupDrafts}
+        pending={resourceGroupPending}
+        archivingGroupId={archivingResourceGroupId}
+        onChange={onResourceGroupChange}
+        onSave={onSaveResourceGroup}
+        onArchive={onArchiveResourceGroup}
+      />
+    </div>
+  );
+}
+
+function generationResourceGroupDraftKey(draft: GenerationResourceGroupDraft): string {
+  return draft.id ?? "new-generation-resource-group";
+}
+
+function generationResourceGroupStatusClassName(group: GenerationResourceGroupDraft): string {
+  if (group.enabled) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200";
+  }
+  return "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300";
+}
+
+interface GenerationResourceGroupSectionProps {
+  groups: GenerationResourceGroup[];
+  drafts: Record<string, GenerationResourceGroupDraft>;
+  pending: boolean;
+  archivingGroupId: string | null;
+  onChange: (key: string, next: GenerationResourceGroupDraft) => void;
+  onSave: (draft: GenerationResourceGroupDraft) => void;
+  onArchive: (groupId: string) => void;
+}
+
+function GenerationResourceGroupSection({
+  groups,
+  drafts,
+  pending,
+  archivingGroupId,
+  onChange,
+  onSave,
+  onArchive,
+}: GenerationResourceGroupSectionProps) {
+  const { t } = useI18n();
+  const activeGroups = groups
+    .filter((group) => !group.archived_at)
+    .sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name));
+  const newDraftKey = "new-generation-resource-group";
+  const newDraft = drafts[newDraftKey] ?? emptyGenerationResourceGroupDraft();
+  const cards = [
+    ...activeGroups.map((group) => ({
+      key: group.id,
+      group,
+      draft: drafts[group.id] ?? generationResourceGroupDraft(group),
+    })),
+    { key: newDraftKey, group: null, draft: newDraft },
+  ];
+
+  return (
+    <section className={`${PANEL_CLASS} space-y-4`}>
+      <div>
+        <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+          {t("settings.resourceGroup.title")}
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+          {t("settings.resourceGroup.description")}
+        </p>
+      </div>
+      <div className="grid gap-4">
+        {cards.map(({ key, group, draft }) => (
+          <GenerationResourceGroupCard
+            key={key}
+            group={group}
+            draft={draft}
+            pending={pending || archivingGroupId === group?.id}
+            onChange={(next) => onChange(generationResourceGroupDraftKey(next), next)}
+            onSave={() => onSave(draft)}
+            onArchive={group && group.key !== "default" ? () => onArchive(group.id) : undefined}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+interface GenerationResourceGroupCardProps {
+  group: GenerationResourceGroup | null;
+  draft: GenerationResourceGroupDraft;
+  pending: boolean;
+  onChange: (next: GenerationResourceGroupDraft) => void;
+  onSave: () => void;
+  onArchive?: () => void;
+}
+
+function GenerationResourceGroupCard({
+  group,
+  draft,
+  pending,
+  onChange,
+  onSave,
+  onArchive,
+}: GenerationResourceGroupCardProps) {
+  const { t } = useI18n();
+  const isNew = !group;
+  const isDefault = group?.key === "default";
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-[#0b1220] dark:shadow-black/20">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-sm font-semibold text-slate-950 dark:text-white">
+              {isNew ? t("settings.resourceGroup.newGroup") : group.name}
+            </h3>
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${generationResourceGroupStatusClassName(draft)}`}>
+              {draft.enabled ? t("settings.resourceGroup.enabled") : t("settings.resourceGroup.disabled")}
+            </span>
+            {isDefault ? (
+              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
+                {t("settings.resourceGroup.defaultBadge")}
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 font-mono text-xs text-slate-500 dark:text-slate-400">
+            {draft.key || t("settings.resourceGroup.keyPlaceholder")}
+          </p>
+        </div>
+        {onArchive ? (
+          <button
+            type="button"
+            onClick={onArchive}
+            disabled={pending}
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
+          >
+            {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
+            {t("settings.resourceGroup.archive")}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_120px]">
+        <SettingsFormField label={t("settings.resourceGroup.key")}>
+          <input
+            value={draft.key}
+            onChange={(event) => onChange({ ...draft, key: event.target.value })}
+            className={INPUT_CLASS}
+            placeholder={t("settings.resourceGroup.keyPlaceholder")}
+            disabled={isDefault}
+          />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.resourceGroup.name")}>
+          <input
+            value={draft.name}
+            onChange={(event) => onChange({ ...draft, name: event.target.value })}
+            className={INPUT_CLASS}
+            placeholder={t("settings.resourceGroup.namePlaceholder")}
+          />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.resourceGroup.sortOrder")}>
+          <input
+            value={draft.sort_order}
+            onChange={(event) => onChange({ ...draft, sort_order: event.target.value })}
+            className={INPUT_CLASS}
+            type="number"
+          />
+        </SettingsFormField>
+      </div>
+      <div className="mt-3">
+        <SettingsFormField label={t("settings.resourceGroup.descriptionLabel")}>
+          <textarea
+            value={draft.description}
+            onChange={(event) => onChange({ ...draft, description: event.target.value })}
+            className={`${TEXTAREA_CLASS} min-h-20 resize-y`}
+            placeholder={t("settings.resourceGroup.descriptionPlaceholder")}
+          />
+        </SettingsFormField>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-4 border-t border-slate-100 pt-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+        <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
+          />
+          {t("settings.resourceGroup.enabled")}
+        </label>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={pending || !draft.key.trim() || !draft.name.trim()}
+          className={SETTINGS_MAIN_ACTION_CLASS}
+        >
+          {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
+          {isNew ? t("settings.resourceGroup.create") : t("settings.resourceGroup.save")}
+        </button>
+      </div>
     </div>
   );
 }
@@ -2178,8 +2444,14 @@ function GenerationConfigPoolSection({
   const { t } = useI18n();
   const configs = generationConfigsForPurpose(data, purpose);
   const profiles = data?.profiles ?? [];
+  const resourceGroups = (data?.generation_resource_groups ?? []).filter((group) => !group.archived_at);
   const newDraftKey = `new-${purpose}`;
-  const newDraft = drafts[newDraftKey] ?? emptyGenerationConfigDraft(purpose);
+  const newDraft =
+    drafts[newDraftKey] ??
+    ({
+      ...emptyGenerationConfigDraft(purpose),
+      resource_group_id: resourceGroups.find((group) => group.enabled)?.id ?? "",
+    } satisfies GenerationConfigDraft);
   const cards = [
     ...configs.map((config) => ({ key: config.id, config, draft: drafts[config.id] ?? generationConfigDraft(config) })),
     { key: newDraftKey, config: null, draft: newDraft },
@@ -2215,6 +2487,7 @@ function GenerationConfigPoolSection({
             key={key}
             config={config}
             draft={draft}
+            resourceGroups={resourceGroups}
             profiles={providerProfilesForGenerationConfig(profiles, draft)}
             pending={pending || archivingConfigId === config?.id}
             onChange={(next) => onChange(generationConfigDraftKey(next), next)}
@@ -2234,6 +2507,7 @@ function GenerationConfigPoolSection({
 interface GenerationConfigCardProps {
   config: GenerationConfig | null;
   draft: GenerationConfigDraft;
+  resourceGroups: GenerationResourceGroup[];
   profiles: ProviderProfile[];
   pending: boolean;
   onChange: (next: GenerationConfigDraft) => void;
@@ -2248,6 +2522,7 @@ interface GenerationConfigCardProps {
 function GenerationConfigCard({
   config,
   draft,
+  resourceGroups,
   profiles,
   pending,
   onChange,
@@ -2401,6 +2676,29 @@ function GenerationConfigCard({
             placeholder={t("settings.generation.namePlaceholder")}
           />
         </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.resourceGroup")}>
+          <SelectField
+            value={draft.resource_group_id}
+            options={[
+              {
+                value: "",
+                label: resourceGroups.length
+                  ? t("settings.generation.selectResourceGroup")
+                  : t("settings.generation.noResourceGroups"),
+                disabled: true,
+              },
+              ...resourceGroups.map((group) => ({
+                value: group.id,
+                label: group.enabled
+                  ? group.name
+                  : `${group.name} (${t("settings.resourceGroup.disabled")})`,
+                disabled: !group.enabled,
+              })),
+            ]}
+            onChange={(value) => onChange({ ...draft, resource_group_id: value })}
+            radius="lg"
+          />
+        </SettingsFormField>
         <SettingsFormField label={t("settings.provider.apiInterfaceLabel")} helpKey="settingsProviderApiInterface">
           <SelectField
             value={draft.provider_kind}
@@ -2498,7 +2796,12 @@ function GenerationConfigCard({
         <button
           type="button"
           onClick={onSave}
-          disabled={busy || !draft.name.trim() || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
+          disabled={
+            busy ||
+            !draft.name.trim() ||
+            !draft.resource_group_id ||
+            (draft.provider_kind !== "mock" && !draft.provider_profile_id)
+          }
           className={SETTINGS_MAIN_ACTION_CLASS}
         >
           {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
@@ -2627,6 +2930,10 @@ export function SettingsPage() {
   const [togglingProviderProfileId, setTogglingProviderProfileId] = useState<string | null>(null);
   const [generationConfigDrafts, setGenerationConfigDrafts] = useState<Record<string, GenerationConfigDraft>>({});
   const [archivingGenerationConfigId, setArchivingGenerationConfigId] = useState<string | null>(null);
+  const [generationResourceGroupDrafts, setGenerationResourceGroupDrafts] = useState<
+    Record<string, GenerationResourceGroupDraft>
+  >({});
+  const [archivingGenerationResourceGroupId, setArchivingGenerationResourceGroupId] = useState<string | null>(null);
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [importPayload, setImportPayload] = useState<SettingsExportPayload | null>(null);
   const [importPreview, setImportPreview] = useState<SettingsImportPreviewResponse | null>(null);
@@ -2662,9 +2969,11 @@ export function SettingsPage() {
   }, [configQuery.data, resetDraftsFromConfig]);
 
   useEffect(() => {
+    const firstEnabledGroupId =
+      providerConfigQuery.data?.generation_resource_groups.find((group) => group.enabled && !group.archived_at)?.id ?? "";
     const nextDrafts: Record<string, GenerationConfigDraft> = {
-      "new-text": emptyGenerationConfigDraft("text"),
-      "new-image": emptyGenerationConfigDraft("image"),
+      "new-text": { ...emptyGenerationConfigDraft("text"), resource_group_id: firstEnabledGroupId },
+      "new-image": { ...emptyGenerationConfigDraft("image"), resource_group_id: firstEnabledGroupId },
     };
     for (const generationConfig of providerConfigQuery.data?.generation_configs ?? []) {
       if (!generationConfig.archived_at) {
@@ -2672,6 +2981,18 @@ export function SettingsPage() {
       }
     }
     setGenerationConfigDrafts(nextDrafts);
+  }, [providerConfigQuery.data]);
+
+  useEffect(() => {
+    const nextDrafts: Record<string, GenerationResourceGroupDraft> = {
+      "new-generation-resource-group": emptyGenerationResourceGroupDraft(),
+    };
+    for (const group of providerConfigQuery.data?.generation_resource_groups ?? []) {
+      if (!group.archived_at) {
+        nextDrafts[group.id] = generationResourceGroupDraft(group);
+      }
+    }
+    setGenerationResourceGroupDrafts(nextDrafts);
   }, [providerConfigQuery.data]);
 
   const activeMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
@@ -2791,6 +3112,9 @@ export function SettingsPage() {
       }
       await queryClient.invalidateQueries({ queryKey: ["config"] });
       await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      await queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
       await queryClient.invalidateQueries({ queryKey: ["runtime-config"] });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
       await queryClient.invalidateQueries({ queryKey: ["canvas-templates"] });
@@ -2892,8 +3216,10 @@ export function SettingsPage() {
         ? api.updateGenerationConfig(draft.id, payload as GenerationConfigUpdateRequest)
         : api.createGenerationConfig(payload as GenerationConfigCreateRequest);
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
       setError("");
       setSavedMessage(t("settings.generation.saved"));
     },
@@ -2910,8 +3236,10 @@ export function SettingsPage() {
       setError("");
       setSavedMessage("");
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
       setError("");
       setSavedMessage(t("settings.generation.archived"));
     },
@@ -2920,6 +3248,49 @@ export function SettingsPage() {
       setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.archiveFailed"));
     },
     onSettled: () => setArchivingGenerationConfigId(null),
+  });
+
+  const saveGenerationResourceGroupMutation = useMutation({
+    mutationFn: (draft: GenerationResourceGroupDraft) => {
+      const payload = generationResourceGroupPayloadFromDraft(draft);
+      return draft.id
+        ? api.updateGenerationResourceGroup(draft.id, payload as GenerationResourceGroupUpdateRequest)
+        : api.createGenerationResourceGroup(payload as GenerationResourceGroupCreateRequest);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      await queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
+      setError("");
+      setSavedMessage(t("settings.resourceGroup.saved"));
+    },
+    onError: (mutationError) => {
+      setSavedMessage("");
+      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.resourceGroup.saveFailed"));
+    },
+  });
+
+  const archiveGenerationResourceGroupMutation = useMutation({
+    mutationFn: (groupId: string) => api.archiveGenerationResourceGroup(groupId),
+    onMutate: (groupId) => {
+      setArchivingGenerationResourceGroupId(groupId);
+      setError("");
+      setSavedMessage("");
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      await queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
+      setError("");
+      setSavedMessage(t("settings.resourceGroup.archived"));
+    },
+    onError: (mutationError) => {
+      setSavedMessage("");
+      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.resourceGroup.archiveFailed"));
+    },
+    onSettled: () => setArchivingGenerationResourceGroupId(null),
   });
 
   const testTextGenerationConfigMutation = useMutation({
@@ -2977,6 +3348,8 @@ export function SettingsPage() {
     deleteProviderProfileMutation.isPending ||
     updateProviderProfileEnabledMutation.isPending;
   const providerPending = providerProfilePending || saveGenerationConfigMutation.isPending;
+  const resourceGroupPending =
+    saveGenerationResourceGroupMutation.isPending || archiveGenerationResourceGroupMutation.isPending;
 
   const loadingMain = configQuery.isLoading || providerConfigQuery.isLoading;
   const genericSection = ["prompts", "upload", "queue", "security"].includes(activeSection);
@@ -3165,6 +3538,9 @@ export function SettingsPage() {
                         drawerOpen={providerDrawerOpen}
                         pending={providerProfilePending}
                         togglingProfileId={togglingProviderProfileId}
+                        resourceGroupDrafts={generationResourceGroupDrafts}
+                        resourceGroupPending={resourceGroupPending}
+                        archivingResourceGroupId={archivingGenerationResourceGroupId}
                         onProfileFormChange={setProviderProfileForm}
                         onOpenCreate={() => {
                           const next = providerDrawerCreateState();
@@ -3203,6 +3579,18 @@ export function SettingsPage() {
                         }}
                         onToggleProfileEnabled={(profileId, enabled) => {
                           updateProviderProfileEnabledMutation.mutate({ profileId, enabled });
+                        }}
+                        onResourceGroupChange={(key, next) => {
+                          setGenerationResourceGroupDrafts((current) => ({ ...current, [key]: next }));
+                          setSavedMessage("");
+                        }}
+                        onSaveResourceGroup={(draft) => {
+                          setError("");
+                          setSavedMessage("");
+                          saveGenerationResourceGroupMutation.mutate(draft);
+                        }}
+                        onArchiveResourceGroup={(groupId) => {
+                          archiveGenerationResourceGroupMutation.mutate(groupId);
                         }}
                       />
                     ) : null}

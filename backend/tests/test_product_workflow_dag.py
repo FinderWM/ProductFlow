@@ -35,6 +35,7 @@ from productflow_backend.domain.enums import (
     WorkflowNodeType,
 )
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     CopySet,
     GenerationConfigDailyStat,
@@ -52,10 +53,20 @@ from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, TE
 
 _WORKFLOW_NODE_VISUAL_WIDTH = 248
 _WORKFLOW_NODE_VISUAL_HEIGHT = 248
+_GENERATION_RESOURCE_GROUP_NODE_TYPES = {
+    WorkflowNodeType.COPY_GENERATION,
+    WorkflowNodeType.IMAGE_GENERATION,
+    WorkflowNodeType.TAIL_SPLITTER,
+}
 
 
-def _template_config(template_key: str, node_key: str, config_json: dict) -> dict:
-    return {
+def _template_config(
+    template_key: str,
+    node_key: str,
+    node_type: WorkflowNodeType,
+    config_json: dict,
+) -> dict:
+    config = {
         **config_json,
         TEMPLATE_METADATA_CONFIG_KEY: {
             "source": "builtin",
@@ -63,6 +74,11 @@ def _template_config(template_key: str, node_key: str, config_json: dict) -> dic
             "node_key": node_key,
         },
     }
+    if node_type in _GENERATION_RESOURCE_GROUP_NODE_TYPES:
+        config["resource_group_id"] = DEFAULT_GENERATION_RESOURCE_GROUP_ID
+    return config
+
+
 _WORKFLOW_TEMPLATE_CONTEXT_ANCHOR_GAP = 220
 REMOVED_COPY_OUTPUT_KEYS = [
     "derived" + "_fields",
@@ -122,7 +138,7 @@ def test_product_workflow_dag_runs_and_persists_artifacts(configured_env: Path) 
                 "category": "家居",
                 "price": "49.90",
                 "source_note": "免打孔安装，适合厨房和浴室，强调承重和整洁。",
-            }
+            },
         },
     )
     assert updated_context.status_code == 200
@@ -189,9 +205,7 @@ def test_product_workflow_dag_runs_and_persists_artifacts(configured_env: Path) 
     )
     assert upstream_edge.status_code == 201
     default_reference_node = next(
-        node
-        for node in workflow["nodes"]
-        if node["node_type"] == "reference_image" and node["title"] == "参考图"
+        node for node in workflow["nodes"] if node["node_type"] == "reference_image" and node["title"] == "参考图"
     )
     default_target_edge = client.post(
         f"/api/products/{product_id}/workflow/edges",
@@ -512,6 +526,7 @@ def test_real_image_config_uses_provider_even_when_legacy_poster_mode_is_templat
             "provider_name": "capturing",
             "model_name": "gpt-image-2",
             "generation_config_id": image_config.id,
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "provider_response_id": "resp-real-binding",
             "provider_response_status": "completed",
         }
@@ -599,14 +614,10 @@ def test_apply_builtin_scenario_template_appends_real_workflow_nodes_and_edges(
 
     assert response.status_code == 201
     workflow = response.json()
-    insertable_template_nodes = [
-        node for node in template.nodes if node.node_type != WorkflowNodeType.PRODUCT_CONTEXT
-    ]
+    insertable_template_nodes = [node for node in template.nodes if node.node_type != WorkflowNodeType.PRODUCT_CONTEXT]
     assert len(workflow["nodes"]) == len(original["nodes"]) + len(insertable_template_nodes)
     assert len(workflow["edges"]) == len(original["edges"]) + len(template.edges)
-    assert len(
-        [node for node in workflow["nodes"] if node["node_type"] == WorkflowNodeType.PRODUCT_CONTEXT.value]
-    ) == 1
+    assert len([node for node in workflow["nodes"] if node["node_type"] == WorkflowNodeType.PRODUCT_CONTEXT.value]) == 1
     product_context_node = next(node for node in original["nodes"] if node["node_type"] == "product_context")
     assert original_node_ids <= {node["id"] for node in workflow["nodes"]}
     assert original_edges <= {
@@ -639,7 +650,8 @@ def test_apply_builtin_scenario_template_appends_real_workflow_nodes_and_edges(
                 and node["title"] == template_node.title
                 and node["position_x"] == template_node.position_x - min_x + expected_min_x
                 and node["position_y"] == template_node.position_y - min_y + expected_min_y
-                and node["config_json"] == _template_config(template.key, template_node.key, template_node.config_json)
+                and node["config_json"]
+                == _template_config(template.key, template_node.key, template_node.node_type, template_node.config_json)
             ),
             None,
         )
@@ -728,7 +740,8 @@ def test_apply_full_canvas_template_reuses_existing_product_context_node(
                 and node["title"] == template_node.title
                 and node["position_x"] == template_node.position_x - min_x + min_created_x
                 and node["position_y"] == template_node.position_y - min_y + min_created_y
-                and node["config_json"] == _template_config(template.key, template_node.key, template_node.config_json)
+                and node["config_json"]
+                == _template_config(template.key, template_node.key, template_node.node_type, template_node.config_json)
             ),
             None,
         )
@@ -758,10 +771,15 @@ def test_apply_full_canvas_template_reuses_existing_product_context_node(
 
     db_session.expire_all()
     workflow_row = db_session.query(ProductWorkflow).filter_by(product_id=product_id, active=True).one()
-    assert db_session.query(WorkflowNode).filter_by(
-        workflow_id=workflow_row.id,
-        node_type=WorkflowNodeType.PRODUCT_CONTEXT,
-    ).count() == 1
+    assert (
+        db_session.query(WorkflowNode)
+        .filter_by(
+            workflow_id=workflow_row.id,
+            node_type=WorkflowNodeType.PRODUCT_CONTEXT,
+        )
+        .count()
+        == 1
+    )
 
 
 @pytest.mark.parametrize(
@@ -862,13 +880,11 @@ def test_builtin_scenario_template_runs_with_auto_product_context_edges(
         if node["node_type"] == "reference_image" and node["title"] == template.output_slots[0].label
     )
     assert any(
-        edge["source_node_id"] == product_context_node["id"]
-        and edge["target_node_id"] == template_copy_node["id"]
+        edge["source_node_id"] == product_context_node["id"] and edge["target_node_id"] == template_copy_node["id"]
         for edge in applied_workflow["edges"]
     )
     assert any(
-        edge["source_node_id"] == product_context_node["id"]
-        and edge["target_node_id"] == template_image_node["id"]
+        edge["source_node_id"] == product_context_node["id"] and edge["target_node_id"] == template_image_node["id"]
         for edge in applied_workflow["edges"]
     )
 
@@ -948,9 +964,7 @@ def test_apply_builtin_scenario_template_avoids_existing_node_overlap(configured
     assert response.status_code == 201
     workflow = response.json()
     created_nodes = [node for node in workflow["nodes"] if node["id"] not in original_node_ids]
-    insertable_template_nodes = [
-        node for node in template.nodes if node.node_type != WorkflowNodeType.PRODUCT_CONTEXT
-    ]
+    insertable_template_nodes = [node for node in template.nodes if node.node_type != WorkflowNodeType.PRODUCT_CONTEXT]
     assert len(created_nodes) == len(insertable_template_nodes)
     product_context_node = next(node for node in original["nodes"] if node["node_type"] == "product_context")
     assert min(node["position_x"] for node in created_nodes) >= (
@@ -1263,11 +1277,15 @@ def test_user_template_group_preserves_unrun_prompt_config_when_applied(configur
         "version": 2,
         "output_mode": "freeform",
         "purpose": None,
+        "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         "requested_slots": [],
     }
     assert created_by_type["copy_generation"]["status"] == "idle"
     assert created_by_type["copy_generation"]["output_json"] is None
-    assert created_by_type["image_generation"]["config_json"] == image_config
+    assert created_by_type["image_generation"]["config_json"] == {
+        **image_config,
+        "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    }
     assert created_by_type["image_generation"]["status"] == "idle"
     assert created_by_type["image_generation"]["output_json"] is None
 
@@ -1779,6 +1797,7 @@ def test_product_workflow_singleton_context_and_direct_image_run(configured_env:
     assert "至少一个图片/参考图节点" in image_node_after["failure_reason"]
     assert next(node for node in payload["nodes"] if node["id"] == context_node["id"])["node_type"] == "product_context"
 
+
 def test_direct_downstream_run_uses_latest_saved_product_context(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -1816,9 +1835,9 @@ def test_direct_downstream_run_uses_latest_saved_product_context(configured_env:
     first_run = client.post(f"/api/products/{product_id}/workflow/run", json={})
     assert first_run.status_code == 200
     first_payload = _wait_for_workflow_run(client, product_id, status="succeeded")
-    stale_context_output = next(
-        node for node in first_payload["nodes"] if node["id"] == context_node["id"]
-    )["output_json"]
+    stale_context_output = next(node for node in first_payload["nodes"] if node["id"] == context_node["id"])[
+        "output_json"
+    ]
     assert stale_context_output["source_note"] == "旧说明：城市通勤。"
 
     latest_context = client.patch(
@@ -2057,8 +2076,7 @@ def test_product_context_source_image_reaches_image_generation_context(
 
     assert image_output["context_summary"]["reference_image_count"] == 1
     assert any(
-        source["label"] == "商品图" and "bag.png" in source["text"]
-        for source in image_output["context_sources"]
+        source["label"] == "商品图" and "bag.png" in source["text"] for source in image_output["context_sources"]
     )
     assert image_output["context_summary"]["copy_prompt_mode"] == "copy"
     assert len(captured_inputs) == 1
@@ -2181,8 +2199,7 @@ def test_image_generation_collects_product_context_through_upstream_copy_edge(
     assert image_output["context_summary"]["reference_image_count"] == 1
     assert any("折叠露营椅" in source["text"] for source in image_output["context_sources"])
     assert any(
-        source["label"] == "商品图" and "chair.png" in source["text"]
-        for source in image_output["context_sources"]
+        source["label"] == "商品图" and "chair.png" in source["text"] for source in image_output["context_sources"]
     )
     assert len(captured_inputs) == 1
     provider_input = captured_inputs[0]
@@ -2320,6 +2337,7 @@ def test_single_node_workflow_run_reuses_succeeded_upstream_outputs(configured_e
     assert len(product_after.json()["poster_variants"]) == poster_count_before + 1
     assert len(product_after.json()["source_assets"]) == source_asset_count_before + 1
 
+
 def test_single_reference_run_reruns_upstream_when_target_slot_missing_artifact(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -2390,6 +2408,7 @@ def test_single_reference_run_reruns_upstream_when_target_slot_missing_artifact(
     product_after = client.get(f"/api/products/{product_id}")
     assert product_after.status_code == 200
     assert len(product_after.json()["copy_sets"]) == copy_count_before
+
 
 def test_image_generation_runs_without_product_context_edge(
     configured_env: Path,

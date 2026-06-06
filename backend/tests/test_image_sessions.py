@@ -22,6 +22,7 @@ from sqlalchemy import select
 from productflow_backend.config import get_settings
 from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     GenerationConfig,
     GenerationConfigDailyStat,
@@ -45,6 +46,11 @@ def _create_user_client(app, admin_client: TestClient, username: str) -> TestCli
         json={"username": username, "display_name": username.title()},
     )
     assert created_user.status_code == 201
+    grant = admin_client.put(
+        f"/api/rbac/users/{created_user.json()['id']}/generation-resource-groups",
+        json={"resource_group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID]},
+    )
+    assert grant.status_code == 200
     client = TestClient(app)
     password_md5 = _password_md5(f"{username}-password")
     set_password = client.post(
@@ -83,6 +89,7 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     first = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "做一张奶油质感的护手霜广告图，柔光，白底，产品居中",
             "size": "1024x1024",
         },
@@ -109,6 +116,7 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     missing_base = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "保持同样产品和光线，把背景改成浴室台面，增加一点水珠",
             "size": "1024x1024",
         },
@@ -119,6 +127,7 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     second = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "保持同样产品和光线，把背景改成浴室台面，增加一点水珠",
             "size": "1024x1024",
             "base_asset_id": first_asset_id,
@@ -146,7 +155,8 @@ def test_generation_config_options_use_runtime_rbac_without_settings_permission(
     payload = options.json()
     assert {item["purpose"] for item in payload} == {"text", "image"}
     assert all(
-        set(item) == {"id", "purpose", "name", "provider_kind", "enabled", "priority", "frozen_until"}
+        set(item)
+        == {"id", "resource_group_id", "purpose", "name", "provider_kind", "enabled", "priority", "frozen_until"}
         for item in payload
     )
 
@@ -165,9 +175,8 @@ def test_prompt_polish_uses_text_generation_config_and_updates_stats(configured_
     response = client.post(
         "/api/image-sessions/prompt-polish",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "一张白底护手霜主图",
-            "generation_config_mode": "manual",
-            "generation_config_id": text_config_id,
         },
     )
     assert response.status_code == 200
@@ -203,12 +212,13 @@ def test_image_session_generation_task_rejects_manual_non_image_config(
     assert text_config_id is not None
     image_session = create_image_session(db_session, product_id=None, title="手动配置校验")
 
-    with pytest.raises(BusinessValidationError, match="生图任务只能使用图片生成配置"):
+    with pytest.raises(BusinessValidationError, match="生成入口只能选择供应商生成分组"):
         create_image_session_generation_task(
             db_session,
             image_session_id=image_session.id,
             prompt="白底产品图",
             size="1024x1024",
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             generation_config_mode="manual",
             generation_config_id=text_config_id,
         )
@@ -234,7 +244,11 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     assert created.status_code == 201
     response = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "只创建任务，不等待 provider", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "只创建任务，不等待 provider",
+            "size": "1024x1024",
+        },
     )
 
     assert response.status_code == 202
@@ -267,7 +281,11 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
 
     duplicate_without_base = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "第一张还没完成时不能再无基图提交", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "第一张还没完成时不能再无基图提交",
+            "size": "1024x1024",
+        },
     )
     assert duplicate_without_base.status_code == 400
     assert duplicate_without_base.json()["detail"] == "后续生图必须选择一张本会话已生成图片作为基图"
@@ -291,6 +309,7 @@ def test_first_queued_image_session_task_without_base_still_executes_if_later_ta
         image_session_id=image_session.id,
         prompt="第一张基础图",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     first_task_id = result.task.id
 
@@ -337,7 +356,7 @@ def test_image_session_status_returns_lightweight_task_snapshot(
     session_id = created.json()["id"]
     submitted = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "只轮询状态", "size": "1024x1024"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "只轮询状态", "size": "1024x1024"},
     )
     assert submitted.status_code == 202
     task_id = submitted.json()["generation_tasks"][0]["id"]
@@ -374,9 +393,10 @@ def test_image_session_status_returns_lightweight_task_snapshot(
     assert completed_payload["generation_tasks"][0]["is_cancelable"] is False
     assert completed_payload["generation_tasks"][0]["progress_phase"] == "succeeded"
     assert completed_payload["generation_tasks"][0]["progress_updated_at"] is not None
-    assert completed_payload["generation_tasks"][0]["result_generation_group_id"] == completed_payload[
-        "latest_generation_group_id"
-    ]
+    assert (
+        completed_payload["generation_tasks"][0]["result_generation_group_id"]
+        == completed_payload["latest_generation_group_id"]
+    )
 
 
 def test_image_session_generation_accepts_per_request_tool_options_and_exposes_provider_notes(
@@ -401,9 +421,7 @@ def test_image_session_generation_accepts_per_request_tool_options_and_exposes_p
             generated_at=datetime.now(UTC),
             provider_request_json={"tool_options": kwargs.get("tool_options")},
             provider_output_json={
-                "_productflow": {
-                    "notes": [{"kind": "fallback", "message": "供应商不支持部分参数，已按基础参数完成。"}]
-                }
+                "_productflow": {"notes": [{"kind": "fallback", "message": "供应商不支持部分参数，已按基础参数完成。"}]}
             },
         )
 
@@ -420,6 +438,7 @@ def test_image_session_generation_accepts_per_request_tool_options_and_exposes_p
     response = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "每轮覆盖 tool 参数",
             "size": "1024x1024",
             "tool_options": {
@@ -472,6 +491,7 @@ def test_image_session_generation_accepts_per_request_tool_options_and_exposes_p
     explicitly_allowed = client.post(
         f"/api/image-sessions/{explicit_session.json()['id']}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "显式允许 n",
             "size": "1024x1024",
             "tool_options": {"quality": "high", "n": 2},
@@ -484,6 +504,7 @@ def test_image_session_generation_accepts_per_request_tool_options_and_exposes_p
     invalid = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "非法 tool 参数",
             "size": "1024x1024",
             "tool_options": {"output_compression": 101},
@@ -524,7 +545,11 @@ def test_image_session_generation_exposes_actual_size_when_provider_downscales(
     assert created.status_code == 201
     response = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "请求 2K 但供应商返回 1K", "size": "2048x2048"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "请求 2K 但供应商返回 1K",
+            "size": "2048x2048",
+        },
     )
 
     assert response.status_code == 202
@@ -556,7 +581,11 @@ def test_image_session_generate_enqueue_failure_marks_task_failed(
     assert created.status_code == 201
     response = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "入队失败应落库", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "入队失败应落库",
+            "size": "1024x1024",
+        },
     )
 
     assert response.status_code == 503
@@ -591,7 +620,7 @@ def test_image_session_manual_retry_resets_failed_task_and_enqueues(
     session_id = created.json()["id"]
     submitted = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "先失败再重试", "size": "1024x1024"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "先失败再重试", "size": "1024x1024"},
     )
     assert submitted.status_code == 202
     task_id = submitted.json()["generation_tasks"][0]["id"]
@@ -652,7 +681,7 @@ def test_image_session_manual_cancel_marks_active_task_cancelled_and_worker_noop
     session_id = created.json()["id"]
     submitted = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "先提交再取消", "size": "1024x1024"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "先提交再取消", "size": "1024x1024"},
     )
     assert submitted.status_code == 202
     task_id = submitted.json()["generation_tasks"][0]["id"]
@@ -738,6 +767,7 @@ def test_image_session_generation_cancel_after_file_save_does_not_persist_round_
         image_session_id=image_session.id,
         prompt="provider 已返回但保存前后被取消",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     task_id = result.task.id
     result.task.status = JobStatus.RUNNING
@@ -789,6 +819,7 @@ def test_image_session_generation_cancelled_task_is_not_overwritten_by_late_fail
         image_session_id=image_session.id,
         prompt="取消后 provider 才报错",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     result.task.status = JobStatus.CANCELLED
     result.task.failure_reason = IMAGE_SESSION_CANCELLED_REASON
@@ -835,7 +866,11 @@ def test_image_session_manual_cancel_rejects_terminal_task(
     session_id = created.json()["id"]
     submitted = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "创建任务后改为成功", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "创建任务后改为成功",
+            "size": "1024x1024",
+        },
     )
     assert submitted.status_code == 202
     task_id = submitted.json()["generation_tasks"][0]["id"]
@@ -873,7 +908,11 @@ def test_image_session_manual_retry_rejects_non_failed_task(
     session_id = created.json()["id"]
     submitted = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "queued 不能重试", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "queued 不能重试",
+            "size": "1024x1024",
+        },
     )
     assert submitted.status_code == 202
     task_id = submitted.json()["generation_tasks"][0]["id"]
@@ -905,7 +944,11 @@ def test_image_session_manual_retry_rejects_non_retryable_failed_task(
     session_id = created.json()["id"]
     submitted = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "创建后改成不可重试失败", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "创建后改成不可重试失败",
+            "size": "1024x1024",
+        },
     )
     assert submitted.status_code == 202
     task_id = submitted.json()["generation_tasks"][0]["id"]
@@ -947,7 +990,7 @@ def test_image_session_manual_retry_enqueue_failure_keeps_task_retryable(
     session_id = created.json()["id"]
     submitted = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "创建任务", "size": "1024x1024"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "创建任务", "size": "1024x1024"},
     )
     assert submitted.status_code == 202
     task_id = submitted.json()["generation_tasks"][0]["id"]
@@ -1007,7 +1050,11 @@ def test_image_session_worker_auto_retry_caps_and_uses_generic_safe_reason(
     assert created.status_code == 201
     response = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "这次 provider 会失败", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "这次 provider 会失败",
+            "size": "1024x1024",
+        },
     )
 
     assert response.status_code == 202
@@ -1059,6 +1106,7 @@ def test_image_session_worker_auto_retry_exposes_last_failure_metadata(
         image_session_id=image_session.id,
         prompt="第一次超时后排队重试",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     execute_image_session_generation_task(result.task.id)
@@ -1109,6 +1157,7 @@ def test_image_session_worker_non_retryable_policy_failure_stops_without_auto_re
         image_session_id=image_session.id,
         prompt="策略拒绝不自动重试",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     monkeypatch.setattr(
         "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
@@ -1168,6 +1217,7 @@ def test_image_session_worker_non_retryable_parameter_failure_stops_without_auto
         image_session_id=image_session.id,
         prompt="参数不支持不自动重试",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     execute_image_session_generation_task(result.task.id)
@@ -1204,7 +1254,11 @@ def test_image_session_worker_exposes_safe_provider_failure_detail(
     assert created.status_code == 201
     response = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "这次 provider 会返回安全失败详情", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "这次 provider 会返回安全失败详情",
+            "size": "1024x1024",
+        },
     )
 
     assert response.status_code == 202
@@ -1241,7 +1295,11 @@ def test_image_session_worker_categorizes_wrapped_connection_failure(
     assert created.status_code == 201
     response = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "这次 provider 会断流", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "这次 provider 会断流",
+            "size": "1024x1024",
+        },
     )
 
     assert response.status_code == 202
@@ -1280,6 +1338,7 @@ def test_image_session_worker_surfaces_completed_text_without_image_reason(
         image_session_id=image_session.id,
         prompt="供应商完成但只返回文字",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     execute_image_session_generation_task(result.task.id)
@@ -1333,6 +1392,7 @@ def test_image_session_worker_partial_retry_continues_remaining_candidates_witho
         image_session_id=image_session.id,
         prompt="生成两张，第二张超时",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         generation_count=2,
     )
 
@@ -1391,6 +1451,7 @@ def test_image_session_worker_marks_task_failed_when_time_limit_raises_outside_c
         image_session_id=image_session.id,
         prompt="进入候选循环前超时",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     execute_image_session_generation_task(result.task.id)
@@ -1430,6 +1491,7 @@ def test_image_session_worker_failure_settles_task_when_parent_session_deleted(
         image_session_id=image_session.id,
         prompt="provider 失败时父会话可能已经不在",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     db_session.execute(delete(ImageSession).where(ImageSession.id == image_session.id))
@@ -1491,6 +1553,7 @@ def test_image_session_worker_failure_settlement_retries_after_stale_data_error(
         image_session_id=image_session.id,
         prompt="失败收口期间 ORM stale",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         generation_count=2,
     )
 
@@ -1559,6 +1622,7 @@ def test_image_session_worker_persists_provider_progress_heartbeat(
         image_session_id=image_session.id,
         prompt="provider polling 更新 heartbeat",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     execute_image_session_generation_task(result.task.id)
@@ -1594,6 +1658,7 @@ def test_image_session_worker_duplicate_message_noops_terminal_task(
         image_session_id=image_session.id,
         prompt="重复 worker 消息只执行一次",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     execute_image_session_generation_task(result.task.id)
@@ -1625,6 +1690,7 @@ def test_image_session_worker_duplicate_message_noops_running_task(
         image_session_id=image_session.id,
         prompt="running 状态不应重复执行",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     result.task.status = JobStatus.RUNNING
     db_session.commit()
@@ -1715,7 +1781,7 @@ def test_image_session_branch_uses_selected_base_and_references_only(configured_
 
     first = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "第一张基础图", "size": "1024x1024"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "第一张基础图", "size": "1024x1024"},
     )
     assert first.status_code == 202
     first_round = next(round_item for round_item in first.json()["rounds"] if round_item["prompt"] == "第一张基础图")
@@ -1735,6 +1801,7 @@ def test_image_session_branch_uses_selected_base_and_references_only(configured_
     branched = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "只从第一张和第二张参考图继续",
             "size": "1024x1024",
             "base_asset_id": first_asset_id,
@@ -1814,6 +1881,7 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
         image_session_id=image_session.id,
         prompt="第一张基础图",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     first_asset_id = first.rounds[-1].generated_asset_id
     assert first_asset_id is not None
@@ -1835,6 +1903,7 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
         image_session_id=image_session.id,
         prompt=branch_prompt,
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         base_asset_id=first_asset_id,
         selected_reference_asset_ids=[reference_ids[1]],
         generation_count=1,
@@ -1910,6 +1979,7 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
             generated_at=datetime.now(UTC),
             provider_response_id="gemini-response",
             provider_request_json={
+                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
                 "prompt": prompt,
                 "size": size,
                 "reference_image_count": len(references),
@@ -1931,6 +2001,7 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
         image_session_id=image_session.id,
         prompt="第一张基础图",
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     first_asset_id = first.rounds[-1].generated_asset_id
     assert first_asset_id is not None
@@ -1952,6 +2023,7 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
         image_session_id=image_session.id,
         prompt=branch_prompt,
         size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         base_asset_id=first_asset_id,
         selected_reference_asset_ids=[reference_ids[1]],
         generation_count=1,
@@ -1991,11 +2063,11 @@ def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Pat
 
     generated = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "生成图", "size": "1024x1024"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "生成图", "size": "1024x1024"},
     )
     other_generated = client.post(
         f"/api/image-sessions/{other_session_id}/generate",
-        json={"prompt": "其它生成图", "size": "1024x1024"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "其它生成图", "size": "1024x1024"},
     )
     assert generated.status_code == 202
     assert other_generated.status_code == 202
@@ -2019,14 +2091,24 @@ def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Pat
 
     base_wrong_session = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "错会话基图", "size": "1024x1024", "base_asset_id": other_generated_asset_id},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "错会话基图",
+            "size": "1024x1024",
+            "base_asset_id": other_generated_asset_id,
+        },
     )
     assert base_wrong_session.status_code == 404
     assert base_wrong_session.json()["detail"] == "会话图片不存在"
 
     base_wrong_kind = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "错类型基图", "size": "1024x1024", "base_asset_id": reference_asset_id},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "错类型基图",
+            "size": "1024x1024",
+            "base_asset_id": reference_asset_id,
+        },
     )
     assert base_wrong_kind.status_code == 400
     assert base_wrong_kind.json()["detail"] == "只能从会话生成图继续"
@@ -2034,6 +2116,7 @@ def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Pat
     reference_wrong_session = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "错会话参考图",
             "size": "1024x1024",
             "base_asset_id": generated_asset_id,
@@ -2046,6 +2129,7 @@ def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Pat
     reference_wrong_kind = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "错类型参考图",
             "size": "1024x1024",
             "base_asset_id": generated_asset_id,
@@ -2057,18 +2141,16 @@ def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Pat
 
     too_many_upload = client.post(
         f"/api/image-sessions/{session_id}/reference-images",
-        files=[
-            ("reference_images", (f"ref-{index}.png", _make_demo_image_bytes(), "image/png"))
-            for index in range(6)
-        ],
+        files=[("reference_images", (f"ref-{index}.png", _make_demo_image_bytes(), "image/png")) for index in range(6)],
     )
     assert too_many_upload.status_code == 200
-    reference_ids = [
-        asset["id"] for asset in too_many_upload.json()["assets"] if asset["kind"] == "reference_upload"
-    ][-6:]
+    reference_ids = [asset["id"] for asset in too_many_upload.json()["assets"] if asset["kind"] == "reference_upload"][
+        -6:
+    ]
     too_many = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "上下文太多",
             "size": "1024x1024",
             "base_asset_id": generated_asset_id,
@@ -2080,7 +2162,12 @@ def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Pat
 
     bad_count = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "数量非法", "size": "1024x1024", "generation_count": 11},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "数量非法",
+            "size": "1024x1024",
+            "generation_count": 11,
+        },
     )
     assert bad_count.status_code == 422
 
@@ -2101,7 +2188,12 @@ def test_image_session_multi_candidate_generation_persists_one_round_per_candida
 
     generated = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "同一提示词出三张候选", "size": "1024x1024", "generation_count": 3},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "同一提示词出三张候选",
+            "size": "1024x1024",
+            "generation_count": 3,
+        },
     )
     assert generated.status_code == 202
     rounds = generated.json()["rounds"]
@@ -2173,7 +2265,12 @@ def test_image_session_openai_images_candidate_count_sets_provider_batch_n(
     assert created.status_code == 201
     generated = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
-        json={"prompt": "同一请求出十张候选", "size": "1024x1024", "generation_count": 10},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "同一请求出十张候选",
+            "size": "1024x1024",
+            "generation_count": 10,
+        },
     )
 
     assert generated.status_code == 202
@@ -2235,7 +2332,11 @@ def test_image_session_generation_accepts_custom_size_and_rejects_invalid_dimens
 
     generated = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "做一张 16:9 展示图", "size": "1280x720"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "做一张 16:9 展示图",
+            "size": "1280x720",
+        },
     )
     assert generated.status_code == 202
     assert generated.json()["rounds"][-1]["size"] == "1280x720"
@@ -2243,28 +2344,43 @@ def test_image_session_generation_accepts_custom_size_and_rejects_invalid_dimens
 
     non_multiple = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "供应商 16 倍数校准", "size": "1500x800", "base_asset_id": generated_asset_id},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "供应商 16 倍数校准",
+            "size": "1500x800",
+            "base_asset_id": generated_asset_id,
+        },
     )
     assert non_multiple.status_code == 202
     assert non_multiple.json()["rounds"][-1]["size"] == "1504x800"
 
     undersized = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "供应商下限回退", "size": "64x64", "base_asset_id": generated_asset_id},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "供应商下限回退",
+            "size": "64x64",
+            "base_asset_id": generated_asset_id,
+        },
     )
     assert undersized.status_code == 202
     assert undersized.json()["rounds"][-1]["size"] == "512x512"
 
     zero = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "尺寸非法", "size": "0x720"},
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "尺寸非法", "size": "0x720"},
     )
     assert zero.status_code == 422
     assert "宽高必须大于 0" in zero.text
 
     oversized = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "尺寸过大", "size": "5000x5000", "base_asset_id": generated_asset_id},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "尺寸过大",
+            "size": "5000x5000",
+            "base_asset_id": generated_asset_id,
+        },
     )
     assert oversized.status_code == 202
     assert oversized.json()["rounds"][-1]["size"] == "2880x2880"
@@ -2301,6 +2417,7 @@ def test_image_session_reference_image_can_be_deleted(configured_env: Path, db_s
     assert db_session.get(ImageSessionAsset, reference_asset["id"]) is None
     assert not reference_path.exists()
 
+
 def test_image_session_can_be_deleted_with_files(configured_env: Path, db_session) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -2320,7 +2437,11 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
     assert upload.status_code == 200
     generated = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "做一张白底商品图", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "做一张白底商品图",
+            "size": "1024x1024",
+        },
     )
     assert generated.status_code == 202
 
@@ -2354,6 +2475,7 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
     assert all(path.exists() for path in asset_paths)
     assert session_root.exists()
 
+
 def test_image_session_result_can_write_back_to_product(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -2375,7 +2497,11 @@ def test_image_session_result_can_write_back_to_product(configured_env: Path) ->
 
     generated = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "做一张高级浴室台面护手霜广告图", "size": "1024x1024"},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "做一张高级浴室台面护手霜广告图",
+            "size": "1024x1024",
+        },
     )
     assert generated.status_code == 202
     generated_payload = generated.json()

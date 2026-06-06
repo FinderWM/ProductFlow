@@ -925,6 +925,8 @@ def run_product_workflow_endpoint(
         product_id=product_id,
         start_node_id=payload.start_node_id if payload else None,
         start_mode=payload.start_mode if payload else "from_node",
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
     )
     return serialize_product_workflow(workflow)
 
@@ -953,7 +955,13 @@ def retry_product_workflow_run_endpoint(
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_GENERATE)),
 ) -> ProductWorkflowResponse:
     _ensure_product_access(session, product_id, current_user, mutate=True)
-    workflow = retry_product_workflow_run(session, product_id=product_id, run_id=run_id)
+    workflow = retry_product_workflow_run(
+        session,
+        product_id=product_id,
+        run_id=run_id,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
     return serialize_product_workflow(workflow)
 
 
@@ -968,5 +976,10 @@ def retry_failed_workflow_nodes_endpoint(
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_GENERATE)),
 ) -> ProductWorkflowResponse:
     _ensure_product_access(session, product_id, current_user, mutate=True)
-    workflow = submit_failed_workflow_nodes_run(session, product_id=product_id)
+    workflow = submit_failed_workflow_nodes_run(
+        session,
+        product_id=product_id,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
     return serialize_product_workflow(workflow)

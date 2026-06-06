@@ -37,7 +37,6 @@ import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
-import type { ParameterHelpKey } from "../lib/parameterHelp";
 import { useI18n } from "../lib/preferences";
 import {
   API_GALLERY_WRITE,
@@ -100,8 +99,7 @@ import type {
   ImageSessionListResponse,
   ImageSessionStatus,
   ImageToolOptions,
-  GenerationConfigOption,
-  GenerationConfigSelectionMode,
+  GenerationResourceGroup,
   ModerationFields,
 } from "../lib/types";
 
@@ -126,10 +124,7 @@ interface ImageChatRouteState {
   toolOptions: ImageToolOptions;
   settingsTab: ImageGenerationSettingsTab;
   targetProductId: string;
-  imageGenerationConfigMode: GenerationConfigSelectionMode;
-  selectedImageGenerationConfigId: string | null;
-  promptPolishConfigMode: GenerationConfigSelectionMode;
-  selectedPromptPolishConfigId: string | null;
+  selectedResourceGroupId: string | null;
 }
 
 const imageChatRouteStateCache = new Map<string, ImageChatRouteState>();
@@ -180,13 +175,10 @@ function hasAdminReadonlyResource(
   return resources.some((resource) => isAdminReadonlyResource(user, resource));
 }
 
-function generationConfigOptionLabel(config: GenerationConfigOption, disabledLabel: string, frozenLabel: string): string {
-  const markers = [
-    !config.enabled ? disabledLabel : "",
-    config.frozen_until ? frozenLabel : "",
-  ].filter(Boolean);
+function resourceGroupOptionLabel(group: GenerationResourceGroup, disabledLabel: string): string {
+  const markers = [!group.enabled ? disabledLabel : ""].filter(Boolean);
   const suffix = markers.length ? ` (${markers.join(" · ")})` : "";
-  return `${config.name}${suffix}`;
+  return `${group.name}${suffix}`;
 }
 
 type PendingDeleteAction =
@@ -241,17 +233,8 @@ export function ImageChatPage() {
   const [settingsTab, setSettingsTab] = useState<ImageGenerationSettingsTab>(
     () => readImageChatRouteState(routeStateScope)?.settingsTab ?? "basic",
   );
-  const [imageGenerationConfigMode, setImageGenerationConfigMode] = useState<GenerationConfigSelectionMode>(
-    () => readImageChatRouteState(routeStateScope)?.imageGenerationConfigMode ?? "auto",
-  );
-  const [selectedImageGenerationConfigId, setSelectedImageGenerationConfigId] = useState<string | null>(
-    () => readImageChatRouteState(routeStateScope)?.selectedImageGenerationConfigId ?? null,
-  );
-  const [promptPolishConfigMode, setPromptPolishConfigMode] = useState<GenerationConfigSelectionMode>(
-    () => readImageChatRouteState(routeStateScope)?.promptPolishConfigMode ?? "auto",
-  );
-  const [selectedPromptPolishConfigId, setSelectedPromptPolishConfigId] = useState<string | null>(
-    () => readImageChatRouteState(routeStateScope)?.selectedPromptPolishConfigId ?? null,
+  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(
+    () => readImageChatRouteState(routeStateScope)?.selectedResourceGroupId ?? null,
   );
   const [titleDraft, setTitleDraft] = useState("");
   const [renameEnabled, setRenameEnabled] = useState(false);
@@ -295,21 +278,15 @@ export function ImageChatPage() {
       toolOptions,
       settingsTab,
       targetProductId,
-      imageGenerationConfigMode,
-      selectedImageGenerationConfigId,
-      promptPolishConfigMode,
-      selectedPromptPolishConfigId,
+      selectedResourceGroupId,
     });
   }, [
     branchBaseAssetId,
     draft,
     generationCount,
-    imageGenerationConfigMode,
-    promptPolishConfigMode,
     routeStateScope,
     selectedGeneratedAssetId,
-    selectedImageGenerationConfigId,
-    selectedPromptPolishConfigId,
+    selectedResourceGroupId,
     selectedReferenceAssetIds,
     selectedSessionId,
     selectedTaskPlaceholderId,
@@ -376,9 +353,9 @@ export function ImageChatPage() {
     queryFn: api.getRuntimeConfig,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
-  const generationConfigOptionsQuery = useQuery({
-    queryKey: ["generation-config-options"],
-    queryFn: api.listGenerationConfigOptions,
+  const generationResourceGroupsQuery = useQuery({
+    queryKey: ["my-generation-resource-groups"],
+    queryFn: api.listMyGenerationResourceGroups,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
 
@@ -391,13 +368,9 @@ export function ImageChatPage() {
     () => buildImageSizeOptions(imageGenerationMaxDimension),
     [imageGenerationMaxDimension],
   );
-  const imageGenerationConfigs = useMemo(
-    () => generationConfigOptionsQuery.data?.filter((config) => config.purpose === "image") ?? [],
-    [generationConfigOptionsQuery.data],
-  );
-  const promptPolishConfigs = useMemo(
-    () => generationConfigOptionsQuery.data?.filter((config) => config.purpose === "text") ?? [],
-    [generationConfigOptionsQuery.data],
+  const resourceGroups = useMemo(
+    () => generationResourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [],
+    [generationResourceGroupsQuery.data],
   );
   const currentProduct = isProductMode
     ? (productQuery.data ?? null)
@@ -426,24 +399,16 @@ export function ImageChatPage() {
   }
 
   useEffect(() => {
-    if (
-      selectedImageGenerationConfigId &&
-      !imageGenerationConfigs.some((config) => config.id === selectedImageGenerationConfigId)
-    ) {
-      setSelectedImageGenerationConfigId(null);
-      setImageGenerationConfigMode("auto");
+    if (!resourceGroups.length) {
+      if (selectedResourceGroupId) {
+        setSelectedResourceGroupId(null);
+      }
+      return;
     }
-  }, [imageGenerationConfigs, selectedImageGenerationConfigId]);
-
-  useEffect(() => {
-    if (
-      selectedPromptPolishConfigId &&
-      !promptPolishConfigs.some((config) => config.id === selectedPromptPolishConfigId)
-    ) {
-      setSelectedPromptPolishConfigId(null);
-      setPromptPolishConfigMode("auto");
+    if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
+      setSelectedResourceGroupId(resourceGroups[0].id);
     }
-  }, [promptPolishConfigs, selectedPromptPolishConfigId]);
+  }, [resourceGroups, selectedResourceGroupId]);
 
   function resetImageSessionSelection() {
     setSelectedGeneratedAssetId(null);
@@ -644,14 +609,7 @@ export function ImageChatPage() {
   }, [branchBaseAssetId, imageSession]);
   const baseRequirementMessage =
     requiresGenerationBase && !branchBaseRound ? t("chat.baseRequired") : "";
-  const imageGenerationConfigRequirementMessage =
-    imageGenerationConfigMode === "manual" && !selectedImageGenerationConfigId
-      ? t("chat.imageGenerationConfigRequired")
-      : "";
-  const promptPolishConfigRequirementMessage =
-    promptPolishConfigMode === "manual" && !selectedPromptPolishConfigId
-      ? t("chat.promptPolishConfigRequired")
-      : "";
+  const resourceGroupRequirementMessage = !selectedResourceGroupId ? t("chat.resourceGroupRequired") : "";
 
   const sourceImage = useMemo(
     () => productQuery.data?.source_assets.find((asset) => asset.kind === "original_image") ?? null,
@@ -889,8 +847,9 @@ export function ImageChatPage() {
       assertImageChatActionAllowed(generationSettingsBlockedTitle);
       return api.polishImageSessionPrompt({
         prompt,
-        generation_config_mode: promptPolishConfigMode,
-        generation_config_id: promptPolishConfigMode === "manual" ? selectedPromptPolishConfigId : null,
+        resource_group_id: selectedResourceGroupId ?? "",
+        generation_config_mode: "auto",
+        generation_config_id: null,
       });
     },
     onSuccess: (response) => {
@@ -947,7 +906,7 @@ export function ImageChatPage() {
     !draft.trim() ||
     generateMutation.isPending ||
     Boolean(generationBlockedTitle) ||
-    Boolean(baseRequirementMessage || imageGenerationConfigRequirementMessage);
+    Boolean(baseRequirementMessage || resourceGroupRequirementMessage);
 
   const attachMutation = useMutation({
     mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; productId?: string }) => {
@@ -1022,8 +981,8 @@ export function ImageChatPage() {
       setErrorMessage(baseRequirementMessage);
       return;
     }
-    if (imageGenerationConfigRequirementMessage) {
-      setErrorMessage(imageGenerationConfigRequirementMessage);
+    if (resourceGroupRequirementMessage) {
+      setErrorMessage(resourceGroupRequirementMessage);
       return;
     }
     const selectedReferenceIds = pruneSelectedReferenceIds(
@@ -1038,8 +997,9 @@ export function ImageChatPage() {
       selected_reference_asset_ids: selectedReferenceIds,
       generation_count: clampGenerationCount(generationCount),
       tool_options: compactedToolOptions,
-      generation_config_mode: imageGenerationConfigMode,
-      generation_config_id: imageGenerationConfigMode === "manual" ? selectedImageGenerationConfigId : null,
+      resource_group_id: selectedResourceGroupId ?? "",
+      generation_config_mode: "auto",
+      generation_config_id: null,
     };
     const signature = buildImageGenerationSubmitSignature(payload);
     const now = Date.now();
@@ -1068,8 +1028,8 @@ export function ImageChatPage() {
       setErrorMessage(generationSettingsBlockedTitle);
       return;
     }
-    if (promptPolishConfigRequirementMessage) {
-      setErrorMessage(promptPolishConfigRequirementMessage);
+    if (resourceGroupRequirementMessage) {
+      setErrorMessage(resourceGroupRequirementMessage);
       return;
     }
     polishPromptMutation.mutate(prompt);
@@ -1130,7 +1090,11 @@ export function ImageChatPage() {
       return;
     }
     pendingGeneratedRoundCountRef.current = imageSession.rounds.length;
-    generateMutation.mutate(imageGenerationTaskSubmitPayload(task));
+    const payload = imageGenerationTaskSubmitPayload(task);
+    generateMutation.mutate({
+      ...payload,
+      resource_group_id: payload.resource_group_id || selectedResourceGroupId || "",
+    });
   }
 
   function handleRename() {
@@ -1437,74 +1401,32 @@ export function ImageChatPage() {
     );
   }
 
-  function renderGenerationConfigSelector({
-    title,
-    mode,
-    selectedConfigId,
-    configs,
-    onModeChange,
-    onConfigChange,
-    helpKey,
-    disabled = false,
-  }: {
-    title: string;
-    mode: GenerationConfigSelectionMode;
-    selectedConfigId: string | null;
-    configs: GenerationConfigOption[];
-    onModeChange: (mode: GenerationConfigSelectionMode) => void;
-    onConfigChange: (configId: string | null) => void;
-    helpKey?: ParameterHelpKey;
-    disabled?: boolean;
-  }) {
+  function renderResourceGroupSelector({ disabled = false }: { disabled?: boolean }) {
     return (
       <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
         <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-          {helpKey ? <ParameterHelpLabel label={title} helpKey={helpKey} uiType="imageChat" /> : title}
+          {t("chat.resourceGroup")}
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <SelectField
-            value={mode}
-            options={[
-              { value: "auto", label: t("chat.generationConfigAuto") },
-              { value: "manual", label: t("chat.generationConfigManual") },
-            ]}
-            onChange={(value) => {
-              const nextMode = value === "manual" ? "manual" : "auto";
-              onModeChange(nextMode);
-              if (nextMode === "auto") {
-                onConfigChange(null);
-              }
-            }}
-            ariaLabel={title}
-            radius="lg"
-            visualSize="sm"
-            disabled={disabled}
-          />
-          <SelectField
-            value={selectedConfigId ?? ""}
-            options={[
-              {
-                value: "",
-                label: configs.length ? t("chat.selectGenerationConfig") : t("chat.noGenerationConfigs"),
-                disabled: mode === "manual",
-              },
-              ...configs.map((config) => ({
-                value: config.id,
-                label: generationConfigOptionLabel(
-                  config,
-                  t("chat.generationConfigDisabled"),
-                  t("chat.generationConfigFrozen"),
-                ),
-                disabled: !config.enabled,
-              })),
-            ]}
-            onChange={(value) => onConfigChange(value || null)}
-            ariaLabel={title}
-            disabled={disabled || mode !== "manual"}
-            radius="lg"
-            visualSize="sm"
-          />
-        </div>
+        <SelectField
+          value={selectedResourceGroupId ?? ""}
+          options={[
+            {
+              value: "",
+              label: resourceGroups.length ? t("chat.selectResourceGroup") : t("chat.noResourceGroups"),
+              disabled: true,
+            },
+            ...resourceGroups.map((group) => ({
+              value: group.id,
+              label: resourceGroupOptionLabel(group, t("chat.resourceGroupDisabled")),
+              disabled: !group.enabled,
+            })),
+          ]}
+          onChange={(value) => setSelectedResourceGroupId(value || null)}
+          ariaLabel={t("chat.resourceGroup")}
+          radius="lg"
+          visualSize="sm"
+          disabled={disabled}
+        />
       </div>
     );
   }
@@ -1534,6 +1456,8 @@ export function ImageChatPage() {
               t={t}
             />
 
+            {renderResourceGroupSelector({ disabled: Boolean(generationSettingsBlockedTitle) })}
+
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-950 dark:text-white" htmlFor={promptId}>
                 <ParameterHelpLabel label={t("chat.prompt")} helpKey="imageChatPrompt" uiType="imageChat" />
@@ -1552,20 +1476,14 @@ export function ImageChatPage() {
                 className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
               />
               <div className="mt-2 grid gap-2">
-                {renderGenerationConfigSelector({
-                  title: t("chat.promptPolishConfig"),
-                  mode: promptPolishConfigMode,
-                  selectedConfigId: selectedPromptPolishConfigId,
-                  configs: promptPolishConfigs,
-                  onModeChange: setPromptPolishConfigMode,
-                  onConfigChange: setSelectedPromptPolishConfigId,
-                  helpKey: "imageChatPromptPolishConfig",
-                  disabled: Boolean(generationSettingsBlockedTitle),
-                })}
                 <button
                   type="button"
                   onClick={handlePolishPrompt}
-                  disabled={!draft.trim() || polishPromptMutation.isPending || Boolean(generationSettingsBlockedTitle)}
+                  disabled={
+                    !draft.trim() ||
+                    polishPromptMutation.isPending ||
+                    Boolean(generationSettingsBlockedTitle || resourceGroupRequirementMessage)
+                  }
                   title={generationSettingsBlockedTitle ?? t("chat.polishPrompt")}
                   className="inline-flex w-full items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25"
                 >
@@ -1601,17 +1519,6 @@ export function ImageChatPage() {
                 ) : null}
               </div>
             </div>
-
-            {renderGenerationConfigSelector({
-              title: t("chat.imageGenerationConfig"),
-              mode: imageGenerationConfigMode,
-              selectedConfigId: selectedImageGenerationConfigId,
-              configs: imageGenerationConfigs,
-              onModeChange: setImageGenerationConfigMode,
-              onConfigChange: setSelectedImageGenerationConfigId,
-              helpKey: "imageGenerationConfig",
-              disabled: Boolean(generationSettingsBlockedTitle),
-            })}
 
             <ImageGenerationSettingsPanel
               size={size}
@@ -1844,6 +1751,9 @@ export function ImageChatPage() {
                 {selectedRound ? (
                   <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400 md:hidden">
                     {imageRoundSizeLabel(selectedRound, t)} · {t("chat.candidate", { index: selectedRound.candidate_index, count: selectedRound.candidate_count })}
+                    <span className="ml-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                      {selectedRound.resource_group.name}
+                    </span>
                     <ResourceMetaBadges resource={selectedRound.generated_asset} className="mt-1" showReason />
                   </div>
                 ) : selectedPlaceholder ? (
@@ -1857,6 +1767,9 @@ export function ImageChatPage() {
                   <>
                     <span className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 md:inline-flex">
                       {imageRoundSizeLabel(selectedRound, t)} · {t("chat.candidate", { index: selectedRound.candidate_index, count: selectedRound.candidate_count })}
+                    </span>
+                    <span className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 md:inline-flex">
+                      {selectedRound.resource_group.name}
                     </span>
                     <a
                       href={api.toApiUrl(selectedRound.generated_asset.download_url)}
@@ -2028,9 +1941,9 @@ export function ImageChatPage() {
             {generationBlockedResource ? (
               <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
             ) : null}
-            {baseRequirementMessage || imageGenerationConfigRequirementMessage ? (
+            {baseRequirementMessage || resourceGroupRequirementMessage ? (
               <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                {baseRequirementMessage || imageGenerationConfigRequirementMessage}
+                {baseRequirementMessage || resourceGroupRequirementMessage}
               </div>
             ) : null}
             <button
@@ -2252,9 +2165,9 @@ export function ImageChatPage() {
               {generationBlockedResource ? (
                 <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
               ) : null}
-              {baseRequirementMessage || imageGenerationConfigRequirementMessage ? (
+              {baseRequirementMessage || resourceGroupRequirementMessage ? (
                 <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                  {baseRequirementMessage || imageGenerationConfigRequirementMessage}
+                  {baseRequirementMessage || resourceGroupRequirementMessage}
                 </div>
               ) : null}
               <button
@@ -2293,6 +2206,10 @@ export function ImageChatPage() {
               value:
                 [activePreviewRound.provider_name, activePreviewRound.model_name].filter(Boolean).join(" / ") ||
                 t("common.unknown"),
+            },
+            {
+              label: t("gallery.meta.resourceGroup"),
+              value: activePreviewRound.resource_group.name,
             },
             {
               label: t("gallery.meta.candidate"),

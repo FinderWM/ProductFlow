@@ -67,6 +67,7 @@ export interface ImageHistoryBranch {
 
 export interface ImageGenerationSubmitPayload {
   prompt: string;
+  resource_group_id: string;
   size: string;
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
@@ -160,6 +161,7 @@ function taskMatchesSubmitPayload(task: ImageSessionGenerationTask, payload: Ima
       selected_reference_asset_ids: task.selected_reference_asset_ids,
       generation_count: task.generation_count,
       tool_options: task.tool_options,
+      resource_group_id: task.resource_group_id ?? "",
       generation_config_mode: task.generation_config_mode,
       generation_config_id: task.requested_generation_config_id,
     }) === buildImageGenerationSubmitSignature(payload)
@@ -182,6 +184,7 @@ export function imageGenerationTaskSubmitPayload(task: ImageSessionGenerationTas
     selected_reference_asset_ids: task.selected_reference_asset_ids,
     generation_count: clampGenerationCount(task.generation_count),
     tool_options: task.tool_options,
+    resource_group_id: task.resource_group_id ?? "",
     generation_config_mode: task.generation_config_mode,
     generation_config_id: task.requested_generation_config_id,
   };
@@ -663,6 +666,7 @@ export function buildImageGenerationSubmitSignature(payload: ImageGenerationSubm
     selected_reference_asset_ids: payload.selected_reference_asset_ids,
     generation_count: effectiveImageGenerationSubmitCount(payload.generation_count, payload.tool_options),
     tool_options: normalizeSubmitToolOptions(payload.tool_options),
+    resource_group_id: payload.resource_group_id,
     generation_config_mode: payload.generation_config_mode ?? "auto",
     generation_config_id: payload.generation_config_mode === "manual" ? (payload.generation_config_id ?? null) : null,
   });

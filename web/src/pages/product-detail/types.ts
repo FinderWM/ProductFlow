@@ -40,6 +40,7 @@ export type NodeConfigDraft = {
   channel: string;
   size: string;
   toolOptions: ImageToolOptions;
+  resourceGroupId: string | null;
   generationConfigMode: GenerationConfigSelectionMode;
   generationConfigId: string | null;
   copyStructuredPayload: CopyPayloadV2 | null;

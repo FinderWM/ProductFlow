@@ -139,6 +139,11 @@ export interface RbacRolePermissions {
   api_permission_codes: string[];
 }
 
+export interface UserGenerationResourceGroupGrants {
+  user_id: string;
+  resource_group_ids: string[];
+}
+
 export interface CreateTrustedUserRequest {
   username: string;
   display_name?: string | null;
@@ -162,6 +167,40 @@ export interface SourceAsset extends ModerationFields {
   created_at: string;
 }
 
+export interface GenerationResourceGroup {
+  id: string;
+  key: string;
+  name: string;
+  description?: string | null;
+  sort_order: number;
+  enabled: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GenerationResourceGroupTag {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface GenerationResourceGroupCreateRequest {
+  key: string;
+  name: string;
+  description?: string | null;
+  sort_order?: number;
+  enabled?: boolean;
+}
+
+export interface GenerationResourceGroupUpdateRequest {
+  key?: string | null;
+  name?: string | null;
+  description?: string | null;
+  sort_order?: number | null;
+  enabled?: boolean | null;
+}
+
 export interface CreativeBriefSummary {
   id: string;
   payload: {
@@ -175,6 +214,8 @@ export interface CreativeBriefSummary {
   provider_name: string;
   model_name: string;
   prompt_version: string;
+  resource_group_id?: string | null;
+  resource_group: GenerationResourceGroupTag;
   created_at: string;
 }
 
@@ -226,6 +267,8 @@ export interface CopySet {
   provider_name: string;
   model_name: string;
   prompt_version: string;
+  resource_group_id?: string | null;
+  resource_group: GenerationResourceGroupTag;
   created_at: string;
   updated_at: string;
   edited_at: string | null;
@@ -241,6 +284,8 @@ export interface PosterVariant extends ModerationFields {
   mime_type: string;
   width: number;
   height: number;
+  resource_group_id?: string | null;
+  resource_group: GenerationResourceGroupTag;
   download_url: string;
   preview_url: string;
   thumbnail_url: string;
@@ -390,6 +435,8 @@ export interface WorkflowNodeRun {
   copy_set_id: string | null;
   poster_variant_id: string | null;
   image_session_asset_id: string | null;
+  resource_group_id?: string | null;
+  resource_group: GenerationResourceGroupTag;
   started_at: string;
   finished_at: string | null;
 }
@@ -400,6 +447,8 @@ export interface WorkflowNodeRunStatus {
   node_id: string;
   status: WorkflowNodeRunStatusValue;
   failure_reason: string | null;
+  resource_group_id?: string | null;
+  resource_group: GenerationResourceGroupTag;
   started_at: string;
   finished_at: string | null;
 }
@@ -633,6 +682,7 @@ export interface ApplyTailSplitPlanItemInput {
 
 export interface ApplyTailSplitPlanImageGenerationConfigInput {
   size?: string | null;
+  resource_group_id?: string | null;
   generation_config_mode?: GenerationConfigSelectionMode;
   generation_config_id?: string | null;
   tool_options?: ImageToolOptions | null;
@@ -719,6 +769,8 @@ export interface ImageSessionRound {
   previous_response_id: string | null;
   image_generation_call_id: string | null;
   generation_config_id: string | null;
+  resource_group_id?: string | null;
+  resource_group: GenerationResourceGroupTag;
   generation_group_id: string | null;
   candidate_index: number;
   candidate_count: number;
@@ -756,6 +808,8 @@ export interface ImageSessionGenerationTask {
   generation_config_mode: GenerationConfigSelectionMode;
   requested_generation_config_id: string | null;
   used_generation_config_id: string | null;
+  resource_group_id?: string | null;
+  resource_group: GenerationResourceGroupTag;
   generation_count: number;
   completed_candidates: number;
   active_candidate_index: number | null;
@@ -851,6 +905,8 @@ export interface GalleryEntry extends ModerationFields {
   provider_response_id: string | null;
   image_generation_call_id: string | null;
   generation_group_id: string | null;
+  resource_group_id?: string | null;
+  resource_group: GenerationResourceGroupTag;
   candidate_index: number | null;
   candidate_count: number | null;
   base_asset_id: string | null;
@@ -1012,6 +1068,7 @@ export interface GenerationConfigStatAggregate {
 
 export interface GenerationConfig {
   id: string;
+  resource_group_id: string;
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1033,6 +1090,7 @@ export interface GenerationConfig {
 
 export interface GenerationConfigOption {
   id: string;
+  resource_group_id: string;
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1043,6 +1101,7 @@ export interface GenerationConfigOption {
 
 export interface GenerationConfigStatusConfig {
   id: string;
+  resource_group_id: string;
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1125,6 +1184,7 @@ export interface UserUsageStatsResponse {
 }
 
 export interface GenerationConfigCreateRequest {
+  resource_group_id?: string | null;
   name: string;
   purpose: ProviderPurpose;
   provider_kind: string;
@@ -1140,6 +1200,7 @@ export interface GenerationConfigCreateRequest {
 }
 
 export interface GenerationConfigUpdateRequest {
+  resource_group_id?: string | null;
   name?: string | null;
   purpose?: ProviderPurpose | null;
   provider_kind?: string | null;
@@ -1189,6 +1250,7 @@ export interface TextGenerationConfigTestResponse {
 export interface ProviderConfigResponse {
   profiles: ProviderProfile[];
   bindings: ProviderBinding[];
+  generation_resource_groups: GenerationResourceGroup[];
   generation_configs: GenerationConfig[];
   status_summary: GenerationConfigStatusSummary | null;
 }
@@ -1235,6 +1297,7 @@ export interface SettingsExportProviderBinding {
 
 export interface SettingsExportGenerationConfig {
   id?: string | null;
+  resource_group_id?: string | null;
   name: string;
   purpose: ProviderPurpose;
   provider_kind: string;
@@ -1247,6 +1310,15 @@ export interface SettingsExportGenerationConfig {
   availability_window_minutes?: number | null;
   failure_threshold?: number | null;
   cooldown_minutes?: number | null;
+}
+
+export interface SettingsExportGenerationResourceGroup {
+  id: string;
+  key: string;
+  name: string;
+  description?: string | null;
+  sort_order: number;
+  enabled: boolean;
 }
 
 export interface SettingsExportCanvasTemplateCategory {
@@ -1283,6 +1355,7 @@ export interface SettingsExportPayload {
   runtime_config: Record<string, string | number | boolean | string[] | null>;
   provider_profiles: SettingsExportProviderProfile[];
   provider_bindings: SettingsExportProviderBinding[];
+  generation_resource_groups: SettingsExportGenerationResourceGroup[];
   generation_configs: SettingsExportGenerationConfig[];
   canvas_template_categories: SettingsExportCanvasTemplateCategory[];
   canvas_templates: SettingsExportCanvasTemplate[];
@@ -1293,6 +1366,7 @@ export interface SettingsImportPreviewResponse {
   runtime_config_count: number;
   provider_profile_count: number;
   provider_binding_count: number;
+  generation_resource_group_count: number;
   generation_config_count: number;
   canvas_template_category_count: number;
   canvas_template_count: number;

@@ -9,9 +9,11 @@ from productflow_backend.application.auth import (
     create_role,
     create_trusted_user,
     get_role_permissions,
+    get_user_generation_resource_group_grant_ids,
     list_roles_with_user_counts,
     list_users,
     replace_role_permissions,
+    replace_user_generation_resource_group_grants,
     reset_user_password,
     set_user_enabled,
     update_role,
@@ -30,6 +32,8 @@ from productflow_backend.presentation.schemas.rbac import (
     UpdateRolePermissionRequest,
     UpdateRoleRequest,
     UpdateTrustedUserRequest,
+    UpdateUserGenerationResourceGroupGrantsRequest,
+    UserGenerationResourceGroupGrantResponse,
     serialize_api_permission,
     serialize_menu,
     serialize_role,
@@ -93,6 +97,33 @@ def update_user_endpoint(
     session: Session = Depends(get_session),
 ) -> RbacUserResponse:
     return serialize_user(set_user_enabled(session, user_id=user_id, enabled=payload.enabled))
+
+
+@router.get("/users/{user_id}/generation-resource-groups", response_model=UserGenerationResourceGroupGrantResponse)
+def get_user_generation_resource_group_grants_endpoint(
+    user_id: str,
+    session: Session = Depends(get_session),
+) -> UserGenerationResourceGroupGrantResponse:
+    return UserGenerationResourceGroupGrantResponse(
+        user_id=user_id,
+        resource_group_ids=get_user_generation_resource_group_grant_ids(session, user_id=user_id),
+    )
+
+
+@router.put("/users/{user_id}/generation-resource-groups", response_model=UserGenerationResourceGroupGrantResponse)
+def replace_user_generation_resource_group_grants_endpoint(
+    user_id: str,
+    payload: UpdateUserGenerationResourceGroupGrantsRequest,
+    session: Session = Depends(get_session),
+) -> UserGenerationResourceGroupGrantResponse:
+    return UserGenerationResourceGroupGrantResponse(
+        user_id=user_id,
+        resource_group_ids=replace_user_generation_resource_group_grants(
+            session,
+            user_id=user_id,
+            resource_group_ids=payload.resource_group_ids,
+        ),
+    )
 
 
 @router.post("/users/{user_id}/reset-password", response_model=RbacUserResponse)

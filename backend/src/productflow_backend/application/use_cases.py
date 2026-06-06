@@ -33,6 +33,7 @@ from productflow_backend.domain.enums import (
 )
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     CopySet,
     PosterVariant,
     Product,
@@ -236,6 +237,7 @@ def _materialize_initial_workflow(
                 "output_mode": "blocks",
                 "generation_config_mode": "auto",
                 "generation_config_id": None,
+                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             },
         )
         session.add(copy_node)
@@ -263,6 +265,7 @@ def _materialize_initial_workflow(
             "max_items": 8,
             "generation_config_mode": "auto",
             "generation_config_id": None,
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "document_source": None,
         },
     )
@@ -750,6 +753,7 @@ def get_product_history(
     session: Session,
     product_id: str,
     *,
+    resource_group_id: str | None = None,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
 ) -> dict[str, Any]:
@@ -759,7 +763,21 @@ def get_product_history(
         actor_user_id=actor_user_id,
         actor_is_admin=actor_is_admin,
     )
+    normalized_group_id = (resource_group_id or "").strip() or None
+    copy_sets = _filter_by_resource_group(product.copy_sets, normalized_group_id)
+    poster_variants = _filter_by_resource_group(product.poster_variants, normalized_group_id)
     return {
-        "copy_sets": sorted(product.copy_sets, key=lambda item: item.created_at, reverse=True),
-        "poster_variants": sorted(product.poster_variants, key=lambda item: item.created_at, reverse=True),
+        "copy_sets": sorted(copy_sets, key=lambda item: item.created_at, reverse=True),
+        "poster_variants": sorted(poster_variants, key=lambda item: item.created_at, reverse=True),
     }
+
+
+def _filter_by_resource_group(
+    items: list[CopySet] | list[PosterVariant],
+    resource_group_id: str | None,
+) -> list[CopySet] | list[PosterVariant]:
+    if resource_group_id is None:
+        return items
+    if resource_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
+        return [item for item in items if item.resource_group_id in {None, resource_group_id}]
+    return [item for item in items if item.resource_group_id == resource_group_id]

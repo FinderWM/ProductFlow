@@ -131,6 +131,7 @@ export function draftFromNode(
         : configString(node, "channel", "灵感主图"),
     size: configString(node, "size", "1024x1024"),
     toolOptions: imageToolOptionsFromUnknown(node?.config_json?.tool_options),
+    resourceGroupId: configString(node, "resource_group_id") || null,
     generationConfigMode: generationConfigModeFromNode(node),
     generationConfigId: generationConfigIdFromNode(node),
     copyStructuredPayload: copySet?.structured_payload ?? outputStructuredPayload(node),
@@ -175,8 +176,9 @@ export function nodeConfigFromDraft(
       channel: draft.channel,
       purpose: configString(node, "purpose"),
       output_mode: configString(node, "output_mode", "blocks"),
-      generation_config_mode: draft.generationConfigMode,
-      generation_config_id: draft.generationConfigMode === "manual" ? draft.generationConfigId : null,
+      resource_group_id: draft.resourceGroupId,
+      generation_config_mode: "auto",
+      generation_config_id: null,
     };
   }
   if (node.node_type === "image_generation") {
@@ -185,8 +187,9 @@ export function nodeConfigFromDraft(
       ...base,
       instruction: draft.instruction,
       size: draft.size,
-      generation_config_mode: draft.generationConfigMode,
-      generation_config_id: draft.generationConfigMode === "manual" ? draft.generationConfigId : null,
+      resource_group_id: draft.resourceGroupId,
+      generation_config_mode: "auto",
+      generation_config_id: null,
       ...(toolOptions ? { tool_options: toolOptions } : { tool_options: null }),
     };
   }
@@ -197,8 +200,9 @@ export function nodeConfigFromDraft(
       description: draft.instruction,
       source_text: draft.sourceNote,
       max_items: Number.isFinite(parsedMaxItems) ? parsedMaxItems : 8,
-      generation_config_mode: draft.generationConfigMode,
-      generation_config_id: draft.generationConfigMode === "manual" ? draft.generationConfigId : null,
+      resource_group_id: draft.resourceGroupId,
+      generation_config_mode: "auto",
+      generation_config_id: null,
       document_source:
         base.document_source && typeof base.document_source === "object" ? base.document_source : null,
     };
@@ -217,6 +221,7 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
       tone: "清晰可信",
       channel: "灵感图",
       output_mode: "blocks",
+      resource_group_id: null,
       generation_config_mode: "auto",
       generation_config_id: null,
     };
@@ -225,6 +230,7 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
     return {
       instruction: "描述你想生成的图片",
       size: "1024x1024",
+      resource_group_id: null,
       generation_config_mode: "auto",
       generation_config_id: null,
       tool_options: null,
@@ -235,6 +241,7 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
       description: "",
       source_text: "",
       max_items: 8,
+      resource_group_id: null,
       generation_config_mode: "auto",
       generation_config_id: null,
       document_source: null,

@@ -9,6 +9,7 @@ from helpers import _login, _make_demo_image_bytes
 from productflow_backend.application import gallery as gallery_app
 from productflow_backend.domain.enums import ImageSessionAssetKind
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ImageGalleryEntry,
     ImageSession,
     ImageSessionAsset,
@@ -36,7 +37,12 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
 
     generated = client.post(
         f"/api/image-sessions/{session_id}/generate",
-        json={"prompt": "一张用于画廊的图", "size": "1024x1024", "generation_count": 2},
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "一张用于画廊的图",
+            "size": "1024x1024",
+            "generation_count": 2,
+        },
     )
     assert generated.status_code == 202
     first_round = generated.json()["rounds"][0]

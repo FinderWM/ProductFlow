@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from productflow_backend.application.gallery import list_gallery_entries, save_generated_asset_to_gallery
@@ -22,11 +22,13 @@ router = APIRouter(
 
 @router.get("", response_model=GalleryEntryListResponse)
 def list_gallery_entries_endpoint(
+    resource_group_id: str | None = Query(default=None, max_length=36),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_GALLERY_READ)),
 ) -> GalleryEntryListResponse:
     items = list_gallery_entries(
         session,
+        resource_group_id=resource_group_id,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
     )
