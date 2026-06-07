@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "vaul";
 import {
+  ChevronDown,
   ChevronRight,
   Download,
   GalleryHorizontalEnd,
@@ -257,6 +258,7 @@ export function ImageChatPage() {
   const [onlyDeletedSessions, setOnlyDeletedSessions] = useState(
     () => readImageChatRouteState(routeStateScope)?.onlyDeletedSessions ?? false,
   );
+  const [sessionFiltersExpanded, setSessionFiltersExpanded] = useState(false);
   const [createSessionDialogOpen, setCreateSessionDialogOpen] = useState(false);
   const [createSessionResourceGroupId, setCreateSessionResourceGroupId] = useState("");
   const [titleDraft, setTitleDraft] = useState("");
@@ -1593,61 +1595,110 @@ export function ImageChatPage() {
   }
 
   function renderSessionResourceGroupFilter() {
+    const selectedSessionResourceGroup = resourceGroups.find((group) => group.id === selectedSessionResourceGroupId);
+    const selectedSessionOwner = rbacUsers.find((user) => user.id === selectedSessionOwnerUserId);
+    const selectedSessionOwnerLabel = selectedSessionOwner
+      ? `${selectedSessionOwner.display_name || selectedSessionOwner.username} (${selectedSessionOwner.username})`
+      : selectedSessionOwnerUserId;
+    const activeFilterCount = [
+      selectedSessionResourceGroupId,
+      isAdmin && selectedSessionOwnerUserId,
+      isAdmin && onlyDeletedSessions,
+    ].filter(Boolean).length;
+    const collapsedSummary = [
+      selectedSessionResourceGroup?.name ?? (selectedSessionResourceGroupId ? selectedSessionResourceGroupId : t("chat.allResourceGroups")),
+      isAdmin ? selectedSessionOwnerLabel : "",
+      isAdmin && onlyDeletedSessions ? t("chat.onlyDeletedSessions") : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
     return (
-      <div className="space-y-2">
-        <label className="block">
-          <span className="mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-            {t("chat.sessionResourceGroupFilter")}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-950/40">
+        <button
+          type="button"
+          onClick={() => setSessionFiltersExpanded((expanded) => !expanded)}
+          aria-expanded={sessionFiltersExpanded}
+          aria-label={sessionFiltersExpanded ? t("chat.sessionFiltersCollapse") : t("chat.sessionFiltersExpand")}
+          className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-900/70 dark:focus-visible:ring-violet-400"
+        >
+          <span className="min-w-0">
+            <span className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{t("chat.sessionFilters")}</span>
+              {activeFilterCount ? (
+                <span className="rounded-full border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:border-violet-400/30 dark:bg-violet-500/12 dark:text-violet-100">
+                  {t("chat.sessionFiltersActiveCount", { count: activeFilterCount })}
+                </span>
+              ) : null}
+            </span>
+            {!sessionFiltersExpanded ? (
+              <span className="mt-1 block truncate text-[11px] text-slate-500 dark:text-slate-400">
+                {collapsedSummary || t("chat.sessionFiltersCollapsedHint")}
+              </span>
+            ) : null}
           </span>
-          <SelectField
-            value={selectedSessionResourceGroupId ?? ""}
-            options={[
-              { value: "", label: t("chat.allResourceGroups") },
-              ...resourceGroups.map((group) => ({
-                value: group.id,
-                label: resourceGroupOptionLabel(group, t("chat.resourceGroupDisabled")),
-                disabled: !group.enabled,
-              })),
-            ]}
-            onChange={setSelectedSessionResourceGroupId}
-            ariaLabel={t("chat.sessionResourceGroupFilter")}
-            radius="lg"
-            visualSize="sm"
-            disabled={generationResourceGroupsQuery.isLoading}
+          <ChevronDown
+            size={16}
+            className={`shrink-0 text-slate-400 transition-transform ${sessionFiltersExpanded ? "rotate-180" : ""}`}
           />
-        </label>
-        {isAdmin ? (
-          <>
+        </button>
+        {sessionFiltersExpanded ? (
+          <div className="space-y-2 border-t border-slate-200 px-3 py-3 dark:border-slate-700">
             <label className="block">
               <span className="mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                {t("chat.sessionOwnerFilter")}
+                {t("chat.sessionResourceGroupFilter")}
               </span>
               <SelectField
-                value={selectedSessionOwnerUserId}
+                value={selectedSessionResourceGroupId ?? ""}
                 options={[
-                  { value: "", label: t("chat.allOwners") },
-                  ...rbacUsers.map((user) => ({
-                    value: user.id,
-                    label: `${user.display_name || user.username} (${user.username})`,
+                  { value: "", label: t("chat.allResourceGroups") },
+                  ...resourceGroups.map((group) => ({
+                    value: group.id,
+                    label: resourceGroupOptionLabel(group, t("chat.resourceGroupDisabled")),
+                    disabled: !group.enabled,
                   })),
                 ]}
-                onChange={setSelectedSessionOwnerUserId}
-                ariaLabel={t("chat.sessionOwnerFilter")}
+                onChange={setSelectedSessionResourceGroupId}
+                ariaLabel={t("chat.sessionResourceGroupFilter")}
                 radius="lg"
                 visualSize="sm"
-                disabled={rbacUsersQuery.isLoading}
+                disabled={generationResourceGroupsQuery.isLoading}
               />
             </label>
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
-              <input
-                type="checkbox"
-                checked={onlyDeletedSessions}
-                onChange={(event) => setOnlyDeletedSessions(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
-              />
-              <span>{t("chat.onlyDeletedSessions")}</span>
-            </label>
-          </>
+            {isAdmin ? (
+              <>
+                <label className="block">
+                  <span className="mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                    {t("chat.sessionOwnerFilter")}
+                  </span>
+                  <SelectField
+                    value={selectedSessionOwnerUserId}
+                    options={[
+                      { value: "", label: t("chat.allOwners") },
+                      ...rbacUsers.map((user) => ({
+                        value: user.id,
+                        label: `${user.display_name || user.username} (${user.username})`,
+                      })),
+                    ]}
+                    onChange={setSelectedSessionOwnerUserId}
+                    ariaLabel={t("chat.sessionOwnerFilter")}
+                    radius="lg"
+                    visualSize="sm"
+                    disabled={rbacUsersQuery.isLoading}
+                  />
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={onlyDeletedSessions}
+                    onChange={(event) => setOnlyDeletedSessions(event.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+                  />
+                  <span>{t("chat.onlyDeletedSessions")}</span>
+                </label>
+              </>
+            ) : null}
+          </div>
         ) : null}
       </div>
     );
