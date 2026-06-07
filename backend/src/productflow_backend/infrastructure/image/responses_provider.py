@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from time import sleep
+from time import monotonic, sleep
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -43,6 +43,7 @@ RESPONSES_IN_PROGRESS_STATUSES = {"queued", "in_progress"}
 RESPONSES_TERMINAL_FAILURE_STATUSES = {"failed", "cancelled", "canceled", "incomplete", "expired"}
 PROVIDER_REQUEST_FAILURE_MESSAGE = "图片供应商请求失败，请检查供应商配置后重试"
 PROVIDER_BACKGROUND_INCOMPLETE_MESSAGE = "图片供应商后台生成未完成，请稍后重试"
+PROVIDER_BACKGROUND_TIMEOUT_MESSAGE = "图片供应商后台生成超时，请稍后重试"
 PROVIDER_MISSING_OUTPUT_MESSAGE = "图片供应商没有返回图片结果，请稍后重试"
 PROVIDER_TEXT_OUTPUT_MESSAGE = "图片供应商已完成请求，但返回的是文字回复，没有返回图片结果"
 
@@ -232,6 +233,7 @@ class OpenAIResponsesImageClient:
         self.tool_input_fidelity = settings.image_tool_input_fidelity
         self.tool_partial_images = settings.image_tool_partial_images
         self.tool_allowed_fields = parse_image_tool_allowed_fields(settings.image_tool_allowed_fields)
+        self.background_poll_timeout_seconds = float(settings.workflow_image_generation_provider_timeout_seconds)
 
     def generate_image(
         self,
@@ -431,8 +433,19 @@ class OpenAIResponsesImageClient:
         self._emit_response_progress(response, progress_callback)
         response_id = str(_get_value(response, "id", "") or "")
         status = str(_get_value(response, "status", "") or "").lower()
+        deadline = monotonic() + self.background_poll_timeout_seconds
         while response_id and status in RESPONSES_IN_PROGRESS_STATUSES and hasattr(client.responses, "retrieve"):
-            sleep(RESPONSES_BACKGROUND_POLL_INTERVAL_SECONDS)
+            remaining_seconds = deadline - monotonic()
+            if remaining_seconds <= 0:
+                self._log_provider_failure(
+                    "Responses 图片供应商后台轮询超时",
+                    phase="background_timeout",
+                    request_payload=request_payload,
+                    response=response,
+                    task_context=task_context,
+                )
+                raise TimeoutError(PROVIDER_BACKGROUND_TIMEOUT_MESSAGE)
+            sleep(min(RESPONSES_BACKGROUND_POLL_INTERVAL_SECONDS, remaining_seconds))
             try:
                 response = client.responses.retrieve(response_id)
             except Exception as exc:  # noqa: BLE001

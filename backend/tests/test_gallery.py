@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import pytest
@@ -19,10 +18,6 @@ from productflow_backend.infrastructure.db.models import (
 )
 from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.presentation.api import create_app
-
-
-def _password_md5(value: str) -> str:
-    return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
 
 
 def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Path, db_session) -> None:
@@ -181,7 +176,11 @@ def test_gallery_list_rejects_ungranted_resource_group_for_member(configured_env
     user_client = TestClient(app)
     set_password = user_client.post(
         "/api/auth/password",
-        json={"username": "gallery-member", "client_password_md5": _password_md5("gallery-member-password")},
+        json={
+            "username": "gallery-member",
+            "password": "gallery-member-password",
+            "setup_token": created_user.json()["password_setup_token"],
+        },
     )
     assert set_password.status_code == 200
 

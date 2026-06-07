@@ -13,6 +13,7 @@ from productflow_backend.infrastructure.db.models import (
     GenerationConfigState,
     GenerationResourceGroup,
 )
+from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
     TEXT_PURPOSE,
@@ -216,3 +217,36 @@ def test_release_updates_stats_and_freeze_window(db_session: Session) -> None:
     assert state.failure_count_in_window == 0
     assert stat.failure_count == 3
     assert stat.freeze_count == 1
+
+
+def test_release_generation_config_claim_decrements_from_database_value(db_session: Session) -> None:
+    config = _add_mock_config(db_session, purpose=IMAGE_PURPOSE, name="双并发图片", max_concurrency=2)
+    first_claim = claim_generation_config(db_session, purpose=IMAGE_PURPOSE, generation_config_id=config.id)
+    second_claim = claim_generation_config(db_session, purpose=IMAGE_PURPOSE, generation_config_id=config.id)
+    assert first_claim is not None
+    assert second_claim is not None
+    db_session.commit()
+
+    factory = get_session_factory()
+    first_session = factory()
+    second_session = factory()
+    try:
+        first_state = first_session.get(GenerationConfigState, config.id)
+        second_state = second_session.get(GenerationConfigState, config.id)
+        assert first_state is not None
+        assert second_state is not None
+        assert first_state.current_concurrency == 2
+        assert second_state.current_concurrency == 2
+
+        release_generation_config_claim(first_session, config.id, success=True, record_result=False)
+        first_session.commit()
+        release_generation_config_claim(second_session, config.id, success=True, record_result=False)
+        second_session.commit()
+    finally:
+        first_session.close()
+        second_session.close()
+
+    db_session.expire_all()
+    state = db_session.get(GenerationConfigState, config.id)
+    assert state is not None
+    assert state.current_concurrency == 0

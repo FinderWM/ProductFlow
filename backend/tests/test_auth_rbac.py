@@ -6,11 +6,19 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login
 
-from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, AuthUser
+from productflow_backend.infrastructure.db.session import get_session_factory
 
 
 def _password_md5(value: str) -> str:
     return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
+
+
+def _set_password(client: TestClient, *, username: str, password: str, setup_token: str):
+    return client.post(
+        "/api/auth/password",
+        json={"username": username, "password": password, "setup_token": setup_token},
+    )
 
 
 def test_admin_can_seed_password_and_receives_all_menus(configured_env: Path) -> None:
@@ -31,6 +39,125 @@ def test_admin_can_seed_password_and_receives_all_menus(configured_env: Path) ->
     assert "rbac:manage" in payload["api_permissions"]
 
 
+def test_legacy_password_hash_is_upgraded_after_plain_password_login(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "legacy-user", "display_name": "Legacy User"},
+    )
+    assert created_user.status_code == 201
+    legacy_client_md5 = _password_md5("legacy-password")
+    legacy_salt = "legacy-salt"
+    legacy_hash = hashlib.md5(f"{legacy_client_md5}:{legacy_salt}".encode(), usedforsecurity=False).hexdigest()
+    with get_session_factory()() as session:
+        user = session.get(AuthUser, created_user.json()["id"])
+        assert user is not None
+        user.password_hash = legacy_hash
+        user.password_salt = legacy_salt
+        user.password_setup_token_hash = None
+        user.password_setup_token_expires_at = None
+        session.commit()
+
+    client = TestClient(app)
+    login = client.post("/api/auth/login", json={"username": "legacy-user", "password": "legacy-password"})
+
+    assert login.status_code == 200
+    with get_session_factory()() as session:
+        user = session.get(AuthUser, created_user.json()["id"])
+        assert user is not None
+        assert user.password_hash is not None
+        assert user.password_hash.startswith("scrypt$")
+        assert user.password_salt is None
+
+
+def test_legacy_password_hash_is_not_upgraded_after_client_md5_login(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "legacy-md5-user", "display_name": "Legacy MD5 User"},
+    )
+    assert created_user.status_code == 201
+    legacy_client_md5 = _password_md5("legacy-password")
+    legacy_salt = "legacy-md5-salt"
+    legacy_hash = hashlib.md5(f"{legacy_client_md5}:{legacy_salt}".encode(), usedforsecurity=False).hexdigest()
+    with get_session_factory()() as session:
+        user = session.get(AuthUser, created_user.json()["id"])
+        assert user is not None
+        user.password_hash = legacy_hash
+        user.password_salt = legacy_salt
+        user.password_setup_token_hash = None
+        user.password_setup_token_expires_at = None
+        session.commit()
+
+    legacy_client = TestClient(app)
+    legacy_login = legacy_client.post(
+        "/api/auth/login",
+        json={"username": "legacy-md5-user", "client_password_md5": legacy_client_md5},
+    )
+    assert legacy_login.status_code == 200
+    with get_session_factory()() as session:
+        user = session.get(AuthUser, created_user.json()["id"])
+        assert user is not None
+        assert user.password_hash == legacy_hash
+        assert user.password_salt == legacy_salt
+
+    plain_client = TestClient(app)
+    plain_login = plain_client.post(
+        "/api/auth/login",
+        json={"username": "legacy-md5-user", "password": "legacy-password"},
+    )
+    assert plain_login.status_code == 200
+    with get_session_factory()() as session:
+        user = session.get(AuthUser, created_user.json()["id"])
+        assert user is not None
+        assert user.password_hash is not None
+        assert user.password_hash.startswith("scrypt$")
+        assert user.password_salt is None
+
+
+def test_password_setup_requires_one_time_token(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "token-user", "display_name": "Token User"},
+    )
+    assert created_user.status_code == 201
+    setup_token = created_user.json()["password_setup_token"]
+    client = TestClient(app)
+
+    missing_token = client.post(
+        "/api/auth/password",
+        json={"username": "token-user", "password": "token-password"},
+    )
+    assert missing_token.status_code == 422
+
+    wrong_token = _set_password(client, username="token-user", password="token-password", setup_token="wrong-token")
+    assert wrong_token.status_code == 400
+    assert wrong_token.json()["detail"] == "设密凭据无效或已过期"
+
+    correct_token = _set_password(client, username="token-user", password="token-password", setup_token=setup_token)
+    assert correct_token.status_code == 200
+
+    reused_token = _set_password(client, username="token-user", password="other-password", setup_token=setup_token)
+    assert reused_token.status_code == 400
+    assert reused_token.json()["detail"] == "该账号已设置密码"
+
+
 def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
 
@@ -44,6 +171,7 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     )
     assert created_user.status_code == 201
     assert created_user.json()["password_pending"] is True
+    setup_token = created_user.json()["password_setup_token"]
     grant = admin_client.put(
         f"/api/rbac/users/{created_user.json()['id']}/generation-resource-groups",
         json={"resource_group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID]},
@@ -51,10 +179,11 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     assert grant.status_code == 200
 
     user_client = TestClient(app)
-    password_md5 = _password_md5("alice-password")
-    set_password = user_client.post(
-        "/api/auth/password",
-        json={"username": "alice", "client_password_md5": password_md5},
+    set_password = _set_password(
+        user_client,
+        username="alice",
+        password="alice-password",
+        setup_token=setup_token,
     )
     assert set_password.status_code == 200
 
@@ -145,10 +274,11 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
     assert regular_user["resource_groups"] == []
 
     user_client = TestClient(app)
-    password_md5 = _password_md5("campaign-password")
-    set_password = user_client.post(
-        "/api/auth/password",
-        json={"username": "campaign-user", "client_password_md5": password_md5},
+    set_password = _set_password(
+        user_client,
+        username="campaign-user",
+        password="campaign-password",
+        setup_token=created_user.json()["password_setup_token"],
     )
     assert set_password.status_code == 200
 
@@ -247,10 +377,11 @@ def test_runtime_and_generation_option_apis_require_matching_rbac_permission(con
     assert created_user.status_code == 201
 
     user_client = TestClient(app)
-    password_md5 = _password_md5("status-password")
-    set_password = user_client.post(
-        "/api/auth/password",
-        json={"username": "status-only", "client_password_md5": password_md5},
+    set_password = _set_password(
+        user_client,
+        username="status-only",
+        password="status-password",
+        setup_token=created_user.json()["password_setup_token"],
     )
     assert set_password.status_code == 200
 
@@ -349,10 +480,11 @@ def test_settings_provider_write_permission_is_separate_from_runtime_write(confi
     assert created_user.status_code == 201
 
     user_client = TestClient(app)
-    password_md5 = _password_md5("provider-ops-password")
-    set_password = user_client.post(
-        "/api/auth/password",
-        json={"username": "provider-ops", "client_password_md5": password_md5},
+    set_password = _set_password(
+        user_client,
+        username="provider-ops",
+        password="provider-ops-password",
+        setup_token=created_user.json()["password_setup_token"],
     )
     assert set_password.status_code == 200
 
@@ -427,10 +559,11 @@ def test_settings_migrate_permission_is_separate_from_provider_write_and_runtime
     assert created_user.status_code == 201
 
     user_client = TestClient(app)
-    password_md5 = _password_md5("settings-migrator-password")
-    set_password = user_client.post(
-        "/api/auth/password",
-        json={"username": "settings-migrator", "client_password_md5": password_md5},
+    set_password = _set_password(
+        user_client,
+        username="settings-migrator",
+        password="settings-migrator-password",
+        setup_token=created_user.json()["password_setup_token"],
     )
     assert set_password.status_code == 200
 
@@ -472,17 +605,19 @@ def test_admin_can_reset_regular_user_password_to_pending(configured_env: Path) 
     user_id = created_user.json()["id"]
 
     user_client = TestClient(app)
-    password_md5 = _password_md5("bob-password")
-    assert user_client.post(
-        "/api/auth/password",
-        json={"username": "bob", "client_password_md5": password_md5},
+    assert _set_password(
+        user_client,
+        username="bob",
+        password="bob-password",
+        setup_token=created_user.json()["password_setup_token"],
     ).status_code == 200
 
     reset = admin_client.post(f"/api/rbac/users/{user_id}/reset-password")
     assert reset.status_code == 200
     assert reset.json()["password_pending"] is True
+    assert reset.json()["password_setup_token"]
 
-    login = user_client.post("/api/auth/login", json={"username": "bob", "client_password_md5": password_md5})
+    login = user_client.post("/api/auth/login", json={"username": "bob", "password": "bob-password"})
     assert login.status_code == 401
 
 
@@ -522,10 +657,11 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
     assert grant.status_code == 200
 
     user_client = TestClient(app)
-    password_md5 = _password_md5("tail-ops-password")
-    set_password = user_client.post(
-        "/api/auth/password",
-        json={"username": "tail-ops", "client_password_md5": password_md5},
+    set_password = _set_password(
+        user_client,
+        username="tail-ops",
+        password="tail-ops-password",
+        setup_token=created_user.json()["password_setup_token"],
     )
     assert set_password.status_code == 200
 

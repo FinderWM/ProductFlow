@@ -59,6 +59,7 @@ backend/backend/storage-dev/
 .codex/tmp/
 .codex/**/*.local.*
 .codex/**/*.py[cod]
+.codex/run
 
 # Antigravity CLI local state
 .antigravitycli/

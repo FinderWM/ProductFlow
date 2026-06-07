@@ -148,6 +148,7 @@ export function RbacPage() {
   const [resourceGroupGrantUser, setResourceGroupGrantUser] = useState<RbacUser | null>(null);
   const [resourceGroupGrantDraft, setResourceGroupGrantDraft] = useState<string[]>([]);
   const [message, setMessage] = useState("");
+  const [passwordSetupToken, setPasswordSetupToken] = useState("");
   const [error, setError] = useState("");
   const userListQueryKey = useMemo(
     () => rbacUserListQueryKey(userPage, userSearch, userRoleFilter),
@@ -291,10 +292,11 @@ export function RbacPage() {
         display_name: displayName.trim() || null,
         role_id: selectedRoleId || null,
       }),
-    onSuccess: async () => {
+    onSuccess: async (createdUser) => {
       setUsername("");
       setDisplayName("");
       setMessage(t("rbac.userCreated"));
+      setPasswordSetupToken(createdUser.password_setup_token ?? "");
       setError("");
       await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
@@ -316,9 +318,10 @@ export function RbacPage() {
 
   const resetPasswordMutation = useMutation({
     mutationFn: api.resetRbacUserPassword,
-    onSuccess: async () => {
+    onSuccess: async (updatedUser) => {
       setPendingUserAction(null);
       setMessage(t("rbac.passwordReset"));
+      setPasswordSetupToken(updatedUser.password_setup_token ?? "");
       setError("");
       await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
@@ -331,6 +334,7 @@ export function RbacPage() {
     onSuccess: async () => {
       setPendingUserAction(null);
       setMessage(t("rbac.userUpdated"));
+      setPasswordSetupToken("");
       setError("");
       await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
@@ -346,6 +350,7 @@ export function RbacPage() {
     onSuccess: async (payload) => {
       setRolePermissionDraft(rolePermissionDraftFromResponse(payload));
       setMessage(t("rbac.permissionsSaved"));
+      setPasswordSetupToken("");
       setError("");
       await queryClient.invalidateQueries({ queryKey: ["rbac-role-permissions", payload.role_id] });
     },
@@ -360,6 +365,7 @@ export function RbacPage() {
     onSuccess: async (payload) => {
       setResourceGroupGrantDraft([...payload.resource_group_ids]);
       setMessage(t("rbac.resourceGroupsSaved"));
+      setPasswordSetupToken("");
       setError("");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["rbac-user-generation-resource-groups", payload.user_id] }),
@@ -372,6 +378,7 @@ export function RbacPage() {
   const handleCreateUser = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMessage("");
+    setPasswordSetupToken("");
     setError("");
     if (!username.trim()) {
       setError(t("rbac.usernameRequired"));
@@ -383,6 +390,7 @@ export function RbacPage() {
   const handleCreateRole = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMessage("");
+    setPasswordSetupToken("");
     setError("");
     if (!roleCode.trim() || !roleName.trim()) {
       setError(t("rbac.roleRequired"));
@@ -472,6 +480,14 @@ export function RbacPage() {
         {message ? (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200">
             {message}
+          </div>
+        ) : null}
+        {passwordSetupToken ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+            <div className="mb-1 font-semibold">{t("rbac.passwordSetupToken")}</div>
+            <code className="block break-all rounded border border-amber-200 bg-white px-2 py-1 font-mono text-xs text-amber-900 dark:border-amber-400/25 dark:bg-slate-950 dark:text-amber-100">
+              {passwordSetupToken}
+            </code>
           </div>
         ) : null}
 

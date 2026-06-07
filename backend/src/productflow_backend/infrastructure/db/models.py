@@ -130,8 +130,10 @@ class AuthUser(Base, TimestampMixin):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     role_id: Mapped[str] = mapped_column(String(36))
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
-    password_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    password_salt: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_salt: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    password_setup_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_setup_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

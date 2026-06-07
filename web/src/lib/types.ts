@@ -93,6 +93,7 @@ export interface RbacUser {
   is_admin: boolean;
   enabled: boolean;
   password_pending: boolean;
+  password_setup_token?: string | null;
   resource_groups: GenerationResourceGroupTag[];
   archived_at?: string | null;
 }

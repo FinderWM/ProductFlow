@@ -265,16 +265,7 @@ def execute_workflow_image_generation(
             if runtime_claim is None:
                 raise RuntimeError("图片生成配置未初始化")
             first_provider = dependencies.image_provider(runtime_claim.generation_config_id, session=session)
-            if callable(getattr(first_provider, "generate_poster_images", None)):
-                image_providers = [first_provider]
-            else:
-                image_providers = [
-                    first_provider,
-                    *[
-                        dependencies.image_provider(runtime_claim.generation_config_id, session=session)
-                        for _ in downstream_nodes[1:]
-                    ],
-                ]
+            image_providers = [first_provider]
             provider_invoked = True
         generated_images = generate_workflow_images_concurrently(
             render_input=render_input,
@@ -490,7 +481,7 @@ def generate_workflow_images_concurrently(
         if poster_generation_mode == "generated":
             if image_providers is None:
                 raise RuntimeError("图片生成供应商未初始化")
-            image_provider = image_providers[target_index - 1]
+            image_provider = image_providers[min(target_index - 1, len(image_providers) - 1)]
             try:
                 generated_image, image_model = image_provider.generate_poster_image(render_input, kind)
             except TimeLimitExceeded:
@@ -526,6 +517,16 @@ def generate_workflow_images_concurrently(
                 )
             ]
         return [generate_one(1)]
+    if poster_generation_mode == "generated":
+        timeout_seconds = workflow_image_generation_provider_timeout_seconds()
+        return [
+            call_with_timeout(
+                lambda target_index=target_index: generate_one(target_index),
+                timeout_seconds=timeout_seconds,
+                timeout_message=WORKFLOW_IMAGE_GENERATION_TIMEOUT_FAILURE,
+            )
+            for target_index in range(1, target_count + 1)
+        ]
     executor = ThreadPoolExecutor(max_workers=target_count)
     futures = {executor.submit(generate_one, target_index): target_index for target_index in range(1, target_count + 1)}
     results: dict[int, GeneratedWorkflowImage] = {}

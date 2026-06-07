@@ -167,6 +167,8 @@ def generation_failure_reason(exc: BaseException) -> str:
 
 
 def generation_failure_is_timeout(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
     return isinstance(exc, TimeLimitExceeded)
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -27,7 +26,10 @@ from productflow_backend.infrastructure.db.models import (
     ProviderProfile,
 )
 from productflow_backend.infrastructure.db.session import get_session_factory
-from productflow_backend.infrastructure.openai_client import OPENAI_COMPATIBLE_DEFAULT_HEADERS
+from productflow_backend.infrastructure.openai_client import (
+    OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+    OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
+)
 from productflow_backend.infrastructure.provider_config import (
     resolve_image_provider_config,
     resolve_text_provider_config,
@@ -47,8 +49,7 @@ def test_auth_session_required(configured_env: Path) -> None:
     assert admin_key_login.status_code == 401
     assert admin_key_login.json()["detail"] == "请使用账号密码登录"
 
-    password_md5 = hashlib.md5(b"super-secret-admin-key", usedforsecurity=False).hexdigest()
-    wrong_password = client.post("/api/auth/login", json={"username": "libow", "client_password_md5": password_md5})
+    wrong_password = client.post("/api/auth/login", json={"username": "libow", "password": "wrong-admin-password"})
     assert wrong_password.status_code == 401
     assert wrong_password.json()["detail"] == "账号或密码不正确"
 
@@ -155,10 +156,7 @@ def test_settings_api_uses_rbac_without_extra_unlock(configured_env: Path) -> No
 
     relogin = client.post(
         "/api/auth/login",
-        json={
-            "username": "libow",
-            "client_password_md5": hashlib.md5(b"super-secret-admin-key", usedforsecurity=False).hexdigest(),
-        },
+        json={"username": "libow", "password": "super-secret-admin-key"},
     )
     assert relogin.status_code == 200
 
@@ -1278,6 +1276,7 @@ def test_provider_model_list_endpoint_fetches_openai_compatible_models(
         "api_key": "secret-model-key",
         "base_url": "https://models.example/v1",
         "default_headers": OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+        "timeout": OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
     }
     assert listed.json() == {
         "models": [

@@ -56,8 +56,15 @@ from productflow_backend.infrastructure.image.gemini_provider import (
     map_productflow_size_to_gemini_image_config,
 )
 from productflow_backend.infrastructure.image.images_provider import OpenAIImagesImageProvider
-from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageProvider
-from productflow_backend.infrastructure.openai_client import OPENAI_COMPATIBLE_DEFAULT_HEADERS
+from productflow_backend.infrastructure.image.responses_provider import (
+    OpenAIResponsesImageClient,
+    OpenAIResponsesImageProvider,
+)
+from productflow_backend.infrastructure.openai_client import (
+    OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+    OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
+    build_openai_client_kwargs,
+)
 from productflow_backend.infrastructure.provider_config import ResolvedImageProviderConfig, ResolvedTextProviderConfig
 
 REMOVED_COPY_OUTPUT_KEYS = [
@@ -67,6 +74,42 @@ REMOVED_COPY_OUTPUT_KEYS = [
     "poster" + "_headline",
     "c" + "ta",
 ]
+
+
+def test_openai_client_kwargs_include_default_timeout() -> None:
+    kwargs = build_openai_client_kwargs(api_key="test-key", base_url="https://openai.example/v1")
+
+    assert kwargs["timeout"] == OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS
+    assert kwargs["default_headers"] == OPENAI_COMPATIBLE_DEFAULT_HEADERS
+    assert kwargs["base_url"] == "https://openai.example/v1"
+
+
+def test_responses_background_poll_has_deadline(configured_env: Path) -> None:
+    client = OpenAIResponsesImageClient(
+        ResolvedImageProviderConfig(
+            provider_kind="openai_responses",
+            model="gpt-image-2",
+            api_key="test-key",
+            responses_background_enabled=True,
+        )
+    )
+    client.background_poll_timeout_seconds = 0.0
+    response = SimpleNamespace(id="resp_timeout", status="in_progress")
+
+    class DummyResponses:
+        def retrieve(self, response_id: str):
+            return SimpleNamespace(id=response_id, status="in_progress")
+
+    dummy_client = SimpleNamespace(responses=DummyResponses())
+
+    with pytest.raises(TimeoutError, match="后台生成超时"):
+        client._poll_background_response(
+            dummy_client,
+            response,
+            request_payload={"model": "gpt-image-2"},
+            progress_callback=None,
+            task_context={},
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -200,6 +243,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
         {
             "api_key": "super-secret-text-key",
             "default_headers": OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+            "timeout": OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
         }
     ]
     assert text_calls[0]["instructions"] == "自定义商品理解提示"
@@ -991,6 +1035,7 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
         "api_key": "demo-api-key",
         "base_url": "https://example.test/v1",
         "default_headers": OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+        "timeout": OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
     }
     assert calls[0]["model"] == "gpt-5.4"
     assert calls[0]["tools"] == [{"type": "image_generation", "size": "1024x1024"}]
@@ -1673,6 +1718,7 @@ def test_openai_images_provider_factory_and_client_generate_payload(
             "api_key": "demo-api-key",
             "base_url": "https://example.test/v1",
             "default_headers": OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+            "timeout": OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
         }
     ]
     assert calls == [

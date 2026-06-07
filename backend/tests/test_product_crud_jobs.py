@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -53,11 +52,6 @@ def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> N
     """Keep API workflow tests deterministic while production delivery goes through Dramatiq."""
 
     _execute_workflow_queue_inline(monkeypatch)
-
-
-def _password_md5(value: str) -> str:
-    return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
-
 
 def test_product_create_persists_source_note_for_ai_context(configured_env: Path) -> None:
     from productflow_backend.presentation.api import create_app
@@ -298,7 +292,11 @@ def test_product_create_rejects_ungranted_resource_group_for_member(configured_e
     user_client = TestClient(app)
     set_password = user_client.post(
         "/api/auth/password",
-        json={"username": "product-member", "client_password_md5": _password_md5("product-member-password")},
+        json={
+            "username": "product-member",
+            "password": "product-member-password",
+            "setup_token": created_user.json()["password_setup_token"],
+        },
     )
     assert set_password.status_code == 200
 

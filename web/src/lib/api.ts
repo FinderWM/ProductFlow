@@ -69,7 +69,6 @@ import type {
   UserUsageStatsResponse,
   UserGenerationResourceGroupGrants,
 } from "./types";
-import { md5Hex } from "./md5";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
@@ -126,19 +125,19 @@ export const api = {
   createSession(username: string, password: string): Promise<{ ok: boolean }> {
     return request("/api/auth/session", {
       method: "POST",
-      body: JSON.stringify({ username, client_password_md5: md5Hex(password) }),
+      body: JSON.stringify({ username, password }),
     });
   },
   login(username: string, password: string): Promise<{ ok: boolean }> {
     return request("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, client_password_md5: md5Hex(password) }),
+      body: JSON.stringify({ username, password }),
     });
   },
-  setPassword(username: string, password: string): Promise<{ ok: boolean }> {
+  setPassword(username: string, password: string, setupToken: string): Promise<{ ok: boolean }> {
     return request("/api/auth/password", {
       method: "POST",
-      body: JSON.stringify({ username, client_password_md5: md5Hex(password) }),
+      body: JSON.stringify({ username, password, setup_token: setupToken }),
     });
   },
   destroySession(): Promise<{ ok: boolean }> {

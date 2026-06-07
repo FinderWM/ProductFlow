@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import pytest
@@ -12,10 +11,6 @@ from productflow_backend.application.canvas_templates import get_builtin_canvas_
 from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.domain.rbac import ADMIN_USER_ID
 from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
-
-
-def _password_md5(value: str) -> str:
-    return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
 
 
 def _create_user_client(app, admin_client: TestClient, username: str) -> TestClient:
@@ -31,10 +26,13 @@ def _create_user_client(app, admin_client: TestClient, username: str) -> TestCli
     assert grant.status_code == 200
 
     client = TestClient(app)
-    password_md5 = _password_md5(f"{username}-password")
     set_password = client.post(
         "/api/auth/password",
-        json={"username": username, "client_password_md5": password_md5},
+        json={
+            "username": username,
+            "password": f"{username}-password",
+            "setup_token": created_user.json()["password_setup_token"],
+        },
     )
     assert set_password.status_code == 200
     return client

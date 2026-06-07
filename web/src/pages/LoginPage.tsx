@@ -14,6 +14,7 @@ export function LoginPage({ authenticated }: LoginPageProps) {
   const { t } = useI18n();
   const [mode, setMode] = useState<"login" | "password">("login");
   const [username, setUsername] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -27,10 +28,10 @@ export function LoginPage({ authenticated }: LoginPageProps) {
   }, [authenticated, navigate]);
 
   const loginMutation = useMutation({
-    mutationFn: (payload: { username: string; password: string; mode: "login" | "password" }) =>
+    mutationFn: (payload: { username: string; password: string; setupToken: string; mode: "login" | "password" }) =>
       payload.mode === "login"
         ? api.login(payload.username, payload.password)
-        : api.setPassword(payload.username, payload.password),
+        : api.setPassword(payload.username, payload.password, payload.setupToken),
     onSuccess: async () => {
       queryClient.removeQueries({ queryKey: ["config"] });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
@@ -53,6 +54,10 @@ export function LoginPage({ authenticated }: LoginPageProps) {
       return;
     }
     if (mode === "password") {
+      if (!setupToken.trim()) {
+        setError(t("login.missingSetupToken"));
+        return;
+      }
       if (password.length < 6) {
         setError(t("login.passwordTooShort"));
         return;
@@ -62,7 +67,7 @@ export function LoginPage({ authenticated }: LoginPageProps) {
         return;
       }
     }
-    loginMutation.mutate({ username: username.trim(), password, mode });
+    loginMutation.mutate({ username: username.trim(), password, setupToken: setupToken.trim(), mode });
   };
 
   return (
@@ -86,6 +91,7 @@ export function LoginPage({ authenticated }: LoginPageProps) {
             onClick={() => {
               setMode("login");
               setError("");
+              setSetupToken("");
             }}
             className={`rounded-md px-3 py-2 transition-colors ${
               mode === "login"
@@ -141,19 +147,34 @@ export function LoginPage({ authenticated }: LoginPageProps) {
           </div>
 
           {mode === "password" ? (
-            <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-slate-400">
-                {t("login.confirmPassword")}
-              </label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 transition-shadow placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/25"
-                placeholder={t("login.confirmPasswordPlaceholder")}
-                autoComplete="new-password"
-              />
-            </div>
+            <>
+              <div>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-slate-400">
+                  {t("login.setupToken")}
+                </label>
+                <input
+                  type="password"
+                  value={setupToken}
+                  onChange={(event) => setSetupToken(event.target.value)}
+                  className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 transition-shadow placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/25"
+                  placeholder={t("login.setupTokenPlaceholder")}
+                  autoComplete="one-time-code"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-slate-400">
+                  {t("login.confirmPassword")}
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 transition-shadow placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/25"
+                  placeholder={t("login.confirmPasswordPlaceholder")}
+                  autoComplete="new-password"
+                />
+              </div>
+            </>
           ) : null}
 
           {error ? <div className="text-xs font-medium text-red-500 dark:text-red-300">{error}</div> : null}

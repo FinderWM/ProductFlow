@@ -54,6 +54,7 @@ class RbacUserResponse(BaseModel):
     is_admin: bool
     enabled: bool
     password_pending: bool
+    password_setup_token: str | None = None
     resource_groups: list[GenerationResourceGroupTagResponse] = Field(default_factory=list)
     archived_at: str | None
 
@@ -139,6 +140,7 @@ def serialize_user(
     user: AuthUser,
     *,
     resource_groups: list[GenerationResourceGroup] | None = None,
+    password_setup_token: str | None = None,
 ) -> RbacUserResponse:
     return RbacUserResponse(
         id=user.id,
@@ -148,7 +150,8 @@ def serialize_user(
         role_name=user.role.name if user.role else "",
         is_admin=user.is_admin,
         enabled=user.enabled,
-        password_pending=not bool(user.password_hash and user.password_salt),
+        password_pending=not bool(user.password_hash),
+        password_setup_token=password_setup_token,
         resource_groups=[
             serialize_generation_resource_group_tag(group, resource_group_id=group.id)
             for group in (resource_groups or [])

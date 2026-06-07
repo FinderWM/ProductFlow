@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
@@ -27,10 +26,6 @@ from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, TEXT_PURPOSE, GenerationConfigClaim
 
 
-def _password_md5(value: str) -> str:
-    return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
-
-
 def _create_user_client(app, admin_client: TestClient, username: str) -> tuple[TestClient, str]:
     created_user = admin_client.post(
         "/api/rbac/users",
@@ -40,10 +35,13 @@ def _create_user_client(app, admin_client: TestClient, username: str) -> tuple[T
     user_id = created_user.json()["id"]
 
     client = TestClient(app)
-    password_md5 = _password_md5(f"{username}-password")
     set_password = client.post(
         "/api/auth/password",
-        json={"username": username, "client_password_md5": password_md5},
+        json={
+            "username": username,
+            "password": f"{username}-password",
+            "setup_token": created_user.json()["password_setup_token"],
+        },
     )
     assert set_password.status_code == 200
     return client, user_id

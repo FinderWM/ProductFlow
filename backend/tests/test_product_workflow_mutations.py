@@ -564,7 +564,7 @@ def test_image_generation_fill_replaces_reference_node_current_image(configured_
     assert {old_asset_id, new_asset_id}.issubset(reference_asset_ids)
 
 
-def test_image_generation_fills_multiple_targets_with_concurrent_provider_calls(
+def test_image_generation_serializes_multiple_targets_for_single_image_provider_claim(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -578,13 +578,12 @@ def test_image_generation_fills_multiple_targets_with_concurrent_provider_calls(
     finally:
         session.close()
 
-    class CoordinatedImageProvider:
-        provider_name = "coordinated"
-        prompt_version = "coordinated-v1"
+    class SerialImageProvider:
+        provider_name = "serial"
+        prompt_version = "serial-v1"
 
         def __init__(self) -> None:
             self._lock = threading.Lock()
-            self._both_started = threading.Event()
             self.started = 0
             self.max_in_flight = 0
             self._in_flight = 0
@@ -602,10 +601,6 @@ def test_image_generation_fills_multiple_targets_with_concurrent_provider_calls(
                 self._in_flight += 1
                 self.max_in_flight = max(self.max_in_flight, self._in_flight)
                 call_index = self.started
-                if self.started >= 2:
-                    self._both_started.set()
-            if not self._both_started.wait(timeout=1.0):
-                raise AssertionError("provider calls were not initiated concurrently")
             try:
                 return (
                     GeneratedImagePayload(
@@ -614,18 +609,18 @@ def test_image_generation_fills_multiple_targets_with_concurrent_provider_calls(
                         mime_type="image/png",
                         width=800,
                         height=800,
-                        variant_label=f"coordinated-{call_index}",
+                        variant_label=f"serial-{call_index}",
                     ),
-                    "coordinated-v1",
+                    "serial-v1",
                 )
             finally:
                 with self._lock:
                     self._in_flight -= 1
 
-    fake_provider = CoordinatedImageProvider()
+    fake_provider = SerialImageProvider()
     provider_factory_thread_ids: list[int] = []
 
-    def fake_provider_factory() -> CoordinatedImageProvider:
+    def fake_provider_factory() -> SerialImageProvider:
         provider_factory_thread_ids.append(threading.get_ident())
         return fake_provider
 
@@ -679,10 +674,10 @@ def test_image_generation_fills_multiple_targets_with_concurrent_provider_calls(
     assert run_response.status_code == 200
     payload = _wait_for_workflow_run(client, product_id, status="succeeded")
     image_output = next(node for node in payload["nodes"] if node["id"] == image_node["id"])["output_json"]
-    assert len(provider_factory_thread_ids) == 2
+    assert len(provider_factory_thread_ids) == 1
     assert set(provider_factory_thread_ids).isdisjoint(fake_provider.thread_ids)
     assert fake_provider.started == 2
-    assert fake_provider.max_in_flight == 2
+    assert fake_provider.max_in_flight == 1
     assert image_output["target_count"] == 2
     assert len(image_output["filled_reference_node_ids"]) == 2
     assert len(image_output["filled_source_asset_ids"]) == 2

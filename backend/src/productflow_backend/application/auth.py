@@ -4,11 +4,13 @@ import hashlib
 import re
 import secrets
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, inspect, select
 from sqlalchemy.orm import Session, selectinload
 
+from productflow_backend.config import get_settings
 from productflow_backend.domain.errors import BusinessValidationError, NotFoundError
 from productflow_backend.domain.rbac import (
     ADMIN_ROLE_CODE,
@@ -46,6 +48,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 CLIENT_PASSWORD_MD5_RE = re.compile(r"^[0-9a-f]{32}$")
+PASSWORD_HASH_PREFIX = "scrypt$"
+PASSWORD_SETUP_TOKEN_HASH_PREFIX = "setup-sha256$"
+PASSWORD_MIN_LENGTH = 6
+PASSWORD_SCRYPT_N = 16384
+PASSWORD_SCRYPT_R = 8
+PASSWORD_SCRYPT_P = 1
+PASSWORD_SCRYPT_DKLEN = 32
+PASSWORD_SETUP_TOKEN_TTL = timedelta(days=7)
 SESSION_USER_KEYS = ("user_id", "username", "role_id", "is_admin")
 
 
@@ -59,6 +69,18 @@ class UserPermissionState:
 class RoleWithUserCount:
     role: AuthRole
     user_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class PasswordCredential:
+    secret: str
+    legacy_client_md5: str
+
+
+@dataclass(frozen=True, slots=True)
+class PasswordSetupIssue:
+    user: AuthUser
+    setup_token: str
 
 
 def normalize_username(username: str) -> str:
@@ -77,14 +99,111 @@ def normalize_client_password_md5(client_password_md5: str) -> str:
     return normalized
 
 
-def password_hash(client_password_md5: str, salt: str) -> str:
-    normalized = normalize_client_password_md5(client_password_md5)
-    return hashlib.md5(f"{normalized}:{salt}".encode(), usedforsecurity=False).hexdigest()
+def normalize_password_credential(
+    *,
+    password: str | None = None,
+    client_password_md5: str | None = None,
+) -> PasswordCredential:
+    normalized_password = (password or "").strip()
+    normalized_client_md5 = (client_password_md5 or "").strip()
+    if normalized_password:
+        if len(normalized_password) < PASSWORD_MIN_LENGTH:
+            raise BusinessValidationError("密码至少 6 位")
+        legacy_client_md5 = hashlib.md5(normalized_password.encode(), usedforsecurity=False).hexdigest()
+        return PasswordCredential(secret=normalized_password, legacy_client_md5=legacy_client_md5)
+    if normalized_client_md5:
+        normalized_md5 = normalize_client_password_md5(normalized_client_md5)
+        return PasswordCredential(secret=normalized_md5, legacy_client_md5=normalized_md5)
+    raise BusinessValidationError("密码不能为空")
+
+
+def password_hash(password_secret: str) -> str:
+    salt = secrets.token_hex(16)
+    derived = hashlib.scrypt(
+        password_secret.encode(),
+        salt=salt.encode(),
+        n=PASSWORD_SCRYPT_N,
+        r=PASSWORD_SCRYPT_R,
+        p=PASSWORD_SCRYPT_P,
+        dklen=PASSWORD_SCRYPT_DKLEN,
+    ).hex()
+    return f"{PASSWORD_HASH_PREFIX}{PASSWORD_SCRYPT_N}${PASSWORD_SCRYPT_R}${PASSWORD_SCRYPT_P}${salt}${derived}"
+
+
+def user_has_password(user: AuthUser) -> bool:
+    return bool(user.password_hash)
 
 
 def auth_tables_available() -> bool:
     inspector = inspect(get_engine())
     return all(inspector.has_table(table_name) for table_name in ("auth_users", "auth_roles", "rbac_menus"))
+
+
+def _legacy_password_hash(client_password_md5: str, salt: str) -> str:
+    normalized = normalize_client_password_md5(client_password_md5)
+    return hashlib.md5(f"{normalized}:{salt}".encode(), usedforsecurity=False).hexdigest()
+
+
+def _verify_password_hash(credential: PasswordCredential, stored_hash: str, legacy_salt: str | None) -> bool:
+    if stored_hash.startswith(PASSWORD_HASH_PREFIX):
+        parts = stored_hash.split("$")
+        if len(parts) != 6:
+            return False
+        _, n_text, r_text, p_text, salt, expected = parts
+        try:
+            derived = hashlib.scrypt(
+                credential.secret.encode(),
+                salt=salt.encode(),
+                n=int(n_text),
+                r=int(r_text),
+                p=int(p_text),
+                dklen=len(bytes.fromhex(expected)),
+            ).hex()
+        except (TypeError, ValueError):
+            return False
+        return secrets.compare_digest(expected, derived)
+    if legacy_salt:
+        return secrets.compare_digest(stored_hash, _legacy_password_hash(credential.legacy_client_md5, legacy_salt))
+    return False
+
+
+def _password_setup_token_hash(setup_token: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.sha256(f"{setup_token}:{salt}".encode()).hexdigest()
+    return f"{PASSWORD_SETUP_TOKEN_HASH_PREFIX}{salt}${digest}"
+
+
+def _verify_password_setup_token(user: AuthUser, setup_token: str | None, *, now: datetime | None = None) -> bool:
+    normalized_token = (setup_token or "").strip()
+    stored_hash = user.password_setup_token_hash or ""
+    if not normalized_token or not stored_hash.startswith(PASSWORD_SETUP_TOKEN_HASH_PREFIX):
+        return False
+    expires_at = user.password_setup_token_expires_at
+    resolved_now = now or datetime.now(UTC)
+    if expires_at is not None:
+        normalized_expires_at = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=UTC)
+        if normalized_expires_at < resolved_now:
+            return False
+    payload = stored_hash.removeprefix(PASSWORD_SETUP_TOKEN_HASH_PREFIX)
+    try:
+        salt, expected = payload.split("$", 1)
+    except ValueError:
+        return False
+    digest = hashlib.sha256(f"{normalized_token}:{salt}".encode()).hexdigest()
+    return secrets.compare_digest(expected, digest)
+
+
+def _issue_password_setup_token(user: AuthUser, *, expires_at: datetime | None = None) -> str:
+    setup_token = secrets.token_urlsafe(32)
+    user.password_setup_token_hash = _password_setup_token_hash(setup_token)
+    user.password_setup_token_expires_at = expires_at or datetime.now(UTC) + PASSWORD_SETUP_TOKEN_TTL
+    user.updated_at = utcnow()
+    return setup_token
+
+
+def _clear_password_setup_token(user: AuthUser) -> None:
+    user.password_setup_token_hash = None
+    user.password_setup_token_expires_at = None
 
 
 def ensure_auth_bootstrapped(session: Session | None = None) -> None:
@@ -102,35 +221,58 @@ def ensure_auth_bootstrapped(session: Session | None = None) -> None:
     session.commit()
 
 
-def set_initial_password(session: Session, *, username: str, client_password_md5: str) -> AuthUser:
+def set_initial_password(
+    session: Session,
+    *,
+    username: str,
+    setup_token: str | None = None,
+    password: str | None = None,
+    client_password_md5: str | None = None,
+) -> AuthUser:
     ensure_auth_bootstrapped(session)
     user = get_user_by_username(session, username)
     if user is None:
         raise NotFoundError("账号不存在")
     if not user.enabled or user.archived_at is not None:
         raise BusinessValidationError("账号不可用")
-    if user.password_hash or user.password_salt:
+    if user_has_password(user):
         raise BusinessValidationError("该账号已设置密码")
+    if not _verify_password_setup_token(user, setup_token):
+        raise BusinessValidationError("设密凭据无效或已过期")
 
-    salt = secrets.token_hex(16)
-    user.password_salt = salt
-    user.password_hash = password_hash(client_password_md5, salt)
+    credential = normalize_password_credential(password=password, client_password_md5=client_password_md5)
+    user.password_salt = None
+    user.password_hash = password_hash(credential.secret)
+    _clear_password_setup_token(user)
     user.updated_at = utcnow()
     session.commit()
     session.refresh(user)
     return user
 
 
-def authenticate_user(session: Session, *, username: str, client_password_md5: str) -> AuthUser | None:
+def authenticate_user(
+    session: Session,
+    *,
+    username: str,
+    password: str | None = None,
+    client_password_md5: str | None = None,
+) -> AuthUser | None:
     ensure_auth_bootstrapped(session)
     user = get_user_by_username(session, username)
     if user is None or not user.enabled or user.archived_at is not None:
         return None
-    if not user.password_hash or not user.password_salt:
+    if not user_has_password(user):
         return None
-    if secrets.compare_digest(user.password_hash, password_hash(client_password_md5, user.password_salt)):
-        return user
-    return None
+    credential = normalize_password_credential(password=password, client_password_md5=client_password_md5)
+    if not _verify_password_hash(credential, user.password_hash or "", user.password_salt):
+        return None
+    if not (user.password_hash or "").startswith(PASSWORD_HASH_PREFIX) and (password or "").strip():
+        user.password_hash = password_hash(credential.secret)
+        user.password_salt = None
+        user.updated_at = utcnow()
+        session.commit()
+        session.refresh(user)
+    return user
 
 
 def get_user_by_username(session: Session, username: str) -> AuthUser | None:
@@ -215,7 +357,7 @@ def create_trusted_user(
     username: str,
     display_name: str | None = None,
     role_id: str | None = None,
-) -> AuthUser:
+) -> PasswordSetupIssue:
     ensure_auth_bootstrapped(session)
     normalized_username = normalize_username(username)
     if get_user_by_username(session, normalized_username) is not None:
@@ -229,13 +371,14 @@ def create_trusted_user(
         role_id=role.id,
         is_admin=False,
     )
+    setup_token = _issue_password_setup_token(user)
     session.add(user)
     session.commit()
     session.refresh(user)
-    return user
+    return PasswordSetupIssue(user=user, setup_token=setup_token)
 
 
-def reset_user_password(session: Session, *, user_id: str, actor: AuthUser) -> AuthUser:
+def reset_user_password(session: Session, *, user_id: str, actor: AuthUser) -> PasswordSetupIssue:
     ensure_auth_bootstrapped(session)
     user = _get_user_or_raise(session, user_id)
     if user.is_admin:
@@ -244,10 +387,11 @@ def reset_user_password(session: Session, *, user_id: str, actor: AuthUser) -> A
         raise BusinessValidationError("不能重置自己的密码")
     user.password_hash = None
     user.password_salt = None
+    setup_token = _issue_password_setup_token(user)
     user.updated_at = utcnow()
     session.commit()
     session.refresh(user)
-    return user
+    return PasswordSetupIssue(user=user, setup_token=setup_token)
 
 
 def set_user_enabled(session: Session, *, user_id: str, enabled: bool) -> AuthUser:
@@ -555,11 +699,21 @@ def _ensure_admin_user(session: Session, admin_role: AuthRole) -> AuthUser:
         )
         session.add(user)
         session.flush()
+        _ensure_admin_password_setup_token(user)
         return user
     if not user.is_admin or user.role_id != admin_role.id:
         user.is_admin = True
         user.role_id = admin_role.id
+    _ensure_admin_password_setup_token(user)
     return user
+
+
+def _ensure_admin_password_setup_token(user: AuthUser) -> None:
+    if user_has_password(user):
+        _clear_password_setup_token(user)
+        return
+    user.password_setup_token_hash = _password_setup_token_hash(get_settings().admin_access_key)
+    user.password_setup_token_expires_at = None
 
 
 def _normalize_role_api_permission_codes(permission_codes: set[str]) -> list[str]:

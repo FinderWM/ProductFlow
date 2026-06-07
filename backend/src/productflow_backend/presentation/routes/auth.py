@@ -32,11 +32,12 @@ def create_session(
 ) -> SessionResponse:
     if payload.admin_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请使用账号密码登录")
-    if not payload.username or not payload.client_password_md5:
+    if not payload.username or not (payload.password or payload.client_password_md5):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="账号和密码不能为空")
     user = authenticate_user(
         session,
         username=payload.username,
+        password=payload.password,
         client_password_md5=payload.client_password_md5,
     )
     if user is None:
@@ -50,6 +51,7 @@ def login(payload: LoginRequest, request: Request, session: Session = Depends(ge
     user = authenticate_user(
         session,
         username=payload.username,
+        password=payload.password,
         client_password_md5=payload.client_password_md5,
     )
     if user is None:
@@ -67,6 +69,8 @@ def set_password(
     user = set_initial_password(
         session,
         username=payload.username,
+        setup_token=payload.setup_token,
+        password=payload.password,
         client_password_md5=payload.client_password_md5,
     )
     _write_login_session(request, user)
@@ -116,7 +120,7 @@ def _serialize_user(user: AuthUser) -> AuthUserResponse:
         role_id=user.role_id,
         is_admin=user.is_admin,
         enabled=user.enabled,
-        password_pending=not bool(user.password_hash and user.password_salt),
+        password_pending=not bool(user.password_hash),
     )
 
 

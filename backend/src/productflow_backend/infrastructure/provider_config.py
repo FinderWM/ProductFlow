@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import case, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -950,8 +950,20 @@ def release_generation_config_claim(
     now: datetime | None = None,
 ) -> None:
     resolved_now = now or datetime.now(UTC)
-    state = _ensure_generation_config_state(session, generation_config_id)
-    state.current_concurrency = max(0, int(state.current_concurrency or 0) - 1)
+    _ensure_generation_config_state(session, generation_config_id)
+    session.execute(
+        update(GenerationConfigState)
+        .where(GenerationConfigState.generation_config_id == generation_config_id)
+        .values(
+            current_concurrency=case(
+                (
+                    GenerationConfigState.current_concurrency > 0,
+                    GenerationConfigState.current_concurrency - 1,
+                ),
+                else_=0,
+            )
+        )
+    )
     if not record_result:
         session.flush()
         return

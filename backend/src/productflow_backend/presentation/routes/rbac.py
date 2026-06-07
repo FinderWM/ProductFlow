@@ -142,13 +142,13 @@ def create_user_endpoint(
     payload: CreateTrustedUserRequest,
     session: Session = Depends(get_session),
 ) -> RbacUserResponse:
-    user = create_trusted_user(
+    issue = create_trusted_user(
         session,
         username=payload.username,
         display_name=payload.display_name,
         role_id=payload.role_id,
     )
-    return serialize_user(user)
+    return serialize_user(issue.user, password_setup_token=issue.setup_token)
 
 
 @router.patch("/users/{user_id}", response_model=RbacUserResponse)
@@ -193,7 +193,8 @@ def reset_user_password_endpoint(
     actor: AuthUser = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> RbacUserResponse:
-    return serialize_user(reset_user_password(session, user_id=user_id, actor=actor))
+    issue = reset_user_password(session, user_id=user_id, actor=actor)
+    return serialize_user(issue.user, password_setup_token=issue.setup_token)
 
 
 @router.get("/roles", response_model=list[RbacRoleResponse])
