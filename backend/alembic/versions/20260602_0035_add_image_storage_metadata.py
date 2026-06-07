@@ -36,7 +36,7 @@ def _backfill_backend() -> str:
 def _backfill_bucket(storage_backend: str) -> str | None:
     if storage_backend not in {"minio", "s3"}:
         return None
-    bucket = (os.environ.get("S3_BUCKET") or "productflow").strip()
+    bucket = (os.environ.get("S3_BUCKET") or "inspiration-one").strip()
     return bucket or None
 
 

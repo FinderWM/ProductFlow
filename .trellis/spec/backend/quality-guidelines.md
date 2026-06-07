@@ -45,9 +45,9 @@ Use the root `justfile` where possible so local env loading and ports match the 
 #### 3. Contracts
 
 - `productflow-backend` and `productflow-worker` must read runtime dependencies from `.env`:
-  - `DATABASE_URL=postgresql+psycopg://productflow:<password>@host.docker.internal:15432/product_flow`
+  - `DATABASE_URL=postgresql+psycopg://productflow:<password>@host.docker.internal:15432/inspiration_flow`
   - `REDIS_URL=redis://host.docker.internal:16379/0`
-- Local host development uses `.env.dev` with `localhost:15432/product_flow` and `localhost:16379/0`.
+- Local host development uses `.env.dev` with `localhost:15432/inspiration_flow` and `localhost:16379/0`.
 - Do not reintroduce PostgreSQL or Redis services into `docker-compose.yml`; they are shared middleware for multiple
   projects.
 - Container storage must use a shared in-container path `STORAGE_ROOT=/app/storage`.
@@ -98,7 +98,7 @@ Use the root `justfile` where possible so local env loading and ports match the 
 Wrong inside an app container:
 
 ```yaml
-DATABASE_URL: postgresql+psycopg://productflow:password@localhost:15432/product_flow
+DATABASE_URL: postgresql+psycopg://productflow:password@localhost:15432/inspiration_flow
 ```
 
 Correct inside an app container:
@@ -219,9 +219,9 @@ Routes and use cases call provider interfaces/factories, not concrete SDK classe
 factory, config definitions, tests, and settings UI types together.
 
 Workflow execution has an additional explicit dependency seam in
-`application/product_workflow_dependencies.py`. Default workflow execution dependencies resolve providers directly through
+`application/inspiration_workflow_dependencies.py`. Default workflow execution dependencies resolve providers directly through
 the infrastructure provider factories. Tests and future composition code that need fake providers should pass a
-`WorkflowExecutionDependencies` instance directly rather than patching the `product_workflows.py` facade.
+`WorkflowExecutionDependencies` instance directly rather than patching the `inspiration_workflows.py` facade.
 
 #### Scenario: Workflow execution dependency seams
 
@@ -230,12 +230,12 @@ the infrastructure provider factories. Tests and future composition code that ne
 
 ##### 2. Signatures
 - `WorkflowExecutionDependencies(text_provider_resolver, image_provider_resolver, poster_renderer_factory)`.
-- `run_product_workflow(..., dependencies=None)`, `execute_product_workflow_run(..., dependencies=None)`, and internal
+- `run_inspiration_workflow(..., dependencies=None)`, `execute_inspiration_workflow_run(..., dependencies=None)`, and internal
   `_execute_node(..., dependencies=None)` accept this seam without changing API/worker call sites.
 
 ##### 3. Contracts
 - `None` uses default resolvers that call the infrastructure text/image provider factories.
-- The `product_workflows.py` facade exports public workflow use cases for route/worker imports only; it must not expose
+- The `inspiration_workflows.py` facade exports public workflow use cases for route/worker imports only; it must not expose
   provider factory helpers or private `_...` execution helpers as test seams.
 - Custom dependencies may be passed by focused tests or future composition code; they must return provider interface
   instances, not concrete SDK payloads.
@@ -248,8 +248,8 @@ the infrastructure provider factories. Tests and future composition code that ne
 - Good: a focused test injects fake providers through `WorkflowExecutionDependencies`.
 - Base: route/worker code calls public workflow use cases with `dependencies=None`, and execution resolves providers via
   the infrastructure factories.
-- Bad: tests monkeypatch `product_workflows.get_image_provider`, `product_workflows.get_text_provider`, or
-  `product_workflows._execute_node`.
+- Bad: tests monkeypatch `inspiration_workflows.get_image_provider`, `inspiration_workflows.get_text_provider`, or
+  `inspiration_workflows._execute_node`.
 - Bad: workflow execution imports a concrete provider SDK class.
 
 ##### 6. Tests Required
@@ -272,19 +272,19 @@ provider = dependencies.image_provider()
 Wrong:
 
 ```python
-monkeypatch.setattr("productflow_backend.application.product_workflows.get_image_provider", fake_factory)
+monkeypatch.setattr("productflow_backend.application.inspiration_workflows.get_image_provider", fake_factory)
 ```
 
 Correct:
 
 ```python
 dependencies = WorkflowExecutionDependencies(image_provider_resolver=fake_factory)
-run_product_workflow(session, product_id=product.id, dependencies=dependencies)
+run_inspiration_workflow(session, inspiration_id=inspiration.id, dependencies=dependencies)
 ```
 
 ### Validate inputs at the correct boundary
 
-- FastAPI `Query` constraints are used for list pagination in `presentation/routes/products.py`.
+- FastAPI `Query` constraints are used for list pagination in `presentation/routes/inspirations.py`.
 - Upload MIME/size/pixel validation is centralized in `presentation/upload_validation.py`.
 - Business text/price normalization lives in `application/use_cases.py` helpers such as `_normalize_required_text(...)` and
   `_normalize_price(...)`.
@@ -394,13 +394,13 @@ Correct:
 - Settings API persistence and validation.
 - Typed business error and legacy `ValueError` HTTP mapping.
 - SQLAlchemy enum value storage, with no native enum/check/FK business constraints in model/head metadata.
-- End-to-end product/copy/poster workflow.
+- End-to-end inspiration/copy/poster workflow.
 - Reference image upload/deletion.
 - Continuous image-session behavior.
 - Alembic upgrade path.
 - OpenAI Responses image provider parsing behavior.
 
-When changing product, copy, poster, settings, upload, image-session, provider, or migration behavior, add or update tests
+When changing inspiration, copy, poster, settings, upload, image-session, provider, or migration behavior, add or update tests
 in the matching topic file. Keep cross-cutting builders and polling/login helpers in `backend/tests/helpers.py` rather
 than reintroducing a giant all-purpose test module.
 
@@ -422,9 +422,9 @@ rows with `StorageService.object_key_for(...)`; it prefers `storage_object_key` 
 Durable task creation and workers are designed to avoid duplicate active work and duplicate execution:
 
 - Queue send failures are handled by application submit use cases before returning 503:
-  `submit_product_workflow_run(...)` and `submit_image_session_generation_task(...)`.
+  `submit_inspiration_workflow_run(...)` and `submit_image_session_generation_task(...)`.
 - Dramatiq actors use `max_retries=0`; application code owns retry state.
-- Product workflow runs follow the same durable-delivery rule with `recover_unfinished_workflow_runs(...)`: the
+- Inspiration workflow runs follow the same durable-delivery rule with `recover_unfinished_workflow_runs(...)`: the
   `workflow_runs` / `workflow_node_runs` tables are authoritative, Dramatiq is only delivery, and duplicate messages must
   no-op for terminal or currently-running runs.
 - Continuous image-session generation follows the same durable-delivery rule with
@@ -441,7 +441,7 @@ Preserve these semantics when editing durable task code.
 - Trigger: adding or changing any database-durable async path that creates provider-backed image/copy/poster generation
   work, enqueues a Dramatiq message, runs in a worker, or exposes queued/running/failed state through a status API.
 - Existing members are intentionally separate business models:
-  - `WorkflowRun` plus `WorkflowNodeRun` for product workflow generation;
+  - `WorkflowRun` plus `WorkflowNodeRun` for inspiration workflow generation;
   - `ImageSessionGenerationTask` for continuous image-session generation.
 - New work must extend or reference `domain/durable_generation_tasks.py` before adding a third state machine.
 
@@ -456,7 +456,7 @@ Preserve these semantics when editing durable task code.
   - `WORKFLOW_RUN_GENERATION_TASK_CONTRACT`;
   - `IMAGE_SESSION_GENERATION_TASK_CONTRACT`.
 - Current worker actors:
-  - `workers.run_product_workflow_run(workflow_run_id: str)`;
+  - `workers.run_inspiration_workflow_run(workflow_run_id: str)`;
   - `workers.run_image_session_generation_task(task_id: str)`.
 
 #### 3. Contracts
@@ -487,7 +487,7 @@ Preserve these semantics when editing durable task code.
   retried later.
 - Duplicate terminal message, including cancelled rows -> no-op, no provider call, no new artifact row.
 - Duplicate currently-running message -> no-op; stale-running recovery handles old abandoned work separately.
-- Recovery sees queued work -> resend delivery without changing product/provider semantics.
+- Recovery sees queued work -> resend delivery without changing inspiration/provider semantics.
 - Recovery sees stale running work -> apply the owning model's documented stale behavior, then resend or fail as
   appropriate.
 - Status refresh during generation -> response is reconstructed from DB rows and remains stable across process restart.
@@ -592,7 +592,7 @@ def run_generation_task(task_id: str) -> None:
 - Each generation task summary includes global queue fields: `queue_active_count`, `queue_running_count`,
   `queue_queued_count`, `queue_max_concurrent_tasks`, `queued_ahead_count`, and `queue_position`.
 - Queue overview API: `GET /api/generation-queue` returns `active_count`, `running_count`, `queued_count`, and
-  `max_concurrent_tasks` for product/workflow surfaces that do not own a specific image-session task.
+  `max_concurrent_tasks` for inspiration/workflow surfaces that do not own a specific image-session task.
 
 ##### 3. Contracts
 
@@ -623,7 +623,7 @@ def run_generation_task(task_id: str) -> None:
   `图片生成失败，请稍后重试`; never expose provider exception text, API keys, base URLs, local paths, request bodies, or
   tracebacks in API responses.
 - The shared public demo workspace stays shared; do not add user/tenant ownership checks as part of this async path unless
-  a separate product requirement introduces isolation.
+  a separate inspiration requirement introduces isolation.
 
 ##### 4. Validation & Error Matrix
 

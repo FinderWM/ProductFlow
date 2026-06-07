@@ -5,7 +5,7 @@ from pathlib import Path
 
 from helpers import _make_demo_image_bytes_with_size
 
-from productflow_backend.application.image_generation_core import (
+from inspiration_one_backend.application.image_generation_core import (
     build_stored_image_reference_payload,
     normalize_image_generation_tool_options,
     provider_output_with_actual_image_size,
@@ -36,9 +36,9 @@ def test_image_generation_core_normalizes_ids_tool_options_and_reference_payload
     }
 
     references = [
-        StoredReference(id="asset-1", storage_path="products/p/ref.png", original_filename="ref-a.png"),
-        StoredReference(id="poster-1", storage_path="products/p/ref.png", original_filename="poster.png"),
-        StoredReference(id="asset-2", storage_path="products/p/other.png", original_filename="ref-b.png"),
+        StoredReference(id="asset-1", storage_path="inspirations/p/ref.png", original_filename="ref-a.png"),
+        StoredReference(id="poster-1", storage_path="inspirations/p/ref.png", original_filename="poster.png"),
+        StoredReference(id="asset-2", storage_path="inspirations/p/other.png", original_filename="ref-b.png"),
     ]
 
     assert [reference.id for reference in unique_image_generation_references(references)] == ["asset-1", "asset-2"]
@@ -46,22 +46,22 @@ def test_image_generation_core_normalizes_ids_tool_options_and_reference_payload
         references,
         resolve_storage_path=lambda storage_path: Path("/storage") / storage_path,
     )
-    assert payload.source_image == Path("/storage/products/p/ref.png")
+    assert payload.source_image == Path("/storage/inspirations/p/ref.png")
     assert [reference.path for reference in payload.reference_images] == [
-        Path("/storage/products/p/ref.png"),
-        Path("/storage/products/p/other.png"),
+        Path("/storage/inspirations/p/ref.png"),
+        Path("/storage/inspirations/p/other.png"),
     ]
 
 
 def test_image_generation_core_merges_actual_size_metadata_without_dropping_provider_notes() -> None:
     provider_output = provider_output_with_actual_image_size(
-        {"_productflow": {"notes": [{"kind": "fallback", "message": "fallback used"}]}},
+        {"_inspiration_one": {"notes": [{"kind": "fallback", "message": "fallback used"}]}},
         requested_size="2048x2048",
         image_bytes=_make_demo_image_bytes_with_size(1024, 1024),
     )
 
-    assert provider_output["_productflow"]["actual_image_size"] == "1024x1024"
-    assert provider_output["_productflow"]["notes"] == [
+    assert provider_output["_inspiration_one"]["actual_image_size"] == "1024x1024"
+    assert provider_output["_inspiration_one"]["notes"] == [
         {"kind": "fallback", "message": "fallback used"},
         {
             "kind": "actual_size_mismatch",

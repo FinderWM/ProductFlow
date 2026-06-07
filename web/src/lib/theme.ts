@@ -4,7 +4,7 @@ export type ThemePreference = (typeof THEME_PREFERENCES)[number];
 export type ResolvedTheme = "light" | "dark";
 
 export const DEFAULT_THEME_PREFERENCE: ThemePreference = "system";
-export const THEME_STORAGE_KEY = "productflow.theme";
+export const THEME_STORAGE_KEY = "inspiration-one.theme";
 
 export function isThemePreference(value: string | null | undefined): value is ThemePreference {
   return THEME_PREFERENCES.includes(value as ThemePreference);

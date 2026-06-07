@@ -1,4 +1,4 @@
-# ProductFlow Roadmap
+# Inspiration One Roadmap
 
 [中文](ROADMAP.md) | English
 
@@ -10,23 +10,23 @@ Completed baseline capabilities:
 
 - FastAPI backend, React/Vite frontend, PostgreSQL, Redis, and Dramatiq worker.
 - Single-admin login and private workspace.
-- Product creation, image upload, and reference image management.
+- Inspiration creation, image upload, and reference image management.
 - Copy generation, editing, confirmation, and history.
 - Template poster generation, AI image-provider poster generation, and poster download.
-- Iterative image sessions and attaching generated images back to products.
-- Generated image gallery: iterative image results can be collected at `/gallery`, keeping source session, product, prompt, size, model, and download entrypoint.
-- Product DAG workflow editing, execution, persistent state, and recovery.
+- Iterative image sessions and attaching generated images back to inspirations.
+- Generated image gallery: iterative image results can be collected at `/gallery`, keeping source session, inspiration, prompt, size, model, and download entrypoint.
+- Inspiration DAG workflow editing, execution, persistent state, and recovery.
 - Shared top navigation.
-- ProductFlow workbench canvas interactions: desktop mouse-wheel zoom, left-drag pan, node drag positioning, box selection / multi-select, and edge drag creation/deletion; mobile Browse, Edit, and Select modes, touch drag/edge creation, and two-finger pinch zoom.
-- Full scenario templates for product creation: blank canvas, marketplace hero images, detail persuasion, scene galleries, content covers, and campaign assets.
-- Workbench templates: the same built-in scenario templates can be inserted into existing canvases and automatically reuse the product node; users can save selected nodes as their own node-group templates with rename and archive-delete support.
+- Inspiration One workbench canvas interactions: desktop mouse-wheel zoom, left-drag pan, node drag positioning, box selection / multi-select, and edge drag creation/deletion; mobile Browse, Edit, and Select modes, touch drag/edge creation, and two-finger pinch zoom.
+- Full scenario templates for inspiration creation: blank canvas, marketplace hero images, detail persuasion, scene galleries, content covers, and campaign assets.
+- Workbench templates: the same built-in scenario templates can be inserted into existing canvases and automatically reuse the inspiration node; users can save selected nodes as their own node-group templates with rename and archive-delete support.
 - Single-slot semantics for reference images, image drag-and-drop upload, compact right sidebar for Details / Runs / Library / Templates, and asset fill.
-- In-product help page: `/help` covers quick start, canvas operations, templates, run failure handling, supported operations, and common questions.
-- Prompt configuration: product understanding, copy, workbench image generation, and iterative image-generation templates can be overridden in the settings page.
-- Initial product brand assets, README preview images, and Web favicon/metadata.
+- In-inspiration help page: `/help` covers quick start, canvas operations, templates, run failure handling, supported operations, and common questions.
+- Prompt configuration: inspiration understanding, copy, workbench image generation, and iterative image-generation templates can be overridden in the settings page.
+- Initial inspiration brand assets, README preview images, and Web favicon/metadata.
 - Settings page management for providers, models, upload limits, job retry, and other business configuration.
-- Lightweight status polling while running: iterative image generation and product workflows poll status responses only, then refresh full details after completion.
-- Mobile product list and product workbench adaptation: product list cards with floating pagination, plus workbench bottom toolbar, bottom sheet, and canvas touch modes.
+- Lightweight status polling while running: iterative image generation and inspiration workflows poll status responses only, then refresh full details after completion.
+- Mobile inspiration list and inspiration workbench adaptation: inspiration list cards with floating pagination, plus workbench bottom toolbar, bottom sheet, and canvas touch modes.
 - Mobile iterative image page adaptation: main view, session drawer, narrow history drawer, generation-settings bottom sheet, and bottom quick actions are organized for small screens.
 - One-command Docker Compose application self-hosting path: after shared PostgreSQL, Redis, and MinIO are running, `docker compose up -d --build` starts the backend API, Dramatiq worker, and the Web static site; `just release` now uses the Compose production update and health-check flow.
 - Basic open-source files, MIT License, contribution/security guides, and issue/PR templates.
@@ -41,7 +41,7 @@ Completed baseline capabilities:
 
 ### 2. Testing and Quality
 
-- Expand end-to-end test examples for product workflow DAGs.
+- Expand end-to-end test examples for inspiration workflow DAGs.
 - Add frontend component/interaction regression testing strategy.
 - Add more edge tests for provider mock, OpenAI Responses provider, failure classification, and manual retry/cancel behavior.
 - Add independent tests for settings-page secret updates and non-echo behavior.
@@ -50,13 +50,13 @@ Completed baseline capabilities:
 
 - Continue improving DAG node run logs and failure reason display; categorized failure messages and workflow retry/cancel actions already exist.
 - Add node-level skip and duplicate capabilities; workflow-level retry/cancel already exists.
-- Continue optimizing partial loading and component boundaries on large product detail pages; active full-workflow polling has already been replaced with lightweight status polling.
-- Continue improving asset reuse between image sessions and product workflows, such as batch attach, version comparison, and clearer source labels.
+- Continue optimizing partial loading and component boundaries on large inspiration detail pages; active full-workflow polling has already been replaced with lightweight status polling.
+- Continue improving asset reuse between image sessions and inspiration workflows, such as batch attach, version comparison, and clearer source labels.
 - Add more frontend regression coverage for the template panel, user-template saving, and key workbench component interactions; core canvas selection/drag helpers already have unit coverage.
 
 ### 4. Documentation and Productization
 
-- Add README / user-guide screenshots so ProductFlow workbench nodes, template panel, and sidebar are more intuitive.
+- Add README / user-guide screenshots so Inspiration One workbench nodes, template panel, and sidebar are more intuitive.
 - Capture lightweight brand usage guidance, including recommended sizes and usage boundaries for logo, favicon, and README hero.
 - Add provider configuration examples and common-error troubleshooting instead of expanding dependency lists.
 
@@ -64,8 +64,8 @@ Completed baseline capabilities:
 
 ### Richer Inputs
 
-- Multi-source product information import.
-- Product URL / spreadsheet import.
+- Multi-source inspiration information import.
+- Inspiration URL / spreadsheet import.
 - More structured brand, audience, and selling-point inputs.
 
 ### Stronger Asset Management

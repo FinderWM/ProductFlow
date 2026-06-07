@@ -13,7 +13,7 @@ Real examples:
 
 - `web/src/components/TopNav.tsx`
 - `web/src/components/StatusPill.tsx`
-- Page-local components/helpers in `web/src/pages/SettingsPage.tsx` and `web/src/pages/ProductDetailPage.tsx`
+- Page-local components/helpers in `web/src/pages/SettingsPage.tsx` and `web/src/pages/InspirationDetailPage.tsx`
 
 ---
 
@@ -36,13 +36,13 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
 For very small props, inline typing is acceptable; `StatusPill` uses:
 
 ```tsx
-export function StatusPill({ status }: { status: ProductWorkflowState }) {
+export function StatusPill({ status }: { status: InspirationWorkflowState }) {
   const config = CONFIG[status];
   return (...);
 }
 ```
 
-Use top-level constants for static display maps. `StatusPill.tsx` defines `CONFIG` as a `Record<ProductWorkflowState, ...>`
+Use top-level constants for static display maps. `StatusPill.tsx` defines `CONFIG` as a `Record<InspirationWorkflowState, ...>`
 so every workflow status has a label and classes.
 
 ---
@@ -70,11 +70,11 @@ Styling is Tailwind-first:
 Current visual language uses zinc/slate surfaces, thin borders, small rounded corners, and restrained hover/focus states.
 Every new visible surface should include dark-mode variants when it uses explicit light backgrounds, borders, shadows, or
 text colors. The app uses a root `dark` class from `PreferencesProvider`, so Tailwind `dark:*` utilities are the normal
-path for component-level theme variants. Existing examples include `TopNav.tsx`, `ProductListPage.tsx`,
-`ProductCreatePage.tsx`, and `SettingsPage.tsx`.
+path for component-level theme variants. Existing examples include `TopNav.tsx`, `InspirationListPage.tsx`,
+`InspirationCreatePage.tsx`, and `SettingsPage.tsx`.
 
 When adding image preview or canvas surfaces, keep images inspectable in both themes. Dark variants should change chrome
-and empty/loading/error states, not tint or obscure product thumbnails.
+and empty/loading/error states, not tint or obscure inspiration thumbnails.
 
 ---
 
@@ -85,8 +85,8 @@ User-visible UI chrome should use the local i18n helpers instead of hard-coded o
 - Translation keys live in `web/src/lib/i18n.ts`; supported locales are `zh-CN` and `en-US`.
 - Components read translations through `useI18n()` / `usePreferences()` from `web/src/lib/preferences.tsx`.
 - Pure helpers that format visible labels should accept an optional translate function or locale rather than importing
-  React hooks. Examples include image-size labels, gallery size labels, and ProductDetail node display helpers.
-- Keep product/operator/model-authored data as source text. Do not translate product names, custom node titles, user
+  React hooks. Examples include image-size labels, gallery size labels, and InspirationDetail node display helpers.
+- Keep inspiration/operator/model-authored data as source text. Do not translate inspiration names, custom node titles, user
   template titles/descriptions returned by the backend, prompts, generated copy, filenames, provider messages, or
   `ApiError.detail`.
 - Prompt configuration help, runtime-setting explanations, and parameter-help examples should stay domain-neutral unless
@@ -106,10 +106,10 @@ User-visible UI chrome should use the local i18n helpers instead of hard-coded o
   `ParameterHelpButton` / `ParameterHelpLabel` from `web/src/components/ParameterHelp.tsx`.
 - Parameter help presentation also belongs to the registry layer: `PARAMETER_HELP_UI_CLASS_REGISTRY` defines page-level
   defaults by `ParameterHelpUiType`, and each help entry may override class names by `helpKey + uiType` through
-  `uiClassNames`. Triggering components pass the nearest page `uiType` such as `productDetail`, `create`, `imageChat`, or
+  `uiClassNames`. Triggering components pass the nearest page `uiType` such as `inspirationDetail`, `create`, `imageChat`, or
   `settings`.
 - Use parameter help only for fields whose behavior has domain or provider nuance, such as workflow instructions,
-  generation config selection, provider tool options, product context documents, dynamic fields, and runtime queue
+  generation config selection, provider tool options, inspiration context documents, dynamic fields, and runtime queue
   settings. Do not add help icons to self-evident fields such as names, titles, labels, body text, width/height,
   aspect/resolution pickers, search filters, pagination, common CRUD controls, or RBAC username/role fields.
 - Dynamic backend runtime config rows may use keys in the shape `settings.config.${key}` with a content override derived
@@ -141,7 +141,7 @@ return <button type="button">退出登录</button>;
 Bad:
 
 ```tsx
-return locale === "en-US" ? translateProductName(product.name) : product.name;
+return locale === "en-US" ? translateInspirationName(inspiration.name) : inspiration.name;
 ```
 
 ---
@@ -150,13 +150,13 @@ return locale === "en-US" ? translateProductName(product.name) : product.name;
 
 Follow the patterns already present:
 
-- Buttons include `type="button"` unless they submit a form. See `TopNav.tsx`, `ProductListPage.tsx`, and `SettingsPage.tsx`.
-- Form submit handlers call `event.preventDefault()` and trigger a mutation, e.g. `ProductCreatePage.tsx` and
+- Buttons include `type="button"` unless they submit a form. See `TopNav.tsx`, `InspirationListPage.tsx`, and `SettingsPage.tsx`.
+- Form submit handlers call `event.preventDefault()` and trigger a mutation, e.g. `InspirationCreatePage.tsx` and
   `LoginPage.tsx`.
 - Inputs in settings use `label htmlFor={item.key}` and matching `id={item.key}` in `ConfigField`.
 - Image upload drop zones use the shared `ImageDropZone` component. Pages own the upload mutation and pass an `onFiles`
   callback; the shared component only handles click, keyboard, drag/drop, `accept`, `multiple`, and disabled/focus states.
-  Use the default single-file mode for product/workflow images and `multiple` for session reference images.
+  Use the default single-file mode for inspiration/workflow images and `multiple` for session reference images.
 - `ImageDropZone` should use the standard label pattern: the visible custom drop zone is a `<label>`, and the
   `input[type="file"]` inside it is visually hidden with `sr-only`. This keeps the custom upload UI clean while letting
   mouse clicks open the native picker through label activation. Do not render the browser's default visible "choose file"
@@ -174,7 +174,7 @@ When adding new forms, keep keyboard/focus behavior at least as strong as these 
 Shared components should not call the API directly today. API calls live in pages through TanStack Query and the central
 `api` object:
 
-- `ProductListPage.tsx` calls `useQuery({ queryKey: ['products'], queryFn: api.listProducts })`.
+- `InspirationListPage.tsx` calls `useQuery({ queryKey: ['inspirations'], queryFn: api.listProducts })`.
 - `SettingsPage.tsx` calls `api.getConfig` / `api.updateConfig` from page-level mutations.
 - `TopNav.tsx` receives `onLogout` instead of knowing about sessions or `api.destroySession`.
 
@@ -246,7 +246,7 @@ preview-sized assets, explicit download actions should use download URLs, and ro
   it still calls `onChange(size)` with only the final normalized `WIDTHxHEIGHT` string.
 - When a selected aspect has no runtime-safe built-in resolution button, the component may generate provider-safe
   resolution candidates from shared helpers or fall back to custom width/height editing. Do not add page-local fallback
-  lists in `ProductDetailPage`, `InspectorPanel`, or `ImageChatPage`.
+  lists in `InspirationDetailPage`, `InspectorPanel`, or `ImageChatPage`.
 - Built-in generated-image presets must also stay within max total pixels `8,294,400`, max aspect ratio `3:1`, and 16px
   multiple dimensions. Do not offer 4K square presets such as `3840x3840`; custom oversized square inputs should calibrate
   down to a safe value such as `2880x2880`.
@@ -278,9 +278,9 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 - Bad: `ImageChatPage` accepts custom dimensions while `InspectorPanel` still exposes a raw text field.
 - Bad: `ImageChatPage` supports provider quality/format/fidelity fields while `InspectorPanel` has a separate partial
   implementation or sends raw unnormalized `tool_options`.
-- Bad: product workflow inspector and image-session generation rebuild separate size/tool/count panels instead of sharing
+- Bad: inspiration workflow inspector and image-session generation rebuild separate size/tool/count panels instead of sharing
   `ImageGenerationSettingsPanel` where the behavior is the same.
-- Bad: one image generation entry uses a combined settings page while another uses `生成设置 / 高级`; product workflow
+- Bad: one image generation entry uses a combined settings page while another uses `生成设置 / 高级`; inspiration workflow
   image nodes and image-session generation should both use `ImageGenerationSettingsTabs` to keep common
   size/count/prompt controls separate from advanced provider tool options.
 - Bad: a custom value is auto-reset because it is not one of the built-in preset buttons.
@@ -317,11 +317,11 @@ Pages provide data and mutations; the shared picker owns only presentational siz
 
 ## TopNav Global Navigation Contract
 
-`web/src/components/TopNav.tsx` is the shared authenticated product navigation bar, not just a page title strip.
+`web/src/components/TopNav.tsx` is the shared authenticated inspiration navigation bar, not just a page title strip.
 
 - Every primary authenticated page should render `TopNav` so the same frequent entries are always available:
-  `商品/工作台`, `文/图生图`, `画廊`, `帮助`, and `配置`.
-- The entries link to `/products`, `/image-chat`, `/gallery`, `/help`, and `/settings`; keep route declarations centralized in
+  `灵感产物/工作台`, `文/图生图`, `画廊`, `帮助`, and `配置`.
+- The entries link to `/inspirations`, `/image-chat`, `/gallery`, `/help`, and `/settings`; keep route declarations centralized in
   `web/src/App.tsx`.
 - Page components may still pass `breadcrumbs`, `onHome`, and `onLogout`, but should not duplicate these global nav links
   in a separate header unless that page needs an additional hero call-to-action.
@@ -340,14 +340,14 @@ Wrong:
 Correct:
 
 ```tsx
-<TopNav breadcrumbs="配置" onHome={() => navigate("/products")} onLogout={() => logoutMutation.mutate()} />
+<TopNav breadcrumbs="配置" onHome={() => navigate("/inspirations")} onLogout={() => logoutMutation.mutate()} />
 ```
 
-The shared nav itself exposes the settings/image-chat/product/gallery links; pages only add page-specific actions.
+The shared nav itself exposes the settings/image-chat/inspiration/gallery links; pages only add page-specific actions.
 
 ### Global Shell and Navigation Density
 
-Use the product shell classes in `web/src/index.css` before inventing page-local wrappers for authenticated pages.
+Use the inspiration shell classes in `web/src/index.css` before inventing page-local wrappers for authenticated pages.
 
 - `pf-app` is the default app background for standard pages that render `TopNav`.
 - `pf-page` and `pf-page-wide` are the standard dashboard containers for list, status, usage, and RBAC pages.
@@ -361,7 +361,7 @@ keep a top navigation bar instead of falling back to the mobile bottom bar. At `
 desktop state: keep high-frequency primary items visible, put lower-frequency items behind the `nav.more` overflow menu,
 and compress locale/theme/logout controls. At `1440px` and wider, the full desktop menu may be visible. Below `xl`, keep
 the bottom navigation to one row with primary items plus a single `More` entry; secondary items and logout belong in the
-`More` panel. The mobile top-left brand text must remain visible, with truncation rather than hiding the product name.
+`More` panel. The mobile top-left brand text must remain visible, with truncation rather than hiding the inspiration name.
 
 Wrong:
 
@@ -400,11 +400,11 @@ Correct:
 
 - `GalleryPage` lists global gallery entries and uses `api.toApiUrl(...)` for `image.thumbnail_url`, `image.preview_url`,
   and `image.download_url`.
-- Continuous image chat saves only the selected generated candidate to the gallery; existing save-to-product behavior must
+- Continuous image chat saves only the selected generated candidate to the gallery; existing save-to-inspiration behavior must
   remain separate.
 - Successful save invalidates `['gallery']` so the global page refreshes without a hard reload.
 - The page should emphasize image-led browsing: a strong selected/hero image, a responsive visual grid, and compact prompt
-  and metadata context. Do not turn it into product filters, bulk tools, or a table-first admin page.
+  and metadata context. Do not turn it into inspiration filters, bulk tools, or a table-first admin page.
 - Gallery feed cards should preserve the full generated image instead of cropping it. Derive card aspect from
   `actual_size` first and `size` second, clamp extreme ratios, and use a stable id/index-based score for featured cards
   so the layout feels varied without changing on every render.
@@ -426,7 +426,7 @@ Correct:
 ### 5. Good/Base/Bad Cases
 
 - Good: the selected generated candidate appears in the gallery after saving and refreshes via `['gallery']`.
-- Base: if a gallery image has no product reference, show it as a global/standalone item without blocking preview.
+- Base: if a gallery image has no inspiration reference, show it as a global/standalone item without blocking preview.
 - Bad: raw `fetch('/api/gallery')` from a page.
 - Bad: adding gallery grouping/filtering/bulk controls under this display-only contract.
 

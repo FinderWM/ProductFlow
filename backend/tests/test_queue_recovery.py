@@ -5,10 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from productflow_backend.application.image_sessions import create_image_session, create_image_session_generation_task
-from productflow_backend.domain.enums import JobStatus
-from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, AppSetting
-from productflow_backend.infrastructure.queue import recover_unfinished_image_session_generation_tasks
+from inspiration_one_backend.application.image_sessions import (
+    create_image_session,
+    create_image_session_generation_task,
+)
+from inspiration_one_backend.domain.enums import JobStatus
+from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, AppSetting
+from inspiration_one_backend.infrastructure.queue import recover_unfinished_image_session_generation_tasks
 
 
 def test_recover_unfinished_image_session_generation_tasks_requeues_queued_tasks(
@@ -16,7 +19,7 @@ def test_recover_unfinished_image_session_generation_tasks_requeues_queued_tasks
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image_session = create_image_session(db_session, product_id=None, title="queued 恢复")
+    image_session = create_image_session(db_session, inspiration_id=None, title="queued 恢复")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -26,7 +29,7 @@ def test_recover_unfinished_image_session_generation_tasks_requeues_queued_tasks
     )
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.queue.enqueue_image_session_generation_task",
+        "inspiration_one_backend.infrastructure.queue.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
 
@@ -43,7 +46,7 @@ def test_recover_unfinished_image_session_generation_tasks_resets_stale_running_
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image_session = create_image_session(db_session, product_id=None, title="running 恢复")
+    image_session = create_image_session(db_session, inspiration_id=None, title="running 恢复")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -57,7 +60,7 @@ def test_recover_unfinished_image_session_generation_tasks_resets_stale_running_
     db_session.commit()
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.queue.enqueue_image_session_generation_task",
+        "inspiration_one_backend.infrastructure.queue.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
 
@@ -81,7 +84,7 @@ def test_recover_unfinished_image_session_generation_tasks_uses_progress_heartbe
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image_session = create_image_session(db_session, product_id=None, title="heartbeat 恢复")
+    image_session = create_image_session(db_session, inspiration_id=None, title="heartbeat 恢复")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -95,7 +98,7 @@ def test_recover_unfinished_image_session_generation_tasks_uses_progress_heartbe
     db_session.commit()
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.queue.enqueue_image_session_generation_task",
+        "inspiration_one_backend.infrastructure.queue.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
 
@@ -116,7 +119,7 @@ def test_recover_unfinished_image_session_generation_tasks_fails_stale_partial_t
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image_session = create_image_session(db_session, product_id=None, title="partial heartbeat 恢复")
+    image_session = create_image_session(db_session, inspiration_id=None, title="partial heartbeat 恢复")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -133,7 +136,7 @@ def test_recover_unfinished_image_session_generation_tasks_fails_stale_partial_t
     db_session.commit()
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.queue.enqueue_image_session_generation_task",
+        "inspiration_one_backend.infrastructure.queue.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
 
@@ -158,7 +161,7 @@ def test_recover_unfinished_image_session_generation_tasks_uses_runtime_stale_cu
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image_session = create_image_session(db_session, product_id=None, title="runtime cutoff 恢复")
+    image_session = create_image_session(db_session, inspiration_id=None, title="runtime cutoff 恢复")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -171,7 +174,7 @@ def test_recover_unfinished_image_session_generation_tasks_uses_runtime_stale_cu
     db_session.commit()
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.queue.enqueue_image_session_generation_task",
+        "inspiration_one_backend.infrastructure.queue.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
 

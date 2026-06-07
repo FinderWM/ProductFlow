@@ -89,7 +89,7 @@ Operational pages should remain dense, readable, and theme-complete:
 
 - Use the existing zinc/slate surface language with restrained borders and hover states.
 - Pair explicit light-mode backgrounds, borders, shadows, muted text, placeholders, and alerts with `dark:*` variants.
-- Keep user-visible UI chrome in `web/src/lib/i18n.ts`; operator content, product names, prompts, filenames, provider messages, and backend `ApiError.detail` stay as source data.
+- Keep user-visible UI chrome in `web/src/lib/i18n.ts`; operator content, inspiration names, prompts, filenames, provider messages, and backend `ApiError.detail` stay as source data.
 - Prefer lucide icons for tool buttons and familiar controls.
 - Do not add large decorative hero layouts, nested cards, gradient orbs, or marketing-style feature copy to app workspaces.
 - Fixed toolbars, boards, counters, grids, and icon buttons need stable dimensions so labels, hover states, and loading icons do not shift layout.

@@ -12,10 +12,10 @@ describe("i18n helpers", () => {
   });
 
   it("translates keys with interpolation", () => {
-    expect(translate("zh-CN", "products.paginationSummary", { page: 2, totalPages: 5, total: 48 })).toBe(
+    expect(translate("zh-CN", "inspirations.paginationSummary", { page: 2, totalPages: 5, total: 48 })).toBe(
       "第 2 / 5 页 · 共 48 个灵感",
     );
-    expect(translate("en-US", "products.paginationSummary", { page: 2, totalPages: 5, total: 48 })).toBe(
+    expect(translate("en-US", "inspirations.paginationSummary", { page: 2, totalPages: 5, total: 48 })).toBe(
       "Page 2 / 5 · 48 inspirations",
     );
     expect(interpolate("Hello {name}, {missing}", { name: "Ada" })).toBe("Hello Ada, {missing}");

@@ -51,7 +51,7 @@ import { imageRoundSizeLabel, placeholderStatusClass, placeholderStatusLabel } f
 import { ImageChatHistoryPanel } from "./image-chat/ImageChatHistoryPanel";
 import { ImageChatMainStage } from "./image-chat/ImageChatMainStage";
 import { ImageChatSessionList } from "./image-chat/ImageChatSessionList";
-import { ProductAssociationPanel, SessionReferencePanel } from "./image-chat/ReferencePanels";
+import { InspirationAssociationPanel, SessionReferencePanel } from "./image-chat/ReferencePanels";
 import {
   HISTORY_PANEL_DEFAULT_HEIGHT,
   HISTORY_PANEL_MIN_HEIGHT,
@@ -106,7 +106,7 @@ import type {
 const DUPLICATE_GENERATION_SUBMIT_WINDOW_MS = 1800;
 const MAX_BRANCH_CONTEXT_IMAGES = 6;
 const DESKTOP_RESIZABLE_LAYOUT_QUERY = "(min-width: 1024px)";
-const PRODUCT_PICKER_LIST_STALE_TIME_MS = 60_000;
+const INSPIRATION_PICKER_LIST_STALE_TIME_MS = 60_000;
 const RUNTIME_CONFIG_STALE_TIME_MS = 5 * 60_000;
 const IMAGE_CHAT_GENERATION_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
@@ -123,14 +123,14 @@ interface ImageChatRouteState {
   size: string;
   toolOptions: ImageToolOptions;
   settingsTab: ImageGenerationSettingsTab;
-  targetProductId: string;
+  targetInspirationId: string;
   selectedResourceGroupId: string | null;
 }
 
 const imageChatRouteStateCache = new Map<string, ImageChatRouteState>();
 
-function getImageChatRouteStateScope(productId: string | undefined): string {
-  return productId ? `product:${productId}` : "standalone";
+function getImageChatRouteStateScope(inspirationId: string | undefined): string {
+  return inspirationId ? `inspiration:${inspirationId}` : "standalone";
 }
 
 function readImageChatRouteState(scope: string): ImageChatRouteState | undefined {
@@ -183,7 +183,7 @@ function resourceGroupOptionLabel(group: GenerationResourceGroup, disabledLabel:
 
 type PendingDeleteAction =
   | { kind: "session"; sessionId: string }
-  | { kind: "productReference"; assetId: string }
+  | { kind: "inspirationReference"; assetId: string }
   | { kind: "sessionReference"; sessionId: string; assetId: string };
 
 function assertImageChatActionAllowed(blockedTitle: string | null) {
@@ -197,9 +197,9 @@ export function ImageChatPage() {
   const sessionState = useSessionState();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { productId } = useParams();
-  const isProductMode = Boolean(productId);
-  const routeStateScope = getImageChatRouteStateScope(productId);
+  const { inspirationId } = useParams();
+  const isInspirationMode = Boolean(inspirationId);
+  const routeStateScope = getImageChatRouteStateScope(inspirationId);
   const autoCreateTriggered = useRef(false);
   const pendingGeneratedRoundCountRef = useRef<number | null>(null);
   const duplicateSubmitGuardRef = useRef<ImageGenerationSubmitGuard | null>(null);
@@ -238,8 +238,8 @@ export function ImageChatPage() {
   );
   const [titleDraft, setTitleDraft] = useState("");
   const [renameEnabled, setRenameEnabled] = useState(false);
-  const [targetProductId, setTargetProductId] = useState(
-    () => readImageChatRouteState(routeStateScope)?.targetProductId ?? "",
+  const [targetInspirationId, setTargetInspirationId] = useState(
+    () => readImageChatRouteState(routeStateScope)?.targetInspirationId ?? "",
   );
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const [polishedPrompt, setPolishedPrompt] = useState("");
@@ -277,7 +277,7 @@ export function ImageChatPage() {
       size,
       toolOptions,
       settingsTab,
-      targetProductId,
+      targetInspirationId,
       selectedResourceGroupId,
     });
   }, [
@@ -292,7 +292,7 @@ export function ImageChatPage() {
     selectedTaskPlaceholderId,
     settingsTab,
     size,
-    targetProductId,
+    targetInspirationId,
     toolOptions,
   ]);
 
@@ -329,28 +329,28 @@ export function ImageChatPage() {
   }, [historyPanelHeight, leftPanelWidth, rightPanelWidth]);
 
   const sessionsQuery = useQuery({
-    queryKey: ["image-sessions", productId ?? "standalone"],
-    queryFn: () => api.listImageSessions(productId),
+    queryKey: ["image-sessions", inspirationId ?? "standalone"],
+    queryFn: () => api.listImageSessions(inspirationId),
   });
 
   const sessionItems = sessionsQuery.data?.items ?? [];
 
-  const productQuery = useQuery({
-    queryKey: ["product", productId],
-    queryFn: () => api.getProduct(productId!),
-    enabled: isProductMode,
+  const inspirationQuery = useQuery({
+    queryKey: ["inspiration", inspirationId],
+    queryFn: () => api.getInspiration(inspirationId!),
+    enabled: isInspirationMode,
   });
 
-  const productsQuery = useQuery({
-    queryKey: ["products", selectedResourceGroupId],
+  const inspirationsQuery = useQuery({
+    queryKey: ["inspirations", selectedResourceGroupId],
     queryFn: () =>
-      api.listProducts({
+      api.listInspirations({
         resource_group_id: selectedResourceGroupId ?? "",
         page_size: 100,
       }),
-    enabled: !isProductMode && Boolean(selectedResourceGroupId),
+    enabled: !isInspirationMode && Boolean(selectedResourceGroupId),
     placeholderData: keepPreviousData,
-    staleTime: PRODUCT_PICKER_LIST_STALE_TIME_MS,
+    staleTime: INSPIRATION_PICKER_LIST_STALE_TIME_MS,
   });
   const runtimeConfigQuery = useQuery({
     queryKey: ["runtime-config"],
@@ -363,7 +363,7 @@ export function ImageChatPage() {
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
 
-  const products = productsQuery.data?.items ?? [];
+  const inspirations = inspirationsQuery.data?.items ?? [];
   const imageGenerationMaxDimension =
     runtimeConfigQuery.data?.image_generation_max_dimension ?? DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
   const imageToolAllowedFields = runtimeConfigQuery.data?.image_tool_allowed_fields ?? DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS;
@@ -376,12 +376,12 @@ export function ImageChatPage() {
     () => generationResourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [],
     [generationResourceGroupsQuery.data],
   );
-  const currentProduct = isProductMode
-    ? (productQuery.data ?? null)
-    : (products.find((product) => product.id === targetProductId) ?? null);
+  const currentInspiration = isInspirationMode
+    ? (inspirationQuery.data ?? null)
+    : (inspirations.find((inspiration) => inspiration.id === targetInspirationId) ?? null);
   const currentUser = sessionState?.user ?? null;
-  const currentProductBlocked = isResourceBlocked(currentProduct);
-  const currentProductAdminReadonly = isAdminReadonlyResource(currentUser, currentProduct);
+  const currentInspirationBlocked = isResourceBlocked(currentInspiration);
+  const currentInspirationAdminReadonly = isAdminReadonlyResource(currentUser, currentInspiration);
   const adminReadonlyActionTitle = t("resource.adminReadonlyAction");
   const canWriteImageChat = hasSessionApiPermission(sessionState, API_IMAGE_CHAT_WRITE);
   const canGenerateImageChat = hasSessionApiPermission(sessionState, API_IMAGE_CHAT_GENERATE);
@@ -392,9 +392,9 @@ export function ImageChatPage() {
   const galleryWritePermissionTitle = canWriteGallery ? null : t("chat.permission.galleryWriteRequired");
   const inspirationsWritePermissionTitle = canWriteInspirations ? null : t("chat.permission.inspirationsWriteRequired");
   const createSessionBlockedTitle =
-    isProductMode && currentProductBlocked
-      ? blockedActionMessage(currentProduct)
-      : isProductMode && currentProductAdminReadonly
+    isInspirationMode && currentInspirationBlocked
+      ? blockedActionMessage(currentInspiration)
+      : isInspirationMode && currentInspirationAdminReadonly
         ? adminReadonlyActionTitle
         : imageChatWritePermissionTitle;
 
@@ -430,23 +430,23 @@ export function ImageChatPage() {
   }
 
   useEffect(() => {
-    if (!isProductMode && products.length && !targetProductId) {
-      setTargetProductId(products[0].id);
+    if (!isInspirationMode && inspirations.length && !targetInspirationId) {
+      setTargetInspirationId(inspirations[0].id);
     }
-  }, [isProductMode, products, targetProductId]);
+  }, [isInspirationMode, inspirations, targetInspirationId]);
 
   const createSessionMutation = useMutation({
     mutationFn: () => {
       if (createSessionBlockedTitle) {
         throw new Error(createSessionBlockedTitle);
       }
-      return api.createImageSession(productId ? { product_id: productId } : {});
+      return api.createImageSession(inspirationId ? { inspiration_id: inspirationId } : {});
     },
     onSuccess: async (imageSession) => {
       setSelectedSessionId(imageSession.id);
       resetImageSessionSelection();
       queryClient.setQueryData(["image-session", imageSession.id], imageSession);
-      await queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      await queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
       setErrorMessage("");
     },
     onError: (error) => {
@@ -483,7 +483,7 @@ export function ImageChatPage() {
   }, [
     createSessionMutation,
     createSessionBlockedTitle,
-    isProductMode,
+    isInspirationMode,
     selectedSessionId,
     sessionItems,
     sessionsQuery.isLoading,
@@ -535,9 +535,9 @@ export function ImageChatPage() {
     }
     if (shouldRefetchDetail) {
       void queryClient.invalidateQueries({ queryKey: ["image-session", status.id] });
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
     }
-  }, [productId, queryClient, selectedSessionId, sessionStatusQuery.data]);
+  }, [inspirationId, queryClient, selectedSessionId, sessionStatusQuery.data]);
 
   useEffect(() => {
     if (!imageSession) {
@@ -616,13 +616,13 @@ export function ImageChatPage() {
   const resourceGroupRequirementMessage = !selectedResourceGroupId ? t("chat.resourceGroupRequired") : "";
 
   const sourceImage = useMemo(
-    () => productQuery.data?.source_assets.find((asset) => asset.kind === "original_image") ?? null,
-    [productQuery.data],
+    () => inspirationQuery.data?.source_assets.find((asset) => asset.kind === "original_image") ?? null,
+    [inspirationQuery.data],
   );
 
-  const productReferenceImages = useMemo(
-    () => productQuery.data?.source_assets.filter((asset) => asset.kind === "reference_image") ?? [],
-    [productQuery.data],
+  const inspirationReferenceImages = useMemo(
+    () => inspirationQuery.data?.source_assets.filter((asset) => asset.kind === "reference_image") ?? [],
+    [inspirationQuery.data],
   );
   const selectedReferenceBlockedResource = firstBlockedResource(
     sessionReferenceAssets.filter((asset) => selectedReferenceAssetIds.includes(asset.id)),
@@ -630,13 +630,13 @@ export function ImageChatPage() {
   const selectedReferenceAssets = sessionReferenceAssets.filter((asset) => selectedReferenceAssetIds.includes(asset.id));
   const generationBlockedResource = firstBlockedResource([
     imageSession,
-    isProductMode ? currentProduct : null,
+    isInspirationMode ? currentInspiration : null,
     requiresGenerationBase ? branchBaseRound?.generated_asset : null,
     selectedReferenceBlockedResource,
   ]);
   const generationAdminReadonly = hasAdminReadonlyResource(currentUser, [
     imageSession,
-    isProductMode ? currentProduct : null,
+    isInspirationMode ? currentInspiration : null,
     requiresGenerationBase ? branchBaseRound?.generated_asset : null,
     ...selectedReferenceAssets,
   ]);
@@ -648,16 +648,16 @@ export function ImageChatPage() {
     imageSession,
     selectedRound?.generated_asset,
   ]);
-  const sessionEditBlockedResource = firstBlockedResource([imageSession, isProductMode ? currentProduct : null]);
-  const sessionEditAdminReadonly = hasAdminReadonlyResource(currentUser, [imageSession, isProductMode ? currentProduct : null]);
-  const productAttachBlockedResource = firstBlockedResource([imageSession, selectedRound?.generated_asset, currentProduct]);
-  const productAttachAdminReadonly = hasAdminReadonlyResource(currentUser, [
+  const sessionEditBlockedResource = firstBlockedResource([imageSession, isInspirationMode ? currentInspiration : null]);
+  const sessionEditAdminReadonly = hasAdminReadonlyResource(currentUser, [imageSession, isInspirationMode ? currentInspiration : null]);
+  const inspirationAttachBlockedResource = firstBlockedResource([imageSession, selectedRound?.generated_asset, currentInspiration]);
+  const inspirationAttachAdminReadonly = hasAdminReadonlyResource(currentUser, [
     imageSession,
     selectedRound?.generated_asset,
-    currentProduct,
+    currentInspiration,
   ]);
-  const sessionOrProductBlockedResource = firstBlockedResource([imageSession, isProductMode ? currentProduct : null]);
-  const productReferenceEditBlockedTitle = currentProductAdminReadonly
+  const sessionOrInspirationBlockedResource = firstBlockedResource([imageSession, isInspirationMode ? currentInspiration : null]);
+  const inspirationReferenceEditBlockedTitle = currentInspirationAdminReadonly
     ? adminReadonlyActionTitle
     : inspirationsWritePermissionTitle;
   const generationBlockedTitle = generationBlockedResource
@@ -681,15 +681,15 @@ export function ImageChatPage() {
     : selectedResultAdminReadonly
       ? adminReadonlyActionTitle
       : galleryWritePermissionTitle;
-  const productAttachBlockedTitle = productAttachBlockedResource
-    ? blockedActionMessage(productAttachBlockedResource)
-    : productAttachAdminReadonly
+  const inspirationAttachBlockedTitle = inspirationAttachBlockedResource
+    ? blockedActionMessage(inspirationAttachBlockedResource)
+    : inspirationAttachAdminReadonly
       ? adminReadonlyActionTitle
       : imageChatWritePermissionTitle;
   const sessionListDeletionBlockedTitle =
-    isProductMode && currentProductBlocked
-      ? blockedActionMessage(currentProduct)
-      : isProductMode && currentProductAdminReadonly
+    isInspirationMode && currentInspirationBlocked
+      ? blockedActionMessage(currentInspiration)
+      : isInspirationMode && currentInspirationAdminReadonly
         ? adminReadonlyActionTitle
         : imageChatWritePermissionTitle;
 
@@ -708,7 +708,7 @@ export function ImageChatPage() {
     },
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
       setRenameEnabled(false);
       setSuccessMessage(t("chat.renameSuccess"));
       setErrorMessage("");
@@ -731,7 +731,7 @@ export function ImageChatPage() {
         .filter((asset) => asset.kind === "reference_upload" && !previousReferenceIds.has(asset.id))
         .map((asset) => asset.id);
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
       const isCurrentSession = updated.id === selectedSessionId;
       if (isCurrentSession && uploadedReferenceIds.length) {
         setSelectedReferenceAssetIds((current) =>
@@ -759,7 +759,7 @@ export function ImageChatPage() {
     },
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
       setPendingDeleteAction(null);
       const isCurrentSession = updated.id === selectedSessionId;
       if (isCurrentSession) {
@@ -789,7 +789,7 @@ export function ImageChatPage() {
       const remainingSessions = sessionItems.filter((item) => item.id !== deletedSessionId);
       setPendingDeleteAction(null);
       queryClient.setQueryData<ImageSessionListResponse>(
-        ["image-sessions", productId ?? "standalone"],
+        ["image-sessions", inspirationId ?? "standalone"],
         (current) => current ? { ...current, items: current.items.filter((item) => item.id !== deletedSessionId) } : current,
       );
       queryClient.removeQueries({ queryKey: ["image-session", deletedSessionId] });
@@ -800,7 +800,7 @@ export function ImageChatPage() {
           autoCreateTriggered.current = false;
         }
       }
-      await queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      await queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
       setSuccessMessage(t("chat.sessionDeleted"));
       setErrorMessage("");
     },
@@ -817,7 +817,7 @@ export function ImageChatPage() {
     },
     onSuccess: (updated, variables) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
       const placeholderId = selectSubmittedImageGenerationTaskPlaceholderId(updated.generation_tasks, variables);
       const submittedTask = placeholderId
         ? updated.generation_tasks.find((task) => placeholderId.startsWith(`task:${task.id}:`))
@@ -873,7 +873,7 @@ export function ImageChatPage() {
     },
     onSuccess: (updated, input) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
       const retriedTask = updated.generation_tasks.find((task) => task.id === input.taskId);
       if (retriedTask) {
         setSelectedTaskPlaceholderId(selectImageGenerationTaskNextPlaceholderId(retriedTask));
@@ -895,7 +895,7 @@ export function ImageChatPage() {
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["image-session-status", updated.id] });
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", productId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
       setSuccessMessage(t("chat.cancelledTask"));
       setErrorMessage("");
     },
@@ -913,21 +913,21 @@ export function ImageChatPage() {
     Boolean(baseRequirementMessage || resourceGroupRequirementMessage);
 
   const attachMutation = useMutation({
-    mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; productId?: string }) => {
-      assertImageChatActionAllowed(productAttachBlockedTitle);
-      return api.attachImageSessionAssetToProduct(selectedSessionId!, payload.assetId, {
+    mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; inspirationId?: string }) => {
+      assertImageChatActionAllowed(inspirationAttachBlockedTitle);
+      return api.attachImageSessionAssetToInspiration(selectedSessionId!, payload.assetId, {
         target: payload.target,
-        product_id: payload.productId,
+        inspiration_id: payload.inspirationId,
       });
     },
     onSuccess: async (response) => {
       setSuccessMessage(response.message);
       setErrorMessage("");
-      await queryClient.invalidateQueries({ queryKey: ["products"] });
-      await queryClient.invalidateQueries({ queryKey: ["product", response.product_id] });
+      await queryClient.invalidateQueries({ queryKey: ["inspirations"] });
+      await queryClient.invalidateQueries({ queryKey: ["inspiration", response.inspiration_id] });
     },
     onError: (error) => {
-      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.saveProductFailed"));
+      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.saveInspirationFailed"));
     },
   });
 
@@ -946,24 +946,24 @@ export function ImageChatPage() {
     },
   });
 
-  const deleteProductReferenceMutation = useMutation({
+  const deleteInspirationReferenceMutation = useMutation({
     mutationFn: (assetId: string) => {
-      assertImageChatActionAllowed(productReferenceEditBlockedTitle);
+      assertImageChatActionAllowed(inspirationReferenceEditBlockedTitle);
       return api.deleteSourceAsset(assetId);
     },
     onSuccess: async (updated) => {
-      queryClient.setQueryData(["product", updated.id], updated);
+      queryClient.setQueryData(["inspiration", updated.id], updated);
       setPendingDeleteAction(null);
-      await queryClient.invalidateQueries({ queryKey: ["product", updated.id] });
+      await queryClient.invalidateQueries({ queryKey: ["inspiration", updated.id] });
       if (selectedSessionId) {
         await queryClient.invalidateQueries({ queryKey: ["image-session", selectedSessionId] });
       }
-      setSuccessMessage(t("chat.productReferenceDeleted"));
+      setSuccessMessage(t("chat.inspirationReferenceDeleted"));
       setErrorMessage("");
     },
     onError: (error) => {
       setPendingDeleteAction(null);
-      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.productReferenceDeleteFailed"));
+      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.inspirationReferenceDeleteFailed"));
     },
   });
 
@@ -1118,18 +1118,18 @@ export function ImageChatPage() {
     if (!selectedRound) {
       return;
     }
-    if (!isProductMode && !targetProductId) {
-      setErrorMessage(t("chat.selectProductFirst"));
+    if (!isInspirationMode && !targetInspirationId) {
+      setErrorMessage(t("chat.selectInspirationFirst"));
       return;
     }
-    if (productAttachBlockedTitle) {
-      setErrorMessage(productAttachBlockedTitle);
+    if (inspirationAttachBlockedTitle) {
+      setErrorMessage(inspirationAttachBlockedTitle);
       return;
     }
     attachMutation.mutate({
       assetId: selectedRound.generated_asset.id,
       target,
-      productId: isProductMode ? productId : targetProductId,
+      inspirationId: isInspirationMode ? inspirationId : targetInspirationId,
     });
   }
 
@@ -1182,25 +1182,25 @@ export function ImageChatPage() {
     setPendingDeleteAction({ kind: "session", sessionId });
   }
 
-  function handleDeleteProductReference(assetId: string) {
-    if (deleteProductReferenceMutation.isPending) {
+  function handleDeleteInspirationReference(assetId: string) {
+    if (deleteInspirationReferenceMutation.isPending) {
       return;
     }
     if (!deletionEnabled) {
       setErrorMessage(t("chat.deleteDisabled"));
       return;
     }
-    const asset = productReferenceImages.find((referenceImage) => referenceImage.id === assetId) ?? null;
-    const blockedResource = firstBlockedResource([currentProduct, asset]);
+    const asset = inspirationReferenceImages.find((referenceImage) => referenceImage.id === assetId) ?? null;
+    const blockedResource = firstBlockedResource([currentInspiration, asset]);
     if (blockedResource) {
       setErrorMessage(blockedActionMessage(blockedResource));
       return;
     }
-    if (isAdminReadonlyResource(currentUser, currentProduct)) {
+    if (isAdminReadonlyResource(currentUser, currentInspiration)) {
       setErrorMessage(adminReadonlyActionTitle);
       return;
     }
-    setPendingDeleteAction({ kind: "productReference", assetId });
+    setPendingDeleteAction({ kind: "inspirationReference", assetId });
   }
 
   function handleReferenceToggle(assetId: string, checked: boolean) {
@@ -1210,7 +1210,7 @@ export function ImageChatPage() {
       setErrorMessage(blockedActionMessage(blockedResource));
       return;
     }
-    if (checked && hasAdminReadonlyResource(currentUser, [imageSession, isProductMode ? currentProduct : null, asset])) {
+    if (checked && hasAdminReadonlyResource(currentUser, [imageSession, isInspirationMode ? currentInspiration : null, asset])) {
       setErrorMessage(adminReadonlyActionTitle);
       return;
     }
@@ -1238,7 +1238,7 @@ export function ImageChatPage() {
       setErrorMessage(blockedActionMessage(blockedResource));
       return;
     }
-    if (hasAdminReadonlyResource(currentUser, [imageSession, isProductMode ? currentProduct : null, asset])) {
+    if (hasAdminReadonlyResource(currentUser, [imageSession, isInspirationMode ? currentInspiration : null, asset])) {
       setErrorMessage(adminReadonlyActionTitle);
       return;
     }
@@ -1382,23 +1382,23 @@ export function ImageChatPage() {
         <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
           <GalleryHorizontalEnd size={15} /> {t("chat.resultUsage")}
         </div>
-        <ProductAssociationPanel
-          isProductMode={isProductMode}
-          product={productQuery.data}
-          products={products}
-          targetProductId={targetProductId}
+        <InspirationAssociationPanel
+          isInspirationMode={isInspirationMode}
+          inspiration={inspirationQuery.data}
+          inspirations={inspirations}
+          targetInspirationId={targetInspirationId}
           sourceImage={sourceImage}
-          referenceImages={productReferenceImages}
+          referenceImages={inspirationReferenceImages}
           selectedRound={selectedRound}
           attachBusy={attachMutation.isPending}
           deletingReferenceAssetId={
-            deleteProductReferenceMutation.isPending ? (deleteProductReferenceMutation.variables ?? null) : null
+            deleteInspirationReferenceMutation.isPending ? (deleteInspirationReferenceMutation.variables ?? null) : null
           }
-          onTargetProductChange={setTargetProductId}
-          onDeleteReference={handleDeleteProductReference}
+          onTargetInspirationChange={setTargetInspirationId}
+          onDeleteReference={handleDeleteInspirationReference}
           onAttach={handleAttach}
-          saveBlockedTitle={productAttachBlockedTitle}
-          editBlockedTitle={productReferenceEditBlockedTitle}
+          saveBlockedTitle={inspirationAttachBlockedTitle}
+          editBlockedTitle={inspirationReferenceEditBlockedTitle}
           t={t}
         />
       </section>
@@ -1476,7 +1476,7 @@ export function ImageChatPage() {
                 disabled={Boolean(generationSettingsBlockedTitle)}
                 title={generationSettingsBlockedTitle ?? t("chat.prompt")}
                 rows={6}
-                placeholder={isProductMode ? t("chat.productPromptPlaceholder") : t("chat.freePromptPlaceholder")}
+                placeholder={isInspirationMode ? t("chat.inspirationPromptPlaceholder") : t("chat.freePromptPlaceholder")}
                 className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
               />
               <div className="mt-2 grid gap-2">
@@ -1586,20 +1586,20 @@ export function ImageChatPage() {
         title:
           pendingDeleteAction.kind === "session"
             ? t("chat.confirmDeleteSessionTitle")
-            : pendingDeleteAction.kind === "productReference"
-              ? t("chat.confirmDeleteProductReferenceTitle")
+            : pendingDeleteAction.kind === "inspirationReference"
+              ? t("chat.confirmDeleteInspirationReferenceTitle")
               : t("chat.confirmDeleteSessionReferenceTitle"),
         description:
           pendingDeleteAction.kind === "session"
             ? t("chat.confirmDeleteSession")
-            : pendingDeleteAction.kind === "productReference"
-              ? t("chat.confirmDeleteProductReference")
+            : pendingDeleteAction.kind === "inspirationReference"
+              ? t("chat.confirmDeleteInspirationReference")
               : t("chat.confirmDeleteSessionReference"),
         busy:
           pendingDeleteAction.kind === "session"
             ? deleteSessionMutation.isPending
-            : pendingDeleteAction.kind === "productReference"
-              ? deleteProductReferenceMutation.isPending
+            : pendingDeleteAction.kind === "inspirationReference"
+              ? deleteInspirationReferenceMutation.isPending
               : deleteSessionReferenceMutation.isPending,
       }
     : null;
@@ -1607,8 +1607,8 @@ export function ImageChatPage() {
   return (
     <div className="pf-workspace flex flex-col text-slate-900 dark:text-slate-100 lg:h-[100dvh] lg:overflow-hidden">
       <TopNav
-        breadcrumbs={isProductMode ? `${productQuery.data?.name ?? t("chat.productFallback")} / ${t("chat.breadcrumb")}` : t("chat.breadcrumb")}
-        onHome={() => navigate(isProductMode && productId ? `/products/${productId}` : "/products")}
+        breadcrumbs={isInspirationMode ? `${inspirationQuery.data?.name ?? t("chat.inspirationFallback")} / ${t("chat.breadcrumb")}` : t("chat.breadcrumb")}
+        onHome={() => navigate(isInspirationMode && inspirationId ? `/inspirations/${inspirationId}` : "/inspirations")}
         onLogout={() => logoutMutation.mutate()}
       />
 
@@ -1815,8 +1815,8 @@ export function ImageChatPage() {
                 ) : null}
               </div>
             </div>
-            {sessionOrProductBlockedResource ? (
-              <ResourceBlockedNotice resource={sessionOrProductBlockedResource} className="mb-3" />
+            {sessionOrInspirationBlockedResource ? (
+              <ResourceBlockedNotice resource={sessionOrInspirationBlockedResource} className="mb-3" />
             ) : null}
 
             <ImageChatMainStage
@@ -2250,13 +2250,13 @@ export function ImageChatPage() {
             deleteSessionMutation.mutate(pendingDeleteAction.sessionId);
             return;
           }
-          if (pendingDeleteAction.kind === "productReference") {
-            if (productReferenceEditBlockedTitle) {
-              setErrorMessage(productReferenceEditBlockedTitle);
+          if (pendingDeleteAction.kind === "inspirationReference") {
+            if (inspirationReferenceEditBlockedTitle) {
+              setErrorMessage(inspirationReferenceEditBlockedTitle);
               setPendingDeleteAction(null);
               return;
             }
-            deleteProductReferenceMutation.mutate(pendingDeleteAction.assetId);
+            deleteInspirationReferenceMutation.mutate(pendingDeleteAction.assetId);
             return;
           }
           if (sessionEditBlockedTitle) {

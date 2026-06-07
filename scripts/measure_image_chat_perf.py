@@ -177,7 +177,7 @@ def wait_for(predicate, timeout_s: float, interval_s: float = 0.05) -> tuple[Any
 
 
 def launch_chrome(width: int, height: int) -> tuple[subprocess.Popen[str], str, Path]:
-  user_data_dir = Path(tempfile.mkdtemp(prefix="productflow-perf-chrome-"))
+  user_data_dir = Path(tempfile.mkdtemp(prefix="inspiration-one-perf-chrome-"))
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]

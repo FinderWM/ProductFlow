@@ -27,7 +27,7 @@ Runtime API typing is centralized in:
 `web/src/lib/types.ts` mirrors backend Pydantic response/request shapes. It intentionally preserves backend field names,
 including `snake_case`:
 
-- `ProductSummary.workflow_state`
+- `InspirationSummary.workflow_state`
 - `CopySet.creative_brief_id`
 - `ImageSessionGenerationTask.failure_reason`
 - `ImageSessionRound.provider_response_id`
@@ -39,7 +39,7 @@ Do not silently convert these to camelCase in frontend types unless the API laye
 String union types mirror backend enums:
 
 ```ts
-export type ProductWorkflowState = "draft" | "copy_ready" | "poster_ready" | "failed";
+export type InspirationWorkflowState = "draft" | "copy_ready" | "poster_ready" | "failed";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 ```
 
@@ -61,8 +61,8 @@ throws typed `ApiError` on non-2xx responses.
 Examples:
 
 ```ts
-getProduct(productId: string): Promise<ProductDetail> {
-  return request(`/api/products/${productId}`);
+getProduct(inspirationId: string): Promise<InspirationDetail> {
+  return request(`/api/inspirations/${inspirationId}`);
 }
 
 updateConfig(payload: ConfigUpdateRequest): Promise<ConfigResponse> {
@@ -77,19 +77,19 @@ Form uploads build `FormData` in API methods such as `createProduct(...)`, `addR
 `addImageSessionReferenceImages(...)`. The fetch wrapper omits `Content-Type` for `FormData` so the browser can set the
 multipart boundary.
 
-### Scenario: Create-product API input typing
+### Scenario: Create-inspiration API input typing
 
 #### 1. Scope / Trigger
 
-- Trigger: changes to the product creation form, `api.createProduct(...)`, or backend `POST /api/products` multipart
+- Trigger: changes to the inspiration creation form, `api.createProduct(...)`, or backend `POST /api/inspirations` multipart
   fields.
-- Product creation is a cross-layer form-upload contract. Keep the shape centralized in `web/src/lib/types.ts` and have
+- Inspiration creation is a cross-layer form-upload contract. Keep the shape centralized in `web/src/lib/types.ts` and have
   `web/src/lib/api.ts` translate it into `FormData`.
 
 #### 2. Signatures
 
-- Shared frontend DTO: `CreateProductInput`.
-- API method: `api.createProduct(input: CreateProductInput): Promise<ProductDetail>`.
+- Shared frontend DTO: `CreateInspirationInput`.
+- API method: `api.createProduct(input: CreateInspirationInput): Promise<InspirationDetail>`.
 - Multipart fields currently mirrored from the backend:
   - `name: string`
   - `file?: File` -> form field `image`
@@ -110,12 +110,12 @@ multipart boundary.
   neither image nor `entry_text`.
 - `canvas_template_key` is the backend-recognized key. UI labels should be merchant-facing output plans, but the submitted
   value remains the key.
-- Blank/default product-creation plans may submit an empty string or omit `canvas_template_key`; this is independent from
+- Blank/default inspiration-creation plans may submit an empty string or omit `canvas_template_key`; this is independent from
   `initial_workflow_entry="blank"`.
 - When `initial_workflow_entry="blank"` and a backend template is selected, the backend may initialize from any non-blank
   template but must persist the workflow source as blank. The frontend must not infer later template-save eligibility from
   selected template type.
-- Product creation large previews for backend-recognized built-in plans must mirror the backend `full_canvas` template
+- Inspiration creation large previews for backend-recognized built-in plans must mirror the backend `full_canvas` template
   layout for the same key. When changing preview node titles, edges, or coordinates, update the backend template and
   backend regression tests in the same change.
 - The page component must not duplicate the full mutation object type inline when a shared DTO exists.
@@ -132,18 +132,18 @@ multipart boundary.
 
 #### 5. Good/Base/Bad Cases
 
-- Good: `ProductCreatePage` stores a selected plan key in component state, displays merchant-facing labels, and passes
+- Good: `InspirationCreatePage` stores a selected plan key in component state, displays merchant-facing labels, and passes
   `canvas_template_key` plus `initial_workflow_entry` into `api.createProduct`.
 - Good: `copy` entry submits `{ initial_workflow_entry: "copy", entry_text }` without `file`.
 - Good: `blank` entry can submit no `file` and no `entry_text`, and may still pass a non-empty `canvas_template_key`.
 - Base: a no-template/basic option can use `""` while still sharing the typed DTO.
-- Bad: `ProductCreatePage` creates `FormData` directly and bypasses the typed API helper.
+- Bad: `InspirationCreatePage` creates `FormData` directly and bypasses the typed API helper.
 - Bad: frontend renames `canvas_template_key` to `canvasTemplateKey` without an explicit mapping layer.
 - Bad: treating `canvas_template_key="blank"` as equivalent to `initial_workflow_entry="blank"`.
 
 #### 6. Tests Required
 
-- `pnpm --dir web build` must pass after any create-product DTO change.
+- `pnpm --dir web build` must pass after any create-inspiration DTO change.
 - Add focused frontend tests for pure helper logic if plan selection or payload routing becomes non-trivial.
 - Backend API tests remain the source of truth for multipart validation, template-key error status, and persisted template
   coordinates mirrored by the creation page preview.
@@ -170,20 +170,20 @@ return api.createProduct({
 });
 ```
 
-### Scenario: Product list summary display DTO
+### Scenario: Inspiration list summary display DTO
 
 #### 1. Scope / Trigger
 
-- Trigger: changes to `ProductSummary`, `/api/products` response fields, `ProductListPage`, or product-list display
+- Trigger: changes to `InspirationSummary`, `/api/inspirations` response fields, `InspirationListPage`, or inspiration-list display
   helpers.
 - The list displays both generated-result imagery and starting input info, so the DTO must keep those fields separate.
 
 #### 2. Signatures
 
-- Shared frontend DTO: `ProductSummary`.
-- API method: `api.listProducts(...): Promise<ProductListResponse>`.
+- Shared frontend DTO: `InspirationSummary`.
+- API method: `api.listProducts(...): Promise<InspirationListResponse>`.
 - Summary fields used by the list:
-  - `initial_workflow_entry: ProductInitialWorkflowEntry | null`
+  - `initial_workflow_entry: InspirationInitialWorkflowEntry | null`
   - `initial_entry_text: string | null`
   - `initial_entry_text_excerpt: string | null`
   - `latest_generated_image_download_url: string | null`
@@ -193,32 +193,32 @@ return api.createProduct({
 
 #### 3. Contracts
 
-- `ProductThumbnail` / main row thumbnail must read only `latest_generated_image_thumbnail_url ??
+- `InspirationThumbnail` / main row thumbnail must read only `latest_generated_image_thumbnail_url ??
   latest_generated_image_preview_url`.
 - Main row thumbnail must not fall back to `source_image_thumbnail_url`; no generated result means an image placeholder.
-- Product key-info for `initial_workflow_entry="image"` reads `source_image_thumbnail_url ?? source_image_preview_url`.
-- Product key-info for `copy` / `tail` reads `initial_entry_text` and falls back to `initial_entry_text_excerpt` for older responses.
-- Product key-info text is allowed to exceed six characters; the UI truncates with ellipsis based on available width.
-- Product key-info for `blank`, missing text, or missing image returns a stable empty state.
-- Keep backend `snake_case` names in `ProductSummary`; do not introduce camelCase aliases in page code.
+- Inspiration key-info for `initial_workflow_entry="image"` reads `source_image_thumbnail_url ?? source_image_preview_url`.
+- Inspiration key-info for `copy` / `tail` reads `initial_entry_text` and falls back to `initial_entry_text_excerpt` for older responses.
+- Inspiration key-info text is allowed to exceed six characters; the UI truncates with ellipsis based on available width.
+- Inspiration key-info for `blank`, missing text, or missing image returns a stable empty state.
+- Keep backend `snake_case` names in `InspirationSummary`; do not introduce camelCase aliases in page code.
 
 #### 4. Validation & Error Matrix
 
 - New backend summary field missing from `types.ts` -> `just web-build` should fail or page code must not consume it.
-- Product has source image but no generated result -> main thumbnail helper returns `null`.
+- Inspiration has source image but no generated result -> main thumbnail helper returns `null`.
 - Copy/tail entry has blank full text and blank excerpt -> key-info helper returns empty.
 - Image entry has no source image URL -> key-info helper returns empty.
 
 #### 5. Good/Base/Bad Cases
 
-- Good: `productMainThumbnailUrl(product)` returns the generated thumbnail and `productKeyInfo(product)` returns a source
+- Good: `inspirationMainThumbnailUrl(inspiration)` returns the generated thumbnail and `inspirationKeyInfo(inspiration)` returns a source
   image for image-entry rows.
 - Good: a copy-entry row with `initial_entry_text="免安装收纳架适配厨房场景"` renders the full text in the key-info column/card
   and truncates visually with an ellipsis when the column is narrow.
 - Base: legacy rows with no `initial_workflow_entry` but a source image may show the source image as key-info while keeping
   the main thumbnail empty.
-- Bad: `ProductThumbnail` uses `source_image_thumbnail_url ?? source_image_preview_url` as its image source.
-- Bad: page components infer copy/tail text by slicing arbitrary product names or source filenames.
+- Bad: `InspirationThumbnail` uses `source_image_thumbnail_url ?? source_image_preview_url` as its image source.
+- Bad: page components infer copy/tail text by slicing arbitrary inspiration names or source filenames.
 
 #### 6. Tests Required
 
@@ -231,13 +231,13 @@ return api.createProduct({
 Wrong:
 
 ```ts
-const thumbUrl = product.source_image_thumbnail_url ?? product.source_image_preview_url;
+const thumbUrl = inspiration.source_image_thumbnail_url ?? inspiration.source_image_preview_url;
 ```
 
 Correct:
 
 ```ts
-const thumbUrl = product.latest_generated_image_thumbnail_url ?? product.latest_generated_image_preview_url;
+const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration.latest_generated_image_preview_url;
 ```
 
 ---
@@ -365,7 +365,7 @@ generation_config_id: selectedConfigId
 
 #### 1. Scope / Trigger
 - Trigger: changes to generation group settings UI, RBAC user grants, image-chat generation, workflow inspector
-  generation settings, gallery/product-history filters, or generated-result DTOs.
+  generation settings, gallery/inspiration-history filters, or generated-result DTOs.
 - This is a cross-layer DTO contract. Frontend types mirror backend `snake_case` fields and page code must keep group
   selection separate from concrete provider config management.
 
@@ -394,8 +394,8 @@ generation_config_id: selectedConfigId
   group-grant panel because backend grants all enabled groups automatically.
 - ImageChatPage reads `['my-generation-resource-groups']`, defaults to the first enabled group, requires one selected
   group before submit, and sends `resource_group_id` with `generation_config_mode: "auto"`.
-- ProductDetail workflow inspector and tail-plan generation require a selected group for generation-capable nodes.
-- Gallery and product history filters pass `resource_group_id` as a query parameter only when a concrete group is
+- InspirationDetail workflow inspector and tail-plan generation require a selected group for generation-capable nodes.
+- Gallery and inspiration history filters pass `resource_group_id` as a query parameter only when a concrete group is
   selected; the all-groups option omits it.
 - Generated result cards, previews, node-run rows, and history entries should display `resource_group.name` from the DTO.
   Do not derive labels from config ids or provider names.
@@ -406,7 +406,7 @@ generation_config_id: selectedConfigId
 - Selected group disappears, becomes disabled, or is archived after refetch -> page resets to the first enabled group or
   clears selection.
 - Generation submit without selected group -> page shows local validation and does not call the API.
-- Gallery/product-history "all groups" selected -> omit `resource_group_id`; selected group -> include the exact id.
+- Gallery/inspiration-history "all groups" selected -> omit `resource_group_id`; selected group -> include the exact id.
 - Missing required `resource_group` tag in a generated-result factory/test -> `just web-build` fails.
 
 #### 5. Good/Base/Bad Cases
@@ -421,8 +421,8 @@ generation_config_id: selectedConfigId
 #### 6. Tests Required
 - SettingsPage tests cover group payloads, import/export counts, and generation config `resource_group_id`.
 - Image-chat helper tests include `resource_group_id` in submit signatures, task placeholders, and regenerate payloads.
-- ProductDetail workflow config tests round-trip node `resource_group_id` and keep generated config mode automatic.
-- Gallery/product-history tests cover filter query params and required `resource_group` result tags.
+- InspirationDetail workflow config tests round-trip node `resource_group_id` and keep generated config mode automatic.
+- Gallery/inspiration-history tests cover filter query params and required `resource_group` result tags.
 - Run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build`.
 
 #### 7. Wrong vs Correct
@@ -462,7 +462,7 @@ Correct:
 
 Use local `type` aliases for page-only structures:
 
-- `EditableCopy` in `ProductDetailPage.tsx`.
+- `EditableCopy` in `InspirationDetailPage.tsx`.
 - `DraftValue` in `SettingsPage.tsx`.
 
 Use `interface` for component props and DTO object shapes:
@@ -482,7 +482,7 @@ Zod/Yup/io-ts runtime validation layer in `web/src/`.
 
 Existing frontend-side validation is lightweight and UI-oriented:
 
-- Required form fields and file accept attributes in `ProductCreatePage.tsx`.
+- Required form fields and file accept attributes in `InspirationCreatePage.tsx`.
 - Config input types/min/max from backend-provided `ConfigItem` metadata in `SettingsPage.tsx`.
 - Allowed image size options derived from `/api/settings` in `ImageChatPage.tsx`.
 
@@ -502,7 +502,7 @@ if (mutationError instanceof ApiError) {
   setError(mutationError.detail);
   return;
 }
-setError(mutationError instanceof Error ? mutationError.message : "创建商品失败");
+setError(mutationError instanceof Error ? mutationError.message : "创建灵感产物失败");
 ```
 
 ---

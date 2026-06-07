@@ -34,7 +34,7 @@ Before backend changes, read:
    - database/schema/config: `./database-guidelines.md`
    - API/business failures/uploads: `./error-handling.md`
    - observability/logging: `./logging-guidelines.md`
-   - product workbench DAG: `./product-workflow-dag.md`
+   - inspiration workbench DAG: `./inspiration-workflow-dag.md`
 
 If a backend change affects frontend API contracts, also read `../frontend/type-safety.md` and
 `../frontend/state-management.md`.

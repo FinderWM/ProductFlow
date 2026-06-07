@@ -114,7 +114,7 @@ function task(overrides: Partial<ImageSessionGenerationTask>): ImageSessionGener
 function detail(overrides: Partial<ImageSessionDetail>): ImageSessionDetail {
   return {
     id: "session-1",
-    product_id: null,
+    inspiration_id: null,
     title: "会话",
     assets: [],
     rounds: [],
@@ -128,7 +128,7 @@ function detail(overrides: Partial<ImageSessionDetail>): ImageSessionDetail {
 function status(overrides: Partial<ImageSessionStatus>): ImageSessionStatus {
   return {
     id: "session-1",
-    product_id: null,
+    inspiration_id: null,
     title: "会话",
     rounds_count: 0,
     latest_round_id: null,

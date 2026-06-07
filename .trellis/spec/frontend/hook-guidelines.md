@@ -12,8 +12,8 @@ Server state uses TanStack Query; local UI/form state uses React's built-in hook
 Real hook-heavy files:
 
 - `web/src/App.tsx`
-- `web/src/pages/ProductListPage.tsx`
-- `web/src/pages/ProductDetailPage.tsx`
+- `web/src/pages/InspirationListPage.tsx`
+- `web/src/pages/InspirationDetailPage.tsx`
 - `web/src/pages/ImageChatPage.tsx`
 - `web/src/pages/SettingsPage.tsx`
 
@@ -24,21 +24,21 @@ Real hook-heavy files:
 Use `useQuery` for reads and `useMutation` for writes. Query keys are small arrays of stable values:
 
 ```tsx
-const productQuery = useQuery({
-  queryKey: ["product", productId],
-  queryFn: () => api.getProduct(productId),
-  enabled: Boolean(productId),
+const inspirationQuery = useQuery({
+  queryKey: ["inspiration", inspirationId],
+  queryFn: () => api.getProduct(inspirationId),
+  enabled: Boolean(inspirationId),
 });
 ```
 
 Examples:
 
 - `App.tsx` uses `['session']` for `api.getSessionState` with `retry: false`.
-- `ProductListPage.tsx` uses `['products']` for `api.listProducts`.
-- `ProductDetailPage.tsx` uses `['product', productId]`, `['product-history', productId]`,
-  `['product-workflow', productId]`, `['product-workflow-status', productId]`, and `['runtime-config']`.
-- `ImageChatPage.tsx` uses `['image-sessions', productId ?? 'standalone']`, `['image-session', selectedSessionId]`,
-  `['image-session-status', selectedSessionId]`, `['config']`, and product queries.
+- `InspirationListPage.tsx` uses `['inspirations']` for `api.listProducts`.
+- `InspirationDetailPage.tsx` uses `['inspiration', inspirationId]`, `['inspiration-history', inspirationId]`,
+  `['inspiration-workflow', inspirationId]`, `['inspiration-workflow-status', inspirationId]`, and `['runtime-config']`.
+- `ImageChatPage.tsx` uses `['image-sessions', inspirationId ?? 'standalone']`, `['image-session', selectedSessionId]`,
+  `['image-session-status', selectedSessionId]`, `['config']`, and inspiration queries.
 - `SettingsPage.tsx` uses `['config']` for runtime settings.
 
 Use `enabled` when an ID is required. Do not call an API with an empty ID just because a route param has not loaded.
@@ -50,7 +50,7 @@ Use `enabled` when an ID is required. Do not call an API with an empty ID just b
 Use `useMutation` for writes and update/invalidate TanStack Query caches in `onSuccess`:
 
 - Logout mutations invalidate `['session']` and navigate to `/login`.
-- Product/detail mutations invalidate `['product', productId]`, `['product-history', productId]`, and/or `['products']`.
+- Inspiration/detail mutations invalidate `['inspiration', inspirationId]`, `['inspiration-history', inspirationId]`, and/or `['inspirations']`.
 - Image session mutations often call `queryClient.setQueryData(['image-session', id], updated)` and invalidate the session
   list.
 - Settings save/reset mutations update `['config']` with `queryClient.setQueryData(...)`.
@@ -61,12 +61,12 @@ Keep cache keys consistent with the page that reads them. If a mutation changes 
 
 ## Polling Pattern
 
-Long-running product workflow and continuous image-session tasks are polled through their owning status/detail queries.
+Long-running inspiration workflow and continuous image-session tasks are polled through their owning status/detail queries.
 Polling must stop when no durable run/task is still `queued` or `running`:
 
 ```tsx
 refetchInterval: (query) => {
-  const data = query.state.data as ProductWorkflowStatus | undefined;
+  const data = query.state.data as InspirationWorkflowStatus | undefined;
   if (!data || hasActiveWorkflow(data)) {
     return 1000;
   }
@@ -134,7 +134,7 @@ nodes or running workflow runs.
 - Good: one queued/running task is visible in the history tree while a different payload can be submitted immediately.
 - Base: a task failure appears in the task card, then full detail is refetched once.
 - Bad: status polling replaces the detail cache with a partial object missing `assets` or `rounds`.
-- Bad: broadening this ImageChat status query to ProductDetail workflow polling without a separate workflow DTO.
+- Bad: broadening this ImageChat status query to InspirationDetail workflow polling without a separate workflow DTO.
 - Bad: disabling ImageChat submission solely because `has_active_generation_task` is true.
 
 ### 6. Tests Required
@@ -161,41 +161,41 @@ Correct:
 useQuery({ queryKey: ["image-session-status", id], refetchInterval: 1500 });
 ```
 
-## Scenario: ProductDetail active-workflow lightweight status polling
+## Scenario: InspirationDetail active-workflow lightweight status polling
 
 ### 1. Scope / Trigger
 
-- Trigger: changing `ProductDetailPage` workflow polling, product-workflow API DTOs, or active workflow status visibility.
+- Trigger: changing `InspirationDetailPage` workflow polling, inspiration-workflow API DTOs, or active workflow status visibility.
 - Goal: active workflow polling should be lightweight while full DAG structure and artifacts remain loaded through the
   workflow detail query.
 
 ### 2. Signatures
 
-- Full workflow query key: `['product-workflow', productId]` -> `api.getProductWorkflow(productId)`.
-- Lightweight status query key: `['product-workflow-status', productId]` ->
-  `api.getProductWorkflowStatus(productId)`.
+- Full workflow query key: `['inspiration-workflow', inspirationId]` -> `api.getInspirationWorkflow(inspirationId)`.
+- Lightweight status query key: `['inspiration-workflow-status', inspirationId]` ->
+  `api.getInspirationWorkflowStatus(inspirationId)`.
 - Backend status fields used by the page: `has_active_workflow`, node `status` / `failure_reason` / `last_run_at`,
   run `status` / `failure_reason` / `finished_at`, node-run status fields, and workflow `updated_at`.
 
 ### 3. Contracts
 
-- Do not put active-run `refetchInterval` on the full `['product-workflow', productId]` query.
+- Do not put active-run `refetchInterval` on the full `['inspiration-workflow', inspirationId]` query.
 - Enable the status query only when the cached full workflow has a running run or queued/running node.
 - Each status response may merge only workflow/node/run status metadata into the cached full workflow. It must not replace
   `edges`, node `config_json`, node `output_json`, or node-run artifact fields such as `output_json`, `copy_set_id`,
   `poster_variant_id`, and `image_session_asset_id`.
 - When status shows an active workflow becoming terminal, invalidate/refetch the full workflow once and let the existing
-  active-to-inactive path refresh `['product', productId]`, `['product-history', productId]`, and `['products']`.
+  active-to-inactive path refresh `['inspiration', inspirationId]`, `['inspiration-history', inspirationId]`, and `['inspirations']`.
 - Keep write mutations authoritative: node/edge/update/run handlers may still set the full workflow cache from mutation
-  responses and refresh product artifact queries.
+  responses and refresh inspiration artifact queries.
 
 ### 4. Validation & Error Matrix
 
-- No product id -> status query disabled.
+- No inspiration id -> status query disabled.
 - Full workflow has no active run/node -> status query disabled; do not poll.
 - Status still active -> merge status metadata only, no full workflow refetch.
-- Status terminal -> merge terminal status, invalidate `['product-workflow', productId]`, and refresh artifact-bearing
-  product queries through the workflow active-to-inactive transition.
+- Status terminal -> merge terminal status, invalidate `['inspiration-workflow', inspirationId]`, and refresh artifact-bearing
+  inspiration queries through the workflow active-to-inactive transition.
 - Status API error -> normal React Query error state; do not clear existing full workflow cache only because a status poll
   failed.
 
@@ -203,9 +203,9 @@ useQuery({ queryKey: ["image-session-status", id], refetchInterval: 1500 });
 
 - Good: active workflow updates node/run status every 1200ms without refetching all edges, node config/output JSON, and
   artifact-bearing run payloads.
-- Base: a failed node shows the failure reason promptly, then full workflow and product artifacts refetch once.
+- Base: a failed node shows the failure reason promptly, then full workflow and inspiration artifacts refetch once.
 - Bad: status polling replaces the detail cache with a partial object missing `edges` or node `config_json`.
-- Bad: workflow terminal status refreshes only `['product-workflow', productId]` and leaves product detail/history/list
+- Bad: workflow terminal status refreshes only `['inspiration-workflow', inspirationId]` and leaves inspiration detail/history/list
   artifact surfaces stale.
 
 ### 6. Tests Required
@@ -220,13 +220,13 @@ useQuery({ queryKey: ["image-session-status", id], refetchInterval: 1500 });
 Wrong:
 
 ```tsx
-useQuery({ queryKey: ["product-workflow", productId], refetchInterval: 1200 });
+useQuery({ queryKey: ["inspiration-workflow", inspirationId], refetchInterval: 1200 });
 ```
 
 Correct:
 
 ```tsx
-useQuery({ queryKey: ["product-workflow-status", productId], refetchInterval: 1200 });
+useQuery({ queryKey: ["inspiration-workflow-status", inspirationId], refetchInterval: 1200 });
 ```
 
 ---
@@ -235,20 +235,20 @@ useQuery({ queryKey: ["product-workflow-status", productId], refetchInterval: 12
 
 Use `useState` for local form/UI state:
 
-- `ProductCreatePage.tsx`: product form fields, selected file(s), error text.
-- `ProductDetailPage.tsx`: copy editing state, selected workbench/canvas state, error text.
-- `ImageChatPage.tsx`: selected session/asset IDs, draft prompt, size, rename mode, target product, messages.
+- `InspirationCreatePage.tsx`: inspiration form fields, selected file(s), error text.
+- `InspirationDetailPage.tsx`: copy editing state, selected workbench/canvas state, error text.
+- `ImageChatPage.tsx`: selected session/asset IDs, draft prompt, size, rename mode, target inspiration, messages.
 - `SettingsPage.tsx`: draft config values, touched secret keys, resetting key, saved/error messages.
 
 Use `useMemo` for derived values that depend on fetched data or local state:
 
-- `ProductDetailPage.tsx` derives `workingCopy`.
+- `InspirationDetailPage.tsx` derives `workingCopy`.
 - `ImageChatPage.tsx` derives allowed size options, selected round, source image, and reference images.
 - `SettingsPage.tsx` groups config items by category.
 
 Use `useEffect` for synchronization side effects, not for deriving values that can be calculated during render. Current
 examples include auth redirects in `LoginPage.tsx`, workflow status completion invalidation in
-`ProductDetailPage.tsx`, and draft reset from fetched config in `SettingsPage.tsx`.
+`InspirationDetailPage.tsx`, and draft reset from fetched config in `SettingsPage.tsx`.
 
 ---
 
@@ -262,8 +262,8 @@ pages/components need the same behavior. Follow React naming rules (`useSomethin
 
 An oversized route page may extract a page-local controller hook or controller component under that page's local directory
 even before there is cross-page reuse, when the extraction isolates a cohesive browser interaction boundary and materially
-reduces route complexity. For ProductDetail-style workbench interactions, keep the boundary page-local (for example
-`web/src/pages/product-detail/WorkflowCanvas.tsx`, or a page-local hook when no component boundary is involved) and pass
+reduces route complexity. For InspirationDetail-style workbench interactions, keep the boundary page-local (for example
+`web/src/pages/inspiration-detail/WorkflowCanvas.tsx`, or a page-local hook when no component boundary is involved) and pass
 API/cache work in as callbacks instead of hiding TanStack Query mutations inside the controller.
 
 Correct:
@@ -279,15 +279,15 @@ Correct:
 Wrong:
 
 ```tsx
-function useWorkflowCanvas(productId: string) {
-  return useMutation({ mutationFn: () => api.createWorkflowEdge(productId, input) });
+function useWorkflowCanvas(inspirationId: string) {
+  return useMutation({ mutationFn: () => api.createWorkflowEdge(inspirationId, input) });
 }
 ```
 
 Likely future extraction candidates, if duplication grows:
 
-- session/logout behavior shared by `ProductListPage.tsx`, `ImageChatPage.tsx`, and `SettingsPage.tsx`.
-- workflow status polling behavior from `ProductDetailPage.tsx`.
+- session/logout behavior shared by `InspirationListPage.tsx`, `ImageChatPage.tsx`, and `SettingsPage.tsx`.
+- workflow status polling behavior from `InspirationDetailPage.tsx`.
 - config draft handling from `SettingsPage.tsx`.
 
 Do not create a `hooks/` directory for one-off logic that is still page-specific.

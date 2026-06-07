@@ -6,27 +6,30 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import _login, _make_demo_image_bytes
 
-from productflow_backend.application.image_sessions import create_image_session, submit_image_session_generation_task
-from productflow_backend.application.product_workflow import graph as product_workflow_graph
-from productflow_backend.application.product_workflow.context import poster_kind_from_config
-from productflow_backend.application.product_workflow.mutations import (
+from inspiration_one_backend.application.image_sessions import (
+    create_image_session,
+    submit_image_session_generation_task,
+)
+from inspiration_one_backend.application.inspiration_workflow import graph as inspiration_workflow_graph
+from inspiration_one_backend.application.inspiration_workflow.context import poster_kind_from_config
+from inspiration_one_backend.application.inspiration_workflow.mutations import (
     create_workflow_edge,
     create_workflow_node,
-    get_or_create_product_workflow,
+    get_or_create_inspiration_workflow,
 )
-from productflow_backend.application.use_cases import create_product, update_copy_set
-from productflow_backend.domain.enums import WorkflowNodeType
-from productflow_backend.domain.errors import (
+from inspiration_one_backend.application.use_cases import create_inspiration, update_copy_set
+from inspiration_one_backend.domain.enums import WorkflowNodeType
+from inspiration_one_backend.domain.errors import (
     BusinessError,
     BusinessValidationError,
     NotFoundError,
     QueueUnavailableError,
 )
-from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, CopySet
-from productflow_backend.infrastructure.logging import current_log_context
-from productflow_backend.presentation import errors as presentation_errors
-from productflow_backend.presentation.api import create_app
-from productflow_backend.presentation.errors import business_error_to_response
+from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, CopySet
+from inspiration_one_backend.infrastructure.logging import current_log_context
+from inspiration_one_backend.presentation import errors as presentation_errors
+from inspiration_one_backend.presentation.api import create_app
+from inspiration_one_backend.presentation.errors import business_error_to_response
 
 
 def test_typed_not_found_maps_to_404_without_message_suffix() -> None:
@@ -89,36 +92,36 @@ def test_global_business_error_handler_preserves_detail_shape(configured_env) ->
     assert current_log_context()["request_id"] == "-"
 
 
-def test_product_workflow_route_uses_global_business_error_handler(configured_env) -> None:  # noqa: ARG001
+def test_inspiration_workflow_route_uses_global_business_error_handler(configured_env) -> None:  # noqa: ARG001
     app = create_app()
     client = TestClient(app)
     _login(client)
 
-    response = client.get("/api/products/missing-product/workflow")
+    response = client.get("/api/inspirations/missing-inspiration/workflow")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "商品不存在"}
+    assert response.json() == {"detail": "灵感产物不存在"}
 
 
-def test_product_route_uses_global_business_error_handler(configured_env) -> None:  # noqa: ARG001
+def test_inspiration_route_uses_global_business_error_handler(configured_env) -> None:  # noqa: ARG001
     app = create_app()
     client = TestClient(app)
     _login(client)
 
-    missing = client.get("/api/products/missing-product")
+    missing = client.get("/api/inspirations/missing-inspiration")
 
     assert missing.status_code == 404
-    assert missing.json() == {"detail": "商品不存在"}
+    assert missing.json() == {"detail": "灵感产物不存在"}
     assert "code" not in missing.json()
 
     invalid = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={"name": "   ", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("blank.png", _make_demo_image_bytes(), "image/png")},
     )
 
     assert invalid.status_code == 400
-    assert invalid.json() == {"detail": "商品名不能为空"}
+    assert invalid.json() == {"detail": "灵感产物名不能为空"}
     assert "code" not in invalid.json()
 
 
@@ -168,8 +171,8 @@ def test_gallery_route_uses_global_business_error_handler(configured_env) -> Non
 
 
 def test_high_risk_business_paths_raise_typed_validation_errors(db_session, configured_env) -> None:  # noqa: ARG001
-    with pytest.raises(BusinessValidationError, match="商品名不能为空"):
-        create_product(
+    with pytest.raises(BusinessValidationError, match="灵感产物名不能为空"):
+        create_inspiration(
             db_session,
             name="   ",
             category=None,
@@ -182,9 +185,9 @@ def test_high_risk_business_paths_raise_typed_validation_errors(db_session, conf
     db_session.rollback()
 
     with pytest.raises(BusinessValidationError, match="价格格式不正确"):
-        create_product(
+        create_inspiration(
             db_session,
-            name="价格格式错误商品",
+            name="价格格式错误灵感产物",
             category=None,
             price="abc",
             source_note=None,
@@ -194,9 +197,9 @@ def test_high_risk_business_paths_raise_typed_validation_errors(db_session, conf
         )
     db_session.rollback()
 
-    product = create_product(
+    inspiration = create_inspiration(
         db_session,
-        name="typed error 商品",
+        name="typed error 灵感产物",
         category=None,
         price=None,
         source_note=None,
@@ -204,30 +207,30 @@ def test_high_risk_business_paths_raise_typed_validation_errors(db_session, conf
         filename="typed.png",
         content_type="image/png",
     )
-    with pytest.raises(BusinessValidationError, match="商品资料节点已存在"):
+    with pytest.raises(BusinessValidationError, match="灵感产物资料节点已存在"):
         create_workflow_node(
             db_session,
-            product_id=product.id,
-            node_type=WorkflowNodeType.PRODUCT_CONTEXT,
-            title="重复商品资料",
+            inspiration_id=inspiration.id,
+            node_type=WorkflowNodeType.INSPIRATION_CONTEXT,
+            title="重复灵感产物资料",
             position_x=0,
             position_y=0,
             config_json={},
         )
 
-    workflow = get_or_create_product_workflow(db_session, product.id)
+    workflow = get_or_create_inspiration_workflow(db_session, inspiration.id)
     copy_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.COPY_GENERATION)
     image_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.IMAGE_GENERATION)
     with pytest.raises(BusinessValidationError, match="工作流不能包含循环依赖"):
         create_workflow_edge(
             db_session,
-            product_id=product.id,
+            inspiration_id=inspiration.id,
             source_node_id=image_node.id,
             target_node_id=copy_node.id,
         )
     db_session.rollback()
 
-    image_session = create_image_session(db_session, product_id=None, title="typed error 生图")
+    image_session = create_image_session(db_session, inspiration_id=None, title="typed error 生图")
     with pytest.raises(BusinessValidationError, match="一次生成数量必须在 1-10 张之间"):
         submit_image_session_generation_task(
             db_session,
@@ -243,9 +246,9 @@ def test_high_risk_business_paths_raise_typed_validation_errors(db_session, conf
 
 
 def test_update_copy_set_payload_validation_uses_typed_business_error(db_session, configured_env) -> None:  # noqa: ARG001
-    product = create_product(
+    inspiration = create_inspiration(
         db_session,
-        name="bad copy payload 商品",
+        name="bad copy payload 灵感产物",
         category=None,
         price=None,
         source_note=None,
@@ -254,7 +257,7 @@ def test_update_copy_set_payload_validation_uses_typed_business_error(db_session
         content_type="image/png",
     )
     copy_set = CopySet(
-        product_id=product.id,
+        inspiration_id=inspiration.id,
         structured_payload={
             "version": 2,
             "summary": "旧文案",
@@ -281,9 +284,9 @@ def test_workflow_edge_rollback_preserves_typed_business_errors(
     configured_env,  # noqa: ARG001
     monkeypatch,
 ) -> None:
-    product = create_product(
+    inspiration = create_inspiration(
         db_session,
-        name="typed edge error 商品",
+        name="typed edge error 灵感产物",
         category=None,
         price=None,
         source_note=None,
@@ -291,19 +294,19 @@ def test_workflow_edge_rollback_preserves_typed_business_errors(
         filename="typed-edge.png",
         content_type="image/png",
     )
-    workflow = get_or_create_product_workflow(db_session, product.id)
+    workflow = get_or_create_inspiration_workflow(db_session, inspiration.id)
     copy_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.COPY_GENERATION)
     reference_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.REFERENCE_IMAGE)
 
     def raise_not_found(_workflow):
         raise NotFoundError("工作流不存在")
 
-    monkeypatch.setattr(product_workflow_graph, "topological_nodes", raise_not_found)
+    monkeypatch.setattr(inspiration_workflow_graph, "topological_nodes", raise_not_found)
 
     with pytest.raises(NotFoundError, match="工作流不存在"):
         create_workflow_edge(
             db_session,
-            product_id=product.id,
+            inspiration_id=inspiration.id,
             source_node_id=copy_node.id,
             target_node_id=reference_node.id,
         )

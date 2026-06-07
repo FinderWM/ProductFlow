@@ -21,7 +21,7 @@ These files document the frontend conventions that are actually present in this 
 | [State Management](./state-management.md) | Server/local/URL state split and query key conventions | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | TypeScript build gate, API centralization, UI review checklist | Filled |
 | [Type Safety](./type-safety.md) | Strict TS, DTO mirroring, ApiError, runtime validation reality | Filled |
-| [Product Workbench DAG](./product-workbench-dag.md) | Product detail DAG workbench UI, API DTOs, and cache contracts | Filled |
+| [Inspiration Workbench DAG](./inspiration-workbench-dag.md) | Inspiration detail DAG workbench UI, API DTOs, and cache contracts | Filled |
 
 ---
 
@@ -36,7 +36,7 @@ Before frontend changes, read:
    - hooks/data fetching: `./hook-guidelines.md`
    - state/cache behavior: `./state-management.md`
    - API DTOs/types: `./type-safety.md`
-   - product workbench DAG: `./product-workbench-dag.md`
+   - inspiration workbench DAG: `./inspiration-workbench-dag.md`
 
 If a frontend change consumes or changes backend API contracts, also read `../backend/error-handling.md`,
 `../backend/database-guidelines.md`, or `../backend/directory-structure.md` as relevant.

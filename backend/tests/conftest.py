@@ -6,9 +6,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from productflow_backend.config import get_settings
-from productflow_backend.infrastructure.db.models import Base
-from productflow_backend.infrastructure.db.session import get_engine, get_session_factory
+from inspiration_one_backend.config import get_settings
+from inspiration_one_backend.infrastructure.db.models import Base
+from inspiration_one_backend.infrastructure.db.session import get_engine, get_session_factory
 
 
 @pytest.fixture()
@@ -56,9 +56,9 @@ def db_session(configured_env: Path):
 def _execute_image_session_queue_inline(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep image-session route tests deterministic while production delivery goes through Dramatiq."""
 
-    from productflow_backend.application.image_sessions import execute_image_session_generation_task
+    from inspiration_one_backend.application.image_sessions import execute_image_session_generation_task
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         execute_image_session_generation_task,
     )

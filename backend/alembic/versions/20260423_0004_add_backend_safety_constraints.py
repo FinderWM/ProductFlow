@@ -12,9 +12,9 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_index(
-        "uq_job_runs_one_active_per_product_kind",
+        "uq_job_runs_one_active_per_inspiration_kind",
         "job_runs",
-        ["product_id", "kind"],
+        ["inspiration_id", "kind"],
         unique=True,
         postgresql_where=sa.text("status IN ('queued', 'running')"),
         sqlite_where=sa.text("status IN ('queued', 'running')"),
@@ -26,9 +26,9 @@ def upgrade() -> None:
         unique=True,
     )
     op.create_index(
-        "uq_source_assets_one_original_per_product",
+        "uq_source_assets_one_original_per_inspiration",
         "source_assets",
-        ["product_id"],
+        ["inspiration_id"],
         unique=True,
         postgresql_where=sa.text("kind = 'original_image'"),
         sqlite_where=sa.text("kind = 'original_image'"),
@@ -36,6 +36,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("uq_source_assets_one_original_per_product", table_name="source_assets")
+    op.drop_index("uq_source_assets_one_original_per_inspiration", table_name="source_assets")
     op.drop_index("uq_image_session_rounds_generated_asset_id", table_name="image_session_rounds")
-    op.drop_index("uq_job_runs_one_active_per_product_kind", table_name="job_runs")
+    op.drop_index("uq_job_runs_one_active_per_inspiration_kind", table_name="job_runs")

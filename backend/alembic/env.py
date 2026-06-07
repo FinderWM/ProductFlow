@@ -5,8 +5,8 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from productflow_backend.config import get_settings
-from productflow_backend.infrastructure.db.models import Base
+from inspiration_one_backend.config import get_settings
+from inspiration_one_backend.infrastructure.db.models import Base
 
 config = context.config
 

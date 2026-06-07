@@ -1,6 +1,6 @@
 import type { TranslationKey } from "./i18n";
 
-export type ParameterHelpUiType = "default" | "productDetail" | "settings" | "imageChat" | "create";
+export type ParameterHelpUiType = "default" | "inspirationDetail" | "settings" | "imageChat" | "create";
 
 export interface ParameterHelpUiClassNames {
   button: string;
@@ -18,9 +18,9 @@ export interface ParameterHelpUiClassNames {
 }
 
 export type StaticParameterHelpKey =
-  | "productContextLongText"
-  | "productContextDocument"
-  | "productContextDynamicFields"
+  | "inspirationContextLongText"
+  | "inspirationContextDocument"
+  | "inspirationContextDynamicFields"
   | "referenceRole"
   | "copyInstruction"
   | "copyTextGenerationConfig"
@@ -101,7 +101,7 @@ export const PARAMETER_HELP_BASE_UI_CLASS_NAMES: ParameterHelpUiClassNames = {
 
 export const PARAMETER_HELP_UI_CLASS_REGISTRY: Record<ParameterHelpUiType, Partial<ParameterHelpUiClassNames>> = {
   default: {},
-  productDetail: {},
+  inspirationDetail: {},
   create: {
     button:
       "text-zinc-400 hover:bg-blue-50 hover:text-blue-600 focus-visible:ring-blue-500 dark:text-slate-500 dark:hover:bg-violet-500/12 dark:hover:text-violet-200",
@@ -124,20 +124,20 @@ export const PARAMETER_HELP_UI_CLASS_REGISTRY: Record<ParameterHelpUiType, Parti
 };
 
 export const PARAMETER_HELP_REGISTRY: Record<StaticParameterHelpKey, ParameterHelpRegistryEntry> = {
-  productContextLongText: {
+  inspirationContextLongText: {
     titleKey: "detail.inspector.longText",
-    introKey: "detail.parameterHelp.productContextLongText.intro",
-    examplesKey: "detail.parameterHelp.productContextLongText.examples",
+    introKey: "detail.parameterHelp.inspirationContextLongText.intro",
+    examplesKey: "detail.parameterHelp.inspirationContextLongText.examples",
   },
-  productContextDocument: {
+  inspirationContextDocument: {
     titleKey: "detail.inspector.contextDocument",
-    introKey: "detail.parameterHelp.productContextDocument.intro",
-    examplesKey: "detail.parameterHelp.productContextDocument.examples",
+    introKey: "detail.parameterHelp.inspirationContextDocument.intro",
+    examplesKey: "detail.parameterHelp.inspirationContextDocument.examples",
   },
-  productContextDynamicFields: {
+  inspirationContextDynamicFields: {
     titleKey: "detail.inspector.dynamicFields",
-    introKey: "detail.parameterHelp.productContextDynamicFields.intro",
-    examplesKey: "detail.parameterHelp.productContextDynamicFields.examples",
+    introKey: "detail.parameterHelp.inspirationContextDynamicFields.intro",
+    examplesKey: "detail.parameterHelp.inspirationContextDynamicFields.examples",
   },
   referenceRole: {
     titleKey: "detail.inspector.role",

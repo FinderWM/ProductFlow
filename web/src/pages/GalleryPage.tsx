@@ -19,7 +19,7 @@ function metadataRows(entry: GalleryEntry, locale: ReturnType<typeof useI18n>["l
     ["gallery.meta.size", galleryEntrySizeLabel(entry, locale)],
     ["gallery.meta.model", [entry.provider_name, entry.model_name].filter(Boolean).join(" / ") || t("common.unknown")],
     ["gallery.meta.session", entry.image_session_title],
-    ["gallery.meta.product", entry.product_name ?? t("gallery.global")],
+    ["gallery.meta.inspiration", entry.inspiration_name ?? t("gallery.global")],
     ["gallery.meta.resourceGroup", entry.resource_group.name],
     [
       "gallery.meta.candidate",
@@ -126,7 +126,7 @@ export function GalleryPage() {
 
   return (
     <div className="pf-app min-h-screen text-slate-950">
-      <TopNav breadcrumbs={t("gallery.title")} onHome={() => navigate("/products")} onLogout={() => logoutMutation.mutate()} />
+      <TopNav breadcrumbs={t("gallery.title")} onHome={() => navigate("/inspirations")} onLogout={() => logoutMutation.mutate()} />
 
       <main className="w-full">
         {galleryQuery.isLoading ? (

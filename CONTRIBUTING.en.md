@@ -1,8 +1,8 @@
-# Contributing to ProductFlow
+# Contributing to Inspiration One
 
 [中文](CONTRIBUTING.md) | English
 
-Thank you for considering contributing code, documentation, or issue reports to ProductFlow. ProductFlow is currently positioned as an open-source self-hosted project, with priority on local reproducibility, truthful documentation, and clear data/secret boundaries.
+Thank you for considering contributing code, documentation, or issue reports to Inspiration One. Inspiration One is currently positioned as an open-source self-hosted project, with priority on local reproducibility, truthful documentation, and clear data/secret boundaries.
 
 ## Before You Start
 
@@ -78,7 +78,7 @@ Prefer one focused topic per PR. The PR description should include:
 Formal version tags use annotated tags with bilingual Chinese/English messages. The tag message should include release positioning, main contents, verification commands, and explicit boundaries; do not keep one-off release-preparation checklists as repository docs. Suggested format:
 
 ```text
-ProductFlow vX.Y.Z
+Inspiration One vX.Y.Z
 
 中文：
 <一句话版本定位>

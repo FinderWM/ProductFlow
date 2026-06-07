@@ -7,10 +7,10 @@ describe("HelpPage locale documents", () => {
     const pages = getHelpDocsForLocale("ja-JP");
     const groups = getHelpNavGroupsForLocale("ja-JP");
 
-    expect(pages[0].title).toBe("ProductFlow ドキュメント概要");
+    expect(pages[0].title).toBe("Inspiration One ドキュメント概要");
     expect(pages[0].category).toBe("はじめに");
     expect(groups[0].title).toBe("はじめに");
-    expect(pages.some((page) => page.title === "ProductFlow Docs Overview")).toBe(false);
+    expect(pages.some((page) => page.title === "Inspiration One Docs Overview")).toBe(false);
   });
 
   it("has Japanese translations for every built-in help document string", () => {

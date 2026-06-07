@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from productflow_backend.application.queue_submission import enqueue_or_mark_failed
-from productflow_backend.domain.durable_generation_tasks import (
+from inspiration_one_backend.application.queue_submission import enqueue_or_mark_failed
+from inspiration_one_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
     QUEUE_UNAVAILABLE_DETAIL,
     WORKFLOW_RUN_GENERATION_TASK_CONTRACT,
     assert_actor_uses_durable_generation_contract,
 )
-from productflow_backend.domain.enums import JobStatus, WorkflowNodeStatus, WorkflowRunStatus
-from productflow_backend.domain.errors import QueueUnavailableError
+from inspiration_one_backend.domain.enums import JobStatus, WorkflowNodeStatus, WorkflowRunStatus
+from inspiration_one_backend.domain.errors import QueueUnavailableError
 
 
 def test_durable_generation_task_contract_keeps_workflow_and_image_models_separate() -> None:
@@ -34,19 +34,19 @@ def test_durable_generation_task_contract_keeps_workflow_and_image_models_separa
 
 
 def test_durable_generation_task_contract_matches_worker_actor_retry_policy(configured_env) -> None:
-    from productflow_backend.workers import (
+    from inspiration_one_backend.workers import (
         run_image_session_generation_task,
-        run_product_workflow_node_run,
-        run_product_workflow_run,
+        run_inspiration_workflow_node_run,
+        run_inspiration_workflow_run,
     )
 
     assert_actor_uses_durable_generation_contract(
         WORKFLOW_RUN_GENERATION_TASK_CONTRACT,
-        run_product_workflow_run,
+        run_inspiration_workflow_run,
     )
     assert_actor_uses_durable_generation_contract(
         WORKFLOW_RUN_GENERATION_TASK_CONTRACT,
-        run_product_workflow_node_run,
+        run_inspiration_workflow_node_run,
     )
     assert_actor_uses_durable_generation_contract(
         IMAGE_SESSION_GENERATION_TASK_CONTRACT,

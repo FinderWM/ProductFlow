@@ -119,9 +119,9 @@ def upgrade() -> None:
     _repair_canvas_template_columns(bind)
     _repair_soft_delete_columns(
         bind,
-        "products",
-        "ix_products_deleted_at",
-        "fk_products_deleted_by_user_id",
+        "inspirations",
+        "ix_inspirations_deleted_at",
+        "fk_inspirations_deleted_by_user_id",
     )
     _repair_soft_delete_columns(
         bind,

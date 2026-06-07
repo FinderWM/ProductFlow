@@ -25,10 +25,7 @@ def upgrade() -> None:
     with op.get_context().autocommit_block():
         op.execute("ALTER TYPE workflownodetype ADD VALUE IF NOT EXISTS 'reference_image'")
 
-    op.execute(
-        "UPDATE workflow_nodes SET node_type = 'reference_image' "
-        "WHERE node_type::text = 'image_upload'"
-    )
+    op.execute("UPDATE workflow_nodes SET node_type = 'reference_image' WHERE node_type::text = 'image_upload'")
 
 
 def downgrade() -> None:

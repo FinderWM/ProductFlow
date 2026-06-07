@@ -21,12 +21,12 @@ def _has_check_constraint(table_name: str, constraint_name: str) -> bool:
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("product_workflows") as batch_op:
+    with op.batch_alter_table("inspiration_workflows") as batch_op:
         batch_op.add_column(
             sa.Column("initial_entry_mode", sa.String(length=20), nullable=False, server_default="image")
         )
         batch_op.create_check_constraint(
-            "ck_product_workflows_initial_entry_mode",
+            "ck_inspiration_workflows_initial_entry_mode",
             f"initial_entry_mode IN ({WORKFLOW_ENTRY_MODES})",
         )
 
@@ -38,7 +38,7 @@ def upgrade() -> None:
             f"entry_mode IN ({TEMPLATE_ENTRY_MODES})",
         )
 
-    op.create_index("ix_product_workflows_initial_entry_mode", "product_workflows", ["initial_entry_mode"])
+    op.create_index("ix_inspiration_workflows_initial_entry_mode", "inspiration_workflows", ["initial_entry_mode"])
     op.create_index("ix_canvas_templates_entry_mode", "canvas_templates", ["entry_mode"])
     op.create_index("ix_canvas_templates_sort_order", "canvas_templates", ["sort_order"])
     op.create_index(
@@ -52,7 +52,7 @@ def downgrade() -> None:
     op.drop_index("ix_canvas_templates_scope_owner_entry_category_sort", table_name="canvas_templates")
     op.drop_index("ix_canvas_templates_sort_order", table_name="canvas_templates")
     op.drop_index("ix_canvas_templates_entry_mode", table_name="canvas_templates")
-    op.drop_index("ix_product_workflows_initial_entry_mode", table_name="product_workflows")
+    op.drop_index("ix_inspiration_workflows_initial_entry_mode", table_name="inspiration_workflows")
 
     has_template_entry_mode_check = _has_check_constraint("canvas_templates", "ck_canvas_templates_entry_mode")
     with op.batch_alter_table("canvas_templates") as batch_op:
@@ -62,10 +62,10 @@ def downgrade() -> None:
         batch_op.drop_column("entry_mode")
 
     has_workflow_entry_mode_check = _has_check_constraint(
-        "product_workflows",
-        "ck_product_workflows_initial_entry_mode",
+        "inspiration_workflows",
+        "ck_inspiration_workflows_initial_entry_mode",
     )
-    with op.batch_alter_table("product_workflows") as batch_op:
+    with op.batch_alter_table("inspiration_workflows") as batch_op:
         if has_workflow_entry_mode_check:
-            batch_op.drop_constraint("ck_product_workflows_initial_entry_mode", type_="check")
+            batch_op.drop_constraint("ck_inspiration_workflows_initial_entry_mode", type_="check")
         batch_op.drop_column("initial_entry_mode")

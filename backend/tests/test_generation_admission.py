@@ -6,11 +6,17 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import _login, _make_demo_image_bytes
 
-from productflow_backend.application.image_sessions import create_image_session, create_image_session_generation_task
-from productflow_backend.application.product_workflows import get_or_create_product_workflow, start_product_workflow_run
-from productflow_backend.application.use_cases import create_product
-from productflow_backend.domain.enums import JobStatus, WorkflowNodeStatus
-from productflow_backend.infrastructure.db.models import (
+from inspiration_one_backend.application.image_sessions import (
+    create_image_session,
+    create_image_session_generation_task,
+)
+from inspiration_one_backend.application.inspiration_workflows import (
+    get_or_create_inspiration_workflow,
+    start_inspiration_workflow_run,
+)
+from inspiration_one_backend.application.use_cases import create_inspiration
+from inspiration_one_backend.domain.enums import JobStatus, WorkflowNodeStatus
+from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     WorkflowNode,
@@ -23,8 +29,8 @@ def _set_generation_cap(db_session, value: int) -> None:
     db_session.commit()
 
 
-def _create_product(db_session, name: str):
-    product = create_product(
+def _create_inspiration(db_session, name: str):
+    inspiration = create_inspiration(
         db_session,
         name=name,
         category=None,
@@ -34,12 +40,12 @@ def _create_product(db_session, name: str):
         filename=f"{name}.png",
         content_type="image/png",
     )
-    workflow = get_or_create_product_workflow(db_session, product.id)
+    workflow = get_or_create_inspiration_workflow(db_session, inspiration.id)
     for node in workflow.nodes:
         if node.node_type in {"copy_generation", "image_generation"}:
             node.config_json = {**(node.config_json or {}), "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID}
     db_session.commit()
-    return product
+    return inspiration
 
 
 def test_generation_cap_accepts_and_queues_workflow_run_creation(
@@ -47,16 +53,16 @@ def test_generation_cap_accepts_and_queues_workflow_run_creation(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     sent_run_ids: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.application.product_workflow.execution.enqueue_workflow_run",
+        "inspiration_one_backend.application.inspiration_workflow.execution.enqueue_workflow_run",
         lambda run_id: sent_run_ids.append(run_id),
     )
 
-    busy_product = _create_product(db_session, "占用并发商品")
-    busy = start_product_workflow_run(db_session, product_id=busy_product.id, actor_is_admin=True)
+    busy_inspiration = _create_inspiration(db_session, "占用并发灵感产物")
+    busy = start_inspiration_workflow_run(db_session, inspiration_id=busy_inspiration.id, actor_is_admin=True)
     busy_node_run = db_session.query(WorkflowNodeRun).filter_by(workflow_run_id=busy.run_id).first()
     assert busy_node_run is not None
     busy_node = db_session.get(WorkflowNode, busy_node_run.node_id)
@@ -64,14 +70,14 @@ def test_generation_cap_accepts_and_queues_workflow_run_creation(
     busy_node_run.status = WorkflowNodeStatus.RUNNING
     busy_node.status = WorkflowNodeStatus.RUNNING
     db_session.commit()
-    workflow_target = _create_product(db_session, "工作流限流商品")
+    workflow_target = _create_inspiration(db_session, "工作流限流灵感产物")
     _set_generation_cap(db_session, 1)
 
     app = create_app()
     client = TestClient(app)
     _login(client)
 
-    workflow_response = client.post(f"/api/products/{workflow_target.id}/workflow/run", json={})
+    workflow_response = client.post(f"/api/inspirations/{workflow_target.id}/workflow/run", json={})
     assert workflow_response.status_code == 200
     queued_run_id = workflow_response.json()["runs"][0]["id"]
     assert workflow_response.json()["runs"][0]["status"] == "running"
@@ -86,15 +92,15 @@ def test_generation_cap_accepts_and_queues_image_session_generation_task_creatio
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     sent_task_ids: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent_task_ids.append(task_id),
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="同步占用会话")
+    image_session = create_image_session(db_session, inspiration_id=None, title="同步占用会话")
     running = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -136,10 +142,10 @@ def test_active_generation_task_count_includes_image_session_generation_tasks(
     configured_env: Path,
     db_session,
 ) -> None:
-    from productflow_backend.application.admission import active_generation_task_count
+    from inspiration_one_backend.application.admission import active_generation_task_count
 
     assert active_generation_task_count(db_session) == 0
-    image_session = create_image_session(db_session, product_id=None, title="并发计数")
+    image_session = create_image_session(db_session, inspiration_id=None, title="并发计数")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -158,14 +164,14 @@ def test_generation_queue_overview_and_positions_include_durable_tasks(
     configured_env: Path,
     db_session,
 ) -> None:
-    from productflow_backend.application.admission import (
+    from inspiration_one_backend.application.admission import (
         get_generation_queue_overview,
         get_generation_task_queue_metadata,
         get_queued_generation_positions,
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="队列会话")
-    second_image_session = create_image_session(db_session, product_id=None, title="队列会话 2")
+    image_session = create_image_session(db_session, inspiration_id=None, title="队列会话")
+    second_image_session = create_image_session(db_session, inspiration_id=None, title="队列会话 2")
     first = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -212,9 +218,9 @@ def test_generation_queue_overview_endpoint_returns_public_snapshot(
     configured_env: Path,
     db_session,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
-    image_session = create_image_session(db_session, product_id=None, title="队列 API 会话")
+    image_session = create_image_session(db_session, inspiration_id=None, title="队列 API 会话")
     running = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,

@@ -456,7 +456,7 @@ export function RbacPage() {
     <div className="pf-app">
       <TopNav
         breadcrumbs={t("rbac.breadcrumb")}
-        onHome={() => navigate("/products")}
+        onHome={() => navigate("/inspirations")}
         onLogout={() => logoutMutation.mutate()}
       />
 
@@ -955,7 +955,7 @@ export function RbacPage() {
 	                      <th className="px-4 py-3">{t("rbac.role")}</th>
 	                      <th className="px-4 py-3">{t("rbac.resourceGroups")}</th>
 	                      <th className="px-4 py-3">{t("rbac.status")}</th>
-	                      <th className="px-4 py-3 text-right">{t("products.table.actions")}</th>
+	                      <th className="px-4 py-3 text-right">{t("inspirations.table.actions")}</th>
 	                    </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">

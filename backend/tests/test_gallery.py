@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import _login, _make_demo_image_bytes
 
-from productflow_backend.application import gallery as gallery_app
-from productflow_backend.domain.enums import ImageSessionAssetKind
-from productflow_backend.infrastructure.db.models import (
+from inspiration_one_backend.application import gallery as gallery_app
+from inspiration_one_backend.domain.enums import ImageSessionAssetKind
+from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     GenerationResourceGroup,
     ImageGalleryEntry,
@@ -16,23 +16,23 @@ from productflow_backend.infrastructure.db.models import (
     ImageSessionAsset,
     ImageSessionRound,
 )
-from productflow_backend.infrastructure.db.session import get_session_factory
-from productflow_backend.presentation.api import create_app
+from inspiration_one_backend.infrastructure.db.session import get_session_factory
+from inspiration_one_backend.presentation.api import create_app
 
 
 def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Path, db_session) -> None:
     app = create_app()
     client = TestClient(app)
     _login(client)
-    product = client.post(
-        "/api/products",
-        data={"name": "画廊商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    inspiration = client.post(
+        "/api/inspirations",
+        data={"name": "画廊灵感产物", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("source.png", _make_demo_image_bytes(), "image/png")},
     )
-    assert product.status_code == 201
-    product_id = product.json()["id"]
+    assert inspiration.status_code == 201
+    inspiration_id = inspiration.json()["id"]
 
-    created_session = client.post("/api/image-sessions", json={"product_id": product_id, "title": "画廊会话"})
+    created_session = client.post("/api/image-sessions", json={"inspiration_id": inspiration_id, "title": "画廊会话"})
     assert created_session.status_code == 201
     session_id = created_session.json()["id"]
 
@@ -56,8 +56,8 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     assert payload["image_session_round_id"] == first_round["id"]
     assert payload["image_session_id"] == session_id
     assert payload["image_session_title"] == "画廊会话"
-    assert payload["product_id"] == product_id
-    assert payload["product_name"] == "画廊商品"
+    assert payload["inspiration_id"] == inspiration_id
+    assert payload["inspiration_name"] == "画廊灵感产物"
     assert payload["prompt"] == "一张用于画廊的图"
     assert payload["size"] == "1024x1024"
     assert payload["actual_size"] == "1024x1024"

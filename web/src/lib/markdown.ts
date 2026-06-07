@@ -1,4 +1,4 @@
-export const PRODUCT_CONTEXT_MARKDOWN_MAX_LENGTH = 50_000;
+export const INSPIRATION_CONTEXT_MARKDOWN_MAX_LENGTH = 50_000;
 
 export function markdownCodeLanguage(className?: string): string | null {
   if (!className) {

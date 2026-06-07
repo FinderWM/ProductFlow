@@ -1,7 +1,7 @@
-name: productflow
+name: inspiration-one
 
 services:
-  productflow-backend:
+  inspiration-one-backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -55,13 +55,13 @@ services:
       JOB_RETRY_DELAY_MS: ${JOB_RETRY_DELAY_MS:-10000}
       GENERATION_MAX_CONCURRENT_TASKS: ${GENERATION_MAX_CONCURRENT_TASKS:-3}
     command: >-
-      sh -c "alembic upgrade head && uvicorn productflow_backend.main:app --host 0.0.0.0 --port 29280"
+      sh -c "alembic upgrade head && uvicorn inspiration_one_backend.main:app --host 0.0.0.0 --port 29280"
     ports:
       - "${APP_HOST_PORT:-29280}:29280"
     volumes:
-      # STORAGE_HOST_PATH is host-only. Leave it unset to use the productflow-storage named volume,
-      # or set it to an existing production directory such as /home/cot/ProductFlow-release/shared/storage.
-      - ${STORAGE_HOST_PATH:-productflow-storage}:/app/storage
+      # STORAGE_HOST_PATH is host-only. Leave it unset to use the inspiration-one-storage named volume,
+      # or set it to an existing production directory such as /home/cot/Inspiration One-release/shared/storage.
+      - ${STORAGE_HOST_PATH:-inspiration-one-storage}:/app/storage
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -75,7 +75,7 @@ services:
       retries: 12
       start_period: 20s
 
-  productflow-worker:
+  inspiration-one-worker:
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -124,17 +124,17 @@ services:
       JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
       JOB_RETRY_DELAY_MS: ${JOB_RETRY_DELAY_MS:-10000}
       GENERATION_MAX_CONCURRENT_TASKS: ${GENERATION_MAX_CONCURRENT_TASKS:-3}
-    command: ["dramatiq", "--processes", "2", "--threads", "4", "productflow_backend.workers"]
+    command: ["dramatiq", "--processes", "2", "--threads", "4", "inspiration_one_backend.workers"]
     volumes:
-      # Keep this source identical to productflow-backend so API and worker see the same files at /app/storage.
-      - ${STORAGE_HOST_PATH:-productflow-storage}:/app/storage
+      # Keep this source identical to inspiration-one-backend so API and worker see the same files at /app/storage.
+      - ${STORAGE_HOST_PATH:-inspiration-one-storage}:/app/storage
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      productflow-backend:
+      inspiration-one-backend:
         condition: service_healthy
 
-  productflow-web:
+  inspiration-one-web:
     build:
       context: .
       dockerfile: web/Dockerfile
@@ -144,7 +144,7 @@ services:
     ports:
       - "${WEB_PORT:-29281}:80"
     depends_on:
-      productflow-backend:
+      inspiration-one-backend:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz | grep -q ok"]
@@ -154,4 +154,4 @@ services:
       start_period: 10s
 
 volumes:
-  productflow-storage:
+  inspiration-one-storage:

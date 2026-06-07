@@ -10,7 +10,7 @@ import {
 import { SelectField } from "../../components/SelectField";
 import { api } from "../../lib/api";
 import { formatImageSizeValue } from "../../lib/imageSizes";
-import type { ImageSessionAsset, ImageSessionRound, ProductDetail, ProductSummary, SourceAsset } from "../../lib/types";
+import type { ImageSessionAsset, ImageSessionRound, InspirationDetail, InspirationSummary, SourceAsset } from "../../lib/types";
 import type { ImageChatTranslate } from "./display";
 
 interface SessionReferencePanelProps {
@@ -123,17 +123,17 @@ export function SessionReferencePanel({
   );
 }
 
-interface ProductAssociationPanelProps {
-  isProductMode: boolean;
-  product: ProductDetail | undefined;
-  products: ProductSummary[];
-  targetProductId: string;
+interface InspirationAssociationPanelProps {
+  isInspirationMode: boolean;
+  inspiration: InspirationDetail | undefined;
+  inspirations: InspirationSummary[];
+  targetInspirationId: string;
   sourceImage: SourceAsset | null;
   referenceImages: SourceAsset[];
   selectedRound: ImageSessionRound | null;
   attachBusy: boolean;
   deletingReferenceAssetId: string | null;
-  onTargetProductChange: (value: string) => void;
+  onTargetInspirationChange: (value: string) => void;
   onDeleteReference: (assetId: string) => void;
   onAttach: (target: "reference" | "main_source") => void;
   saveBlockedTitle?: string | null;
@@ -141,40 +141,40 @@ interface ProductAssociationPanelProps {
   t: ImageChatTranslate;
 }
 
-export function ProductAssociationPanel({
-  isProductMode,
-  product,
-  products,
-  targetProductId,
+export function InspirationAssociationPanel({
+  isInspirationMode,
+  inspiration,
+  inspirations,
+  targetInspirationId,
   sourceImage,
   referenceImages,
   selectedRound,
   attachBusy,
   deletingReferenceAssetId,
-  onTargetProductChange,
+  onTargetInspirationChange,
   onDeleteReference,
   onAttach,
   saveBlockedTitle = null,
   editBlockedTitle = null,
   t,
-}: ProductAssociationPanelProps) {
-  const productBlocked = isResourceBlocked(product);
-  const productBlockedTitle = getResourceBlockedActionTitle(product, t("resource.blockedAction"));
-  const saveDisabled = attachBusy || !selectedRound || (!isProductMode && !targetProductId) || Boolean(saveBlockedTitle);
+}: InspirationAssociationPanelProps) {
+  const inspirationBlocked = isResourceBlocked(inspiration);
+  const inspirationBlockedTitle = getResourceBlockedActionTitle(inspiration, t("resource.blockedAction"));
+  const saveDisabled = attachBusy || !selectedRound || (!isInspirationMode && !targetInspirationId) || Boolean(saveBlockedTitle);
   const saveDisabledTitle =
-    saveBlockedTitle ?? (!selectedRound ? t("chat.selectHistoryFirst") : !isProductMode && !targetProductId ? t("chat.selectProductFirst") : "");
+    saveBlockedTitle ?? (!selectedRound ? t("chat.selectHistoryFirst") : !isInspirationMode && !targetInspirationId ? t("chat.selectInspirationFirst") : "");
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
-      <div className="mb-3 text-sm font-semibold text-zinc-900 dark:text-white">{t("chat.saveToProduct")}</div>
-      {isProductMode ? (
-        product ? (
+      <div className="mb-3 text-sm font-semibold text-zinc-900 dark:text-white">{t("chat.saveToInspiration")}</div>
+      {isInspirationMode ? (
+        inspiration ? (
           <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3">
-            <ProductThumbnail sourceImage={sourceImage} alt={product.name} />
+            <InspirationThumbnail sourceImage={sourceImage} alt={inspiration.name} />
             <div className="min-w-0 self-center">
-              <div className="truncate text-sm font-medium text-zinc-900 dark:text-slate-100">{product.name}</div>
-              <div className="mt-1 text-xs text-zinc-500 dark:text-slate-400">{t("chat.productReferenceCount", { count: referenceImages.length })}</div>
-              <ResourceMetaBadges resource={product} className="mt-1" showReason />
+              <div className="truncate text-sm font-medium text-zinc-900 dark:text-slate-100">{inspiration.name}</div>
+              <div className="mt-1 text-xs text-zinc-500 dark:text-slate-400">{t("chat.inspirationReferenceCount", { count: referenceImages.length })}</div>
+              <ResourceMetaBadges resource={inspiration} className="mt-1" showReason />
             </div>
           </div>
         ) : (
@@ -184,19 +184,19 @@ export function ProductAssociationPanel({
         )
       ) : (
         <label className="block">
-          <span className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-200">{t("chat.targetProduct")}</span>
+          <span className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-200">{t("chat.targetInspiration")}</span>
           <SelectField
-            value={targetProductId}
+            value={targetInspirationId}
             options={
-              products.length
-                ? products.map((item) => ({
+              inspirations.length
+                ? inspirations.map((item) => ({
                     value: item.id,
                     label: isResourceBlocked(item) ? `${item.name} · ${t("resource.disabled")}` : item.name,
                     disabled: isResourceBlocked(item),
                   }))
-                : [{ value: "", label: t("chat.noProducts"), disabled: true }]
+                : [{ value: "", label: t("chat.noInspirations"), disabled: true }]
             }
-            onChange={onTargetProductChange}
+            onChange={onTargetInspirationChange}
           />
         </label>
       )}
@@ -205,8 +205,8 @@ export function ProductAssociationPanel({
         <div className="mt-3 grid grid-cols-4 gap-2">
           {referenceImages.slice(0, 4).map((asset) => {
             const deleting = deletingReferenceAssetId === asset.id;
-            const assetBlocked = productBlocked || isResourceBlocked(asset);
-            const assetBlockedTitle = productBlocked ? productBlockedTitle : getResourceBlockedActionTitle(asset, t("resource.blockedAction"));
+            const assetBlocked = inspirationBlocked || isResourceBlocked(asset);
+            const assetBlockedTitle = inspirationBlocked ? inspirationBlockedTitle : getResourceBlockedActionTitle(asset, t("resource.blockedAction"));
             return (
               <div key={asset.id} className="group relative overflow-hidden rounded-md border border-zinc-200 bg-white dark:border-slate-700 dark:bg-slate-950/70">
                 <a href={api.toApiUrl(asset.preview_url)} target="_blank" rel="noreferrer" title={asset.original_filename}>
@@ -219,15 +219,15 @@ export function ProductAssociationPanel({
                   />
                 </a>
                 <ResourceMetaBadges
-                  resource={assetBlocked && productBlocked ? product : asset}
+                  resource={assetBlocked && inspirationBlocked ? inspiration : asset}
                   className="absolute left-1 top-1 max-w-[calc(100%-2rem)]"
                 />
                 <button
                   type="button"
-                  aria-label={t("chat.deleteProductReference")}
+                  aria-label={t("chat.deleteInspirationReference")}
                   onClick={() => onDeleteReference(asset.id)}
                   disabled={deleting || assetBlocked || Boolean(editBlockedTitle)}
-                  title={editBlockedTitle ?? (assetBlocked ? assetBlockedTitle : t("chat.deleteProductReference"))}
+                  title={editBlockedTitle ?? (assetBlocked ? assetBlockedTitle : t("chat.deleteInspirationReference"))}
                   className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded bg-white/90 text-zinc-500 opacity-100 shadow-sm ring-1 ring-zinc-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/90 dark:text-slate-300 dark:ring-slate-700 dark:hover:text-red-300 md:opacity-0 md:group-hover:opacity-100"
                 >
                   {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
@@ -257,9 +257,9 @@ export function ProductAssociationPanel({
             className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
           >
             {attachBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
-            {isProductMode ? t("chat.addReference") : t("chat.saveAsReference")}
+            {isInspirationMode ? t("chat.addReference") : t("chat.saveAsReference")}
           </button>
-          {isProductMode ? (
+          {isInspirationMode ? (
             <button
               type="button"
               onClick={() => onAttach("main_source")}
@@ -277,7 +277,7 @@ export function ProductAssociationPanel({
   );
 }
 
-function ProductThumbnail({ sourceImage, alt }: { sourceImage: SourceAsset | null; alt: string }) {
+function InspirationThumbnail({ sourceImage, alt }: { sourceImage: SourceAsset | null; alt: string }) {
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-slate-700 dark:bg-slate-950/70">
       {sourceImage ? (

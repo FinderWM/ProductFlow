@@ -18,9 +18,9 @@ from helpers import (
 )
 from sqlalchemy import select
 
-from productflow_backend.config import get_settings
-from productflow_backend.domain.errors import BusinessValidationError
-from productflow_backend.infrastructure.db.models import (
+from inspiration_one_backend.config import get_settings
+from inspiration_one_backend.domain.errors import BusinessValidationError
+from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     GenerationConfig,
@@ -32,7 +32,7 @@ from productflow_backend.infrastructure.db.models import (
     ProviderBinding,
     ProviderProfile,
 )
-from productflow_backend.infrastructure.db.session import get_session_factory
+from inspiration_one_backend.infrastructure.db.session import get_session_factory
 
 
 def _create_user_client(app, admin_client: TestClient, username: str) -> TestClient:
@@ -64,16 +64,16 @@ def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> N
     """Keep API workflow tests deterministic while production delivery goes through Dramatiq."""
 
     _execute_workflow_queue_inline(monkeypatch)
-    from productflow_backend.application.image_sessions import execute_image_session_generation_task
+    from inspiration_one_backend.application.image_sessions import execute_image_session_generation_task
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         execute_image_session_generation_task,
     )
 
 
 def test_image_session_rounds_support_same_conversation(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -142,7 +142,7 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
 
 
 def test_generation_config_options_use_runtime_rbac_without_settings_permission(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -160,7 +160,7 @@ def test_generation_config_options_use_runtime_rbac_without_settings_permission(
 
 
 def test_prompt_polish_uses_text_generation_config_and_updates_stats(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -199,16 +199,16 @@ def test_image_session_generation_task_rejects_manual_non_image_config(
     configured_env: Path,
     db_session,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
     )
-    from productflow_backend.infrastructure.provider_config import TEXT_PURPOSE, ensure_provider_config_bootstrapped
+    from inspiration_one_backend.infrastructure.provider_config import TEXT_PURPOSE, ensure_provider_config_bootstrapped
 
     ensure_provider_config_bootstrapped(db_session)
     text_config_id = db_session.scalar(select(GenerationConfig.id).where(GenerationConfig.purpose == TEXT_PURPOSE))
     assert text_config_id is not None
-    image_session = create_image_session(db_session, product_id=None, title="手动配置校验")
+    image_session = create_image_session(db_session, inspiration_id=None, title="手动配置校验")
 
     with pytest.raises(BusinessValidationError, match="生成入口只能选择供应商生成分组"):
         create_image_session_generation_task(
@@ -227,11 +227,11 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
     app = create_app()
@@ -294,14 +294,14 @@ def test_first_queued_image_session_task_without_base_still_executes_if_later_ta
     configured_env: Path,
     db_session,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
-    from productflow_backend.domain.enums import JobStatus
+    from inspiration_one_backend.domain.enums import JobStatus
 
-    image_session = create_image_session(db_session, product_id=None, title="首任务 worker 校验")
+    image_session = create_image_session(db_session, inspiration_id=None, title="首任务 worker 校验")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -337,12 +337,12 @@ def test_image_session_status_returns_lightweight_task_snapshot(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import execute_image_session_generation_task
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.application.image_sessions import execute_image_session_generation_task
+    from inspiration_one_backend.presentation.api import create_app
 
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
     app = create_app()
@@ -402,8 +402,8 @@ def test_image_session_generation_accepts_per_request_tool_options_and_exposes_p
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.infrastructure.image.chat_service import GeneratedChatImage
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.infrastructure.image.chat_service import GeneratedChatImage
+    from inspiration_one_backend.presentation.api import create_app
 
     calls: list[dict | None] = []
 
@@ -419,12 +419,14 @@ def test_image_session_generation_accepts_per_request_tool_options_and_exposes_p
             generated_at=datetime.now(UTC),
             provider_request_json={"tool_options": kwargs.get("tool_options")},
             provider_output_json={
-                "_productflow": {"notes": [{"kind": "fallback", "message": "供应商不支持部分参数，已按基础参数完成。"}]}
+                "_inspiration_one": {
+                    "notes": [{"kind": "fallback", "message": "供应商不支持部分参数，已按基础参数完成。"}]
+                }
             },
         )
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         generate_with_note,
     )
     app = create_app()
@@ -515,8 +517,8 @@ def test_image_session_generation_exposes_actual_size_when_provider_downscales(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.infrastructure.image.chat_service import GeneratedChatImage
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.infrastructure.image.chat_service import GeneratedChatImage
+    from inspiration_one_backend.presentation.api import create_app
 
     def generate_downscaled(self, **kwargs) -> GeneratedChatImage:
         return GeneratedChatImage(
@@ -532,7 +534,7 @@ def test_image_session_generation_exposes_actual_size_when_provider_downscales(
         )
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         generate_downscaled,
     )
     app = create_app()
@@ -562,13 +564,13 @@ def test_image_session_generate_enqueue_failure_marks_task_failed(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     def fail_enqueue(task_id: str) -> None:
         raise RuntimeError(f"redis down for {task_id}")
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         fail_enqueue,
     )
     app = create_app()
@@ -601,12 +603,12 @@ def test_image_session_manual_retry_resets_failed_task_and_enqueues(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.domain.enums import JobStatus
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.presentation.api import create_app
 
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
     app = create_app()
@@ -658,16 +660,16 @@ def test_image_session_manual_cancel_marks_active_task_cancelled_and_worker_noop
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import execute_image_session_generation_task
-    from productflow_backend.domain.enums import JobStatus
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.application.image_sessions import execute_image_session_generation_task
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.presentation.api import create_app
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: None,
     )
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions._execute_image_session_round_generation",
+        "inspiration_one_backend.application.image_sessions._execute_image_session_round_generation",
         lambda *args, **kwargs: pytest.fail("cancelled image session task must no-op"),
     )
     app = create_app()
@@ -708,16 +710,16 @@ def test_image_session_generation_cancel_after_file_save_does_not_persist_round_
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         IMAGE_SESSION_CANCELLED_REASON,
         ImageSessionGenerationCancelledError,
         _execute_image_session_round_generation,
         create_image_session,
         create_image_session_generation_task,
     )
-    from productflow_backend.domain.enums import JobStatus
-    from productflow_backend.infrastructure.image.chat_service import GeneratedChatImage
-    from productflow_backend.infrastructure.storage import LocalStorage
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.infrastructure.image.chat_service import GeneratedChatImage
+    from inspiration_one_backend.infrastructure.storage import LocalStorage
 
     def generate_success(self, **kwargs) -> GeneratedChatImage:
         return GeneratedChatImage(
@@ -755,11 +757,11 @@ def test_image_session_generation_cancel_after_file_save_does_not_persist_round_
             return relative_path
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         generate_success,
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="保存后取消")
+    image_session = create_image_session(db_session, inspiration_id=None, title="保存后取消")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -803,15 +805,15 @@ def test_image_session_generation_cancelled_task_is_not_overwritten_by_late_fail
     configured_env: Path,
     db_session,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         IMAGE_SESSION_CANCELLED_REASON,
         _handle_image_generation_task_failure_safely,
         create_image_session,
         create_image_session_generation_task,
     )
-    from productflow_backend.domain.enums import JobStatus
+    from inspiration_one_backend.domain.enums import JobStatus
 
-    image_session = create_image_session(db_session, product_id=None, title="取消后失败不覆盖")
+    image_session = create_image_session(db_session, inspiration_id=None, title="取消后失败不覆盖")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -848,11 +850,11 @@ def test_image_session_manual_cancel_rejects_terminal_task(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.domain.enums import JobStatus
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.presentation.api import create_app
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: None,
     )
     app = create_app()
@@ -891,10 +893,10 @@ def test_image_session_manual_retry_rejects_non_failed_task(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: None,
     )
     app = create_app()
@@ -926,11 +928,11 @@ def test_image_session_manual_retry_rejects_non_retryable_failed_task(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.domain.enums import JobStatus
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.presentation.api import create_app
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: None,
     )
     app = create_app()
@@ -971,12 +973,12 @@ def test_image_session_manual_retry_enqueue_failure_keeps_task_retryable(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.domain.enums import JobStatus
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.presentation.api import create_app
 
     sent: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
     app = create_app()
@@ -1006,7 +1008,7 @@ def test_image_session_manual_retry_enqueue_failure_keeps_task_retryable(
         raise RuntimeError(f"redis down for {task_id}")
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         fail_enqueue,
     )
 
@@ -1027,8 +1029,8 @@ def test_image_session_worker_auto_retry_caps_and_uses_generic_safe_reason(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import IMAGE_SESSION_GENERATION_MAX_ATTEMPTS
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.application.image_sessions import IMAGE_SESSION_GENERATION_MAX_ATTEMPTS
+    from inspiration_one_backend.presentation.api import create_app
 
     calls = {"count": 0}
 
@@ -1037,7 +1039,7 @@ def test_image_session_worker_auto_retry_caps_and_uses_generic_safe_reason(
         raise RuntimeError("provider raw secret sk-test path=/tmp/provider-traceback")
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         fail_generate,
     )
     app = create_app()
@@ -1076,13 +1078,13 @@ def test_image_session_worker_auto_retry_exposes_last_failure_metadata(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         IMAGE_SESSION_GENERATION_MAX_ATTEMPTS,
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
-    from productflow_backend.domain.enums import JobStatus
+    from inspiration_one_backend.domain.enums import JobStatus
 
     sent: list[str] = []
 
@@ -1090,15 +1092,15 @@ def test_image_session_worker_auto_retry_exposes_last_failure_metadata(
         raise TimeoutError("read timeout from provider")
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         fail_generate,
     )
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="自动重试元数据")
+    image_session = create_image_session(db_session, inspiration_id=None, title="自动重试元数据")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1133,12 +1135,12 @@ def test_image_session_worker_non_retryable_policy_failure_stops_without_auto_re
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
     )
-    from productflow_backend.domain.enums import JobStatus
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.presentation.api import create_app
 
     sent: list[str] = []
 
@@ -1146,10 +1148,10 @@ def test_image_session_worker_non_retryable_policy_failure_stops_without_auto_re
         raise RuntimeError("Request blocked by content policy")
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         fail_generate,
     )
-    image_session = create_image_session(db_session, product_id=None, title="策略拒绝")
+    image_session = create_image_session(db_session, inspiration_id=None, title="策略拒绝")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1158,11 +1160,11 @@ def test_image_session_worker_non_retryable_policy_failure_stops_without_auto_re
         resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
 
-    from productflow_backend.application.image_sessions import execute_image_session_generation_task
+    from inspiration_one_backend.application.image_sessions import execute_image_session_generation_task
 
     execute_image_session_generation_task(result.task.id)
 
@@ -1188,12 +1190,12 @@ def test_image_session_worker_non_retryable_parameter_failure_stops_without_auto
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
-    from productflow_backend.domain.enums import JobStatus
+    from inspiration_one_backend.domain.enums import JobStatus
 
     sent: list[str] = []
 
@@ -1201,15 +1203,15 @@ def test_image_session_worker_non_retryable_parameter_failure_stops_without_auto
         raise RuntimeError("unknown parameter: background")
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         fail_generate,
     )
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="参数拒绝")
+    image_session = create_image_session(db_session, inspiration_id=None, title="参数拒绝")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1235,13 +1237,13 @@ def test_image_session_worker_exposes_safe_provider_failure_detail(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     def fail_generate(*args, **kwargs) -> None:
         raise RuntimeError("image2 不支持 64x64，最小尺寸为 512x512")
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         fail_generate,
     )
     app = create_app()
@@ -1274,7 +1276,7 @@ def test_image_session_worker_categorizes_wrapped_connection_failure(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     def fail_generate(*args, **kwargs) -> None:
         cause = ConnectionError("connection reset by peer")
@@ -1282,7 +1284,7 @@ def test_image_session_worker_categorizes_wrapped_connection_failure(
         raise wrapped from cause
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         fail_generate,
     )
     app = create_app()
@@ -1315,22 +1317,22 @@ def test_image_session_worker_surfaces_completed_text_without_image_reason(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
-    from productflow_backend.infrastructure.image.responses_provider import PROVIDER_TEXT_OUTPUT_MESSAGE
+    from inspiration_one_backend.infrastructure.image.responses_provider import PROVIDER_TEXT_OUTPUT_MESSAGE
 
     def fail_with_text_output(*args, **kwargs) -> None:
         raise RuntimeError(PROVIDER_TEXT_OUTPUT_MESSAGE)
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         fail_with_text_output,
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="provider text only")
+    image_session = create_image_session(db_session, inspiration_id=None, title="provider text only")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1354,12 +1356,12 @@ def test_image_session_worker_partial_retry_continues_remaining_candidates_witho
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
-    from productflow_backend.infrastructure.image.chat_service import GeneratedChatImage
+    from inspiration_one_backend.infrastructure.image.chat_service import GeneratedChatImage
 
     calls = {"count": 0}
 
@@ -1380,11 +1382,11 @@ def test_image_session_worker_partial_retry_continues_remaining_candidates_witho
         )
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         generate_then_timeout,
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="部分成功超时")
+    image_session = create_image_session(db_session, inspiration_id=None, title="部分成功超时")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1432,18 +1434,18 @@ def test_image_session_worker_marks_task_failed_when_time_limit_raises_outside_c
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
 
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions._execute_image_session_round_generation",
+        "inspiration_one_backend.application.image_sessions._execute_image_session_round_generation",
         lambda *args, **kwargs: (_ for _ in ()).throw(TimeLimitExceeded()),
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="整体超时")
+    image_session = create_image_session(db_session, inspiration_id=None, title="整体超时")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1472,18 +1474,18 @@ def test_image_session_worker_failure_settles_task_when_parent_session_deleted(
 ) -> None:
     from sqlalchemy import delete
 
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("provider failed")),
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="父会话已删除")
+    image_session = create_image_session(db_session, inspiration_id=None, title="父会话已删除")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1514,8 +1516,8 @@ def test_image_session_worker_failure_settlement_retries_after_stale_data_error(
 ) -> None:
     from sqlalchemy.orm.exc import StaleDataError
 
-    from productflow_backend.application import image_sessions as image_session_app
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application import image_sessions as image_session_app
+    from inspiration_one_backend.application.image_sessions import (
         ImageSessionGenerationExecutionError,
         create_image_session,
         create_image_session_generation_task,
@@ -1545,7 +1547,7 @@ def test_image_session_worker_failure_settlement_retries_after_stale_data_error(
 
     monkeypatch.setattr(image_session_app, "_handle_image_generation_task_failure", flaky_handle_failure)
 
-    image_session = create_image_session(db_session, product_id=None, title="stale 收口")
+    image_session = create_image_session(db_session, inspiration_id=None, title="stale 收口")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1574,12 +1576,12 @@ def test_image_session_worker_persists_provider_progress_heartbeat(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
-    from productflow_backend.infrastructure.image.chat_service import GeneratedChatImage
+    from inspiration_one_backend.infrastructure.image.chat_service import GeneratedChatImage
 
     def generate_with_progress(self, **kwargs):
         kwargs["progress_callback"](
@@ -1610,11 +1612,11 @@ def test_image_session_worker_persists_provider_progress_heartbeat(
         )
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         generate_with_progress,
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="provider progress")
+    image_session = create_image_session(db_session, inspiration_id=None, title="provider progress")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1644,13 +1646,13 @@ def test_image_session_worker_duplicate_message_noops_terminal_task(
     configured_env: Path,
     db_session,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="重复消息")
+    image_session = create_image_session(db_session, inspiration_id=None, title="重复消息")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1675,14 +1677,14 @@ def test_image_session_worker_duplicate_message_noops_running_task(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         create_image_session,
         create_image_session_generation_task,
         execute_image_session_generation_task,
     )
-    from productflow_backend.domain.enums import JobStatus
+    from inspiration_one_backend.domain.enums import JobStatus
 
-    image_session = create_image_session(db_session, product_id=None, title="running 重复消息")
+    image_session = create_image_session(db_session, inspiration_id=None, title="running 重复消息")
     result = create_image_session_generation_task(
         db_session,
         image_session_id=image_session.id,
@@ -1694,7 +1696,7 @@ def test_image_session_worker_duplicate_message_noops_running_task(
     db_session.commit()
     calls: list[object] = []
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         lambda *args, **kwargs: calls.append((args, kwargs)),
     )
 
@@ -1714,15 +1716,15 @@ def test_image_session_worker_defers_queued_task_when_global_running_capacity_fu
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         IMAGE_SESSION_CAPACITY_RETRY_DELAY_MS,
         create_image_session,
         execute_image_session_generation_task,
     )
-    from productflow_backend.domain.enums import JobStatus
-    from productflow_backend.infrastructure.db.models import AppSetting
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.infrastructure.db.models import AppSetting
 
-    image_session = create_image_session(db_session, product_id=None, title="同会话并发上限")
+    image_session = create_image_session(db_session, inspiration_id=None, title="同会话并发上限")
     running = ImageSessionGenerationTask(
         session_id=image_session.id,
         status=JobStatus.RUNNING,
@@ -1743,11 +1745,11 @@ def test_image_session_worker_defers_queued_task_when_global_running_capacity_fu
 
     delayed_requeues: list[tuple[str, int]] = []
     monkeypatch.setattr(
-        "productflow_backend.application.image_sessions.enqueue_image_session_generation_task_later",
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task_later",
         lambda task_id, *, delay_ms: delayed_requeues.append((task_id, delay_ms)),
     )
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
         lambda *args, **kwargs: pytest.fail("capacity-blocked task must not call provider"),
     )
 
@@ -1767,7 +1769,7 @@ def test_image_session_worker_defers_queued_task_when_global_running_capacity_fu
 
 
 def test_image_session_branch_uses_selected_base_and_references_only(configured_env: Path, db_session) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1838,7 +1840,7 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
     db_session,
     monkeypatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         add_image_session_reference_images,
         create_image_session,
         generate_image_session_round,
@@ -1871,9 +1873,9 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
         def __init__(self, **kwargs) -> None:
             self.images = DummyImages()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
 
-    image_session = create_image_session(db_session, product_id=None, title="Images API 分支测试")
+    image_session = create_image_session(db_session, inspiration_id=None, title="Images API 分支测试")
     first = generate_image_session_round(
         db_session,
         image_session_id=image_session.id,
@@ -1924,8 +1926,8 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
         {"filename": "base.png", "mime_type": "image/png"},
         {"filename": "reference-1.png", "mime_type": "image/png"},
     ]
-    assert persisted.provider_output_json["_productflow"]["requested_image_count"] == 2
-    assert persisted.provider_output_json["_productflow"]["effective_image_count"] == 2
+    assert persisted.provider_output_json["_inspiration_one"]["requested_image_count"] == 2
+    assert persisted.provider_output_json["_inspiration_one"]["effective_image_count"] == 2
 
 
 def test_image_session_google_gemini_uses_selected_base_and_references_only(
@@ -1933,7 +1935,7 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
     db_session,
     monkeypatch,
 ) -> None:
-    from productflow_backend.application.image_sessions import (
+    from inspiration_one_backend.application.image_sessions import (
         add_image_session_reference_images,
         create_image_session,
         generate_image_session_round,
@@ -1985,15 +1987,15 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
                     {"filename": reference.filename, "mime_type": reference.mime_type} for reference in references
                 ],
             },
-            provider_output_json={"_productflow": {"model": self.model}},
+            provider_output_json={"_inspiration_one": {"model": self.model}},
         )
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.gemini_provider.GoogleGeminiImageClient.generate_image",
+        "inspiration_one_backend.infrastructure.image.gemini_provider.GoogleGeminiImageClient.generate_image",
         fake_generate_image,
     )
 
-    image_session = create_image_session(db_session, product_id=None, title="Gemini 分支测试")
+    image_session = create_image_session(db_session, inspiration_id=None, title="Gemini 分支测试")
     first = generate_image_session_round(
         db_session,
         image_session_id=image_session.id,
@@ -2046,7 +2048,7 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
 
 
 def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -2174,7 +2176,7 @@ def test_image_session_multi_candidate_generation_persists_one_round_per_candida
     configured_env: Path,
     db_session,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -2219,7 +2221,7 @@ def test_image_session_openai_images_candidate_count_sets_provider_batch_n(
     db_session,
     monkeypatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     monkeypatch.setenv("IMAGE_PROVIDER_KIND", "openai_images")
     monkeypatch.setenv("IMAGE_API_KEY", "demo-api-key")
@@ -2253,7 +2255,7 @@ def test_image_session_openai_images_candidate_count_sets_provider_batch_n(
         def __init__(self, **kwargs) -> None:
             self.images = DummyImages()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
 
     app = create_app()
     client = TestClient(app)
@@ -2305,7 +2307,7 @@ def test_image_session_openai_images_candidate_count_sets_provider_batch_n(
 
 
 def test_image_session_worker_actor_uses_internal_failsafe_time_limit(configured_env: Path) -> None:
-    from productflow_backend.workers import (
+    from inspiration_one_backend.workers import (
         IMAGE_SESSION_WORKER_FAILSAFE_TIME_LIMIT_MS,
         get_image_session_worker_failsafe_time_limit_ms,
         run_image_session_generation_task,
@@ -2317,7 +2319,7 @@ def test_image_session_worker_actor_uses_internal_failsafe_time_limit(configured
 
 
 def test_image_session_generation_accepts_custom_size_and_rejects_invalid_dimensions(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -2385,7 +2387,7 @@ def test_image_session_generation_accepts_custom_size_and_rejects_invalid_dimens
 
 
 def test_image_session_reference_image_can_be_deleted(configured_env: Path, db_session) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -2417,7 +2419,7 @@ def test_image_session_reference_image_can_be_deleted(configured_env: Path, db_s
 
 
 def test_image_session_can_be_deleted_with_files(configured_env: Path, db_session) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -2437,7 +2439,7 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
         f"/api/image-sessions/{session_id}/generate",
         json={
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            "prompt": "做一张白底商品图",
+            "prompt": "做一张白底灵感产物图",
             "size": "1024x1024",
         },
     )
@@ -2474,15 +2476,15 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
     assert session_root.exists()
 
 
-def test_image_session_result_can_write_back_to_product(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+def test_image_session_result_can_write_back_to_inspiration(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
 
-    create_product_response = client.post(
-        "/api/products",
+    create_inspiration_response = client.post(
+        "/api/inspirations",
         data={
             "name": "护手霜",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -2491,10 +2493,10 @@ def test_image_session_result_can_write_back_to_product(configured_env: Path) ->
         },
         files={"image": ("cream.png", _make_demo_image_bytes(), "image/png")},
     )
-    assert create_product_response.status_code == 201
-    product_id = create_product_response.json()["id"]
+    assert create_inspiration_response.status_code == 201
+    inspiration_id = create_inspiration_response.json()["id"]
 
-    created = client.post("/api/image-sessions", json={"product_id": product_id})
+    created = client.post("/api/image-sessions", json={"inspiration_id": inspiration_id})
     assert created.status_code == 201
     session_id = created.json()["id"]
 
@@ -2511,33 +2513,33 @@ def test_image_session_result_can_write_back_to_product(configured_env: Path) ->
     generated_asset_id = generated_payload["rounds"][-1]["generated_asset"]["id"]
 
     attach_reference = client.post(
-        f"/api/image-sessions/{session_id}/assets/{generated_asset_id}/attach-to-product",
+        f"/api/image-sessions/{session_id}/assets/{generated_asset_id}/attach-to-inspiration",
         json={"target": "reference"},
     )
     assert attach_reference.status_code == 200
-    assert attach_reference.json()["message"] == "已加入商品参考图"
+    assert attach_reference.json()["message"] == "已加入灵感产物参考图"
 
-    product_after_reference = client.get(f"/api/products/{product_id}")
-    assert product_after_reference.status_code == 200
+    inspiration_after_reference = client.get(f"/api/inspirations/{inspiration_id}")
+    assert inspiration_after_reference.status_code == 200
     reference_assets = [
-        asset for asset in product_after_reference.json()["source_assets"] if asset["kind"] == "reference_image"
+        asset for asset in inspiration_after_reference.json()["source_assets"] if asset["kind"] == "reference_image"
     ]
     assert len(reference_assets) >= 1
 
     attach_main = client.post(
-        f"/api/image-sessions/{session_id}/assets/{generated_asset_id}/attach-to-product",
+        f"/api/image-sessions/{session_id}/assets/{generated_asset_id}/attach-to-inspiration",
         json={"target": "main_source"},
     )
     assert attach_main.status_code == 200
-    assert attach_main.json()["message"] == "已设为商品主图"
+    assert attach_main.json()["message"] == "已设为灵感产物主图"
 
-    product_after_main = client.get(f"/api/products/{product_id}")
-    assert product_after_main.status_code == 200
+    inspiration_after_main = client.get(f"/api/inspirations/{inspiration_id}")
+    assert inspiration_after_main.status_code == 200
     original_assets = [
-        asset for asset in product_after_main.json()["source_assets"] if asset["kind"] == "original_image"
+        asset for asset in inspiration_after_main.json()["source_assets"] if asset["kind"] == "original_image"
     ]
     all_reference_assets = [
-        asset for asset in product_after_main.json()["source_assets"] if asset["kind"] == "reference_image"
+        asset for asset in inspiration_after_main.json()["source_assets"] if asset["kind"] == "reference_image"
     ]
     assert len(original_assets) == 1
     assert len(all_reference_assets) >= 2

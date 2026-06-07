@@ -34,18 +34,18 @@ changes should also run the executable quality gate added under `web/package.jso
 - `pnpm --dir web test:run` runs deterministic Vitest unit tests from `web/vitest.config.ts`.
 - `pnpm --dir web test` is reserved for local Vitest watch mode.
 
-Prefer pure helper tests for page-local logic before large UI refactors. For ProductDetail workbench changes, add or
-extend tests under `web/src/pages/product-detail/*.test.ts` when touching gallery, download, workflow status, or other
-importable helper behavior. Do not split `ProductDetailPage.tsx` solely to satisfy tests; extract only small pure helpers
+Prefer pure helper tests for page-local logic before large UI refactors. For InspirationDetail workbench changes, add or
+extend tests under `web/src/pages/inspiration-detail/*.test.ts` when touching gallery, download, workflow status, or other
+importable helper behavior. Do not split `InspirationDetailPage.tsx` solely to satisfy tests; extract only small pure helpers
 when that keeps runtime behavior unchanged.
 
 ## Scenario: Frontend executable quality gate
 
 ### 1. Scope / Trigger
 
-- Trigger: any frontend code change under `web/src/`, frontend config change under `web/`, or ProductDetail helper
+- Trigger: any frontend code change under `web/src/`, frontend config change under `web/`, or InspirationDetail helper
   extraction intended to support refactoring.
-- Goal: keep the gate small and deterministic before larger ProductDetail UI splitting.
+- Goal: keep the gate small and deterministic before larger InspirationDetail UI splitting.
 
 ### 2. Signatures
 
@@ -72,15 +72,15 @@ when that keeps runtime behavior unchanged.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: add or update a ProductDetail gallery/download/status helper and cover it with a colocated `*.test.ts`.
+- Good: add or update a InspirationDetail gallery/download/status helper and cover it with a colocated `*.test.ts`.
 - Base: run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` before handing off frontend changes.
-- Bad: split `ProductDetailPage.tsx` UI only to make tests importable.
+- Bad: split `InspirationDetailPage.tsx` UI only to make tests importable.
 - Bad: enable broad formatting or hook-dependency rules that require whole-frontend rewrites in an unrelated task.
 
 ### 6. Tests Required
 
 - New pure helper -> add Vitest unit coverage for normal and edge cases.
-- ProductDetail helper changes -> prefer colocated tests under `web/src/pages/product-detail/`.
+- InspirationDetail helper changes -> prefer colocated tests under `web/src/pages/inspiration-detail/`.
 - Locale/theme helper changes -> update or add tests near `web/src/lib/preferences.test.ts`.
 - Locale-aware pure helper changes -> test both `zh-CN` and `en-US`, including fallback behavior for legacy system labels
   when old records store default Chinese titles.
@@ -141,8 +141,8 @@ Any API contract change should update `web/src/lib/types.ts`, page usage, and ba
 Current pages show loading, error, disabled, and success states close to the action:
 
 - Loading spinner for initial app/session load in `App.tsx`.
-- Product list load/error states in `ProductListPage.tsx`.
-- Mutation errors in `ProductCreatePage.tsx`, `ProductDetailPage.tsx`, `ImageChatPage.tsx`, and `SettingsPage.tsx`.
+- Inspiration list load/error states in `InspirationListPage.tsx`.
+- Mutation errors in `InspirationCreatePage.tsx`, `InspirationDetailPage.tsx`, `ImageChatPage.tsx`, and `SettingsPage.tsx`.
 - Disabled buttons while mutations are pending.
 
 Follow this style for new actions.
@@ -187,7 +187,7 @@ Review new UI for:
 - Image URLs from the backend are converted with `api.toApiUrl(...)` before being used in `src` or links.
 - Destructive actions such as delete are explicit buttons and update cache/selection state after success.
 - Visible UI chrome uses `useI18n()` or locale-aware helpers instead of hard-coded page-local strings.
-- Light surfaces, borders, and muted text have dark-mode variants, and product/image previews remain inspectable.
+- Light surfaces, borders, and muted text have dark-mode variants, and inspiration/image previews remain inspectable.
 
 ---
 
@@ -213,7 +213,7 @@ Use `just web-dev` so `.env.dev` and proxy behavior match backend dev commands.
 - Committing `web/dist/`, `web/node_modules/`, `*.tsbuildinfo`, or local env files.
 - Adding lint/test commands to docs without actually configuring them in `web/package.json`.
 - Adding page-local locale/theme persistence outside `PreferencesProvider`.
-- Translating product/operator/model-authored content instead of only ProductFlow UI chrome and system labels.
+- Translating inspiration/operator/model-authored content instead of only ProductFlow UI chrome and system labels.
 
 ---
 

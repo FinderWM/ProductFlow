@@ -12,7 +12,7 @@ from helpers import (
     _read_image_size,
 )
 
-from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
+from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
 
 
 @pytest.fixture(autouse=True)
@@ -22,15 +22,15 @@ def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> N
     _execute_workflow_queue_inline(monkeypatch)
 
 
-def test_product_asset_variant_urls_serve_preview_and_thumbnail(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+def test_inspiration_asset_variant_urls_serve_preview_and_thumbnail(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
 
-    create_product_response = client.post(
-        "/api/products",
+    create_inspiration_response = client.post(
+        "/api/inspirations",
         data={
             "name": "大尺寸主图样例",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -39,9 +39,9 @@ def test_product_asset_variant_urls_serve_preview_and_thumbnail(configured_env: 
         },
         files={"image": ("large.png", _make_demo_image_bytes_with_size(2400, 1800), "image/png")},
     )
-    assert create_product_response.status_code == 201
+    assert create_inspiration_response.status_code == 201
     source_asset = next(
-        asset for asset in create_product_response.json()["source_assets"] if asset["kind"] == "original_image"
+        asset for asset in create_inspiration_response.json()["source_assets"] if asset["kind"] == "original_image"
     )
 
     assert source_asset["download_url"].startswith("/api/source-assets/")
@@ -59,15 +59,15 @@ def test_product_asset_variant_urls_serve_preview_and_thumbnail(configured_env: 
     assert max(_read_image_size(thumbnail.content)) <= 320
 
 
-def test_product_create_rejects_invalid_price_and_invalid_image(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+def test_inspiration_create_rejects_invalid_price_and_invalid_image(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
 
     invalid_price = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
             "name": "护手霜",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -79,7 +79,7 @@ def test_product_create_rejects_invalid_price_and_invalid_image(configured_env: 
     assert invalid_price.status_code == 400
 
     invalid_image = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
             "name": "护手霜",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -92,7 +92,7 @@ def test_product_create_rejects_invalid_price_and_invalid_image(configured_env: 
 
 
 def test_image_generation_calibrates_oversized_size(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)

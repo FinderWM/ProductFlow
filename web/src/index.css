@@ -362,45 +362,45 @@ textarea {
   display: none;
 }
 
-.product-create-scrollbar {
+.inspiration-create-scrollbar {
   scrollbar-color: rgb(148 163 184 / 0.65) rgb(226 232 240 / 0.7);
   scrollbar-width: thin;
 }
 
-.product-create-scrollbar::-webkit-scrollbar {
+.inspiration-create-scrollbar::-webkit-scrollbar {
   width: 12px;
   height: 12px;
 }
 
-.product-create-scrollbar::-webkit-scrollbar-track {
+.inspiration-create-scrollbar::-webkit-scrollbar-track {
   border-radius: 999px;
   background: rgb(226 232 240 / 0.7);
 }
 
-.product-create-scrollbar::-webkit-scrollbar-thumb {
+.inspiration-create-scrollbar::-webkit-scrollbar-thumb {
   border: 3px solid rgb(226 232 240 / 0.7);
   border-radius: 999px;
   background: rgb(100 116 139 / 0.78);
 }
 
-.product-create-scrollbar::-webkit-scrollbar-thumb:hover {
+.inspiration-create-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgb(71 85 105 / 0.88);
 }
 
-:root.dark .product-create-scrollbar {
+:root.dark .inspiration-create-scrollbar {
   scrollbar-color: rgb(148 163 184 / 0.72) rgb(15 23 42 / 0.92);
 }
 
-:root.dark .product-create-scrollbar::-webkit-scrollbar-track {
+:root.dark .inspiration-create-scrollbar::-webkit-scrollbar-track {
   background: rgb(15 23 42 / 0.92);
 }
 
-:root.dark .product-create-scrollbar::-webkit-scrollbar-thumb {
+:root.dark .inspiration-create-scrollbar::-webkit-scrollbar-thumb {
   border-color: rgb(15 23 42 / 0.92);
   background: rgb(148 163 184 / 0.66);
 }
 
-:root.dark .product-create-scrollbar::-webkit-scrollbar-thumb:hover {
+:root.dark .inspiration-create-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgb(203 213 225 / 0.78);
 }
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from productflow_backend.application.canvas_templates import (
+from inspiration_one_backend.application.canvas_templates import (
     BUILTIN_CANVAS_TEMPLATES,
     SUPPORTED_CANVAS_TEMPLATE_NODE_TYPES,
     CanvasTemplate,
@@ -18,8 +18,8 @@ from productflow_backend.application.canvas_templates import (
     list_builtin_canvas_templates,
     validate_canvas_template,
 )
-from productflow_backend.domain.enums import WorkflowNodeType
-from productflow_backend.domain.errors import BusinessValidationError
+from inspiration_one_backend.domain.enums import WorkflowNodeType
+from inspiration_one_backend.domain.errors import BusinessValidationError
 
 
 def _minimal_template(**overrides: object) -> CanvasTemplate:
@@ -36,16 +36,16 @@ def _minimal_template(**overrides: object) -> CanvasTemplate:
         ),
         "nodes": (
             CanvasTemplateNodeSpec(
-                key="product",
-                node_type=WorkflowNodeType.PRODUCT_CONTEXT,
-                title="商品",
+                key="inspiration",
+                node_type=WorkflowNodeType.INSPIRATION_CONTEXT,
+                title="灵感产物",
             ),
             CanvasTemplateNodeSpec(
                 key="image",
                 node_type=WorkflowNodeType.IMAGE_GENERATION,
                 title="生图",
-                config_json={"instruction": "生成商品图", "size": "1024x1024"},
-                instruction_seed="生成商品图",
+                config_json={"instruction": "生成灵感产物图", "size": "1024x1024"},
+                instruction_seed="生成灵感产物图",
                 size="1024x1024",
             ),
             CanvasTemplateNodeSpec(
@@ -57,7 +57,7 @@ def _minimal_template(**overrides: object) -> CanvasTemplate:
             ),
         ),
         "edges": (
-            CanvasTemplateEdgeSpec(source_node_key="product", target_node_key="image"),
+            CanvasTemplateEdgeSpec(source_node_key="inspiration", target_node_key="image"),
             CanvasTemplateEdgeSpec(source_node_key="image", target_node_key="output"),
         ),
         "output_slots": (
@@ -126,9 +126,7 @@ def test_builtin_canvas_template_catalog_documents_02_shipped_scenarios() -> Non
 
 def test_full_canvas_templates_have_distinct_graph_shapes() -> None:
     templates = {
-        template.key: template
-        for template in list_builtin_canvas_templates()
-        if template.kind == "full_canvas"
+        template.key: template for template in list_builtin_canvas_templates() if template.kind == "full_canvas"
     }
 
     graph_shapes = {
@@ -149,8 +147,7 @@ def test_full_canvas_templates_have_distinct_graph_shapes() -> None:
     assert len(templates["ecommerce-model-lifestyle-image-v1"].output_slots) == 2
     assert len(templates["ecommerce-short-video-cover-v1"].output_slots) == 2
     assert any(
-        node.node_type == WorkflowNodeType.REFERENCE_IMAGE
-        for node in templates["ecommerce-xiaohongshu-image-v1"].nodes
+        node.node_type == WorkflowNodeType.REFERENCE_IMAGE for node in templates["ecommerce-xiaohongshu-image-v1"].nodes
     )
     assert any(
         node.node_type == WorkflowNodeType.COPY_GENERATION and node.key == "visual_copy"
@@ -203,7 +200,7 @@ def test_builtin_canvas_templates_satisfy_v1_contract() -> None:
 
 def test_builtin_canvas_templates_keep_readable_horizontal_progression() -> None:
     for template in list_builtin_canvas_templates():
-        nodes = tuple(node for node in template.nodes if node.node_type != WorkflowNodeType.PRODUCT_CONTEXT)
+        nodes = tuple(node for node in template.nodes if node.node_type != WorkflowNodeType.INSPIRATION_CONTEXT)
         sorted_unique_x = sorted({node.position_x for node in template.nodes})
 
         assert nodes
@@ -368,9 +365,9 @@ def test_template_validator_rejects_invalid_default_external_connection() -> Non
         update={
             "default_external_connections": (
                 CanvasTemplateDefaultExternalConnection(
-                    source="existing_product_context",
+                    source="existing_inspiration_context",
                     target_node_key="missing",
-                    label="自动接商品",
+                    label="自动接灵感产物",
                     reason="目标不存在。",
                 ),
             )
@@ -380,9 +377,9 @@ def test_template_validator_rejects_invalid_default_external_connection() -> Non
         update={
             "default_external_connections": (
                 CanvasTemplateDefaultExternalConnection(
-                    source="existing_product_context",
+                    source="existing_inspiration_context",
                     target_node_key="reference",
-                    label="自动接商品",
+                    label="自动接灵感产物",
                     reason="参考图不是生成节点。",
                 ),
             )
@@ -392,9 +389,9 @@ def test_template_validator_rejects_invalid_default_external_connection() -> Non
         update={
             "default_external_connections": (
                 CanvasTemplateDefaultExternalConnection(
-                    source="existing_product_context",
+                    source="existing_inspiration_context",
                     target_node_key="image",
-                    label="自动接商品",
+                    label="自动接灵感产物",
                     reason="完整画布不声明外部连接。",
                 ),
             )
@@ -428,11 +425,11 @@ def test_template_validator_rejects_duplicate_node_keys() -> None:
         validate_canvas_template(duplicate)
 
 
-def test_template_validator_rejects_product_context_in_node_group() -> None:
+def test_template_validator_rejects_inspiration_context_in_node_group() -> None:
     valid = _minimal_template()
     invalid = valid.model_copy(update={"kind": "node_group"})
 
-    with pytest.raises(BusinessValidationError, match="节点组模板不能包含商品资料节点"):
+    with pytest.raises(BusinessValidationError, match="节点组模板不能包含灵感产物资料节点"):
         validate_canvas_template(invalid)
 
 
@@ -451,7 +448,7 @@ def test_get_builtin_canvas_template_rejects_unknown_key() -> None:
 
 def test_template_node_type_allowlist_matches_current_workflow_node_types() -> None:
     assert SUPPORTED_CANVAS_TEMPLATE_NODE_TYPES == {
-        WorkflowNodeType.PRODUCT_CONTEXT,
+        WorkflowNodeType.INSPIRATION_CONTEXT,
         WorkflowNodeType.REFERENCE_IMAGE,
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.IMAGE_GENERATION,

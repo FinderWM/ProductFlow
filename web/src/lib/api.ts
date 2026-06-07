@@ -12,7 +12,7 @@ import type {
   CopySet,
   CopySetUpdateRequest,
   CopyUserTemplateToGlobalInput,
-  CreateProductInput,
+  CreateInspirationInput,
   CreateRoleRequest,
   CreateTrustedUserRequest,
   CreateUserCanvasTemplateInput,
@@ -35,9 +35,9 @@ import type {
   ImageSessionListResponse,
   ImageSessionStatus,
   ImageToolOptions,
-  ProductDetail,
-  ProductHistory,
-  ProductInitialWorkflowEntry,
+  InspirationDetail,
+  InspirationHistory,
+  InspirationInitialWorkflowEntry,
   ProviderBinding,
   ProviderBindingUpdateRequest,
   ProviderConfigResponse,
@@ -45,11 +45,11 @@ import type {
   ProviderProfile,
   ProviderProfileCreateRequest,
   ProviderProfileUpdateRequest,
-  ProductWorkflow,
-  ProductWorkflowStatus,
+  InspirationWorkflow,
+  InspirationWorkflowStatus,
   WorkflowRunStartMode,
-  ProductWritebackResponse,
-  ProductListResponse,
+  InspirationWritebackResponse,
+  InspirationListResponse,
   ReviewUserTemplateGroupInput,
   RuntimeConfig,
   RbacPermissionCatalog,
@@ -209,7 +209,7 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  listProducts(input: {
+  listInspirations(input: {
     resource_group_id: string;
     page?: number;
     page_size?: number;
@@ -217,7 +217,7 @@ export const api = {
     updated_from?: string;
     updated_to?: string;
     owner_user_id?: string;
-  }): Promise<ProductListResponse> {
+  }): Promise<InspirationListResponse> {
     const params = new URLSearchParams({
       resource_group_id: input.resource_group_id,
       page: String(input.page ?? 1),
@@ -235,21 +235,21 @@ export const api = {
     if (input.owner_user_id) {
       params.set("owner_user_id", input.owner_user_id);
     }
-    return request(`/api/products?${params.toString()}`);
+    return request(`/api/inspirations?${params.toString()}`);
   },
-  getProduct(productId: string): Promise<ProductDetail> {
-    return request(`/api/products/${productId}`);
+  getInspiration(inspirationId: string): Promise<InspirationDetail> {
+    return request(`/api/inspirations/${inspirationId}`);
   },
-  deleteProduct(productId: string): Promise<void> {
-    return request(`/api/products/${productId}`, { method: "DELETE" });
+  deleteInspiration(inspirationId: string): Promise<void> {
+    return request(`/api/inspirations/${inspirationId}`, { method: "DELETE" });
   },
-  getProductHistory(productId: string, input?: { resource_group_id?: string | null }): Promise<ProductHistory> {
+  getInspirationHistory(inspirationId: string, input?: { resource_group_id?: string | null }): Promise<InspirationHistory> {
     const params = new URLSearchParams();
     if (input?.resource_group_id) {
       params.set("resource_group_id", input.resource_group_id);
     }
     const suffix = params.size ? `?${params.toString()}` : "";
-    return request(`/api/products/${productId}/history${suffix}`);
+    return request(`/api/inspirations/${inspirationId}/history${suffix}`);
   },
   getConfig(): Promise<ConfigResponse> {
     return request("/api/settings");
@@ -398,7 +398,7 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  async createProduct(input: CreateProductInput): Promise<ProductDetail> {
+  async createInspiration(input: CreateInspirationInput): Promise<InspirationDetail> {
     const formData = new FormData();
     formData.set("name", input.name);
     formData.set("resource_group_id", input.resource_group_id);
@@ -435,22 +435,22 @@ export const api = {
     if (input.entry_text) {
       formData.set("entry_text", input.entry_text);
     }
-    return request("/api/products", {
+    return request("/api/inspirations", {
       method: "POST",
       body: formData,
     });
   },
-  async addReferenceImages(productId: string, files: File[]): Promise<ProductDetail> {
+  async addReferenceImages(inspirationId: string, files: File[]): Promise<InspirationDetail> {
     const formData = new FormData();
     files.forEach((file) => {
       formData.append("reference_images", file);
     });
-    return request(`/api/products/${productId}/reference-images`, {
+    return request(`/api/inspirations/${inspirationId}/reference-images`, {
       method: "POST",
       body: formData,
     });
   },
-  deleteSourceAsset(assetId: string): Promise<ProductDetail> {
+  deleteSourceAsset(assetId: string): Promise<InspirationDetail> {
     return request(`/api/source-assets/${assetId}`, { method: "DELETE" });
   },
   updateCopySet(copySetId: string, payload: CopySetUpdateRequest): Promise<CopySet> {
@@ -462,11 +462,11 @@ export const api = {
   confirmCopySet(copySetId: string): Promise<CopySet> {
     return request(`/api/copy-sets/${copySetId}/confirm`, { method: "POST" });
   },
-  listImageSessions(productId?: string): Promise<ImageSessionListResponse> {
-    const query = productId ? `?product_id=${encodeURIComponent(productId)}` : "";
+  listImageSessions(inspirationId?: string): Promise<ImageSessionListResponse> {
+    const query = inspirationId ? `?inspiration_id=${encodeURIComponent(inspirationId)}` : "";
     return request(`/api/image-sessions${query}`);
   },
-  createImageSession(input: { product_id?: string; title?: string }): Promise<ImageSessionDetail> {
+  createImageSession(input: { inspiration_id?: string; title?: string }): Promise<ImageSessionDetail> {
     return request("/api/image-sessions", {
       method: "POST",
       body: JSON.stringify(input),
@@ -542,12 +542,12 @@ export const api = {
   cancelImageSessionGenerationTask(sessionId: string, taskId: string): Promise<ImageSessionDetail> {
     return request(`/api/image-sessions/${sessionId}/generation-tasks/${taskId}/cancel`, { method: "POST" });
   },
-  attachImageSessionAssetToProduct(
+  attachImageSessionAssetToInspiration(
     sessionId: string,
     assetId: string,
-    input: { product_id?: string; target: "reference" | "main_source" },
-  ): Promise<ProductWritebackResponse> {
-    return request(`/api/image-sessions/${sessionId}/assets/${assetId}/attach-to-product`, {
+    input: { inspiration_id?: string; target: "reference" | "main_source" },
+  ): Promise<InspirationWritebackResponse> {
+    return request(`/api/image-sessions/${sessionId}/assets/${assetId}/attach-to-inspiration`, {
       method: "POST",
       body: JSON.stringify(input),
     });
@@ -562,17 +562,17 @@ export const api = {
       body: JSON.stringify({ image_session_asset_id: imageSessionAssetId }),
     });
   },
-  getProductWorkflow(productId: string): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow`);
+  getInspirationWorkflow(inspirationId: string): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow`);
   },
-  getProductWorkflowStatus(productId: string): Promise<ProductWorkflowStatus> {
-    return request(`/api/products/${productId}/workflow/status`);
+  getInspirationWorkflowStatus(inspirationId: string): Promise<InspirationWorkflowStatus> {
+    return request(`/api/inspirations/${inspirationId}/workflow/status`);
   },
   listCanvasTemplates(input?: {
     search?: string;
     category_id?: string;
     scope?: CanvasTemplateScope;
-    initial_workflow_entry?: ProductInitialWorkflowEntry;
+    initial_workflow_entry?: InspirationInitialWorkflowEntry;
   }): Promise<CanvasTemplateListResponse> {
     const params = new URLSearchParams();
     if (input?.search) {
@@ -594,7 +594,7 @@ export const api = {
     search?: string;
     category_id?: string;
     scope?: CanvasTemplateScope;
-    initial_workflow_entry?: ProductInitialWorkflowEntry;
+    initial_workflow_entry?: InspirationInitialWorkflowEntry;
   }): Promise<CanvasTemplateListResponse> {
     const params = new URLSearchParams();
     if (input?.search) {
@@ -687,32 +687,32 @@ export const api = {
       method: "DELETE",
     });
   },
-  applyWorkflowTemplateGroup(productId: string, input: ApplyWorkflowTemplateGroupInput): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow/template-groups`, {
+  applyWorkflowTemplateGroup(inspirationId: string, input: ApplyWorkflowTemplateGroupInput): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow/template-groups`, {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
   duplicateWorkflowNodeGroup(
-    productId: string,
+    inspirationId: string,
     input: DuplicateWorkflowNodeGroupInput,
-  ): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow/node-groups/duplicate`, {
+  ): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow/node-groups/duplicate`, {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
-  createUserTemplateGroup(productId: string, input: CreateUserTemplateGroupInput): Promise<CanvasTemplateSummary> {
-    return request(`/api/products/${productId}/workflow/user-template-groups`, {
+  createUserTemplateGroup(inspirationId: string, input: CreateUserTemplateGroupInput): Promise<CanvasTemplateSummary> {
+    return request(`/api/inspirations/${inspirationId}/workflow/user-template-groups`, {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
   createUserCanvasTemplate(
-    productId: string,
+    inspirationId: string,
     input: CreateUserCanvasTemplateInput,
   ): Promise<CanvasTemplateSummary> {
-    return request(`/api/products/${productId}/workflow/user-canvas-templates`, {
+    return request(`/api/inspirations/${inspirationId}/workflow/user-canvas-templates`, {
       method: "POST",
       body: JSON.stringify(input),
     });
@@ -747,16 +747,16 @@ export const api = {
     });
   },
   createWorkflowNode(
-    productId: string,
+    inspirationId: string,
     input: {
-      node_type: ProductWorkflow["nodes"][number]["node_type"];
+      node_type: InspirationWorkflow["nodes"][number]["node_type"];
       title: string;
       position_x: number;
       position_y: number;
       config_json: Record<string, unknown>;
     },
-  ): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow/nodes`, {
+  ): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes`, {
       method: "POST",
       body: JSON.stringify(input),
     });
@@ -769,19 +769,19 @@ export const api = {
       position_y?: number;
       config_json?: Record<string, unknown>;
     },
-  ): Promise<ProductWorkflow> {
+  ): Promise<InspirationWorkflow> {
     return request(`/api/workflow-nodes/${nodeId}`, {
       method: "PATCH",
       body: JSON.stringify(input),
     });
   },
-  updateWorkflowNodeCopy(nodeId: string, payload: CopySetUpdateRequest): Promise<ProductWorkflow> {
+  updateWorkflowNodeCopy(nodeId: string, payload: CopySetUpdateRequest): Promise<InspirationWorkflow> {
     return request(`/api/workflow-nodes/${nodeId}/copy`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     });
   },
-  applyTailSplitPlan(nodeId: string, payload: ApplyTailSplitPlanInput): Promise<ProductWorkflow> {
+  applyTailSplitPlan(nodeId: string, payload: ApplyTailSplitPlanInput): Promise<InspirationWorkflow> {
     return request(`/api/workflow-nodes/${nodeId}/tail-split-plan/apply`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -790,7 +790,7 @@ export const api = {
   async uploadWorkflowNodeImage(
     nodeId: string,
     input: { file: File; role?: string; label?: string },
-  ): Promise<ProductWorkflow> {
+  ): Promise<InspirationWorkflow> {
     const formData = new FormData();
     formData.set("image", input.file);
     if (input.role) {
@@ -804,7 +804,7 @@ export const api = {
       body: formData,
     });
   },
-  async uploadWorkflowNodeDocument(nodeId: string, input: { file: File }): Promise<ProductWorkflow> {
+  async uploadWorkflowNodeDocument(nodeId: string, input: { file: File }): Promise<InspirationWorkflow> {
     const formData = new FormData();
     formData.set("document", input.file);
     return request(`/api/workflow-nodes/${nodeId}/document`, {
@@ -815,46 +815,46 @@ export const api = {
   bindWorkflowNodeImage(
     nodeId: string,
     input: { source_asset_id?: string; poster_variant_id?: string },
-  ): Promise<ProductWorkflow> {
+  ): Promise<InspirationWorkflow> {
     return request(`/api/workflow-nodes/${nodeId}/image-source`, {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
-  clearWorkflowNodeImage(nodeId: string): Promise<ProductWorkflow> {
+  clearWorkflowNodeImage(nodeId: string): Promise<InspirationWorkflow> {
     return request(`/api/workflow-nodes/${nodeId}/image`, { method: "DELETE" });
   },
   createWorkflowEdge(
-    productId: string,
+    inspirationId: string,
     input: { source_node_id: string; target_node_id: string; source_handle?: string; target_handle?: string },
-  ): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow/edges`, {
+  ): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow/edges`, {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
-  deleteWorkflowEdge(edgeId: string): Promise<ProductWorkflow> {
+  deleteWorkflowEdge(edgeId: string): Promise<InspirationWorkflow> {
     return request(`/api/workflow-edges/${edgeId}`, { method: "DELETE" });
   },
-  deleteWorkflowNode(nodeId: string): Promise<ProductWorkflow> {
+  deleteWorkflowNode(nodeId: string): Promise<InspirationWorkflow> {
     return request(`/api/workflow-nodes/${nodeId}`, { method: "DELETE" });
   },
-  runProductWorkflow(
-    productId: string,
+  runInspirationWorkflow(
+    inspirationId: string,
     input?: { start_node_id?: string; start_mode?: WorkflowRunStartMode },
-  ): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow/run`, {
+  ): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow/run`, {
       method: "POST",
       body: JSON.stringify(input ?? {}),
     });
   },
-  cancelProductWorkflowRun(productId: string, runId: string): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow/runs/${runId}/cancel`, { method: "POST" });
+  cancelInspirationWorkflowRun(inspirationId: string, runId: string): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow/runs/${runId}/cancel`, { method: "POST" });
   },
-  retryProductWorkflowRun(productId: string, runId: string): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow/runs/${runId}/retry`, { method: "POST" });
+  retryInspirationWorkflowRun(inspirationId: string, runId: string): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow/runs/${runId}/retry`, { method: "POST" });
   },
-  retryFailedWorkflowNodes(productId: string): Promise<ProductWorkflow> {
-    return request(`/api/products/${productId}/workflow/failed-nodes/retry`, { method: "POST" });
+  retryFailedWorkflowNodes(inspirationId: string): Promise<InspirationWorkflow> {
+    return request(`/api/inspirations/${inspirationId}/workflow/failed-nodes/retry`, { method: "POST" });
   },
 };

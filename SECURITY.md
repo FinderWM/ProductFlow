@@ -2,7 +2,7 @@
 
 [中文](SECURITY.md) | [English](SECURITY.en.md)
 
-ProductFlow 是自托管项目。部署者负责保护自己的管理员密钥、模型 API key、数据库、Redis、文件存储和反向代理入口。
+Inspiration One 是自托管项目。部署者负责保护自己的管理员密钥、模型 API key、数据库、Redis、文件存储和反向代理入口。
 
 ## 支持范围
 

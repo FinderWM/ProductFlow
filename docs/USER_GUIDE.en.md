@@ -1,41 +1,41 @@
-# ProductFlow Beginner Tutorial and Reference
+# Inspiration One Beginner Tutorial and Reference
 
 [中文](USER_GUIDE.md) | English
 
 This document has two parts:
 
-1. **Beginner tutorial**: minimal jargon, follow the clicks and fields, and generate one usable product image first.
+1. **Beginner tutorial**: minimal jargon, follow the clicks and fields, and generate one usable inspiration image first.
 2. **Reference**: after completing one run, read more about workbench cards, prompt configuration, model settings, and common questions.
 
-The product now provides a **Help** page in the top navigation for quick access to workflows, templates, supported operations, and common troubleshooting. This Markdown document remains as repository text reference and should stay aligned with the in-product help page.
+The inspiration now provides a **Help** page in the top navigation for quick access to workflows, templates, supported operations, and common troubleshooting. This Markdown document remains as repository text reference and should stay aligned with the in-inspiration help page.
 
-The current workbench is the **ProductFlow workbench**: the middle area is a zoomable and draggable node canvas. On desktop, the right side is a compact sidebar that switches between **Details / Runs / Library / Templates** with a small rail. On mobile, the canvas remains the main surface and the bottom toolbar opens workflow run, Single node, Templates, Details, Runs, and Library controls. Normal use does not require understanding the internal DAG. Just remember: product, reference image, copy, and image generation are cards; edges mean "downstream generation refers to upstream data".
+The current workbench is the **Inspiration One workbench**: the middle area is a zoomable and draggable node canvas. On desktop, the right side is a compact sidebar that switches between **Details / Runs / Library / Templates** with a small rail. On mobile, the canvas remains the main surface and the bottom toolbar opens workflow run, Single node, Templates, Details, Runs, and Library controls. Normal use does not require understanding the internal DAG. Just remember: inspiration, reference image, copy, and image generation are cards; edges mean "downstream generation refers to upstream data".
 
 ---
 
-## Beginner Tutorial: Start from One Product Image
+## Beginner Tutorial: Start from One Inspiration Image
 
-Goal: upload one product image, add a little information, generate copy, then generate a satisfying image.
+Goal: upload one inspiration image, add a little information, generate copy, then generate a satisfying image.
 
-### 1. Create a Product
+### 1. Create a Inspiration
 
-1. Click **Products / Workbench** in the top navigation.
-2. Click **New product**.
-3. Upload a clear product main image.
-4. Fill in a product name, for example: `cream white commuter tote bag`.
-5. Choose a canvas template. Beginners can choose **Product main image**; choose **Blank canvas** if you want to build the workflow manually.
+1. Click **Inspirations / Workbench** in the top navigation.
+2. Click **New inspiration**.
+3. Upload a clear inspiration main image.
+4. Fill in a inspiration name, for example: `cream white commuter tote bag`.
+5. Choose a canvas template. Beginners can choose **Inspiration main image**; choose **Blank canvas** if you want to build the workflow manually.
 6. Click **Create and continue**.
 
-Expected result: the page enters this product's workbench, with several clickable cards in the middle.
+Expected result: the page enters this inspiration's workbench, with several clickable cards in the middle.
 
-### 2. Add Product Details
+### 2. Add Inspiration Details
 
-1. Click the **Product** card on the canvas.
-2. The right side switches to **Details**. Add category, price, product description, or the direction you want to emphasize this time.
+1. Click the **Inspiration** card on the canvas.
+2. The right side switches to **Details**. Add category, price, inspiration description, or the direction you want to emphasize this time.
 3. Example description: `Suitable for commuting and weekend outings, lightweight, large capacity, cream white color.`
 4. Click **Save**, or wait until the right-side status shows **Saved**.
 
-Expected result: the form saves successfully. Later copy and image generation use these saved product details.
+Expected result: the form saves successfully. Later copy and image generation use these saved inspiration details.
 
 ### 3. Generate the First Copy Version
 
@@ -46,7 +46,7 @@ Expected result: the form saves successfully. Later copy and image generation us
    Emphasize commuting, lightweight design, and large capacity. Use a premium tone without exaggeration.
    ```
 
-3. Click **Run current node**. If you want to run from product details all the way to image generation, click **Run workflow**.
+3. Click **Run current node**. If you want to run from inspiration details all the way to image generation, click **Run workflow**.
 
 Expected result: the copy card generates an editable structured copy payload. It may be freeform text, short labeled blocks, layout sections, visual guidance, or a mix that fits the selected template.
 
@@ -88,7 +88,7 @@ Change only one or two things per round; it is easier to tell which sentence wor
 
 Common adjustments:
 
-- Subject is unclear: add `product centered in frame, complete subject, clear texture`.
+- Subject is unclear: add `inspiration centered in frame, complete subject, clear texture`.
 - Background is too busy: add `clean background, fewer props, keep only 1-2 supporting objects`.
 - Style is wrong: add `natural light`, `magazine-like composition`, `minimal ecommerce`, or `warm lifestyle`.
 - Selling point is missing: put the most important selling point in the first sentence, such as `large capacity`, `lightweight`, or `commuter-friendly`.
@@ -108,7 +108,7 @@ Download the image when you are satisfied. If you want to continue fine-tuning i
 - **Desktop move cards**: hold the card body or title area and drag; the position is saved after release. It stays where you placed it after refresh.
 - **Desktop connect cards**: drag from a card connection point to a target card. An edge is created after release. Edges are part of the workflow, not temporary visuals.
 - **Desktop multi-select cards**: hold Shift and drag a selection box from blank canvas, or Ctrl / Cmd / Shift-click several nodes. A selected group can be moved, deleted, or saved as a node-group template.
-- **Mobile browse mode**: the product workbench opens in browse mode on mobile. One-finger dragging on blank canvas pans the view, tapping a node selects it, and two-finger pinch zooms the canvas.
+- **Mobile browse mode**: the inspiration workbench opens in browse mode on mobile. One-finger dragging on blank canvas pans the view, tapping a node selects it, and two-finger pinch zooms the canvas.
 - **Mobile edit mode**: after switching the bottom mode control to **Edit**, touch and pen input can drag nodes and create edges from output handles to target nodes.
 - **Mobile select mode**: after switching the bottom mode control to **Select**, tapping nodes adds or removes them from multi-select. Tapping blank canvas exits the temporary selection mode.
 - **Mobile toolbar and panels**: the bottom toolbar provides workflow run, Single node, Templates, Details, Runs, and Library entrypoints. Those sidebar contents open as a bottom sheet on mobile.
@@ -116,18 +116,18 @@ Download the image when you are satisfied. If you want to continue fine-tuning i
 
 ### Node Group Templates
 
-The right-side **Templates** panel inserts reusable groups into an existing product workbench. It serves a different moment from the full-canvas template chosen during product creation:
+The right-side **Templates** panel inserts reusable groups into an existing inspiration workbench. It serves a different moment from the full-canvas template chosen during inspiration creation:
 
-- **Full-canvas template**: chosen only when creating a product; it defines the initial workflow structure.
-- **Node-group template**: appended inside an existing product workbench, for example a main-image refinement, scene image, or campaign image flow.
-- **User template**: after selecting two or more non-product nodes, save the selected structure as your own node-group template.
+- **Full-canvas template**: chosen only when creating a inspiration; it defines the initial workflow structure.
+- **Node-group template**: appended inside an existing inspiration workbench, for example a main-image refinement, scene image, or campaign image flow.
+- **User template**: after selecting two or more non-inspiration nodes, save the selected structure as your own node-group template.
 
-Saving a user template stores only reusable node configuration and internal edges between selected nodes. It does not store generated images, copy outputs, or product details. User templates can be renamed and deleted; deleting a template does not affect nodes already inserted into a product workbench.
+Saving a user template stores only reusable node configuration and internal edges between selected nodes. It does not store generated images, copy outputs, or inspiration details. User templates can be renamed and deleted; deleting a template does not affect nodes already inserted into a inspiration workbench.
 
 ### 7. Use Iterative Image Generation for Detail Tuning
 
 1. Click **Image chat** in the top navigation.
-2. Select a product, or generate freely first.
+2. Select a inspiration, or generate freely first.
 3. The first image can be generated directly from a text description. For later edits, first click a completed image in history as the base image.
 4. Request changes conversationally, for example:
 
@@ -135,7 +135,7 @@ Saving a user template stores only reusable node configuration and internal edge
    Keep the bag angle unchanged, change the background to a brighter office, and reduce desk clutter.
    ```
 
-5. When satisfied, write the image back to the product so the workbench can reference it later.
+5. When satisfied, write the image back to the inspiration so the workbench can reference it later.
 
 On small screens, Image chat uses a main-view, drawer, and bottom-sheet layout:
 
@@ -144,17 +144,17 @@ On small screens, Image chat uses a main-view, drawer, and bottom-sheet layout:
 - **Right history drawer**: shows branch/candidate history and running placeholders. Tapping a completed image selects it as the current result and the next base image; tapping a placeholder shows that candidate's queued, generating, failed, or cancelled state.
 - **Main view**: generation status, current result, failure reason, and provider notes remain visible. When a multi-candidate task is submitted, history first shows the matching number of placeholders; while running, the page refreshes lightweight status and refreshes full session detail after the task ends.
 - **Bottom action bar**: the generation entry is always available. After a completed result is selected, the bar also shows Download and Send to gallery.
-- **Bottom generation sheet**: contains Generation and Advanced tabs. Generation manages product linking, product references, session references, image description, size, and candidate count; Advanced manages enabled image tool parameters. The submit button at the bottom starts generation using the current candidate count.
+- **Bottom generation sheet**: contains Generation and Advanced tabs. Generation manages inspiration linking, inspiration references, session references, image description, size, and candidate count; Advanced manages enabled image tool parameters. The submit button at the bottom starts generation using the current candidate count.
 
 ### 8. Save to Gallery
 
-Image chat results can be saved to **Gallery**. The gallery keeps image source, linked product, prompt, size, and model information, and provides a download entrypoint.
+Image chat results can be saved to **Gallery**. The gallery keeps image source, linked inspiration, prompt, size, and model information, and provides a download entrypoint.
 
 Good gallery candidates:
 
-- Backgrounds or compositions that may be reused later but should not be attached to a product yet.
+- Backgrounds or compositions that may be reused later but should not be attached to a inspiration yet.
 - Satisfying candidates that need to be reviewed together.
-- Useful tuning results that are not the current product's final image.
+- Useful tuning results that are not the current inspiration's final image.
 
 ---
 
@@ -162,13 +162,13 @@ Good gallery candidates:
 
 These notes are for users who have completed one run and want more precise control.
 
-### Product
+### Inspiration
 
-Stores product name, category, price, and description. Downstream generation prioritizes the latest saved product details.
+Stores inspiration name, category, price, and description. Downstream generation prioritizes the latest saved inspiration details.
 
 ### Reference Image
 
-A reference image card holds only the current image. You can upload manually, or let an image-generation card fill it with a new image. The new image replaces the current image in the card; old assets remain in product history.
+A reference image card holds only the current image. You can upload manually, or let an image-generation card fill it with a new image. The new image replaces the current image in the card; old assets remain in inspiration history.
 
 When a reference image card is selected, assets in the right-side **Library** panel show fill actions. When filling from an existing asset, the system reuses the existing asset record and does not create a duplicate upload for the same image.
 
@@ -180,17 +180,17 @@ The current workbench uses structured copy as later image-generation context, so
 
 ### Image Generation
 
-Triggers image generation based on product details, copy, reference images, and your image requirements. It is not an image slot: generated images are written into connected downstream reference image cards. If no downstream reference image card is connected, running fails and tells you to connect at least one image/reference image node first.
+Triggers image generation based on inspiration details, copy, reference images, and your image requirements. It is not an image slot: generated images are written into connected downstream reference image cards. If no downstream reference image card is connected, running fails and tells you to connect at least one image/reference image node first.
 
-The image-generation card now distinguishes between "generate directly from product details" and "generate with copy/reference context": when upstream copy or reference images are connected, generation reads that context. Without connected copy, it can still try to generate from product details and the node's image requirements.
+The image-generation card now distinguishes between "generate directly from inspiration details" and "generate with copy/reference context": when upstream copy or reference images are connected, generation reads that context. Without connected copy, it can still try to generate from inspiration details and the node's image requirements.
 
 ### Tail Splitter
 
 The tail-splitter node turns long text, upstream copy, and upstream reference-image context into multiple executable image branches. Running the tail node first creates a persisted split plan. The plan stays on the node output, so you can refresh and confirm it later.
 
-When reviewing the split plan, you can remove items that should not be created. The graph changes only after confirmation, when ProductFlow creates ordinary public copy/reference nodes, image-trigger nodes, and output reference-image nodes. Cancelling the dialog leaves the canvas unchanged.
+When reviewing the split plan, you can remove items that should not be created. The graph changes only after confirmation, when Inspiration One creates ordinary public copy/reference nodes, image-trigger nodes, and output reference-image nodes. Cancelling the dialog leaves the canvas unchanged.
 
-When a full workflow run crosses a tail node, ProductFlow rebuilds only the generated branch that belongs to that tail batch. If you only changed public nodes or image-trigger prompts inside the current batch, prefer the current-batch image rerun path so the split is preserved.
+When a full workflow run crosses a tail node, Inspiration One rebuilds only the generated branch that belongs to that tail batch. If you only changed public nodes or image-trigger prompts inside the current batch, prefer the current-batch image rerun path so the split is preserved.
 
 ---
 
@@ -198,7 +198,7 @@ When a full workflow run crosses a tail node, ProductFlow rebuilds only the gene
 
 - Connect A to B: B references A during generation.
 - To try one card only: select the card and run the current node.
-- To generate from product details all the way to image: run the whole workflow.
+- To generate from inspiration details all the way to image: run the whole workflow.
 - Before running, confirm that the right-side form is saved. If the selected card has unsaved draft content, the current run button first attempts to save it, then starts running.
 - You can keep organizing canvas positions while the workflow is running, but do not repeatedly click run or change the structure.
 - Image-generation results are not downloaded from the image-generation card. Use the downstream reference image card or the right-side **Library** panel.
@@ -211,7 +211,7 @@ When a full workflow run crosses a tail node, ProductFlow rebuilds only the gene
 
 Open **Settings** in the top navigation and find the **Prompts** group. You can adjust four long-term default prompt templates:
 
-- `prompt_brief_system`: default prompt for product understanding.
+- `prompt_brief_system`: default prompt for inspiration understanding.
 - `prompt_copy_system`: default prompt for copy generation.
 - `prompt_poster_image_template`: workbench image-generation template.
 - `prompt_poster_image_edit_template`: workbench edit template when upstream copy or reference-image context is present.
@@ -228,8 +228,8 @@ Restoring defaults deletes the custom value from the database and returns to the
 
 Common placeholders:
 
-- Workbench image template: `product_name`, `category`, `price`, `source_note`, `instruction`, `context_block`, `reference_policy`, `size`, `kind`, `kind_label`, `kind_requirements`.
-- Workbench edit template: `product_name`, `category`, `price`, `source_note`, `instruction`, `context_block`, `reference_policy`, `size`, `kind`, `kind_label`, `kind_requirements`.
+- Workbench image template: `inspiration_name`, `category`, `price`, `source_note`, `instruction`, `context_block`, `reference_policy`, `size`, `kind`, `kind_label`, `kind_requirements`.
+- Workbench edit template: `inspiration_name`, `category`, `price`, `source_note`, `instruction`, `context_block`, `reference_policy`, `size`, `kind`, `kind_label`, `kind_requirements`.
 - Iterative image template: `prompt`, `size`, `history_block`.
 
 If a placeholder is misspelled, the system does not crash just because of the unknown placeholder. That part may not be replaced as expected. Prefer small edits followed by testing.
@@ -266,8 +266,8 @@ After changing role grants, sign in again and confirm that navigation visibility
 Copy, poster, workflow, and Image chat generation are background tasks. Pages refresh status while running, but they do not repeatedly download complete historical data:
 
 - Image chat updates queue position, completed candidate count, latest progress time, provider status, success/failure state, and failure reason.
-- Product workflows update node state, run state, and failure reasons.
-- After a task ends, the page refreshes full details and shows new images, copy, or product history.
+- Inspiration workflows update node state, run state, and failure reasons.
+- After a task ends, the page refreshes full details and shows new images, copy, or inspiration history.
 - Retryable failed tasks keep a retry entrypoint. Retry reuses the task's prompt, size, reference images, and advanced parameters.
 - Running Image chat tasks can be cancelled; cancelled tasks do not write new candidates.
 
@@ -291,7 +291,7 @@ Do not change many sentences at once. Change only one item per round: background
 
 ### Template saving failed?
 
-Confirm that you selected at least two nodes and did not include the **Product** node. User node-group templates store reusable workflow fragments. They cannot contain product-detail nodes and do not store generated images or copy outputs.
+Confirm that you selected at least two nodes and did not include the **Inspiration** node. User node-group templates store reusable workflow fragments. They cannot contain inspiration-detail nodes and do not store generated images or copy outputs.
 
 ### Settings failed to save?
 

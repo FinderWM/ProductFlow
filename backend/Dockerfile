@@ -22,4 +22,4 @@ RUN mkdir -p /app/storage/logs
 
 EXPOSE 29280
 
-CMD ["uvicorn", "productflow_backend.main:app", "--host", "0.0.0.0", "--port", "29280"]
+CMD ["uvicorn", "inspiration_one_backend.main:app", "--host", "0.0.0.0", "--port", "29280"]

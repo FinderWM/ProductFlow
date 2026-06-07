@@ -6,15 +6,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from productflow_backend.infrastructure.db.models import (
+from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     GenerationConfig,
     GenerationConfigDailyStat,
     GenerationConfigState,
     GenerationResourceGroup,
 )
-from productflow_backend.infrastructure.db.session import get_session_factory
-from productflow_backend.infrastructure.provider_config import (
+from inspiration_one_backend.infrastructure.db.session import get_session_factory
+from inspiration_one_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
     TEXT_PURPOSE,
     _ensure_generation_config_state,

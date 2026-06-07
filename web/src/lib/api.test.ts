@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
 
-function productDetailResponse() {
+function inspirationDetailResponse() {
   return new Response(
     JSON.stringify({
-      id: "product-1",
+      id: "inspiration-1",
       owner_user_id: "user-1",
       owner_username: null,
       resource_group_id: "group-default",
@@ -27,17 +27,17 @@ function productDetailResponse() {
   );
 }
 
-describe("api.createProduct", () => {
+describe("api.createInspiration", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("serializes rich product context fields into multipart form data", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(productDetailResponse());
+  it("serializes rich inspiration context fields into multipart form data", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(inspirationDetailResponse());
     const image = new File(["image"], "cube.png", { type: "image/png" });
     const documentFile = new File(["brief"], "brief.md", { type: "text/markdown" });
 
-    await api.createProduct({
+    await api.createInspiration({
       name: "三阶魔方",
       resource_group_id: "group-default",
       long_text: "顺滑磁吸结构",

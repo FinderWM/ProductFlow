@@ -19,17 +19,17 @@ Current observability files and mechanisms:
   `image_session_generation_task_id`.
 - `backend/src/productflow_backend/presentation/api.py` sets API request context from `X-Request-ID` or a generated id and
   returns the same value in the response header.
-- `backend/src/productflow_backend/workers.py` sets worker context at the Dramatiq actor boundary for product workflow
-  run schedulers, product workflow node runs, and continuous image-session generation tasks, then clears it when the actor
+- `backend/src/productflow_backend/workers.py` sets worker context at the Dramatiq actor boundary for inspiration workflow
+  run schedulers, inspiration workflow node runs, and continuous image-session generation tasks, then clears it when the actor
   returns or raises.
 - `backend/src/productflow_backend/workers.py` persists async workflow and continuous image generation state through
   application use cases rather than logging retry state only.
-- `backend/src/productflow_backend/application/product_workflow/execution.py` and
-  `backend/src/productflow_backend/application/product_workflow/run_state.py` update `WorkflowRun` /
+- `backend/src/productflow_backend/application/inspiration_workflow/execution.py` and
+  `backend/src/productflow_backend/application/inspiration_workflow/run_state.py` update `WorkflowRun` /
   `WorkflowNodeRun` status and failure fields.
 - `backend/src/productflow_backend/application/image_sessions.py` updates `ImageSessionGenerationTask` status,
   failure, attempt, queue, and result fields.
-- `backend/tests/test_queue_recovery.py`, `backend/tests/test_product_workflow_queue_recovery.py`, and
+- `backend/tests/test_queue_recovery.py`, `backend/tests/test_inspiration_workflow_queue_recovery.py`, and
   `backend/tests/test_logging_behavior.py` assert workflow/image-session retry, recovery, and logging behavior through
   durable state, filesystem state, and HTTP responses.
 
@@ -51,7 +51,7 @@ continue to reach stdout/stderr and are mirrored into a rotating file handler.
 
 ### Persisted operational state
 
-For product workflow and continuous image-session tasks, durable state is preferred over log-only state:
+For inspiration workflow and continuous image-session tasks, durable state is preferred over log-only state:
 
 - `WorkflowRun.status` / `WorkflowNodeRun.status` track DAG execution.
 - `ImageSessionGenerationTask.status` tracks `queued`, `running`, `succeeded`, or `failed`.
@@ -113,8 +113,8 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
   header.
 - API request id correlation must not change any JSON response model or route response shape.
 - Business error responses converted by the global typed handler still return the normal `X-Request-ID` response header.
-- `run_product_workflow_run(...)` sets `workflow_run_id` only while that Dramatiq actor executes.
-- `run_product_workflow_node_run(...)` sets `workflow_node_run_id` only while that Dramatiq actor executes.
+- `run_inspiration_workflow_run(...)` sets `workflow_run_id` only while that Dramatiq actor executes.
+- `run_inspiration_workflow_node_run(...)` sets `workflow_node_run_id` only while that Dramatiq actor executes.
 - `run_image_session_generation_task(...)` sets `image_session_generation_task_id` only while that Dramatiq actor executes.
 - Ordinary process logs outside request/worker context use `-` placeholders.
 - Do not manually pass request ids, workflow run ids, or generation task ids through application DTOs just to support
@@ -130,7 +130,7 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
 
 ### 5. Good/Base/Bad Cases
 - Good: API log emitted during a request includes `request_id=<id>` and the HTTP response has the same `X-Request-ID`.
-- Good: product workflow worker logs include `workflow_run_id=<run id>` without manual string interpolation at every
+- Good: inspiration workflow worker logs include `workflow_run_id=<run id>` without manual string interpolation at every
   logging call.
 - Good: continuous image-session worker logs include `image_session_generation_task_id=<task id>`.
 - Base: process startup, Uvicorn lifecycle, and queue recovery logs render `request_id=- workflow_run_id=-
@@ -150,7 +150,7 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
 
 ```python
 token = set_workflow_run_id(workflow_run_id)
-execute_product_workflow_run(workflow_run_id)
+execute_inspiration_workflow_run(workflow_run_id)
 ```
 
 #### Correct
@@ -158,7 +158,7 @@ execute_product_workflow_run(workflow_run_id)
 ```python
 token = set_workflow_run_id(workflow_run_id)
 try:
-    execute_product_workflow_run(workflow_run_id)
+    execute_inspiration_workflow_run(workflow_run_id)
 finally:
     reset_workflow_run_id(token)
 ```
@@ -178,7 +178,7 @@ finally:
 - Do not add Prometheus, OpenTelemetry, structlog, loguru, APM agents, or a metrics endpoint without a dedicated task.
 - Do not add ad-hoc route-level counters.
 - Keep generation progress and failure evidence in durable database state:
-- `WorkflowRun` / `WorkflowNodeRun` statuses for product workflow progress and failure counts.
+- `WorkflowRun` / `WorkflowNodeRun` statuses for inspiration workflow progress and failure counts.
 - `ImageSessionGenerationTask` status, attempts, queue fields, progress heartbeat, and failure reason for continuous image
   generation.
 - Queue recovery summaries from `recover_unfinished_workflow_runs(...)` and

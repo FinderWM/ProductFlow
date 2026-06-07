@@ -1,4 +1,4 @@
-# ProductFlow Architecture
+# Inspiration One Architecture
 
 [中文](ARCHITECTURE.md) | English
 
@@ -6,7 +6,7 @@ Current architecture health, completed cleanup, and remaining risks are tracked 
 
 ## 1. System Overview
 
-ProductFlow consists of the frontend, backend API, background worker, PostgreSQL, Redis, and local file storage:
+Inspiration One consists of the frontend, backend API, background worker, PostgreSQL, Redis, and local file storage:
 
 ```text
 React/Vite web
@@ -19,18 +19,18 @@ React/Vite web
     -> same database, queue, storage and providers
 ```
 
-The default self-hosted path is driven by the root `docker-compose.yml`. `docker compose up -d --build` builds and starts the FastAPI backend, the Dramatiq worker, and the nginx-served Web static site. API/worker containers read `DATABASE_URL` / `REDIS_URL` from `.env` and connect to the shared PostgreSQL container `libowpg` and Redis container `libowredis` maintained under `/Users/yunlong/project/self/env`; storage is selected by `STORAGE_BACKEND`. With `STORAGE_BACKEND=local`, API/worker containers share persistent storage mounted at `/app/storage`, backed by the Docker named volume `productflow-storage` when `STORAGE_HOST_PATH` is not set. When migrating from an older systemd production environment, you can set the host-only variable `STORAGE_HOST_PATH=/home/cot/ProductFlow-release/shared/storage` to bind-mount an existing host storage directory to `/app/storage`; the runtime container still keeps `STORAGE_ROOT=/app/storage`. With `STORAGE_BACKEND=minio` or `STORAGE_BACKEND=s3`, API/worker containers use S3-compatible object storage and `STORAGE_ROOT` is only the local cache and image-variant workspace. The backend container runs Alembic migrations before starting `uvicorn`.
+The default self-hosted path is driven by the root `docker-compose.yml`. `docker compose up -d --build` builds and starts the FastAPI backend, the Dramatiq worker, and the nginx-served Web static site. API/worker containers read `DATABASE_URL` / `REDIS_URL` from `.env` and connect to the shared PostgreSQL container `libowpg` and Redis container `libowredis` maintained under `/Users/yunlong/project/self/env`; storage is selected by `STORAGE_BACKEND`. With `STORAGE_BACKEND=local`, API/worker containers share persistent storage mounted at `/app/storage`, backed by the Docker named volume `inspiration-one-storage` when `STORAGE_HOST_PATH` is not set. When migrating from an older systemd production environment, you can set the host-only variable `STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage` to bind-mount an existing host storage directory to `/app/storage`; the runtime container still keeps `STORAGE_ROOT=/app/storage`. With `STORAGE_BACKEND=minio` or `STORAGE_BACKEND=s3`, API/worker containers use S3-compatible object storage and `STORAGE_ROOT` is only the local cache and image-variant workspace. The backend container runs Alembic migrations before starting `uvicorn`.
 
-The production update entrypoint is `just release`, which calls `scripts/release.sh` to validate Compose configuration, stop legacy user-level systemd services (`productflow-backend.service`, `productflow-worker.service`, `productflow-web.service`, used to free old release ports 29280/29281), run `docker compose up -d --build --remove-orphans`, and perform HTTP health checks. `just release-dry-run` only validates configuration and prints the plan; it does not stop old services, build, or start containers. Normal updates do not delete Docker volumes.
+The production update entrypoint is `just release`, which calls `scripts/release.sh` to validate Compose configuration, stop legacy user-level systemd services (`inspiration-one-backend.service`, `inspiration-one-worker.service`, `inspiration-one-web.service`, used to free old release ports 29280/29281), run `docker compose up -d --build --remove-orphans`, and perform HTTP health checks. `just release-dry-run` only validates configuration and prints the plan; it does not stop old services, build, or start containers. Normal updates do not delete Docker volumes.
 
 Local hot-reload development is still driven by the root `justfile`: after the shared middleware containers `libowpg`, `libowredis`, and `libowminio` are running, run the API, worker, and frontend separately with `just backend-run`, `just backend-worker`, and `just web-dev`. The development environment uses `STORAGE_BACKEND=minio` plus `STORAGE_ROOT=./backend/storage-dev` from `.env.dev`; `STORAGE_ROOT` is only the local cache directory. The wrapper script loads `S3_*` values from `/Users/yunlong/project/self/env/minio.env`. Do not start local development processes by shell-sourcing production `.env`.
 
 ## 2. Backend Layering
 
-Backend code lives under `backend/src/productflow_backend/` and is organized by layer:
+Backend code lives under `backend/src/inspiration_one_backend/` and is organized by layer:
 
 - `presentation/`: FastAPI app, routes, auth dependencies, Pydantic schemas, and upload validation.
-- `application/`: use-case logic for products, copy, posters, gallery, image sessions, and product workflows. Product workflow logic is split into graph / mutations / query / execution / context / artifacts / dependencies modules, with `product_workflows.py` kept as the compatibility facade.
+- `application/`: use-case logic for inspirations, copy, posters, gallery, image sessions, and inspiration workflows. Inspiration workflow logic is split into graph / mutations / query / execution / context / artifacts / dependencies modules, with `inspiration_workflows.py` kept as the compatibility facade.
 - `domain/`: stable enums such as task status, asset type, and workflow node type.
 - `infrastructure/`: SQLAlchemy models/session, queue, storage, text/image providers, and poster renderer.
 - `workers.py`: Dramatiq actor entrypoint.
@@ -42,26 +42,26 @@ The route layer only handles input adaptation, authentication, error mapping, an
 
 Frontend code lives under `web/src/`:
 
-- `pages/`: login, product list, product creation, product detail, gallery, help, settings, and image-session pages (current routes include `/image-chat`, `/products/:productId/image-chat`, `/gallery`, `/help`, and `/settings`).
+- `pages/`: login, inspiration list, inspiration creation, inspiration detail, gallery, help, settings, and image-session pages (current routes include `/image-chat`, `/inspirations/:inspirationId/image-chat`, `/gallery`, `/help`, and `/settings`).
 - `components/`: shared UI such as the top navigation, status tags, and image drag-and-drop upload area.
 - `lib/api.ts`: centralized REST API request wrapper.
 - `lib/types.ts`: frontend DTO types that must stay aligned with backend schemas.
 
-The frontend uses TanStack Query for server state. The product detail page and iterative image page use lightweight status polling while work is active:
+The frontend uses TanStack Query for server state. The inspiration detail page and iterative image page use lightweight status polling while work is active:
 
 - Iterative image generation polls `['image-session-status', selectedSessionId]`, merges task state only, then refreshes the full session after completion.
-- Product workflows poll `['product-workflow-status', productId]`, merge node/run state only, then refresh full workflow and product artifact queries after completion.
+- Inspiration workflows poll `['inspiration-workflow-status', inspirationId]`, merge node/run state only, then refresh full workflow and inspiration artifact queries after completion.
 
-Do not reintroduce active polling for complete `ImageSessionDetailResponse` or complete `ProductWorkflowResponse`; those payloads include image history, node configuration, artifact references, and run records, and high-frequency refresh increases frontend render cost and backend serialization work.
+Do not reintroduce active polling for complete `ImageSessionDetailResponse` or complete `InspirationWorkflowResponse`; those payloads include image history, node configuration, artifact references, and run records, and high-frequency refresh increases frontend render cost and backend serialization work.
 
-The product detail page is currently the ProductFlow workbench: the canvas handles nodes, edges, zoom, pan, node dragging, box selection, and multi-select. On desktop, the right sidebar handles Details, Runs, Library, and Templates. On mobile, a bottom toolbar carries the workflow run entrypoint plus Single node, Templates, Details, Runs, and Library entrypoints, and a bottom sheet renders those panel contents. The mobile canvas has local `browse` / `edit` / `select` interaction modes: `browse` handles one-finger pan, node tap selection, and two-finger pinch zoom; `edit` allows touch/pen node dragging and edge creation; `select` toggles multi-select by tapping nodes. Canvas zoom ratio and desktop sidebar width are browser-local preferences, while mobile mode and sheet openness are page-local UI state. Workflow nodes, edges, run state, and artifacts remain database-backed.
+The inspiration detail page is currently the Inspiration One workbench: the canvas handles nodes, edges, zoom, pan, node dragging, box selection, and multi-select. On desktop, the right sidebar handles Details, Runs, Library, and Templates. On mobile, a bottom toolbar carries the workflow run entrypoint plus Single node, Templates, Details, Runs, and Library entrypoints, and a bottom sheet renders those panel contents. The mobile canvas has local `browse` / `edit` / `select` interaction modes: `browse` handles one-finger pan, node tap selection, and two-finger pinch zoom; `edit` allows touch/pen node dragging and edge creation; `select` toggles multi-select by tapping nodes. Canvas zoom ratio and desktop sidebar width are browser-local preferences, while mobile mode and sheet openness are page-local UI state. Workflow nodes, edges, run state, and artifacts remain database-backed.
 
 ## 4. Main Data Model Lines
 
-Traditional product creative chain:
+Traditional inspiration creative chain:
 
 ```text
-Product
+Inspiration
   -> SourceAsset(original/reference/processed)
   -> CreativeBrief
   -> CopySet(draft/confirmed)
@@ -75,15 +75,15 @@ ImageSession
   -> ImageSessionAsset(reference_upload/generated_image)
   -> ImageSessionRound(one generated candidate per row)
   -> ImageSessionGenerationTask(durable async generation task)
-  -> optional Product attachment
+  -> optional Inspiration attachment
   -> optional ImageGalleryEntry
 ```
 
-Product DAG workflow chain:
+Inspiration DAG workflow chain:
 
 ```text
-ProductWorkflow
-  -> WorkflowNode(product_context/reference_image/copy_generation/image_generation)
+InspirationWorkflow
+  -> WorkflowNode(inspiration_context/reference_image/copy_generation/image_generation)
   -> WorkflowEdge
   -> WorkflowRun
   -> WorkflowNodeRun
@@ -93,7 +93,7 @@ Canvas template chain:
 
 ```text
 CanvasTemplate(builtin full_canvas)
-  -> product creation or workflow template insertion
+  -> inspiration creation or workflow template insertion
 
 UserCanvasTemplate(node_group)
   -> reusable selected workflow nodes and internal edges
@@ -103,36 +103,36 @@ PostgreSQL is the source of truth for metadata and run state. Redis/Dramatiq is 
 
 Workflow node semantics for users:
 
-- `product_context`: product information entrypoint for one product workflow.
-- `reference_image`: a single current reference image slot; manual upload or upstream image generation replaces the current image, while old assets remain in product history/assets.
+- `inspiration_context`: inspiration information entrypoint for one inspiration workflow.
+- `reference_image`: a single current reference image slot; manual upload or upstream image generation replaces the current image, while old assets remain in inspiration history/assets.
 - `copy_generation`: copy generation and editable structured copy. Later image generation reads structured copy context directly.
 - `image_generation`: image-generation trigger/configuration node; image artifacts are written into downstream reference image nodes instead of being displayed on the image-generation node itself.
 
 Canvas template boundaries:
 
-- Built-in `full_canvas` scenario templates can initialize a complete workflow during product creation and can also be
-  inserted into an existing product workbench.
-- When a built-in scenario template is inserted into an existing workbench, the template `product_context` node is mapped
-  to the active workflow's existing product node instead of creating a second product node.
-- User node-group templates are saved from selected nodes and persist only reusable configuration plus internal edges between selected nodes; they do not store product details, generated images, or copy outputs.
+- Built-in `full_canvas` scenario templates can initialize a complete workflow during inspiration creation and can also be
+  inserted into an existing inspiration workbench.
+- When a built-in scenario template is inserted into an existing workbench, the template `inspiration_context` node is mapped
+  to the active workflow's existing inspiration node instead of creating a second inspiration node.
+- User node-group templates are saved from selected nodes and persist only reusable configuration plus internal edges between selected nodes; they do not store inspiration details, generated images, or copy outputs.
 
 ## 5. Async Jobs and Recovery
 
 There are currently two background execution entrypoints:
 
-1. `WorkflowRun`: used for product DAG workflow execution.
+1. `WorkflowRun`: used for inspiration DAG workflow execution.
 2. `ImageSessionGenerationTask`: used for iterative image generation.
 
 Shared principles:
 
 - Database records are persisted first; Redis messages are only recoverable dispatch attempts.
-- Database constraints prevent duplicate active workflow runs for the same product.
+- Database constraints prevent duplicate active workflow runs for the same inspiration.
 - If enqueue fails, the newly created run/task is marked failed to avoid stuck active state.
 - API startup recovers queued unfinished tasks/workflows.
 - Worker startup can reset stale running state and re-dispatch work.
 - Workflow runs and iterative image-generation tasks serialize `is_retryable` / `is_cancelable`, and the frontend uses those flags to show retry and cancel actions.
 - Image-generation failures are classified into user-readable categories covering provider quota/rate limit, content policy, network interruption, request timeout, provider service errors, and unsupported parameters.
-- Iterative image generation no longer treats a user-configurable hard total timeout as product semantics. Running tasks persist `progress_updated_at`, completed candidate count, current candidate, and provider response state; stale-running recovery uses the latest progress heartbeat for idle detection and only falls back to `started_at` for older rows.
+- Iterative image generation no longer treats a user-configurable hard total timeout as inspiration semantics. Running tasks persist `progress_updated_at`, completed candidate count, current candidate, and provider response state; stale-running recovery uses the latest progress heartbeat for idle detection and only falls back to `started_at` for older rows.
 - The iterative image worker's Dramatiq `time_limit` remains only as an internal failsafe, not as a user-tunable generation deadline.
 - Dramatiq actors should no-op on duplicate messages for terminal/currently-running records.
 - The global generation concurrency limit is enforced by counting active `WorkflowRun` and `ImageSessionGenerationTask` rows in the database.
@@ -140,18 +140,18 @@ Shared principles:
 
 Related entrypoints:
 
-- `productflow_backend.infrastructure.queue.recover_unfinished_workflow_runs`
-- `productflow_backend.infrastructure.queue.recover_unfinished_image_session_generation_tasks`
-- `productflow_backend.workers`
+- `inspiration_one_backend.infrastructure.queue.recover_unfinished_workflow_runs`
+- `inspiration_one_backend.infrastructure.queue.recover_unfinished_image_session_generation_tasks`
+- `inspiration_one_backend.workers`
 
 ## 6. Provider Architecture
 
-ProductFlow separates model capabilities by modality.
+Inspiration One separates model capabilities by modality.
 
 Text providers live under `infrastructure/text/` with a unified interface:
 
-- `generate_brief(product_input)`
-- `generate_copy(product_input, brief, config, reference_images=None)`
+- `generate_brief(inspiration_input)`
+- `generate_copy(inspiration_input, brief, config, reference_images=None)`
 
 Current implementations:
 
@@ -162,8 +162,8 @@ Image providers live under `infrastructure/image/` and serve poster generation a
 
 - `mock`
 - `openai_responses` (Responses API `image_generation` tool, supporting `input_image`; iterative image generation prefers background response + retrieve polling and writes provider status into task progress)
-- `openai_images` (Images API `images.generate` / `images.edit` compatible interface; it does not use Responses `previous_response_id`, and ProductFlow explicitly sends the selected base image plus references for iterative image sessions)
-- `google_gemini_image` (Google Gemini native `generateContent` image API through the official `google-genai` SDK; ProductFlow explicitly sends the selected base image plus references for iterative image sessions)
+- `openai_images` (Images API `images.generate` / `images.edit` compatible interface; it does not use Responses `previous_response_id`, and Inspiration One explicitly sends the selected base image plus references for iterative image sessions)
+- `google_gemini_image` (Google Gemini native `generateContent` image API through the official `google-genai` SDK; Inspiration One explicitly sends the selected base image plus references for iterative image sessions)
 
 Provider selection is controlled by `provider_profiles`, `provider_bindings`, and corresponding factories. Legacy
 `TEXT_*` / `IMAGE_*` environment values are only first-migration input; runtime resolvers read interface kind,
@@ -174,7 +174,7 @@ connection data, and models from provider profiles and purpose bindings. Routes 
 Posters have two modes:
 
 - `template`: render with local Pillow templates, suitable for development/testing without image model keys.
-- `generated`: package confirmed copy, product images, and reference images as image-provider input and generate the result with a remote model.
+- `generated`: package confirmed copy, inspiration images, and reference images as image-provider input and generate the result with a remote model.
 
 Both modes target two artifact types:
 
@@ -192,15 +192,15 @@ Secret configuration values are not echoed back in API responses.
 
 The login-gate setting `admin_access_required` is retained as runtime configuration. Current access control is account login plus RBAC permissions. Settings reads, settings writes, status reads, resource governance, and RBAC management are bound to their matching backend API permissions.
 
-The business deletion switch `deletion_enabled` is disabled by default. When disabled, the backend rejects whole-product deletion and whole iterative image-session deletion at the route boundary, so demo sites do not lose evidence after problematic content is deleted. Workflow node/edge editing and reference-image deletion are not affected. `DELETE /api/auth/session` and restoring database overrides from the settings page are not part of business deletion protection.
+The business deletion switch `deletion_enabled` is disabled by default. When disabled, the backend rejects whole-inspiration deletion and whole iterative image-session deletion at the route boundary, so demo sites do not lose evidence after problematic content is deleted. Workflow node/edge editing and reference-image deletion are not affected. `DELETE /api/auth/session` and restoring database overrides from the settings page are not part of business deletion protection.
 
-Prompt template overrides cover product understanding, copy generation, workbench image generation, and iterative image generation. Infrastructure configuration and secret reading stay behind backend boundaries; the frontend only displays configuration items, sources, and save state.
+Prompt template overrides cover inspiration understanding, copy generation, workbench image generation, and iterative image generation. Infrastructure configuration and secret reading stay behind backend boundaries; the frontend only displays configuration items, sources, and save state.
 
 ## 9. File Storage and Downloads
 
 Files are managed by `StorageService` in `infrastructure/storage.py`; `LocalStorage` remains as a compatibility alias. With `STORAGE_BACKEND=local`, objects are written under `STORAGE_ROOT`. With `STORAGE_BACKEND=minio` or `STORAGE_BACKEND=s3`, objects are written through the S3-compatible backend and cached under `STORAGE_ROOT` for downloads and image variants. `STORAGE_HOST_PATH` only controls the host bind-mount source and should not be passed into application logic as a replacement for `STORAGE_ROOT`.
 
-Image resource tables do not store full access URLs. They store object identity fields: `storage_backend`, `storage_bucket`, and `storage_object_key`. The legacy `storage_path` field remains for compatibility; reads prefer `storage_object_key` and fall back to `storage_path` when the new key is absent. Product lists, galleries, and image sessions receive MinIO/S3 URLs generated by the API from the current storage configuration; local storage or missing public access config falls back to backend download routes.
+Image resource tables do not store full access URLs. They store object identity fields: `storage_backend`, `storage_bucket`, and `storage_object_key`. The legacy `storage_path` field remains for compatibility; reads prefer `storage_object_key` and fall back to `storage_path` when the new key is absent. Inspiration lists, galleries, and image sessions receive MinIO/S3 URLs generated by the API from the current storage configuration; local storage or missing public access config falls back to backend download routes.
 
 User-downloadable files are read through controlled routes, for example:
 

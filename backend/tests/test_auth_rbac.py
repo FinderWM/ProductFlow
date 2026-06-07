@@ -6,8 +6,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login
 
-from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, AuthUser
-from productflow_backend.infrastructure.db.session import get_session_factory
+from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, AuthUser
+from inspiration_one_backend.infrastructure.db.session import get_session_factory
 
 
 def _password_md5(value: str) -> str:
@@ -22,7 +22,7 @@ def _set_password(client: TestClient, *, username: str, password: str, setup_tok
 
 
 def test_admin_can_seed_password_and_receives_all_menus(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -40,7 +40,7 @@ def test_admin_can_seed_password_and_receives_all_menus(configured_env: Path) ->
 
 
 def test_legacy_password_hash_is_upgraded_after_plain_password_login(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -76,7 +76,7 @@ def test_legacy_password_hash_is_upgraded_after_plain_password_login(configured_
 
 
 def test_legacy_password_hash_is_not_upgraded_after_client_md5_login(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -126,7 +126,7 @@ def test_legacy_password_hash_is_not_upgraded_after_client_md5_login(configured_
 
 
 def test_password_setup_requires_one_time_token(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -159,7 +159,7 @@ def test_password_setup_requires_one_time_token(configured_env: Path) -> None:
 
 
 def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -204,8 +204,10 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     assert "settings:migrate" not in payload["api_permissions"]
     assert "rbac:manage" not in payload["api_permissions"]
 
-    products = user_client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
-    assert products.status_code == 200
+    inspirations = user_client.get(
+        "/api/inspirations", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID}
+    )
+    assert inspirations.status_code == 200
 
     status_page_data = user_client.get("/api/settings/generation-config-status")
     assert status_page_data.status_code == 200
@@ -234,7 +236,7 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
 
 
 def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -307,7 +309,7 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
 
 
 def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -354,7 +356,7 @@ def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Pa
 
 
 def test_runtime_and_generation_option_apis_require_matching_rbac_permission(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -402,7 +404,7 @@ def test_runtime_and_generation_option_apis_require_matching_rbac_permission(con
 
 
 def test_role_permission_save_auto_adds_settings_menu_and_read_permission(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -429,7 +431,7 @@ def test_role_permission_save_auto_adds_settings_menu_and_read_permission(config
 
 
 def test_global_template_permission_lives_under_settings_menu(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -457,7 +459,7 @@ def test_global_template_permission_lives_under_settings_menu(configured_env: Pa
 
 
 def test_settings_provider_write_permission_is_separate_from_runtime_write(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -534,7 +536,7 @@ def test_settings_provider_write_permission_is_separate_from_runtime_write(confi
 
 
 def test_settings_migrate_permission_is_separate_from_provider_write_and_runtime_write(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -591,7 +593,7 @@ def test_settings_migrate_permission_is_separate_from_provider_write_and_runtime
 
 
 def test_admin_can_reset_regular_user_password_to_pending(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -605,12 +607,15 @@ def test_admin_can_reset_regular_user_password_to_pending(configured_env: Path) 
     user_id = created_user.json()["id"]
 
     user_client = TestClient(app)
-    assert _set_password(
-        user_client,
-        username="bob",
-        password="bob-password",
-        setup_token=created_user.json()["password_setup_token"],
-    ).status_code == 200
+    assert (
+        _set_password(
+            user_client,
+            username="bob",
+            password="bob-password",
+            setup_token=created_user.json()["password_setup_token"],
+        ).status_code
+        == 200
+    )
 
     reset = admin_client.post(f"/api/rbac/users/{user_id}/reset-password")
     assert reset.status_code == 200
@@ -625,7 +630,7 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
     configured_env: Path,
     monkeypatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     _execute_workflow_queue_inline(monkeypatch)
     app = create_app()
@@ -665,19 +670,19 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
     )
     assert set_password.status_code == 200
 
-    created_product = user_client.post(
-        "/api/products",
+    created_inspiration = user_client.post(
+        "/api/inspirations",
         data={
-            "name": "Tail RBAC 商品",
+            "name": "Tail RBAC 灵感产物",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "tail",
             "entry_text": "免安装、收纳整洁、细节材质、不同场景摆放。",
         },
     )
-    assert created_product.status_code == 201
-    product_id = created_product.json()["id"]
+    assert created_inspiration.status_code == 201
+    inspiration_id = created_inspiration.json()["id"]
 
-    workflow = user_client.get(f"/api/products/{product_id}/workflow")
+    workflow = user_client.get(f"/api/inspirations/{inspiration_id}/workflow")
     assert workflow.status_code == 200
     tail_node = next(node for node in workflow.json()["nodes"] if node["node_type"] == "tail_splitter")
     tail_node_id = tail_node["id"]
@@ -696,7 +701,7 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
     assert "拆分计划" in apply_with_write_permission.json()["detail"]
 
     run_without_generate_permission = user_client.post(
-        f"/api/products/{product_id}/workflow/run",
+        f"/api/inspirations/{inspiration_id}/workflow/run",
         json={"start_node_id": tail_node_id},
     )
     assert run_without_generate_permission.status_code == 403
@@ -712,7 +717,7 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
     assert updated_permissions.status_code == 200
 
     run_with_generate_permission = user_client.post(
-        f"/api/products/{product_id}/workflow/run",
+        f"/api/inspirations/{inspiration_id}/workflow/run",
         json={"start_node_id": tail_node_id},
     )
     assert run_with_generate_permission.status_code == 200

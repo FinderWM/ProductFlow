@@ -29,8 +29,8 @@ Models inherit from `Base(DeclarativeBase)` in `infrastructure/db/models.py` and
 `mapped_column(...)`:
 
 ```python
-class Product(Base, TimestampMixin):
-    __tablename__ = "products"
+class Inspiration(Base, TimestampMixin):
+    __tablename__ = "inspirations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(255))
@@ -77,20 +77,20 @@ Use code/domain/API validation and tests for the supported value set.
 
 ### Relationships and delete behavior
 
-Relationship ID columns such as `product_id`, `workflow_id`, and `owner_user_id` are plain scalar columns. The database
+Relationship ID columns such as `inspiration_id`, `workflow_id`, and `owner_user_id` are plain scalar columns. The database
 keeps primary keys, nullability, ordinary indexes, unique indexes, and partial unique indexes, but it does not declare
 business foreign-key constraints.
 
 Relationships are defined on models and use explicit joins/cascades where application code needs ORM navigation. Examples:
 
-- `Product.source_assets`, `Product.creative_briefs`, `Product.copy_sets`, `Product.poster_variants`,
-  `Product.image_sessions`, and `Product.workflows` use `cascade="all, delete-orphan"` in
+- `Inspiration.source_assets`, `Inspiration.creative_briefs`, `Inspiration.copy_sets`, `Inspiration.poster_variants`,
+  `Inspiration.image_sessions`, and `Inspiration.workflows` use `cascade="all, delete-orphan"` in
   `infrastructure/db/models.py`.
 - Relationships that SQLAlchemy cannot infer must declare `primaryjoin` and `foreign_keys`, using `foreign(...)` to mark
   the child/reference column.
 - Owned-child deletion, optional-reference nulling, and required-reference existence checks are application contracts.
-  Implement them in use cases or ORM cascades where the product behavior depends on them.
-- Cycles such as `Product.current_confirmed_copy_set_id` keep ORM-level `post_update=True`; they must not use a database
+  Implement them in use cases or ORM cascades where the inspiration behavior depends on them.
+- Cycles such as `Inspiration.current_confirmed_copy_set_id` keep ORM-level `post_update=True`; they must not use a database
   foreign-key constraint to encode the relationship.
 
 ---
@@ -118,26 +118,26 @@ to the request dependency chain.
 Use `select(...)`, `session.scalar(...)`, and `session.scalars(...)`. When a response needs related data, define a query
 helper with `selectinload(...)` instead of relying on accidental lazy loading. Current examples:
 
-- `_product_query()` in `application/use_cases.py` loads source assets, briefs, copy sets, posters, and confirmed copy.
-- `_image_session_query()` in `application/image_sessions.py` loads assets, rounds, generated assets, and product source
+- `_inspiration_query()` in `application/use_cases.py` loads source assets, briefs, copy sets, posters, and confirmed copy.
+- `_image_session_query()` in `application/image_sessions.py` loads assets, rounds, generated assets, and inspiration source
   assets.
 
 ### Pagination and limits
 
-Product listing uses database-level pagination in `application/use_cases.py::list_products` with `offset`/`limit` and a
-separate count query. The route `presentation/routes/products.py::list_products_endpoint` constrains `page >= 1` and
+Inspiration listing uses database-level pagination in `application/use_cases.py::list_inspirations` with `offset`/`limit` and a
+separate count query. The route `presentation/routes/inspirations.py::list_inspirations_endpoint` constrains `page >= 1` and
 `1 <= page_size <= 100` using FastAPI `Query`.
 
-`list_products(status=...)` must also stay database-filtered before eager loading and pagination:
+`list_inspirations(status=...)` must also stay database-filtered before eager loading and pagination:
 
 - `draft`: no confirmed copy set and no poster variants.
-- `copy_ready`: has `Product.current_confirmed_copy_set_id` and no poster variants.
+- `copy_ready`: has `Inspiration.current_confirmed_copy_set_id` and no poster variants.
 - `poster_ready`: has at least one poster variant.
-- `failed`: currently has no persisted product-level source of truth and should return no rows until a real state owner is
+- `failed`: currently has no persisted inspiration-level source of truth and should return no rows until a real state owner is
   introduced.
 
-Keep the response shape unchanged. If product state semantics change, update both `derive_product_state(...)` and the SQL
-status filter together, then add a query behavior test. Do not reintroduce full-table product loads for list pages.
+Keep the response shape unchanged. If inspiration state semantics change, update both `derive_inspiration_state(...)` and the SQL
+status filter together, then add a query behavior test. Do not reintroduce full-table inspiration loads for list pages.
 
 ### Runtime settings registry
 
@@ -157,7 +157,7 @@ For runtime settings:
   database table.
 - Prompt runtime setting labels, descriptions, and default prompt constants should stay domain-neutral. Use terms such as
   project/content material, context, subject, visual content, and structured copy instead of ecommerce-only labels such as
-  Taobao, product detail page, main image copy, or selling points unless the setting is explicitly limited to that flow.
+  Taobao, inspiration detail page, main image copy, or selling points unless the setting is explicitly limited to that flow.
 
 ## Scenario: Provider profile and generation config pool
 
@@ -279,7 +279,7 @@ For runtime settings:
 - Manual scheduling targets the supplied config id but still respects enabled state, profile availability, freeze state,
   and max concurrency. Capacity/freeze exhaustion returns `None` to keep durable tasks queued.
 - Only real provider execution outcomes update `generation_config_daily_stats` and failure windows. Queue wait,
-  validation errors, user cancellation, and missing product/workflow references must not count as provider failures.
+  validation errors, user cancellation, and missing inspiration/workflow references must not count as provider failures.
 - Daily stats use the running machine's local calendar date. Do not add a separate env-only timezone setting for stats.
 - SQLite tests can read `DateTime(timezone=True)` columns back as naive datetimes; scheduler comparisons must normalize
   stored datetimes to aware UTC before comparing with `datetime.now(UTC)`.
@@ -413,7 +413,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 
 - Trigger: changing provider profile/generation config settings, generation scheduling, account grants, workflow
   generation requests, image-session generation requests, generated-result serializers, settings import/export, or gallery
-  and product history filters.
+  and inspiration history filters.
 - This is a cross-layer contract because `generation_resource_groups`, `generation_configs.resource_group_id`, account
   grants, durable generation rows, API schemas, and frontend selectors must all agree on the selected group.
 
@@ -472,7 +472,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   the selected group stays recorded on the task/run.
 - `default` group archive or disable attempt -> settings API returns `400`.
 - Imported generation config references a missing group id -> import preview/commit returns `400`.
-- Filtering product history or gallery by `default` includes legacy null-group rows; filtering by another group matches
+- Filtering inspiration history or gallery by `default` includes legacy null-group rows; filtering by another group matches
   only that exact group id.
 
 ### 5. Good/Base/Bad Cases
@@ -494,7 +494,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - RBAC tests cover admin all-groups behavior and account-level grant replacement for non-admin users.
 - Scheduler tests cover purpose plus group filtering for automatic claims and manual config compatibility.
 - Workflow and image-session tests cover missing, unauthorized, disabled, archived, and valid group selection.
-- Serializer/filter tests cover product history, workflow status/detail, image-session detail/status, and gallery group
+- Serializer/filter tests cover inspiration history, workflow status/detail, image-session detail/status, and gallery group
   tags, including default-filter legacy null rows.
 - Frontend gates must run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` after DTO/selector
   changes.
@@ -614,7 +614,7 @@ def get_runtime_config_endpoint():
 
 ### 1. Scope / Trigger
 
-- Trigger: changing runtime settings, `/api/settings/runtime`, product deletion, or image-session deletion.
+- Trigger: changing runtime settings, `/api/settings/runtime`, inspiration deletion, or image-session deletion.
 - This is a cross-layer contract because `Settings`, config serialization, route dependencies, frontend DTOs, and UI delete
   buttons must agree on the same field and scope.
 
@@ -626,7 +626,7 @@ def get_runtime_config_endpoint():
   `image_generation_max_dimension`.
 - Guard helper: `presentation.deps.require_deletion_enabled() -> None`.
 - Soft-delete columns:
-  - `products.deleted_at`, `products.deleted_by_user_id`
+  - `inspirations.deleted_at`, `inspirations.deleted_by_user_id`
   - `image_sessions.deleted_at`, `image_sessions.deleted_by_user_id`
 
 ### 3. Contracts
@@ -634,11 +634,11 @@ def get_runtime_config_endpoint():
 - Default behavior is evidence-preserving: `deletion_enabled` is `False` unless explicitly set through env/defaults or
   `app_settings`.
 - The guard applies only to high-risk whole-record deletion routes:
-  - `DELETE /api/products/{product_id}`
+  - `DELETE /api/inspirations/{inspiration_id}`
   - `DELETE /api/image-sessions/{image_session_id}`
 - When the guard allows deletion, these routes perform logical deletion only: set `deleted_at` and
   `deleted_by_user_id`, keep database rows, child rows, and storage files.
-- Ordinary users cannot list or read their own soft-deleted products/sessions; they receive the same not-found behavior as
+- Ordinary users cannot list or read their own soft-deleted inspirations/sessions; they receive the same not-found behavior as
   for missing rows. Admin users may list and read soft-deleted rows for traceability.
 - The guard must not apply to workflow editing or reference-image cleanup:
   - `DELETE /api/workflow-edges/{edge_id}`
@@ -649,27 +649,27 @@ def get_runtime_config_endpoint():
 
 ### 4. Validation & Error Matrix
 
-- `deletion_enabled == False` and product delete -> `403`, `{"detail": "删除功能已关闭，请联系管理员"}`.
+- `deletion_enabled == False` and inspiration delete -> `403`, `{"detail": "删除功能已关闭，请联系管理员"}`.
 - `deletion_enabled == False` and image-session delete -> `403`, same detail.
-- `deletion_enabled == True` and product/session delete -> `204` plus soft-delete metadata update; storage files remain.
-- Ordinary user lists or reads a soft-deleted product/session -> omitted from list or `404`.
-- Admin lists or reads a soft-deleted product/session -> `200` with the same owner attribution as active rows.
+- `deletion_enabled == True` and inspiration/session delete -> `204` plus soft-delete metadata update; storage files remain.
+- Ordinary user lists or reads a soft-deleted inspiration/session -> omitted from list or `404`.
+- Admin lists or reads a soft-deleted inspiration/session -> `200` with the same owner attribution as active rows.
 - Reference-image deletion and workflow node/edge deletion -> original behavior regardless of `deletion_enabled`.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: public demo keeps generated content traceable by disabling whole product and whole image-session deletion.
-- Base: admin temporarily enables deletion from settings, soft-deletes a whole product/session, then disables it again.
-- Base: admins can inspect soft-deleted product/session rows and retained files when investigating abuse or audit history.
+- Good: public demo keeps generated content traceable by disabling whole inspiration and whole image-session deletion.
+- Base: admin temporarily enables deletion from settings, soft-deletes a whole inspiration/session, then disables it again.
+- Base: admins can inspect soft-deleted inspiration/session rows and retained files when investigating abuse or audit history.
 - Bad: blocking workflow node/edge deletion; this breaks normal workbench editing and is outside the traceability goal.
 - Bad: blocking reference-image deletion; image-library cleanup is not the high-risk traceability gap this toggle targets.
-- Bad: deleting product/session rows or storage trees from the whole-record delete endpoints.
+- Bad: deleting inspiration/session rows or storage trees from the whole-record delete endpoints.
 
 ### 6. Tests Required
 
-- Route test for default-disabled product delete preserving database row and storage files.
+- Route test for default-disabled inspiration delete preserving database row and storage files.
 - Route test for default-disabled image-session delete preserving database row and storage files.
-- Enabled product/session delete tests must assert soft-delete metadata is set, ordinary user lists hide the row, admin
+- Enabled inspiration/session delete tests must assert soft-delete metadata is set, ordinary user lists hide the row, admin
   lists can still see it, and storage files remain.
 - Existing workflow node/edge and reference-image delete tests must continue to pass without enabling deletion.
 - Runtime config test must assert `deletion_enabled` appears in `/api/settings/runtime` and settings persistence.
@@ -687,8 +687,8 @@ def delete_workflow_node_endpoint(...):
 Correct:
 
 ```python
-@router.delete("/products/{product_id}", dependencies=[Depends(require_deletion_enabled)])
-def delete_product_endpoint(...):
+@router.delete("/inspirations/{inspiration_id}", dependencies=[Depends(require_deletion_enabled)])
+def delete_inspiration_endpoint(...):
     ...
 ```
 
@@ -717,7 +717,7 @@ def delete_product_endpoint(...):
 
 ### 3. Contracts
 
-- `generation_count` is the MVP batch size and must stay in `1..4` unless product requirements explicitly expand it.
+- `generation_count` is the MVP batch size and must stay in `1..4` unless inspiration requirements explicitly expand it.
 - One generation request may include at most 6 image context inputs total: the explicit `base_asset_id` counts as one,
   and each `selected_reference_asset_ids` item counts as one. Reject over-limit requests instead of silently truncating
   selected references.
@@ -733,7 +733,7 @@ def delete_product_endpoint(...):
   that participate in the next provider request.
 - Card branching must not blindly pass `previous_response_id` or assemble all later history images. Provider context for
   branching is explicit: selected base image first, then selected references, plus the current prompt/size.
-- Product-scoped continuous sessions may still save results back to the product, but product main/reference images are not
+- Inspiration-scoped continuous sessions may still save results back to the inspiration, but inspiration main/reference images are not
   implicit generation context for card branching.
 
 ### 4. Validation & Error Matrix
@@ -822,7 +822,7 @@ round.generated_asset_id = asset.id
   all `rounds`, and `generation_tasks`.
 - Lightweight status API: `GET /api/image-sessions/{image_session_id}/status` returns `ImageSessionStatusResponse`.
 - Status response fields:
-  - `id`, `product_id`, `title`, `created_at`, `updated_at`.
+  - `id`, `inspiration_id`, `title`, `created_at`, `updated_at`.
   - `rounds_count`, `latest_round_id`, `latest_generation_group_id`.
   - `has_active_generation_task`.
   - `generation_tasks` using the same task DTO fields as detail, including queue metadata, failure reason, tool options,
@@ -855,7 +855,7 @@ round.generated_asset_id = asset.id
 - Base: a queued task keeps visible prompt, queue position, generation count, and duplicate-submit disabling without
   loading all historical rounds.
 - Bad: adding `assets` or serialized `rounds` to `ImageSessionStatusResponse`; that recreates the original heavy polling.
-- Bad: using status polling for ProductDetail workflow runs in this scenario; workflow status needs its own contract.
+- Bad: using status polling for InspirationDetail workflow runs in this scenario; workflow status needs its own contract.
 
 ### 6. Tests Required
 
@@ -898,7 +898,7 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 
 - Trigger: changing gallery persistence, gallery API response fields, or continuous image-session "save to gallery"
   behavior.
-- Gallery is a global display surface over generated image-session assets. It is not a product library replacement and not
+- Gallery is a global display surface over generated image-session assets. It is not a inspiration library replacement and not
   a file-copying workflow.
 
 ### 2. Signatures
@@ -915,10 +915,10 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 - `image_session_round_id` references the round that generated the asset and must be nulled or rejected by application
   code if a cleanup path removes the referenced round.
 - Gallery entries reference existing generated files through `/api/image-session-assets/{asset_id}/download` URLs; they
-  must not duplicate image bytes into product storage or a gallery-specific storage tree.
+  must not duplicate image bytes into inspiration storage or a gallery-specific storage tree.
 - Repeated saves for the same generated asset are idempotent and return the existing gallery entry.
 - Response metadata should include prompt, requested size, actual size, provider/model, candidate metadata, session ID/title,
-  product ID/name when available, and `created_at`.
+  inspiration ID/name when available, and `created_at`.
 
 ### 4. Validation & Error Matrix
 
@@ -930,14 +930,14 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 ### 5. Good/Base/Bad Cases
 
 - Good: a continuous image candidate can be saved once, then repeated clicks keep one gallery row.
-- Base: product-scoped and standalone image sessions both appear in the same global gallery list.
-- Bad: copying generated image bytes into `source_assets` or product storage when the user only chose "save to gallery".
-- Bad: adding product-level grouping, bulk management, tags, or search inside this global display-only gallery task.
+- Base: inspiration-scoped and standalone image sessions both appear in the same global gallery list.
+- Bad: copying generated image bytes into `source_assets` or inspiration storage when the user only chose "save to gallery".
+- Bad: adding inspiration-level grouping, bulk management, tags, or search inside this global display-only gallery task.
 
 ### 6. Tests Required
 
 - Backend route test saves a generated image and verifies prompt, image URLs, size/actual size, provider/model, candidate,
-  session, product, and creation metadata.
+  session, inspiration, and creation metadata.
 - Backend route test repeats the same save and asserts one database row.
 - Backend route test rejects reference-upload assets.
 - Migration test path must keep Alembic upgrade-to-head green on SQLite and PostgreSQL-compatible schema definitions.
@@ -947,10 +947,10 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 #### Wrong
 
 ```python
-storage.save_reference_upload(product.id, asset.original_filename, image_bytes)
+storage.save_reference_upload(inspiration.id, asset.original_filename, image_bytes)
 ```
 
-This writes to the product library and changes product state.
+This writes to the inspiration library and changes inspiration state.
 
 #### Correct
 
@@ -1409,14 +1409,14 @@ migration file.
 ### 1. Scope / Trigger
 
 - Trigger: changing auth/RBAC resource isolation, owner filters, admin resource visibility, or migrations for user-owned
-  product/image/gallery rows.
-- Applies to `products`, `image_sessions`, `image_session_assets`, `image_gallery_entries`, route dependencies, response
+  inspiration/image/gallery rows.
+- Applies to `inspirations`, `image_sessions`, `image_session_assets`, `image_gallery_entries`, route dependencies, response
   serializers, and ownership tests.
 
 ### 2. Signatures
 
 - DB columns:
-  - `products.owner_user_id -> auth_users.id`
+  - `inspirations.owner_user_id -> auth_users.id`
   - `image_sessions.owner_user_id -> auth_users.id`
   - `image_session_assets.owner_user_id -> auth_users.id`
   - `image_gallery_entries.owner_user_id -> auth_users.id`
@@ -1429,8 +1429,8 @@ migration file.
 
 ### 3. Contracts
 
-- New products and standalone image sessions are owned by the current authenticated user.
-- Product-scoped image sessions must use the same owner as the product.
+- New inspirations and standalone image sessions are owned by the current authenticated user.
+- Inspiration-scoped image sessions must use the same owner as the inspiration.
 - Image-session assets inherit `ImageSession.owner_user_id`; gallery entries inherit the generated asset owner.
 - Historical data migrates to the seeded `libow` admin id.
 - Admin users can read all owned resources, but content mutations for resources owned by another user must fail.
@@ -1438,9 +1438,9 @@ migration file.
 
 ### 4. Validation & Error Matrix
 
-- Ordinary user lists products/sessions -> only rows where `owner_user_id == current_user.id`.
-- Ordinary user reads/downloads another user's product, session, source asset, or session asset -> `404`.
-- Admin reads another user's product/session/gallery entry -> `200` with `owner_username`.
+- Ordinary user lists inspirations/sessions -> only rows where `owner_user_id == current_user.id`.
+- Ordinary user reads/downloads another user's inspiration, session, source asset, or session asset -> `404`.
+- Admin reads another user's inspiration/session/gallery entry -> `200` with `owner_username`.
 - Admin edits/deletes/generates/saves/writes back another user's resource -> `400`, `管理员不能直接编辑其他用户资源`.
 - Saving a gallery entry for an asset not owned by the actor -> `404` for ordinary users, `400` for admin cross-owner edits.
 
@@ -1455,10 +1455,10 @@ migration file.
 
 ### 6. Tests Required
 
-- API regression: ordinary user cannot list/read/download another user's product or image-session asset.
+- API regression: ordinary user cannot list/read/download another user's inspiration or image-session asset.
 - API regression: admin can list/read all resources and sees `owner_username`.
 - API regression: admin cannot content-edit, delete, generate, save gallery, or write back another user's resource.
-- Migration regression: Alembic head assigns existing product/image/gallery rows to `libow`.
+- Migration regression: Alembic head assigns existing inspiration/image/gallery rows to `libow`.
 - Frontend gate: when owner fields are added to DTOs, run `just web-build`.
 
 ### 7. Wrong vs Correct
@@ -1466,15 +1466,15 @@ migration file.
 Wrong:
 
 ```python
-product = session.get(Product, product_id)
+inspiration = session.get(Inspiration, inspiration_id)
 ```
 
 Correct:
 
 ```python
-product = get_product_detail(
+inspiration = get_inspiration_detail(
     session,
-    product_id,
+    inspiration_id,
     actor_user_id=current_user.id,
     actor_is_admin=current_user.is_admin,
 )
@@ -1483,7 +1483,7 @@ product = get_product_detail(
 Wrong:
 
 ```python
-with op.batch_alter_table("products") as batch_op:
+with op.batch_alter_table("inspirations") as batch_op:
     batch_op.add_column(sa.Column("owner_user_id", sa.String(36), nullable=False, server_default=ADMIN_USER_ID))
     batch_op.alter_column("owner_user_id", server_default=None)
 ```
@@ -1491,10 +1491,10 @@ with op.batch_alter_table("products") as batch_op:
 Correct:
 
 ```python
-with op.batch_alter_table("products") as batch_op:
+with op.batch_alter_table("inspirations") as batch_op:
     batch_op.add_column(sa.Column("owner_user_id", sa.String(36), nullable=False, server_default=ADMIN_USER_ID))
 
-with op.batch_alter_table("products") as batch_op:
+with op.batch_alter_table("inspirations") as batch_op:
     batch_op.alter_column("owner_user_id", existing_type=sa.String(36), nullable=False, server_default=None)
 ```
 
@@ -1505,8 +1505,8 @@ with op.batch_alter_table("products") as batch_op:
 ### 1. Scope / Trigger
 
 - Trigger: changing admin resource governance, disabled/enabled columns, effective availability checks, or serializers for
-  user-generated product/image/gallery resources.
-- Applies to `products`, `source_assets`, `poster_variants`, `image_sessions`, `image_session_assets`,
+  user-generated inspiration/image/gallery resources.
+- Applies to `inspirations`, `source_assets`, `poster_variants`, `image_sessions`, `image_session_assets`,
   `image_gallery_entries`, moderation APIs, download/use actions, and API DTOs.
 
 ### 2. Signatures
@@ -1521,17 +1521,17 @@ with op.batch_alter_table("products") as batch_op:
   - `POST /api/resources/{resource_type}/{resource_id}/restore`
   - `GET /api/resource-moderation/{resource_type}/{resource_id}`
   - `PATCH /api/resource-moderation/{resource_type}/{resource_id}`
-- Resource type values use backend model/resource names such as `product`, `source_asset`, `poster_variant`,
+- Resource type values use backend model/resource names such as `inspiration`, `source_asset`, `poster_variant`,
   `image_session`, `image_session_asset`, and `image_gallery_entry`.
 
 ### 3. Contracts
 
 - A resource can be visible to its owner while unavailable for continued use.
 - Effective availability cascades through parent resources:
-  - Source assets and poster variants follow their product.
-  - Image sessions follow their optional product.
-  - Image-session assets follow their session and product.
-  - Gallery entries follow their asset, session, and product.
+  - Source assets and poster variants follow their inspiration.
+  - Image sessions follow their optional inspiration.
+  - Image-session assets follow their session and inspiration.
+  - Gallery entries follow their asset, session, and inspiration.
 - Parent disablement must not bulk-update child rows. Runtime checks compute `effective_enabled` from the chain.
 - Download, generation, save-to-gallery, writeback, copy edits, workflow mutation, and image binding must check effective
   availability before using the resource.
@@ -1540,7 +1540,7 @@ with op.batch_alter_table("products") as batch_op:
 
 ### 4. Validation & Error Matrix
 
-- Owner reads a disabled product/session/gallery entry -> `200` with `enabled=false` and `effective_enabled=false`.
+- Owner reads a disabled inspiration/session/gallery entry -> `200` with `enabled=false` and `effective_enabled=false`.
 - Owner tries to download or continue using a disabled resource -> `400`, `资源已被管理员屏蔽，暂不可使用`.
 - Admin disables/restores a supported resource type -> `200` with moderation state.
 - Ordinary user calls moderation endpoints -> `403`, `需要管理员权限`.
@@ -1548,7 +1548,7 @@ with op.batch_alter_table("products") as batch_op:
 
 ### 5. Tests Required
 
-- API regression for product disable/restore, parent cascade to source asset, and blocked download/mutation.
+- API regression for inspiration disable/restore, parent cascade to source asset, and blocked download/mutation.
 - API regression for image-session asset disable, blocked gallery save, gallery-entry disable, owner visibility, and
   non-owner gallery hiding.
 - Migration/model regression proving moderation columns and indexes exist.
@@ -1561,7 +1561,7 @@ with op.batch_alter_table("products") as batch_op:
 - Trigger: changing canvas template storage, template category storage, built-in template seeding, personal template
   create/list/apply behavior, or global template management APIs.
 - Applies to `canvas_templates`, `canvas_template_categories`, the legacy compatibility table
-  `user_canvas_templates`, product creation template selection, workbench template panels, and moderation checks for
+  `user_canvas_templates`, inspiration creation template selection, workbench template panels, and moderation checks for
   template/category usage.
 
 ### 2. Signatures
@@ -1583,7 +1583,7 @@ with op.batch_alter_table("products") as batch_op:
   - `enabled`, `archived_at`, `disabled_at`, `disabled_by_user_id`, `disabled_reason`
   - `review_status: "none" | "pending" | "approved" | "rejected"`
   - `review_note`, `review_submitted_at`, `reviewed_at`, `reviewed_by_user_id`
-- DB table: `product_workflows`
+- DB table: `inspiration_workflows`
   - `initial_entry_mode: "image" | "copy" | "tail" | "blank"`
   - Records the workflow creation entry. This is not derived from current nodes, because a blank workflow can later add
     image/copy/tail nodes but still must not be saved as a personal full-canvas template.
@@ -1602,8 +1602,8 @@ with op.batch_alter_table("products") as batch_op:
   - `PATCH /api/workflow/user-template-categories/{category_id}`
   - `DELETE /api/workflow/user-template-categories/{category_id}`
   - `POST /api/workflow/user-template-categories/{category_id}/restore`
-  - `POST /api/products/{product_id}/workflow/user-template-groups`
-  - `POST /api/products/{product_id}/workflow/user-canvas-templates`
+  - `POST /api/inspirations/{inspiration_id}/workflow/user-template-groups`
+  - `POST /api/inspirations/{inspiration_id}/workflow/user-canvas-templates`
   - `PATCH /api/workflow/user-template-groups/{template_id}`
   - `POST /api/workflow/user-template-groups/{template_id}/review`
   - `DELETE /api/workflow/user-template-groups/{template_id}`
@@ -1626,7 +1626,7 @@ with op.batch_alter_table("products") as batch_op:
 - Built-in rows are seeded once by `key`; bootstrap must be idempotent and must not overwrite operator-managed database
   rows with the same key.
 - `canvas_templates.entry_mode` is a single entry type, not an array. Full-canvas templates may be selected only by a
-  matching product creation entry, except `initial_workflow_entry=blank`, which may initialize from any non-blank template.
+  matching inspiration creation entry, except `initial_workflow_entry=blank`, which may initialize from any non-blank template.
 - `GET /api/workflow/canvas-templates?initial_workflow_entry=image|copy|tail` returns templates with matching
   `entry_mode`. `initial_workflow_entry=blank` returns all non-blank template entry modes.
 - `canvas_templates.template_json` stores the existing `CanvasTemplate` payload contract for global templates and
@@ -1635,7 +1635,7 @@ with op.batch_alter_table("products") as batch_op:
 - `user_canvas_templates` is compatibility storage only. New personal template queries and application paths read
   `canvas_templates`; new personal template writes mirror a legacy row so old tests/tools that inspect the old table keep
   working during the migration window.
-- Saving a personal full-canvas template uses `product_workflows.initial_entry_mode` as the new template `entry_mode`.
+- Saving a personal full-canvas template uses `inspiration_workflows.initial_entry_mode` as the new template `entry_mode`.
   `initial_entry_mode="blank"` must fail even if the graph now contains non-blank nodes.
 - Saving a personal full-canvas template from a graph with no `tail_splitter` copies all current nodes and internal edges.
   If any `tail_splitter` exists, save only the tail node and its ancestors; downstream AI-expanded image branches are
@@ -1644,7 +1644,7 @@ with op.batch_alter_table("products") as batch_op:
   carriers. Copy/image prompt text is retained only when the caller sets `retain_prompt_text=true`; tail source text is
   always cleared.
 - Operational catalog reads (`/canvas-templates`) return only effectively enabled templates/categories visible to the
-  actor. This is the only query mode used for product creation and workbench initialization/application.
+  actor. This is the only query mode used for inspiration creation and workbench initialization/application.
 - Management reads (`/canvas-templates/manage`) return disabled and pending-review rows visible to the actor. Admin users
   can see all active global and personal templates/categories; ordinary users can see their own disabled personal
   templates with status and reason.
@@ -1677,8 +1677,8 @@ with op.batch_alter_table("products") as batch_op:
 - Template or category disabled -> use/create/apply path returns `400`, `资源已被管理员屏蔽，暂不可使用`.
 - Duplicate category name in the same uniqueness scope -> `400`, `画布模板分类已存在`.
 - Duplicate global template key -> `400`, `画布模板 key 已存在`.
-- Product creation with a non-blank entry and mismatched template entry -> `400`, `画布模板入口类型与开始方式不匹配`.
-- Product creation with unknown `initial_workflow_entry` -> `400`, `初始工作台入口不支持`.
+- Inspiration creation with a non-blank entry and mismatched template entry -> `400`, `画布模板入口类型与开始方式不匹配`.
+- Inspiration creation with unknown `initial_workflow_entry` -> `400`, `初始工作台入口不支持`.
 - Saving a personal full-canvas template from a blank-entry workflow -> `400`, `空白入口画布不能保存为模板`.
 - Copying a personal template to global without a global category -> `400`, `画布模板分类不存在`.
 
@@ -1700,7 +1700,7 @@ with op.batch_alter_table("products") as batch_op:
   source template `entry_mode`.
 - Good: an owner sees a disabled personal template in management view, submits an edit with a review note, and the admin
   can approve or keep it disabled from the management view.
-- Base: disabled global templates and disabled personal templates never appear in product creation/workbench operational
+- Base: disabled global templates and disabled personal templates never appear in inspiration creation/workbench operational
   catalog results.
 - Base: old `user_canvas_templates` rows are mirrored to user-scoped `canvas_templates` owned by `libow` during bootstrap.
 - Bad: calling `list_builtin_canvas_templates()` directly from route catalog handlers after database tables exist.
@@ -1728,7 +1728,7 @@ with op.batch_alter_table("products") as batch_op:
   `ix_canvas_templates_review_status` index exist.
 - API tests for owner edit-with-review-note, pending review visibility, admin approve, admin keep-disabled, and
   operational catalog hiding disabled/pending templates.
-- Migration/model test proving `product_workflows.initial_entry_mode`, `canvas_templates.entry_mode`, and
+- Migration/model test proving `inspiration_workflows.initial_entry_mode`, `canvas_templates.entry_mode`, and
   `canvas_templates.sort_order` exist with indexes and code-level validation coverage.
 - API tests for entry-mode template filtering, blank entry template initialization, mismatched entry rejection, blank
   workflow save rejection, tail-node ancestor-only save, artifact stripping, and user-template copy-to-global.
@@ -1933,7 +1933,7 @@ Expecting this to count a user failure is wrong; `record_result=False` intention
 - Integration test: full workflow run with tail resplit deletes prior generated batch nodes and preserves manual nodes.
 - Integration test: tail split apply still tracks batch metadata and rejects second apply of the same pending plan.
 - Regression suite: `tests/test_tail_splitter_workflow.py`, `tests/test_workflow_domain_rules.py`,
-  `tests/test_product_workflow_dag.py`, `tests/test_product_workflow_mutations.py`.
+  `tests/test_inspiration_workflow_dag.py`, `tests/test_inspiration_workflow_mutations.py`.
 - Ruff check for touched runtime/execution/provider files.
 
 ### 7. Wrong vs Correct
@@ -1968,10 +1968,10 @@ provider = dependencies.text_provider(runtime_claim.generation_config_id, sessio
 
 ## Naming Conventions
 
-- Table names are plural snake_case: `products`, `source_assets`, `workflow_runs`, `image_session_rounds`.
-- Relationship ID columns end with `_id`: `product_id`, `copy_set_id`, `generated_asset_id`.
+- Table names are plural snake_case: `inspirations`, `source_assets`, `workflow_runs`, `image_session_rounds`.
+- Relationship ID columns end with `_id`: `inspiration_id`, `copy_set_id`, `generated_asset_id`.
 - Unique partial indexes use descriptive names beginning with `uq_`, e.g.
-  `uq_workflow_node_runs_one_active_per_node` and `uq_source_assets_one_original_per_product`.
+  `uq_workflow_node_runs_one_active_per_node` and `uq_source_assets_one_original_per_inspiration`.
 - Do not add foreign-key constraint names; relationship semantics live in model joins, use cases, and tests.
 
 ---

@@ -1,24 +1,24 @@
-export type ProductWorkflowState = "draft" | "copy_ready" | "poster_ready" | "failed";
+export type InspirationWorkflowState = "draft" | "copy_ready" | "poster_ready" | "failed";
 export type CopyStatus = "draft" | "confirmed";
 export type PosterKind = "main_image" | "promo_poster";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type SourceAssetKind =
   | "original_image"
   | "reference_image"
-  | "processed_product_image"
+  | "processed_inspiration_image"
   | "context_image"
   | "context_document";
 export type ImageSessionAssetKind = "reference_upload" | "generated_image";
 export type GenerationConfigSelectionMode = "auto" | "manual";
 export type WorkflowNodeType =
-  | "product_context"
+  | "inspiration_context"
   | "reference_image"
   | "copy_generation"
   | "image_generation"
   | "tail_splitter";
 export type CanvasTemplateWorkflowNodeType = WorkflowNodeType;
-export type ProductInitialWorkflowEntry = "image" | "copy" | "tail" | "blank";
-export type CanvasTemplateEntryMode = Exclude<ProductInitialWorkflowEntry, "blank">;
+export type InspirationInitialWorkflowEntry = "image" | "copy" | "tail" | "blank";
+export type CanvasTemplateEntryMode = Exclude<InspirationInitialWorkflowEntry, "blank">;
 export type WorkflowNodeStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type WorkflowNodeRunStatusValue = WorkflowNodeStatus;
 export type WorkflowRunStatus = "running" | "waiting_confirmation" | "succeeded" | "failed" | "cancelled";
@@ -279,7 +279,7 @@ export interface CopySet {
 
 export interface PosterVariant extends ModerationFields {
   id: string;
-  product_id: string;
+  inspiration_id: string;
   copy_set_id: string;
   kind: PosterKind;
   template_name: string;
@@ -294,7 +294,7 @@ export interface PosterVariant extends ModerationFields {
   created_at: string;
 }
 
-export interface ProductSummary extends ModerationFields {
+export interface InspirationSummary extends ModerationFields {
   id: string;
   owner_user_id?: string;
   owner_username?: string | null;
@@ -303,14 +303,14 @@ export interface ProductSummary extends ModerationFields {
   name: string;
   category: string | null;
   price: string | null;
-  workflow_state: ProductWorkflowState;
+  workflow_state: InspirationWorkflowState;
   latest_copy_status: CopyStatus | null;
   latest_poster_at: string | null;
   source_image_filename: string | null;
   source_image_download_url: string | null;
   source_image_preview_url: string | null;
   source_image_thumbnail_url: string | null;
-  initial_workflow_entry: ProductInitialWorkflowEntry | null;
+  initial_workflow_entry: InspirationInitialWorkflowEntry | null;
   initial_entry_text: string | null;
   initial_entry_text_excerpt: string | null;
   latest_generated_image_download_url: string | null;
@@ -320,14 +320,14 @@ export interface ProductSummary extends ModerationFields {
   updated_at: string;
 }
 
-export interface ProductListResponse {
-  items: ProductSummary[];
+export interface InspirationListResponse {
+  items: InspirationSummary[];
   total: number;
   page: number;
   page_size: number;
 }
 
-export interface ProductDetail extends ModerationFields {
+export interface InspirationDetail extends ModerationFields {
   id: string;
   owner_user_id?: string;
   owner_username?: string | null;
@@ -337,7 +337,7 @@ export interface ProductDetail extends ModerationFields {
   category: string | null;
   price: string | null;
   source_note: string | null;
-  workflow_state: ProductWorkflowState;
+  workflow_state: InspirationWorkflowState;
   source_assets: SourceAsset[];
   latest_brief: CreativeBriefSummary | null;
   current_confirmed_copy_set: CopySet | null;
@@ -347,12 +347,12 @@ export interface ProductDetail extends ModerationFields {
   updated_at: string;
 }
 
-export interface ProductHistory {
+export interface InspirationHistory {
   copy_sets: CopySet[];
   poster_variants: PosterVariant[];
 }
 
-export interface CreateProductInput {
+export interface CreateInspirationInput {
   name: string;
   resource_group_id: string;
   category?: string;
@@ -361,7 +361,7 @@ export interface CreateProductInput {
   long_text?: string;
   dynamic_fields?: Record<string, string | number | boolean | null>;
   canvas_template_key?: string;
-  initial_workflow_entry?: ProductInitialWorkflowEntry;
+  initial_workflow_entry?: InspirationInitialWorkflowEntry;
   entry_text?: string;
   file?: File;
   contextDocumentFile?: File;
@@ -512,12 +512,12 @@ export interface WorkflowNodeStatusSummary {
   updated_at: string;
 }
 
-export interface ProductWorkflow {
+export interface InspirationWorkflow {
   id: string;
-  product_id: string;
+  inspiration_id: string;
   title: string;
   active: boolean;
-  initial_entry_mode?: ProductInitialWorkflowEntry;
+  initial_entry_mode?: InspirationInitialWorkflowEntry;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   runs: WorkflowRun[];
@@ -525,12 +525,12 @@ export interface ProductWorkflow {
   updated_at: string;
 }
 
-export interface ProductWorkflowStatus {
+export interface InspirationWorkflowStatus {
   id: string;
-  product_id: string;
+  inspiration_id: string;
   title: string;
   active: boolean;
-  initial_entry_mode?: ProductInitialWorkflowEntry;
+  initial_entry_mode?: InspirationInitialWorkflowEntry;
   has_active_workflow: boolean;
   nodes: WorkflowNodeStatusSummary[];
   runs: WorkflowRunStatusSummary[];
@@ -567,7 +567,7 @@ export interface CanvasTemplateSuggestedConnection {
 }
 
 export interface CanvasTemplateDefaultExternalConnection {
-  source: "existing_product_context";
+  source: "existing_inspiration_context";
   target_node_key: string;
   label: string;
 }
@@ -847,7 +847,7 @@ export interface ImageSessionSummary extends ModerationFields {
   id: string;
   owner_user_id?: string;
   owner_username?: string | null;
-  product_id: string | null;
+  inspiration_id: string | null;
   title: string;
   rounds_count: number;
   latest_generated_asset: ImageSessionAsset | null;
@@ -859,7 +859,7 @@ export interface ImageSessionDetail extends ModerationFields {
   id: string;
   owner_user_id?: string;
   owner_username?: string | null;
-  product_id: string | null;
+  inspiration_id: string | null;
   title: string;
   assets: ImageSessionAsset[];
   rounds: ImageSessionRound[];
@@ -872,7 +872,7 @@ export interface ImageSessionStatus extends ModerationFields {
   id: string;
   owner_user_id?: string;
   owner_username?: string | null;
-  product_id: string | null;
+  inspiration_id: string | null;
   title: string;
   rounds_count: number;
   latest_round_id: string | null;
@@ -887,8 +887,8 @@ export interface ImageSessionListResponse {
   items: ImageSessionSummary[];
 }
 
-export interface ProductWritebackResponse {
-  product_id: string;
+export interface InspirationWritebackResponse {
+  inspiration_id: string;
   message: string;
 }
 
@@ -900,8 +900,8 @@ export interface GalleryEntry extends ModerationFields {
   image_session_round_id: string | null;
   image_session_id: string;
   image_session_title: string;
-  product_id: string | null;
-  product_name: string | null;
+  inspiration_id: string | null;
+  inspiration_name: string | null;
   image: ImageSessionAsset;
   prompt: string | null;
   size: string | null;
@@ -1222,7 +1222,7 @@ export interface GenerationConfigUpdateRequest {
   cooldown_minutes?: number | null;
 }
 
-export interface TextGenerationConfigTestProductRequest {
+export interface TextGenerationConfigTestInspirationRequest {
   name: string;
   category?: string | null;
   price?: string | null;
@@ -1240,7 +1240,7 @@ export interface TextGenerationConfigTestCopyRequest {
 export interface TextGenerationConfigTestRequest {
   generation_config_id?: string | null;
   generation_config?: GenerationConfigCreateRequest | null;
-  product?: TextGenerationConfigTestProductRequest;
+  inspiration?: TextGenerationConfigTestInspirationRequest;
   copy_request?: TextGenerationConfigTestCopyRequest;
 }
 

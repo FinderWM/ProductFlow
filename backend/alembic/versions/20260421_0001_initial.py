@@ -14,7 +14,7 @@ depends_on = None
 source_asset_kind = postgresql.ENUM(
     "original_image",
     "reference_image",
-    "processed_product_image",
+    "processed_inspiration_image",
     name="sourceassetkind",
     create_type=False,
 )
@@ -33,7 +33,7 @@ def upgrade() -> None:
     poster_kind.create(bind, checkfirst=True)
 
     op.create_table(
-        "products",
+        "inspirations",
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("category", sa.String(length=120), nullable=True),
@@ -48,20 +48,20 @@ def upgrade() -> None:
     op.create_table(
         "creative_briefs",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("product_id", sa.String(length=36), nullable=False),
+        sa.Column("inspiration_id", sa.String(length=36), nullable=False),
         sa.Column("payload", sa.JSON(), nullable=False),
         sa.Column("provider_name", sa.String(length=50), nullable=False),
         sa.Column("model_name", sa.String(length=100), nullable=False),
         sa.Column("prompt_version", sa.String(length=32), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["product_id"], ["products.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["inspiration_id"], ["inspirations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 
     op.create_table(
         "copy_sets",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("product_id", sa.String(length=36), nullable=False),
+        sa.Column("inspiration_id", sa.String(length=36), nullable=False),
         sa.Column("creative_brief_id", sa.String(length=36), nullable=True),
         sa.Column("status", copy_status, nullable=False),
         sa.Column("title", sa.Text(), nullable=False),
@@ -80,14 +80,14 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["creative_brief_id"], ["creative_briefs.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["product_id"], ["products.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["inspiration_id"], ["inspirations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 
     if bind.dialect.name != "sqlite":
         op.create_foreign_key(
-            "fk_products_current_confirmed_copy_set_id",
-            "products",
+            "fk_inspirations_current_confirmed_copy_set_id",
+            "inspirations",
             "copy_sets",
             ["current_confirmed_copy_set_id"],
             ["id"],
@@ -97,20 +97,20 @@ def upgrade() -> None:
     op.create_table(
         "source_assets",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("product_id", sa.String(length=36), nullable=False),
+        sa.Column("inspiration_id", sa.String(length=36), nullable=False),
         sa.Column("kind", source_asset_kind, nullable=False),
         sa.Column("original_filename", sa.String(length=255), nullable=False),
         sa.Column("mime_type", sa.String(length=100), nullable=False),
         sa.Column("storage_path", sa.String(length=500), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["product_id"], ["products.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["inspiration_id"], ["inspirations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 
     op.create_table(
         "poster_variants",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("product_id", sa.String(length=36), nullable=False),
+        sa.Column("inspiration_id", sa.String(length=36), nullable=False),
         sa.Column("copy_set_id", sa.String(length=36), nullable=False),
         sa.Column("kind", poster_kind, nullable=False),
         sa.Column("template_name", sa.String(length=100), nullable=False),
@@ -120,14 +120,14 @@ def upgrade() -> None:
         sa.Column("height", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["copy_set_id"], ["copy_sets.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["product_id"], ["products.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["inspiration_id"], ["inspirations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 
     op.create_table(
         "job_runs",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("product_id", sa.String(length=36), nullable=False),
+        sa.Column("inspiration_id", sa.String(length=36), nullable=False),
         sa.Column("kind", job_kind, nullable=False),
         sa.Column("status", job_status, nullable=False),
         sa.Column("target_poster_kind", poster_kind, nullable=True),
@@ -141,7 +141,7 @@ def upgrade() -> None:
         sa.Column("is_retryable", sa.Boolean(), nullable=False),
         sa.ForeignKeyConstraint(["copy_set_id"], ["copy_sets.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["poster_variant_id"], ["poster_variants.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["product_id"], ["products.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["inspiration_id"], ["inspirations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 
@@ -152,10 +152,10 @@ def downgrade() -> None:
     op.drop_table("source_assets")
     bind = op.get_bind()
     if bind.dialect.name != "sqlite":
-        op.drop_constraint("fk_products_current_confirmed_copy_set_id", "products", type_="foreignkey")
+        op.drop_constraint("fk_inspirations_current_confirmed_copy_set_id", "inspirations", type_="foreignkey")
     op.drop_table("copy_sets")
     op.drop_table("creative_briefs")
-    op.drop_table("products")
+    op.drop_table("inspirations")
 
     poster_kind.drop(bind, checkfirst=True)
     copy_status.drop(bind, checkfirst=True)

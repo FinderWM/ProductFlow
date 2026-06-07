@@ -10,14 +10,14 @@ from fastapi.testclient import TestClient
 from helpers import _login
 from sqlalchemy import select
 
-from productflow_backend.config import (
+from inspiration_one_backend.config import (
     CONFIG_DEFINITION_BY_KEY,
     RUNTIME_CONFIG_KEYS,
     get_runtime_settings,
     get_settings,
     normalize_config_values,
 )
-from productflow_backend.infrastructure.db.models import (
+from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     GenerationConfig,
@@ -25,24 +25,24 @@ from productflow_backend.infrastructure.db.models import (
     ProviderBinding,
     ProviderProfile,
 )
-from productflow_backend.infrastructure.db.session import get_session_factory
-from productflow_backend.infrastructure.openai_client import (
+from inspiration_one_backend.infrastructure.db.session import get_session_factory
+from inspiration_one_backend.infrastructure.openai_client import (
     OPENAI_COMPATIBLE_DEFAULT_HEADERS,
     OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
 )
-from productflow_backend.infrastructure.provider_config import (
+from inspiration_one_backend.infrastructure.provider_config import (
     resolve_image_provider_config,
     resolve_text_provider_config,
 )
 
 
 def test_auth_session_required(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
 
-    unauthorized = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
+    unauthorized = client.get("/api/inspirations", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert unauthorized.status_code == 401
 
     admin_key_login = client.post("/api/auth/session", json={"admin_key": "wrong-admin-key"})
@@ -55,7 +55,7 @@ def test_auth_session_required(configured_env: Path) -> None:
 
     _login(client)
 
-    authorized = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
+    authorized = client.get("/api/inspirations", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert authorized.status_code == 200
     assert authorized.json()["items"] == []
 
@@ -64,7 +64,7 @@ def test_auth_session_survives_small_wall_clock_rollback(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     current_timestamp = 1_800_000_000
     monkeypatch.setattr(itsdangerous.timed.time, "time", lambda: current_timestamp)
@@ -74,7 +74,7 @@ def test_auth_session_survives_small_wall_clock_rollback(
     _login(client)
 
     current_timestamp -= 2
-    authorized = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
+    authorized = client.get("/api/inspirations", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
 
     assert authorized.status_code == 200
     assert authorized.json()["items"] == []
@@ -83,7 +83,7 @@ def test_auth_session_survives_small_wall_clock_rollback(
 def test_session_signer_does_not_keep_large_future_timestamp_after_clock_recovers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.session import MonotonicTimestampSigner
+    from inspiration_one_backend.presentation.session import MonotonicTimestampSigner
 
     current_timestamp = 1_800_000_000
     monkeypatch.setattr(itsdangerous.timed.time, "time", lambda: current_timestamp)
@@ -98,7 +98,7 @@ def test_session_signer_does_not_keep_large_future_timestamp_after_clock_recover
 
 
 def test_admin_access_required_setting_no_longer_bypasses_account_login(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -109,11 +109,11 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
     assert "未知配置项" in disabled.json()["detail"]
 
     public_client = TestClient(app)
-    public_products = public_client.get(
-        "/api/products",
+    public_inspirations = public_client.get(
+        "/api/inspirations",
         params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
     )
-    assert public_products.status_code == 401
+    assert public_inspirations.status_code == 401
 
     session_state = public_client.get("/api/auth/session")
     assert session_state.status_code == 200
@@ -124,17 +124,20 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
     assert locked_settings.status_code == 401
 
     _login(public_client)
-    assert public_client.get(
-        "/api/products",
-        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
-    ).status_code == 200
+    assert (
+        public_client.get(
+            "/api/inspirations",
+            params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+        ).status_code
+        == 200
+    )
 
     new_client = TestClient(app)
-    private_products = new_client.get(
-        "/api/products",
+    private_inspirations = new_client.get(
+        "/api/inspirations",
         params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
     )
-    assert private_products.status_code == 401
+    assert private_inspirations.status_code == 401
 
     required_session = new_client.get("/api/auth/session")
     assert required_session.status_code == 200
@@ -143,7 +146,7 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
 
 
 def test_settings_api_uses_rbac_without_extra_unlock(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -195,7 +198,7 @@ def test_runtime_config_ignores_database_rows_for_env_only_settings(configured_e
 def test_settings_api_has_no_extra_unlock_dependency(
     configured_env: Path,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -206,7 +209,7 @@ def test_settings_api_has_no_extra_unlock_dependency(
 
 
 def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -250,8 +253,7 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert "progress heartbeat" in initial_items["image_session_stale_running_after_minutes"]["description"]
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["value"] == 15 * 60
     assert (
-        initial_items["workflow_image_generation_provider_timeout_seconds"]["category"]
-        == "全局生成配置 / 工作流生成"
+        initial_items["workflow_image_generation_provider_timeout_seconds"]["category"] == "全局生成配置 / 工作流生成"
     )
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["minimum"] == 1
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["maximum"] == 24 * 60 * 60
@@ -335,7 +337,7 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
 def test_settings_export_includes_migratable_runtime_config_provider_secrets_and_excludes_env_only(
     configured_env: Path,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -378,7 +380,7 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
     assert exported.status_code == 200
     payload = exported.json()
     assert payload["metadata"]["schema_version"] == 1
-    assert payload["metadata"]["app"] == "ProductFlow"
+    assert payload["metadata"]["app"] == "Inspiration One"
     assert payload["metadata"]["app_version"]
     assert payload["runtime_config"]["generation_max_concurrent_tasks"] == 2
     assert payload["runtime_config"]["deletion_enabled"] is True
@@ -407,7 +409,7 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
 
 
 def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -529,7 +531,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
 
 
 def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -618,7 +620,7 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
 
 
 def test_provider_bootstrap_runs_on_app_startup(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     session = get_session_factory()()
     try:
@@ -651,7 +653,7 @@ def test_provider_bootstrap_runs_on_app_startup(configured_env: Path) -> None:
 
 
 def test_provider_bootstrap_merges_matching_legacy_text_and_image_config(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     session = get_session_factory()()
     try:
@@ -720,7 +722,7 @@ def test_provider_bootstrap_merges_matching_legacy_text_and_image_config(configu
 
 
 def test_provider_bootstrap_splits_different_legacy_connections(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     session = get_session_factory()()
     try:
@@ -755,7 +757,7 @@ def test_provider_bootstrap_splits_different_legacy_connections(configured_env: 
 
 
 def test_generation_config_status_filters_date_range_and_splits_purpose_stats(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -831,7 +833,7 @@ def test_generation_config_status_filters_date_range_and_splits_purpose_stats(co
 
 
 def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bindings(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -937,7 +939,7 @@ def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bin
         json={"provider_kind": "mock", "provider_profile_id": None, "model_settings": {}, "config": {}},
     )
     assert missing_text_model.status_code == 400
-    assert "文案商品理解模型未配置" in missing_text_model.json()["detail"]
+    assert "文案灵感产物理解模型未配置" in missing_text_model.json()["detail"]
 
     missing_image_model = client.patch(
         "/api/settings/provider-bindings/image",
@@ -1011,7 +1013,7 @@ def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bin
 
 
 def test_text_generation_config_test_api_runs_mock_without_persistence(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1031,7 +1033,7 @@ def test_text_generation_config_test_api_runs_mock_without_persistence(configure
                 "max_concurrency": 1,
                 "enabled": True,
             },
-            "product": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
+            "inspiration": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
             "copy_request": {"instruction": "突出保温和便携", "output_mode": "blocks"},
         },
     )
@@ -1054,7 +1056,7 @@ def test_text_generation_config_test_api_runs_mock_without_persistence(configure
 
 
 def test_text_generation_config_test_api_reports_missing_real_provider_config(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1082,7 +1084,7 @@ def test_text_generation_config_test_api_reports_missing_real_provider_config(co
 
 
 def test_real_image_binding_switches_visible_poster_mode_to_generated(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1138,7 +1140,7 @@ def test_real_image_binding_switches_visible_poster_mode_to_generated(configured
 
 
 def test_provider_config_supports_google_gemini_profiles_bindings_and_import(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1224,7 +1226,7 @@ def test_provider_model_list_endpoint_fetches_openai_compatible_models(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     captured_kwargs: dict[str, object] = {}
 
@@ -1245,7 +1247,7 @@ def test_provider_model_list_endpoint_fetches_openai_compatible_models(
             captured_kwargs.update(kwargs)
             self.models = DummyModels()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.provider_models.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.provider_models.OpenAI", DummyOpenAI)
 
     app = create_app()
     client = TestClient(app)
@@ -1301,7 +1303,7 @@ def test_provider_model_list_endpoint_validates_profile_and_maps_provider_failur
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     class FailingModels:
         def list(self):
@@ -1311,7 +1313,7 @@ def test_provider_model_list_endpoint_validates_profile_and_maps_provider_failur
         def __init__(self, **kwargs):
             self.models = FailingModels()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.provider_models.OpenAI", FailingOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.provider_models.OpenAI", FailingOpenAI)
 
     app = create_app()
     client = TestClient(app)
@@ -1506,7 +1508,7 @@ def test_resolvers_reject_missing_models_instead_of_using_legacy_defaults(
 
     with pytest.raises(RuntimeError) as text_error:
         resolve_text_provider_config()
-    assert "文案商品理解模型未配置" in str(text_error.value)
+    assert "文案灵感产物理解模型未配置" in str(text_error.value)
 
     with pytest.raises(RuntimeError) as image_error:
         resolve_image_provider_config()
@@ -1520,7 +1522,7 @@ def test_images_api_runtime_options_normalize_and_validate_without_provider_key(
 
 
 def test_settings_api_accepts_and_validates_optional_image_tool_fields(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1602,8 +1604,9 @@ def test_settings_api_accepts_and_validates_optional_image_tool_fields(configure
     assert cleared.status_code == 200
     assert get_runtime_settings().image_tool_output_compression is None
 
+
 def test_prompt_settings_api_accepts_rejects_and_resets(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1622,9 +1625,10 @@ def test_prompt_settings_api_accepts_rejects_and_resets(configured_env: Path) ->
     assert "显式连接的上游上下文" in initial_items["prompt_poster_image_edit_template"]["value"]
     assert initial_items["prompt_poster_image_reference_policy"]["category"] == "提示词"
     assert initial_items["prompt_poster_image_reference_policy"]["input_type"] == "textarea"
-    assert "输入图片中的主体、结构、材质、风格或场景作为视觉基准" in initial_items[
-        "prompt_poster_image_reference_policy"
-    ]["value"]
+    assert (
+        "输入图片中的主体、结构、材质、风格或场景作为视觉基准"
+        in initial_items["prompt_poster_image_reference_policy"]["value"]
+    )
 
     updated = client.patch("/api/settings", json={"values": {"prompt_copy_system": "自定义文案系统提示"}})
     assert updated.status_code == 200
@@ -1642,8 +1646,9 @@ def test_prompt_settings_api_accepts_rejects_and_resets(configured_env: Path) ->
     assert reset_items["prompt_copy_system"]["source"] == "env_default"
     assert "内容生成助手" in reset_items["prompt_copy_system"]["value"]
 
+
 def test_settings_api_rejects_invalid_effective_config(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1657,8 +1662,9 @@ def test_settings_api_rejects_invalid_effective_config(configured_env: Path) -> 
     assert response.status_code == 400
     assert "主图尺寸" in response.json()["detail"]
 
+
 def test_settings_api_rejects_malformed_image_sizes_before_persist(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1684,8 +1690,9 @@ def test_settings_api_rejects_malformed_image_sizes_before_persist(configured_en
     finally:
         session.close()
 
+
 def test_settings_api_normalizes_custom_image_sizes_for_generation(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1712,7 +1719,7 @@ def test_settings_api_normalizes_custom_image_sizes_for_generation(configured_en
         f"/api/image-sessions/{session_id}/generate",
         json={
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            "prompt": "生成一张自定义尺寸商品图",
+            "prompt": "生成一张自定义尺寸灵感产物图",
             "size": "512x512",
         },
     )
@@ -1733,7 +1740,7 @@ def test_runtime_image_size_env_defaults_are_generation_bounded(configured_env: 
 
 
 def test_image_generation_max_dimension_runtime_config_controls_size_bounds(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1790,7 +1797,7 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
 
 
 def test_legacy_image_chat_route_is_removed(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
@@ -1798,6 +1805,6 @@ def test_legacy_image_chat_route_is_removed(configured_env: Path) -> None:
 
     response = client.post(
         "/api/image-chat/generate",
-        json={"prompt": "做一张白底商品图", "size": "1024x1024"},
+        json={"prompt": "做一张白底灵感产物图", "size": "1024x1024"},
     )
     assert response.status_code == 404

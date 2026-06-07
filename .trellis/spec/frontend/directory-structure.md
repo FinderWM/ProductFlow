@@ -42,10 +42,10 @@ web/
     │   └── types.ts                 # frontend DTOs mirroring backend responses
     └── pages/
         ├── LoginPage.tsx
-        ├── ProductListPage.tsx
-        ├── ProductCreatePage.tsx
-        ├── ProductDetailPage.tsx
-        ├── product-detail/              # page-local product workflow constants/types/utils/components
+        ├── InspirationListPage.tsx
+        ├── InspirationCreatePage.tsx
+        ├── InspirationDetailPage.tsx
+        ├── inspiration-detail/              # page-local inspiration workflow constants/types/utils/components
         ├── ImageChatPage.tsx
         ├── SettingsPage.tsx
         └── StatusPage.tsx
@@ -61,11 +61,11 @@ shared API/type/format helper.
 Routes are centralized in `web/src/App.tsx` inside `AppRoutes()`:
 
 - `/login` -> `LoginPage`
-- `/products` -> `ProductListPage`
-- `/products/new` -> `ProductCreatePage`
-- `/products/:productId` -> `ProductDetailPage`
+- `/inspirations` -> `InspirationListPage`
+- `/inspirations/new` -> `InspirationCreatePage`
+- `/inspirations/:inspirationId` -> `InspirationDetailPage`
 - `/image-chat` -> standalone `ImageChatPage`
-- `/products/:productId/image-chat` -> product-scoped `ImageChatPage`
+- `/inspirations/:inspirationId/image-chat` -> inspiration-scoped `ImageChatPage`
 - `/help` -> `HelpPage`
 - `/settings` -> `SettingsPage`
 - `/status` -> `StatusPage`
@@ -80,8 +80,8 @@ unauthenticated users to `/login`.
 Use `web/src/pages/` for route-level modules that own data fetching, navigation, mutations, and complex local UI state.
 Current examples:
 
-- `ProductListPage.tsx` owns product list fetching, logout mutation, and navigation to settings/image chat/new product.
-- `ProductDetailPage.tsx` owns product detail/history queries, workflow status polling, copy editing state, and
+- `InspirationListPage.tsx` owns inspiration list fetching, logout mutation, and navigation to settings/image chat/new inspiration.
+- `InspirationDetailPage.tsx` owns inspiration detail/history queries, workflow status polling, copy editing state, and
   workbench actions.
 - `ImageChatPage.tsx` owns session selection, auto-create behavior, config-derived image size options, and generation.
 - `SettingsPage.tsx` owns config fetching, grouped drafts, secret touched state, save/reset mutations.
@@ -94,10 +94,10 @@ Use `web/src/components/` for reusable presentational components with small prop
 - `StatusPill.tsx`
 - `ImageGenerationSettingsTabs.tsx`, `ImageGenerationSettingsPanel.tsx`, `ImageSizePicker.tsx`, and
   `ImageToolControls.tsx` for the shared image generation settings shell and controls used by both the image-session page
-  and product workflow inspector.
+  and inspiration workflow inspector.
 
 If a component is only used inside one page and tightly coupled to that page's state, keep it either in the page file or
-in a page-local directory. `ProductDetailPage.tsx` uses `web/src/pages/product-detail/` for workflow canvas constants,
+in a page-local directory. `InspirationDetailPage.tsx` uses `web/src/pages/inspiration-detail/` for workflow canvas constants,
 draft/config utilities, image mapping helpers, and page-local components; do not move those to global `components/`
 until another page actually reuses them.
 
@@ -110,7 +110,7 @@ until another page actually reuses them.
 - `web/src/lib/format.ts` contains pure formatting helpers such as `formatDateTime`, `formatShortDate`, and
   `formatPrice`.
 - `web/src/lib/image-downloads.ts` contains reusable image URL, filename sanitization, timestamp suffix, and extension
-  helpers. Page-specific mapping from product/poster records to downloadable images should stay page-local.
+  helpers. Page-specific mapping from inspiration/poster records to downloadable images should stay page-local.
 
 Do not scatter raw `fetch(...)` calls or duplicate DTO interfaces inside pages.
 
@@ -118,8 +118,8 @@ Do not scatter raw `fetch(...)` calls or duplicate DTO interfaces inside pages.
 
 ## Naming Conventions
 
-- Page and component files use `PascalCase.tsx`: `ProductListPage.tsx`, `TopNav.tsx`.
-- Exported React components use named exports: `export function ProductListPage() { ... }`.
+- Page and component files use `PascalCase.tsx`: `InspirationListPage.tsx`, `TopNav.tsx`.
+- Exported React components use named exports: `export function InspirationListPage() { ... }`.
 - Utility files use lower camel-ish names: `api.ts`, `format.ts`, `types.ts`.
 - Helper functions use `camelCase`, for example `getWorkingCopy`, `getSourceImageUrl`, `draftsFromConfig`.
 - API DTO fields intentionally preserve backend `snake_case` names, for example `workflow_state`, `copy_set_id`,

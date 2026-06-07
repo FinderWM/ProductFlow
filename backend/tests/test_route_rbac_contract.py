@@ -9,9 +9,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-from productflow_backend.config import get_settings
-from productflow_backend.domain.rbac import API_RBAC_MANAGE, API_RESOURCES_MODERATE
-from productflow_backend.presentation import deps
+from inspiration_one_backend.config import get_settings
+from inspiration_one_backend.domain.rbac import API_RBAC_MANAGE, API_RESOURCES_MODERATE
+from inspiration_one_backend.presentation import deps
 
 PUBLIC_ROUTES = frozenset(
     {
@@ -56,7 +56,7 @@ def contract_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Fa
     monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
     get_settings.cache_clear()
 
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     yield create_app()
     get_settings.cache_clear()
@@ -188,6 +188,5 @@ def _format_failure(method: str, path: str, gate: RouteGate, reason: str) -> str
     dependencies = ", ".join(gate.dependency_names) or "<none>"
     permissions = ", ".join(sorted(gate.api_permissions)) or "<none>"
     return (
-        f"{method} {path}: {reason}; "
-        f"admin={gate.has_admin}; permissions=[{permissions}]; dependencies=[{dependencies}]"
+        f"{method} {path}: {reason}; admin={gate.has_admin}; permissions=[{permissions}]; dependencies=[{dependencies}]"
     )

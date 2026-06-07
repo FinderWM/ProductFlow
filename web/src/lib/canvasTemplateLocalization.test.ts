@@ -14,13 +14,13 @@ const builtInTemplate: CanvasTemplateSummary = {
   entry_mode: "image",
   sort_order: 100,
   title: "电商主图",
-  description: "生成商品首图，突出主体、利益点和清晰构图。",
+  description: "生成灵感产物首图，突出主体、利益点和清晰构图。",
   source: "builtin",
   user_template_id: null,
   scenario: {
     scenario: "main_image",
     title: "主图",
-    description: "用于商品列表和详情首屏的主视觉。",
+    description: "用于灵感产物列表和详情首屏的主视觉。",
     ecommerce_stage: "listing",
     tags: ["main-image"],
   },
@@ -43,11 +43,11 @@ const builtInTemplate: CanvasTemplateSummary = {
     },
   ],
   preview_edges: [{ source_node_key: "copy", target_node_key: "output" }],
-  output_slots: [{ node_key: "output", label: "主图输出", description: "商品列表和详情首图候选。" }],
+  output_slots: [{ node_key: "output", label: "主图输出", description: "灵感产物列表和详情首图候选。" }],
   reference_input_hints: [],
   suggested_connections: [],
   default_external_connections: [
-    { source: "existing_product_context", target_node_key: "copy", label: "自动接商品" },
+    { source: "existing_inspiration_context", target_node_key: "copy", label: "自动接灵感产物" },
   ],
 };
 
@@ -104,16 +104,16 @@ describe("canvas template localization", () => {
   });
 
   it("keeps default-locale built-in labels aligned with inspiration wording", () => {
-    expect(localizeBuiltInTemplateNodeTitle("product_context", "商品资料", "zh-CN", {
+    expect(localizeBuiltInTemplateNodeTitle("inspiration_context", "灵感产物资料", "zh-CN", {
       _canvas_template: {
         source: "builtin",
         template_key: "ecommerce-main-image-v1",
-        node_key: "product",
+        node_key: "inspiration",
       },
     })).toBe("灵感资料");
-    expect(localizeBuiltInTemplateLabel("自动接商品", "zh-CN")).toBe("自动接灵感");
+    expect(localizeBuiltInTemplateLabel("自动接灵感产物", "zh-CN")).toBe("自动接灵感");
 
-    expect(localizeBuiltInTemplateNodeTitle("copy_generation", "我的商品文案", "zh-CN")).toBeNull();
-    expect(localizeBuiltInTemplateLabel("我的商品输出", "zh-CN")).toBeNull();
+    expect(localizeBuiltInTemplateNodeTitle("copy_generation", "我的灵感产物文案", "zh-CN")).toBeNull();
+    expect(localizeBuiltInTemplateLabel("我的灵感产物输出", "zh-CN")).toBeNull();
   });
 });

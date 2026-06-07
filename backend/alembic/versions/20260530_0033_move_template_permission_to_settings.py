@@ -87,17 +87,17 @@ def upgrade() -> None:
         )
     op.create_index("ix_canvas_templates_review_status", "canvas_templates", ["review_status"])
 
-    with op.batch_alter_table("products") as batch_op:
+    with op.batch_alter_table("inspirations") as batch_op:
         batch_op.add_column(sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True))
         batch_op.add_column(sa.Column("deleted_by_user_id", sa.String(length=36), nullable=True))
         batch_op.create_foreign_key(
-            "fk_products_deleted_by_user_id",
+            "fk_inspirations_deleted_by_user_id",
             "auth_users",
             ["deleted_by_user_id"],
             ["id"],
             ondelete="SET NULL",
         )
-    op.create_index("ix_products_deleted_at", "products", ["deleted_at"])
+    op.create_index("ix_inspirations_deleted_at", "inspirations", ["deleted_at"])
 
     with op.batch_alter_table("image_sessions") as batch_op:
         batch_op.add_column(sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True))
@@ -124,11 +124,11 @@ def downgrade() -> None:
         batch_op.drop_column("deleted_by_user_id")
         batch_op.drop_column("deleted_at")
 
-    op.drop_index("ix_products_deleted_at", table_name="products")
-    has_products_deleted_fk = _has_foreign_key("products", "fk_products_deleted_by_user_id")
-    with op.batch_alter_table("products") as batch_op:
-        if has_products_deleted_fk:
-            batch_op.drop_constraint("fk_products_deleted_by_user_id", type_="foreignkey")
+    op.drop_index("ix_inspirations_deleted_at", table_name="inspirations")
+    has_inspirations_deleted_fk = _has_foreign_key("inspirations", "fk_inspirations_deleted_by_user_id")
+    with op.batch_alter_table("inspirations") as batch_op:
+        if has_inspirations_deleted_fk:
+            batch_op.drop_constraint("fk_inspirations_deleted_by_user_id", type_="foreignkey")
         batch_op.drop_column("deleted_by_user_id")
         batch_op.drop_column("deleted_at")
 

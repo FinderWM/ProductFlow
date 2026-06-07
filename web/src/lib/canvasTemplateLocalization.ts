@@ -12,7 +12,7 @@ interface BuiltInCanvasTemplateText {
 }
 
 const DEFAULT_EXTERNAL_CONNECTION_LABELS: Record<string, string> = {
-  "自动接商品": "Auto-connect inspiration",
+  "自动接灵感产物": "Auto-connect inspiration",
 };
 
 const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
@@ -22,7 +22,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioTitle: "Main image",
     scenarioDescription: "For inspiration listings and the first screen of the detail page.",
     nodes: {
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       copy: "Main-image benefits",
       image: "Generate main image",
       output: "Main image output",
@@ -40,7 +40,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioTitle: "Taobao main image",
     scenarioDescription: "For Taobao listing traffic and the detail first screen, with a clear subject and benefits.",
     nodes: {
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       angle: "Search benefits",
       main: "Main image version",
       main_output: "Taobao main image",
@@ -59,7 +59,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For Xiaohongshu note covers, content seeding, and lifestyle display.",
     nodes: {
       style_reference: "Note style reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       angle: "Cover angle",
       cover: "Vertical cover",
       cover_output: "Cover output",
@@ -80,7 +80,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioTitle: "Multi-angle",
     scenarioDescription: "For detail-page carousels that show appearance, structure, and back-side details.",
     nodes: {
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       angle_plan: "Angle plan",
       front_image: "Front angle",
       front_output: "Front output",
@@ -102,7 +102,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For explaining specification differences on the detail page.",
     nodes: {
       sku_reference: "SKU reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       variant_copy: "Variant differences",
       single_variant: "Single SKU image",
       single_variant_output: "SKU image output",
@@ -123,7 +123,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioTitle: "Feature highlights",
     scenarioDescription: "For detail-page feature explanation, function entry points, and conversion support.",
     nodes: {
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       feature_copy: "Benefit extraction",
       layout_copy: "Information hierarchy",
       infographic: "Feature infographic",
@@ -139,7 +139,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioTitle: "Size / spec",
     scenarioDescription: "For explaining parameters, size, capacity, and specifications on the detail page.",
     nodes: {
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       spec_copy: "Spec organization",
       dimension_image: "Dimension annotation",
       dimension_output: "Dimension output",
@@ -158,7 +158,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For explaining size, thickness, capacity, and real-life fit or placement.",
     nodes: {
       scale_reference: "Scale reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       scale_copy: "Scale notes",
       handheld_image: "Hand-held / worn reference",
       handheld_output: "Scale image output",
@@ -180,7 +180,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For detail-page included items, accessory counts, and gift-box display.",
     nodes: {
       package_reference: "Packaging reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       checklist_copy: "Checklist copy",
       flatlay_image: "Package flat lay",
       flatlay_output: "Checklist output",
@@ -202,7 +202,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For installation guides, tutorials, cleaning maintenance, and pre-support guidance.",
     nodes: {
       step_reference: "Step reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       step_copy: "Step breakdown",
       step_image: "Step instruction graphic",
       step_output: "Step output",
@@ -225,7 +225,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For explaining upgrades, bundle differences, and purchase-decision dimensions.",
     nodes: {
       compare_reference: "Comparison reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       comparison_copy: "Comparison dimensions",
       comparison_image: "Comparison graphic",
       comparison_output: "Comparison output",
@@ -247,7 +247,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For apparel, beauty, home, and other categories that need usage context.",
     nodes: {
       style: "Pose / style reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       copy: "Audience and scene",
       half_body: "Half-body / usage image",
       half_body_output: "Lifestyle image",
@@ -269,7 +269,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For explaining usage environment, styling, and spatial relationships.",
     nodes: {
       scene_reference: "Scene reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       copy: "Scene notes",
       wide_scene: "Wide scene",
       scene_output: "Scene image output",
@@ -288,7 +288,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For explaining material, craft, and key functions on the detail page.",
     nodes: {
       detail_reference: "Detail reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       detail_copy: "Detail notes",
       macro_image: "Material close-up",
       macro_output: "Detail image output",
@@ -310,7 +310,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For campaign pages, promotional placements, and in-site ad assets.",
     nodes: {
       campaign_style: "Campaign style reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       offer_copy: "Offer information",
       visual_copy: "Visual hierarchy",
       banner: "Campaign banner",
@@ -330,7 +330,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioDescription: "For in-site short videos, content feeds, live previews, and ad entry points.",
     nodes: {
       cover_style: "Cover style reference",
-      product: "Inspiration info",
+      inspiration: "Inspiration info",
       hook_copy: "Cover hook",
       frame_copy: "Frame rhythm",
       vertical_cover: "Vertical cover",
@@ -352,8 +352,8 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
     scenarioTitle: "White background",
     scenarioDescription: "For platform base inspiration images, spec graphics, and reusable assets.",
     nodes: {
-      product_reference: "Subject reference",
-      product: "Inspiration info",
+      inspiration_reference: "Subject reference",
+      inspiration: "Inspiration info",
       clean_copy: "White-background requirements",
       white_image: "Standard white-background image",
       white_output: "White-background output",
@@ -365,7 +365,7 @@ const BUILT_IN_TEMPLATE_TEXT: Record<string, BuiltInCanvasTemplateText> = {
       shadow_output: "Display output",
     },
     referenceInputHints: {
-      product_reference: "Subject reference",
+      inspiration_reference: "Subject reference",
     },
   },
 };
@@ -381,7 +381,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
 > = {
   "ecommerce-main-image-v1": {
     nodes: {
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       copy: { nodeType: "copy_generation", title: "主图卖点" },
       image: { nodeType: "image_generation", title: "生成主图" },
       output: { nodeType: "reference_image", title: "主图输出" },
@@ -392,7 +392,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   },
   "ecommerce-taobao-main-image-v1": {
     nodes: {
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       angle: { nodeType: "copy_generation", title: "搜索卖点" },
       main: { nodeType: "image_generation", title: "主图版本" },
       main_output: { nodeType: "reference_image", title: "淘宝主图" },
@@ -404,7 +404,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-xiaohongshu-image-v1": {
     nodes: {
       style_reference: { nodeType: "reference_image", title: "笔记风格参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       angle: { nodeType: "copy_generation", title: "封面角度" },
       cover: { nodeType: "image_generation", title: "竖版封面" },
       cover_output: { nodeType: "reference_image", title: "封面输出" },
@@ -416,7 +416,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   },
   "ecommerce-multi-angle-image-v1": {
     nodes: {
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       angle_plan: { nodeType: "copy_generation", title: "角度规划" },
       front_image: { nodeType: "image_generation", title: "正面角度" },
       front_output: { nodeType: "reference_image", title: "正面输出" },
@@ -430,7 +430,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-sku-variant-image-v1": {
     nodes: {
       sku_reference: { nodeType: "reference_image", title: "SKU 参考图" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       variant_copy: { nodeType: "copy_generation", title: "变体差异" },
       single_variant: { nodeType: "image_generation", title: "单 SKU 图" },
       single_variant_output: { nodeType: "reference_image", title: "SKU 图输出" },
@@ -442,7 +442,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   },
   "ecommerce-feature-infographic-v1": {
     nodes: {
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       feature_copy: { nodeType: "copy_generation", title: "卖点提炼" },
       layout_copy: { nodeType: "copy_generation", title: "信息层级" },
       infographic: { nodeType: "image_generation", title: "卖点信息图" },
@@ -452,7 +452,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   },
   "ecommerce-size-spec-image-v1": {
     nodes: {
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       spec_copy: { nodeType: "copy_generation", title: "规格整理" },
       dimension_image: { nodeType: "image_generation", title: "尺寸标注图" },
       dimension_output: { nodeType: "reference_image", title: "尺寸输出" },
@@ -464,7 +464,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-scale-reference-image-v1": {
     nodes: {
       scale_reference: { nodeType: "reference_image", title: "参照物参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       scale_copy: { nodeType: "copy_generation", title: "尺度说明" },
       handheld_image: { nodeType: "image_generation", title: "手持/佩戴参照" },
       handheld_output: { nodeType: "reference_image", title: "尺度图输出" },
@@ -477,7 +477,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-package-checklist-image-v1": {
     nodes: {
       package_reference: { nodeType: "reference_image", title: "包装参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       checklist_copy: { nodeType: "copy_generation", title: "清单文案" },
       flatlay_image: { nodeType: "image_generation", title: "包装平铺图" },
       flatlay_output: { nodeType: "reference_image", title: "清单输出" },
@@ -490,7 +490,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-usage-steps-image-v1": {
     nodes: {
       step_reference: { nodeType: "reference_image", title: "步骤参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       step_copy: { nodeType: "copy_generation", title: "步骤拆解" },
       step_image: { nodeType: "image_generation", title: "步骤说明图" },
       step_output: { nodeType: "reference_image", title: "步骤输出" },
@@ -504,7 +504,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-comparison-image-v1": {
     nodes: {
       compare_reference: { nodeType: "reference_image", title: "对比参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       comparison_copy: { nodeType: "copy_generation", title: "对比维度" },
       comparison_image: { nodeType: "image_generation", title: "对比说明图" },
       comparison_output: { nodeType: "reference_image", title: "对比输出" },
@@ -517,7 +517,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-model-lifestyle-image-v1": {
     nodes: {
       style: { nodeType: "reference_image", title: "姿态/风格参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       copy: { nodeType: "copy_generation", title: "人群与场景" },
       half_body: { nodeType: "image_generation", title: "半身/使用图" },
       half_body_output: { nodeType: "reference_image", title: "生活方式图" },
@@ -530,7 +530,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-scene-image-v1": {
     nodes: {
       scene_reference: { nodeType: "reference_image", title: "场景参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       copy: { nodeType: "copy_generation", title: "场景说明" },
       wide_scene: { nodeType: "image_generation", title: "宽幅场景" },
       scene_output: { nodeType: "reference_image", title: "场景图输出" },
@@ -541,7 +541,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-detail-material-image-v1": {
     nodes: {
       detail_reference: { nodeType: "reference_image", title: "细节参考图" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       detail_copy: { nodeType: "copy_generation", title: "细节说明" },
       macro_image: { nodeType: "image_generation", title: "材质特写" },
       macro_output: { nodeType: "reference_image", title: "细节图输出" },
@@ -554,7 +554,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-campaign-promotion-image-v1": {
     nodes: {
       campaign_style: { nodeType: "reference_image", title: "活动风格参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       offer_copy: { nodeType: "copy_generation", title: "优惠信息" },
       visual_copy: { nodeType: "copy_generation", title: "视觉层级" },
       banner: { nodeType: "image_generation", title: "活动横图" },
@@ -566,7 +566,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   "ecommerce-short-video-cover-v1": {
     nodes: {
       cover_style: { nodeType: "reference_image", title: "封面风格参考" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       hook_copy: { nodeType: "copy_generation", title: "封面钩子" },
       frame_copy: { nodeType: "copy_generation", title: "画面节奏" },
       vertical_cover: { nodeType: "image_generation", title: "竖版封面" },
@@ -582,8 +582,8 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
   },
   "ecommerce-white-background-image-v1": {
     nodes: {
-      product_reference: { nodeType: "reference_image", title: "主体参考图" },
-      product: { nodeType: "product_context", title: "商品资料" },
+      inspiration_reference: { nodeType: "reference_image", title: "主体参考图" },
+      inspiration: { nodeType: "inspiration_context", title: "灵感产物资料" },
       clean_copy: { nodeType: "copy_generation", title: "白底要求" },
       white_image: { nodeType: "image_generation", title: "标准白底图" },
       white_output: { nodeType: "reference_image", title: "白底图输出" },
@@ -591,7 +591,7 @@ const BUILT_IN_TEMPLATE_SOURCE_TEXT: Record<
       shadow_output: { nodeType: "reference_image", title: "陈列输出" },
     },
     outputSlots: { white_output: "白底图输出", shadow_output: "陈列输出" },
-    referenceInputHints: { product_reference: "主体参考图" },
+    referenceInputHints: { inspiration_reference: "主体参考图" },
   },
 };
 
@@ -639,7 +639,7 @@ function shouldLocalizeTemplate(template: CanvasTemplateSummary): boolean {
 }
 
 function localizeDefaultChineseSource(value: string): string {
-  return value.replaceAll("商品", "灵感");
+  return value.replaceAll("灵感产物", "灵感");
 }
 
 function localizedByKey(sourceValue: string, localizedValue: string | undefined, locale: Locale): string {

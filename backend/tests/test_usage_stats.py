@@ -9,21 +9,21 @@ from fastapi.testclient import TestClient
 from helpers import _login
 from sqlalchemy.orm import Session
 
-from productflow_backend.application.auth import ensure_auth_bootstrapped
-from productflow_backend.application.generation_config_runtime import (
+from inspiration_one_backend.application.auth import ensure_auth_bootstrapped
+from inspiration_one_backend.application.generation_config_runtime import (
     RuntimeGenerationConfigClaim,
     release_runtime_generation_config,
 )
-from productflow_backend.application.usage_stats import list_user_usage_stats, record_user_usage_result
-from productflow_backend.domain.errors import BusinessValidationError
-from productflow_backend.domain.rbac import ADMIN_USER_ID
-from productflow_backend.infrastructure.db.models import (
+from inspiration_one_backend.application.usage_stats import list_user_usage_stats, record_user_usage_result
+from inspiration_one_backend.domain.errors import BusinessValidationError
+from inspiration_one_backend.domain.rbac import ADMIN_USER_ID
+from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AuthUser,
     UserDailyUsageStat,
 )
-from productflow_backend.infrastructure.db.session import get_session_factory
-from productflow_backend.infrastructure.provider_config import IMAGE_PURPOSE, TEXT_PURPOSE, GenerationConfigClaim
+from inspiration_one_backend.infrastructure.db.session import get_session_factory
+from inspiration_one_backend.infrastructure.provider_config import IMAGE_PURPOSE, TEXT_PURPOSE, GenerationConfigClaim
 
 
 def _create_user_client(app, admin_client: TestClient, username: str) -> tuple[TestClient, str]:
@@ -78,15 +78,15 @@ def test_release_runtime_generation_config_records_user_stats_before_global_stat
 
     fake_session = FakeSession()
     monkeypatch.setattr(
-        "productflow_backend.application.generation_config_runtime.get_session_factory",
+        "inspiration_one_backend.application.generation_config_runtime.get_session_factory",
         lambda: lambda: fake_session,
     )
     monkeypatch.setattr(
-        "productflow_backend.application.generation_config_runtime.record_user_usage_result",
+        "inspiration_one_backend.application.generation_config_runtime.record_user_usage_result",
         lambda session, **kwargs: calls.append("user_stats"),
     )
     monkeypatch.setattr(
-        "productflow_backend.application.generation_config_runtime.release_generation_config_claim",
+        "inspiration_one_backend.application.generation_config_runtime.release_generation_config_claim",
         lambda session, generation_config_id, **kwargs: calls.append("global_stats"),
     )
 
@@ -112,15 +112,15 @@ def test_release_runtime_generation_config_skips_user_stats_when_result_is_not_r
             calls.append("close")
 
     monkeypatch.setattr(
-        "productflow_backend.application.generation_config_runtime.get_session_factory",
+        "inspiration_one_backend.application.generation_config_runtime.get_session_factory",
         lambda: lambda: FakeSession(),
     )
     monkeypatch.setattr(
-        "productflow_backend.application.generation_config_runtime.record_user_usage_result",
+        "inspiration_one_backend.application.generation_config_runtime.record_user_usage_result",
         lambda session, **kwargs: calls.append("user_stats"),
     )
     monkeypatch.setattr(
-        "productflow_backend.application.generation_config_runtime.release_generation_config_claim",
+        "inspiration_one_backend.application.generation_config_runtime.release_generation_config_claim",
         lambda session, generation_config_id, **kwargs: calls.append("global_stats"),
     )
 
@@ -205,7 +205,7 @@ def test_user_usage_stats_rejects_missing_or_archived_user(db_session: Session) 
 
 
 def test_usage_stats_api_self_only_and_admin_filters(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)

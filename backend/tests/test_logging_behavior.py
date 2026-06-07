@@ -10,12 +10,12 @@ import pytest
 from fastapi import Response
 from fastapi.testclient import TestClient
 
-from productflow_backend.config import get_settings
+from inspiration_one_backend.config import get_settings
 
 
 @pytest.fixture(autouse=True)
 def _clean_log_context() -> Iterator[None]:
-    from productflow_backend.infrastructure.logging import (
+    from inspiration_one_backend.infrastructure.logging import (
         reset_image_session_generation_task_id,
         reset_request_id,
         reset_workflow_node_run_id,
@@ -66,7 +66,7 @@ def test_default_log_dir_uses_backend_storage_when_running_from_backend(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.infrastructure.logging import get_log_file_path
+    from inspiration_one_backend.infrastructure.logging import get_log_file_path
 
     backend_dir = Path(__file__).resolve().parents[1]
     monkeypatch.delenv("LOG_DIR", raising=False)
@@ -76,14 +76,15 @@ def test_default_log_dir_uses_backend_storage_when_running_from_backend(
     settings = get_settings()
 
     assert settings.log_dir == backend_dir / "storage" / "logs"
-    assert get_log_file_path(settings) == backend_dir / "storage" / "logs" / "productflow.log"
+    assert get_log_file_path(settings) == backend_dir / "storage" / "logs" / "inspiration-one.log"
+
 
 def test_log_cleanup_deletes_expired_persistent_logs(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from productflow_backend.infrastructure.logging import cleanup_old_logs
+    from inspiration_one_backend.infrastructure.logging import cleanup_old_logs
 
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
@@ -105,13 +106,14 @@ def test_log_cleanup_deletes_expired_persistent_logs(
     assert not old_log.exists()
     assert fresh_log.exists()
 
+
 def test_configure_logging_keeps_single_stdout_handler_and_log_dir_override(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from productflow_backend.infrastructure.logging import configure_logging, get_log_file_path
+    from inspiration_one_backend.infrastructure.logging import configure_logging, get_log_file_path
 
     log_dir = tmp_path / "stdout-logs"
     monkeypatch.setenv("LOG_DIR", str(log_dir))
@@ -129,22 +131,22 @@ def test_configure_logging_keeps_single_stdout_handler_and_log_dir_override(
         configure_logging(settings)
         configure_logging(settings)
 
-        logging.getLogger("productflow_backend.tests.stdout").info("stdout and file visible line")
+        logging.getLogger("inspiration_one_backend.tests.stdout").info("stdout and file visible line")
         for handler in root_logger.handlers:
             handler.flush()
 
-        productflow_stream_handlers = [
-            handler for handler in root_logger.handlers if getattr(handler, "_productflow_stream_handler", False)
+        inspiration_one_stream_handlers = [
+            handler for handler in root_logger.handlers if getattr(handler, "_inspiration_one_stream_handler", False)
         ]
-        productflow_file_handlers = [
-            handler for handler in root_logger.handlers if getattr(handler, "_productflow_file_handler", False)
+        inspiration_one_file_handlers = [
+            handler for handler in root_logger.handlers if getattr(handler, "_inspiration_one_file_handler", False)
         ]
         captured = capsys.readouterr()
         log_text = get_log_file_path(settings).read_text(encoding="utf-8")
 
         assert get_log_file_path(settings).parent == log_dir
-        assert len(productflow_stream_handlers) == 1
-        assert len(productflow_file_handlers) == 1
+        assert len(inspiration_one_stream_handlers) == 1
+        assert len(inspiration_one_file_handlers) == 1
         assert "stdout and file visible line" in captured.out
         assert log_text.count("stdout and file visible line") == 1
     finally:
@@ -155,12 +157,13 @@ def test_configure_logging_keeps_single_stdout_handler_and_log_dir_override(
         root_logger.setLevel(original_level)
         root_logger.propagate = original_propagate
 
+
 def test_configure_logging_mirrors_uvicorn_lifecycle_and_access_logs(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from productflow_backend.infrastructure.logging import configure_logging, get_log_file_path
+    from inspiration_one_backend.infrastructure.logging import configure_logging, get_log_file_path
 
     log_dir = tmp_path / "uvicorn-logs"
     monkeypatch.setenv("LOG_DIR", str(log_dir))
@@ -173,10 +176,7 @@ def test_configure_logging_mirrors_uvicorn_lifecycle_and_access_logs(
     error_logger = logging.getLogger("uvicorn.error")
     access_logger = logging.getLogger("uvicorn.access")
     loggers = (root_logger, uvicorn_logger, error_logger, access_logger)
-    original_state = {
-        logger.name: (list(logger.handlers), logger.level, logger.propagate)
-        for logger in loggers
-    }
+    original_state = {logger.name: (list(logger.handlers), logger.level, logger.propagate) for logger in loggers}
 
     try:
         uvicorn_logger.propagate = False
@@ -186,7 +186,7 @@ def test_configure_logging_mirrors_uvicorn_lifecycle_and_access_logs(
         configure_logging(settings)
         configure_logging(settings)
 
-        logging.getLogger("productflow_backend.tests.logging").info("application persistent line")
+        logging.getLogger("inspiration_one_backend.tests.logging").info("application persistent line")
         error_logger.info("Started server process [12345]")
         error_logger.info("Application startup complete.")
         access_logger.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:29282", "GET", "/healthz", "1.1", 200)
@@ -200,15 +200,15 @@ def test_configure_logging_mirrors_uvicorn_lifecycle_and_access_logs(
         assert log_text.count("Started server process [12345]") == 1
         assert log_text.count("Application startup complete.") == 1
         assert log_text.count('127.0.0.1:29282 - "GET /healthz HTTP/1.1" 200 OK') == 1
-        productflow_file_handlers = [
+        inspiration_one_file_handlers = [
             handler
             for logger in (root_logger, error_logger, access_logger)
             for handler in logger.handlers
-            if getattr(handler, "_productflow_file_handler", False)
+            if getattr(handler, "_inspiration_one_file_handler", False)
         ]
-        assert len({id(handler) for handler in productflow_file_handlers}) == 1
+        assert len({id(handler) for handler in inspiration_one_file_handlers}) == 1
         assert not any(
-            getattr(handler, "_productflow_stream_handler", False)
+            getattr(handler, "_inspiration_one_stream_handler", False)
             for logger in (error_logger, access_logger)
             for handler in logger.handlers
         )
@@ -225,8 +225,8 @@ def test_configure_logging_mirrors_uvicorn_lifecycle_and_access_logs(
 
 
 def test_logging_formatter_includes_current_context_and_stable_empty_context() -> None:
-    from productflow_backend.infrastructure.logging import (
-        _ProductFlowFormatter,
+    from inspiration_one_backend.infrastructure.logging import (
+        _InspirationOneFormatter,
         reset_image_session_generation_task_id,
         reset_request_id,
         reset_workflow_node_run_id,
@@ -237,13 +237,13 @@ def test_logging_formatter_includes_current_context_and_stable_empty_context() -
         set_workflow_run_id,
     )
 
-    formatter = _ProductFlowFormatter(
+    formatter = _InspirationOneFormatter(
         "request_id=%(request_id)s workflow_run_id=%(workflow_run_id)s workflow_node_run_id=%(workflow_node_run_id)s "
         "image_session_generation_task_id=%(image_session_generation_task_id)s %(message)s"
     )
 
     empty_record = logging.LogRecord(
-        name="productflow_backend.tests.context",
+        name="inspiration_one_backend.tests.context",
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
@@ -266,7 +266,7 @@ def test_logging_formatter_includes_current_context_and_stable_empty_context() -
     task_token = set_image_session_generation_task_id("image-task-1")
     try:
         context_record = logging.LogRecord(
-            name="productflow_backend.tests.context",
+            name="inspiration_one_backend.tests.context",
             level=logging.INFO,
             pathname=__file__,
             lineno=1,
@@ -291,8 +291,8 @@ def test_logging_formatter_includes_current_context_and_stable_empty_context() -
 
 
 def test_request_id_middleware_returns_header_and_cleans_context(configured_env: Path) -> None:
-    from productflow_backend.infrastructure.logging import current_log_context
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.infrastructure.logging import current_log_context
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
 
@@ -334,8 +334,8 @@ def test_request_id_middleware_returns_header_and_cleans_context(configured_env:
 def test_request_id_middleware_preserves_http_exception_body_header_and_context_cleanup(configured_env: Path) -> None:
     from fastapi import HTTPException
 
-    from productflow_backend.infrastructure.logging import current_log_context
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.infrastructure.logging import current_log_context
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
 
@@ -355,11 +355,11 @@ def test_request_id_middleware_preserves_http_exception_body_header_and_context_
 
 
 def test_worker_actors_set_and_clear_log_context(monkeypatch: pytest.MonkeyPatch, configured_env: Path) -> None:
-    from productflow_backend.infrastructure.logging import current_log_context
-    from productflow_backend.workers import (
+    from inspiration_one_backend.infrastructure.logging import current_log_context
+    from inspiration_one_backend.workers import (
         run_image_session_generation_task,
-        run_product_workflow_node_run,
-        run_product_workflow_run,
+        run_inspiration_workflow_node_run,
+        run_inspiration_workflow_run,
     )
 
     observed: list[dict[str, str]] = []
@@ -376,14 +376,18 @@ def test_worker_actors_set_and_clear_log_context(monkeypatch: pytest.MonkeyPatch
         assert task_id == "image-task-1"
         observed.append(current_log_context())
 
-    monkeypatch.setattr("productflow_backend.workers.execute_product_workflow_run", capture_workflow_context)
-    monkeypatch.setattr("productflow_backend.workers.execute_product_workflow_node_run", capture_workflow_node_context)
-    monkeypatch.setattr("productflow_backend.workers.execute_image_session_generation_task", capture_image_task_context)
+    monkeypatch.setattr("inspiration_one_backend.workers.execute_inspiration_workflow_run", capture_workflow_context)
+    monkeypatch.setattr(
+        "inspiration_one_backend.workers.execute_inspiration_workflow_node_run", capture_workflow_node_context
+    )
+    monkeypatch.setattr(
+        "inspiration_one_backend.workers.execute_image_session_generation_task", capture_image_task_context
+    )
 
-    run_product_workflow_run.fn("workflow-run-1")
+    run_inspiration_workflow_run.fn("workflow-run-1")
     assert current_log_context()["workflow_run_id"] == "-"
 
-    run_product_workflow_node_run.fn("workflow-node-run-1")
+    run_inspiration_workflow_node_run.fn("workflow-node-run-1")
     assert current_log_context()["workflow_node_run_id"] == "-"
 
     run_image_session_generation_task.fn("image-task-1")
@@ -415,11 +419,11 @@ def test_worker_actors_clear_log_context_when_execution_raises(
     monkeypatch: pytest.MonkeyPatch,
     configured_env: Path,
 ) -> None:
-    from productflow_backend.infrastructure.logging import current_log_context
-    from productflow_backend.workers import (
+    from inspiration_one_backend.infrastructure.logging import current_log_context
+    from inspiration_one_backend.workers import (
         run_image_session_generation_task,
-        run_product_workflow_node_run,
-        run_product_workflow_run,
+        run_inspiration_workflow_node_run,
+        run_inspiration_workflow_run,
     )
 
     def raise_workflow_error(workflow_run_id: str) -> None:
@@ -438,16 +442,18 @@ def test_worker_actors_clear_log_context_when_execution_raises(
         assert current_log_context()["image_session_generation_task_id"] == "image-task-error"
         raise RuntimeError("image task failed")
 
-    monkeypatch.setattr("productflow_backend.workers.execute_product_workflow_run", raise_workflow_error)
-    monkeypatch.setattr("productflow_backend.workers.execute_product_workflow_node_run", raise_workflow_node_error)
-    monkeypatch.setattr("productflow_backend.workers.execute_image_session_generation_task", raise_image_task_error)
+    monkeypatch.setattr("inspiration_one_backend.workers.execute_inspiration_workflow_run", raise_workflow_error)
+    monkeypatch.setattr(
+        "inspiration_one_backend.workers.execute_inspiration_workflow_node_run", raise_workflow_node_error
+    )
+    monkeypatch.setattr("inspiration_one_backend.workers.execute_image_session_generation_task", raise_image_task_error)
 
     with pytest.raises(RuntimeError, match="workflow failed"):
-        run_product_workflow_run.fn("workflow-run-error")
+        run_inspiration_workflow_run.fn("workflow-run-error")
     assert current_log_context()["workflow_run_id"] == "-"
 
     with pytest.raises(RuntimeError, match="workflow node failed"):
-        run_product_workflow_node_run.fn("workflow-node-run-error")
+        run_inspiration_workflow_node_run.fn("workflow-node-run-error")
     assert current_log_context()["workflow_node_run_id"] == "-"
 
     with pytest.raises(RuntimeError, match="image task failed"):

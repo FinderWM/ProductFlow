@@ -78,13 +78,13 @@ const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 10;
 
 const navItems: TopNavItem[] = [
   {
-    labelKey: "nav.products",
-    to: "/products",
+    labelKey: "nav.inspirations",
+    to: "/inspirations",
     menuCode: "inspirations",
     requiredPermission: API_INSPIRATIONS_READ,
     priority: "primary",
     icon: Flower2,
-    match: (pathname: string) => pathname.startsWith("/products") && !pathname.endsWith("/image-chat"),
+    match: (pathname: string) => pathname.startsWith("/inspirations") && !pathname.endsWith("/image-chat"),
   },
   {
     labelKey: "nav.imageChat",
@@ -727,14 +727,14 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
                 <span className="mr-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm shadow-slate-950/20 dark:bg-white dark:text-slate-950">
                   <Wand2 size={17} />
                 </span>
-                <span className="min-w-0 truncate text-[15px] sm:text-base">ProductFlow</span>
+                <span className="min-w-0 truncate text-[15px] sm:text-base">Inspiration One</span>
               </button>
             ) : (
               <div className="flex min-w-0 items-center text-base font-semibold text-slate-950 dark:text-slate-100">
                 <span className="mr-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm shadow-slate-950/20 dark:bg-white dark:text-slate-950">
                   <Wand2 size={17} />
                 </span>
-                <span className="min-w-0 truncate text-[15px] sm:text-base">ProductFlow</span>
+                <span className="min-w-0 truncate text-[15px] sm:text-base">Inspiration One</span>
               </div>
             )}
             {breadcrumbs ? (

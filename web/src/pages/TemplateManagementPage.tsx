@@ -29,7 +29,7 @@ import type {
   UpdateGlobalCanvasTemplateInput,
   UpdateUserTemplateGroupInput,
 } from "../lib/types";
-import { TemplateGraphPreview } from "./product-detail/TemplateGroupsPanel";
+import { TemplateGraphPreview } from "./inspiration-detail/TemplateGroupsPanel";
 
 type TemplateManagementMode = "personal" | "global";
 type EntryFilter = CanvasTemplateEntryMode | "all";
@@ -331,7 +331,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
 
   const pageTitle = mode === "global" ? t("templateManage.globalTitle") : t("templateManage.personalTitle");
   const pageDescription = mode === "global" ? t("templateManage.globalDescription") : t("templateManage.personalDescription");
-  const backPath = mode === "global" ? "/settings" : "/products/new";
+  const backPath = mode === "global" ? "/settings" : "/inspirations/new";
   const backLabel = mode === "global" ? t("templateManage.backToSettings") : t("templateManage.backToCreate");
   const loading = templatesQuery.isLoading || categoriesQuery.isLoading || globalCategoriesQuery.isLoading;
   const loadFailed = templatesQuery.isError || categoriesQuery.isError || globalCategoriesQuery.isError;

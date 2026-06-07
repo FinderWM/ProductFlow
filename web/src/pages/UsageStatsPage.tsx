@@ -202,7 +202,7 @@ export function UsageStatsPage() {
     <div className="pf-app flex flex-col">
       <TopNav
         breadcrumbs={t("usageStats.breadcrumb")}
-        onHome={() => navigate("/products")}
+        onHome={() => navigate("/inspirations")}
         onLogout={() => logoutMutation.mutate()}
       />
       <main className="pf-page pf-page-wide flex-1">

@@ -32,15 +32,15 @@ const LoginPage = lazy(() =>
 const loadImageChatPage = () =>
   import("./pages/ImageChatPage").then((module) => ({ default: module.ImageChatPage }));
 const ImageChatPage = lazy(loadImageChatPage);
-const ProductCreatePage = lazy(() =>
-  import("./pages/ProductCreatePage").then((module) => ({ default: module.ProductCreatePage })),
+const InspirationCreatePage = lazy(() =>
+  import("./pages/InspirationCreatePage").then((module) => ({ default: module.InspirationCreatePage })),
 );
-const ProductDetailPage = lazy(() =>
-  import("./pages/ProductDetailPage").then((module) => ({ default: module.ProductDetailPage })),
+const InspirationDetailPage = lazy(() =>
+  import("./pages/InspirationDetailPage").then((module) => ({ default: module.InspirationDetailPage })),
 );
-const loadProductListPage = () =>
-  import("./pages/ProductListPage").then((module) => ({ default: module.ProductListPage }));
-const ProductListPage = lazy(loadProductListPage);
+const loadInspirationListPage = () =>
+  import("./pages/InspirationListPage").then((module) => ({ default: module.InspirationListPage }));
+const InspirationListPage = lazy(loadInspirationListPage);
 const RbacPage = lazy(() =>
   import("./pages/RbacPage").then((module) => ({ default: module.RbacPage })),
 );
@@ -63,7 +63,7 @@ const menuHomeRoutes: Array<{
   requiredPermission?: string;
   hasAccess?: (sessionState: SessionState | null) => boolean;
 }> = [
-  { code: "inspirations", to: "/products", requiredPermission: API_INSPIRATIONS_READ },
+  { code: "inspirations", to: "/inspirations", requiredPermission: API_INSPIRATIONS_READ },
   { code: "image_chat", to: "/image-chat", requiredPermission: API_IMAGE_CHAT_READ },
   { code: "gallery", to: "/gallery", requiredPermission: API_GALLERY_READ },
   { code: "status", to: "/status", requiredPermission: API_STATUS_READ },
@@ -111,7 +111,7 @@ function AppRoutes() {
     if (!authenticated) {
       return;
     }
-    void loadProductListPage();
+    void loadInspirationListPage();
     void loadImageChatPage();
   }, [authenticated]);
 
@@ -148,10 +148,10 @@ function AppRoutes() {
       <Suspense fallback={<LoadingScreen />}>
         <Routes>
           <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
-          <Route path="/products" element={menuRoute("inspirations", <ProductListPage />)} />
+          <Route path="/inspirations" element={menuRoute("inspirations", <InspirationListPage />)} />
           <Route
-            path="/products/new"
-            element={permissionRoute("inspirations", API_INSPIRATIONS_WRITE, <ProductCreatePage />)}
+            path="/inspirations/new"
+            element={permissionRoute("inspirations", API_INSPIRATIONS_WRITE, <InspirationCreatePage />)}
           />
           <Route path="/workflow/templates" element={menuRoute("inspirations", <TemplateManagementPage mode="personal" />)} />
           <Route path="/image-chat" element={menuRoute("image_chat", <ImageChatPage />)} />
@@ -166,12 +166,12 @@ function AppRoutes() {
           <Route path="/status" element={menuRoute("status", <StatusPage />)} />
           <Route path="/usage-stats" element={menuRoute("usage_stats", <UsageStatsPage />)} />
           <Route
-            path="/products/:productId/image-chat"
+            path="/inspirations/:inspirationId/image-chat"
             element={menuRoute("image_chat", <ImageChatPage />)}
           />
           <Route
-            path="/products/:productId"
-            element={menuRoute("inspirations", <ProductDetailPage />)}
+            path="/inspirations/:inspirationId"
+            element={menuRoute("inspirations", <InspirationDetailPage />)}
           />
           <Route path="*" element={<Navigate to={authenticated ? defaultAuthenticatedPath : "/login"} replace />} />
         </Routes>

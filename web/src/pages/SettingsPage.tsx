@@ -160,7 +160,7 @@ export interface GenerationResourceGroupDraft {
 }
 
 export interface TextConfigTestDraft {
-  productName: string;
+  inspirationName: string;
   category: string;
   price: string;
   sourceNote: string;
@@ -328,8 +328,8 @@ const EMPTY_PROVIDER_FORM: ProviderProfileFormState = {
 };
 
 const DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
-  productName: "测试商品",
-  category: "电商商品",
+  inspirationName: "测试灵感产物",
+  category: "电商灵感产物",
   price: "",
   sourceNote: "用于验证当前文案生成配置的测试输入。",
   instruction: "输出适合主图的短文案。",
@@ -778,8 +778,8 @@ function textGenerationConfigTestPayload(
   return {
     generation_config_id: generationConfigDraft.id,
     generation_config: generationConfig,
-    product: {
-      name: testDraft.productName.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.productName,
+    inspiration: {
+      name: testDraft.inspirationName.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.inspirationName,
       category: testDraft.category.trim() || null,
       price: testDraft.price.trim() || null,
       source_note: testDraft.sourceNote.trim() || null,
@@ -2365,10 +2365,10 @@ function TextConfigTestPanel({
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <SettingsFormField label={t("settings.generation.testProductName")}>
+        <SettingsFormField label={t("settings.generation.testInspirationName")}>
           <input
-            value={state.draft.productName}
-            onChange={(event) => onDraftChange({ ...state.draft, productName: event.target.value })}
+            value={state.draft.inspirationName}
+            onChange={(event) => onDraftChange({ ...state.draft, inspirationName: event.target.value })}
             className={INPUT_CLASS}
           />
         </SettingsFormField>

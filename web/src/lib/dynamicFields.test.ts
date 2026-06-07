@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { dynamicFieldsToRecord, parseDynamicScalar } from "./dynamicFields";
 
 describe("dynamic field helpers", () => {
-  it("parses scalar strings for product context dynamic fields", () => {
+  it("parses scalar strings for inspiration context dynamic fields", () => {
     expect(parseDynamicScalar("true")).toBe(true);
     expect(parseDynamicScalar("false")).toBe(false);
     expect(parseDynamicScalar("null")).toBeNull();

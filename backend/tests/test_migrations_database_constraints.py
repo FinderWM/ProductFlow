@@ -8,8 +8,8 @@ import sqlalchemy as sa
 from alembic.config import Config
 
 from alembic import command
-from productflow_backend.config import get_settings
-from productflow_backend.domain.enums import (
+from inspiration_one_backend.config import get_settings
+from inspiration_one_backend.domain.enums import (
     CopyStatus,
     ImageSessionAssetKind,
     JobStatus,
@@ -19,15 +19,15 @@ from productflow_backend.domain.enums import (
     WorkflowNodeType,
     WorkflowRunStatus,
 )
-from productflow_backend.infrastructure.db.models import (
+from inspiration_one_backend.infrastructure.db.models import (
     CanvasTemplate,
     CanvasTemplateCategory,
     CopySet,
     ImageGalleryEntry,
     ImageSessionAsset,
     ImageSessionGenerationTask,
+    InspirationWorkflow,
     PosterVariant,
-    ProductWorkflow,
     SourceAsset,
     UserCanvasTemplate,
     WorkflowNode,
@@ -38,8 +38,7 @@ from productflow_backend.infrastructure.db.models import (
 )
 
 MODEL_LEGACY_COPY_COLUMNS = [
-    "model_" + suffix
-    for suffix in ("title", "selling" + "_points", "poster" + "_headline", "c" + "ta")
+    "model_" + suffix for suffix in ("title", "selling" + "_points", "poster" + "_headline", "c" + "ta")
 ]
 LEGACY_COPY_COLUMNS = ["title", "selling" + "_points", "poster" + "_headline", "c" + "ta"]
 
@@ -149,9 +148,7 @@ def test_canvas_template_models_match_migration_contract() -> None:
         "uq_canvas_template_categories_global_name",
         "uq_canvas_template_categories_user_owner_name",
     }
-    assert not [
-        constraint for constraint in category_table.constraints if isinstance(constraint, sa.CheckConstraint)
-    ]
+    assert not [constraint for constraint in category_table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
     template_table = CanvasTemplate.__table__
     assert template_table.c.id.type.length == 36
@@ -189,10 +186,10 @@ def test_canvas_template_models_match_migration_contract() -> None:
     }
     assert not [constraint for constraint in template_table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
-    workflow_table = ProductWorkflow.__table__
+    workflow_table = InspirationWorkflow.__table__
     assert workflow_table.c.initial_entry_mode.type.length == 20
     assert not workflow_table.c.initial_entry_mode.nullable
-    assert "ix_product_workflows_initial_entry_mode" in {index.name for index in workflow_table.indexes}
+    assert "ix_inspiration_workflows_initial_entry_mode" in {index.name for index in workflow_table.indexes}
     assert not [constraint for constraint in workflow_table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
 
@@ -255,13 +252,11 @@ def test_repair_migration_adds_missing_0033_columns_after_stamp(tmp_path: Path, 
         "reviewed_at",
         "reviewed_by_user_id",
     } <= canvas_template_columns
-    assert "ix_canvas_templates_review_status" in {
-        index["name"] for index in inspector.get_indexes("canvas_templates")
-    }
+    assert "ix_canvas_templates_review_status" in {index["name"] for index in inspector.get_indexes("canvas_templates")}
     assert not inspector.get_foreign_keys("canvas_templates")
 
     for table_name, index_name in (
-        ("products", "ix_products_deleted_at"),
+        ("inspirations", "ix_inspirations_deleted_at"),
         ("image_sessions", "ix_image_sessions_deleted_at"),
     ):
         columns = {column["name"] for column in inspector.get_columns(table_name)}
@@ -295,19 +290,19 @@ def test_legacy_copy_fields_migrate_to_structured_payload_and_drop_columns(
         connection.execute(
             sa.text(
                 """
-                INSERT INTO products (
+                INSERT INTO inspirations (
                     id, name, category, price, source_note, current_confirmed_copy_set_id, created_at, updated_at
                 )
                 VALUES (:id, :name, NULL, NULL, NULL, NULL, :now, :now)
                 """
             ),
-            {"id": "product-1", "name": "迁移商品", "now": now},
+            {"id": "inspiration-1", "name": "迁移灵感产物", "now": now},
         )
         connection.execute(
             sa.text(
                 """
                 INSERT INTO copy_sets (
-                    id, product_id, creative_brief_id, status,
+                    id, inspiration_id, creative_brief_id, status,
                     __LEGACY_COPY_COLUMNS__,
                     structured_payload,
                     __MODEL_LEGACY_COLUMNS__,
@@ -316,7 +311,7 @@ def test_legacy_copy_fields_migrate_to_structured_payload_and_drop_columns(
                     edited_at, confirmed_at, created_at, updated_at
                 )
                 VALUES (
-                    :id, :product_id, NULL, :status,
+                    :id, :inspiration_id, NULL, :status,
                     :text_value, :points_value, :headline_value, :action_value,
                     NULL,
                     :model_text_value, :model_points_value, :model_headline_value, :model_action_value,
@@ -324,13 +319,13 @@ def test_legacy_copy_fields_migrate_to_structured_payload_and_drop_columns(
                     :provider_name, :model_name, :prompt_version,
                     NULL, NULL, :now, :now
                 )
-                """
-                .replace("__LEGACY_COPY_COLUMNS__", ", ".join(LEGACY_COPY_COLUMNS))
-                .replace("__MODEL_LEGACY_COLUMNS__", ", ".join(MODEL_LEGACY_COPY_COLUMNS))
+                """.replace("__LEGACY_COPY_COLUMNS__", ", ".join(LEGACY_COPY_COLUMNS)).replace(
+                    "__MODEL_LEGACY_COLUMNS__", ", ".join(MODEL_LEGACY_COPY_COLUMNS)
+                )
             ),
             {
                 "id": "copy-set-1",
-                "product_id": "product-1",
+                "inspiration_id": "inspiration-1",
                 "status": "draft",
                 "text_value": "旧标题",
                 "points_value": '["卖点一", "卖点二"]',
@@ -353,16 +348,23 @@ def test_legacy_copy_fields_migrate_to_structured_payload_and_drop_columns(
     engine = sa.create_engine(f"sqlite:///{database_path}")
     inspector = sa.inspect(engine)
     copy_set_columns = {column["name"] for column in inspector.get_columns("copy_sets")}
-    assert not {
-        *LEGACY_COPY_COLUMNS,
-        *MODEL_LEGACY_COPY_COLUMNS,
-    } & copy_set_columns
+    assert (
+        not {
+            *LEGACY_COPY_COLUMNS,
+            *MODEL_LEGACY_COPY_COLUMNS,
+        }
+        & copy_set_columns
+    )
     assert {"structured_payload", "model_structured_payload"} <= copy_set_columns
     with engine.connect() as connection:
-        row = connection.execute(
-            sa.text("SELECT structured_payload, model_structured_payload FROM copy_sets WHERE id = :id"),
-            {"id": "copy-set-1"},
-        ).mappings().one()
+        row = (
+            connection.execute(
+                sa.text("SELECT structured_payload, model_structured_payload FROM copy_sets WHERE id = :id"),
+                {"id": "copy-set-1"},
+            )
+            .mappings()
+            .one()
+        )
     structured_payload = json.loads(row["structured_payload"])
     model_structured_payload = json.loads(row["model_structured_payload"])
     assert structured_payload["version"] == 2
@@ -382,18 +384,22 @@ def test_legacy_copy_fields_migrate_to_structured_payload_and_drop_columns(
     downgraded_columns = {column["name"] for column in inspector.get_columns("copy_sets")}
     assert {*LEGACY_COPY_COLUMNS, *MODEL_LEGACY_COPY_COLUMNS} <= downgraded_columns
     with engine.connect() as connection:
-        row = connection.execute(
-            sa.text(
-                """
+        row = (
+            connection.execute(
+                sa.text(
+                    """
                 SELECT __LEGACY_COPY_COLUMNS__, __MODEL_LEGACY_COLUMNS__
                 FROM copy_sets
                 WHERE id = :id
-                """
-                .replace("__LEGACY_COPY_COLUMNS__", ", ".join(LEGACY_COPY_COLUMNS))
-                .replace("__MODEL_LEGACY_COLUMNS__", ", ".join(MODEL_LEGACY_COPY_COLUMNS))
-            ),
-            {"id": "copy-set-1"},
-        ).mappings().one()
+                """.replace("__LEGACY_COPY_COLUMNS__", ", ".join(LEGACY_COPY_COLUMNS)).replace(
+                        "__MODEL_LEGACY_COLUMNS__", ", ".join(MODEL_LEGACY_COPY_COLUMNS)
+                    )
+                ),
+                {"id": "copy-set-1"},
+            )
+            .mappings()
+            .one()
+        )
     assert row[LEGACY_COPY_COLUMNS[0]] == "旧标题"
     assert json.loads(row[LEGACY_COPY_COLUMNS[1]]) == ["卖点一", "卖点二"]
     assert row[LEGACY_COPY_COLUMNS[2]] == "旧海报标题"
@@ -426,15 +432,15 @@ def test_workflow_run_retryability_migration_supports_sqlite(tmp_path: Path, mon
     with engine.begin() as connection:
         connection.execute(
             sa.text(
-                "INSERT INTO products (id, name, created_at, updated_at) "
-                "VALUES ('product-1', '重试迁移商品', :now, :now)"
+                "INSERT INTO inspirations (id, name, created_at, updated_at) "
+                "VALUES ('inspiration-1', '重试迁移灵感产物', :now, :now)"
             ),
             {"now": now},
         )
         connection.execute(
             sa.text(
-                "INSERT INTO product_workflows (id, product_id, title, active, created_at, updated_at) "
-                "VALUES ('workflow-1', 'product-1', '迁移工作流', 1, :now, :now)"
+                "INSERT INTO inspiration_workflows (id, inspiration_id, title, active, created_at, updated_at) "
+                "VALUES ('workflow-1', 'inspiration-1', '迁移工作流', 1, :now, :now)"
             ),
             {"now": now},
         )
@@ -490,15 +496,15 @@ def test_workflow_run_progress_metadata_migration_supports_sqlite(tmp_path: Path
     with engine.begin() as connection:
         connection.execute(
             sa.text(
-                "INSERT INTO products (id, name, created_at, updated_at) "
-                "VALUES ('product-1', '进度迁移商品', :now, :now)"
+                "INSERT INTO inspirations (id, name, created_at, updated_at) "
+                "VALUES ('inspiration-1', '进度迁移灵感产物', :now, :now)"
             ),
             {"now": now},
         )
         connection.execute(
             sa.text(
-                "INSERT INTO product_workflows (id, product_id, title, active, created_at, updated_at) "
-                "VALUES ('workflow-1', 'product-1', '迁移工作流', 1, :now, :now)"
+                "INSERT INTO inspiration_workflows (id, inspiration_id, title, active, created_at, updated_at) "
+                "VALUES ('workflow-1', 'inspiration-1', '迁移工作流', 1, :now, :now)"
             ),
             {"now": now},
         )
@@ -637,7 +643,7 @@ def test_job_runs_drop_migration_and_downgrade_support_sqlite(tmp_path: Path, mo
     engine = sa.create_engine(f"sqlite:///{database_path}")
     inspector = sa.inspect(engine)
     assert "job_runs" in inspector.get_table_names()
-    assert "uq_job_runs_one_active_per_product_kind" in {
+    assert "uq_job_runs_one_active_per_inspiration_kind" in {
         index["name"] for index in inspector.get_indexes("job_runs")
     }
 
@@ -653,10 +659,10 @@ def test_job_runs_drop_migration_and_downgrade_support_sqlite(tmp_path: Path, mo
     inspector = sa.inspect(engine)
     assert "job_runs" in inspector.get_table_names()
     columns = {column["name"]: column for column in inspector.get_columns("job_runs")}
-    assert columns["product_id"]["nullable"] is False
+    assert columns["inspiration_id"]["nullable"] is False
     assert columns["kind"]["nullable"] is False
     assert columns["status"]["nullable"] is False
-    assert "uq_job_runs_one_active_per_product_kind" in {
+    assert "uq_job_runs_one_active_per_inspiration_kind" in {
         index["name"] for index in inspector.get_indexes("job_runs")
     }
 
@@ -765,20 +771,20 @@ def test_alembic_upgrade_removes_legacy_workflow_nodes(tmp_path: Path, monkeypat
     with engine.begin() as connection:
         connection.execute(
             sa.text(
-                "INSERT INTO products (id, name, created_at, updated_at) "
-                "VALUES ('product-1', '旧工作流商品', :now, :now)"
+                "INSERT INTO inspirations (id, name, created_at, updated_at) "
+                "VALUES ('inspiration-1', '旧工作流灵感产物', :now, :now)"
             ),
             {"now": now},
         )
         connection.execute(
             sa.text(
-                "INSERT INTO product_workflows (id, product_id, title, active, created_at, updated_at) "
-                "VALUES ('workflow-1', 'product-1', '旧工作流', 1, :now, :now)"
+                "INSERT INTO inspiration_workflows (id, inspiration_id, title, active, created_at, updated_at) "
+                "VALUES ('workflow-1', 'inspiration-1', '旧工作流', 1, :now, :now)"
             ),
             {"now": now},
         )
         for node_id, node_type in (
-            ("context-1", "product_context"),
+            ("context-1", "inspiration_context"),
             ("copy-1", "copy_generation"),
             ("legacy-text-1", "legacy_text"),
             ("image-1", "image_generation"),
@@ -829,7 +835,7 @@ def test_alembic_upgrade_removes_legacy_workflow_nodes(tmp_path: Path, monkeypat
         edge_ids = connection.execute(sa.text("SELECT id FROM workflow_edges ORDER BY id")).scalars().all()
         node_run_ids = connection.execute(sa.text("SELECT id FROM workflow_node_runs ORDER BY id")).scalars().all()
 
-    assert node_types == ["product_context", "copy_generation", "image_generation", "reference_image"]
+    assert node_types == ["inspiration_context", "copy_generation", "image_generation", "reference_image"]
     assert edge_ids == ["edge-supported"]
     assert node_run_ids == ["node-run-supported"]
     get_settings.cache_clear()
@@ -858,15 +864,15 @@ def test_disjoint_workflow_node_run_migration_constraints_support_sqlite(
     with engine.begin() as connection:
         connection.execute(
             sa.text(
-                "INSERT INTO products (id, name, created_at, updated_at) "
-                "VALUES ('product-1', '节点并行迁移商品', :now, :now)"
+                "INSERT INTO inspirations (id, name, created_at, updated_at) "
+                "VALUES ('inspiration-1', '节点并行迁移灵感产物', :now, :now)"
             ),
             {"now": now},
         )
         connection.execute(
             sa.text(
-                "INSERT INTO product_workflows (id, product_id, title, active, created_at, updated_at) "
-                "VALUES ('workflow-1', 'product-1', '节点并行迁移工作流', 1, :now, :now)"
+                "INSERT INTO inspiration_workflows (id, inspiration_id, title, active, created_at, updated_at) "
+                "VALUES ('workflow-1', 'inspiration-1', '节点并行迁移工作流', 1, :now, :now)"
             ),
             {"now": now},
         )

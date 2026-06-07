@@ -26,13 +26,13 @@ Current query key patterns:
 
 - Session: `['session']` in `App.tsx`. `GET /api/auth/session` returns both `authenticated` and `access_required`;
   private routes require account login and no runtime setting can disable this boundary.
-- Product list: `['products']` in `ProductListPage.tsx` and `ImageChatPage.tsx`.
-- Product detail/history: `['product', productId]` and `['product-history', productId]` in `ProductDetailPage.tsx`.
-- Product workbench: `['product-workflow', productId]` and `['product-workflow-status', productId]` in
-  `ProductDetailPage.tsx`.
-- Image sessions: `['image-sessions', productId ?? 'standalone']` and `['image-session', selectedSessionId]` in
+- Inspiration list: `['inspirations']` in `InspirationListPage.tsx` and `ImageChatPage.tsx`.
+- Inspiration detail/history: `['inspiration', inspirationId]` and `['inspiration-history', inspirationId]` in `InspirationDetailPage.tsx`.
+- Inspiration workbench: `['inspiration-workflow', inspirationId]` and `['inspiration-workflow-status', inspirationId]` in
+  `InspirationDetailPage.tsx`.
+- Image sessions: `['image-sessions', inspirationId ?? 'standalone']` and `['image-session', selectedSessionId]` in
   `ImageChatPage.tsx`.
-- Runtime config: `['runtime-config']` in `ProductDetailPage.tsx`, `ProductListPage.tsx`, and `ImageChatPage.tsx`.
+- Runtime config: `['runtime-config']` in `InspirationDetailPage.tsx`, `InspirationListPage.tsx`, and `ImageChatPage.tsx`.
 - Full settings config: `['config']` in `SettingsPage.tsx`; successful settings saves/resets must invalidate
   `['runtime-config']` when they can affect public runtime behavior.
 - Settings import/export: successful import must refresh or invalidate settings/provider/runtime queries plus
@@ -48,26 +48,26 @@ When writing mutations, update/invalidate every key that can show stale data.
 
 Keep short-lived UI state local to the page that owns the interaction:
 
-- `ProductCreatePage.tsx` stores form fields, selected files, and a local error string.
-- `ProductDetailPage.tsx` stores editing mode, editable copy draft, selected canvas/workbench state, and local mutation
+- `InspirationCreatePage.tsx` stores form fields, selected files, and a local error string.
+- `InspirationDetailPage.tsx` stores editing mode, editable copy draft, selected canvas/workbench state, and local mutation
   error strings.
-- `ImageChatPage.tsx` stores selected session/generated asset, prompt draft, image size, rename mode, target product,
+- `ImageChatPage.tsx` stores selected session/generated asset, prompt draft, image size, rename mode, target inspiration,
   and transient success/error messages.
 - `SettingsPage.tsx` stores config drafts, secret touched flags, reset progress, and save/error messages.
 
 Local state should not duplicate server records unless the user is editing a draft. For example, `SettingsPage.tsx` creates
-`drafts` from fetched config so the user can edit before saving; product details themselves remain in TanStack Query.
+`drafts` from fetched config so the user can edit before saving; inspiration details themselves remain in TanStack Query.
 
 ## URL and Navigation State
 
 React Router owns route selection and route params:
 
-- `useNavigate()` is used after login/logout, product creation, and page buttons.
-- `useParams()` supplies `productId` for `ProductDetailPage.tsx` and product-scoped `ImageChatPage.tsx`.
+- `useNavigate()` is used after login/logout, inspiration creation, and page buttons.
+- `useParams()` supplies `inspirationId` for `InspirationDetailPage.tsx` and inspiration-scoped `ImageChatPage.tsx`.
 - Auth redirects are centralized in `App.tsx` route elements and `LoginPage.tsx` redirects authenticated users away from
   `/login`.
 
-Do not introduce a global store just to track current page or product ID; use the URL.
+Do not introduce a global store just to track current page or inspiration ID; use the URL.
 
 ---
 
@@ -85,7 +85,7 @@ Locale and theme are the only durable browser-local UI preferences currently sup
   locale/theme state.
 
 Locale and theme are not server records. Do not store them in TanStack Query, add backend settings for them, or persist
-them with auth/session state unless a future product requirement explicitly changes that boundary.
+them with auth/session state unless a future inspiration requirement explicitly changes that boundary.
 
 Good:
 
@@ -107,10 +107,10 @@ return <button type="button">{locale === "en-US" ? "Settings" : "配置"}</butto
 
 Prefer derived values over additional state:
 
-- `ProductDetailPage.tsx` derives source image URL, reference images, working copy, and poster variants from
-  `ProductDetail`.
+- `InspirationDetailPage.tsx` derives source image URL, reference images, working copy, and poster variants from
+  `InspirationDetail`.
 - `ImageChatPage.tsx` derives built-in image-size picker presets from `web/src/lib/imageSizes.ts`, selected round from
-  the selected asset ID, and product source/reference images from product detail.
+  the selected asset ID, and inspiration source/reference images from inspiration detail.
 - `SettingsPage.tsx` derives grouped config items from the fetched config response.
 - `StatusPage.tsx` derives quick date ranges in local date-input format and passes the selected range to the status API;
   it renders backend-provided `today_*`, `range_*`, and per-config `range_stat` fields instead of recalculating
@@ -126,8 +126,8 @@ The central API wrapper throws `ApiError(status, detail)` from `web/src/lib/api.
 strings:
 
 - `LoginPage.tsx` displays invalid key errors.
-- `ProductCreatePage.tsx` displays create/upload validation errors.
-- `ProductDetailPage.tsx` displays copy/poster/reference image mutation errors.
+- `InspirationCreatePage.tsx` displays create/upload validation errors.
+- `InspirationDetailPage.tsx` displays copy/poster/reference image mutation errors.
 - `ImageChatPage.tsx` displays generation/session/attach errors.
 - `SettingsPage.tsx` displays config validation errors.
 
@@ -142,5 +142,5 @@ Keep error display local unless multiple pages need a shared notification system
 - Invalidating broad caches unnecessarily when a precise `setQueryData` is already used and safe.
 - Hiding route state in local storage or globals instead of using React Router params.
 - Storing API keys or admin keys in frontend local storage. Authentication is session-cookie based.
-- Reintroducing durable browser-local onboarding, tour, help, or tutorial state without a new approved product requirement.
+- Reintroducing durable browser-local onboarding, tour, help, or tutorial state without a new approved inspiration requirement.
 - Adding new durable local preferences outside `PreferencesProvider` without updating this spec and focused helper tests.

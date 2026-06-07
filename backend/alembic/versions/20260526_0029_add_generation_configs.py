@@ -196,17 +196,21 @@ def _migrate_provider_bindings() -> None:
         sa.column("created_at", sa.DateTime(timezone=True)),
         sa.column("updated_at", sa.DateTime(timezone=True)),
     )
-    rows = bind.execute(
-        sa.select(
-            provider_bindings.c.purpose,
-            provider_bindings.c.provider_kind,
-            provider_bindings.c.provider_profile_id,
-            provider_bindings.c.model_settings_json,
-            provider_bindings.c.config_json,
-            provider_bindings.c.created_at,
-            provider_bindings.c.updated_at,
-        ).order_by(provider_bindings.c.purpose)
-    ).mappings().all()
+    rows = (
+        bind.execute(
+            sa.select(
+                provider_bindings.c.purpose,
+                provider_bindings.c.provider_kind,
+                provider_bindings.c.provider_profile_id,
+                provider_bindings.c.model_settings_json,
+                provider_bindings.c.config_json,
+                provider_bindings.c.created_at,
+                provider_bindings.c.updated_at,
+            ).order_by(provider_bindings.c.purpose)
+        )
+        .mappings()
+        .all()
+    )
     if not rows:
         _insert_default_configs(bind)
         return

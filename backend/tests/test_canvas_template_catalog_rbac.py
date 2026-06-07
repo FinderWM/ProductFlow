@@ -6,11 +6,11 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import _login, _make_demo_image_bytes
 
-from productflow_backend.application.auth import ensure_auth_bootstrapped
-from productflow_backend.application.canvas_templates import get_builtin_canvas_template
-from productflow_backend.domain.errors import BusinessValidationError
-from productflow_backend.domain.rbac import ADMIN_USER_ID
-from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
+from inspiration_one_backend.application.auth import ensure_auth_bootstrapped
+from inspiration_one_backend.application.canvas_templates import get_builtin_canvas_template
+from inspiration_one_backend.domain.errors import BusinessValidationError
+from inspiration_one_backend.domain.rbac import ADMIN_USER_ID
+from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
 
 
 def _create_user_client(app, admin_client: TestClient, username: str) -> TestClient:
@@ -38,9 +38,9 @@ def _create_user_client(app, admin_client: TestClient, username: str) -> TestCli
     return client
 
 
-def _create_product(client: TestClient, name: str) -> dict:
+def _create_inspiration(client: TestClient, name: str) -> dict:
     created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={"name": name, "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": (f"{name}.png", _make_demo_image_bytes(), "image/png")},
     )
@@ -48,8 +48,8 @@ def _create_product(client: TestClient, name: str) -> dict:
     return created.json()
 
 
-def _save_first_node_group_template(client: TestClient, product_id: str, category_id: str | None = None) -> dict:
-    workflow = client.get(f"/api/products/{product_id}/workflow")
+def _save_first_node_group_template(client: TestClient, inspiration_id: str, category_id: str | None = None) -> dict:
+    workflow = client.get(f"/api/inspirations/{inspiration_id}/workflow")
     assert workflow.status_code == 200
     nodes = [
         node
@@ -57,7 +57,7 @@ def _save_first_node_group_template(client: TestClient, product_id: str, categor
         if node["node_type"] in {"copy_generation", "image_generation", "reference_image"}
     ][:2]
     saved = client.post(
-        f"/api/products/{product_id}/workflow/user-template-groups",
+        f"/api/inspirations/{inspiration_id}/workflow/user-template-groups",
         json={
             "title": "个人复用链路",
             "node_ids": [node["id"] for node in nodes],
@@ -69,7 +69,7 @@ def _save_first_node_group_template(client: TestClient, product_id: str, categor
 
 
 def test_canvas_template_user_scope_requires_active_owner(db_session) -> None:
-    from productflow_backend.application.product_workflow.user_templates import (
+    from inspiration_one_backend.application.inspiration_workflow.user_templates import (
         create_canvas_template_category,
         create_user_canvas_template_from_workflow_nodes,
     )
@@ -91,7 +91,7 @@ def test_canvas_template_user_scope_requires_active_owner(db_session) -> None:
     with pytest.raises(BusinessValidationError, match="用户模板归属账号不存在"):
         create_user_canvas_template_from_workflow_nodes(
             db_session,
-            product_id="missing-product",
+            inspiration_id="missing-inspiration",
             owner_user_id="missing-user",
             title="失效 owner 模板",
             description=None,
@@ -100,7 +100,7 @@ def test_canvas_template_user_scope_requires_active_owner(db_session) -> None:
 
 
 def test_builtin_templates_seed_to_database_and_support_search_category_filter(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -157,9 +157,9 @@ def test_builtin_templates_seed_to_database_and_support_search_category_filter(c
 
 
 def test_canvas_template_catalog_filters_by_initial_entry_mode(configured_env: Path) -> None:
-    from productflow_backend.application.product_workflow.user_templates import create_global_canvas_template
-    from productflow_backend.infrastructure.db.session import get_session_factory
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.application.inspiration_workflow.user_templates import create_global_canvas_template
+    from inspiration_one_backend.infrastructure.db.session import get_session_factory
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -195,7 +195,7 @@ def test_canvas_template_catalog_filters_by_initial_entry_mode(configured_env: P
 
 
 def test_user_template_categories_and_templates_are_owner_scoped(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -208,8 +208,8 @@ def test_user_template_categories_and_templates_are_owner_scoped(configured_env:
         json={"name": "Alice 分类", "sort_order": 20},
     )
     assert category.status_code == 201
-    product = _create_product(alice_client, "Alice 模板灵感")
-    template = _save_first_node_group_template(alice_client, product["id"], category.json()["id"])
+    inspiration = _create_inspiration(alice_client, "Alice 模板灵感")
+    template = _save_first_node_group_template(alice_client, inspiration["id"], category.json()["id"])
 
     alice_templates = alice_client.get("/api/workflow/canvas-templates", params={"scope": "user"})
     assert alice_templates.status_code == 200
@@ -243,7 +243,7 @@ def test_user_template_categories_and_templates_are_owner_scoped(configured_env:
 
 
 def test_user_template_restore_is_owner_scoped(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -251,8 +251,8 @@ def test_user_template_restore_is_owner_scoped(configured_env: Path) -> None:
     alice_client = _create_user_client(app, admin_client, "alice")
     bob_client = _create_user_client(app, admin_client, "bob")
 
-    product = _create_product(alice_client, "Alice 恢复模板灵感")
-    template = _save_first_node_group_template(alice_client, product["id"])
+    inspiration = _create_inspiration(alice_client, "Alice 恢复模板灵感")
+    template = _save_first_node_group_template(alice_client, inspiration["id"])
     template_id = template["user_template_id"]
 
     archived = alice_client.delete(f"/api/workflow/user-template-groups/{template_id}")
@@ -275,7 +275,7 @@ def test_user_template_restore_is_owner_scoped(configured_env: Path) -> None:
 
 
 def test_global_template_management_requires_rbac_and_archives_restore(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -356,7 +356,7 @@ def test_global_template_management_requires_rbac_and_archives_restore(configure
 
 
 def test_disabled_template_category_cannot_be_reused(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
@@ -382,13 +382,13 @@ def test_disabled_template_category_cannot_be_reused(configured_env: Path) -> No
     assert category_manage.json()["items"][0]["id"] == category.json()["id"]
     assert category_manage.json()["items"][0]["disabled_reason"] == "分类暂不可用"
 
-    product = _create_product(alice_client, "分类屏蔽灵感")
-    workflow = alice_client.get(f"/api/products/{product['id']}/workflow")
+    inspiration = _create_inspiration(alice_client, "分类屏蔽灵感")
+    workflow = alice_client.get(f"/api/inspirations/{inspiration['id']}/workflow")
     assert workflow.status_code == 200
     copy_node = next(node for node in workflow.json()["nodes"] if node["node_type"] == "copy_generation")
 
     blocked = alice_client.post(
-        f"/api/products/{product['id']}/workflow/user-template-groups",
+        f"/api/inspirations/{inspiration['id']}/workflow/user-template-groups",
         json={
             "title": "不能挂屏蔽分类",
             "node_ids": [copy_node["id"]],

@@ -309,7 +309,7 @@ def downgrade() -> None:
 
 
 def _add_core_resource_owner_columns() -> None:
-    _add_owner_column("products", "fk_products_owner_user_id", "ix_products_owner_user_id")
+    _add_owner_column("inspirations", "fk_inspirations_owner_user_id", "ix_inspirations_owner_user_id")
     _add_owner_column("image_sessions", "fk_image_sessions_owner_user_id", "ix_image_sessions_owner_user_id")
     _add_owner_column(
         "image_session_assets",
@@ -324,7 +324,7 @@ def _add_core_resource_owner_columns() -> None:
 
 
 def _add_core_resource_moderation_columns() -> None:
-    _add_moderation_columns("products", "fk_products_disabled_by_user_id", "ix_products_enabled")
+    _add_moderation_columns("inspirations", "fk_inspirations_disabled_by_user_id", "ix_inspirations_enabled")
     _add_moderation_columns("source_assets", "fk_source_assets_disabled_by_user_id", "ix_source_assets_enabled")
     _add_moderation_columns("poster_variants", "fk_poster_variants_disabled_by_user_id", "ix_poster_variants_enabled")
     _add_moderation_columns("image_sessions", "fk_image_sessions_disabled_by_user_id", "ix_image_sessions_enabled")
@@ -406,7 +406,7 @@ def _drop_core_resource_owner_columns() -> None:
         "ix_image_session_assets_owner_user_id",
     )
     _drop_owner_column("image_sessions", "fk_image_sessions_owner_user_id", "ix_image_sessions_owner_user_id")
-    _drop_owner_column("products", "fk_products_owner_user_id", "ix_products_owner_user_id")
+    _drop_owner_column("inspirations", "fk_inspirations_owner_user_id", "ix_inspirations_owner_user_id")
 
 
 def _drop_core_resource_moderation_columns() -> None:
@@ -435,7 +435,7 @@ def _drop_core_resource_moderation_columns() -> None:
         "fk_source_assets_disabled_by_user_id",
         "ix_source_assets_enabled",
     )
-    _drop_moderation_columns("products", "fk_products_disabled_by_user_id", "ix_products_enabled")
+    _drop_moderation_columns("inspirations", "fk_inspirations_disabled_by_user_id", "ix_inspirations_enabled")
 
 
 def _drop_owner_column(table_name: str, fk_name: str, index_name: str | None) -> None:

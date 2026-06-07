@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 if TYPE_CHECKING:
-    from productflow_backend.application.product_workflow_dependencies import WorkflowExecutionDependencies
+    from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
 
 
 def _make_demo_image_bytes() -> bytes:
@@ -59,7 +59,7 @@ def _enable_deletion(client: TestClient) -> None:
 
 def _wait_for_workflow_run(
     client: TestClient,
-    product_id: str,
+    inspiration_id: str,
     *,
     run_id: str | None = None,
     status: str | None = None,
@@ -68,7 +68,7 @@ def _wait_for_workflow_run(
     deadline = time.monotonic() + timeout
     last_payload: dict | None = None
     while time.monotonic() < deadline:
-        response = client.get(f"/api/products/{product_id}/workflow")
+        response = client.get(f"/api/inspirations/{inspiration_id}/workflow")
         assert response.status_code == 200, (
             f"{response.status_code}: {response.text} has_session_cookie={'session' in client.cookies}"
         )
@@ -96,22 +96,22 @@ def _execute_workflow_queue_inline(
     *,
     dependencies: WorkflowExecutionDependencies | None = None,
 ) -> None:
-    from productflow_backend.application.product_workflows import (
-        execute_product_workflow_node_run,
-        execute_product_workflow_run,
+    from inspiration_one_backend.application.inspiration_workflows import (
+        execute_inspiration_workflow_node_run,
+        execute_inspiration_workflow_run,
     )
 
     def execute_inline(run_id: str) -> None:
-        execute_product_workflow_run(run_id, dependencies=dependencies)
+        execute_inspiration_workflow_run(run_id, dependencies=dependencies)
 
     def execute_node_inline(node_run_id: str) -> None:
-        execute_product_workflow_node_run(node_run_id, dependencies=dependencies)
+        execute_inspiration_workflow_node_run(node_run_id, dependencies=dependencies)
 
     monkeypatch.setattr(
-        "productflow_backend.application.product_workflow.execution.enqueue_workflow_run",
+        "inspiration_one_backend.application.inspiration_workflow.execution.enqueue_workflow_run",
         execute_inline,
     )
     monkeypatch.setattr(
-        "productflow_backend.application.product_workflow.execution.enqueue_workflow_node_run",
+        "inspiration_one_backend.application.inspiration_workflow.execution.enqueue_workflow_node_run",
         execute_node_inline,
     )

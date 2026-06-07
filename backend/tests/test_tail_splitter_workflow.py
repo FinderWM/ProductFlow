@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login, _wait_for_workflow_run
 
-from productflow_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType, WorkflowRunStatus
-from productflow_backend.domain.workflow_rules import WorkflowRuleNode, should_execute_missing_upstream
-from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
+from inspiration_one_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType, WorkflowRunStatus
+from inspiration_one_backend.domain.workflow_rules import WorkflowRuleNode, should_execute_missing_upstream
+from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
 
 
 @pytest.fixture(autouse=True)
@@ -34,12 +34,12 @@ def _tail_generated_node(workflow, *, tail_node_id: str, role: str):
 
 
 def test_mock_tail_splitter_treats_max_items_as_upper_bound() -> None:
-    from productflow_backend.application.contracts import TailSplitPlanInput
-    from productflow_backend.infrastructure.text.mock_provider import MockTextProvider
+    from inspiration_one_backend.application.contracts import TailSplitPlanInput
+    from inspiration_one_backend.infrastructure.text.mock_provider import MockTextProvider
 
     draft, _model = MockTextProvider().generate_tail_split_plan(
         TailSplitPlanInput(
-            product_name="简短商品",
+            inspiration_name="简短灵感产物",
             source_text="只需要一张主图",
             description="",
             max_items=4,
@@ -49,8 +49,8 @@ def test_mock_tail_splitter_treats_max_items_as_upper_bound() -> None:
     assert len(draft.items) == 1
 
 
-def test_product_creation_supports_copy_and_tail_entries_without_image(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+def test_inspiration_creation_supports_copy_and_tail_entries_without_image(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
 
     del configured_env
     app = create_app()
@@ -58,26 +58,26 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
     _login(client)
 
     copy_created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
-            "name": "文案入口商品",
+            "name": "文案入口灵感产物",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "copy",
             "entry_text": "强调免安装、整洁收纳和家居场景适配。",
         },
     )
     assert copy_created.status_code == 201
-    copy_product_id = copy_created.json()["id"]
+    copy_inspiration_id = copy_created.json()["id"]
 
-    copy_workflow = client.get(f"/api/products/{copy_product_id}/workflow")
+    copy_workflow = client.get(f"/api/inspirations/{copy_inspiration_id}/workflow")
     assert copy_workflow.status_code == 200
     copy_payload = copy_workflow.json()
     assert {node["node_type"] for node in copy_payload["nodes"]} == {
-        "product_context",
+        "inspiration_context",
         "copy_generation",
     }
-    copy_context_node = _workflow_node(copy_payload, "product_context")
-    assert copy_context_node["config_json"]["name"] == "文案入口商品"
+    copy_context_node = _workflow_node(copy_payload, "inspiration_context")
+    assert copy_context_node["config_json"]["name"] == "文案入口灵感产物"
     assert copy_context_node["config_json"]["entry_type"] == "copy"
     assert copy_context_node["config_json"]["long_text"] == "强调免安装、整洁收纳和家居场景适配。"
     copy_node = _workflow_node(copy_payload, "copy_generation")
@@ -86,26 +86,26 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
     assert [(edge["source_node_id"], edge["target_node_id"]) for edge in copy_payload["edges"]]
 
     tail_created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
-            "name": "尾巴入口商品",
+            "name": "尾巴入口灵感产物",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "tail",
             "entry_text": "免安装、收纳整洁、细节材质、不同场景摆放。",
         },
     )
     assert tail_created.status_code == 201
-    tail_product_id = tail_created.json()["id"]
+    tail_inspiration_id = tail_created.json()["id"]
 
-    tail_workflow = client.get(f"/api/products/{tail_product_id}/workflow")
+    tail_workflow = client.get(f"/api/inspirations/{tail_inspiration_id}/workflow")
     assert tail_workflow.status_code == 200
     tail_payload = tail_workflow.json()
     assert {node["node_type"] for node in tail_payload["nodes"]} == {
-        "product_context",
+        "inspiration_context",
         "tail_splitter",
     }
-    tail_context_node = _workflow_node(tail_payload, "product_context")
-    assert tail_context_node["config_json"]["name"] == "尾巴入口商品"
+    tail_context_node = _workflow_node(tail_payload, "inspiration_context")
+    assert tail_context_node["config_json"]["name"] == "尾巴入口灵感产物"
     assert tail_context_node["config_json"]["entry_type"] == "tail"
     assert tail_context_node["config_json"]["long_text"] == "免安装、收纳整洁、细节材质、不同场景摆放。"
     tail_node = _workflow_node(tail_payload, "tail_splitter")
@@ -113,7 +113,7 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
     assert len(tail_payload["edges"]) == 1
 
     blank_created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
             "name": "空白入口灵感",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -121,21 +121,21 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
         },
     )
     assert blank_created.status_code == 201
-    blank_product_id = blank_created.json()["id"]
+    blank_inspiration_id = blank_created.json()["id"]
 
-    blank_workflow = client.get(f"/api/products/{blank_product_id}/workflow")
+    blank_workflow = client.get(f"/api/inspirations/{blank_inspiration_id}/workflow")
     assert blank_workflow.status_code == 200
     blank_payload = blank_workflow.json()
-    assert [node["node_type"] for node in blank_payload["nodes"]] == ["product_context"]
+    assert [node["node_type"] for node in blank_payload["nodes"]] == ["inspiration_context"]
     assert blank_payload["nodes"][0]["title"] == "灵感"
     assert blank_payload["nodes"][0]["config_json"]["name"] == "空白入口灵感"
     assert blank_payload["nodes"][0]["config_json"]["entry_type"] == "blank"
     assert blank_payload["edges"] == []
 
     image_missing = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
-            "name": "图片入口商品",
+            "name": "图片入口灵感产物",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "image",
         },
@@ -144,7 +144,7 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
     assert image_missing.json()["detail"] == "请先上传灵感图"
 
     copy_missing_text = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
             "name": "缺内容文案入口",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -155,7 +155,7 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
     assert copy_missing_text.json()["detail"] == "入口内容不能为空"
 
     tail_missing_text = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
             "name": "缺内容尾巴入口",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -167,7 +167,7 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
 
 
 def test_tail_splitter_max_items_uses_runtime_config_limit(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     del configured_env
     app = create_app()
@@ -175,17 +175,17 @@ def test_tail_splitter_max_items_uses_runtime_config_limit(configured_env: Path)
     _login(client)
 
     created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
-            "name": "尾巴拆分上限商品",
+            "name": "尾巴拆分上限灵感产物",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "tail",
             "entry_text": "主打免安装、收纳整洁、细节材质、不同场景摆放。",
         },
     )
     assert created.status_code == 201
-    product_id = created.json()["id"]
-    workflow_payload = client.get(f"/api/products/{product_id}/workflow").json()
+    inspiration_id = created.json()["id"]
+    workflow_payload = client.get(f"/api/inspirations/{inspiration_id}/workflow").json()
     tail_node = _workflow_node(workflow_payload, "tail_splitter")
 
     legacy_nullable_config = client.patch(
@@ -256,7 +256,7 @@ def test_tail_splitter_max_items_uses_runtime_config_limit(configured_env: Path)
 
 
 def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(configured_env: Path) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     del configured_env
     app = create_app()
@@ -264,18 +264,18 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
     _login(client)
 
     created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={
-            "name": "尾巴拆分商品",
+            "name": "尾巴拆分灵感产物",
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "tail",
             "entry_text": "主打免安装、收纳整洁、细节材质、不同场景摆放。",
         },
     )
     assert created.status_code == 201
-    product_id = created.json()["id"]
+    inspiration_id = created.json()["id"]
 
-    workflow_payload = client.get(f"/api/products/{product_id}/workflow").json()
+    workflow_payload = client.get(f"/api/inspirations/{inspiration_id}/workflow").json()
     tail_node = _workflow_node(workflow_payload, "tail_splitter")
 
     updated = client.patch(
@@ -293,12 +293,12 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
     assert updated.status_code == 200
 
     run_response = client.post(
-        f"/api/products/{product_id}/workflow/run",
+        f"/api/inspirations/{inspiration_id}/workflow/run",
         json={"start_node_id": tail_node["id"]},
     )
     assert run_response.status_code == 200
 
-    finished = _wait_for_workflow_run(client, product_id, status="waiting_confirmation")
+    finished = _wait_for_workflow_run(client, inspiration_id, status="waiting_confirmation")
     assert finished["runs"][0]["is_cancelable"] is True
     assert finished["runs"][0]["queue_active_count"] == 0
     tail_node_after_run = next(node for node in finished["nodes"] if node["id"] == tail_node["id"])
@@ -412,20 +412,20 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
 
 
 def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_session) -> None:
-    from productflow_backend.application.product_workflows import (
+    from inspiration_one_backend.application.inspiration_workflows import (
         apply_tail_split_plan,
         create_workflow_node,
-        execute_product_workflow_run,
-        get_or_create_product_workflow,
-        run_product_workflow,
+        execute_inspiration_workflow_run,
+        get_or_create_inspiration_workflow,
+        run_inspiration_workflow,
         update_workflow_node,
     )
-    from productflow_backend.application.use_cases import create_product
-    from productflow_backend.domain.enums import WorkflowNodeType
+    from inspiration_one_backend.application.use_cases import create_inspiration
+    from inspiration_one_backend.domain.enums import WorkflowNodeType
 
-    product = create_product(
+    inspiration = create_inspiration(
         db_session,
-        name="尾巴全图重拆分商品",
+        name="尾巴全图重拆分灵感产物",
         category=None,
         price=None,
         source_note=None,
@@ -435,7 +435,7 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
         initial_workflow_entry="tail",
         entry_text="主打免安装、收纳整洁、细节材质、不同场景摆放。",
     )
-    workflow = get_or_create_product_workflow(db_session, product.id)
+    workflow = get_or_create_inspiration_workflow(db_session, inspiration.id)
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
 
     workflow = update_workflow_node(
@@ -454,7 +454,7 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
     )
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
 
-    workflow = run_product_workflow(db_session, product_id=product.id, start_node_id=tail_node.id)
+    workflow = run_inspiration_workflow(db_session, inspiration_id=inspiration.id, start_node_id=tail_node.id)
     first_run = next(run for run in workflow.runs if run.status == WorkflowRunStatus.WAITING_CONFIRMATION)
     tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
     first_plan = tail_node.output_json["latest_plan"]
@@ -468,7 +468,7 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
         item_ids=first_item_ids,
         position_x=tail_node.position_x + 80,
         position_y=tail_node.position_y,
-        enqueue=lambda run_id: execute_product_workflow_run(run_id),
+        enqueue=lambda run_id: execute_inspiration_workflow_run(run_id),
     )
     db_session.expire_all()
     first_run_after_apply = db_session.get(type(first_run), first_run.id)
@@ -483,7 +483,7 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
 
     workflow = create_workflow_node(
         db_session,
-        product_id=product.id,
+        inspiration_id=inspiration.id,
         node_type=WorkflowNodeType.COPY_GENERATION,
         title="手动保留节点",
         position_x=tail_node.position_x + 40,
@@ -507,7 +507,7 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
         },
     )
 
-    workflow = run_product_workflow(db_session, product_id=product.id)
+    workflow = run_inspiration_workflow(db_session, inspiration_id=inspiration.id)
     node_ids_after_full_run = {node.id for node in workflow.nodes}
     assert first_batch_node_ids.issubset(node_ids_after_full_run)
     assert manual_node_id in node_ids_after_full_run
@@ -526,7 +526,7 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
         item_ids=second_item_ids,
         position_x=tail_node.position_x + 80,
         position_y=tail_node.position_y,
-        enqueue=lambda run_id: execute_product_workflow_run(run_id),
+        enqueue=lambda run_id: execute_inspiration_workflow_run(run_id),
     )
     node_ids_after_confirm = {node.id for node in workflow.nodes}
     assert first_batch_node_ids.isdisjoint(node_ids_after_confirm)
@@ -545,20 +545,20 @@ def test_full_workflow_run_resplits_tail_branch_and_keeps_manual_nodes(db_sessio
 
 
 def test_tail_splitter_reapply_can_reuse_previous_public_nodes(db_session) -> None:
-    from productflow_backend.application.product_workflow.artifacts import copy_node_output, image_asset_output
-    from productflow_backend.application.product_workflows import (
+    from inspiration_one_backend.application.inspiration_workflow.artifacts import copy_node_output, image_asset_output
+    from inspiration_one_backend.application.inspiration_workflows import (
         apply_tail_split_plan,
-        get_or_create_product_workflow,
-        run_product_workflow,
+        get_or_create_inspiration_workflow,
+        run_inspiration_workflow,
         update_workflow_node,
     )
-    from productflow_backend.application.use_cases import create_product
-    from productflow_backend.domain.enums import CopyStatus, SourceAssetKind
-    from productflow_backend.infrastructure.db.models import CopySet, SourceAsset
+    from inspiration_one_backend.application.use_cases import create_inspiration
+    from inspiration_one_backend.domain.enums import CopyStatus, SourceAssetKind
+    from inspiration_one_backend.infrastructure.db.models import CopySet, SourceAsset
 
-    product = create_product(
+    inspiration = create_inspiration(
         db_session,
-        name="尾巴公共节点复用商品",
+        name="尾巴公共节点复用灵感产物",
         category=None,
         price=None,
         source_note=None,
@@ -568,7 +568,7 @@ def test_tail_splitter_reapply_can_reuse_previous_public_nodes(db_session) -> No
         initial_workflow_entry="tail",
         entry_text="主打免安装、收纳整洁、细节材质、不同场景摆放。",
     )
-    workflow = get_or_create_product_workflow(db_session, product.id)
+    workflow = get_or_create_inspiration_workflow(db_session, inspiration.id)
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
     workflow = update_workflow_node(
         db_session,
@@ -586,7 +586,7 @@ def test_tail_splitter_reapply_can_reuse_previous_public_nodes(db_session) -> No
     )
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
 
-    workflow = run_product_workflow(db_session, product_id=product.id, start_node_id=tail_node.id)
+    workflow = run_inspiration_workflow(db_session, inspiration_id=inspiration.id, start_node_id=tail_node.id)
     tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
     first_plan = tail_node.output_json["latest_plan"]
     first_item_ids = [item["id"] for item in first_plan["items"][:2]]
@@ -604,7 +604,7 @@ def test_tail_splitter_reapply_can_reuse_previous_public_nodes(db_session) -> No
     public_reference_node = _tail_generated_node(workflow, tail_node_id=tail_node.id, role="public_reference")
 
     copy_set = CopySet(
-        product_id=product.id,
+        inspiration_id=inspiration.id,
         status=CopyStatus.DRAFT,
         structured_payload={
             "version": 2,
@@ -621,11 +621,11 @@ def test_tail_splitter_reapply_can_reuse_previous_public_nodes(db_session) -> No
         prompt_version="test",
     )
     reference_asset = SourceAsset(
-        product_id=product.id,
+        inspiration_id=inspiration.id,
         kind=SourceAssetKind.REFERENCE_IMAGE,
         original_filename="shared-reference.png",
         mime_type="image/png",
-        storage_path="products/test/shared-reference.png",
+        storage_path="inspirations/test/shared-reference.png",
     )
     db_session.add_all([copy_set, reference_asset])
     db_session.flush()
@@ -658,7 +658,7 @@ def test_tail_splitter_reapply_can_reuse_previous_public_nodes(db_session) -> No
             "generation_config_id": None,
         },
     )
-    workflow = run_product_workflow(db_session, product_id=product.id, start_node_id=tail_node.id)
+    workflow = run_inspiration_workflow(db_session, inspiration_id=inspiration.id, start_node_id=tail_node.id)
     tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
     second_plan = tail_node.output_json["latest_plan"]
     second_item_ids = [item["id"] for item in second_plan["items"][:2]]
@@ -707,20 +707,20 @@ def test_run_after_tail_dispatches_independent_generated_branches_in_one_wave(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.application.product_workflows import (
+    from inspiration_one_backend.application.inspiration_workflows import (
         apply_tail_split_plan,
-        execute_product_workflow_run,
-        get_or_create_product_workflow,
-        run_product_workflow,
-        start_product_workflow_run,
+        execute_inspiration_workflow_run,
+        get_or_create_inspiration_workflow,
+        run_inspiration_workflow,
+        start_inspiration_workflow_run,
         update_workflow_node,
     )
-    from productflow_backend.application.use_cases import create_product
-    from productflow_backend.infrastructure.db.models import WorkflowRun
+    from inspiration_one_backend.application.use_cases import create_inspiration
+    from inspiration_one_backend.infrastructure.db.models import WorkflowRun
 
-    product = create_product(
+    inspiration = create_inspiration(
         db_session,
-        name="尾巴后并发分支商品",
+        name="尾巴后并发分支灵感产物",
         category=None,
         price=None,
         source_note=None,
@@ -730,7 +730,7 @@ def test_run_after_tail_dispatches_independent_generated_branches_in_one_wave(
         initial_workflow_entry="tail",
         entry_text="主打免安装、收纳整洁、细节材质、不同场景摆放。",
     )
-    workflow = get_or_create_product_workflow(db_session, product.id)
+    workflow = get_or_create_inspiration_workflow(db_session, inspiration.id)
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
     workflow = update_workflow_node(
         db_session,
@@ -748,7 +748,7 @@ def test_run_after_tail_dispatches_independent_generated_branches_in_one_wave(
     )
     tail_node = next(node for node in workflow.nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER)
 
-    workflow = run_product_workflow(db_session, product_id=product.id, start_node_id=tail_node.id)
+    workflow = run_inspiration_workflow(db_session, inspiration_id=inspiration.id, start_node_id=tail_node.id)
     tail_node = next(node for node in workflow.nodes if node.id == tail_node.id)
     plan = tail_node.output_json["latest_plan"]
     item_ids = [item["id"] for item in plan["items"][:3]]
@@ -778,9 +778,9 @@ def test_run_after_tail_dispatches_independent_generated_branches_in_one_wave(
     )
     assert len(image_node_ids) == 3
 
-    kickoff = start_product_workflow_run(
+    kickoff = start_inspiration_workflow_run(
         db_session,
-        product_id=product.id,
+        inspiration_id=inspiration.id,
         start_node_id=tail_node.id,
         start_mode="after_node",
     )
@@ -793,11 +793,11 @@ def test_run_after_tail_dispatches_independent_generated_branches_in_one_wave(
 
     dispatched_node_run_ids: list[str] = []
     monkeypatch.setattr(
-        "productflow_backend.application.product_workflow.execution.enqueue_workflow_node_run",
+        "inspiration_one_backend.application.inspiration_workflow.execution.enqueue_workflow_node_run",
         lambda node_run_id: dispatched_node_run_ids.append(node_run_id),
     )
 
-    execute_product_workflow_run(kickoff.run_id)
+    execute_inspiration_workflow_run(kickoff.run_id)
 
     db_session.expire_all()
     run = db_session.get(WorkflowRun, kickoff.run_id)

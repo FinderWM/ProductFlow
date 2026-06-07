@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from productflow_backend.application.image_generation_failures import (
+from inspiration_one_backend.application.image_generation_failures import (
     classify_image_generation_failure,
     safe_image_generation_failure_reason,
 )
@@ -60,10 +60,13 @@ def test_safe_image_generation_failure_reason_uses_exception_chain() -> None:
 
 
 def test_safe_image_generation_failure_reason_keeps_sensitive_unknown_errors_generic() -> None:
-    assert safe_image_generation_failure_reason(
-        RuntimeError("provider failed sk-test-token base_url=https://secret.example/v1 prompt=full prompt"),
-        generic_message=GENERIC,
-    ) == GENERIC
+    assert (
+        safe_image_generation_failure_reason(
+            RuntimeError("provider failed sk-test-token base_url=https://secret.example/v1 prompt=full prompt"),
+            generic_message=GENERIC,
+        )
+        == GENERIC
+    )
 
 
 @pytest.mark.parametrize(

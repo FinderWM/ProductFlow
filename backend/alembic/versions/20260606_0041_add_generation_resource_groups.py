@@ -161,8 +161,7 @@ def _backfill_result_resource_groups() -> None:
     inspector = sa.inspect(bind)
     table_names = set(inspector.get_table_names())
     columns_by_table = {
-        table_name: {column["name"] for column in inspector.get_columns(table_name)}
-        for table_name in table_names
+        table_name: {column["name"] for column in inspector.get_columns(table_name)} for table_name in table_names
     }
 
     for table_name in ("creative_briefs", "copy_sets", "poster_variants"):

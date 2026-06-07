@@ -23,7 +23,7 @@ poster_kind = postgresql.ENUM("main_image", "promo_poster", name="posterkind", c
 
 def upgrade() -> None:
     bind = op.get_bind()
-    op.drop_index("uq_job_runs_one_active_per_product_kind", table_name="job_runs")
+    op.drop_index("uq_job_runs_one_active_per_inspiration_kind", table_name="job_runs")
     op.drop_table("job_runs")
     if bind.dialect.name != "sqlite":
         job_kind.drop(bind, checkfirst=True)
@@ -36,7 +36,7 @@ def downgrade() -> None:
     op.create_table(
         "job_runs",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("product_id", sa.String(length=36), nullable=False),
+        sa.Column("inspiration_id", sa.String(length=36), nullable=False),
         sa.Column("kind", job_kind, nullable=False),
         sa.Column("status", job_status, nullable=False),
         sa.Column("target_poster_kind", poster_kind, nullable=True),
@@ -50,13 +50,13 @@ def downgrade() -> None:
         sa.Column("is_retryable", sa.Boolean(), nullable=False),
         sa.ForeignKeyConstraint(["copy_set_id"], ["copy_sets.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["poster_variant_id"], ["poster_variants.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["product_id"], ["products.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["inspiration_id"], ["inspirations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
-        "uq_job_runs_one_active_per_product_kind",
+        "uq_job_runs_one_active_per_inspiration_kind",
         "job_runs",
-        ["product_id", "kind"],
+        ["inspiration_id", "kind"],
         unique=True,
         postgresql_where=sa.text("status IN ('queued', 'running')"),
         sqlite_where=sa.text("status IN ('queued', 'running')"),

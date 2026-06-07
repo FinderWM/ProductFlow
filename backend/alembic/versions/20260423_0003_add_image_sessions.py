@@ -27,11 +27,11 @@ def upgrade() -> None:
     op.create_table(
         "image_sessions",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("product_id", sa.String(length=36), nullable=True),
+        sa.Column("inspiration_id", sa.String(length=36), nullable=True),
         sa.Column("title", sa.String(length=255), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["product_id"], ["products.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["inspiration_id"], ["inspirations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
 

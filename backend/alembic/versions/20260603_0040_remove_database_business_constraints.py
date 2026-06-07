@@ -41,9 +41,9 @@ POSTGRES_ENUM_TYPES = (
 )
 POSTGRES_PARTIAL_UNIQUE_INDEXES: tuple[tuple[str, str, tuple[str, ...], sa.TextClause], ...] = (
     (
-        "uq_source_assets_one_original_per_product",
+        "uq_source_assets_one_original_per_inspiration",
         "source_assets",
-        ("product_id",),
+        ("inspiration_id",),
         sa.text("kind = 'original_image'"),
     ),
     (

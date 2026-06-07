@@ -2,7 +2,7 @@
 
 [中文](SECURITY.md) | English
 
-ProductFlow is a self-hosted project. Deployers are responsible for protecting their admin key, model API keys, database, Redis, file storage, and reverse-proxy entrypoints.
+Inspiration One is a self-hosted project. Deployers are responsible for protecting their admin key, model API keys, database, Redis, file storage, and reverse-proxy entrypoints.
 
 ## Supported Scope
 

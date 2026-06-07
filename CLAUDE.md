@@ -29,7 +29,7 @@ Frontend tests: `pnpm --dir web test:run`
 
 Four-layer DDD:
 - **`presentation/`** — FastAPI app factory (`api.py`), route modules, Pydantic schemas, session middleware
-- **`application/`** — Use cases: auth, canvas templates, gallery, generation configs, image sessions, product workflows, queue submission, moderation, RBAC
+- **`application/`** — Use cases: auth, canvas templates, gallery, generation configs, image sessions, inspiration workflows, queue submission, moderation, RBAC
 - **`domain/`** — Enums, errors, RBAC model, workflow rules, durable generation task definitions
 - **`infrastructure/`** — DB (SQLAlchemy models + `get_db_session`), image/text providers, poster rendering, queue (Dramatiq actors), storage (local/MinIO/S3 via boto3), OpenAI client wrappers
 
@@ -73,7 +73,7 @@ Runtime config (DB-overridable via `/settings`): prompt templates, image tool pa
 
 ## Testing
 
-Add workflow-level coverage when changing product, copy, poster, settings, or image-session behavior. Run `just backend-test` before backend commits and `just web-build` before frontend commits.
+Add workflow-level coverage when changing inspiration, copy, poster, settings, or image-session behavior. Run `just backend-test` before backend commits and `just web-build` before frontend commits.
 
 ## Commit Convention
 

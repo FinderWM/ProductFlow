@@ -14,7 +14,7 @@ Key files:
 - `backend/src/productflow_backend/application/use_cases.py`
 - `backend/src/productflow_backend/application/image_sessions.py`
 - `backend/src/productflow_backend/presentation/errors.py`
-- `backend/src/productflow_backend/presentation/routes/products.py`
+- `backend/src/productflow_backend/presentation/routes/inspirations.py`
 - `backend/src/productflow_backend/presentation/routes/image_sessions.py`
 - `backend/src/productflow_backend/presentation/routes/settings.py`
 - `backend/src/productflow_backend/presentation/upload_validation.py`
@@ -46,8 +46,8 @@ mapping must not rely on raw `ValueError` catches or message suffixes.
 
 Use typed errors for newly touched expected failures:
 
-- Missing records: `_get_product_or_raise(...)` raises `NotFoundError("商品不存在")` in `application/use_cases.py`.
-- Missing workflow/session resources such as products, workflows, nodes, edges, image sessions, source assets, copy sets,
+- Missing records: `_get_inspiration_or_raise(...)` raises `NotFoundError("灵感产物不存在")` in `application/use_cases.py`.
+- Missing workflow/session resources such as inspirations, workflows, nodes, edges, image sessions, source assets, copy sets,
   and poster variants should use `NotFoundError`.
 - Explicit workflow validation such as the missing poster file case raises `BusinessValidationError("海报文件不存在")`
   so it remains a `400` without a string-content exception in typed mapping.
@@ -80,9 +80,9 @@ use case still exposes a raw expected business failure, convert the owner use ca
 
 Examples:
 
-- `presentation/routes/product_workflows.py` lets typed business errors propagate through the global handler after the
+- `presentation/routes/inspiration_workflows.py` lets typed business errors propagate through the global handler after the
   workflow use cases were inventoried as typed at the route boundary.
-- `presentation/routes/products.py`, `presentation/routes/image_sessions.py`, and `presentation/routes/gallery.py` let
+- `presentation/routes/inspirations.py`, `presentation/routes/image_sessions.py`, and `presentation/routes/gallery.py` let
   typed business errors propagate through the global handler after their route-facing failures were inventoried as typed.
 - Download/file-serving routes may still catch `ValueError` from `LocalStorage.resolve_for_variant(...)` and raise direct
   `HTTPException(404)` because the route owns file-serving semantics.
@@ -118,7 +118,7 @@ modules.
 
 #### 4. Validation & Error Matrix
 
-- `NotFoundError("商品不存在")` -> `404`, `{"detail": "商品不存在"}`.
+- `NotFoundError("灵感产物不存在")` -> `404`, `{"detail": "灵感产物不存在"}`.
 - `BusinessValidationError("海报文件不存在")` -> `400`, `{"detail": "海报文件不存在"}`.
 - `BusinessValidationError("工作流连线引用了不存在的节点")` -> `400`,
   `{"detail": "工作流连线引用了不存在的节点"}`.
@@ -130,7 +130,7 @@ modules.
 
 #### 5. Good/Base/Bad Cases
 
-- Good: `_get_product_or_raise(...)` raises `NotFoundError("商品不存在")`.
+- Good: `_get_inspiration_or_raise(...)` raises `NotFoundError("灵感产物不存在")`.
 - Base: provider/Pydantic payload normalization may still raise `ValueError` inside parsing boundaries; route-facing
   business use cases should raise typed errors.
 - Bad: adding a new `if detail.endswith(...)` or exact Chinese string branch for newly converted typed errors.
@@ -143,9 +143,9 @@ modules.
 - Route/global-handler test typed `BusinessError` preserves response shape `{"detail": "..."}` and does not add a `code`
   field.
 - Unit or route test poster-file missing remains `400` with detail `"海报文件不存在"`.
-- Application-level test newly touched business validations raise `BusinessValidationError`, for example product field
+- Application-level test newly touched business validations raise `BusinessValidationError`, for example inspiration field
   validation, workflow graph validation, and image-session generation validation.
-- Regression test route surfaces that used to have wrappers, such as product detail, image-session detail/generation, and
+- Regression test route surfaces that used to have wrappers, such as inspiration detail, image-session detail/generation, and
   gallery save, use the global typed handler.
 - Regression test the legacy raw `ValueError` helper is absent from `presentation.errors`.
 
@@ -161,8 +161,8 @@ if detail.endswith("不存在"):
 Correct:
 
 ```python
-if product is None:
-    raise NotFoundError("商品不存在")
+if inspiration is None:
+    raise NotFoundError("灵感产物不存在")
 ```
 
 ---
@@ -222,7 +222,7 @@ or byte-size checks in individual route handlers.
 
 Application submit use cases create durable work first, then enqueue through `infrastructure/queue.py`:
 
-- `application/product_workflow/execution.py::submit_product_workflow_run(...)` creates/reuses `WorkflowRun` rows,
+- `application/inspiration_workflow/execution.py::submit_inspiration_workflow_run(...)` creates/reuses `WorkflowRun` rows,
   enqueues when `_workflow_run_should_enqueue(...)` says delivery is needed, and marks enqueue failures through
   `mark_workflow_run_enqueue_failed(...)`.
 - `application/image_sessions.py::submit_image_session_generation_task(...)` creates the
@@ -275,7 +275,7 @@ file paths, or tracebacks must fall back to the generic queue/provider failure d
   `ImageSessionGenerationTask.progress_updated_at`, falling back to `started_at` for older rows that do not have progress
   metadata. The user-facing runtime setting is `image_session_stale_running_after_minutes`, defaulting to 90 minutes.
 - The Dramatiq actor keeps only an internal worker failsafe `time_limit` from
-  `image_session_worker_failsafe_time_limit_minutes`; this is not the product-level timeout decision.
+  `image_session_worker_failsafe_time_limit_minutes`; this is not the inspiration-level timeout decision.
 
 #### 3. Contracts
 
@@ -458,7 +458,7 @@ call_provider()
 ## Provider and Runtime Errors
 
 Provider-specific API errors are handled inside application/provider code and persisted on durable workflow or
-image-session task rows for async product flows.
+image-session task rows for async inspiration flows.
 
 `config.py::_load_database_config_overrides()` intentionally tolerates missing `app_settings` tables during fresh startup
 by returning `{}` for operational/programming SQLAlchemy errors, but it re-raises unexpected non-SQLAlchemy exceptions.

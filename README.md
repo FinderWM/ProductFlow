@@ -1,31 +1,31 @@
 <p align="center">
-  <img src="docs/assets/productflow-brand-concept.png" alt="ProductFlow brand concept: product card connected to AI copy and image workflow nodes" width="168">
+  <img src="docs/assets/inspiration-one-brand-concept.png" alt="Inspiration One brand concept: inspiration card connected to AI copy and image workflow nodes" width="168">
 </p>
 
-# ProductFlow
+# Inspiration One
 
 [中文](README.md) | [English](README.en.md)
 <p align="center">
   <a href="https://draw.devbin.de"><strong>体验站 / Live Demo</strong></a>
 </p>
 
-ProductFlow 是面向单人或小团队商家的开源自托管商品素材工作台。核心链路覆盖商品资料、参考图、AI 文案、AI/模板海报、连续生图会话、生成图画廊和可视化工作流。
+Inspiration One 是面向单人或小团队商家的开源自托管灵感产物素材工作台。核心链路覆盖灵感产物资料、参考图、AI 文案、AI/模板海报、连续生图会话、生成图画廊和可视化工作流。
 
 当前形态为私有单管理员实例。自托管部署需要 PostgreSQL、Redis、后端 API、Dramatiq worker、Web 前端，以及可用的文本/图片模型供应商。
 
 ## 功能概览
 
-### 商品/工作台
+### 灵感产物/工作台
 
 - 单管理员访问密钥登录，基于 Cookie session 访问后台 API。
-- 商品列表、分页浏览、创建商品、商品详情工作台、受全局开关保护的商品删除；移动端商品列表使用卡片和浮动分页。
-- 节点画布组织商品资料、参考图、文案节点和生图节点。
+- 灵感产物列表、分页浏览、创建灵感产物、灵感产物详情工作台、受全局开关保护的灵感产物删除；移动端灵感产物列表使用卡片和浮动分页。
+- 节点画布组织灵感产物资料、参考图、文案节点和生图节点。
 - 桌面画布支持滚轮缩放、空白处拖动平移、节点拖拽定位、节点连线、边删除、Ctrl/Cmd/Shift 多选、Shift 框选。
-- 移动端商品工作台保留画布为主界面，提供浏览、编辑和选择模式；支持单指平移、点选节点、双指缩放、触控拖拽节点、触控创建连线和点按多选。
+- 移动端灵感产物工作台保留画布为主界面，提供浏览、编辑和选择模式；支持单指平移、点选节点、双指缩放、触控拖拽节点、触控创建连线和点按多选。
 - 移动端底部工具栏提供运行工作流、单节点、模板、详情、日志和图库入口，面板内容从底部展开。
-- 完整画布模板用于创建商品；内置节点组模板和用户节点组模板用于工作台内追加流程。
-- 商品原图、参考图、连续生图参考图支持点击选择或拖拽上传，并受 MIME、大小、像素和数量限制保护。
-- 参考图节点是单图槽位；手动上传或上游生图填充会替换当前图，旧素材保留在商品历史/素材列表中。
+- 完整画布模板用于创建灵感产物；内置节点组模板和用户节点组模板用于工作台内追加流程。
+- 灵感产物原图、参考图、连续生图参考图支持点击选择或拖拽上传，并受 MIME、大小、像素和数量限制保护。
+- 参考图节点是单图槽位；手动上传或上游生图填充会替换当前图，旧素材保留在灵感产物历史/素材列表中。
 - 文案节点支持生成、编辑、确认和历史查看，当前输出是后续生图可直接读取的可编辑结构化文案。
 - 生图节点只负责触发和配置生成；生成结果写入连接的下游参考图节点，并在参考图节点或图库面板预览和下载。
 
@@ -34,23 +34,23 @@ ProductFlow 是面向单人或小团队商家的开源自托管商品素材工�
 - 独立图片会话支持参考图上传、历史基图选择、连续生成、多候选比较和移动端主视图/抽屉/底部面板布局。
 - 移动端文/图生图顶部栏提供会话抽屉、当前会话标题/重命名和历史抽屉；生成状态、当前结果和供应商提示保留在主视图。
 - 会话列表从左侧抽屉打开，可新建、选择和删除会话；分支/候选历史从右侧窄抽屉打开，点击已完成图片会设为当前结果和下一轮基图。
-- 底部快捷条始终提供生成入口；选中已完成结果后，同时提供下载和投至画廊。底部生成面板包含生成设置/高级标签页、商品关联、商品/会话参考图、提示词、尺寸、候选数量和图片工具参数。
+- 底部快捷条始终提供生成入口；选中已完成结果后，同时提供下载和投至画廊。底部生成面板包含生成设置/高级标签页、灵感产物关联、灵感产物/会话参考图、提示词、尺寸、候选数量和图片工具参数。
 - 运行状态包含排队位置、轻量状态刷新、候选进度、失败原因、取消和重试。
-- 生成图可下载、投至画廊、保存为商品参考图，或设为商品主图参考。
+- 生成图可下载、投至画廊、保存为灵感产物参考图，或设为灵感产物主图参考。
 
 ### 画廊
 
 - `/gallery` 集中保存文/图生图结果。
-- 条目保留来源会话、关联商品、提示词、尺寸、模型和下载入口。
+- 条目保留来源会话、关联灵感产物、提示词、尺寸、模型和下载入口。
 
 ### 配置与运行
 
 - `/settings` 支持运行时业务配置覆盖：provider、模型、图片尺寸、图片工具参数、提示词模板、上传限制、全局并发、业务删除开关等。
 - 图片工具参数可控制 Responses `image_generation` tool 的可用字段、质量、输出格式、压缩、背景、审核、action、input fidelity、partial images 和 provider `n` 等高级参数；Responses 后台响应模式默认开启，不支持时会回退同步请求。
 - Secret 字段不回显；配置页由独立 `SETTINGS_ACCESS_TOKEN` 二次解锁。
-- 文案、海报、商品工作流和文/图生图由 Dramatiq + Redis 投递，PostgreSQL 记录状态。
-- API/worker 启动时恢复未完成文案/海报任务、商品工作流和连续生图任务。
-- 运行中商品工作流和文/图生图只轮询轻量 status，结束后刷新完整详情。
+- 文案、海报、灵感产物工作流和文/图生图由 Dramatiq + Redis 投递，PostgreSQL 记录状态。
+- API/worker 启动时恢复未完成文案/海报任务、灵感产物工作流和连续生图任务。
+- 运行中灵感产物工作流和文/图生图只轮询轻量 status，结束后刷新完整详情。
 
 ### 产品内帮助
 
@@ -60,11 +60,11 @@ ProductFlow 是面向单人或小团队商家的开源自托管商品素材工�
 
 ### 界面预览
 
-![商品列表示例](images/preview1.png)
+![灵感产物列表示例](images/preview1.png)
 
-![商品工作台示例](images/preview2.png)
+![灵感产物工作台示例](images/preview2.png)
 
-![新建商品示例](images/preview3.png)
+![新建灵感产物示例](images/preview3.png)
 
 ![图生图面板示例](images/preview4.png)
 
@@ -82,8 +82,8 @@ ProductFlow 是面向单人或小团队商家的开源自托管商品素材工�
 - 当前架构健康度复审：`docs/ARCHITECTURE_HEALTH_REVIEW.md`
 - 路线图：`docs/ROADMAP.md`
 - 版本记录：`CHANGELOG.md`
-- 品牌资产：`docs/assets/productflow-brand-concept.png`、`docs/assets/productflow-mark.svg`
-- Web metadata / favicon 资产：`web/public/productflow-brand-concept.png`、`web/public/productflow-mark.svg`
+- 品牌资产：`docs/assets/inspiration-one-brand-concept.png`、`docs/assets/inspiration-one-mark.svg`
+- Web metadata / favicon 资产：`web/public/inspiration-one-brand-concept.png`、`web/public/inspiration-one-mark.svg`
 
 ## 技术栈
 
@@ -94,7 +94,7 @@ ProductFlow 是面向单人或小团队商家的开源自托管商品素材工�
 
 ## Markdown 编辑与图表渲染依赖
 
-ProductFlow 的商品上下文长文案编辑器使用以下开源项目实现 Markdown 源文编辑、GFM 预览和 Mermaid 图表渲染。项目通过 `web/package.json` 中的 npm 包依赖引入这些能力，没有复制第三方项目源码。
+Inspiration One 的灵感产物上下文长文案编辑器使用以下开源项目实现 Markdown 源文编辑、GFM 预览和 Mermaid 图表渲染。项目通过 `web/package.json` 中的 npm 包依赖引入这些能力，没有复制第三方项目源码。
 
 - [react-markdown](https://github.com/remarkjs/react-markdown)：在 React 中渲染 Markdown 预览。
 - [remark-gfm](https://github.com/remarkjs/remark-gfm)：支持表格、任务列表、删除线和自动链接等 GFM 语法。
@@ -102,7 +102,7 @@ ProductFlow 的商品上下文长文案编辑器使用以下开源项目实现 M
 
 ## 开源依赖与致谢
 
-ProductFlow 的应用代码之外，仓库还保留了一套面向 AI 协作的项目工作流资产。特别感谢**真诚、友善、团结、专业**的 Linuxdo 社区。
+Inspiration One 的应用代码之外，仓库还保留了一套面向 AI 协作的项目工作流资产。特别感谢**真诚、友善、团结、专业**的 Linuxdo 社区。
 <p>
   <a href="https://linux.do">
     <img src="https://img.shields.io/badge/LinuxDo-community-1f6feb" alt="LinuxDo">
@@ -130,7 +130,7 @@ ProductFlow 的应用代码之外，仓库还保留了一套面向 AI 协作的�
 ## 仓库结构
 
 ```text
-ProductFlow/
+Inspiration One/
   README.md
   LICENSE
   CONTRIBUTING.md
@@ -156,22 +156,22 @@ ProductFlow/
     ROADMAP.md
     ROADMAP.en.md
     assets/
-      productflow-brand-concept.png
-      productflow-mark.svg
+      inspiration-one-brand-concept.png
+      inspiration-one-mark.svg
   backend/
     Dockerfile
     pyproject.toml
     alembic.ini
     alembic/versions/
-    src/productflow_backend/
+    src/inspiration_one_backend/
     tests/
   web/
     Dockerfile
     nginx.conf
     package.json
     public/
-      productflow-brand-concept.png
-      productflow-mark.svg
+      inspiration-one-brand-concept.png
+      inspiration-one-mark.svg
     src/
   .trellis/
     workflow.md
@@ -196,9 +196,9 @@ cp .env.example .env
 - `ADMIN_ACCESS_KEY`：登录后台使用的管理员密钥；密钥本身只从环境变量读取，不写入数据库。
 - `SETTINGS_ACCESS_TOKEN`：配置页二次解锁令牌，必须与登录密钥分开。
 - `SESSION_SECRET`：签名 session cookie 的长随机字符串。
-- `POSTGRES_PASSWORD`：共享 PostgreSQL 密码；需要与 `/Users/yunlong/project/self/env/productflow.env` 的 `PG_PASSWORD` 一致。
+- `POSTGRES_PASSWORD`：共享 PostgreSQL 密码；需要与 `/Users/yunlong/project/self/env/inspiration-one.env` 的 `PG_PASSWORD` 一致。
 
-默认 provider 为 `mock`，`POSTER_GENERATION_MODE=template`，无需真实模型密钥即可完成创建商品、生成文案和模板海报等基础流程。真实模型配置见“模型与供应商配置”。
+默认 provider 为 `mock`，`POSTER_GENERATION_MODE=template`，无需真实模型密钥即可完成创建灵感产物、生成文案和模板海报等基础流程。真实模型配置见“模型与供应商配置”。
 
 ### 2. 一键构建并启动
 
@@ -210,22 +210,22 @@ docker compose up -d --build
 
 Compose 默认启动：
 
-- 后端 API：服务名 `productflow-backend`，宿主机端口 `${APP_HOST_PORT:-29280}`。
-- Dramatiq worker：服务名 `productflow-worker`，与 API 共享外部 PostgreSQL、Redis 和 storage 卷。
-- Web：服务名 `productflow-web`，nginx 静态服务，宿主机端口 `${WEB_PORT:-29281}`。
+- 后端 API：服务名 `inspiration-one-backend`，宿主机端口 `${APP_HOST_PORT:-29280}`。
+- Dramatiq worker：服务名 `inspiration-one-worker`，与 API 共享外部 PostgreSQL、Redis 和 storage 卷。
+- Web：服务名 `inspiration-one-web`，nginx 静态服务，宿主机端口 `${WEB_PORT:-29281}`。
 
-PostgreSQL、Redis 和 MinIO 由 `/Users/yunlong/project/self/env` 下的独立 Docker 中间件维护。ProductFlow 使用：
+PostgreSQL、Redis 和 MinIO 由 `/Users/yunlong/project/self/env` 下的独立 Docker 中间件维护。Inspiration One 使用：
 
-- PostgreSQL 容器：`libowpg`，宿主机端口 `15432`，数据库 `product_flow`。
+- PostgreSQL 容器：`libowpg`，宿主机端口 `15432`，数据库 `inspiration_flow`。
 - Redis 容器：`libowredis`，宿主机端口 `16379`，DB `0`。
-- MinIO 容器：`libowminio`，S3 API 宿主机端口 `19000`，bucket `productflow`。
+- MinIO 容器：`libowminio`，S3 API 宿主机端口 `19000`，bucket `inspiration-one`。
 
 如应用端口已被占用，可在 `.env` 中修改 `APP_HOST_PORT` 或 `WEB_PORT`，再重新执行 `docker compose up -d --build`。
 
 容器内应用通过 `.env` 中的外部连接 URL 访问共享中间件：
 
 ```text
-DATABASE_URL=postgresql+psycopg://productflow:<POSTGRES_PASSWORD>@host.docker.internal:15432/product_flow
+DATABASE_URL=postgresql+psycopg://inspiration-one:<POSTGRES_PASSWORD>@host.docker.internal:15432/inspiration_flow
 REDIS_URL=redis://host.docker.internal:16379/0
 STORAGE_ROOT=/app/storage
 STORAGE_BACKEND=local
@@ -233,7 +233,7 @@ STORAGE_BACKEND=local
 
 文件存储通过 `STORAGE_BACKEND` 切换：
 
-- `local`：上传和生成文件存入 `STORAGE_ROOT`，Compose 默认使用 Docker named volume `productflow-storage`。
+- `local`：上传和生成文件存入 `STORAGE_ROOT`，Compose 默认使用 Docker named volume `inspiration-one-storage`。
 - `minio`：通过 S3 兼容接口写入共享 MinIO，PgSQL 保存对象 key 和后端/bucket 元数据，API 响应时按当前配置拼接公开访问 URL，`STORAGE_ROOT` 只作为本地缓存目录。
 - `s3`：预留给其他 S3 兼容对象存储；接入时填写 `STORAGE_PUBLIC_BASE_URL`、`S3_ENDPOINT_URL`、`S3_BUCKET`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`、`S3_REGION`。
 
@@ -243,25 +243,25 @@ STORAGE_BACKEND=local
 STORAGE_BACKEND=minio
 S3_ENDPOINT_URL=http://host.docker.internal:19000
 STORAGE_PUBLIC_BASE_URL=http://localhost:19000
-S3_BUCKET=productflow
+S3_BUCKET=inspiration-one
 S3_ACCESS_KEY=<MINIO_APP_ACCESS_KEY>
 S3_SECRET_KEY=<MINIO_APP_SECRET_KEY>
 S3_REGION=us-east-1
 ```
 
-容器运行时 `STORAGE_ROOT` 固定为 `/app/storage`，不要写入宿主机路径。`STORAGE_BACKEND=local` 时上传和生成文件存入 Docker named volume `productflow-storage`，容器重启后数据保留；`STORAGE_BACKEND=minio` 时文件写入 MinIO，PgSQL 只保存对象 key 和必要的后端/bucket 元数据，API 响应时再按当前 `STORAGE_PUBLIC_BASE_URL` + bucket + object key 拼接访问 URL，`/app/storage` 仅用于缓存和缩略图派生。
+容器运行时 `STORAGE_ROOT` 固定为 `/app/storage`，不要写入宿主机路径。`STORAGE_BACKEND=local` 时上传和生成文件存入 Docker named volume `inspiration-one-storage`，容器重启后数据保留；`STORAGE_BACKEND=minio` 时文件写入 MinIO，PgSQL 只保存对象 key 和必要的后端/bucket 元数据，API 响应时再按当前 `STORAGE_PUBLIC_BASE_URL` + bucket + object key 拼接访问 URL，`/app/storage` 仅用于缓存和缩略图派生。
 
-从旧 systemd 生产环境迁移到 Compose 时，如已有生产文件目录（例如 `/home/cot/ProductFlow-release/shared/storage`），可在 `.env` 中设置 host-only 变量复用旧文件：
+从旧 systemd 生产环境迁移到 Compose 时，如已有生产文件目录（例如 `/home/cot/Inspiration One-release/shared/storage`），可在 `.env` 中设置 host-only 变量复用旧文件：
 
 ```bash
-STORAGE_HOST_PATH=/home/cot/ProductFlow-release/shared/storage
+STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage
 ```
 
-`STORAGE_HOST_PATH` 仅用于 Compose bind mount 的宿主机路径；API/worker 容器内仍使用 `STORAGE_ROOT=/app/storage`。留空或不设置时使用 `productflow-storage` named volume。普通更新不要执行 `docker compose down -v`，也不要为切换 storage 挂载删除 Docker volume；如需回到 named volume，移除 `STORAGE_HOST_PATH` 后重新执行 `docker compose up -d`。
+`STORAGE_HOST_PATH` 仅用于 Compose bind mount 的宿主机路径；API/worker 容器内仍使用 `STORAGE_ROOT=/app/storage`。留空或不设置时使用 `inspiration-one-storage` named volume。普通更新不要执行 `docker compose down -v`，也不要为切换 storage 挂载删除 Docker volume；如需回到 named volume，移除 `STORAGE_HOST_PATH` 后重新执行 `docker compose up -d`。
 
 ### 3. 数据库迁移
 
-`productflow-backend` 启动命令会先执行：
+`inspiration-one-backend` 启动命令会先执行：
 
 ```bash
 alembic upgrade head
@@ -270,7 +270,7 @@ alembic upgrade head
 迁移成功后才会启动 `uvicorn`。升级代码后如需手动重跑迁移，执行：
 
 ```bash
-docker compose run --rm productflow-backend alembic upgrade head
+docker compose run --rm inspiration-one-backend alembic upgrade head
 ```
 
 ### 4. 访问与健康检查
@@ -296,12 +296,12 @@ curl "http://127.0.0.1:<WEB_PORT>/api/healthz"
 {"status":"ok"}
 ```
 
-Web 默认入口：`http://127.0.0.1:29281`（改过端口时使用 `.env` 中的 `WEB_PORT`）。使用 `.env` 中的 `ADMIN_ACCESS_KEY` 登录。Web 镜像提供 Vite build 后的静态资源，nginx 将同源 `/api/*` 请求反向代理到 `productflow-backend:29280`。
+Web 默认入口：`http://127.0.0.1:29281`（改过端口时使用 `.env` 中的 `WEB_PORT`）。使用 `.env` 中的 `ADMIN_ACCESS_KEY` 登录。Web 镜像提供 Vite build 后的静态资源，nginx 将同源 `/api/*` 请求反向代理到 `inspiration-one-backend:29280`。
 
 ### 5. 日志、停止与清理
 
 ```bash
-docker compose logs -f productflow-backend productflow-worker productflow-web
+docker compose logs -f inspiration-one-backend inspiration-one-worker inspiration-one-web
 docker compose down
 ```
 
@@ -341,7 +341,7 @@ cp web/.env.example web/.env
 - `SESSION_SECRET`：签名 session cookie 的长随机字符串。
 - `POSTGRES_PASSWORD`：共享 PostgreSQL 密码，同时保持 `.env.dev` 的 `DATABASE_URL` 中密码一致。
 
-`.env.dev.example` 使用开发端口、Redis DB 0、共享 PostgreSQL 中的 `product_flow`，并默认 `STORAGE_BACKEND=minio`。`scripts/with_dev_env.sh` 会读取 `/Users/yunlong/project/self/env/minio.env`，自动导出本机进程需要的 `S3_*` 变量。使用单独开发数据库时，需要在 PostgreSQL 中创建对应数据库，再调整 `.env.dev` 的 `DATABASE_URL`。本地开发的 `STORAGE_ROOT=./backend/storage-dev` 只作为对象缓存目录；避免通过 `source .env` 或生产 `STORAGE_HOST_PATH` 启动开发进程。
+`.env.dev.example` 使用开发端口、Redis DB 0、共享 PostgreSQL 中的 `inspiration_flow`，并默认 `STORAGE_BACKEND=minio`。`scripts/with_dev_env.sh` 会读取 `/Users/yunlong/project/self/env/minio.env`，自动导出本机进程需要的 `S3_*` 变量。使用单独开发数据库时，需要在 PostgreSQL 中创建对应数据库，再调整 `.env.dev` 的 `DATABASE_URL`。本地开发的 `STORAGE_ROOT=./backend/storage-dev` 只作为对象缓存目录；避免通过 `source .env` 或生产 `STORAGE_HOST_PATH` 启动开发进程。
 
 ### 3. 确认共享中间件运行
 
@@ -382,8 +382,8 @@ just web-dev
 无 `just` 时：
 
 ```bash
-bash scripts/with_dev_env.sh bash -lc 'uv run --directory backend uvicorn productflow_backend.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-29282}"'
-bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 productflow_backend.workers
+bash scripts/with_dev_env.sh bash -lc 'uv run --directory backend uvicorn inspiration_one_backend.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-29282}"'
+bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 inspiration_one_backend.workers
 bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target="${VITE_DEV_PROXY_TARGET:-http://127.0.0.1:${APP_PORT:-29282}}"; VITE_API_BASE_URL= VITE_DEV_PROXY_TARGET="$api_target" pnpm --dir web dev -- --host 0.0.0.0 --port "$web_port" --strictPort'
 ```
 
@@ -392,7 +392,7 @@ bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target
 - API：`http://localhost:29282`
 - Web：`http://localhost:29283`
 
-打开 Web 页面后使用 `ADMIN_ACCESS_KEY` 登录。顶部导航提供 **商品/工作台**、**文/图生图**、**画廊**、**帮助** 和 **配置**。
+打开 Web 页面后使用 `ADMIN_ACCESS_KEY` 登录。顶部导航提供 **灵感产物/工作台**、**文/图生图**、**画廊**、**帮助** 和 **配置**。
 
 ### 6. 开发健康检查
 
@@ -408,11 +408,11 @@ curl http://127.0.0.1:29282/healthz
 
 ## 模型与供应商配置
 
-ProductFlow 把文本和图片能力分开配置。基础设施配置（数据库、Redis、session、管理员密钥）仍然只从环境变量读取；业务配置可在前端 `/settings` 页面写入数据库并覆盖环境变量默认值。
+Inspiration One 把文本和图片能力分开配置。基础设施配置（数据库、Redis、session、管理员密钥）仍然只从环境变量读取；业务配置可在前端 `/settings` 页面写入数据库并覆盖环境变量默认值。
 
 登录门禁 `admin_access_required` 默认开启。普通工作台和私有 API 需要 `ADMIN_ACCESS_KEY` 登录。二次解锁 `/settings` 后可关闭该开关，让普通工作台/API 免登录访问。`ADMIN_ACCESS_KEY` 仍必须保留在环境变量中，作为重新开启登录后的管理员入口。`SETTINGS_ACCESS_TOKEN` 始终独立保护配置页读取和写入。
 
-业务整删默认关闭：`DELETION_ENABLED=false` 时商品删除和连续生图会话删除 API 会返回 403，以便体验站保留违规内容溯源证据。工作流节点/连线编辑和参考图删除不受该开关影响。需要清理整条商品或会话数据时，管理员可在 `/settings` 显式开启“启用业务删除”，或通过环境默认值开启。
+业务整删默认关闭：`DELETION_ENABLED=false` 时灵感产物删除和连续生图会话删除 API 会返回 403，以便体验站保留违规内容溯源证据。工作流节点/连线编辑和参考图删除不受该开关影响。需要清理整条灵感产物或会话数据时，管理员可在 `/settings` 显式开启“启用业务删除”，或通过环境默认值开启。
 
 供应商配置：
 
@@ -420,19 +420,19 @@ ProductFlow 把文本和图片能力分开配置。基础设施配置（数据�
 - `TEXT_PROVIDER_KIND`、`TEXT_API_KEY`、`TEXT_BASE_URL`、`TEXT_BRIEF_MODEL`、`TEXT_COPY_MODEL`、`IMAGE_PROVIDER_KIND`、`IMAGE_API_KEY`、`IMAGE_BASE_URL`、`IMAGE_GENERATE_MODEL`、`IMAGE_RESPONSES_BACKGROUND_ENABLED`、`IMAGE_IMAGES_QUALITY`、`IMAGE_IMAGES_STYLE` 是升级迁移输入。升级后的首次启动会读取这些值并创建 `provider_profiles` / `provider_bindings`；新配置请在 `/settings` 修改。
 - Docker Compose 会把上述 legacy provider 变量传入 backend 和 worker 容器，保证旧 `.env` 中的真实 provider 能参与首次 bootstrap。默认值保持 mock，适合本地开发和无外部 API Key 的部署。
 - 文案用途支持 `mock` 和 `openai`。图片用途支持 `mock`、`openai_responses`、`openai_images`。
-- `openai_responses` 使用 OpenAI Responses `image_generation` 工具，支持参考图输入。ProductFlow 当前的连续生图分支上下文由用户显式选择的基图和参考图决定，不会自动把整段历史图片都传给 provider。
-- `openai_images` 使用 OpenAI Images API 兼容接口，适合直接生成/编辑图片；连续生图由 ProductFlow 显式传入所选基图和参考图，不使用 `previous_response_id`。
+- `openai_responses` 使用 OpenAI Responses `image_generation` 工具，支持参考图输入。Inspiration One 当前的连续生图分支上下文由用户显式选择的基图和参考图决定，不会自动把整段历史图片都传给 provider。
+- `openai_images` 使用 OpenAI Images API 兼容接口，适合直接生成/编辑图片；连续生图由 Inspiration One 显式传入所选基图和参考图，不使用 `previous_response_id`。
 - 图片尺寸默认值仍可通过 `IMAGE_MAIN_IMAGE_SIZE`、`IMAGE_PROMO_POSTER_SIZE` 提供，并可在 `/settings` 中覆盖。
 - 高级 tool 参数：`IMAGE_TOOL_ALLOWED_FIELDS` 控制前端可展示、后端可持久化并发送给 provider 的 tool 字段；可选默认值还包括 `IMAGE_TOOL_MODEL`、`IMAGE_TOOL_QUALITY`、`IMAGE_TOOL_OUTPUT_FORMAT`、`IMAGE_TOOL_OUTPUT_COMPRESSION`、`IMAGE_TOOL_BACKGROUND`、`IMAGE_TOOL_MODERATION`、`IMAGE_TOOL_ACTION`、`IMAGE_TOOL_INPUT_FIDELITY`、`IMAGE_TOOL_PARTIAL_IMAGES`、`IMAGE_TOOL_N`。
 
 海报模式：
 
 - `POSTER_GENERATION_MODE=template`：用本地模板/Pillow 渲染，不调用图片模型。
-- `POSTER_GENERATION_MODE=generated`：把确认版文案和商品/参考图交给图片 provider 生成海报。
+- `POSTER_GENERATION_MODE=generated`：把确认版文案和灵感产物/参考图交给图片 provider 生成海报。
 
 提示词模板：
 
-- `/settings` 的提示词分组可覆盖商品理解、文案生成、工作台生图和连续生图模板。
+- `/settings` 的提示词分组可覆盖灵感产物理解、文案生成、工作台生图和连续生图模板。
 - 单次需求写在文案/生图节点或文/图生图画面描述里；长期默认行为写入配置页模板。
 
 ## 常用命令
@@ -442,8 +442,8 @@ ProductFlow 把文本和图片能力分开配置。基础设施配置（数据�
 | 安装后端依赖 | `just backend-install` | `uv sync --directory backend --extra dev` |
 | 安装前端依赖 | `just web-install` | `pnpm --dir web install` |
 | 应用开发库迁移 | `just backend-migrate` | `bash scripts/with_dev_env.sh uv run --directory backend alembic upgrade head` |
-| 启动开发 API | `just backend-run` | `bash scripts/with_dev_env.sh bash -lc 'uv run --directory backend uvicorn productflow_backend.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-29282}"'` |
-| 启动 Dramatiq worker | `just backend-worker` | `bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 productflow_backend.workers` |
+| 启动开发 API | `just backend-run` | `bash scripts/with_dev_env.sh bash -lc 'uv run --directory backend uvicorn inspiration_one_backend.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-29282}"'` |
+| 启动 Dramatiq worker | `just backend-worker` | `bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 inspiration_one_backend.workers` |
 | 运行 backend pytest | `just backend-test` | `uv run --directory backend pytest` |
 | 启动 Vite 开发服务器 | `just web-dev` | `bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target="${VITE_DEV_PROXY_TARGET:-http://127.0.0.1:${APP_PORT:-29282}}"; VITE_API_BASE_URL= VITE_DEV_PROXY_TARGET="$api_target" pnpm --dir web dev -- --host 0.0.0.0 --port "$web_port" --strictPort'` |
 | 运行前端 lint | 无 just 包装 | `pnpm --dir web lint` |
@@ -452,7 +452,7 @@ ProductFlow 把文本和图片能力分开配置。基础设施配置（数据�
 | 发布 dry run | `just release-dry-run` | `DRY_RUN=1 bash scripts/release.sh` |
 | 生产更新 | `just release` | `bash scripts/release.sh` |
 
-`just release` / `bash scripts/release.sh` 是 Docker Compose 生产更新入口。流程包括 `docker compose config --quiet`、停止可能占用 `29280/29281` 的 legacy user-level systemd 服务、`docker compose up -d --build --remove-orphans`，以及 backend `/healthz`、web `/healthz`、web 代理 `/api/healthz` 检查。该流程不会删除 Docker volumes；普通更新不要执行 `docker compose down -v`。复用旧 systemd 生产文件时，在 `.env` 中设置 `STORAGE_HOST_PATH=/home/cot/ProductFlow-release/shared/storage`。已手动迁走旧服务时，可临时执行 `LEGACY_SYSTEMD_ACTION=skip bash scripts/release.sh`，或使用 `LEGACY_SYSTEMD_ACTION=skip just release`。
+`just release` / `bash scripts/release.sh` 是 Docker Compose 生产更新入口。流程包括 `docker compose config --quiet`、停止可能占用 `29280/29281` 的 legacy user-level systemd 服务、`docker compose up -d --build --remove-orphans`，以及 backend `/healthz`、web `/healthz`、web 代理 `/api/healthz` 检查。该流程不会删除 Docker volumes；普通更新不要执行 `docker compose down -v`。复用旧 systemd 生产文件时，在 `.env` 中设置 `STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage`。已手动迁走旧服务时，可临时执行 `LEGACY_SYSTEMD_ACTION=skip bash scripts/release.sh`，或使用 `LEGACY_SYSTEMD_ACTION=skip just release`。
 
 `just release-dry-run` / `DRY_RUN=1 bash scripts/release.sh` 只校验 Compose 配置并打印实际发布会执行的步骤；不会停止 systemd 服务、不会构建镜像，也不会启动或切换运行中的服务。
 
@@ -461,14 +461,14 @@ ProductFlow 把文本和图片能力分开配置。基础设施配置（数据�
 后端只暴露 REST API。主要入口包括：
 
 - `POST /api/auth/session`、`GET /api/auth/session`、`DELETE /api/auth/session`
-- `/api/products`、`/api/products/{product_id}`、`/api/products/{product_id}/history`
-- `/api/products/{product_id}/reference-images`、`/api/source-assets/{asset_id}`、`/api/source-assets/{asset_id}/download`
+- `/api/inspirations`、`/api/inspirations/{inspiration_id}`、`/api/inspirations/{inspiration_id}/history`
+- `/api/inspirations/{inspiration_id}/reference-images`、`/api/source-assets/{asset_id}`、`/api/source-assets/{asset_id}/download`
 - `/api/copy-sets/{copy_set_id}`、`/api/copy-sets/{copy_set_id}/confirm`
 - `/api/posters/{poster_id}/download`
 - `/api/image-sessions`、`/api/image-sessions/{image_session_id}`、`/api/image-sessions/{image_session_id}/status`、`/api/image-session-assets/{asset_id}/download`
 - `/api/gallery`
 - `/api/generation-queue`
-- `/api/products/{product_id}/workflow`、`/api/products/{product_id}/workflow/status`、`/api/products/{product_id}/workflow/run`、`/api/products/{product_id}/workflow/runs/{run_id}/cancel`
+- `/api/inspirations/{inspiration_id}/workflow`、`/api/inspirations/{inspiration_id}/workflow/status`、`/api/inspirations/{inspiration_id}/workflow/run`、`/api/inspirations/{inspiration_id}/workflow/runs/{run_id}/cancel`
 - `/api/workflow/canvas-templates`、`/api/workflow/user-template-groups`
 - `/api/workflow-nodes/{node_id}`、`/api/workflow-edges/{edge_id}`
 - `/api/settings`、`/api/settings/lock-state`、`/api/settings/unlock`、`/api/settings/runtime`

@@ -1,4 +1,4 @@
-"""remove legacy product workflow nodes
+"""remove legacy inspiration workflow nodes
 
 Revision ID: 20260424_0010
 Revises: 20260424_0009
@@ -13,7 +13,7 @@ branch_labels = None
 depends_on = None
 
 
-SUPPORTED_NODE_TYPES = ("product_context", "reference_image", "copy_generation", "image_generation")
+SUPPORTED_NODE_TYPES = ("inspiration_context", "reference_image", "copy_generation", "image_generation")
 
 
 def _node_type_text_expr() -> str:
@@ -38,15 +38,9 @@ def upgrade() -> None:
     # Some pre-clarification databases used `image_upload` as the image-slot node.
     # Keep the slot data, but move it to the only supported current value before
     # removing the remaining unsupported workflow nodes.
-    op.execute(
-        "UPDATE workflow_nodes SET node_type = 'reference_image' "
-        f"WHERE {node_type_text} = 'image_upload'"
-    )
+    op.execute(f"UPDATE workflow_nodes SET node_type = 'reference_image' WHERE {node_type_text} = 'image_upload'")
 
-    unsupported_nodes = (
-        "SELECT id FROM workflow_nodes "
-        f"WHERE {node_type_text} NOT IN ({_supported_node_type_list()})"
-    )
+    unsupported_nodes = f"SELECT id FROM workflow_nodes WHERE {node_type_text} NOT IN ({_supported_node_type_list()})"
     op.execute(
         "DELETE FROM workflow_edges "
         f"WHERE source_node_id IN ({unsupported_nodes}) OR target_node_id IN ({unsupported_nodes})"

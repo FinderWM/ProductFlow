@@ -22,7 +22,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-ProductFlow is a private single-merchant workspace. The backend lives in `backend/src/productflow_backend/` and uses clear layers: `presentation/` for FastAPI routes and schemas, `application/` for use cases, `domain/` for enums/core concepts, and `infrastructure/` for database, storage, queues, text/image providers, and poster rendering. Alembic migrations are in `backend/alembic/versions/`; backend tests are in `backend/tests/`. The React/Vite app lives in `web/src/`, with pages in `web/src/pages/`, shared UI in `web/src/components/`, and API/type helpers in `web/src/lib/`. Product and architecture notes live in `docs/`.
+Inspiration One is a private single-merchant workspace. The backend lives in `backend/src/inspiration_one_backend/` and uses clear layers: `presentation/` for FastAPI routes and schemas, `application/` for use cases, `domain/` for enums/core concepts, and `infrastructure/` for database, storage, queues, text/image providers, and poster rendering. Alembic migrations are in `backend/alembic/versions/`; backend tests are in `backend/tests/`. The React/Vite app lives in `web/src/`, with pages in `web/src/pages/`, shared UI in `web/src/components/`, and API/type helpers in `web/src/lib/`. Inspiration and architecture notes live in `docs/`.
 
 ## Build, Test, and Development Commands
 Use the root `justfile` whenever possible:
@@ -39,10 +39,10 @@ Use the root `justfile` whenever possible:
 - `just web-build` — type-check and build the frontend.
 
 ## Coding Style & Naming Conventions
-Python targets 3.12 and uses Ruff with 120-character lines plus `E`, `F`, `I`, `UP`, and `B` lint rules. Keep imports sorted, prefer typed functions, and name modules/functions in `snake_case`. React components and pages use `PascalCase` filenames, such as `ProductListPage.tsx`; hooks, helpers, and API functions use `camelCase`. Keep provider-specific code behind infrastructure factories instead of leaking it into routes.
+Python targets 3.12 and uses Ruff with 120-character lines plus `E`, `F`, `I`, `UP`, and `B` lint rules. Keep imports sorted, prefer typed functions, and name modules/functions in `snake_case`. React components and pages use `PascalCase` filenames, such as `InspirationListPage.tsx`; hooks, helpers, and API functions use `camelCase`. Keep provider-specific code behind infrastructure factories instead of leaking it into routes.
 
 ## Testing Guidelines
-Backend tests use pytest and are discovered from `backend/tests/` as `test_*.py`. Add workflow-level coverage when changing product, copy, poster, settings, or image-session behavior. Run `just backend-test` before backend commits and `just web-build` before frontend commits. For schema or migration changes, include both an Alembic revision and a regression test where practical.
+Backend tests use pytest and are discovered from `backend/tests/` as `test_*.py`. Add workflow-level coverage when changing inspiration, copy, poster, settings, or image-session behavior. Run `just backend-test` before backend commits and `just web-build` before frontend commits. For schema or migration changes, include both an Alembic revision and a regression test where practical.
 
 ## Commit & Pull Request Guidelines
 Recent history mixes Conventional Commit prefixes (`feat:`, `chore:`) with concise Chinese summaries. Use one focused commit per topic, for example `feat: 增加设置页模型配置`. Pull requests should describe the user-visible change, list verification commands, call out migrations/config changes, and include screenshots for UI updates.
@@ -62,7 +62,7 @@ Do not commit `.env`, `web/.env`, generated storage, caches, or build output. Ke
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `yuqie6/ProductFlow`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues for `yuqie6/Inspiration One`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -18,7 +18,7 @@ from helpers import (
 from PIL import Image
 from pydantic import ValidationError
 
-from productflow_backend.application.contracts import (
+from inspiration_one_backend.application.contracts import (
     BlocksCopyContent,
     CopyBlock,
     CopyNodeConfigV2,
@@ -26,46 +26,49 @@ from productflow_backend.application.contracts import (
     CopySection,
     CreativeBriefPayload,
     FreeformCopyContent,
+    InspirationInput,
     LayoutBriefCopyContent,
     PosterGenerationInput,
-    ProductInput,
     ReferenceImageInput,
 )
-from productflow_backend.application.copy_payloads import normalize_copy_payload
-from productflow_backend.application.product_workflow_dependencies import WorkflowExecutionDependencies
-from productflow_backend.application.product_workflows import run_product_workflow
-from productflow_backend.application.use_cases import (
-    create_product,
-    get_product_detail,
+from inspiration_one_backend.application.copy_payloads import normalize_copy_payload
+from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
+from inspiration_one_backend.application.inspiration_workflows import run_inspiration_workflow
+from inspiration_one_backend.application.use_cases import (
+    create_inspiration,
+    get_inspiration_detail,
 )
-from productflow_backend.config import get_settings
-from productflow_backend.domain.enums import (
+from inspiration_one_backend.config import get_settings
+from inspiration_one_backend.domain.enums import (
     PosterKind,
 )
-from productflow_backend.infrastructure.db.models import (
+from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     ProviderBinding,
     ProviderProfile,
 )
-from productflow_backend.infrastructure.db.session import get_session_factory
-from productflow_backend.infrastructure.image.gemini_provider import (
+from inspiration_one_backend.infrastructure.db.session import get_session_factory
+from inspiration_one_backend.infrastructure.image.gemini_provider import (
     GoogleGeminiImageClient,
     GoogleGeminiImageProvider,
     GoogleGeminiReferenceImage,
-    map_productflow_size_to_gemini_image_config,
+    map_inspiration_one_size_to_gemini_image_config,
 )
-from productflow_backend.infrastructure.image.images_provider import OpenAIImagesImageProvider
-from productflow_backend.infrastructure.image.responses_provider import (
+from inspiration_one_backend.infrastructure.image.images_provider import OpenAIImagesImageProvider
+from inspiration_one_backend.infrastructure.image.responses_provider import (
     OpenAIResponsesImageClient,
     OpenAIResponsesImageProvider,
 )
-from productflow_backend.infrastructure.openai_client import (
+from inspiration_one_backend.infrastructure.openai_client import (
     OPENAI_COMPATIBLE_DEFAULT_HEADERS,
     OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
     build_openai_client_kwargs,
 )
-from productflow_backend.infrastructure.provider_config import ResolvedImageProviderConfig, ResolvedTextProviderConfig
+from inspiration_one_backend.infrastructure.provider_config import (
+    ResolvedImageProviderConfig,
+    ResolvedTextProviderConfig,
+)
 
 REMOVED_COPY_OUTPUT_KEYS = [
     "derived" + "_fields",
@@ -131,7 +134,7 @@ def _progress_collector_with_context(
     def append(progress: dict) -> None:
         events.append(progress)
 
-    append.productflow_context = {  # type: ignore[attr-defined]
+    append.inspiration_one_context = {  # type: ignore[attr-defined]
         "task_id": task_id,
         "session_id": session_id,
         "candidate_index": candidate_index,
@@ -152,9 +155,9 @@ class DummyImagesAPIResponse:
 
 
 def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, monkeypatch) -> None:
-    from productflow_backend.infrastructure.image.chat_service import ImageChatService, ImageChatTurn
-    from productflow_backend.infrastructure.prompts import render_prompt_template
-    from productflow_backend.infrastructure.text.openai_provider import OpenAITextProvider
+    from inspiration_one_backend.infrastructure.image.chat_service import ImageChatService, ImageChatTurn
+    from inspiration_one_backend.infrastructure.prompts import render_prompt_template
+    from inspiration_one_backend.infrastructure.text.openai_provider import OpenAITextProvider
 
     assert (
         render_prompt_template(
@@ -168,18 +171,18 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
     try:
         session.add_all(
             [
-                AppSetting(key="prompt_brief_system", value="自定义商品理解提示"),
+                AppSetting(key="prompt_brief_system", value="自定义灵感产物理解提示"),
                 AppSetting(key="prompt_copy_system", value="自定义文案提示"),
                 AppSetting(
                     key="prompt_poster_image_template",
                     value=(
-                        "自定义海报 {product_name} / {instruction} / {kind_label} / "
+                        "自定义海报 {inspiration_name} / {instruction} / {kind_label} / "
                         "{context_block} / {reference_policy}"
                     ),
                 ),
                 AppSetting(
                     key="prompt_poster_image_edit_template",
-                    value="自定义改图 {product_name} / {instruction} / {kind_label} / {size} / {reference_policy}",
+                    value="自定义改图 {inspiration_name} / {instruction} / {kind_label} / {size} / {reference_policy}",
                 ),
                 AppSetting(
                     key="prompt_poster_image_reference_policy",
@@ -219,7 +222,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
             text_client_kwargs.append(kwargs)
             self.responses = DummyTextResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.text.openai_provider.OpenAI", DummyTextOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.text.openai_provider.OpenAI", DummyTextOpenAI)
 
     text_provider = OpenAITextProvider(
         ResolvedTextProviderConfig(
@@ -229,15 +232,15 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
             api_key="super-secret-text-key",
         )
     )
-    product_input = ProductInput(
-        name="测试商品",
+    inspiration_input = InspirationInput(
+        name="测试灵感产物",
         category="类目",
         price="9.90",
         source_note="说明",
         image_path="/tmp/a.png",
     )
-    brief, _ = text_provider.generate_brief(product_input)
-    text_provider.generate_copy(product_input, brief)
+    brief, _ = text_provider.generate_brief(inspiration_input)
+    text_provider.generate_copy(inspiration_input, brief)
 
     assert text_client_kwargs == [
         {
@@ -246,7 +249,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
             "timeout": OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
         }
     ]
-    assert text_calls[0]["instructions"] == "自定义商品理解提示"
+    assert text_calls[0]["instructions"] == "自定义灵感产物理解提示"
     assert text_calls[0]["input"][0]["role"] == "user"
     assert text_calls[1]["instructions"] == "自定义文案提示"
     assert text_calls[1]["input"][0]["role"] == "user"
@@ -256,7 +259,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
     source_path.write_bytes(_make_demo_image_bytes())
     poster_prompt = OpenAIResponsesImageProvider()._build_prompt(
         PosterGenerationInput(
-            product_name="测试商品",
+            inspiration_name="测试灵感产物",
             category="类目",
             price="9.90",
             source_note="说明",
@@ -267,7 +270,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
         PosterKind.MAIN_IMAGE,
         "1024x1024",
     )
-    assert "自定义海报 测试商品 / 强调轻便 / 主图 /" in poster_prompt
+    assert "自定义海报 测试灵感产物 / 强调轻便 / 主图 /" in poster_prompt
     assert "可用文案参考" in poster_prompt
     assert "卖点：卖点一" in poster_prompt
     assert poster_prompt.endswith("自定义视觉参考规则")
@@ -275,7 +278,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
     edit_prompt = OpenAIResponsesImageProvider()._build_prompt(
         PosterGenerationInput(
             copy_prompt_mode="image_edit",
-            product_name="测试商品",
+            inspiration_name="测试灵感产物",
             category="类目",
             price="9.90",
             source_note="说明",
@@ -285,7 +288,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
         PosterKind.MAIN_IMAGE,
         "1024x1024",
     )
-    assert edit_prompt == "自定义改图 测试商品 / 改成白底，保留主体 / 主图 / 1024x1024 / 自定义视觉参考规则"
+    assert edit_prompt == "自定义改图 测试灵感产物 / 改成白底，保留主体 / 主图 / 1024x1024 / 自定义视觉参考规则"
 
     chat_prompt = ImageChatService()._build_prompt(
         "改成白底",
@@ -298,7 +301,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
 
 
 def test_openai_text_provider_reads_sse_text_response() -> None:
-    from productflow_backend.infrastructure.text.openai_provider import OpenAITextProvider
+    from inspiration_one_backend.infrastructure.text.openai_provider import OpenAITextProvider
 
     provider = object.__new__(OpenAITextProvider)
     response = "\n".join(
@@ -389,11 +392,11 @@ def test_copy_payload_v2_normalizes_provider_block_variants() -> None:
     payload = normalize_copy_payload(
         {
             "version": 2,
-            "summary": "坐标验收商品4",
+            "summary": "坐标验收灵感产物4",
             "content": {
                 "kind": "blocks",
                 "blocks": [
-                    {"type": "title", "text": "坐标验收商品4"},
+                    {"type": "title", "text": "坐标验收灵感产物4"},
                     {"type": "benefit", "text": "覆盖上下架流程验收"},
                     {"type": "benefit", "text": "节点、区域功能测试"},
                     {"type": "benefit", "text": "方便快速识别管理"},
@@ -600,16 +603,16 @@ def test_copy_payload_v2_drops_empty_layout_items() -> None:
     assert [item.text for item in payload.content.sections[0].items] == ["台面乱？上墙收一收"]
 
 
-def test_product_workflow_copy_run_normalizes_provider_scalar_lists(configured_env: Path, monkeypatch) -> None:
+def test_inspiration_workflow_copy_run_normalizes_provider_scalar_lists(configured_env: Path, monkeypatch) -> None:
     class ListAudienceTextProvider:
         provider_name = "list-audience"
         prompt_version = "test-v1"
 
-        def generate_brief(self, product: ProductInput) -> tuple[CreativeBriefPayload, str]:
+        def generate_brief(self, inspiration: InspirationInput) -> tuple[CreativeBriefPayload, str]:
             return (
                 CreativeBriefPayload.model_validate(
                     {
-                        "positioning": f"{product.name} 的内容创作场景",
+                        "positioning": f"{inspiration.name} 的内容创作场景",
                         "audience": ["摄影入门用户", "小红书图文内容创作者"],
                         "selling_angles": ["上手快", "画面稳", "适合图文内容"],
                         "taboo_phrases": [],
@@ -621,7 +624,7 @@ def test_product_workflow_copy_run_normalizes_provider_scalar_lists(configured_e
 
         def generate_copy(
             self,
-            product: ProductInput,
+            inspiration: InspirationInput,
             brief: CreativeBriefPayload,
             config: CopyNodeConfigV2,
             reference_images: list[ReferenceImageInput] | None = None,
@@ -629,7 +632,7 @@ def test_product_workflow_copy_run_normalizes_provider_scalar_lists(configured_e
             del config, reference_images
             return (
                 CopyPayloadV2(
-                    summary=f"{product.name} 新手拍摄更稳",
+                    summary=f"{inspiration.name} 新手拍摄更稳",
                     content=BlocksCopyContent(
                         blocks=[
                             CopyBlock(id="audience", text=f"适合{brief.audience}"),
@@ -648,37 +651,37 @@ def test_product_workflow_copy_run_normalizes_provider_scalar_lists(configured_e
         ),
     )
 
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
 
     created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={"name": "手机摄影支架", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("tripod.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
-    product_id = created.json()["id"]
+    inspiration_id = created.json()["id"]
 
-    run_response = client.post(f"/api/products/{product_id}/workflow/run", json={})
+    run_response = client.post(f"/api/inspirations/{inspiration_id}/workflow/run", json={})
     assert run_response.status_code == 200
     assert run_response.json()["runs"][0]["status"] == "running"
-    workflow_payload = _wait_for_workflow_run(client, product_id, status="succeeded")
+    workflow_payload = _wait_for_workflow_run(client, inspiration_id, status="succeeded")
     copy_node = next(node for node in workflow_payload["nodes"] if node["node_type"] == "copy_generation")
     assert copy_node["output_json"]["structured_payload"]["version"] == 2
     assert not set(REMOVED_COPY_OUTPUT_KEYS) & set(copy_node["output_json"])
     structured_text = str(copy_node["output_json"]["structured_payload"])
     assert "摄影入门用户、小红书图文内容创作者" in structured_text
 
-    product_response = client.get(f"/api/products/{product_id}")
-    assert product_response.status_code == 200
-    latest_brief = product_response.json()["latest_brief"]
+    inspiration_response = client.get(f"/api/inspirations/{inspiration_id}")
+    assert inspiration_response.status_code == 200
+    latest_brief = inspiration_response.json()["latest_brief"]
     assert latest_brief["payload"]["audience"] == "摄影入门用户、小红书图文内容创作者"
 
 
-def test_product_workflow_copy_run_retries_provider_payload_contract_mismatch(
+def test_inspiration_workflow_copy_run_retries_provider_payload_contract_mismatch(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -688,12 +691,12 @@ def test_product_workflow_copy_run_retries_provider_payload_contract_mismatch(
         brief_attempts = 0
         copy_attempts = 0
 
-        def generate_brief(self, product: ProductInput) -> tuple[CreativeBriefPayload, str]:
+        def generate_brief(self, inspiration: InspirationInput) -> tuple[CreativeBriefPayload, str]:
             type(self).brief_attempts += 1
             if type(self).brief_attempts == 1:
                 return CreativeBriefPayload.model_validate(
                     {
-                        "positioning": f"{product.name} 定位",
+                        "positioning": f"{inspiration.name} 定位",
                         "audience": [],
                         "selling_angles": ["轻", "稳", "好收纳"],
                         "taboo_phrases": [],
@@ -702,7 +705,7 @@ def test_product_workflow_copy_run_retries_provider_payload_contract_mismatch(
                 ), "bad-brief"
             return (
                 CreativeBriefPayload(
-                    positioning=f"{product.name} 便携定位",
+                    positioning=f"{inspiration.name} 便携定位",
                     audience="小户型用户",
                     selling_angles=["轻", "稳", "好收纳"],
                     taboo_phrases=[],
@@ -713,12 +716,12 @@ def test_product_workflow_copy_run_retries_provider_payload_contract_mismatch(
 
         def generate_copy(
             self,
-            product: ProductInput,
+            inspiration: InspirationInput,
             brief: CreativeBriefPayload,
             config: CopyNodeConfigV2,
             reference_images: list[ReferenceImageInput] | None = None,
         ) -> tuple[CopyPayloadV2, str]:
-            del product, brief, config, reference_images
+            del inspiration, brief, config, reference_images
             type(self).copy_attempts += 1
             if type(self).copy_attempts == 1:
                 return CopyPayloadV2.model_validate(
@@ -743,23 +746,23 @@ def test_product_workflow_copy_run_retries_provider_payload_contract_mismatch(
         ),
     )
 
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
 
     created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={"name": "折叠置物架", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("shelf.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
-    product_id = created.json()["id"]
+    inspiration_id = created.json()["id"]
 
-    run_response = client.post(f"/api/products/{product_id}/workflow/run", json={})
+    run_response = client.post(f"/api/inspirations/{inspiration_id}/workflow/run", json={})
     assert run_response.status_code == 200
-    workflow_payload = _wait_for_workflow_run(client, product_id, status="succeeded")
+    workflow_payload = _wait_for_workflow_run(client, inspiration_id, status="succeeded")
     copy_node = next(node for node in workflow_payload["nodes"] if node["node_type"] == "copy_generation")
 
     assert RetryingTextProvider.brief_attempts == 2
@@ -772,7 +775,7 @@ def test_mock_image_provider_does_not_read_runtime_settings_during_generation(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.infrastructure.image.mock_provider import MockImageProvider
+    from inspiration_one_backend.infrastructure.image.mock_provider import MockImageProvider
 
     source_path = configured_env / "mock-thread-safe-source.png"
     source_path.parent.mkdir(parents=True, exist_ok=True)
@@ -783,13 +786,13 @@ def test_mock_image_provider_does_not_read_runtime_settings_during_generation(
         raise AssertionError("runtime settings should be resolved before provider worker execution")
 
     monkeypatch.setattr(
-        "productflow_backend.infrastructure.image.mock_provider.get_runtime_settings",
+        "inspiration_one_backend.infrastructure.image.mock_provider.get_runtime_settings",
         fail_runtime_settings_lookup,
     )
 
     generated, model = provider.generate_poster_image(
         PosterGenerationInput(
-            product_name="线程安全测试商品",
+            inspiration_name="线程安全测试灵感产物",
             category="测试类目",
             price="99",
             source_note="测试说明",
@@ -811,8 +814,8 @@ def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from productflow_backend.infrastructure.image.base import GeneratedImagePayload
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.infrastructure.image.base import GeneratedImagePayload
+    from inspiration_one_backend.presentation.api import create_app
 
     session = get_session_factory()()
     try:
@@ -844,7 +847,7 @@ def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
                     provider_response_id="resp_workflow_1",
                     provider_response_status="completed",
                     provider_output_json={
-                        "_productflow": {
+                        "_inspiration_one": {
                             "actual_size": "800x800",
                             "notes": ["accepted quality", "normalized size"],
                         },
@@ -866,14 +869,14 @@ def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
     _login(client)
 
     created = client.post(
-        "/api/products",
+        "/api/inspirations",
         data={"name": "露营杯", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("cup.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
-    product_id = created.json()["id"]
+    inspiration_id = created.json()["id"]
 
-    workflow_response = client.get(f"/api/products/{product_id}/workflow")
+    workflow_response = client.get(f"/api/inspirations/{inspiration_id}/workflow")
     assert workflow_response.status_code == 200
     workflow = workflow_response.json()
     copy_node = next(node for node in workflow["nodes"] if node["node_type"] == "copy_generation")
@@ -883,16 +886,16 @@ def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
     assert deleted_copy.status_code == 200
     patched_image = client.patch(
         f"/api/workflow-nodes/{image_node['id']}",
-        json={"config_json": {"instruction": "基于商品图改成暖色露营场景", "size": "1024x1024"}},
+        json={"config_json": {"instruction": "基于灵感产物图改成暖色露营场景", "size": "1024x1024"}},
     )
     assert patched_image.status_code == 200
 
     selected_run = client.post(
-        f"/api/products/{product_id}/workflow/run",
+        f"/api/inspirations/{inspiration_id}/workflow/run",
         json={"start_node_id": image_node["id"]},
     )
     assert selected_run.status_code == 200
-    payload = _wait_for_workflow_run(client, product_id, status="succeeded")
+    payload = _wait_for_workflow_run(client, inspiration_id, status="succeeded")
     image_output = next(node for node in payload["nodes"] if node["id"] == image_node["id"])["output_json"]
 
     assert image_output["context_summary"]["copy_prompt_mode"] == "image_edit"
@@ -920,7 +923,7 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
     configured_env: Path,
     monkeypatch,
 ) -> None:
-    from productflow_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.api import create_app
 
     monkeypatch.setenv("IMAGE_PROVIDER_KIND", "openai_responses")
     monkeypatch.setenv("IMAGE_BASE_URL", "https://example.test/v1")
@@ -970,7 +973,7 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
             client_kwargs.append(kwargs)
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
     app = create_app()
     client = TestClient(app)
@@ -991,7 +994,7 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
         f"/api/image-sessions/{session_id}/generate",
         json={
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            "prompt": "生成日漫风商品场景",
+            "prompt": "生成日漫风灵感产物场景",
             "size": "1024x1024",
         },
     )
@@ -1089,7 +1092,7 @@ def test_openai_responses_poster_provider_uses_image_generation_tool(
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
     source_path = configured_env / "provider-source.png"
     reference_path = configured_env / "provider-reference.png"
@@ -1100,7 +1103,7 @@ def test_openai_responses_poster_provider_uses_image_generation_tool(
     provider = OpenAIResponsesImageProvider()
     generated_image, model_name = provider.generate_poster_image(
         poster=PosterGenerationInput(
-            product_name="测试商品",
+            inspiration_name="测试灵感产物",
             category="测试类目",
             price="9.90",
             source_note="防水牛津布，适合通勤和短途出差。",
@@ -1134,7 +1137,7 @@ def test_openai_responses_poster_provider_uses_image_generation_tool(
     assert "用户要求：背景更干净，强调收纳空间。" in prompt_text
     assert "- 补充说明：防水牛津布，适合通勤和短途出差。" in prompt_text
     assert "- 参考图片数量：2" in prompt_text
-    assert "- 商品原图：第 1 张输入图片" in prompt_text
+    assert "- 灵感产物原图：第 1 张输入图片" in prompt_text
     assert "- 参考图：reference.png（角色：参考图）" in prompt_text
     assert "视觉参考规则：" in prompt_text
     assert "如有输入图片，以输入图片中的主体、结构、材质、风格或场景作为视觉基准" in prompt_text
@@ -1182,9 +1185,9 @@ def test_openai_responses_image_tool_optional_fields_are_omitted_until_configure
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     OpenAIResponsesImageClient().generate_image(prompt="默认 payload", size="1024x1024")
 
@@ -1289,10 +1292,10 @@ def test_openai_responses_image_client_polls_background_response_and_reports_pro
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.sleep", lambda seconds: None)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.sleep", lambda seconds: None)
 
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     result = OpenAIResponsesImageClient().generate_image(
         prompt="后台生成",
@@ -1349,9 +1352,9 @@ def test_openai_responses_image_client_falls_back_when_background_is_unsupported
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     result = OpenAIResponsesImageClient().generate_image(prompt="兼容同步响应", size="1024x1024")
 
@@ -1391,11 +1394,11 @@ def test_openai_responses_image_client_wraps_background_poll_errors(
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.sleep", lambda seconds: None)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.sleep", lambda seconds: None)
 
-    from productflow_backend.infrastructure.image import responses_provider
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image import responses_provider
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     log_messages: list[str] = []
 
@@ -1454,10 +1457,10 @@ def test_openai_responses_image_client_redacts_base_url_credentials_in_logs(
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image import responses_provider
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image import responses_provider
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     log_messages: list[str] = []
 
@@ -1518,9 +1521,9 @@ def test_openai_responses_image_client_retries_without_optional_fields_and_recor
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     result = OpenAIResponsesImageClient().generate_image(
         prompt="带每轮字段",
@@ -1533,8 +1536,8 @@ def test_openai_responses_image_client_retries_without_optional_fields_and_recor
         {"type": "image_generation", "size": "1024x1024", "quality": "high", "output_format": "webp"}
     ]
     assert calls[1]["tools"] == [{"type": "image_generation", "size": "1024x1024"}]
-    assert result.provider_request_json["_productflow"]["fallback_used"] is True
-    assert result.provider_output_json["_productflow"]["notes"] == [
+    assert result.provider_request_json["_inspiration_one"]["fallback_used"] is True
+    assert result.provider_output_json["_inspiration_one"]["notes"] == [
         {"kind": "fallback", "message": "供应商不支持部分参数，已按基础参数完成。"}
     ]
     assert "unsupported field" not in str(result.provider_output_json)
@@ -1583,9 +1586,9 @@ def test_openai_responses_image_client_records_provider_adjusted_note(
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     result = OpenAIResponsesImageClient().generate_image(
         prompt="provider 调整字段",
@@ -1593,7 +1596,7 @@ def test_openai_responses_image_client_records_provider_adjusted_note(
         tool_options={"quality": "high", "output_format": "webp"},
     )
 
-    metadata = result.provider_output_json["_productflow"]
+    metadata = result.provider_output_json["_inspiration_one"]
     assert metadata["effective_image_tool"]["output_format"] == "png"
     assert metadata["notes"][0]["kind"] == "provider_adjusted"
     assert metadata["notes"][0]["fields"] == ["quality", "output_format"]
@@ -1613,9 +1616,9 @@ def test_openai_responses_image_client_sanitizes_client_initialization_errors(
         def __init__(self, **kwargs) -> None:
             raise RuntimeError(f"raw provider init failed: {kwargs}")
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     with pytest.raises(RuntimeError) as error:
         OpenAIResponsesImageClient().generate_image(prompt="初始化失败", size="1024x1024")
@@ -1669,9 +1672,9 @@ def test_openai_responses_image_client_infers_mime_type_from_returned_bytes(
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     result = OpenAIResponsesImageClient().generate_image(prompt="返回 JPEG", size="1024x1024")
 
@@ -1704,14 +1707,14 @@ def test_openai_images_provider_factory_and_client_generate_payload(
             client_kwargs.append(kwargs)
             self.images = DummyImages()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.factory import get_image_provider
-    from productflow_backend.infrastructure.image.images_provider import OpenAIImagesClient
+    from inspiration_one_backend.infrastructure.image.factory import get_image_provider
+    from inspiration_one_backend.infrastructure.image.images_provider import OpenAIImagesClient
 
     assert isinstance(get_image_provider(), OpenAIImagesImageProvider)
 
-    result = OpenAIImagesClient().generate(prompt="生成商品图", size="1024x1024")[0]
+    result = OpenAIImagesClient().generate(prompt="生成灵感产物图", size="1024x1024")[0]
 
     assert client_kwargs == [
         {
@@ -1724,7 +1727,7 @@ def test_openai_images_provider_factory_and_client_generate_payload(
     assert calls == [
         {
             "model": "gpt-image-1",
-            "prompt": "生成商品图",
+            "prompt": "生成灵感产物图",
             "size": "1024x1024",
             "n": 1,
             "response_format": "b64_json",
@@ -1736,7 +1739,7 @@ def test_openai_images_provider_factory_and_client_generate_payload(
     assert result.model_name == "gpt-image-1"
     assert result.provider_request_json == {
         "model": "gpt-image-1",
-        "prompt": "生成商品图",
+        "prompt": "生成灵感产物图",
         "size": "1024x1024",
         "n": 1,
         "quality": "high",
@@ -1797,14 +1800,14 @@ def test_google_gemini_provider_factory_and_client_generate_payload(
             client_kwargs.append(kwargs)
             self.models = DummyModels()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.gemini_provider.genai.Client", DummyClient)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.gemini_provider.genai.Client", DummyClient)
 
-    from productflow_backend.infrastructure.image.factory import get_image_provider
+    from inspiration_one_backend.infrastructure.image.factory import get_image_provider
 
     assert isinstance(get_image_provider(), GoogleGeminiImageProvider)
 
     result = GoogleGeminiImageClient().generate_image(
-        prompt="生成商品图",
+        prompt="生成灵感产物图",
         size="2048x1152",
         reference_images=[GoogleGeminiReferenceImage(image_bytes, "image/png", "ref.png")],
     )
@@ -1817,7 +1820,7 @@ def test_google_gemini_provider_factory_and_client_generate_payload(
     assert result.provider_response_id == "gemini-response-1"
     assert result.provider_request_json == {
         "model": "gemini-3.1-flash-image-preview",
-        "prompt": "生成商品图",
+        "prompt": "生成灵感产物图",
         "size": "2048x1152",
         "reference_image_count": 1,
         "reference_images": [{"filename": "ref.png", "mime_type": "image/png", "byte_count": len(image_bytes)}],
@@ -1827,7 +1830,7 @@ def test_google_gemini_provider_factory_and_client_generate_payload(
         "response_id": "gemini-response-1",
         "model_version": "gemini-test-version",
         "text_part_count": 1,
-        "_productflow": {
+        "_inspiration_one": {
             "model": "gemini-3.1-flash-image-preview",
             "requested_size": "2048x1152",
             "effective_aspect_ratio": "16:9",
@@ -1839,11 +1842,11 @@ def test_google_gemini_provider_factory_and_client_generate_payload(
 
 
 def test_google_gemini_size_mapping_and_sanitized_errors() -> None:
-    config = map_productflow_size_to_gemini_image_config("1024x1536", "gemini-2.5-flash-image")
+    config = map_inspiration_one_size_to_gemini_image_config("1024x1536", "gemini-2.5-flash-image")
     assert config.aspect_ratio == "2:3"
     assert config.image_size is None
 
-    preview_config = map_productflow_size_to_gemini_image_config("3840x2160", "gemini-3-pro-image-preview")
+    preview_config = map_inspiration_one_size_to_gemini_image_config("3840x2160", "gemini-3-pro-image-preview")
     assert preview_config.aspect_ratio == "16:9"
     assert preview_config.image_size == "4K"
 
@@ -1883,9 +1886,9 @@ def test_openai_images_client_retries_generate_without_optional_fields(
         def __init__(self, **kwargs) -> None:
             self.images = DummyImages()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.images_provider import OpenAIImagesClient
+    from inspiration_one_backend.infrastructure.image.images_provider import OpenAIImagesClient
 
     result = OpenAIImagesClient().generate(prompt="fallback", size="1024x1024")[0]
 
@@ -1894,7 +1897,7 @@ def test_openai_images_client_retries_generate_without_optional_fields(
     assert "style" in calls[0]
     assert "quality" not in calls[1]
     assert "style" not in calls[1]
-    assert result.provider_output_json["_productflow"]["notes"] == [
+    assert result.provider_output_json["_inspiration_one"]["notes"] == [
         {"kind": "fallback", "message": "供应商不支持部分可选参数，已按基础参数完成。"}
     ]
     assert "unsupported optional field" not in str(result.provider_output_json)
@@ -1924,9 +1927,9 @@ def test_openai_images_client_edit_sends_multiple_images_and_falls_back_to_base_
         def __init__(self, **kwargs) -> None:
             self.images = DummyImages()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.images_provider import ImagesReferenceImage, OpenAIImagesClient
+    from inspiration_one_backend.infrastructure.image.images_provider import ImagesReferenceImage, OpenAIImagesClient
 
     result = OpenAIImagesClient().edit(
         image=[
@@ -1952,7 +1955,7 @@ def test_openai_images_client_edit_sends_multiple_images_and_falls_back_to_base_
         "images": [{"filename": "base.png", "mime_type": "image/png"}],
         "has_mask": False,
     }
-    assert result.provider_output_json["_productflow"] == {
+    assert result.provider_output_json["_inspiration_one"] == {
         "notes": [
             {"kind": "fallback", "message": "供应商不支持部分可选参数，已按基础参数完成。"},
             {"kind": "multi_image_fallback", "message": "供应商不支持多张编辑输入，已仅使用基图完成。"},
@@ -1989,8 +1992,8 @@ def test_openai_images_client_reports_missing_output_and_sanitizes_failures(
         def __init__(self, **kwargs) -> None:
             self.images = FailingImages()
 
-    from productflow_backend.infrastructure.image import images_provider
-    from productflow_backend.infrastructure.image.images_provider import OpenAIImagesClient
+    from inspiration_one_backend.infrastructure.image import images_provider
+    from inspiration_one_backend.infrastructure.image.images_provider import OpenAIImagesClient
 
     monkeypatch.setattr(images_provider, "OpenAI", MissingOutputOpenAI)
     with pytest.raises(RuntimeError) as missing_error:
@@ -2026,7 +2029,7 @@ def test_openai_images_poster_provider_uses_existing_prompt_contract_and_referen
         def __init__(self, **kwargs) -> None:
             self.images = DummyImages()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
 
     session = get_session_factory()()
     try:
@@ -2035,11 +2038,11 @@ def test_openai_images_poster_provider_uses_existing_prompt_contract_and_referen
                 AppSetting(
                     key="prompt_poster_image_edit_template",
                     value=(
-                        "EDIT {product_name}/{category}/{price}/{source_note}/{instruction}/"
+                        "EDIT {inspiration_name}/{category}/{price}/{source_note}/{instruction}/"
                         "{kind_label}/{size}/{context_block}/{reference_policy}/{kind_requirements}"
                     ),
                 ),
-                AppSetting(key="prompt_poster_image_reference_policy", value="保留商品主体"),
+                AppSetting(key="prompt_poster_image_reference_policy", value="保留灵感产物主体"),
             ]
         )
         session.commit()
@@ -2055,7 +2058,7 @@ def test_openai_images_poster_provider_uses_existing_prompt_contract_and_referen
     generated_image, model_name = OpenAIImagesImageProvider().generate_poster_image(
         poster=PosterGenerationInput(
             copy_prompt_mode="image_edit",
-            product_name="测试商品",
+            inspiration_name="测试灵感产物",
             category="测试类目",
             price="9.90",
             source_note="防水牛津布",
@@ -2080,12 +2083,12 @@ def test_openai_images_poster_provider_uses_existing_prompt_contract_and_referen
     assert payload["size"] == "1024x1024"
     assert [image.name for image in payload["image"]] == ["images-source.png", "reference.png"]
     prompt = payload["prompt"]
-    assert "EDIT 测试商品/测试类目/9.90/防水牛津布/背景更干净/主图/1024x1024" in prompt
+    assert "EDIT 测试灵感产物/测试类目/9.90/防水牛津布/背景更干净/主图/1024x1024" in prompt
     assert "- 补充说明：防水牛津布" in prompt
     assert "- 参考图片数量：2" in prompt
-    assert "- 商品原图：第 1 张输入图片" in prompt
+    assert "- 灵感产物原图：第 1 张输入图片" in prompt
     assert "- 参考图：reference.png（角色：参考图）" in prompt
-    assert "保留商品主体" in prompt
+    assert "保留灵感产物主体" in prompt
     assert "不要把字段名" in prompt
 
 
@@ -2110,11 +2113,11 @@ def test_openai_images_poster_provider_batches_count_as_images_api_n(
         def __init__(self, **kwargs) -> None:
             self.images = DummyImages()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.images_provider.OpenAI", DummyOpenAI)
 
     generated_images = OpenAIImagesImageProvider().generate_poster_images(
         poster=PosterGenerationInput(
-            product_name="批量商品",
+            inspiration_name="批量灵感产物",
             instruction="生成候选",
             image_size="1024x1024",
             tool_options={"quality": "high", "n": 1},
@@ -2140,7 +2143,7 @@ def test_generated_poster_mode_uses_image_provider(
     monkeypatch.setenv("IMAGE_PROVIDER_KIND", "mock")
     get_settings.cache_clear()
 
-    product = create_product(
+    inspiration = create_inspiration(
         db_session,
         name="便携榨汁杯",
         category="小家电",
@@ -2155,24 +2158,24 @@ def test_generated_poster_mode_uses_image_provider(
         ],
     )
 
-    run_product_workflow(db_session, product_id=product.id)
+    run_inspiration_workflow(db_session, inspiration_id=inspiration.id)
     db_session.expire_all()
 
-    product_after_poster = get_product_detail(db_session, product.id)
-    assert product_after_poster.poster_variants
+    inspiration_after_poster = get_inspiration_detail(db_session, inspiration.id)
+    assert inspiration_after_poster.poster_variants
     assert all(
         "workflow:mock:mock-generated-r1:mock-image-v1" in poster.template_name
-        for poster in product_after_poster.poster_variants
+        for poster in inspiration_after_poster.poster_variants
     )
 
 
 def test_default_image_prompts_are_low_pollution_context_carriers(configured_env: Path) -> None:
-    from productflow_backend.infrastructure.image.chat_service import ImageChatService
+    from inspiration_one_backend.infrastructure.image.chat_service import ImageChatService
 
     prompt = OpenAIResponsesImageProvider()._build_prompt(
         PosterGenerationInput(
             copy_prompt_mode="image_edit",
-            product_name="",
+            inspiration_name="",
             instruction="画一张蓝色抽象渐变",
             image_size="1280x720",
         ),
@@ -2181,7 +2184,7 @@ def test_default_image_prompts_are_low_pollution_context_carriers(configured_env
     )
     chat_prompt = ImageChatService()._build_prompt("画一张蓝色抽象渐变", [], "1280x720")
 
-    forbidden = ["电商海报", "继承输入参考图", "商品主体", "主标题", "卖点", "CTA", "价格标签"]
+    forbidden = ["电商海报", "继承输入参考图", "灵感产物主体", "主标题", "卖点", "CTA", "价格标签"]
     assert all(term not in prompt for term in forbidden)
     assert all(term not in chat_prompt for term in ["继承已经确定", "主体", "构图与材质"])
     assert "不应注入" not in prompt
@@ -2193,7 +2196,7 @@ def test_default_image_prompts_are_low_pollution_context_carriers(configured_env
 def test_openai_image_prompt_uses_structured_copy_context(configured_env: Path) -> None:
     prompt = OpenAIResponsesImageProvider()._build_prompt(
         PosterGenerationInput(
-            product_name="结构化商品",
+            inspiration_name="结构化灵感产物",
             instruction="突出结构化上下文",
             structured_copy_context="摘要：结构化主标题\n正文：结构化正文\n卖点：结构化卖点",
         ),
@@ -2240,9 +2243,9 @@ def test_openai_responses_image_client_reports_completed_text_without_image(
         def __init__(self, **kwargs) -> None:
             self.responses = DummyResponses()
 
-    monkeypatch.setattr("productflow_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    from productflow_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
+    from inspiration_one_backend.infrastructure.image.responses_provider import OpenAIResponsesImageClient
 
     with pytest.raises(RuntimeError) as error:
         OpenAIResponsesImageClient().generate_image(prompt="只返回文字", size="1024x1024")

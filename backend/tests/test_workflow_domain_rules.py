@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from productflow_backend.domain.enums import WorkflowNodeType
-from productflow_backend.domain.workflow_rules import (
+from inspiration_one_backend.domain.enums import WorkflowNodeType
+from inspiration_one_backend.domain.workflow_rules import (
     WorkflowRuleEdge,
     WorkflowRuleNode,
     ready_workflow_node_ids,
@@ -26,7 +26,7 @@ def _node(
 
 def test_selected_node_plan_uses_reusable_edges_without_database_session() -> None:
     nodes = [
-        _node("context", WorkflowNodeType.PRODUCT_CONTEXT, x=0),
+        _node("context", WorkflowNodeType.INSPIRATION_CONTEXT, x=0),
         _node("copy", WorkflowNodeType.COPY_GENERATION, x=100),
         _node("image", WorkflowNodeType.IMAGE_GENERATION, x=200),
         _node("target", WorkflowNodeType.REFERENCE_IMAGE, x=300),
@@ -50,7 +50,7 @@ def test_selected_node_plan_uses_reusable_edges_without_database_session() -> No
 def test_missing_upstream_business_rules_do_not_need_orm_models() -> None:
     copy_node = _node("copy", WorkflowNodeType.COPY_GENERATION)
     image_node = _node("image", WorkflowNodeType.IMAGE_GENERATION)
-    product_context = _node("context", WorkflowNodeType.PRODUCT_CONTEXT)
+    inspiration_context = _node("context", WorkflowNodeType.INSPIRATION_CONTEXT)
     configured_reference = _node(
         "reference",
         WorkflowNodeType.REFERENCE_IMAGE,
@@ -59,7 +59,7 @@ def test_missing_upstream_business_rules_do_not_need_orm_models() -> None:
     empty_reference = _node("empty-reference", WorkflowNodeType.REFERENCE_IMAGE)
 
     assert should_execute_missing_upstream(copy_node, image_node) is True
-    assert should_execute_missing_upstream(product_context, copy_node) is False
+    assert should_execute_missing_upstream(inspiration_context, copy_node) is False
     assert should_execute_missing_upstream(configured_reference, copy_node) is True
     assert should_execute_missing_upstream(empty_reference, copy_node) is False
 
@@ -130,7 +130,7 @@ def test_ready_workflow_node_ids_waits_for_chain_upstream() -> None:
 
 def test_ready_workflow_node_ids_returns_branch_wave_after_shared_upstream_succeeds() -> None:
     nodes = [
-        _node("context", WorkflowNodeType.PRODUCT_CONTEXT, x=0),
+        _node("context", WorkflowNodeType.INSPIRATION_CONTEXT, x=0),
         _node("copy", WorkflowNodeType.COPY_GENERATION, x=100),
         _node("image", WorkflowNodeType.IMAGE_GENERATION, x=200),
         _node("reference", WorkflowNodeType.REFERENCE_IMAGE, x=300),

@@ -36,7 +36,7 @@ def _storage_public_base_url() -> str | None:
 
 
 def _storage_bucket() -> str | None:
-    bucket = (os.environ.get("S3_BUCKET") or "productflow").strip().strip("/")
+    bucket = (os.environ.get("S3_BUCKET") or "inspiration-one").strip().strip("/")
     return bucket or None
 
 

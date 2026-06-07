@@ -1,8 +1,8 @@
-import type { ProductWorkflowState } from "../lib/types";
+import type { InspirationWorkflowState } from "../lib/types";
 import { useI18n } from "../lib/preferences";
 
 const CONFIG: Record<
-  ProductWorkflowState,
+  InspirationWorkflowState,
   { textKey: "status.draft" | "status.copyReady" | "status.posterReady" | "status.failed"; classes: string; dot: string }
 > = {
   draft: {
@@ -27,7 +27,7 @@ const CONFIG: Record<
   },
 };
 
-export function StatusPill({ status }: { status: ProductWorkflowState }) {
+export function StatusPill({ status }: { status: InspirationWorkflowState }) {
   const { t } = useI18n();
   const config = CONFIG[status];
   return (

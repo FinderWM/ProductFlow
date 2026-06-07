@@ -6,9 +6,9 @@ dry_run="${DRY_RUN:-0}"
 legacy_action="${LEGACY_SYSTEMD_ACTION:-stop}"
 
 legacy_services=(
-  productflow-backend.service
-  productflow-worker.service
-  productflow-web.service
+  inspiration-one-backend.service
+  inspiration-one-worker.service
+  inspiration-one-web.service
 )
 
 cd "$repo_root"
@@ -102,7 +102,7 @@ wait_for_health() {
   done
 
   echo "[release] ${label} health check failed after $((attempts * delay_seconds))s: ${url}" >&2
-  echo "[release] 可用 docker compose ps 和 docker compose logs productflow-backend productflow-worker productflow-web 排查" >&2
+  echo "[release] 可用 docker compose ps 和 docker compose logs inspiration-one-backend inspiration-one-worker inspiration-one-web 排查" >&2
   return 1
 }
 
