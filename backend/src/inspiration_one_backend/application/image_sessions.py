@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Literal, cast
 
 from dramatiq.middleware.time_limit import TimeLimitExceeded
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import desc, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.exc import StaleDataError
@@ -52,6 +52,7 @@ from inspiration_one_backend.domain.durable_generation_tasks import (
 from inspiration_one_backend.domain.enums import ImageSessionAssetKind, JobStatus, SourceAssetKind
 from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
 from inspiration_one_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     GenerationConfig,
     ImageSession,
     ImageSessionAsset,
@@ -324,17 +325,49 @@ def list_image_sessions(
     session: Session,
     *,
     inspiration_id: str | None = None,
+    resource_group_id: str | None = None,
+    owner_user_id: str | None = None,
+    only_deleted: bool = False,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
 ) -> list[ImageSession]:
     stmt = _image_session_query()
     if actor_user_id is not None and not actor_is_admin:
         stmt = stmt.where(ImageSession.owner_user_id == actor_user_id)
+    if actor_is_admin and owner_user_id:
+        stmt = stmt.where(ImageSession.owner_user_id == owner_user_id)
+    if only_deleted and actor_is_admin:
+        stmt = stmt.where(ImageSession.deleted_at.is_not(None))
+    else:
         stmt = stmt.where(ImageSession.deleted_at.is_(None))
     if inspiration_id is None:
         stmt = stmt.where(ImageSession.inspiration_id.is_(None))
     else:
         stmt = stmt.where(ImageSession.inspiration_id == inspiration_id)
+    normalized_group_id = (resource_group_id or "").strip() or None
+    if normalized_group_id is not None:
+        round_group_filter = ImageSessionRound.resource_group_id == normalized_group_id
+        task_group_filter = ImageSessionGenerationTask.resource_group_id == normalized_group_id
+        if normalized_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
+            round_group_filter = or_(round_group_filter, ImageSessionRound.resource_group_id.is_(None))
+            task_group_filter = or_(task_group_filter, ImageSessionGenerationTask.resource_group_id.is_(None))
+        has_matching_round = (
+            select(ImageSessionRound.id)
+            .where(ImageSessionRound.session_id == ImageSession.id, round_group_filter)
+            .exists()
+        )
+        has_matching_task = (
+            select(ImageSessionGenerationTask.id)
+            .where(ImageSessionGenerationTask.session_id == ImageSession.id, task_group_filter)
+            .exists()
+        )
+        has_any_round = select(ImageSessionRound.id).where(ImageSessionRound.session_id == ImageSession.id).exists()
+        has_any_task = (
+            select(ImageSessionGenerationTask.id)
+            .where(ImageSessionGenerationTask.session_id == ImageSession.id)
+            .exists()
+        )
+        stmt = stmt.where(or_(has_matching_round, has_matching_task, ~has_any_round & ~has_any_task))
     return list(session.scalars(stmt).all())
 
 

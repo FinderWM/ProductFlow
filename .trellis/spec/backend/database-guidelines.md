@@ -191,6 +191,7 @@ For runtime settings:
   - `config_json: JSON object`
 - DB table: `generation_configs`
   - `id: String(36)`
+  - `resource_group_id: String(36) | null`
   - `purpose: "text" | "image"`
   - `name: String(120)`
   - `provider_kind: "mock" | "openai" | "openai_responses" | "openai_images" | "google_gemini_image"`
@@ -231,7 +232,7 @@ For runtime settings:
 - Resolver functions:
   - `resolve_text_provider_config(generation_config_id: str | None = None) -> ResolvedTextProviderConfig`
   - `resolve_image_provider_config(generation_config_id: str | None = None) -> ResolvedImageProviderConfig`
-  - `claim_generation_config(session, purpose, generation_config_id=None) -> GenerationConfigClaim | None`
+  - `claim_generation_config(session, purpose, resource_group_id=None, generation_config_id=None) -> GenerationConfigClaim | None`
   - `release_generation_config_claim(session, generation_config_id, success=..., ...) -> None`
 
 ### 3. Contracts
@@ -245,7 +246,8 @@ For runtime settings:
 - `generation_configs` is the runtime source for provider selection. `provider_bindings` exists only as a compatibility
   mirror of the highest-priority active config per purpose.
 - `ensure_provider_config_bootstrapped(session)` reads legacy effective provider config from env plus legacy
-  `app_settings` rows, then creates provider profiles, generation configs, state rows, and compatibility bindings once.
+  `app_settings` rows, then creates provider profiles, default-group generation configs, state rows, and compatibility
+  bindings once.
 - If legacy text and image configs share the same `(base_url, api_key)`, bootstrap creates one profile with merged
   capabilities. Different connections create separate profiles.
 - Google Gemini profiles use `provider_type="google_gemini"`, declare only `image_google_gemini`, reject custom
@@ -268,14 +270,18 @@ For runtime settings:
   optional `gemini_output_mime_type`. Do not require or persist Responses background config for `openai_images`, Google
   Gemini, or `mock`.
 - `GET /api/settings/generation-config-options` requires a matching workbench/image-chat read permission or
-  `settings:read`. It returns only non-secret fields (`id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`,
-  `frozen_until`) for workflow and image-chat selectors.
+  `settings:read`. It returns only non-secret fields (`id`, `resource_group_id`, `purpose`, `name`, `provider_kind`,
+  `enabled`, `priority`, `frozen_until`) for workflow and image-chat selectors.
+- Settings create/update APIs may store `generation_configs.resource_group_id = null`. This means the config is
+  intentionally unbound in the settings workspace; it is not a fallback/default config for normal generation.
 - `GET /api/settings/generation-config-status` requires `status:read`. It may receive `start_date=YYYY-MM-DD` and
   `end_date=YYYY-MM-DD`; when omitted, the range defaults to today's local stat date. The response must keep today's
   aggregate fields for compatibility, add selected-range totals, split text/image attempts by `GenerationConfig.purpose`,
   and return per-config `range_stat` values aggregated from `generation_config_daily_stats`.
-- Automatic scheduling filters disabled, archived, frozen, over-capacity, profile-disabled, and capability-incompatible
-  configs, then claims capacity with a conditional DB update on `generation_config_states.current_concurrency`.
+- Automatic scheduling filters by the selected group, then filters disabled, archived, frozen, over-capacity,
+  profile-disabled, and capability-incompatible configs before claiming capacity with a conditional DB update on
+  `generation_config_states.current_concurrency`. Unbound configs (`resource_group_id is null`) are excluded from
+  group-scoped automatic claims.
 - Manual scheduling targets the supplied config id but still respects enabled state, profile availability, freeze state,
   and max concurrency. Capacity/freeze exhaustion returns `None` to keep durable tasks queued.
 - Only real provider execution outcomes update `generation_config_daily_stats` and failure windows. Queue wait,
@@ -412,8 +418,8 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 ### 1. Scope / Trigger
 
 - Trigger: changing provider profile/generation config settings, generation scheduling, account grants, workflow
-  generation requests, image-session generation requests, generated-result serializers, settings import/export, or gallery
-  and inspiration history filters.
+  generation requests, image-session generation requests, generated-result serializers, settings import/export, or
+  resource-group list filters.
 - This is a cross-layer contract because `generation_resource_groups`, `generation_configs.resource_group_id`, account
   grants, durable generation rows, API schemas, and frontend selectors must all agree on the selected group.
 
@@ -431,13 +437,17 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - DB table: `user_generation_resource_group_grants`
   - unique `(user_id, resource_group_id)`
 - DB columns:
-  - `generation_configs.resource_group_id: String(36)`
+  - `generation_configs.resource_group_id: String(36) | null`
   - generated-result rows that are shown or filtered by group carry nullable `resource_group_id`; legacy null values
     display as the built-in default group.
 - API:
   - `GET/POST/PATCH/DELETE /api/settings/generation-resource-groups`
   - `GET /api/settings/my-generation-resource-groups`
   - `GET/PUT /api/rbac/users/{user_id}/generation-resource-groups`
+  - `GET /api/inspirations?resource_group_id=<id>`; omitted `resource_group_id` means all visible inspirations.
+  - `GET /api/image-sessions?resource_group_id=<id>`; omitted `resource_group_id` means all visible sessions for the
+    current inspiration/standalone scope.
+  - `GET /api/gallery?resource_group_id=<id>`; omitted `resource_group_id` means all visible gallery entries.
   - generation submit/status/result DTOs expose `resource_group_id` and `resource_group { id, key, name }`.
 - Runtime selection:
   - `GenerationConfigSelection(resource_group_id=...)`
@@ -448,19 +458,28 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - `ensure_provider_config_bootstrapped(session)` must ensure the built-in `default` group exists before creating or
   backfilling generation configs.
 - Existing provider profiles and text/image generation configs belong to the `default` group during migration/bootstrap.
+- Settings users may leave a text/image generation config unbound or clear its group later. Unbound configs stay visible
+  in settings/status APIs but are not candidates for group-scoped generation scheduling.
 - Admin users can use every enabled, non-archived group. Non-admin users can use only enabled, non-archived groups granted
   through `user_generation_resource_group_grants`.
 - User-facing generation entry points must submit exactly one `resource_group_id`. Frontend selectors show available
   groups only and hide concrete generation config selection for normal generation flows.
 - Backend entry points must validate that the selected group exists, is enabled, is not archived, and is authorized for
   the actor before enqueueing durable work.
+- Image-chat session creation uses a confirmation step that submits the selected `resource_group_id` for actor
+  authorization validation and as the frontend's initial generation group. The `image_sessions` row itself does not own
+  group membership; persisted list/archive group tags remain on generation tasks, rounds, and gallery entries.
 - Text scheduling can claim only text configs in the selected group; image scheduling can claim only image configs in the
   selected group. Provider/profile availability, freeze state, and concurrency checks still apply inside that group.
+  Unbound configs must not be used as implicit fallback configs for any selected group.
 - Generated briefs, copy sets, poster variants, workflow node runs, image-session tasks, image-session rounds, and gallery
   entries must serialize a group tag. If a legacy row has `resource_group_id is None`, serializers and default-group
   filters treat it as `default`.
-- Settings import/export documents include `generation_resource_groups`, and imported generation configs must reference an
-  imported group or fall back to `default` only for legacy payloads that lack group data.
+- List filters are optional and single-select. Omitted or blank `resource_group_id` means no group filtering; a concrete
+  group id must still be validated for existence, enabled/not-archived status, and actor authorization before filtering.
+- Settings import/export documents include `generation_resource_groups`. Imported generation configs must reference an
+  imported group, explicitly set `resource_group_id: null` for unbound configs, or fall back to `default` only for legacy
+  payloads that omit the field entirely.
 
 ### 4. Validation & Error Matrix
 
@@ -472,8 +491,12 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   the selected group stays recorded on the task/run.
 - `default` group archive or disable attempt -> settings API returns `400`.
 - Imported generation config references a missing group id -> import preview/commit returns `400`.
-- Filtering inspiration history or gallery by `default` includes legacy null-group rows; filtering by another group matches
-  only that exact group id.
+- Settings `PATCH /api/settings/generation-configs/{id}` omits `resource_group_id` -> keep the existing group.
+- Settings `PATCH /api/settings/generation-configs/{id}` sends `resource_group_id: null` -> clear the group and persist
+  `NULL`.
+- Omitted list filter on inspirations, image sessions, gallery, or inspiration history -> no group filter is applied.
+- Filtering list/history rows by `default` includes legacy null-group rows where that compatibility path still exists;
+  filtering by another group matches only that exact group id.
 
 ### 5. Good/Base/Bad Cases
 
@@ -481,6 +504,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   scheduler claims only image configs whose `resource_group_id` is `campaign`.
 - Good: an admin sees `default` plus every other enabled group in `/api/settings/my-generation-resource-groups`.
 - Base: local/mock setups have one enabled `default` group with text and image generation configs.
+- Base: a settings-only config can be unbound while the operator decides which group should own it.
 - Base: older generated rows with null group fields render as `default` and are returned by the default-group filter.
 - Bad: accepting a manual `generation_config_id` from a normal user flow and using it to bypass group authorization.
 - Bad: returning generated result DTOs without a `resource_group` tag because the raw row has a null group id.
@@ -493,9 +517,10 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   config group assignment.
 - RBAC tests cover admin all-groups behavior and account-level grant replacement for non-admin users.
 - Scheduler tests cover purpose plus group filtering for automatic claims and manual config compatibility.
+- Settings/update tests cover omitted group preserving the existing value and explicit `null` clearing the group.
 - Workflow and image-session tests cover missing, unauthorized, disabled, archived, and valid group selection.
-- Serializer/filter tests cover inspiration history, workflow status/detail, image-session detail/status, and gallery group
-  tags, including default-filter legacy null rows.
+- Serializer/filter tests cover inspiration list/history, workflow status/detail, image-session list/detail/status, and
+  gallery group tags, including omitted-filter all rows and default-filter legacy null rows.
 - Frontend gates must run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` after DTO/selector
   changes.
 
@@ -638,8 +663,12 @@ def get_runtime_config_endpoint():
   - `DELETE /api/image-sessions/{image_session_id}`
 - When the guard allows deletion, these routes perform logical deletion only: set `deleted_at` and
   `deleted_by_user_id`, keep database rows, child rows, and storage files.
+- User-facing UI should call whole-record soft deletion "archive"/"archived"; backend route names, setting keys, and
+  database columns keep the existing deletion naming for API compatibility.
 - Ordinary users cannot list or read their own soft-deleted inspirations/sessions; they receive the same not-found behavior as
-  for missing rows. Admin users may list and read soft-deleted rows for traceability.
+  for missing rows. Admin users may read soft-deleted rows for traceability.
+- Inspiration and image-session list APIs default to active rows only. Admin users may pass `only_deleted=true` to list only
+  soft-deleted rows; ordinary users still receive active rows only.
 - The guard must not apply to workflow editing or reference-image cleanup:
   - `DELETE /api/workflow-edges/{edge_id}`
   - `DELETE /api/workflow-nodes/{node_id}`
@@ -653,7 +682,9 @@ def get_runtime_config_endpoint():
 - `deletion_enabled == False` and image-session delete -> `403`, same detail.
 - `deletion_enabled == True` and inspiration/session delete -> `204` plus soft-delete metadata update; storage files remain.
 - Ordinary user lists or reads a soft-deleted inspiration/session -> omitted from list or `404`.
-- Admin lists or reads a soft-deleted inspiration/session -> `200` with the same owner attribution as active rows.
+- Admin lists without `only_deleted` -> soft-deleted inspiration/session rows are omitted.
+- Admin lists with `only_deleted=true` -> only soft-deleted inspiration/session rows are returned.
+- Admin reads a soft-deleted inspiration/session -> `200` with the same owner attribution as active rows.
 - Reference-image deletion and workflow node/edge deletion -> original behavior regardless of `deletion_enabled`.
 
 ### 5. Good/Base/Bad Cases
@@ -1434,11 +1465,15 @@ migration file.
 - Image-session assets inherit `ImageSession.owner_user_id`; gallery entries inherit the generated asset owner.
 - Historical data migrates to the seeded `libow` admin id.
 - Admin users can read all owned resources, but content mutations for resources owned by another user must fail.
+- Admin inspiration and image-session list APIs may accept `owner_user_id` to narrow results to one owner. Ordinary users
+  always remain constrained to `actor_user_id`; a supplied `owner_user_id` must not widen their visible rows.
 - Ordinary users should receive `404` for another user's resource rather than a visible ownership detail.
 
 ### 4. Validation & Error Matrix
 
 - Ordinary user lists inspirations/sessions -> only rows where `owner_user_id == current_user.id`.
+- Ordinary user lists inspirations/sessions with another user's `owner_user_id` -> still only current user's rows.
+- Admin lists inspirations/sessions with `owner_user_id` -> only that owner's otherwise visible rows.
 - Ordinary user reads/downloads another user's inspiration, session, source asset, or session asset -> `404`.
 - Admin reads another user's inspiration/session/gallery entry -> `200` with `owner_username`.
 - Admin edits/deletes/generates/saves/writes back another user's resource -> `400`, `管理员不能直接编辑其他用户资源`.

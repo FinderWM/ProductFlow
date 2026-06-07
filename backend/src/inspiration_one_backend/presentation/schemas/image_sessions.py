@@ -109,6 +109,8 @@ class ImageSessionSummaryResponse(ResourceModerationFields):
     inspiration_id: str | None = None
     title: str
     rounds_count: int
+    latest_resource_group_id: str | None = None
+    latest_resource_group: GenerationResourceGroupTagResponse | None = None
     latest_generated_asset: ImageSessionAssetResponse | None = None
     deleted_at: datetime | None = None
     deleted_by_user_id: str | None = None
@@ -154,6 +156,7 @@ class ImageSessionListResponse(BaseModel):
 
 class CreateImageSessionRequest(BaseModel):
     inspiration_id: str | None = None
+    resource_group_id: str | None = Field(default=None, min_length=1, max_length=36)
     title: str | None = Field(default=None, max_length=255)
 
 
@@ -351,6 +354,15 @@ def serialize_image_session_generation_task(
 
 def serialize_image_session_summary(image_session: ImageSession) -> ImageSessionSummaryResponse:
     latest_round = max(image_session.rounds, key=lambda item: item.created_at, default=None)
+    latest_task = max(image_session.generation_tasks, key=lambda item: item.created_at, default=None)
+    latest_resource_group_id = None
+    latest_resource_group = None
+    if latest_round is not None and (latest_task is None or latest_round.created_at >= latest_task.created_at):
+        latest_resource_group_id = latest_round.resource_group_id
+        latest_resource_group = latest_round.resource_group
+    elif latest_task is not None:
+        latest_resource_group_id = latest_task.resource_group_id
+        latest_resource_group = latest_task.resource_group
     return ImageSessionSummaryResponse(
         id=image_session.id,
         owner_user_id=image_session.owner_user_id,
@@ -358,6 +370,15 @@ def serialize_image_session_summary(image_session: ImageSession) -> ImageSession
         inspiration_id=image_session.inspiration_id,
         title=image_session.title,
         rounds_count=len(image_session.rounds),
+        latest_resource_group_id=latest_resource_group_id,
+        latest_resource_group=(
+            serialize_generation_resource_group_tag(
+                latest_resource_group,
+                resource_group_id=latest_resource_group_id,
+            )
+            if latest_resource_group_id is not None
+            else None
+        ),
         latest_generated_asset=(serialize_image_session_asset(latest_round.generated_asset) if latest_round else None),
         **serialize_moderation_fields(image_session).model_dump(),
         deleted_at=image_session.deleted_at,

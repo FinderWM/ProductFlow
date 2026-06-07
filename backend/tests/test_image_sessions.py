@@ -25,6 +25,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     AppSetting,
     GenerationConfig,
     GenerationConfigDailyStat,
+    GenerationResourceGroup,
     ImageSession,
     ImageSessionAsset,
     ImageSessionGenerationTask,
@@ -139,6 +140,171 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     assert second_payload["rounds"][-1]["previous_response_id"] is None
     assert second_payload["rounds"][-1]["base_asset_id"] == first_asset_id
     assert second_payload["rounds"][-1]["selected_reference_asset_ids"] == []
+
+
+def test_image_session_list_filters_by_selected_resource_group(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.domain.enums import ImageSessionAssetKind
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    premium_group = GenerationResourceGroup(key="premium-session-list", name="高阶生图分组", sort_order=20)
+    default_session = ImageSession(title="默认分组会话")
+    premium_session = ImageSession(title="高阶分组会话")
+    empty_session = ImageSession(title="空会话")
+    db_session.add_all([premium_group, default_session, premium_session, empty_session])
+    db_session.flush()
+    default_asset = ImageSessionAsset(
+        session_id=default_session.id,
+        kind=ImageSessionAssetKind.GENERATED_IMAGE,
+        original_filename="default-session.png",
+        mime_type="image/png",
+        storage_path="image-sessions/default-session.png",
+    )
+    premium_asset = ImageSessionAsset(
+        session_id=premium_session.id,
+        kind=ImageSessionAssetKind.GENERATED_IMAGE,
+        original_filename="premium-session.png",
+        mime_type="image/png",
+        storage_path="image-sessions/premium-session.png",
+    )
+    db_session.add_all([default_asset, premium_asset])
+    db_session.flush()
+    db_session.add_all(
+        [
+            ImageSessionRound(
+                session_id=default_session.id,
+                prompt="默认分组生成",
+                assistant_message="ok",
+                size="1024x1024",
+                model_name="mock",
+                provider_name="mock",
+                prompt_version="v1",
+                generated_asset_id=default_asset.id,
+                resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            ),
+            ImageSessionRound(
+                session_id=premium_session.id,
+                prompt="高阶分组生成",
+                assistant_message="ok",
+                size="1024x1024",
+                model_name="mock",
+                provider_name="mock",
+                prompt_version="v1",
+                generated_asset_id=premium_asset.id,
+                resource_group_id=premium_group.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    default_list = client.get(
+        "/api/image-sessions",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    )
+    assert default_list.status_code == 200
+    assert {item["id"] for item in default_list.json()["items"]} == {default_session.id, empty_session.id}
+    default_item = next(item for item in default_list.json()["items"] if item["id"] == default_session.id)
+    assert default_item["latest_resource_group"]["key"] == "default"
+
+    premium_list = client.get("/api/image-sessions", params={"resource_group_id": premium_group.id})
+    assert premium_list.status_code == 200
+    assert {item["id"] for item in premium_list.json()["items"]} == {premium_session.id, empty_session.id}
+    premium_item = next(item for item in premium_list.json()["items"] if item["id"] == premium_session.id)
+    assert premium_item["latest_resource_group"]["key"] == "premium-session-list"
+
+    all_list = client.get("/api/image-sessions")
+    assert all_list.status_code == 200
+    assert {item["id"] for item in all_list.json()["items"]} == {
+        default_session.id,
+        premium_session.id,
+        empty_session.id,
+    }
+
+
+def test_image_session_list_filters_by_owner_for_admin(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    def create_owner_client(username: str) -> tuple[TestClient, str]:
+        created_user = admin_client.post(
+            "/api/rbac/users",
+            json={"username": username, "display_name": username.title()},
+        )
+        assert created_user.status_code == 201
+        grant = admin_client.put(
+            f"/api/rbac/users/{created_user.json()['id']}/generation-resource-groups",
+            json={"resource_group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID]},
+        )
+        assert grant.status_code == 200
+        client = TestClient(app)
+        set_password = client.post(
+            "/api/auth/password",
+            json={
+                "username": username,
+                "password": f"{username}-password",
+                "setup_token": created_user.json()["password_setup_token"],
+            },
+        )
+        assert set_password.status_code == 200
+        return client, created_user.json()["id"]
+
+    owner_client, owner_id = create_owner_client("image-owner-a")
+    other_client, other_id = create_owner_client("image-owner-b")
+
+    owner_session = owner_client.post("/api/image-sessions", json={"title": "A 用户会话"})
+    assert owner_session.status_code == 201
+    other_session = other_client.post("/api/image-sessions", json={"title": "B 用户会话"})
+    assert other_session.status_code == 201
+
+    owner_filtered = admin_client.get("/api/image-sessions", params={"owner_user_id": owner_id})
+    assert owner_filtered.status_code == 200
+    assert {item["id"] for item in owner_filtered.json()["items"]} == {owner_session.json()["id"]}
+
+    other_filtered = admin_client.get("/api/image-sessions", params={"owner_user_id": other_id})
+    assert other_filtered.status_code == 200
+    assert {item["id"] for item in other_filtered.json()["items"]} == {other_session.json()["id"]}
+
+    non_admin_attempt = owner_client.get("/api/image-sessions", params={"owner_user_id": other_id})
+    assert non_admin_attempt.status_code == 200
+    assert {item["id"] for item in non_admin_attempt.json()["items"]} == {owner_session.json()["id"]}
+
+
+def test_image_session_create_validates_selected_resource_group(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    premium_group = GenerationResourceGroup(key="premium-session-create", name="高阶生图创建分组", sort_order=30)
+    db_session.add(premium_group)
+    db_session.commit()
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+    owner_client = _create_user_client(app, admin_client, "image-create-owner")
+
+    rejected = owner_client.post(
+        "/api/image-sessions",
+        json={"resource_group_id": premium_group.id, "title": "未授权分组会话"},
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "账号未授权使用该供应商生成分组"
+
+    created = owner_client.post(
+        "/api/image-sessions",
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "title": "授权分组会话"},
+    )
+    assert created.status_code == 201
+
+    admin_created = admin_client.post(
+        "/api/image-sessions",
+        json={"resource_group_id": premium_group.id, "title": "管理员分组会话"},
+    )
+    assert admin_created.status_code == 201
 
 
 def test_generation_config_options_use_runtime_rbac_without_settings_permission(configured_env: Path) -> None:
@@ -2464,7 +2630,12 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
 
     admin_listed = admin_client.get("/api/image-sessions")
     assert admin_listed.status_code == 200
-    admin_session = next(item for item in admin_listed.json()["items"] if item["id"] == session_id)
+    assert all(item["id"] != session_id for item in admin_listed.json()["items"])
+
+    admin_listed_only_deleted = admin_client.get("/api/image-sessions", params={"only_deleted": True})
+    assert admin_listed_only_deleted.status_code == 200
+    assert {item["id"] for item in admin_listed_only_deleted.json()["items"]} == {session_id}
+    admin_session = admin_listed_only_deleted.json()["items"][0]
     assert admin_session["deleted_at"] is not None
     assert admin_session["deleted_by_user_id"] is not None
 

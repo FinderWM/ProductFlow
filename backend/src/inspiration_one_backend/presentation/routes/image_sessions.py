@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from inspiration_one_backend.application.auth import require_generation_resource_group_for_user
 from inspiration_one_backend.application.image_sessions import (
     add_image_session_reference_images,
     attach_image_session_asset_to_inspiration,
@@ -58,12 +59,27 @@ router = APIRouter(
 @router.get("/image-sessions", response_model=ImageSessionListResponse)
 def list_image_sessions_endpoint(
     inspiration_id: str | None = Query(default=None),
+    resource_group_id: str | None = Query(default=None, min_length=1, max_length=36),
+    owner_user_id: str | None = Query(default=None),
+    only_deleted: bool = Query(default=False),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_IMAGE_CHAT_READ)),
 ) -> ImageSessionListResponse:
+    normalized_group_id = (resource_group_id or "").strip() or None
+    if normalized_group_id is not None:
+        resource_group = require_generation_resource_group_for_user(
+            session,
+            user_id=current_user.id,
+            is_admin=current_user.is_admin,
+            resource_group_id=normalized_group_id,
+        )
+        normalized_group_id = resource_group.id
     items = list_image_sessions(
         session,
         inspiration_id=inspiration_id,
+        resource_group_id=normalized_group_id,
+        owner_user_id=owner_user_id,
+        only_deleted=only_deleted,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
     )
@@ -76,6 +92,13 @@ def create_image_session_endpoint(
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_IMAGE_CHAT_WRITE)),
 ) -> ImageSessionDetailResponse:
+    if payload.resource_group_id is not None:
+        require_generation_resource_group_for_user(
+            session,
+            user_id=current_user.id,
+            is_admin=current_user.is_admin,
+            resource_group_id=payload.resource_group_id,
+        )
     image_session = create_image_session(
         session,
         inspiration_id=payload.inspiration_id,

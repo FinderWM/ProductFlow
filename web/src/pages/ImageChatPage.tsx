@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "vaul";
@@ -101,6 +101,7 @@ import type {
   ImageToolOptions,
   GenerationResourceGroup,
   ModerationFields,
+  SourceAsset,
 } from "../lib/types";
 
 const DUPLICATE_GENERATION_SUBMIT_WINDOW_MS = 1800;
@@ -108,6 +109,7 @@ const MAX_BRANCH_CONTEXT_IMAGES = 6;
 const DESKTOP_RESIZABLE_LAYOUT_QUERY = "(min-width: 1024px)";
 const INSPIRATION_PICKER_LIST_STALE_TIME_MS = 60_000;
 const RUNTIME_CONFIG_STALE_TIME_MS = 5 * 60_000;
+const RBAC_USERS_STALE_TIME_MS = 5 * 60_000;
 const IMAGE_CHAT_GENERATION_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 type ImageChatResizeTarget = "left" | "right" | "history";
@@ -125,6 +127,9 @@ interface ImageChatRouteState {
   settingsTab: ImageGenerationSettingsTab;
   targetInspirationId: string;
   selectedResourceGroupId: string | null;
+  selectedSessionResourceGroupId: string | null;
+  selectedSessionOwnerUserId: string;
+  onlyDeletedSessions: boolean;
 }
 
 const imageChatRouteStateCache = new Map<string, ImageChatRouteState>();
@@ -186,6 +191,11 @@ type PendingDeleteAction =
   | { kind: "inspirationReference"; assetId: string }
   | { kind: "sessionReference"; sessionId: string; assetId: string };
 
+interface ReferenceImagePreview {
+  asset: ImageSessionAsset | SourceAsset;
+  title: string;
+}
+
 function assertImageChatActionAllowed(blockedTitle: string | null) {
   if (blockedTitle) {
     throw new ApiError(403, blockedTitle);
@@ -206,6 +216,8 @@ export function ImageChatPage() {
   const mobileSessionButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileHistoryButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileSettingsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const createSessionDialogTitleId = useId();
+  const createSessionDialogDescriptionId = useId();
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     () => readImageChatRouteState(routeStateScope)?.selectedSessionId ?? null,
@@ -236,6 +248,17 @@ export function ImageChatPage() {
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(
     () => readImageChatRouteState(routeStateScope)?.selectedResourceGroupId ?? null,
   );
+  const [selectedSessionResourceGroupId, setSelectedSessionResourceGroupId] = useState<string | null>(
+    () => readImageChatRouteState(routeStateScope)?.selectedSessionResourceGroupId ?? null,
+  );
+  const [selectedSessionOwnerUserId, setSelectedSessionOwnerUserId] = useState(
+    () => readImageChatRouteState(routeStateScope)?.selectedSessionOwnerUserId ?? "",
+  );
+  const [onlyDeletedSessions, setOnlyDeletedSessions] = useState(
+    () => readImageChatRouteState(routeStateScope)?.onlyDeletedSessions ?? false,
+  );
+  const [createSessionDialogOpen, setCreateSessionDialogOpen] = useState(false);
+  const [createSessionResourceGroupId, setCreateSessionResourceGroupId] = useState("");
   const [titleDraft, setTitleDraft] = useState("");
   const [renameEnabled, setRenameEnabled] = useState(false);
   const [targetInspirationId, setTargetInspirationId] = useState(
@@ -244,6 +267,7 @@ export function ImageChatPage() {
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const [polishedPrompt, setPolishedPrompt] = useState("");
   const [previewRound, setPreviewRound] = useState<ImageSessionRound | null>(null);
+  const [referencePreview, setReferencePreview] = useState<ReferenceImagePreview | null>(null);
   const [pendingDeleteAction, setPendingDeleteAction] =
     useState<PendingDeleteAction | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -279,6 +303,9 @@ export function ImageChatPage() {
       settingsTab,
       targetInspirationId,
       selectedResourceGroupId,
+      selectedSessionResourceGroupId,
+      selectedSessionOwnerUserId,
+      onlyDeletedSessions,
     });
   }, [
     branchBaseAssetId,
@@ -287,9 +314,12 @@ export function ImageChatPage() {
     routeStateScope,
     selectedGeneratedAssetId,
     selectedResourceGroupId,
+    selectedSessionOwnerUserId,
+    selectedSessionResourceGroupId,
     selectedReferenceAssetIds,
     selectedSessionId,
     selectedTaskPlaceholderId,
+    onlyDeletedSessions,
     settingsTab,
     size,
     targetInspirationId,
@@ -328,9 +358,25 @@ export function ImageChatPage() {
     return () => window.removeEventListener("resize", clampPanelSizesToViewport);
   }, [historyPanelHeight, leftPanelWidth, rightPanelWidth]);
 
+  const currentUser = sessionState?.user ?? null;
+  const isAdmin = Boolean(currentUser?.is_admin);
+  const sessionListScope = inspirationId ?? "standalone";
+  const sessionListQueryKey = [
+    "image-sessions",
+    sessionListScope,
+    selectedSessionResourceGroupId,
+    isAdmin ? selectedSessionOwnerUserId : "",
+    isAdmin && onlyDeletedSessions,
+  ] as const;
   const sessionsQuery = useQuery({
-    queryKey: ["image-sessions", inspirationId ?? "standalone"],
-    queryFn: () => api.listImageSessions(inspirationId),
+    queryKey: sessionListQueryKey,
+    queryFn: () =>
+      api.listImageSessions(inspirationId, {
+        resource_group_id: selectedSessionResourceGroupId || null,
+        owner_user_id: isAdmin ? selectedSessionOwnerUserId || undefined : undefined,
+        only_deleted: isAdmin && onlyDeletedSessions,
+      }),
+    enabled: selectedSessionResourceGroupId !== null,
   });
 
   const sessionItems = sessionsQuery.data?.items ?? [];
@@ -362,8 +408,16 @@ export function ImageChatPage() {
     queryFn: api.listMyGenerationResourceGroups,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
+  const rbacUsersQuery = useQuery({
+    queryKey: ["rbac-users"],
+    queryFn: () => api.listRbacUsers({ page_size: 100 }),
+    enabled: isAdmin,
+    retry: false,
+    staleTime: RBAC_USERS_STALE_TIME_MS,
+  });
 
   const inspirations = inspirationsQuery.data?.items ?? [];
+  const rbacUsers = rbacUsersQuery.data?.items ?? [];
   const imageGenerationMaxDimension =
     runtimeConfigQuery.data?.image_generation_max_dimension ?? DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
   const imageToolAllowedFields = runtimeConfigQuery.data?.image_tool_allowed_fields ?? DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS;
@@ -379,7 +433,6 @@ export function ImageChatPage() {
   const currentInspiration = isInspirationMode
     ? (inspirationQuery.data ?? null)
     : (inspirations.find((inspiration) => inspiration.id === targetInspirationId) ?? null);
-  const currentUser = sessionState?.user ?? null;
   const currentInspirationBlocked = isResourceBlocked(currentInspiration);
   const currentInspirationAdminReadonly = isAdminReadonlyResource(currentUser, currentInspiration);
   const adminReadonlyActionTitle = t("resource.adminReadonlyAction");
@@ -403,16 +456,33 @@ export function ImageChatPage() {
   }
 
   useEffect(() => {
+    if (!generationResourceGroupsQuery.isFetched) {
+      return;
+    }
     if (!resourceGroups.length) {
       if (selectedResourceGroupId) {
         setSelectedResourceGroupId(null);
+      }
+      if (selectedSessionResourceGroupId === null) {
+        setSelectedSessionResourceGroupId("");
       }
       return;
     }
     if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
       setSelectedResourceGroupId(resourceGroups[0].id);
     }
-  }, [resourceGroups, selectedResourceGroupId]);
+    if (
+      selectedSessionResourceGroupId === null ||
+      (selectedSessionResourceGroupId && !resourceGroups.some((group) => group.id === selectedSessionResourceGroupId))
+    ) {
+      setSelectedSessionResourceGroupId(resourceGroups[0].id);
+    }
+  }, [
+    generationResourceGroupsQuery.isFetched,
+    resourceGroups,
+    selectedResourceGroupId,
+    selectedSessionResourceGroupId,
+  ]);
 
   function resetImageSessionSelection() {
     setSelectedGeneratedAssetId(null);
@@ -435,18 +505,57 @@ export function ImageChatPage() {
     }
   }, [isInspirationMode, inspirations, targetInspirationId]);
 
+  function defaultCreateSessionResourceGroupId(): string {
+    if (selectedResourceGroupId && resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
+      return selectedResourceGroupId;
+    }
+    if (
+      selectedSessionResourceGroupId &&
+      resourceGroups.some((group) => group.id === selectedSessionResourceGroupId)
+    ) {
+      return selectedSessionResourceGroupId;
+    }
+    return resourceGroups[0]?.id ?? "";
+  }
+
+  function openCreateSessionDialog() {
+    if (createSessionBlockedTitle) {
+      setErrorMessage(createSessionBlockedTitle);
+      return;
+    }
+    if (generationResourceGroupsQuery.isLoading) {
+      return;
+    }
+    const defaultResourceGroupId = defaultCreateSessionResourceGroupId();
+    if (!defaultResourceGroupId) {
+      setErrorMessage(t("chat.noResourceGroups"));
+      return;
+    }
+    setCreateSessionResourceGroupId(defaultResourceGroupId);
+    setCreateSessionDialogOpen(true);
+    setSuccessMessage("");
+    setErrorMessage("");
+  }
+
   const createSessionMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: ({ resourceGroupId }: { resourceGroupId: string }) => {
       if (createSessionBlockedTitle) {
         throw new Error(createSessionBlockedTitle);
       }
-      return api.createImageSession(inspirationId ? { inspiration_id: inspirationId } : {});
+      return api.createImageSession(
+        inspirationId
+          ? { inspiration_id: inspirationId, resource_group_id: resourceGroupId }
+          : { resource_group_id: resourceGroupId },
+      );
     },
-    onSuccess: async (imageSession) => {
+    onSuccess: async (imageSession, variables) => {
       setSelectedSessionId(imageSession.id);
+      setSelectedResourceGroupId(variables.resourceGroupId);
+      setSelectedSessionResourceGroupId(variables.resourceGroupId);
+      setCreateSessionDialogOpen(false);
       resetImageSessionSelection();
       queryClient.setQueryData(["image-session", imageSession.id], imageSession);
-      await queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      await queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       setErrorMessage("");
     },
     onError: (error) => {
@@ -460,8 +569,38 @@ export function ImageChatPage() {
     },
   });
 
+  function handleConfirmCreateSession() {
+    if (createSessionMutation.isPending) {
+      return;
+    }
+    const resourceGroupId = createSessionResourceGroupId || defaultCreateSessionResourceGroupId();
+    if (!resourceGroupId) {
+      setErrorMessage(t("chat.resourceGroupRequired"));
+      return;
+    }
+    createSessionMutation.mutate({ resourceGroupId });
+  }
+
   useEffect(() => {
-    if (sessionsQuery.isLoading || createSessionMutation.isPending) {
+    if (!createSessionDialogOpen || createSessionMutation.isPending) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setCreateSessionDialogOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [createSessionDialogOpen, createSessionMutation.isPending]);
+
+  useEffect(() => {
+    if (
+      sessionsQuery.isLoading ||
+      createSessionMutation.isPending ||
+      createSessionDialogOpen ||
+      generationResourceGroupsQuery.isLoading
+    ) {
       return;
     }
     if (sessionItems.length === 0 && !autoCreateTriggered.current) {
@@ -470,7 +609,7 @@ export function ImageChatPage() {
         setErrorMessage(createSessionBlockedTitle);
         return;
       }
-      createSessionMutation.mutate();
+      openCreateSessionDialog();
       return;
     }
     if (selectedSessionId && sessionItems.some((item) => item.id === selectedSessionId)) {
@@ -482,8 +621,11 @@ export function ImageChatPage() {
     }
   }, [
     createSessionMutation,
+    createSessionDialogOpen,
     createSessionBlockedTitle,
+    generationResourceGroupsQuery.isLoading,
     isInspirationMode,
+    openCreateSessionDialog,
     selectedSessionId,
     sessionItems,
     sessionsQuery.isLoading,
@@ -535,9 +677,9 @@ export function ImageChatPage() {
     }
     if (shouldRefetchDetail) {
       void queryClient.invalidateQueries({ queryKey: ["image-session", status.id] });
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
     }
-  }, [inspirationId, queryClient, selectedSessionId, sessionStatusQuery.data]);
+  }, [queryClient, selectedSessionId, sessionListScope, sessionStatusQuery.data]);
 
   useEffect(() => {
     if (!imageSession) {
@@ -708,7 +850,7 @@ export function ImageChatPage() {
     },
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       setRenameEnabled(false);
       setSuccessMessage(t("chat.renameSuccess"));
       setErrorMessage("");
@@ -731,7 +873,7 @@ export function ImageChatPage() {
         .filter((asset) => asset.kind === "reference_upload" && !previousReferenceIds.has(asset.id))
         .map((asset) => asset.id);
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       const isCurrentSession = updated.id === selectedSessionId;
       if (isCurrentSession && uploadedReferenceIds.length) {
         setSelectedReferenceAssetIds((current) =>
@@ -759,7 +901,7 @@ export function ImageChatPage() {
     },
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       setPendingDeleteAction(null);
       const isCurrentSession = updated.id === selectedSessionId;
       if (isCurrentSession) {
@@ -786,21 +928,28 @@ export function ImageChatPage() {
       return api.deleteImageSession(sessionId);
     },
     onSuccess: async (_response, deletedSessionId) => {
-      const remainingSessions = sessionItems.filter((item) => item.id !== deletedSessionId);
+      const keepDeletedSessionVisible = isAdmin && onlyDeletedSessions;
+      const remainingSessions = keepDeletedSessionVisible
+        ? sessionItems
+        : sessionItems.filter((item) => item.id !== deletedSessionId);
       setPendingDeleteAction(null);
-      queryClient.setQueryData<ImageSessionListResponse>(
-        ["image-sessions", inspirationId ?? "standalone"],
-        (current) => current ? { ...current, items: current.items.filter((item) => item.id !== deletedSessionId) } : current,
-      );
-      queryClient.removeQueries({ queryKey: ["image-session", deletedSessionId] });
-      if (selectedSessionId === deletedSessionId) {
+      if (keepDeletedSessionVisible) {
+        await queryClient.invalidateQueries({ queryKey: ["image-session", deletedSessionId] });
+      } else {
+        queryClient.setQueryData<ImageSessionListResponse>(
+          sessionListQueryKey,
+          (current) => current ? { ...current, items: current.items.filter((item) => item.id !== deletedSessionId) } : current,
+        );
+        queryClient.removeQueries({ queryKey: ["image-session", deletedSessionId] });
+      }
+      if (!keepDeletedSessionVisible && selectedSessionId === deletedSessionId) {
         setSelectedSessionId(remainingSessions[0]?.id ?? null);
         resetImageSessionSelection();
         if (!remainingSessions.length) {
           autoCreateTriggered.current = false;
         }
       }
-      await queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      await queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       setSuccessMessage(t("chat.sessionDeleted"));
       setErrorMessage("");
     },
@@ -817,7 +966,7 @@ export function ImageChatPage() {
     },
     onSuccess: (updated, variables) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       const placeholderId = selectSubmittedImageGenerationTaskPlaceholderId(updated.generation_tasks, variables);
       const submittedTask = placeholderId
         ? updated.generation_tasks.find((task) => placeholderId.startsWith(`task:${task.id}:`))
@@ -873,7 +1022,7 @@ export function ImageChatPage() {
     },
     onSuccess: (updated, input) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       const retriedTask = updated.generation_tasks.find((task) => task.id === input.taskId);
       if (retriedTask) {
         setSelectedTaskPlaceholderId(selectImageGenerationTaskNextPlaceholderId(retriedTask));
@@ -895,7 +1044,7 @@ export function ImageChatPage() {
     onSuccess: (updated) => {
       queryClient.setQueryData(["image-session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["image-session-status", updated.id] });
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", inspirationId ?? "standalone"] });
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       setSuccessMessage(t("chat.cancelledTask"));
       setErrorMessage("");
     },
@@ -967,7 +1116,14 @@ export function ImageChatPage() {
     },
   });
 
-  const createSessionDisabled = createSessionMutation.isPending || Boolean(createSessionBlockedTitle);
+  const createSessionNoResourceGroupTitle =
+    generationResourceGroupsQuery.isFetched && !resourceGroups.length ? t("chat.noResourceGroups") : null;
+  const createSessionButtonTitle = createSessionBlockedTitle ?? createSessionNoResourceGroupTitle ?? t("chat.newSession");
+  const createSessionDisabled =
+    createSessionMutation.isPending ||
+    generationResourceGroupsQuery.isLoading ||
+    Boolean(createSessionBlockedTitle) ||
+    !resourceGroups.length;
   const renameSessionDisabled = !selectedSessionId || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle);
   const saveSelectedGalleryDisabled = saveGalleryMutation.isPending || Boolean(selectedResultBlockedTitle);
   const sessionDeletionEnabled = deletionEnabled;
@@ -1396,6 +1552,7 @@ export function ImageChatPage() {
           }
           onTargetInspirationChange={setTargetInspirationId}
           onDeleteReference={handleDeleteInspirationReference}
+          onPreviewReference={(asset) => setReferencePreview({ asset, title: t("detail.referenceImage") })}
           onAttach={handleAttach}
           saveBlockedTitle={inspirationAttachBlockedTitle}
           editBlockedTitle={inspirationReferenceEditBlockedTitle}
@@ -1435,6 +1592,67 @@ export function ImageChatPage() {
     );
   }
 
+  function renderSessionResourceGroupFilter() {
+    return (
+      <div className="space-y-2">
+        <label className="block">
+          <span className="mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+            {t("chat.sessionResourceGroupFilter")}
+          </span>
+          <SelectField
+            value={selectedSessionResourceGroupId ?? ""}
+            options={[
+              { value: "", label: t("chat.allResourceGroups") },
+              ...resourceGroups.map((group) => ({
+                value: group.id,
+                label: resourceGroupOptionLabel(group, t("chat.resourceGroupDisabled")),
+                disabled: !group.enabled,
+              })),
+            ]}
+            onChange={setSelectedSessionResourceGroupId}
+            ariaLabel={t("chat.sessionResourceGroupFilter")}
+            radius="lg"
+            visualSize="sm"
+            disabled={generationResourceGroupsQuery.isLoading}
+          />
+        </label>
+        {isAdmin ? (
+          <>
+            <label className="block">
+              <span className="mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                {t("chat.sessionOwnerFilter")}
+              </span>
+              <SelectField
+                value={selectedSessionOwnerUserId}
+                options={[
+                  { value: "", label: t("chat.allOwners") },
+                  ...rbacUsers.map((user) => ({
+                    value: user.id,
+                    label: `${user.display_name || user.username} (${user.username})`,
+                  })),
+                ]}
+                onChange={setSelectedSessionOwnerUserId}
+                ariaLabel={t("chat.sessionOwnerFilter")}
+                radius="lg"
+                visualSize="sm"
+                disabled={rbacUsersQuery.isLoading}
+              />
+            </label>
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={onlyDeletedSessions}
+                onChange={(event) => setOnlyDeletedSessions(event.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+              />
+              <span>{t("chat.onlyDeletedSessions")}</span>
+            </label>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderGenerationSettingsTabs(promptId: string) {
     return (
       <ImageGenerationSettingsTabs
@@ -1457,6 +1675,7 @@ export function ImageChatPage() {
               onFiles={handleUploadReferenceFiles}
               onToggle={handleReferenceToggle}
               onDelete={handleDeleteSessionReference}
+              onPreview={(asset) => setReferencePreview({ asset, title: t("chat.sessionReferences") })}
               t={t}
             />
 
@@ -1630,22 +1849,23 @@ export function ImageChatPage() {
             <span className="h-12 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
           </button>
           <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
                 <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
               </div>
               <button
                 type="button"
-                onClick={() => createSessionMutation.mutate()}
+                onClick={openCreateSessionDialog}
                 disabled={createSessionDisabled}
-                title={createSessionBlockedTitle ?? t("chat.newSession")}
+                title={createSessionButtonTitle}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                 aria-label={t("chat.newSession")}
               >
                 {createSessionMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={16} />}
               </button>
             </div>
+            <div className="mt-3">{renderSessionResourceGroupFilter()}</div>
           </div>
 
           <ImageChatSessionList
@@ -1988,34 +2208,37 @@ export function ImageChatPage() {
             className="fixed inset-y-0 left-0 z-[71] flex w-[min(86vw,360px)] flex-col border-r border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden"
           >
             <Drawer.Title className="sr-only">{t("chat.mobileSessionDrawer")}</Drawer.Title>
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 dark:border-slate-800">
-              <div>
-                <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
+            <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={openCreateSessionDialog}
+                    disabled={createSessionDisabled}
+                    title={createSessionButtonTitle}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
+                    aria-label={t("chat.newSession")}
+                  >
+                    {createSessionMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Plus size={18} />}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t("chat.closeSessionDrawer")}
+                    onClick={() => {
+                      setMobileSessionDrawerOpen(false);
+                      mobileSessionButtonRef.current?.focus();
+                    }}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition-colors active:scale-[0.98] hover:border-slate-300 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => createSessionMutation.mutate()}
-                  disabled={createSessionDisabled}
-                  title={createSessionBlockedTitle ?? t("chat.newSession")}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
-                  aria-label={t("chat.newSession")}
-                >
-                  {createSessionMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Plus size={18} />}
-                </button>
-                <button
-                  type="button"
-                  aria-label={t("chat.closeSessionDrawer")}
-                  onClick={() => {
-                    setMobileSessionDrawerOpen(false);
-                    mobileSessionButtonRef.current?.focus();
-                  }}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition-colors active:scale-[0.98] hover:border-slate-300 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
-                >
-                  <X size={18} />
-                </button>
-              </div>
+              <div className="mt-3">{renderSessionResourceGroupFilter()}</div>
             </div>
             <ImageChatSessionList
               items={sessionItems}
@@ -2228,6 +2451,102 @@ export function ImageChatPage() {
           closeLabel={t("gallery.closePreview")}
           onClose={() => setPreviewRound(null)}
         />
+      ) : null}
+      {referencePreview ? (
+        <GalleryImagePreviewDialog
+          ariaLabel={t("detail.previewImage", { alt: referencePreview.asset.original_filename })}
+          imageUrl={api.toApiUrl(referencePreview.asset.preview_url)}
+          imageAlt={referencePreview.asset.original_filename}
+          title={referencePreview.title}
+          subtitle={referencePreview.asset.original_filename}
+          body={
+            <div className="space-y-3">
+              <ResourceBlockedNotice resource={referencePreview.asset} />
+              <div>{referencePreview.asset.original_filename}</div>
+            </div>
+          }
+          providerNotesTitle={t("gallery.providerNotes")}
+          downloadUrl={referencePreview.asset.download_url}
+          downloadLabel={t("gallery.download")}
+          closeLabel={t("gallery.closePreview")}
+          onClose={() => setReferencePreview(null)}
+        />
+      ) : null}
+      {createSessionDialogOpen ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !createSessionMutation.isPending) {
+              setCreateSessionDialogOpen(false);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={createSessionDialogTitleId}
+            aria-describedby={createSessionDialogDescriptionId}
+            className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+          >
+            <div className="flex items-start gap-3 px-5 pt-5">
+              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">
+                <Sparkles size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 id={createSessionDialogTitleId} className="text-base font-semibold text-slate-950 dark:text-white">
+                  {t("chat.createSessionDialogTitle")}
+                </h2>
+                <p id={createSessionDialogDescriptionId} className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  {t("chat.createSessionDialogDescription")}
+                </p>
+                <label className="mt-4 block space-y-2">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    {t("chat.resourceGroup")}
+                  </span>
+                  <SelectField
+                    value={createSessionResourceGroupId}
+                    options={[
+                      {
+                        value: "",
+                        label: resourceGroups.length ? t("chat.selectResourceGroup") : t("chat.noResourceGroups"),
+                        disabled: true,
+                      },
+                      ...resourceGroups.map((group) => ({
+                        value: group.id,
+                        label: resourceGroupOptionLabel(group, t("chat.resourceGroupDisabled")),
+                        disabled: !group.enabled,
+                      })),
+                    ]}
+                    onChange={setCreateSessionResourceGroupId}
+                    ariaLabel={t("chat.resourceGroup")}
+                    radius="lg"
+                    visualSize="sm"
+                    disabled={createSessionMutation.isPending || generationResourceGroupsQuery.isLoading}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
+              <button
+                type="button"
+                onClick={() => setCreateSessionDialogOpen(false)}
+                disabled={createSessionMutation.isPending}
+                className="inline-flex h-9 min-w-[72px] items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCreateSession}
+                disabled={createSessionMutation.isPending || !createSessionResourceGroupId}
+                className="inline-flex h-9 min-w-[88px] items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white shadow-sm shadow-slate-950/15 transition-colors hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+              >
+                {createSessionMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : null}
+                {t("chat.createSessionConfirm")}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
       <ConfirmDialog
         open={Boolean(pendingDeleteDialog)}

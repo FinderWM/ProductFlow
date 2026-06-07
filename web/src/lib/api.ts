@@ -7,6 +7,7 @@ import type {
   CanvasTemplateListResponse,
   ConfigResponse,
   ConfigUpdateRequest,
+  CurrentWeather,
   CreateCanvasTemplateCategoryInput,
   CreateGlobalCanvasTemplateInput,
   CopySet,
@@ -68,9 +69,45 @@ import type {
   UpdateUserTemplateGroupInput,
   UserUsageStatsResponse,
   UserGenerationResourceGroupGrants,
+  WeatherCoordinates,
+  WeatherLocation,
 } from "./types";
+import { weatherConditionFromCode } from "./weather";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+
+interface OpenMeteoCurrentWeatherPayload {
+  current?: {
+    time?: string;
+    temperature_2m?: unknown;
+    relative_humidity_2m?: unknown;
+    surface_pressure?: unknown;
+    pressure_msl?: unknown;
+    weather_code?: unknown;
+    is_day?: unknown;
+  };
+  timezone?: string | null;
+}
+
+interface OpenMeteoGeocodingPayload {
+  results?: Array<{
+    id?: number;
+    name?: unknown;
+    latitude?: unknown;
+    longitude?: unknown;
+    country?: unknown;
+    admin1?: unknown;
+    timezone?: unknown;
+  }>;
+}
+
+interface NominatimLocationPayload {
+  place_id?: number;
+  lat?: unknown;
+  lon?: unknown;
+  name?: unknown;
+  display_name?: unknown;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -117,8 +154,153 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function requestExternalJson<T>(url: string, failureDetail: string): Promise<T> {
+  const response = await fetch(url, { credentials: "omit" });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, failureDetail);
+  }
+
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new ApiError(502, failureDetail);
+  }
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeCoordinate(value: number): string {
+  if (!Number.isFinite(value)) {
+    throw new ApiError(400, "天气坐标无效");
+  }
+  return value.toFixed(4);
+}
+
+function normalizeOpenMeteoWeather(payload: OpenMeteoCurrentWeatherPayload): CurrentWeather {
+  const weatherCode = finiteNumber(payload.current?.weather_code);
+  if (weatherCode === null) {
+    throw new ApiError(502, "天气接口返回异常");
+  }
+
+  return {
+    weather_code: weatherCode,
+    condition: weatherConditionFromCode(weatherCode),
+    temperature_celsius: finiteNumber(payload.current?.temperature_2m),
+    humidity_percent: finiteNumber(payload.current?.relative_humidity_2m),
+    pressure_hpa: finiteNumber(payload.current?.surface_pressure) ?? finiteNumber(payload.current?.pressure_msl),
+    is_day: finiteNumber(payload.current?.is_day) !== 0,
+    observed_at: payload.current?.time ?? null,
+    timezone: payload.timezone ?? null,
+  };
+}
+
+function normalizeWeatherLocations(payload: OpenMeteoGeocodingPayload): WeatherLocation[] {
+  return (payload.results ?? []).flatMap((result) => {
+    const latitude = finiteNumber(result.latitude);
+    const longitude = finiteNumber(result.longitude);
+    if (typeof result.name !== "string" || latitude === null || longitude === null) {
+      return [];
+    }
+
+    return [
+      {
+        id: typeof result.id === "number" ? result.id : null,
+        name: result.name,
+        latitude,
+        longitude,
+        country: typeof result.country === "string" ? result.country : null,
+        admin1: typeof result.admin1 === "string" ? result.admin1 : null,
+        timezone: typeof result.timezone === "string" ? result.timezone : null,
+      },
+    ];
+  });
+}
+
+function normalizeNominatimLocations(payload: NominatimLocationPayload[]): WeatherLocation[] {
+  return payload.flatMap((result) => {
+    const latitude = typeof result.lat === "string" ? Number(result.lat) : null;
+    const longitude = typeof result.lon === "string" ? Number(result.lon) : null;
+    if (latitude === null || longitude === null || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return [];
+    }
+
+    const displayName =
+      typeof result.display_name === "string"
+        ? result.display_name
+        : typeof result.name === "string"
+          ? result.name
+          : "";
+
+    return [
+      {
+        id: typeof result.place_id === "number" ? result.place_id : null,
+        name: displayName || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+        latitude,
+        longitude,
+        country: null,
+        admin1: null,
+        timezone: null,
+      },
+    ];
+  });
+}
+
 export const api = {
   toApiUrl,
+  async searchWeatherLocations(input: { query: string; language?: string }): Promise<WeatherLocation[]> {
+    const query = input.query.trim();
+    if (!query) {
+      return [];
+    }
+    const params = new URLSearchParams({
+      name: query,
+      count: "5",
+      format: "json",
+      language: input.language ?? "zh",
+    });
+    const openMeteoPayload = await requestExternalJson<OpenMeteoGeocodingPayload>(
+      `https://geocoding-api.open-meteo.com/v1/search?${params.toString()}`,
+      "天气位置查询失败",
+    );
+    const openMeteoLocations = normalizeWeatherLocations(openMeteoPayload);
+    if (openMeteoLocations.length > 0) {
+      return openMeteoLocations;
+    }
+
+    const fallbackParams = new URLSearchParams({
+      q: query,
+      format: "json",
+      limit: "5",
+      addressdetails: "1",
+      "accept-language": input.language ?? "zh",
+    });
+    const nominatimPayload = await requestExternalJson<NominatimLocationPayload[]>(
+      `https://nominatim.openstreetmap.org/search?${fallbackParams.toString()}`,
+      "天气位置查询失败",
+    );
+    return normalizeNominatimLocations(nominatimPayload);
+  },
+  async findWeatherLocation(input: { query: string; language?: string }): Promise<WeatherLocation | null> {
+    const locations = await api.searchWeatherLocations(input);
+    return locations[0] ?? null;
+  },
+  async getCurrentWeather(input: WeatherCoordinates): Promise<CurrentWeather> {
+    const params = new URLSearchParams({
+      latitude: normalizeCoordinate(input.latitude),
+      longitude: normalizeCoordinate(input.longitude),
+      current: "temperature_2m,relative_humidity_2m,surface_pressure,pressure_msl,weather_code,is_day",
+      timezone: "auto",
+      forecast_days: "1",
+    });
+    const payload = await requestExternalJson<OpenMeteoCurrentWeatherPayload>(
+      `https://api.open-meteo.com/v1/forecast?${params.toString()}`,
+      "天气接口请求失败",
+    );
+    return normalizeOpenMeteoWeather(payload);
+  },
   getSessionState(): Promise<SessionState> {
     return request<SessionState>("/api/auth/session");
   },
@@ -210,19 +392,22 @@ export const api = {
     });
   },
   listInspirations(input: {
-    resource_group_id: string;
+    resource_group_id?: string | null;
     page?: number;
     page_size?: number;
     title?: string;
     updated_from?: string;
     updated_to?: string;
     owner_user_id?: string;
+    only_deleted?: boolean;
   }): Promise<InspirationListResponse> {
     const params = new URLSearchParams({
-      resource_group_id: input.resource_group_id,
       page: String(input.page ?? 1),
       page_size: String(input.page_size ?? 20),
     });
+    if (input.resource_group_id) {
+      params.set("resource_group_id", input.resource_group_id);
+    }
     if (input.title) {
       params.set("title", input.title);
     }
@@ -234,6 +419,9 @@ export const api = {
     }
     if (input.owner_user_id) {
       params.set("owner_user_id", input.owner_user_id);
+    }
+    if (input.only_deleted) {
+      params.set("only_deleted", "true");
     }
     return request(`/api/inspirations?${params.toString()}`);
   },
@@ -462,11 +650,27 @@ export const api = {
   confirmCopySet(copySetId: string): Promise<CopySet> {
     return request(`/api/copy-sets/${copySetId}/confirm`, { method: "POST" });
   },
-  listImageSessions(inspirationId?: string): Promise<ImageSessionListResponse> {
-    const query = inspirationId ? `?inspiration_id=${encodeURIComponent(inspirationId)}` : "";
-    return request(`/api/image-sessions${query}`);
+  listImageSessions(
+    inspirationId?: string,
+    input?: { resource_group_id?: string | null; owner_user_id?: string; only_deleted?: boolean },
+  ): Promise<ImageSessionListResponse> {
+    const params = new URLSearchParams();
+    if (inspirationId) {
+      params.set("inspiration_id", inspirationId);
+    }
+    if (input?.resource_group_id) {
+      params.set("resource_group_id", input.resource_group_id);
+    }
+    if (input?.owner_user_id) {
+      params.set("owner_user_id", input.owner_user_id);
+    }
+    if (input?.only_deleted) {
+      params.set("only_deleted", "true");
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/image-sessions${suffix}`);
   },
-  createImageSession(input: { inspiration_id?: string; title?: string }): Promise<ImageSessionDetail> {
+  createImageSession(input: { inspiration_id?: string; resource_group_id: string; title?: string }): Promise<ImageSessionDetail> {
     return request("/api/image-sessions", {
       method: "POST",
       body: JSON.stringify(input),
@@ -552,9 +756,13 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
-  listGalleryEntries(input: { resource_group_id: string }): Promise<GalleryEntryListResponse> {
-    const params = new URLSearchParams({ resource_group_id: input.resource_group_id });
-    return request(`/api/gallery?${params.toString()}`);
+  listGalleryEntries(input?: { resource_group_id?: string | null }): Promise<GalleryEntryListResponse> {
+    const params = new URLSearchParams();
+    if (input?.resource_group_id) {
+      params.set("resource_group_id", input.resource_group_id);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/gallery${suffix}`);
   },
   saveGalleryEntry(imageSessionAssetId: string): Promise<GalleryEntry> {
     return request("/api/gallery", {
