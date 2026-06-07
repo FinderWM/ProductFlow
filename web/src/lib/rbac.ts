@@ -11,6 +11,9 @@ export const API_GALLERY_WRITE = "gallery:write";
 export const API_STATUS_READ = "status:read";
 export const API_USAGE_STATS_READ = "usage_stats:read";
 export const API_SETTINGS_READ = "settings:read";
+export const API_SETTINGS_WRITE = "settings:write";
+export const API_SETTINGS_PROVIDER_WRITE = "settings:provider_write";
+export const API_SETTINGS_MIGRATE = "settings:migrate";
 export const API_GLOBAL_TEMPLATES_MANAGE = "templates:manage_global";
 export const RBAC_MANAGE_PERMISSION = "rbac:manage";
 

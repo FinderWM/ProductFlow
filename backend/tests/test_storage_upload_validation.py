@@ -31,7 +31,12 @@ def test_product_asset_variant_urls_serve_preview_and_thumbnail(configured_env: 
 
     create_product_response = client.post(
         "/api/products",
-        data={"name": "大尺寸主图样例", "category": "个护", "price": "99.00"},
+        data={
+            "name": "大尺寸主图样例",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "category": "个护",
+            "price": "99.00",
+        },
         files={"image": ("large.png", _make_demo_image_bytes_with_size(2400, 1800), "image/png")},
     )
     assert create_product_response.status_code == 201
@@ -63,14 +68,24 @@ def test_product_create_rejects_invalid_price_and_invalid_image(configured_env: 
 
     invalid_price = client.post(
         "/api/products",
-        data={"name": "护手霜", "category": "个护", "price": "abc"},
+        data={
+            "name": "护手霜",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "category": "个护",
+            "price": "abc",
+        },
         files={"image": ("cream.png", _make_demo_image_bytes(), "image/png")},
     )
     assert invalid_price.status_code == 400
 
     invalid_image = client.post(
         "/api/products",
-        data={"name": "护手霜", "category": "个护", "price": "59.00"},
+        data={
+            "name": "护手霜",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "category": "个护",
+            "price": "59.00",
+        },
         files={"image": ("cream.png", b"not an image", "image/png")},
     )
     assert invalid_image.status_code == 400

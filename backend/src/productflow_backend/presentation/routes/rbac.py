@@ -19,7 +19,14 @@ from productflow_backend.application.auth import (
     update_role,
 )
 from productflow_backend.domain.rbac import API_RBAC_MANAGE
-from productflow_backend.infrastructure.db.models import AuthUser, RbacApiPermission, RbacMenu
+from productflow_backend.infrastructure.db.models import (
+    AuthUser,
+    GenerationResourceGroup,
+    RbacApiPermission,
+    RbacMenu,
+    UserGenerationResourceGroupGrant,
+)
+from productflow_backend.infrastructure.provider_config import ensure_provider_config_bootstrapped
 from productflow_backend.presentation.deps import get_current_user, get_session, require_admin, require_api_permission
 from productflow_backend.presentation.schemas.rbac import (
     CreateRoleRequest,
@@ -68,12 +75,66 @@ def list_users_endpoint(
     session: Session = Depends(get_session),
 ) -> RbacUserListResponse:
     users, total = list_users(session, page=page, page_size=page_size, username=username, role_id=role_id)
+    resource_groups_by_user = _resource_groups_by_user(session, users)
     return RbacUserListResponse(
-        items=[serialize_user(user) for user in users],
+        items=[serialize_user(user, resource_groups=resource_groups_by_user.get(user.id, [])) for user in users],
         total=total,
         page=page,
         page_size=page_size,
     )
+
+
+def _resource_groups_by_user(
+    session: Session,
+    users: list[AuthUser],
+) -> dict[str, list[GenerationResourceGroup]]:
+    if not users:
+        return {}
+    ensure_provider_config_bootstrapped(session)
+    result: dict[str, list[GenerationResourceGroup]] = {user.id: [] for user in users}
+    enabled_groups = list(
+        session.scalars(
+            select(GenerationResourceGroup)
+            .where(
+                GenerationResourceGroup.enabled.is_(True),
+                GenerationResourceGroup.archived_at.is_(None),
+            )
+            .order_by(
+                GenerationResourceGroup.sort_order,
+                GenerationResourceGroup.created_at,
+                GenerationResourceGroup.name,
+            )
+        ).all()
+    )
+    for user in users:
+        if user.is_admin:
+            result[user.id] = enabled_groups
+
+    regular_user_ids = [user.id for user in users if not user.is_admin]
+    if not regular_user_ids:
+        return result
+
+    rows = session.execute(
+        select(UserGenerationResourceGroupGrant.user_id, GenerationResourceGroup)
+        .join(
+            GenerationResourceGroup,
+            GenerationResourceGroup.id == UserGenerationResourceGroupGrant.resource_group_id,
+        )
+        .where(
+            UserGenerationResourceGroupGrant.user_id.in_(regular_user_ids),
+            GenerationResourceGroup.enabled.is_(True),
+            GenerationResourceGroup.archived_at.is_(None),
+        )
+        .order_by(
+            UserGenerationResourceGroupGrant.user_id,
+            GenerationResourceGroup.sort_order,
+            GenerationResourceGroup.created_at,
+            GenerationResourceGroup.name,
+        )
+    )
+    for user_id, group in rows:
+        result.setdefault(user_id, []).append(group)
+    return result
 
 
 @router.post("/users", response_model=RbacUserResponse, status_code=status.HTTP_201_CREATED)

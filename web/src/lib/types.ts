@@ -93,6 +93,7 @@ export interface RbacUser {
   is_admin: boolean;
   enabled: boolean;
   password_pending: boolean;
+  resource_groups: GenerationResourceGroupTag[];
   archived_at?: string | null;
 }
 
@@ -296,6 +297,8 @@ export interface ProductSummary extends ModerationFields {
   id: string;
   owner_user_id?: string;
   owner_username?: string | null;
+  resource_group_id: string;
+  resource_group: GenerationResourceGroupTag;
   name: string;
   category: string | null;
   price: string | null;
@@ -327,6 +330,8 @@ export interface ProductDetail extends ModerationFields {
   id: string;
   owner_user_id?: string;
   owner_username?: string | null;
+  resource_group_id: string;
+  resource_group: GenerationResourceGroupTag;
   name: string;
   category: string | null;
   price: string | null;
@@ -348,6 +353,7 @@ export interface ProductHistory {
 
 export interface CreateProductInput {
   name: string;
+  resource_group_id: string;
   category?: string;
   price?: string;
   source_note?: string;

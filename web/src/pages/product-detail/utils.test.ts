@@ -42,7 +42,7 @@ const baseNode: WorkflowNode = {
   created_at: "2026-04-26T00:00:00Z",
   updated_at: "2026-04-26T00:00:00Z",
 };
-const defaultResourceGroup = { id: "group-default", key: "default", name: "默认分组" };
+const defaultResourceGroup = { id: "group-default", key: "default", name: "default" };
 
 type WorkflowNodeRunDraft = Partial<WorkflowRun["node_runs"][number]>;
 type WorkflowNodeRunStatusDraft = Partial<WorkflowRunStatusSummary["node_runs"][number]>;

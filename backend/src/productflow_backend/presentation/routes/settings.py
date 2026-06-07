@@ -734,8 +734,8 @@ def _normalize_import_generation_resource_groups(document: SettingsExportDocumen
         SettingsGenerationResourceGroupExport(
             id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             key=DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
-            name="默认分组",
-            description="系统内置默认供应商生成能力分组",
+            name="default",
+            description="default 供应商生成能力分组",
             sort_order=0,
             enabled=True,
         )
@@ -752,11 +752,6 @@ def _normalize_import_generation_resource_groups(document: SettingsExportDocumen
             raise ValueError("生成分组名称不能为空")
         if group_id in seen_ids or key in seen_keys:
             raise ValueError("生成分组不能重复")
-        if group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
-            if key != DEFAULT_GENERATION_RESOURCE_GROUP_KEY:
-                raise ValueError("内置 default 分组 key 不正确")
-            if not group.enabled:
-                raise ValueError("内置 default 分组不能停用")
         seen_ids.add(group_id)
         seen_keys.add(key)
         groups.append(
@@ -769,16 +764,14 @@ def _normalize_import_generation_resource_groups(document: SettingsExportDocumen
                 "enabled": group.enabled,
             }
         )
-    if DEFAULT_GENERATION_RESOURCE_GROUP_KEY in seen_keys and DEFAULT_GENERATION_RESOURCE_GROUP_ID not in seen_ids:
-        raise ValueError("内置 default 分组 id 不正确")
     if DEFAULT_GENERATION_RESOURCE_GROUP_ID not in seen_ids and DEFAULT_GENERATION_RESOURCE_GROUP_KEY not in seen_keys:
         groups.insert(
             0,
             {
                 "id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
                 "key": DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
-                "name": "默认分组",
-                "description": "系统内置默认供应商生成能力分组",
+                "name": "default",
+                "description": "default 供应商生成能力分组",
                 "sort_order": 0,
                 "enabled": True,
             },
@@ -884,11 +877,12 @@ def _normalize_import_generation_configs(
     generation_resource_groups: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     resource_group_ids = {group["id"] for group in generation_resource_groups}
+    fallback_resource_group_id = generation_resource_groups[0]["id"]
     if not document.generation_configs:
         return [
             {
                 "id": None,
-                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+                "resource_group_id": fallback_resource_group_id,
                 "name": "默认文案配置" if binding["purpose"] == "text" else "默认图片配置",
                 "purpose": binding["purpose"],
                 "provider_kind": binding["provider_kind"],
@@ -930,7 +924,7 @@ def _normalize_import_generation_configs(
             model_settings=item.model_settings,
         )
         provider_profile_id = item.provider_profile_id
-        resource_group_id = item.resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID
+        resource_group_id = item.resource_group_id or fallback_resource_group_id
         if resource_group_id not in resource_group_ids:
             raise ValueError("生成配置引用的分组不存在")
         if item.provider_kind == "mock":
@@ -1378,7 +1372,7 @@ def list_generation_resource_groups_endpoint(
 @router.post(
     "/generation-resource-groups",
     response_model=GenerationResourceGroupResponse,
-    dependencies=[WRITE_SETTINGS_PERMISSION],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def create_generation_resource_group_endpoint(
     payload: GenerationResourceGroupCreateRequest,
@@ -1402,7 +1396,7 @@ def create_generation_resource_group_endpoint(
 @router.patch(
     "/generation-resource-groups/{resource_group_id}",
     response_model=GenerationResourceGroupResponse,
-    dependencies=[WRITE_SETTINGS_PERMISSION],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def update_generation_resource_group_endpoint(
     resource_group_id: str,
@@ -1429,7 +1423,7 @@ def update_generation_resource_group_endpoint(
 @router.delete(
     "/generation-resource-groups/{resource_group_id}",
     response_model=GenerationResourceGroupResponse,
-    dependencies=[WRITE_SETTINGS_PERMISSION],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def archive_generation_resource_group_endpoint(
     resource_group_id: str,
@@ -1542,7 +1536,7 @@ def test_text_generation_config_endpoint(
 @router.post(
     "/generation-configs",
     response_model=GenerationConfigResponse,
-    dependencies=[WRITE_SETTINGS_PERMISSION],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def create_generation_config_endpoint(
     payload: GenerationConfigCreateRequest,
@@ -1581,7 +1575,7 @@ def create_generation_config_endpoint(
 @router.patch(
     "/generation-configs/{generation_config_id}",
     response_model=GenerationConfigResponse,
-    dependencies=[WRITE_SETTINGS_PERMISSION],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def update_generation_config_endpoint(
     generation_config_id: str,
@@ -1625,7 +1619,7 @@ def update_generation_config_endpoint(
 @router.delete(
     "/generation-configs/{generation_config_id}",
     response_model=GenerationConfigResponse,
-    dependencies=[WRITE_SETTINGS_PERMISSION],
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
 )
 def archive_generation_config_endpoint(
     generation_config_id: str,

@@ -46,7 +46,7 @@ def _create_user_client(app, admin_client: TestClient, username: str) -> TestCli
 def _create_product(client: TestClient, name: str) -> dict:
     created = client.post(
         "/api/products",
-        data={"name": name},
+        data={"name": name, "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": (f"{name}.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -87,7 +87,7 @@ def test_product_owner_isolation_and_admin_read_only_view(configured_env: Path) 
     admin_product = _create_product(admin_client, "管理员灵感")
     alice_product = _create_product(alice_client, "Alice 灵感")
 
-    alice_list = alice_client.get("/api/products")
+    alice_list = alice_client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert alice_list.status_code == 200
     alice_items = alice_list.json()["items"]
     assert [item["id"] for item in alice_items] == [alice_product["id"]]
@@ -97,7 +97,7 @@ def test_product_owner_isolation_and_admin_read_only_view(configured_env: Path) 
     admin_source_id = admin_product["source_assets"][0]["id"]
     assert alice_client.get(f"/api/source-assets/{admin_source_id}/download").status_code == 404
 
-    admin_list = admin_client.get("/api/products")
+    admin_list = admin_client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert admin_list.status_code == 200
     owner_by_id = {item["id"]: item["owner_username"] for item in admin_list.json()["items"]}
     assert owner_by_id[admin_product["id"]] == "libow"
@@ -135,6 +135,7 @@ def test_product_list_filters_by_title_update_time_and_owner(configured_env: Pat
     admin_filtered = admin_client.get(
         "/api/products",
         params={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "title": "托特",
             "updated_from": "2026-05-10",
             "updated_to": "2026-05-10",
@@ -149,6 +150,7 @@ def test_product_list_filters_by_title_update_time_and_owner(configured_env: Pat
     alice_filtered = alice_client.get(
         "/api/products",
         params={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "title": "托特",
             "updated_from": "2026-05-10",
             "updated_to": "2026-05-10",
@@ -211,7 +213,7 @@ def test_image_session_owner_isolation_and_gallery_owner(configured_env: Path) -
     assert saved_gallery.status_code == 201
     assert saved_gallery.json()["owner_username"] == "alice"
 
-    gallery = admin_client.get("/api/gallery")
+    gallery = admin_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert gallery.status_code == 200
     assert gallery.json()["items"][0]["owner_username"] == "alice"
 
@@ -297,16 +299,16 @@ def test_gallery_moderation_keeps_owner_visibility_and_hides_from_others(configu
     assert disabled.status_code == 200
     assert disabled.json()["effective_enabled"] is False
 
-    owner_gallery = alice_client.get("/api/gallery")
+    owner_gallery = alice_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert owner_gallery.status_code == 200
     assert [item["id"] for item in owner_gallery.json()["items"]] == [entry_id]
     assert owner_gallery.json()["items"][0]["effective_enabled"] is False
 
-    other_gallery = bob_client.get("/api/gallery")
+    other_gallery = bob_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert other_gallery.status_code == 200
     assert all(item["id"] != entry_id for item in other_gallery.json()["items"])
 
-    admin_gallery = admin_client.get("/api/gallery")
+    admin_gallery = admin_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert admin_gallery.status_code == 200
     assert any(item["id"] == entry_id for item in admin_gallery.json()["items"])
 
@@ -449,12 +451,12 @@ def test_image_session_and_gallery_moderation_blocks_usage(configured_env: Path)
     assert save_disabled_entry.status_code == 400
     assert save_disabled_entry.json()["detail"] == RESOURCE_DISABLED_MESSAGE
 
-    alice_gallery = alice_client.get("/api/gallery")
+    alice_gallery = alice_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert alice_gallery.status_code == 200
     assert alice_gallery.json()["items"][0]["id"] == gallery_entry_id
     assert alice_gallery.json()["items"][0]["enabled"] is False
 
-    bob_gallery = bob_client.get("/api/gallery")
+    bob_gallery = bob_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert bob_gallery.status_code == 200
     assert bob_gallery.json()["items"] == []
 

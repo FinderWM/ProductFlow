@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -36,7 +37,7 @@ import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import { API_INSPIRATIONS_WRITE, hasSessionApiPermission } from "../lib/rbac";
 import { useSessionState } from "../lib/session";
-import type { ProductSummary, RbacUser } from "../lib/types";
+import type { GenerationResourceGroup, ProductSummary, RbacUser } from "../lib/types";
 import { productKeyInfo, productMainThumbnailUrl } from "./ProductListPage.helpers";
 
 const PAGE_SIZE = 12;
@@ -213,13 +214,15 @@ export function ProductListPage() {
   const [page, setPage] = useState(1);
   const [searchDraft, setSearchDraft] = useState<ProductSearchFilters>(EMPTY_PRODUCT_SEARCH);
   const [activeSearch, setActiveSearch] = useState<ProductSearchFilters>(EMPTY_PRODUCT_SEARCH);
+  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [pendingDeleteProduct, setPendingDeleteProduct] = useState<ProductSummary | null>(null);
   const productsQuery = useQuery({
-    queryKey: ["products", page, PAGE_SIZE, activeSearch],
+    queryKey: ["products", selectedResourceGroupId, page, PAGE_SIZE, activeSearch],
     queryFn: () =>
       api.listProducts({
+        resource_group_id: selectedResourceGroupId ?? "",
         page,
         page_size: PAGE_SIZE,
         title: activeSearch.title || undefined,
@@ -227,8 +230,14 @@ export function ProductListPage() {
         updated_to: activeSearch.updated_to || undefined,
         owner_user_id: isAdmin ? activeSearch.owner_user_id || undefined : undefined,
       }),
+    enabled: Boolean(selectedResourceGroupId),
     placeholderData: keepPreviousData,
     staleTime: PRODUCT_LIST_STALE_TIME_MS,
+  });
+  const generationResourceGroupsQuery = useQuery({
+    queryKey: ["my-generation-resource-groups"],
+    queryFn: api.listMyGenerationResourceGroups,
+    staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
   const rbacUsersQuery = useQuery({
     queryKey: ["rbac-users"],
@@ -243,6 +252,10 @@ export function ProductListPage() {
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
   const products = productsQuery.data?.items ?? [];
+  const resourceGroups = useMemo<GenerationResourceGroup[]>(
+    () => generationResourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [],
+    [generationResourceGroupsQuery.data],
+  );
   const total = productsQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const deletionEnabled = runtimeConfigQuery.data?.deletion_enabled ?? false;
@@ -260,6 +273,19 @@ export function ProductListPage() {
       setPage(totalPages);
     }
   }, [page, productsQuery.data, totalPages]);
+
+  useEffect(() => {
+    if (!resourceGroups.length) {
+      if (selectedResourceGroupId) {
+        setSelectedResourceGroupId(null);
+      }
+      return;
+    }
+    if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
+      setSelectedResourceGroupId(resourceGroups[0].id);
+      setPage(1);
+    }
+  }, [resourceGroups, selectedResourceGroupId]);
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -406,6 +432,9 @@ export function ProductListPage() {
             isAdmin={isAdmin}
             users={rbacUsers}
             usersLoading={rbacUsersQuery.isLoading}
+            resourceGroups={resourceGroups}
+            resourceGroupsLoading={generationResourceGroupsQuery.isLoading}
+            selectedResourceGroupId={selectedResourceGroupId ?? ""}
             active={searchDraftActive || searchActive}
             activeCount={searchFilterCount}
             fetching={productsQuery.isFetching}
@@ -413,11 +442,15 @@ export function ProductListPage() {
             onChange={setSearchDraft}
             onClear={clearSearch}
             onMobileToggle={() => setMobileSearchOpen((current) => !current)}
+            onResourceGroupChange={(value) => {
+              setSelectedResourceGroupId(value || null);
+              setPage(1);
+            }}
             onQuickRange={applyQuickRange}
             onSubmit={submitSearch}
           />
 
-          {productsQuery.isLoading ? (
+          {generationResourceGroupsQuery.isLoading || productsQuery.isLoading ? (
             <div className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2 lg:hidden">
                 {[1, 2, 3].map((i) => (
@@ -481,9 +514,14 @@ export function ProductListPage() {
                 </table>
               </div>
             </div>
-          ) : productsQuery.isError ? (
+          ) : generationResourceGroupsQuery.isError || productsQuery.isError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
               {t("products.loadFailed")}
+            </div>
+          ) : !resourceGroups.length ? (
+            <div className="rounded-xl border border-dashed border-zinc-300 bg-white px-6 py-14 text-center dark:border-slate-700/80 dark:bg-[#0f1726]">
+              <Search className="mx-auto mb-3 text-zinc-300 dark:text-slate-500" size={32} />
+              <div className="font-medium text-zinc-900 dark:text-white">{t("products.noResourceGroups")}</div>
             </div>
           ) : products.length ? (
             <>
@@ -785,7 +823,10 @@ function ProductMobileCard({
               <span className="block truncate text-sm font-semibold text-slate-950 dark:text-slate-100" title={product.name}>
                 {product.name}
               </span>
-              <ResourceMetaBadges resource={product} className="mt-1" />
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <ResourceGroupBadge name={product.resource_group.name} />
+                <ResourceMetaBadges resource={product} />
+              </div>
               <span className="mt-1 flex items-center gap-1.5 text-xs text-zinc-500 dark:text-slate-400">
                 <span>{t("products.table.updated")}</span>
                 <span className="font-mono tabular-nums">{formatDateTimeSeconds(product.updated_at)}</span>
@@ -858,7 +899,10 @@ function ProductTableRow({
             <div className="block max-w-full truncate text-left font-medium text-slate-950 transition-colors group-hover:text-indigo-700 dark:text-slate-100 dark:group-hover:text-violet-200" title={product.name}>
               {product.name}
             </div>
-            <ResourceMetaBadges resource={product} className="mt-1" />
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <ResourceGroupBadge name={product.resource_group.name} />
+              <ResourceMetaBadges resource={product} />
+            </div>
             <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-slate-400">
               {product.category ? <span className="min-w-0 max-w-full truncate">{product.category}</span> : null}
               {product.price ? <span className="shrink-0">{formatPrice(product.price)}</span> : null}
@@ -908,11 +952,22 @@ function ProductTableRow({
   );
 }
 
+function ResourceGroupBadge({ name }: { name: string }) {
+  return (
+    <span className="inline-flex max-w-full items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
 function ProductSearchPanel({
   draft,
   isAdmin,
   users,
   usersLoading,
+  resourceGroups,
+  resourceGroupsLoading,
+  selectedResourceGroupId,
   active,
   activeCount,
   fetching,
@@ -920,6 +975,7 @@ function ProductSearchPanel({
   onChange,
   onClear,
   onMobileToggle,
+  onResourceGroupChange,
   onQuickRange,
   onSubmit,
 }: {
@@ -927,6 +983,9 @@ function ProductSearchPanel({
   isAdmin: boolean;
   users: RbacUser[];
   usersLoading: boolean;
+  resourceGroups: GenerationResourceGroup[];
+  resourceGroupsLoading: boolean;
+  selectedResourceGroupId: string;
   active: boolean;
   activeCount: number;
   fetching: boolean;
@@ -934,6 +993,7 @@ function ProductSearchPanel({
   onChange: (filters: ProductSearchFilters) => void;
   onClear: () => void;
   onMobileToggle: () => void;
+  onResourceGroupChange: (resourceGroupId: string) => void;
   onQuickRange: (rangeId: ProductQuickRangeId) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -992,7 +1052,9 @@ function ProductSearchPanel({
       <div id="product-search-fields" className={`${mobileOpen ? "mt-4 block" : "hidden"} lg:mt-0 lg:block`}>
         <div
           className={`grid gap-4 md:grid-cols-2 xl:items-end ${
-            isAdmin ? "xl:grid-cols-[minmax(0,1fr)_23rem_14rem_auto]" : "xl:grid-cols-[minmax(0,1fr)_23rem_auto]"
+            isAdmin
+              ? "xl:grid-cols-[minmax(0,1fr)_23rem_14rem_14rem_auto]"
+              : "xl:grid-cols-[minmax(0,1fr)_23rem_14rem_auto]"
           }`}
         >
           <label className="min-w-0 space-y-2 md:col-span-2 xl:col-span-1">
@@ -1051,6 +1113,25 @@ function ProductSearchPanel({
               </select>
             </label>
           ) : null}
+
+          <label className="space-y-2">
+            <span className={labelClassName}>{t("products.resourceGroupFilter")}</span>
+            <select
+              value={selectedResourceGroupId}
+              onChange={(event) => onResourceGroupChange(event.target.value)}
+              disabled={resourceGroupsLoading || !resourceGroups.length}
+              className={fieldClassName}
+            >
+              <option value="" disabled>
+                {resourceGroups.length ? t("products.selectResourceGroup") : t("products.noResourceGroups")}
+              </option>
+              {resourceGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <div className="flex shrink-0 flex-wrap items-center gap-2 md:col-span-2 md:justify-end xl:col-span-1 xl:justify-start">
             <button

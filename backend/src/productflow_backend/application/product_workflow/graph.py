@@ -215,6 +215,7 @@ def get_edge_or_raise(session: Session, edge_id: str) -> WorkflowEdge:
 
 
 def default_node_specs(product: Product) -> list[dict[str, Any]]:
+    resource_group_id = product.resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID
     return [
         {
             "key": "context",
@@ -232,7 +233,7 @@ def default_node_specs(product: Product) -> list[dict[str, Any]]:
             "position_y": 80,
             "config_json": {
                 "instruction": f"围绕 {product.name} 生成一版适合商品图的文案",
-                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+                "resource_group_id": resource_group_id,
             },
         },
         {
@@ -244,7 +245,7 @@ def default_node_specs(product: Product) -> list[dict[str, Any]]:
             "config_json": {
                 "instruction": "结合商品和文案生成商品图",
                 "size": DEFAULT_IMAGE_SIZE,
-                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+                "resource_group_id": resource_group_id,
             },
         },
         {

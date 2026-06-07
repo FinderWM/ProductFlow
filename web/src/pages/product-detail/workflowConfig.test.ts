@@ -19,6 +19,7 @@ const removedCopyOutputKeys = [
   "poster" + "_headline",
   "c" + "ta",
 ] as const;
+const defaultResourceGroup = { id: "group-default", key: "default", name: "default" };
 
 const baseNode: WorkflowNode = {
   id: "copy-node",
@@ -50,6 +51,8 @@ const baseNode: WorkflowNode = {
 
 const product: ProductDetail = {
   id: "product-1",
+  resource_group_id: defaultResourceGroup.id,
+  resource_group: defaultResourceGroup,
   name: "商品",
   category: null,
   price: null,

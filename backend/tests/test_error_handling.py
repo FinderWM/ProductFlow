@@ -113,7 +113,7 @@ def test_product_route_uses_global_business_error_handler(configured_env) -> Non
 
     invalid = client.post(
         "/api/products",
-        data={"name": "   "},
+        data={"name": "   ", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("blank.png", _make_demo_image_bytes(), "image/png")},
     )
 

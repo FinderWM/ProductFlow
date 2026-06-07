@@ -59,9 +59,12 @@ export function ImagesPanel({
           <select
             value={selectedResourceGroupId}
             onChange={(event) => onResourceGroupChange(event.target.value)}
+            disabled={!resourceGroups.length}
             className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400"
           >
-            <option value="">{t("detail.images.allResourceGroups")}</option>
+            <option value="" disabled>
+              {resourceGroups.length ? t("detail.images.selectResourceGroup") : t("detail.images.noResourceGroups")}
+            </option>
             {resourceGroups.map((group) => (
               <option key={group.id} value={group.id}>
                 {group.name}

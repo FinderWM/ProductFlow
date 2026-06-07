@@ -577,7 +577,9 @@ describe("SettingsPage import/export helpers", () => {
   it("keeps import and export controls on a dedicated settings section", () => {
     const sectionIds = settingsSectionIds();
 
+    expect(sectionIds).toContain("resourceGroups");
     expect(sectionIds).toContain("migration");
+    expect(shouldShowSettingsMigrationPanel("resourceGroups")).toBe(false);
     expect(shouldShowSettingsMigrationPanel("migration")).toBe(true);
     for (const sectionId of sectionIds.filter((sectionId) => sectionId !== "migration")) {
       expect(shouldShowSettingsMigrationPanel(sectionId)).toBe(false);

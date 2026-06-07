@@ -72,12 +72,12 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
     ApiPermissionDefinition(API_STATUS_READ, MENU_STATUS, "查看状态", "查看生成队列和配置状态", 10),
     ApiPermissionDefinition(API_USAGE_STATS_READ, MENU_USAGE_STATS, "查看个人统计", "查看用户维度使用统计", 10),
     ApiPermissionDefinition(API_SETTINGS_READ, MENU_SETTINGS, "查看设置", "查看系统设置和供应商配置", 10),
-    ApiPermissionDefinition(API_SETTINGS_WRITE, MENU_SETTINGS, "维护设置", "修改系统设置和供应商配置", 20),
+    ApiPermissionDefinition(API_SETTINGS_WRITE, MENU_SETTINGS, "维护系统设置", "修改运行时系统设置", 20),
     ApiPermissionDefinition(
         API_SETTINGS_PROVIDER_WRITE,
         MENU_SETTINGS,
         "维护供应商配置",
-        "修改供应商档案、绑定和密钥相关配置",
+        "修改供应商档案、生成分组、文案/图片生成配置和密钥相关配置",
         30,
     ),
     ApiPermissionDefinition(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from productflow_backend.application import gallery as gallery_app
 from productflow_backend.domain.enums import ImageSessionAssetKind
 from productflow_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    GenerationResourceGroup,
     ImageGalleryEntry,
     ImageSession,
     ImageSessionAsset,
@@ -19,13 +21,17 @@ from productflow_backend.infrastructure.db.session import get_session_factory
 from productflow_backend.presentation.api import create_app
 
 
+def _password_md5(value: str) -> str:
+    return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
+
+
 def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Path, db_session) -> None:
     app = create_app()
     client = TestClient(app)
     _login(client)
     product = client.post(
         "/api/products",
-        data={"name": "画廊商品"},
+        data={"name": "画廊商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("source.png", _make_demo_image_bytes(), "image/png")},
     )
     assert product.status_code == 201
@@ -70,12 +76,118 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     assert saved_again.json()["id"] == payload["id"]
     assert db_session.query(ImageGalleryEntry).count() == 1
 
-    listed = client.get("/api/gallery")
+    listed = client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert listed.status_code == 200
     items = listed.json()["items"]
     assert len(items) == 1
     assert items[0]["id"] == payload["id"]
     assert items[0]["image"]["download_url"].startswith("/api/image-session-assets/")
+
+
+def test_gallery_list_filters_by_selected_resource_group(configured_env: Path, db_session) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    missing_group = client.get("/api/gallery")
+    assert missing_group.status_code == 422
+
+    premium_group = GenerationResourceGroup(key="premium-gallery", name="高阶图库分组", sort_order=20)
+    db_session.add(premium_group)
+    db_session.flush()
+    image_session = ImageSession(title="图库筛选会话")
+    db_session.add(image_session)
+    db_session.flush()
+    default_asset = ImageSessionAsset(
+        session_id=image_session.id,
+        kind=ImageSessionAssetKind.GENERATED_IMAGE,
+        original_filename="default.png",
+        mime_type="image/png",
+        storage_path="image-sessions/default.png",
+    )
+    premium_asset = ImageSessionAsset(
+        session_id=image_session.id,
+        kind=ImageSessionAssetKind.GENERATED_IMAGE,
+        original_filename="premium.png",
+        mime_type="image/png",
+        storage_path="image-sessions/premium.png",
+    )
+    db_session.add_all([default_asset, premium_asset])
+    db_session.flush()
+    default_round = ImageSessionRound(
+        session_id=image_session.id,
+        prompt="默认分组图库",
+        assistant_message="ok",
+        size="1024x1024",
+        model_name="mock",
+        provider_name="mock",
+        prompt_version="v1",
+        generated_asset_id=default_asset.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    )
+    premium_round = ImageSessionRound(
+        session_id=image_session.id,
+        prompt="高阶分组图库",
+        assistant_message="ok",
+        size="1024x1024",
+        model_name="mock",
+        provider_name="mock",
+        prompt_version="v1",
+        generated_asset_id=premium_asset.id,
+        resource_group_id=premium_group.id,
+    )
+    db_session.add_all([default_round, premium_round])
+    db_session.flush()
+    default_entry = ImageGalleryEntry(
+        image_session_asset_id=default_asset.id,
+        image_session_round_id=default_round.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    )
+    premium_entry = ImageGalleryEntry(
+        image_session_asset_id=premium_asset.id,
+        image_session_round_id=premium_round.id,
+        resource_group_id=premium_group.id,
+    )
+    db_session.add_all([default_entry, premium_entry])
+    db_session.commit()
+
+    default_list = client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
+    assert default_list.status_code == 200
+    assert {item["id"] for item in default_list.json()["items"]} == {default_entry.id}
+    assert default_list.json()["items"][0]["resource_group"]["key"] == "default"
+
+    premium_list = client.get("/api/gallery", params={"resource_group_id": premium_group.id})
+    assert premium_list.status_code == 200
+    assert {item["id"] for item in premium_list.json()["items"]} == {premium_entry.id}
+    assert premium_list.json()["items"][0]["resource_group"]["key"] == "premium-gallery"
+
+
+def test_gallery_list_rejects_ungranted_resource_group_for_member(configured_env: Path) -> None:
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_group = admin_client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "member-gallery", "name": "会员图库分组", "sort_order": 20, "enabled": True},
+    )
+    assert created_group.status_code == 200
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "gallery-member", "display_name": "Gallery Member"},
+    )
+    assert created_user.status_code == 201
+
+    user_client = TestClient(app)
+    set_password = user_client.post(
+        "/api/auth/password",
+        json={"username": "gallery-member", "client_password_md5": _password_md5("gallery-member-password")},
+    )
+    assert set_password.status_code == 200
+
+    rejected = user_client.get("/api/gallery", params={"resource_group_id": created_group.json()["id"]})
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "账号未授权使用该供应商生成分组"
 
 
 def test_gallery_rejects_non_generated_session_assets(configured_env: Path) -> None:

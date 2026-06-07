@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from productflow_backend.infrastructure.db.models import AuthRole, AuthUser, RbacApiPermission, RbacMenu
+from productflow_backend.infrastructure.db.models import (
+    AuthRole,
+    AuthUser,
+    GenerationResourceGroup,
+    RbacApiPermission,
+    RbacMenu,
+)
+from productflow_backend.presentation.schemas.generation_resource_groups import (
+    GenerationResourceGroupTagResponse,
+    serialize_generation_resource_group_tag,
+)
 
 
 class RbacMenuResponse(BaseModel):
@@ -44,6 +54,7 @@ class RbacUserResponse(BaseModel):
     is_admin: bool
     enabled: bool
     password_pending: bool
+    resource_groups: list[GenerationResourceGroupTagResponse] = Field(default_factory=list)
     archived_at: str | None
 
 
@@ -124,7 +135,11 @@ def serialize_role(role: AuthRole, *, user_count: int = 0) -> RbacRoleResponse:
     )
 
 
-def serialize_user(user: AuthUser) -> RbacUserResponse:
+def serialize_user(
+    user: AuthUser,
+    *,
+    resource_groups: list[GenerationResourceGroup] | None = None,
+) -> RbacUserResponse:
     return RbacUserResponse(
         id=user.id,
         username=user.username,
@@ -134,5 +149,9 @@ def serialize_user(user: AuthUser) -> RbacUserResponse:
         is_admin=user.is_admin,
         enabled=user.enabled,
         password_pending=not bool(user.password_hash and user.password_salt),
+        resource_groups=[
+            serialize_generation_resource_group_tag(group, resource_group_id=group.id)
+            for group in (resource_groups or [])
+        ],
         archived_at=user.archived_at.isoformat() if user.archived_at else None,
     )

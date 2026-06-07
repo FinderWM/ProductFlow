@@ -26,7 +26,7 @@ import {
 } from "./branching";
 
 const createdAt = "2026-04-27T00:00:00Z";
-const resourceGroup = { id: "group-default", key: "default", name: "默认分组" };
+const resourceGroup = { id: "group-default", key: "default", name: "default" };
 
 function asset(id: string): ImageSessionAsset {
   return {

@@ -24,6 +24,7 @@ from productflow_backend.domain.enums import (
     WorkflowRunStatus,
 )
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     CopySet,
     PosterVariant,
@@ -237,7 +238,7 @@ def test_reference_workflow_node_upload_replaces_current_image(configured_env: P
 
     created = client.post(
         "/api/products",
-        data={"name": "桌面收纳盒"},
+        data={"name": "桌面收纳盒", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("box.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -289,7 +290,7 @@ def test_reference_workflow_node_image_can_be_cleared(configured_env: Path) -> N
 
     created = client.post(
         "/api/products",
-        data={"name": "空参考图切换"},
+        data={"name": "空参考图切换", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("box.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -336,7 +337,7 @@ def test_reference_workflow_node_can_bind_existing_source_or_poster_image(config
 
     created = client.post(
         "/api/products",
-        data={"name": "桌面灯架"},
+        data={"name": "桌面灯架", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("lamp-stand.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -479,7 +480,7 @@ def test_reference_workflow_node_bind_poster_reports_missing_file_as_bad_request
 
     created = client.post(
         "/api/products",
-        data={"name": "文件缺失海报"},
+        data={"name": "文件缺失海报", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("missing-poster.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -513,7 +514,7 @@ def test_image_generation_fill_replaces_reference_node_current_image(configured_
 
     created = client.post(
         "/api/products",
-        data={"name": "床头灯"},
+        data={"name": "床头灯", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("lamp.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -641,7 +642,7 @@ def test_image_generation_fills_multiple_targets_with_concurrent_provider_calls(
 
     created = client.post(
         "/api/products",
-        data={"name": "并发生图商品"},
+        data={"name": "并发生图商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("parallel.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -763,7 +764,7 @@ def test_image_generation_batches_downstream_targets_with_batch_provider(
 
     created = client.post(
         "/api/products",
-        data={"name": "批量承接商品"},
+        data={"name": "批量承接商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("batch.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -819,7 +820,7 @@ def test_workflow_node_can_be_deleted_with_connected_edges(configured_env: Path)
 
     created = client.post(
         "/api/products",
-        data={"name": "可删节点商品"},
+        data={"name": "可删节点商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("node.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -861,7 +862,7 @@ def test_duplicate_workflow_node_group_sanitizes_artifacts_omits_product_context
 
     created = client.post(
         "/api/products",
-        data={"name": "复制节点组商品"},
+        data={"name": "复制节点组商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("duplicate.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201

@@ -342,9 +342,13 @@ export function ImageChatPage() {
   });
 
   const productsQuery = useQuery({
-    queryKey: ["products"],
-    queryFn: () => api.listProducts({ page_size: 100 }),
-    enabled: !isProductMode,
+    queryKey: ["products", selectedResourceGroupId],
+    queryFn: () =>
+      api.listProducts({
+        resource_group_id: selectedResourceGroupId ?? "",
+        page_size: 100,
+      }),
+    enabled: !isProductMode && Boolean(selectedResourceGroupId),
     placeholderData: keepPreviousData,
     staleTime: PRODUCT_PICKER_LIST_STALE_TIME_MS,
   });

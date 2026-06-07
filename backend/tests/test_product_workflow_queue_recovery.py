@@ -24,6 +24,7 @@ from productflow_backend.domain.enums import (
     WorkflowRunStatus,
 )
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     WorkflowEdge,
     WorkflowNode,
@@ -232,7 +233,7 @@ def test_workflow_run_endpoint_enqueues_durable_actor_and_reuses_active_run(
 
     created = client.post(
         "/api/products",
-        data={"name": "队列工作流商品"},
+        data={"name": "队列工作流商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("workflow.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -280,7 +281,7 @@ def test_workflow_status_exposes_queue_metadata_and_action_flags(
 
     created = client.post(
         "/api/products",
-        data={"name": "工作流队列元数据"},
+        data={"name": "工作流队列元数据", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("workflow.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -322,7 +323,7 @@ def test_workflow_run_enqueue_failure_marks_run_failed(
 
     created = client.post(
         "/api/products",
-        data={"name": "入队失败商品"},
+        data={"name": "入队失败商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("workflow.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -458,7 +459,7 @@ def test_workflow_run_retry_creates_new_run_from_failed_run_without_duplicate_ac
 
     created = client.post(
         "/api/products",
-        data={"name": "重试工作流商品"},
+        data={"name": "重试工作流商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("workflow.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -524,7 +525,7 @@ def test_workflow_run_retry_rejects_non_retryable_failed_run(
 
     created = client.post(
         "/api/products",
-        data={"name": "不可重试工作流商品"},
+        data={"name": "不可重试工作流商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("workflow.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -1526,7 +1527,7 @@ def test_retry_failed_workflow_nodes_endpoint_starts_all_retryable_failed_nodes(
 
     created = client.post(
         "/api/products",
-        data={"name": "失败节点批量重跑商品"},
+        data={"name": "失败节点批量重跑商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("workflow-retry-failed.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201

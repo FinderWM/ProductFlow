@@ -8,6 +8,8 @@ function productDetailResponse() {
       id: "product-1",
       owner_user_id: "user-1",
       owner_username: null,
+      resource_group_id: "group-default",
+      resource_group: { id: "group-default", key: "default", name: "default" },
       name: "三阶魔方",
       category: null,
       price: null,
@@ -37,6 +39,7 @@ describe("api.createProduct", () => {
 
     await api.createProduct({
       name: "三阶魔方",
+      resource_group_id: "group-default",
       long_text: "顺滑磁吸结构",
       dynamic_fields: { magnetic: true, level: 3, note: null },
       initial_workflow_entry: "copy",
@@ -48,6 +51,7 @@ describe("api.createProduct", () => {
     const [, init] = fetchMock.mock.calls[0];
     const body = init?.body as FormData;
     expect(body.get("name")).toBe("三阶魔方");
+    expect(body.get("resource_group_id")).toBe("group-default");
     expect(body.has("owner_id")).toBe(false);
     expect(body.get("long_text")).toBe("顺滑磁吸结构");
     expect(body.get("initial_workflow_entry")).toBe("copy");

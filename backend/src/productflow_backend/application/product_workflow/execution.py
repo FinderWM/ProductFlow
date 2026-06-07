@@ -803,7 +803,8 @@ def _execute_workflow_node_run(
     node_run.status = WorkflowNodeStatus.SUCCEEDED
     node_run.output_json = output
     node_run.copy_set_id = output.get("copy_set_id")
-    node_run.resource_group_id = output.get("resource_group_id")
+    output_resource_group_id = output.get("resource_group_id")
+    node_run.resource_group_id = output_resource_group_id
     if isinstance(output.get("generated_poster_variant_ids"), list):
         poster_ids = output["generated_poster_variant_ids"]
     else:
@@ -813,6 +814,9 @@ def _execute_workflow_node_run(
     node_run.finished_at = now_utc()
     if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
         _append_tail_pending_confirmation_from_output(run=run, node=node, node_run=node_run, output=output)
+    if isinstance(output_resource_group_id, str) and output_resource_group_id.strip():
+        workflow.product.resource_group_id = output_resource_group_id.strip()
+        workflow.product.updated_at = now_utc()
     workflow.updated_at = now_utc()
     session.commit()
     logger.info("工作流节点执行成功: run_id=%s node_id=%s", run.id, node.id)

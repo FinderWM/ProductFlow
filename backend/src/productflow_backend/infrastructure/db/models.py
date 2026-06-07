@@ -583,6 +583,7 @@ class Product(Base, TimestampMixin):
     __tablename__ = "products"
     __table_args__ = (
         Index("ix_products_owner_user_id", "owner_user_id"),
+        Index("ix_products_resource_group_id", "resource_group_id"),
         Index("ix_products_enabled", "enabled"),
         Index("ix_products_deleted_at", "deleted_at"),
     )
@@ -596,6 +597,10 @@ class Product(Base, TimestampMixin):
     category: Mapped[str | None] = mapped_column(String(120), nullable=True)
     price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     source_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resource_group_id: Mapped[str] = mapped_column(
+        String(36),
+        default=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
@@ -616,6 +621,10 @@ class Product(Base, TimestampMixin):
     owner: Mapped[AuthUser] = relationship(
         primaryjoin=lambda: child_parent_join(Product.owner_user_id, AuthUser.id),
         foreign_keys=lambda: [Product.owner_user_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(Product.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [Product.resource_group_id],
     )
     disabled_by: Mapped[AuthUser | None] = relationship(
         primaryjoin=lambda: child_parent_join(Product.disabled_by_user_id, AuthUser.id),

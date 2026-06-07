@@ -8,7 +8,7 @@ from productflow_backend.infrastructure.db.models import (
     GenerationResourceGroup,
 )
 
-DEFAULT_GENERATION_RESOURCE_GROUP_NAME = "默认分组"
+DEFAULT_GENERATION_RESOURCE_GROUP_NAME = "default"
 
 
 class GenerationResourceGroupTagResponse(BaseModel):

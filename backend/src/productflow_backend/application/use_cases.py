@@ -7,9 +7,10 @@ from decimal import Decimal, InvalidOperation
 from json import JSONDecodeError
 from typing import Any, Literal, cast
 
-from sqlalchemy import desc, exists, func, literal, select
+from sqlalchemy import desc, exists, func, literal, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from productflow_backend.application.auth import require_generation_resource_group_for_user
 from productflow_backend.application.copy_payloads import normalize_copy_payload
 from productflow_backend.application.moderation import ensure_resource_usable
 from productflow_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
@@ -35,6 +36,7 @@ from productflow_backend.domain.errors import BusinessValidationError, NotFoundE
 from productflow_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     CopySet,
+    GenerationResourceGroup,
     PosterVariant,
     Product,
     ProductWorkflow,
@@ -44,6 +46,7 @@ from productflow_backend.infrastructure.db.models import (
     WorkflowNodeRun,
     WorkflowRun,
 )
+from productflow_backend.infrastructure.provider_config import require_generation_resource_group
 from productflow_backend.infrastructure.storage import LocalStorage
 
 InitialWorkflowEntry = Literal["image", "copy", "tail", "blank"]
@@ -181,6 +184,7 @@ def _materialize_initial_workflow(
     entry_text: str | None,
     source_asset: SourceAsset | None,
     product_context_config: dict[str, Any],
+    resource_group_id: str,
 ) -> None:
     workflow = ProductWorkflow(
         product_id=product.id,
@@ -237,7 +241,7 @@ def _materialize_initial_workflow(
                 "output_mode": "blocks",
                 "generation_config_mode": "auto",
                 "generation_config_id": None,
-                "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+                "resource_group_id": resource_group_id,
             },
         )
         session.add(copy_node)
@@ -265,7 +269,7 @@ def _materialize_initial_workflow(
             "max_items": 8,
             "generation_config_mode": "auto",
             "generation_config_id": None,
-            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "resource_group_id": resource_group_id,
             "document_source": None,
         },
     )
@@ -287,6 +291,7 @@ def _product_query():
         select(Product)
         .options(
             selectinload(Product.source_assets),
+            selectinload(Product.resource_group),
             selectinload(Product.creative_briefs),
             selectinload(Product.copy_sets),
             selectinload(Product.poster_variants),
@@ -391,6 +396,32 @@ def _product_status_filter(status: ProductWorkflowState):
     return literal(False)
 
 
+def _resolve_product_resource_group(
+    session: Session,
+    *,
+    resource_group_id: str | None,
+    actor_user_id: str | None,
+    actor_is_admin: bool,
+    require_user_grant: bool,
+) -> GenerationResourceGroup:
+    normalized_group_id = (resource_group_id or "").strip()
+    if not normalized_group_id:
+        if require_user_grant:
+            raise BusinessValidationError("请选择供应商生成分组")
+        normalized_group_id = DEFAULT_GENERATION_RESOURCE_GROUP_ID
+    if require_user_grant:
+        return require_generation_resource_group_for_user(
+            session,
+            user_id=actor_user_id,
+            is_admin=actor_is_admin,
+            resource_group_id=normalized_group_id,
+        )
+    try:
+        return require_generation_resource_group(session, normalized_group_id, require_enabled=True)
+    except ValueError as exc:
+        raise BusinessValidationError(str(exc)) from exc
+
+
 def create_product(
     session: Session,
     *,
@@ -409,10 +440,20 @@ def create_product(
     dynamic_fields_json: str | None = None,
     context_document_upload: ProductContextDocumentInput | None = None,
     owner_user_id: str | None = None,
+    resource_group_id: str | None = None,
+    actor_is_admin: bool = False,
+    require_resource_group_grant: bool = False,
     storage: LocalStorage | None = None,
 ) -> Product:
     """创建商品，保存原始图和参考图到本地存储。"""
     resolved_owner_user_id = resolve_owner_user_id(session, owner_user_id)
+    resource_group = _resolve_product_resource_group(
+        session,
+        resource_group_id=resource_group_id,
+        actor_user_id=resolved_owner_user_id,
+        actor_is_admin=actor_is_admin,
+        require_user_grant=require_resource_group_grant,
+    )
     explicit_initial_workflow_entry = initial_workflow_entry is not None
     workflow_entry = _normalize_initial_workflow_entry(initial_workflow_entry)
     normalized_entry_text = _normalize_entry_text(
@@ -446,6 +487,7 @@ def create_product(
         category=_normalize_optional_text(category, field_name="类目", max_length=120),
         price=_normalize_price(price),
         source_note=normalized_source_note or normalized_context_long_text,
+        resource_group_id=resource_group.id,
     )
     session.add(product)
     session.flush()
@@ -513,6 +555,7 @@ def create_product(
             initial_entry_mode=workflow_entry,
             entry_text=normalized_entry_text,
             product_context_config=product_context_config,
+            resource_group_id=resource_group.id,
         )
     elif explicit_initial_workflow_entry:
         _materialize_initial_workflow(
@@ -522,6 +565,7 @@ def create_product(
             entry_text=normalized_entry_text,
             source_asset=original_source_asset,
             product_context_config=product_context_config,
+            resource_group_id=resource_group.id,
         )
     session.commit()
     session.expire_all()
@@ -613,8 +657,10 @@ def list_products(
     updated_from: datetime | None = None,
     updated_to: datetime | None = None,
     owner_user_id: str | None = None,
+    resource_group_id: str | None = None,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
+    require_resource_group_grant: bool = False,
 ) -> tuple[list[Product], int]:
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
@@ -625,6 +671,17 @@ def list_products(
         filters.append(Product.deleted_at.is_(None))
     if actor_is_admin and owner_user_id:
         filters.append(Product.owner_user_id == owner_user_id)
+    resource_group = _resolve_product_resource_group(
+        session,
+        resource_group_id=resource_group_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        require_user_grant=require_resource_group_grant,
+    )
+    if resource_group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
+        filters.append(or_(Product.resource_group_id == resource_group.id, Product.resource_group_id.is_(None)))
+    else:
+        filters.append(Product.resource_group_id == resource_group.id)
     if status is not None:
         filters.append(_product_status_filter(status))
     normalized_title = _normalize_optional_search_text(title, max_length=120)

@@ -98,6 +98,8 @@ class ProductSummaryResponse(ResourceModerationFields):
     id: str
     owner_user_id: str
     owner_username: str | None = None
+    resource_group_id: str
+    resource_group: GenerationResourceGroupTagResponse
     name: str
     category: str | None = None
     price: Decimal | None = None
@@ -131,6 +133,8 @@ class ProductDetailResponse(ResourceModerationFields):
     id: str
     owner_user_id: str
     owner_username: str | None = None
+    resource_group_id: str
+    resource_group: GenerationResourceGroupTagResponse
     name: str
     category: str | None = None
     price: Decimal | None = None
@@ -360,6 +364,11 @@ def serialize_product_summary(product: Product) -> ProductSummaryResponse:
         id=product.id,
         owner_user_id=product.owner_user_id,
         owner_username=product.owner.username if product.owner else None,
+        resource_group_id=product.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            product.resource_group,
+            resource_group_id=product.resource_group_id,
+        ),
         name=product.name,
         category=product.category,
         price=product.price,
@@ -392,6 +401,11 @@ def serialize_product_detail(product: Product) -> ProductDetailResponse:
         id=product.id,
         owner_user_id=product.owner_user_id,
         owner_username=product.owner.username if product.owner else None,
+        resource_group_id=product.resource_group_id,
+        resource_group=serialize_generation_resource_group_tag(
+            product.resource_group,
+            resource_group_id=product.resource_group_id,
+        ),
         name=product.name,
         category=product.category,
         price=product.price,

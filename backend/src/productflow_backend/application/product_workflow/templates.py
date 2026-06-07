@@ -32,10 +32,18 @@ GENERATION_RESOURCE_GROUP_NODE_TYPES = frozenset(
 )
 
 
-def _default_resource_group_config(node_type: WorkflowNodeType, config_json: dict[str, Any]) -> dict[str, Any]:
+def _default_resource_group_config(
+    node_type: WorkflowNodeType,
+    config_json: dict[str, Any],
+    *,
+    resource_group_id: str | None,
+) -> dict[str, Any]:
     config = dict(config_json)
     if node_type in GENERATION_RESOURCE_GROUP_NODE_TYPES:
-        config.setdefault("resource_group_id", DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+        config["resource_group_id"] = resource_group_id or config.get(
+            "resource_group_id",
+            DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        )
     return config
 
 
@@ -72,6 +80,7 @@ def materialize_product_workflow_from_template(
     initial_entry_mode: InitialWorkflowEntry = "image",
     entry_text: str | None = None,
     product_context_config: dict[str, object] | None = None,
+    resource_group_id: str | None = None,
 ) -> ProductWorkflow:
     validate_canvas_template(template)
     if template.kind != "full_canvas":
@@ -99,7 +108,12 @@ def materialize_product_workflow_from_template(
     session.add(workflow)
     session.flush()
 
-    nodes_by_template_key = materialize_canvas_template_graph(session, workflow=workflow, template=template)
+    nodes_by_template_key = materialize_canvas_template_graph(
+        session,
+        workflow=workflow,
+        template=template,
+        resource_group_id=resource_group_id,
+    )
     _persist_template_product_context(
         nodes_by_template_key.values(),
         initial_entry_mode=initial_entry_mode,
@@ -119,13 +133,18 @@ def materialize_canvas_template_graph(
     position_y_offset: int = 0,
     existing_nodes_by_template_key: dict[str, WorkflowNode] | None = None,
     external_source_nodes_by_template_source: dict[str, WorkflowNode] | None = None,
+    resource_group_id: str | None = None,
 ) -> dict[str, WorkflowNode]:
     validate_canvas_template(template)
     nodes_by_template_key: dict[str, WorkflowNode] = dict(existing_nodes_by_template_key or {})
     for node_spec in template.nodes:
         if node_spec.key in nodes_by_template_key:
             continue
-        config_json = _default_resource_group_config(node_spec.node_type, deepcopy(node_spec.config_json))
+        config_json = _default_resource_group_config(
+            node_spec.node_type,
+            deepcopy(node_spec.config_json),
+            resource_group_id=resource_group_id,
+        )
         if template.source == "builtin":
             config_json[TEMPLATE_METADATA_CONFIG_KEY] = {
                 "source": template.source,

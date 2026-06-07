@@ -36,6 +36,7 @@ import type { TranslationKey } from "../lib/i18n";
 import type {
   CanvasTemplateScope,
   CanvasTemplateSummary,
+  GenerationResourceGroup,
   ModerationFields,
   ProductInitialWorkflowEntry,
   WorkflowNodeType,
@@ -250,6 +251,7 @@ export function ProductCreatePage() {
   const contextDocumentTextFileRef = useRef<File | null>(null);
   const [dynamicFields, setDynamicFields] = useState<Array<DynamicFieldDraft & { id: string }>>([]);
   const [initialWorkflowEntry, setInitialWorkflowEntry] = useState<ProductInitialWorkflowEntry>("image");
+  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
   const [canvasTemplateKey, setCanvasTemplateKey] = useState<string>("");
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateCategoryId, setTemplateCategoryId] = useState("");
@@ -285,6 +287,26 @@ export function ProductCreatePage() {
         scope: templateScopeParam,
       }),
   });
+  const generationResourceGroupsQuery = useQuery({
+    queryKey: ["my-generation-resource-groups"],
+    queryFn: api.listMyGenerationResourceGroups,
+  });
+  const resourceGroups = useMemo<GenerationResourceGroup[]>(
+    () => generationResourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [],
+    [generationResourceGroupsQuery.data],
+  );
+
+  useEffect(() => {
+    if (!resourceGroups.length) {
+      if (selectedResourceGroupId) {
+        setSelectedResourceGroupId(null);
+      }
+      return;
+    }
+    if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
+      setSelectedResourceGroupId(resourceGroups[0].id);
+    }
+  }, [resourceGroups, selectedResourceGroupId]);
 
   const canvasPlanOptions = useMemo(() => {
     const blankCanvasPreviewNodes: PreviewNode[] =
@@ -430,6 +452,9 @@ export function ProductCreatePage() {
     if (!name.trim()) {
       return t("create.requiredName");
     }
+    if (!selectedResourceGroupId) {
+      return t("create.resourceGroupRequired");
+    }
     if (mainImageRequired && !file) {
       return t("create.requiredImage");
     }
@@ -469,6 +494,7 @@ export function ProductCreatePage() {
       const trimmedLongText = longText.trim();
       return api.createProduct({
         name: name.trim(),
+        resource_group_id: selectedResourceGroupId ?? "",
         long_text: trimmedLongText || undefined,
         file: file ?? undefined,
         contextDocumentFile: contextDocumentFileForSubmit(contextDocumentFile),
@@ -784,6 +810,29 @@ export function ProductCreatePage() {
                 </span>
               </div>
               <div className="mt-4 grid gap-2">
+                <label className="mb-2 block">
+                  <span className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
+                    {t("create.resourceGroup")} <span className="text-red-500">*</span>
+                  </span>
+                  <select
+                    value={selectedResourceGroupId ?? ""}
+                    onChange={(event) => {
+                      setSelectedResourceGroupId(event.target.value || null);
+                      setError("");
+                    }}
+                    disabled={generationResourceGroupsQuery.isLoading || !resourceGroups.length}
+                    className="h-10 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none transition-shadow focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                  >
+                    <option value="" disabled>
+                      {resourceGroups.length ? t("create.selectResourceGroup") : t("create.noResourceGroups")}
+                    </option>
+                    {resourceGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 {INITIAL_WORKFLOW_ENTRY_OPTIONS.map((option) => {
                   const active = initialWorkflowEntry === option.value;
                   const Icon = option.icon;

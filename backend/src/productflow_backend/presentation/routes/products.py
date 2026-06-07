@@ -64,6 +64,7 @@ async def create_product_endpoint(
     canvas_template_key: str | None = Form(default=None),
     initial_workflow_entry: str | None = Form(default=None),
     entry_text: str | None = Form(default=None),
+    resource_group_id: str = Form(..., min_length=1, max_length=36),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_WRITE)),
 ) -> ProductDetailResponse:
@@ -108,6 +109,9 @@ async def create_product_endpoint(
         dynamic_fields_json=dynamic_fields_json,
         context_document_upload=context_document_payload,
         owner_user_id=current_user.id,
+        resource_group_id=resource_group_id,
+        actor_is_admin=current_user.is_admin,
+        require_resource_group_grant=True,
     )
     return serialize_product_detail(product)
 
@@ -119,6 +123,7 @@ def list_products_endpoint(
     updated_from: date | None = Query(default=None),
     updated_to: date | None = Query(default=None),
     owner_user_id: str | None = Query(default=None),
+    resource_group_id: str = Query(..., min_length=1, max_length=36),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     session: Session = Depends(get_session),
@@ -133,8 +138,10 @@ def list_products_endpoint(
         updated_from=_start_of_day(updated_from),
         updated_to=_start_of_day(updated_to),
         owner_user_id=owner_user_id,
+        resource_group_id=resource_group_id,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
+        require_resource_group_grant=True,
     )
     return ProductListResponse(
         items=[serialize_product_summary(item) for item in items],

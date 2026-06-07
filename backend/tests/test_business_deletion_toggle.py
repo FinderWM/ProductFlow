@@ -9,6 +9,7 @@ from helpers import (
 )
 
 from productflow_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ImageSession,
     ImageSessionAsset,
     Product,
@@ -30,7 +31,7 @@ def test_product_and_image_session_delete_are_disabled_by_default_and_preserve_r
 
     created_product = client.post(
         "/api/products",
-        data={"name": "默认禁止删除商品"},
+        data={"name": "默认禁止删除商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files=[
             ("image", ("main.png", _make_demo_image_bytes(), "image/png")),
             ("reference_images", ("ref.png", _make_demo_image_bytes(), "image/png")),

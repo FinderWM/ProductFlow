@@ -40,7 +40,7 @@ def test_auth_session_required(configured_env: Path) -> None:
     app = create_app()
     client = TestClient(app)
 
-    unauthorized = client.get("/api/products")
+    unauthorized = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert unauthorized.status_code == 401
 
     admin_key_login = client.post("/api/auth/session", json={"admin_key": "wrong-admin-key"})
@@ -54,7 +54,7 @@ def test_auth_session_required(configured_env: Path) -> None:
 
     _login(client)
 
-    authorized = client.get("/api/products")
+    authorized = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert authorized.status_code == 200
     assert authorized.json()["items"] == []
 
@@ -73,7 +73,7 @@ def test_auth_session_survives_small_wall_clock_rollback(
     _login(client)
 
     current_timestamp -= 2
-    authorized = client.get("/api/products")
+    authorized = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
 
     assert authorized.status_code == 200
     assert authorized.json()["items"] == []
@@ -108,7 +108,10 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
     assert "未知配置项" in disabled.json()["detail"]
 
     public_client = TestClient(app)
-    public_products = public_client.get("/api/products")
+    public_products = public_client.get(
+        "/api/products",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    )
     assert public_products.status_code == 401
 
     session_state = public_client.get("/api/auth/session")
@@ -120,10 +123,16 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
     assert locked_settings.status_code == 401
 
     _login(public_client)
-    assert public_client.get("/api/products").status_code == 200
+    assert public_client.get(
+        "/api/products",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    ).status_code == 200
 
     new_client = TestClient(app)
-    private_products = new_client.get("/api/products")
+    private_products = new_client.get(
+        "/api/products",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    )
     assert private_products.status_code == 401
 
     required_session = new_client.get("/api/auth/session")
@@ -537,17 +546,16 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
     assert rejected_version.status_code == 400
     assert rejected_version.json()["detail"] == "配置文件版本不支持"
 
-    invalid_default_group_key = deepcopy(document)
-    invalid_default_group_key["generation_resource_groups"] = [
+    renamed_default_group = deepcopy(document)
+    renamed_default_group["generation_resource_groups"] = [
         {
             **document["generation_resource_groups"][0],
             "id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "key": "renamed-default",
         }
     ]
-    rejected_default_group_key = client.post("/api/settings/import/preview", json=invalid_default_group_key)
-    assert rejected_default_group_key.status_code == 400
-    assert rejected_default_group_key.json()["detail"] == "内置 default 分组 key 不正确"
+    accepted_renamed_default_group = client.post("/api/settings/import/preview", json=renamed_default_group)
+    assert accepted_renamed_default_group.status_code == 200
 
     disabled_default_group = deepcopy(document)
     disabled_default_group["generation_resource_groups"] = [
@@ -556,9 +564,8 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
             "enabled": False,
         }
     ]
-    rejected_disabled_default_group = client.post("/api/settings/import/preview", json=disabled_default_group)
-    assert rejected_disabled_default_group.status_code == 400
-    assert rejected_disabled_default_group.json()["detail"] == "内置 default 分组不能停用"
+    accepted_disabled_default_group = client.post("/api/settings/import/preview", json=disabled_default_group)
+    assert accepted_disabled_default_group.status_code == 200
 
     invalid_binding = dict(document)
     invalid_binding["runtime_config"] = {**document["runtime_config"], "generation_max_concurrent_tasks": 5}

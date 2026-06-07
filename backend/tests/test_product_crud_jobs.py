@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from productflow_backend.domain.enums import (
     WorkflowNodeType,
     WorkflowRunStatus,
 )
+from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     CopySet,
@@ -43,6 +45,7 @@ from productflow_backend.infrastructure.db.models import (
     WorkflowNodeRun,
     WorkflowRun,
 )
+from productflow_backend.infrastructure.provider_config import TEXT_PURPOSE, add_generation_config
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +53,10 @@ def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> N
     """Keep API workflow tests deterministic while production delivery goes through Dramatiq."""
 
     _execute_workflow_queue_inline(monkeypatch)
+
+
+def _password_md5(value: str) -> str:
+    return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()
 
 
 def test_product_create_persists_source_note_for_ai_context(configured_env: Path) -> None:
@@ -63,6 +70,7 @@ def test_product_create_persists_source_note_for_ai_context(configured_env: Path
         "/api/products",
         data={
             "name": "露营保温杯",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "category": "户外",
             "price": "79.00",
             "source_note": "316 不锈钢，主打长效保温和车载杯架适配。",
@@ -76,7 +84,7 @@ def test_product_create_persists_source_note_for_ai_context(configured_env: Path
 
     minimal = client.post(
         "/api/products",
-        data={"name": "极简商品壳"},
+        data={"name": "极简商品壳", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("minimal.png", _make_demo_image_bytes(), "image/png")},
     )
     assert minimal.status_code == 201
@@ -95,7 +103,7 @@ def test_default_product_create_preserves_lazy_workflow_behavior(configured_env:
 
     created = client.post(
         "/api/products",
-        data={"name": "默认画布商品"},
+        data={"name": "默认画布商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("default.png", _make_demo_image_bytes(), "image/png")},
     )
 
@@ -113,7 +121,11 @@ def test_default_product_create_preserves_lazy_workflow_behavior(configured_env:
 
     default_key = client.post(
         "/api/products",
-        data={"name": "显式默认画布商品", "canvas_template_key": "default"},
+        data={
+            "name": "显式默认画布商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "canvas_template_key": "default",
+        },
         files={"image": ("explicit-default.png", _make_demo_image_bytes(), "image/png")},
     )
     assert default_key.status_code == 201
@@ -131,7 +143,11 @@ def test_product_create_materializes_full_canvas_template(configured_env: Path, 
 
     created = client.post(
         "/api/products",
-        data={"name": "模板画布商品", "canvas_template_key": template.key},
+        data={
+            "name": "模板画布商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "canvas_template_key": template.key,
+        },
         files={"image": ("template.png", _make_demo_image_bytes(), "image/png")},
     )
 
@@ -218,12 +234,81 @@ def test_product_create_rejects_invalid_canvas_template_key(configured_env: Path
 
     response = client.post(
         "/api/products",
-        data={"name": "坏模板商品", "canvas_template_key": "missing-template"},
+        data={
+            "name": "坏模板商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "canvas_template_key": "missing-template",
+        },
         files={"image": ("missing.png", _make_demo_image_bytes(), "image/png")},
     )
 
     assert response.status_code == 400
     assert "画布模板不存在" in response.json()["detail"]
+
+
+def test_product_create_requires_resource_group_for_authorized_entry(db_session, configured_env: Path) -> None:  # noqa: ARG001
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    missing_group_response = client.post(
+        "/api/products",
+        data={"name": "缺少生成分组"},
+        files={"image": ("missing-group.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert missing_group_response.status_code == 422
+
+    with pytest.raises(BusinessValidationError, match="请选择供应商生成分组"):
+        create_product(
+            db_session,
+            name="缺少生成分组",
+            category=None,
+            price=None,
+            source_note=None,
+            image_bytes=_make_demo_image_bytes(),
+            filename="missing-group.png",
+            content_type="image/png",
+            resource_group_id=" ",
+            actor_is_admin=True,
+            require_resource_group_grant=True,
+        )
+
+
+def test_product_create_rejects_ungranted_resource_group_for_member(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_group = admin_client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "premium-product", "name": "高阶灵感分组", "sort_order": 20, "enabled": True},
+    )
+    assert created_group.status_code == 200
+    premium_group_id = created_group.json()["id"]
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "product-member", "display_name": "Product Member"},
+    )
+    assert created_user.status_code == 201
+
+    user_client = TestClient(app)
+    set_password = user_client.post(
+        "/api/auth/password",
+        json={"username": "product-member", "client_password_md5": _password_md5("product-member-password")},
+    )
+    assert set_password.status_code == 200
+
+    rejected = user_client.post(
+        "/api/products",
+        data={"name": "未授权分组灵感", "resource_group_id": premium_group_id},
+        files={"image": ("unauthorized.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "账号未授权使用该供应商生成分组"
 
 
 def test_product_create_filters_canvas_template_by_entry_mode(configured_env: Path, db_session) -> None:
@@ -249,6 +334,7 @@ def test_product_create_filters_canvas_template_by_entry_mode(configured_env: Pa
         "/api/products",
         data={
             "name": "入口不匹配",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "canvas_template_key": "copy-entry-global-template",
             "initial_workflow_entry": "image",
         },
@@ -261,6 +347,7 @@ def test_product_create_filters_canvas_template_by_entry_mode(configured_env: Pa
         "/api/products",
         data={
             "name": "文案入口模板",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "canvas_template_key": "copy-entry-global-template",
             "initial_workflow_entry": "copy",
             "entry_text": "这是一段用于文案入口的起始内容",
@@ -297,6 +384,7 @@ def test_product_create_template_persists_text_entry_context_for_summary(configu
         "/api/products",
         data={
             "name": "模板文案入口灵感",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "canvas_template_key": "copy-entry-summary-template",
             "initial_workflow_entry": "copy",
             "entry_text": entry_text,
@@ -320,7 +408,7 @@ def test_product_create_template_persists_text_entry_context_for_summary(configu
     assert context_node.config_json["long_text"] == entry_text
     assert context_node.config_json["source_note"] == entry_text
 
-    listed = client.get("/api/products")
+    listed = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert listed.status_code == 200
     item = next(item for item in listed.json()["items"] if item["id"] == created.json()["id"])
     assert item["initial_workflow_entry"] == "copy"
@@ -328,6 +416,106 @@ def test_product_create_template_persists_text_entry_context_for_summary(configu
     assert item["initial_entry_text_excerpt"] == "免安装收纳架"
     assert item["source_image_thumbnail_url"]
     assert item["latest_generated_image_thumbnail_url"] is None
+
+
+def test_product_list_filters_by_selected_resource_group(configured_env: Path) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created_group = client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "premium-list", "name": "高阶列表分组", "sort_order": 20, "enabled": True},
+    )
+    assert created_group.status_code == 200
+    premium_group_id = created_group.json()["id"]
+    default_product = client.post(
+        "/api/products",
+        data={"name": "默认分组灵感", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+        files={"image": ("default-list.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert default_product.status_code == 201
+    premium_product = client.post(
+        "/api/products",
+        data={"name": "高阶分组灵感", "resource_group_id": premium_group_id},
+        files={"image": ("premium-list.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert premium_product.status_code == 201
+
+    default_list = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
+    assert default_list.status_code == 200
+    assert {item["id"] for item in default_list.json()["items"]} == {default_product.json()["id"]}
+    assert default_list.json()["items"][0]["resource_group"]["key"] == "default"
+
+    premium_list = client.get("/api/products", params={"resource_group_id": premium_group_id})
+    assert premium_list.status_code == 200
+    assert {item["id"] for item in premium_list.json()["items"]} == {premium_product.json()["id"]}
+    assert premium_list.json()["items"][0]["resource_group"]["key"] == "premium-list"
+
+
+def test_successful_workflow_generation_updates_product_resource_group(
+    configured_env: Path,
+    db_session,
+) -> None:
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created_group = client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "premium-workflow", "name": "高阶工作流分组", "sort_order": 20, "enabled": True},
+    )
+    assert created_group.status_code == 200
+    premium_group_id = created_group.json()["id"]
+    db_session.expire_all()
+    created_config = add_generation_config(
+        db_session,
+        resource_group_id=premium_group_id,
+        name="premium text",
+        purpose=TEXT_PURPOSE,
+        provider_kind="mock",
+        provider_profile_id=None,
+        model_settings={"brief_model": "mock-brief", "copy_model": "mock-copy"},
+        config={},
+        priority=10,
+        max_concurrency=1,
+        enabled=True,
+    )
+    assert created_config.resource_group_id == premium_group_id
+    created_product = client.post(
+        "/api/products",
+        data={"name": "跨分组生成灵感", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+        files={"image": ("workflow-group.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created_product.status_code == 201
+    product_id = created_product.json()["id"]
+    assert created_product.json()["resource_group_id"] == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+
+    workflow = client.get(f"/api/products/{product_id}/workflow")
+    assert workflow.status_code == 200
+    copy_node = next(node for node in workflow.json()["nodes"] if node["node_type"] == "copy_generation")
+    patched_node = client.patch(
+        f"/api/workflow-nodes/{copy_node['id']}",
+        json={"config_json": {**copy_node["config_json"], "resource_group_id": premium_group_id}},
+    )
+    assert patched_node.status_code == 200
+
+    run_response = client.post(f"/api/products/{product_id}/workflow/run", json={"start_node_id": copy_node["id"]})
+    assert run_response.status_code == 200
+    _wait_for_workflow_run(client, product_id, status="succeeded")
+
+    db_session.expire_all()
+    product = db_session.get(Product, product_id)
+    assert product is not None
+    assert product.resource_group_id == premium_group_id
+
+    detail = client.get(f"/api/products/{product_id}")
+    assert detail.status_code == 200
+    assert detail.json()["resource_group"]["key"] == "premium-workflow"
 
 
 def test_product_create_accepts_broad_builtin_canvas_template_key(configured_env: Path, db_session) -> None:
@@ -340,7 +528,11 @@ def test_product_create_accepts_broad_builtin_canvas_template_key(configured_env
 
     response = client.post(
         "/api/products",
-        data={"name": "规格模板商品", "canvas_template_key": template.key},
+        data={
+            "name": "规格模板商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "canvas_template_key": template.key,
+        },
         files={"image": ("sku-template.png", _make_demo_image_bytes(), "image/png")},
     )
 
@@ -366,6 +558,7 @@ def test_product_list_summary_uses_latest_run_first_generated_image(configured_e
         filename=None,
         content_type=None,
         initial_workflow_entry="blank",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     workflow = db_session.query(ProductWorkflow).filter_by(product_id=product.id, active=True).one()
     context_node = (
@@ -505,7 +698,7 @@ def test_product_list_summary_uses_latest_run_first_generated_image(configured_e
     client = TestClient(app)
     _login(client)
 
-    listed = client.get("/api/products")
+    listed = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert listed.status_code == 200
     item = next(item for item in listed.json()["items"] if item["id"] == product.id)
     assert item["initial_workflow_entry"] == "blank"
@@ -525,7 +718,7 @@ def test_legacy_jobrun_routes_are_removed(configured_env: Path) -> None:
 
     created = client.post(
         "/api/products",
-        data={"name": "无传统任务商品"},
+        data={"name": "无传统任务商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("legacy.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -550,7 +743,7 @@ def test_product_history_can_filter_by_resource_group(configured_env: Path, db_s
 
     created = client.post(
         "/api/products",
-        data={"name": "分组历史商品"},
+        data={"name": "分组历史商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("history.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -652,7 +845,7 @@ def test_product_can_be_deleted_from_api(configured_env: Path, db_session) -> No
 
     created = client.post(
         "/api/products",
-        data={"name": "待删除商品"},
+        data={"name": "待删除商品", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("delete.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -673,7 +866,7 @@ def test_product_can_be_deleted_from_api(configured_env: Path, db_session) -> No
     assert deleted.status_code == 204
     assert deleted.content == b""
 
-    listed = client.get("/api/products")
+    listed = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert listed.status_code == 200
     listed_product = next(item for item in listed.json()["items"] if item["id"] == product_id)
     assert listed_product["deleted_at"] is not None
@@ -699,6 +892,7 @@ def test_reference_images_can_be_attached_to_product(db_session, configured_env:
         image_bytes=_make_demo_image_bytes(),
         filename="mug.png",
         content_type="image/png",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     updated = add_reference_images(
@@ -728,6 +922,7 @@ def test_product_status_filter_uses_database_pagination_before_eager_loading(db_
         image_bytes=_make_demo_image_bytes(),
         filename="draft.png",
         content_type="image/png",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     copy_ready = create_product(
         db_session,
@@ -738,6 +933,7 @@ def test_product_status_filter_uses_database_pagination_before_eager_loading(db_
         image_bytes=_make_demo_image_bytes(),
         filename="copy.png",
         content_type="image/png",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     poster_ready = create_product(
         db_session,
@@ -748,6 +944,7 @@ def test_product_status_filter_uses_database_pagination_before_eager_loading(db_
         image_bytes=_make_demo_image_bytes(),
         filename="poster.png",
         content_type="image/png",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     copy_set = CopySet(
@@ -823,6 +1020,7 @@ def test_product_status_filter_uses_database_pagination_before_eager_loading(db_
             status=ProductWorkflowState.DRAFT,
             page=1,
             page_size=1,
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         )
     finally:
         event.remove(db_session.bind, "before_cursor_execute", record_product_query)
@@ -838,18 +1036,21 @@ def test_product_status_filter_uses_database_pagination_before_eager_loading(db_
         status=ProductWorkflowState.COPY_READY,
         page=1,
         page_size=10,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     poster_products, poster_total = list_products(
         db_session,
         status=ProductWorkflowState.POSTER_READY,
         page=1,
         page_size=10,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     failed_products, failed_total = list_products(
         db_session,
         status=ProductWorkflowState.FAILED,
         page=1,
         page_size=10,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
 
     assert copy_total == 1
@@ -858,6 +1059,28 @@ def test_product_status_filter_uses_database_pagination_before_eager_loading(db_
     assert [product.id for product in poster_products] == [poster_ready.id]
     assert failed_total == 0
     assert failed_products == []
+
+
+def test_product_list_requires_resource_group_for_authorized_entry(db_session, configured_env: Path) -> None:  # noqa: ARG001
+    from productflow_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    missing_group_response = client.get("/api/products")
+    assert missing_group_response.status_code == 422
+
+    with pytest.raises(BusinessValidationError, match="请选择供应商生成分组"):
+        list_products(
+            db_session,
+            status=None,
+            page=1,
+            page_size=20,
+            resource_group_id="",
+            actor_is_admin=True,
+            require_resource_group_grant=True,
+        )
 
 
 def test_product_reference_image_can_be_deleted(configured_env: Path, db_session) -> None:
@@ -869,7 +1092,12 @@ def test_product_reference_image_can_be_deleted(configured_env: Path, db_session
 
     created = client.post(
         "/api/products",
-        data={"name": "香薰蜡烛", "category": "家居", "price": "49.00"},
+        data={
+            "name": "香薰蜡烛",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "category": "家居",
+            "price": "49.00",
+        },
         files=[
             ("image", ("main.png", _make_demo_image_bytes(), "image/png")),
             ("reference_images", ("ref.png", _make_demo_image_bytes(), "image/png")),

@@ -8,7 +8,7 @@ const gridRowUnitPx = 8;
 const gridGapPx = 16;
 const regularSquareTileWidthPx = 308;
 const featuredSquareTileWidthPx = 420;
-const defaultResourceGroup = { id: "group-default", key: "default", name: "默认分组" };
+const defaultResourceGroup = { id: "group-default", key: "default", name: "default" };
 
 function renderedGridHeight(rowSpan: number): number {
   return rowSpan * gridRowUnitPx + (rowSpan - 1) * gridGapPx;

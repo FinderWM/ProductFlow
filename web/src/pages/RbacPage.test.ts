@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildPermissionGroups,
+  rbacUserListQueryKey,
+  rbacUserResourceGroupLabels,
   rolePermissionDraftFromResponse,
   toggleApiPermissionDraft,
   toggleMenuPermissionDraft,
   type RolePermissionDraft,
 } from "./RbacPage";
-import type { RbacPermissionCatalog, RbacRolePermissions } from "../lib/types";
+import type { RbacPermissionCatalog, RbacRolePermissions, RbacUser } from "../lib/types";
 
 function permissionCatalog(): RbacPermissionCatalog {
   return {
@@ -49,6 +51,21 @@ function rolePermissions(overrides: Partial<RbacRolePermissions> = {}): RbacRole
     role_id: overrides.role_id ?? "role-1",
     menu_codes: overrides.menu_codes ?? [],
     api_permission_codes: overrides.api_permission_codes ?? [],
+  };
+}
+
+function rbacUser(overrides: Partial<RbacUser> = {}): RbacUser {
+  return {
+    id: overrides.id ?? "user-1",
+    username: overrides.username ?? "alice",
+    display_name: overrides.display_name ?? "Alice",
+    role_id: overrides.role_id ?? "role-1",
+    role_name: overrides.role_name ?? "普通用户",
+    is_admin: overrides.is_admin ?? false,
+    enabled: overrides.enabled ?? true,
+    password_pending: overrides.password_pending ?? false,
+    resource_groups: overrides.resource_groups ?? [],
+    archived_at: overrides.archived_at,
   };
 }
 
@@ -115,5 +132,22 @@ describe("RbacPage permission helpers", () => {
       menu_codes: ["settings"],
       api_permission_codes: ["settings:provider_write"],
     });
+  });
+
+  it("returns generation group labels for the user list column", () => {
+    expect(
+      rbacUserResourceGroupLabels(
+        rbacUser({ resource_groups: [{ id: "group-1", key: "campaign", name: "活动分组" }] }),
+        "未授权分组",
+      ),
+    ).toEqual(["活动分组"]);
+  });
+
+  it("returns the fallback label when a user has no generation group grants", () => {
+    expect(rbacUserResourceGroupLabels(rbacUser(), "未授权分组")).toEqual(["未授权分组"]);
+  });
+
+  it("builds the rbac user list query key from current filters", () => {
+    expect(rbacUserListQueryKey(2, "alice", "role-1")).toEqual(["rbac-users", 2, "alice", "role-1"]);
   });
 });

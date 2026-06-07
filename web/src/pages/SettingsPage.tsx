@@ -42,6 +42,14 @@ import { api, ApiError } from "../lib/api";
 import type { TranslationKey } from "../lib/i18n";
 import type { ParameterHelpKey } from "../lib/parameterHelp";
 import { useI18n } from "../lib/preferences";
+import {
+  API_GLOBAL_TEMPLATES_MANAGE,
+  API_SETTINGS_MIGRATE,
+  API_SETTINGS_PROVIDER_WRITE,
+  API_SETTINGS_WRITE,
+  hasSessionApiPermission,
+} from "../lib/rbac";
+import { useSessionState } from "../lib/session";
 import type {
   ConfigItem,
   ConfigResponse,
@@ -72,6 +80,7 @@ import {
 type DraftValue = string | boolean | string[];
 export type SettingsSectionId =
   | "providers"
+  | "resourceGroups"
   | "text"
   | "image"
   | "prompts"
@@ -213,6 +222,13 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     descriptionKey: "settings.section.providersDescription",
     groupKey: "settings.groupProviders",
     icon: ServerCog,
+  },
+  {
+    id: "resourceGroups",
+    labelKey: "settings.section.resourceGroups",
+    descriptionKey: "settings.section.resourceGroupsDescription",
+    groupKey: "settings.groupProviders",
+    icon: Link2,
   },
   {
     id: "text",
@@ -832,6 +848,7 @@ interface SettingsMigrationPanelProps {
   importInputRef: RefObject<HTMLInputElement | null>;
   importFileName: string;
   importPreview: SettingsImportPreviewResponse | null;
+  canMigrate: boolean;
   exportBusy: boolean;
   importPreviewBusy: boolean;
   importCommitBusy: boolean;
@@ -846,6 +863,7 @@ function SettingsMigrationPanel({
   importInputRef,
   importFileName,
   importPreview,
+  canMigrate,
   exportBusy,
   importPreviewBusy,
   importCommitBusy,
@@ -888,7 +906,7 @@ function SettingsMigrationPanel({
           <button
             type="button"
             onClick={onChooseImportFile}
-            disabled={importPreviewBusy || importCommitBusy}
+            disabled={!canMigrate || importPreviewBusy || importCommitBusy}
             className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:hover:bg-slate-800"
           >
             {importPreviewBusy ? (
@@ -932,7 +950,7 @@ function SettingsMigrationPanel({
               <button
                 type="button"
                 onClick={onCommitImport}
-                disabled={importCommitBusy}
+                disabled={!canMigrate || importCommitBusy}
                 className={SETTINGS_MAIN_ACTION_CLASS}
               >
                 {importCommitBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
@@ -1272,6 +1290,7 @@ interface ConfigFieldProps {
   value: DraftValue;
   secretTouched: boolean;
   isResetting: boolean;
+  disabled?: boolean;
   layout?: "row" | "card";
   onChange: (value: DraftValue, touchedSecret?: boolean) => void;
   onReset: () => void;
@@ -1282,6 +1301,7 @@ function ConfigField({
   value,
   secretTouched,
   isResetting,
+  disabled = false,
   layout = "row",
   onChange,
   onReset,
@@ -1311,6 +1331,7 @@ function ConfigField({
             <input
               type="checkbox"
               checked={selectedMultiValues.includes(option.value)}
+              disabled={disabled}
               onChange={() => toggleMultiValue(option.value)}
               className="h-3.5 w-3.5 accent-indigo-600"
             />
@@ -1319,11 +1340,12 @@ function ConfigField({
         ))}
       </div>
     ) : item.input_type === "select" ? (
-      <SelectField id={item.key} value={String(value)} options={item.options} onChange={onChange} />
+      <SelectField id={item.key} value={String(value)} options={item.options} onChange={onChange} disabled={disabled} />
     ) : item.input_type === "textarea" ? (
       <textarea
         id={item.key}
         value={String(value)}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         rows={item.key.startsWith("prompt_") ? 8 : 3}
         className={`${TEXTAREA_CLASS} resize-y leading-6`}
@@ -1334,6 +1356,7 @@ function ConfigField({
           id={item.key}
           type="checkbox"
           checked={Boolean(value)}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.checked)}
           className="h-4 w-4 accent-zinc-900"
         />
@@ -1347,6 +1370,7 @@ function ConfigField({
         min={item.minimum ?? undefined}
         max={item.maximum ?? undefined}
         placeholder={item.secret && item.has_value ? t("settings.secretPlaceholder") : item.description || undefined}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value, item.secret)}
         className={INPUT_CLASS}
         autoComplete={item.secret ? "new-password" : undefined}
@@ -1380,7 +1404,7 @@ function ConfigField({
             <button
               type="button"
               onClick={onReset}
-              disabled={isResetting}
+              disabled={disabled || isResetting}
               className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-slate-100 hover:text-zinc-900 disabled:opacity-50 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-white"
               aria-label={t("settings.restoreDefault")}
               title={t("settings.restoreDefault")}
@@ -1423,7 +1447,7 @@ function ConfigField({
             <button
               type="button"
               onClick={onReset}
-              disabled={isResetting}
+              disabled={disabled || isResetting}
               className="inline-flex items-center text-xs font-medium text-zinc-500 hover:text-zinc-900 disabled:opacity-50 dark:text-slate-400 dark:hover:text-white"
             >
               {isResetting ? <Loader2 size={13} className="mr-1 animate-spin" /> : <RotateCcw size={13} className="mr-1" />}
@@ -1443,9 +1467,7 @@ interface ProvidersSectionProps {
   drawerOpen: boolean;
   pending: boolean;
   togglingProfileId: string | null;
-  resourceGroupDrafts: Record<string, GenerationResourceGroupDraft>;
-  resourceGroupPending: boolean;
-  archivingResourceGroupId: string | null;
+  canWrite: boolean;
   onProfileFormChange: (next: ProviderProfileFormState) => void;
   onOpenCreate: () => void;
   onEditProfile: (profile: ProviderProfile) => void;
@@ -1453,9 +1475,6 @@ interface ProvidersSectionProps {
   onSubmitProfile: () => void;
   onDeleteProfile: (profile: ProviderProfile) => void;
   onToggleProfileEnabled: (profileId: string, enabled: boolean) => void;
-  onResourceGroupChange: (key: string, next: GenerationResourceGroupDraft) => void;
-  onSaveResourceGroup: (draft: GenerationResourceGroupDraft) => void;
-  onArchiveResourceGroup: (groupId: string) => void;
 }
 
 function ProvidersSection({
@@ -1465,9 +1484,7 @@ function ProvidersSection({
   drawerOpen,
   pending,
   togglingProfileId,
-  resourceGroupDrafts,
-  resourceGroupPending,
-  archivingResourceGroupId,
+  canWrite,
   onProfileFormChange,
   onOpenCreate,
   onEditProfile,
@@ -1475,9 +1492,6 @@ function ProvidersSection({
   onSubmitProfile,
   onDeleteProfile,
   onToggleProfileEnabled,
-  onResourceGroupChange,
-  onSaveResourceGroup,
-  onArchiveResourceGroup,
 }: ProvidersSectionProps) {
   const { t } = useI18n();
   const profiles = (data?.profiles ?? []).filter((profile) => !profile.archived_at);
@@ -1501,7 +1515,7 @@ function ProvidersSection({
             {t("settings.provider.listDescription")}
           </p>
         </div>
-        <button type="button" onClick={onOpenCreate} className={SETTINGS_MAIN_ACTION_CLASS}>
+        <button type="button" onClick={onOpenCreate} disabled={!canWrite} className={SETTINGS_MAIN_ACTION_CLASS}>
           <Plus size={14} className="mr-2" />
           {t("settings.provider.create")}
         </button>
@@ -1518,6 +1532,7 @@ function ProvidersSection({
                 usage={usage}
                 pending={pending}
                 toggling={togglingProfileId === profile.id}
+                canWrite={canWrite}
                 onEdit={() => onEditProfile(profile)}
                 onDelete={() => onDeleteProfile(profile)}
                 onToggleEnabled={(enabled) => onToggleProfileEnabled(profile.id, enabled)}
@@ -1534,7 +1549,7 @@ function ProvidersSection({
           <p className="mt-3 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
             {t("settings.provider.emptyDescription")}
           </p>
-          <button type="button" onClick={onOpenCreate} className={`${SETTINGS_MAIN_ACTION_CLASS} mt-6`}>
+          <button type="button" onClick={onOpenCreate} disabled={!canWrite} className={`${SETTINGS_MAIN_ACTION_CLASS} mt-6`}>
             <Plus size={14} className="mr-2" />
             {t("settings.provider.create")}
           </button>
@@ -1547,19 +1562,10 @@ function ProvidersSection({
         editingProfileId={editingProfileId}
         pending={pending}
         enableToggleBlocked={editingProfileDisableBlocked}
+        canWrite={canWrite}
         onFormChange={onProfileFormChange}
         onClose={onCloseDrawer}
         onSubmit={onSubmitProfile}
-      />
-
-      <GenerationResourceGroupSection
-        groups={data?.generation_resource_groups ?? []}
-        drafts={resourceGroupDrafts}
-        pending={resourceGroupPending}
-        archivingGroupId={archivingResourceGroupId}
-        onChange={onResourceGroupChange}
-        onSave={onSaveResourceGroup}
-        onArchive={onArchiveResourceGroup}
       />
     </div>
   );
@@ -1581,6 +1587,7 @@ interface GenerationResourceGroupSectionProps {
   drafts: Record<string, GenerationResourceGroupDraft>;
   pending: boolean;
   archivingGroupId: string | null;
+  canWrite: boolean;
   onChange: (key: string, next: GenerationResourceGroupDraft) => void;
   onSave: (draft: GenerationResourceGroupDraft) => void;
   onArchive: (groupId: string) => void;
@@ -1591,6 +1598,7 @@ function GenerationResourceGroupSection({
   drafts,
   pending,
   archivingGroupId,
+  canWrite,
   onChange,
   onSave,
   onArchive,
@@ -1627,9 +1635,10 @@ function GenerationResourceGroupSection({
             group={group}
             draft={draft}
             pending={pending || archivingGroupId === group?.id}
+            canWrite={canWrite}
             onChange={(next) => onChange(generationResourceGroupDraftKey(next), next)}
             onSave={() => onSave(draft)}
-            onArchive={group && group.key !== "default" ? () => onArchive(group.id) : undefined}
+            onArchive={group ? () => onArchive(group.id) : undefined}
           />
         ))}
       </div>
@@ -1641,6 +1650,7 @@ interface GenerationResourceGroupCardProps {
   group: GenerationResourceGroup | null;
   draft: GenerationResourceGroupDraft;
   pending: boolean;
+  canWrite: boolean;
   onChange: (next: GenerationResourceGroupDraft) => void;
   onSave: () => void;
   onArchive?: () => void;
@@ -1650,13 +1660,13 @@ function GenerationResourceGroupCard({
   group,
   draft,
   pending,
+  canWrite,
   onChange,
   onSave,
   onArchive,
 }: GenerationResourceGroupCardProps) {
   const { t } = useI18n();
   const isNew = !group;
-  const isDefault = group?.key === "default";
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-[#0b1220] dark:shadow-black/20">
@@ -1669,11 +1679,6 @@ function GenerationResourceGroupCard({
             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${generationResourceGroupStatusClassName(draft)}`}>
               {draft.enabled ? t("settings.resourceGroup.enabled") : t("settings.resourceGroup.disabled")}
             </span>
-            {isDefault ? (
-              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
-                {t("settings.resourceGroup.defaultBadge")}
-              </span>
-            ) : null}
           </div>
           <p className="mt-1 font-mono text-xs text-slate-500 dark:text-slate-400">
             {draft.key || t("settings.resourceGroup.keyPlaceholder")}
@@ -1683,7 +1688,7 @@ function GenerationResourceGroupCard({
           <button
             type="button"
             onClick={onArchive}
-            disabled={pending}
+            disabled={!canWrite || pending}
             className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
           >
             {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
@@ -1696,15 +1701,16 @@ function GenerationResourceGroupCard({
         <SettingsFormField label={t("settings.resourceGroup.key")}>
           <input
             value={draft.key}
+            disabled={!canWrite}
             onChange={(event) => onChange({ ...draft, key: event.target.value })}
             className={INPUT_CLASS}
             placeholder={t("settings.resourceGroup.keyPlaceholder")}
-            disabled={isDefault}
           />
         </SettingsFormField>
         <SettingsFormField label={t("settings.resourceGroup.name")}>
           <input
             value={draft.name}
+            disabled={!canWrite}
             onChange={(event) => onChange({ ...draft, name: event.target.value })}
             className={INPUT_CLASS}
             placeholder={t("settings.resourceGroup.namePlaceholder")}
@@ -1713,6 +1719,7 @@ function GenerationResourceGroupCard({
         <SettingsFormField label={t("settings.resourceGroup.sortOrder")}>
           <input
             value={draft.sort_order}
+            disabled={!canWrite}
             onChange={(event) => onChange({ ...draft, sort_order: event.target.value })}
             className={INPUT_CLASS}
             type="number"
@@ -1723,6 +1730,7 @@ function GenerationResourceGroupCard({
         <SettingsFormField label={t("settings.resourceGroup.descriptionLabel")}>
           <textarea
             value={draft.description}
+            disabled={!canWrite}
             onChange={(event) => onChange({ ...draft, description: event.target.value })}
             className={`${TEXTAREA_CLASS} min-h-20 resize-y`}
             placeholder={t("settings.resourceGroup.descriptionPlaceholder")}
@@ -1735,6 +1743,7 @@ function GenerationResourceGroupCard({
           <input
             type="checkbox"
             checked={draft.enabled}
+            disabled={!canWrite}
             onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
             className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
           />
@@ -1743,7 +1752,7 @@ function GenerationResourceGroupCard({
         <button
           type="button"
           onClick={onSave}
-          disabled={pending || !draft.key.trim() || !draft.name.trim()}
+          disabled={!canWrite || pending || !draft.key.trim() || !draft.name.trim()}
           className={SETTINGS_MAIN_ACTION_CLASS}
         >
           {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
@@ -1809,6 +1818,7 @@ interface ProviderProfileCardProps {
   usage: ProviderProfileUsage;
   pending: boolean;
   toggling: boolean;
+  canWrite: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onToggleEnabled: (enabled: boolean) => void;
@@ -1819,6 +1829,7 @@ function ProviderProfileCard({
   usage,
   pending,
   toggling,
+  canWrite,
   onEdit,
   onDelete,
   onToggleEnabled,
@@ -1834,6 +1845,7 @@ function ProviderProfileCard({
       <button
         type="button"
         onClick={onEdit}
+        disabled={!canWrite}
         className="-m-2 block w-full space-y-4 rounded-lg p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400"
       >
         <span className="flex items-start justify-between gap-4">
@@ -1903,6 +1915,7 @@ function ProviderProfileCard({
         <button
           type="button"
           onClick={onEdit}
+          disabled={!canWrite}
           className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-300/50 dark:hover:text-violet-100"
           aria-label={t("settings.provider.editAria")}
           title={t("settings.provider.edit")}
@@ -1912,7 +1925,7 @@ function ProviderProfileCard({
         <button
           type="button"
           onClick={onDelete}
-          disabled={pending}
+          disabled={!canWrite || pending}
           className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
           aria-label={t("settings.provider.deleteAria")}
           title={t("settings.provider.deleteAria")}
@@ -1942,7 +1955,7 @@ function ProviderProfileCard({
         </div>
         <ProviderEnabledSwitch
           checked={profile.enabled}
-          disabled={pending || toggling || disableBlocked}
+          disabled={!canWrite || pending || toggling || disableBlocked}
           loading={toggling}
           title={switchHelp}
           ariaLabel={t("settings.provider.enabledSwitchAria")}
@@ -1957,15 +1970,17 @@ function ProviderProfileCard({
 interface ProviderCapabilityToggleProps {
   option: (typeof PROVIDER_CAPABILITY_OPTIONS)[number];
   selected: boolean;
+  disabled?: boolean;
   onToggle: () => void;
 }
 
-function ProviderCapabilityToggle({ option, selected, onToggle }: ProviderCapabilityToggleProps) {
+function ProviderCapabilityToggle({ option, selected, disabled = false, onToggle }: ProviderCapabilityToggleProps) {
   const { t } = useI18n();
   return (
     <button
       type="button"
       aria-pressed={selected}
+      disabled={disabled}
       onClick={onToggle}
       className={`flex h-[46px] items-center gap-3 rounded-xl border px-3 text-left text-sm font-semibold transition ${
         selected
@@ -1994,6 +2009,7 @@ interface ProviderDrawerTextInputProps {
   type?: "text" | "password";
   icon?: ReactNode;
   autoComplete?: string;
+  disabled?: boolean;
 }
 
 function ProviderDrawerTextInput({
@@ -2003,6 +2019,7 @@ function ProviderDrawerTextInput({
   type = "text",
   icon,
   autoComplete,
+  disabled = false,
 }: ProviderDrawerTextInputProps) {
   return (
     <div className="relative">
@@ -2014,6 +2031,7 @@ function ProviderDrawerTextInput({
       <input
         type={type}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         className={`${PROVIDER_DRAWER_INPUT_CLASS} ${icon ? "pl-11" : ""}`}
         placeholder={placeholder}
@@ -2075,6 +2093,7 @@ interface ProviderProfileDrawerProps {
   editingProfileId: string | null;
   pending: boolean;
   enableToggleBlocked: boolean;
+  canWrite: boolean;
   onFormChange: (next: ProviderProfileFormState) => void;
   onClose: () => void;
   onSubmit: () => void;
@@ -2086,6 +2105,7 @@ function ProviderProfileDrawer({
   editingProfileId,
   pending,
   enableToggleBlocked,
+  canWrite,
   onFormChange,
   onClose,
   onSubmit,
@@ -2159,6 +2179,9 @@ function ProviderProfileDrawer({
           className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
+            if (!canWrite) {
+              return;
+            }
             onSubmit();
           }}
         >
@@ -2171,6 +2194,7 @@ function ProviderProfileDrawer({
                 value={form.name}
                 onChange={(name) => onFormChange({ ...form, name })}
                 placeholder={t("settings.provider.namePlaceholder")}
+                disabled={!canWrite}
               />
             </SettingsFormField>
             <SettingsFormField label={t("settings.provider.typeLabel")} helpKey="settingsProviderType">
@@ -2183,6 +2207,7 @@ function ProviderProfileDrawer({
                 onChange={(value) =>
                   handleProviderTypeChange(value === "google_gemini" ? "google_gemini" : "openai_compatible")
                 }
+                disabled={!canWrite}
                 radius="lg"
               />
             </SettingsFormField>
@@ -2193,6 +2218,7 @@ function ProviderProfileDrawer({
                   onChange={(base_url) => onFormChange({ ...form, base_url })}
                   placeholder={t("settings.provider.baseUrlPlaceholder")}
                   icon={<Link2 size={16} />}
+                  disabled={!canWrite}
                 />
               </SettingsFormField>
             ) : (
@@ -2212,6 +2238,7 @@ function ProviderProfileDrawer({
                 }
                 icon={<KeyRound size={16} />}
                 autoComplete="new-password"
+                disabled={!canWrite}
               />
             </SettingsFormField>
             <div className="grid gap-2">
@@ -2228,6 +2255,7 @@ function ProviderProfileDrawer({
                     key={option.value}
                     option={option}
                     selected={form.capabilities.includes(option.value)}
+                    disabled={!canWrite}
                     onToggle={() => toggleCapability(option.value)}
                   />
                 ))}
@@ -2237,7 +2265,7 @@ function ProviderProfileDrawer({
             <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
               <ProviderDrawerEnableToggle
                 checked={form.enabled}
-                disabled={pending}
+                disabled={!canWrite || pending}
                 blocked={enableToggleBlocked}
                 onToggle={(enabled) => onFormChange({ ...form, enabled })}
               />
@@ -2247,7 +2275,7 @@ function ProviderProfileDrawer({
           <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-5 dark:border-slate-800 dark:bg-[#121722]">
             <button
               type="submit"
-              disabled={pending || !form.name.trim() || !form.capabilities.length}
+              disabled={!canWrite || pending || !form.name.trim() || !form.capabilities.length}
               className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition hover:bg-indigo-500 disabled:opacity-50 dark:bg-violet-500 dark:shadow-violet-950/30 dark:hover:bg-violet-400"
             >
               {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
@@ -2266,6 +2294,7 @@ interface GenerationConfigPoolSectionProps {
   drafts: Record<string, GenerationConfigDraft>;
   pending: boolean;
   archivingConfigId: string | null;
+  canWrite: boolean;
   textTestState?: TextConfigTestState;
   onChange: (key: string, next: GenerationConfigDraft) => void;
   onSave: (draft: GenerationConfigDraft) => void;
@@ -2433,6 +2462,7 @@ function GenerationConfigPoolSection({
   drafts,
   pending,
   archivingConfigId,
+  canWrite,
   textTestState,
   onChange,
   onSave,
@@ -2490,6 +2520,7 @@ function GenerationConfigPoolSection({
             resourceGroups={resourceGroups}
             profiles={providerProfilesForGenerationConfig(profiles, draft)}
             pending={pending || archivingConfigId === config?.id}
+            canWrite={canWrite}
             onChange={(next) => onChange(generationConfigDraftKey(next), next)}
             onSave={() => onSave(draft)}
             onArchive={config ? () => onArchive(config.id) : undefined}
@@ -2510,6 +2541,7 @@ interface GenerationConfigCardProps {
   resourceGroups: GenerationResourceGroup[];
   profiles: ProviderProfile[];
   pending: boolean;
+  canWrite: boolean;
   onChange: (next: GenerationConfigDraft) => void;
   onSave: () => void;
   onArchive?: () => void;
@@ -2525,6 +2557,7 @@ function GenerationConfigCard({
   resourceGroups,
   profiles,
   pending,
+  canWrite,
   onChange,
   onSave,
   onArchive,
@@ -2548,6 +2581,7 @@ function GenerationConfigCard({
           { value: "google_gemini_image", label: t("settings.provider.interface.googleGeminiImage") },
         ];
   const busy = pending;
+  const controlsDisabled = busy || !canWrite;
 
   return (
     <div className={`${PANEL_CLASS} space-y-5`}>
@@ -2588,7 +2622,7 @@ function GenerationConfigCard({
             <button
               type="button"
               onClick={onTest}
-              disabled={busy || testing || !draft.name.trim() || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
+              disabled={controlsDisabled || testing || !draft.name.trim() || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
               className="inline-flex h-9 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100 dark:hover:bg-violet-500/20"
             >
               {testing ? <Loader2 size={14} className="mr-2 animate-spin" /> : <MessageSquareText size={14} className="mr-2" />}
@@ -2599,7 +2633,7 @@ function GenerationConfigCard({
             <button
               type="button"
               onClick={onArchive}
-              disabled={busy}
+              disabled={controlsDisabled}
               className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
             >
               {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
@@ -2672,6 +2706,7 @@ function GenerationConfigCard({
           <input
             value={draft.name}
             onChange={(event) => onChange({ ...draft, name: event.target.value })}
+            disabled={controlsDisabled}
             className={INPUT_CLASS}
             placeholder={t("settings.generation.namePlaceholder")}
           />
@@ -2696,6 +2731,7 @@ function GenerationConfigCard({
               })),
             ]}
             onChange={(value) => onChange({ ...draft, resource_group_id: value })}
+            disabled={controlsDisabled}
             radius="lg"
           />
         </SettingsFormField>
@@ -2717,6 +2753,7 @@ function GenerationConfigCard({
                 provider_profile_id: "",
               })
             }
+            disabled={controlsDisabled}
             radius="lg"
           />
         </SettingsFormField>
@@ -2731,6 +2768,7 @@ function GenerationConfigCard({
               ...profiles.map((profile) => ({ value: profile.id, label: profile.name })),
             ]}
             onChange={(value) => onChange({ ...draft, provider_profile_id: value })}
+            disabled={controlsDisabled}
             radius="lg"
           />
         </SettingsFormField>
@@ -2745,7 +2783,7 @@ function GenerationConfigCard({
             placeholder={t("settings.provider.textBriefModelPlaceholder")}
             providerKind={draft.provider_kind === "openai" ? "openai" : "mock"}
             providerProfileId={draft.provider_profile_id}
-            disabled={busy}
+            disabled={controlsDisabled}
             helpKey="settingsTextBriefModel"
             onChange={(brief_model) => onChange({ ...draft, brief_model })}
           />
@@ -2756,30 +2794,30 @@ function GenerationConfigCard({
             placeholder={t("settings.provider.textCopyModelPlaceholder")}
             providerKind={draft.provider_kind === "openai" ? "openai" : "mock"}
             providerProfileId={draft.provider_profile_id}
-            disabled={busy}
+            disabled={controlsDisabled}
             helpKey="settingsTextCopyModel"
             onChange={(copy_model) => onChange({ ...draft, copy_model })}
           />
         </div>
       ) : (
-        <GenerationConfigImageFields draft={draft} pending={busy} onChange={onChange} configId={config?.id ?? "new"} />
+        <GenerationConfigImageFields draft={draft} pending={controlsDisabled} onChange={onChange} configId={config?.id ?? "new"} />
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <SettingsFormField label={t("settings.generation.priority")} helpKey="settingsGenerationPriority">
-          <input value={draft.priority} onChange={(event) => onChange({ ...draft, priority: event.target.value })} className={INPUT_CLASS} type="number" />
+          <input value={draft.priority} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, priority: event.target.value })} className={INPUT_CLASS} type="number" />
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.maxConcurrency")} helpKey="settingsGenerationMaxConcurrency">
-          <input value={draft.max_concurrency} onChange={(event) => onChange({ ...draft, max_concurrency: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+          <input value={draft.max_concurrency} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, max_concurrency: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.availabilityWindow")} helpKey="settingsGenerationAvailabilityWindow">
-          <input value={draft.availability_window_minutes} onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
+          <input value={draft.availability_window_minutes} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.failureThreshold")} helpKey="settingsGenerationFailureThreshold">
-          <input value={draft.failure_threshold} onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
+          <input value={draft.failure_threshold} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.cooldownMinutes")} helpKey="settingsGenerationCooldownMinutes">
-          <input value={draft.cooldown_minutes} onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
+          <input value={draft.cooldown_minutes} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
         </SettingsFormField>
       </div>
 
@@ -2788,6 +2826,7 @@ function GenerationConfigCard({
           <input
             type="checkbox"
             checked={draft.enabled}
+            disabled={controlsDisabled}
             onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
             className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
           />
@@ -2797,7 +2836,7 @@ function GenerationConfigCard({
           type="button"
           onClick={onSave}
           disabled={
-            busy ||
+            controlsDisabled ||
             !draft.name.trim() ||
             !draft.resource_group_id ||
             (draft.provider_kind !== "mock" && !draft.provider_profile_id)
@@ -2853,6 +2892,7 @@ function GenerationConfigImageFields({
                 { value: "v1", label: "v1" },
               ]}
               onChange={(value) => onChange({ ...draft, gemini_api_version: value === "v1" ? "v1" : "v1beta" })}
+              disabled={pending}
               radius="lg"
             />
           </SettingsFormField>
@@ -2866,6 +2906,7 @@ function GenerationConfigImageFields({
                 { value: "image/webp", label: "image/webp" },
               ]}
               onChange={(value) => onChange({ ...draft, gemini_output_mime_type: value })}
+              disabled={pending}
               radius="lg"
             />
           </SettingsFormField>
@@ -2875,16 +2916,18 @@ function GenerationConfigImageFields({
         <div className="grid gap-3 sm:grid-cols-2">
           <SettingsFormField label={t("settings.provider.imagesQualityLabel")} helpKey="settingsImagesQuality">
             <input
-              value={draft.images_quality}
-              onChange={(event) => onChange({ ...draft, images_quality: event.target.value })}
+            value={draft.images_quality}
+            disabled={pending}
+            onChange={(event) => onChange({ ...draft, images_quality: event.target.value })}
               className={INPUT_CLASS}
               placeholder={t("settings.provider.imagesQualityPlaceholder")}
             />
           </SettingsFormField>
           <SettingsFormField label={t("settings.provider.imagesStyleLabel")} helpKey="settingsImagesStyle">
             <input
-              value={draft.images_style}
-              onChange={(event) => onChange({ ...draft, images_style: event.target.value })}
+            value={draft.images_style}
+            disabled={pending}
+            onChange={(event) => onChange({ ...draft, images_style: event.target.value })}
               className={INPUT_CLASS}
               placeholder={t("settings.provider.imagesStylePlaceholder")}
             />
@@ -2896,6 +2939,7 @@ function GenerationConfigImageFields({
           <input
             type="checkbox"
             checked={draft.responses_background_enabled}
+            disabled={pending}
             onChange={(event) => onChange({ ...draft, responses_background_enabled: event.target.checked })}
             className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
           />
@@ -2914,6 +2958,7 @@ export function SettingsPage() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const session = useSessionState();
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
   const [draftSnapshots, setDraftSnapshots] = useState<Record<string, DraftSnapshot>>({});
@@ -2998,6 +3043,10 @@ export function SettingsPage() {
   const activeMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
   const activeItems = itemsForSection(configQuery.data, activeSection);
   const activeConfigGroups = activeSection === "queue" ? configCategoryGroups(activeItems) : [];
+  const canWriteRuntimeSettings = hasSessionApiPermission(session, API_SETTINGS_WRITE);
+  const canWriteProviderSettings = hasSessionApiPermission(session, API_SETTINGS_PROVIDER_WRITE);
+  const canMigrateSettings = hasSessionApiPermission(session, API_SETTINGS_MIGRATE);
+  const canManageGlobalTemplates = hasSessionApiPermission(session, API_GLOBAL_TEMPLATES_MANAGE);
   const normalizedSectionSearch = sectionSearch.trim().toLowerCase();
   const visibleSections = normalizedSectionSearch
     ? SETTINGS_SECTIONS.filter(
@@ -3326,6 +3375,9 @@ export function SettingsPage() {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canWriteRuntimeSettings) {
+      return;
+    }
     setError("");
     setSavedMessage("");
     saveMutation.mutate();
@@ -3334,7 +3386,7 @@ export function SettingsPage() {
   const handleImportFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
     event.currentTarget.value = "";
-    if (!file) {
+    if (!file || !canMigrateSettings) {
       return;
     }
     setError("");
@@ -3480,6 +3532,7 @@ export function SettingsPage() {
                       importInputRef={importInputRef}
                       importFileName={importFileName}
                       importPreview={importPreview}
+                      canMigrate={canMigrateSettings}
                       exportBusy={exportSettingsMutation.isPending}
                       importPreviewBusy={previewImportMutation.isPending}
                       importCommitBusy={commitImportMutation.isPending}
@@ -3488,9 +3541,17 @@ export function SettingsPage() {
                         setSavedMessage("");
                         setExportConfirmOpen(true);
                       }}
-                      onChooseImportFile={() => importInputRef.current?.click()}
+                      onChooseImportFile={() => {
+                        if (canMigrateSettings) {
+                          importInputRef.current?.click();
+                        }
+                      }}
                       onImportFileChange={handleImportFileChange}
-                      onCommitImport={() => commitImportMutation.mutate()}
+                      onCommitImport={() => {
+                        if (canMigrateSettings) {
+                          commitImportMutation.mutate();
+                        }
+                      }}
                       onCancelImport={() => {
                         setImportPayload(null);
                         setImportPreview(null);
@@ -3511,6 +3572,7 @@ export function SettingsPage() {
                       <button
                         type="button"
                         onClick={() => navigate("/settings/global-templates")}
+                        disabled={!canManageGlobalTemplates}
                         className={SETTINGS_MAIN_ACTION_CLASS}
                       >
                         <Layers3 size={14} className="mr-2" />
@@ -3538,11 +3600,12 @@ export function SettingsPage() {
                         drawerOpen={providerDrawerOpen}
                         pending={providerProfilePending}
                         togglingProfileId={togglingProviderProfileId}
-                        resourceGroupDrafts={generationResourceGroupDrafts}
-                        resourceGroupPending={resourceGroupPending}
-                        archivingResourceGroupId={archivingGenerationResourceGroupId}
+                        canWrite={canWriteProviderSettings}
                         onProfileFormChange={setProviderProfileForm}
                         onOpenCreate={() => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           const next = providerDrawerCreateState();
                           setEditingProviderProfileId(next.editingProfileId);
                           setProviderProfileForm(next.form);
@@ -3551,6 +3614,9 @@ export function SettingsPage() {
                           setSavedMessage("");
                         }}
                         onEditProfile={(profile) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           const next = providerDrawerEditState(profile);
                           setEditingProviderProfileId(next.editingProfileId);
                           setProviderProfileForm(next.form);
@@ -3564,6 +3630,9 @@ export function SettingsPage() {
                           setProviderDrawerOpen(false);
                         }}
                         onSubmitProfile={() => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           setError("");
                           setSavedMessage("");
                           if (editingProviderProfileId) {
@@ -3573,23 +3642,45 @@ export function SettingsPage() {
                           createProviderProfileMutation.mutate();
                         }}
                         onDeleteProfile={(profile) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           setError("");
                           setSavedMessage("");
                           setPendingDeleteProviderProfile(profile);
                         }}
                         onToggleProfileEnabled={(profileId, enabled) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           updateProviderProfileEnabledMutation.mutate({ profileId, enabled });
                         }}
-                        onResourceGroupChange={(key, next) => {
+                      />
+                    ) : null}
+
+                    {activeSection === "resourceGroups" ? (
+                      <GenerationResourceGroupSection
+                        groups={providerConfigQuery.data?.generation_resource_groups ?? []}
+                        drafts={generationResourceGroupDrafts}
+                        pending={resourceGroupPending}
+                        archivingGroupId={archivingGenerationResourceGroupId}
+                        canWrite={canWriteProviderSettings}
+                        onChange={(key, next) => {
                           setGenerationResourceGroupDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
                         }}
-                        onSaveResourceGroup={(draft) => {
+                        onSave={(draft) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           setError("");
                           setSavedMessage("");
                           saveGenerationResourceGroupMutation.mutate(draft);
                         }}
-                        onArchiveResourceGroup={(groupId) => {
+                        onArchive={(groupId) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           archiveGenerationResourceGroupMutation.mutate(groupId);
                         }}
                       />
@@ -3602,23 +3693,33 @@ export function SettingsPage() {
                         drafts={generationConfigDrafts}
                         pending={providerPending}
                         archivingConfigId={archivingGenerationConfigId}
+                        canWrite={canWriteProviderSettings}
                         textTestState={textConfigTestState}
                         onChange={(key, next) => {
                           setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
                         }}
                         onSave={(draft) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           setError("");
                           setSavedMessage("");
                           saveGenerationConfigMutation.mutate(draft);
                         }}
                         onArchive={(configId) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           archiveGenerationConfigMutation.mutate(configId);
                         }}
                         onTextTestDraftChange={(draft) => {
                           setTextConfigTestState((current) => ({ ...current, draft }));
                         }}
                         onTestTextConfig={(draft) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           testTextGenerationConfigMutation.mutate({
                             key: generationConfigDraftKey(draft),
                             payload: textGenerationConfigTestPayload(draft, textConfigTestState.draft),
@@ -3637,16 +3738,23 @@ export function SettingsPage() {
                         drafts={generationConfigDrafts}
                         pending={providerPending}
                         archivingConfigId={archivingGenerationConfigId}
+                        canWrite={canWriteProviderSettings}
                         onChange={(key, next) => {
                           setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
                         }}
                         onSave={(draft) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           setError("");
                           setSavedMessage("");
                           saveGenerationConfigMutation.mutate(draft);
                         }}
                         onArchive={(configId) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
                           archiveGenerationConfigMutation.mutate(configId);
                         }}
                         onRefreshSort={() => {
@@ -3674,6 +3782,7 @@ export function SettingsPage() {
                                       value={drafts[item.key] ?? draftFromItem(item)}
                                       secretTouched={Boolean(secretTouched[item.key])}
                                       isResetting={resettingKey === item.key}
+                                      disabled={!canWriteRuntimeSettings}
                                       onChange={(nextValue, touchedSecret) => {
                                         setDrafts((current) => ({ ...current, [item.key]: nextValue }));
                                         setSavedMessage("");
@@ -3681,7 +3790,11 @@ export function SettingsPage() {
                                           setSecretTouched((current) => ({ ...current, [item.key]: true }));
                                         }
                                       }}
-                                      onReset={() => resetMutation.mutate(item.key)}
+                                      onReset={() => {
+                                        if (canWriteRuntimeSettings) {
+                                          resetMutation.mutate(item.key);
+                                        }
+                                      }}
                                     />
                                   ))}
                                 </div>
@@ -3697,6 +3810,7 @@ export function SettingsPage() {
                                   secretTouched={Boolean(secretTouched[item.key])}
                                   isResetting={resettingKey === item.key}
                                   layout="card"
+                                  disabled={!canWriteRuntimeSettings}
                                   onChange={(nextValue, touchedSecret) => {
                                     setDrafts((current) => ({ ...current, [item.key]: nextValue }));
                                     setSavedMessage("");
@@ -3704,7 +3818,11 @@ export function SettingsPage() {
                                       setSecretTouched((current) => ({ ...current, [item.key]: true }));
                                     }
                                   }}
-                                  onReset={() => resetMutation.mutate(item.key)}
+                                  onReset={() => {
+                                    if (canWriteRuntimeSettings) {
+                                      resetMutation.mutate(item.key);
+                                    }
+                                  }}
                                 />
                               ))}
                             </div>
@@ -3716,6 +3834,7 @@ export function SettingsPage() {
                                 value={drafts[item.key] ?? draftFromItem(item)}
                                 secretTouched={Boolean(secretTouched[item.key])}
                                 isResetting={resettingKey === item.key}
+                                disabled={!canWriteRuntimeSettings}
                                 onChange={(nextValue, touchedSecret) => {
                                   setDrafts((current) => ({ ...current, [item.key]: nextValue }));
                                   setSavedMessage("");
@@ -3723,7 +3842,11 @@ export function SettingsPage() {
                                     setSecretTouched((current) => ({ ...current, [item.key]: true }));
                                   }
                                 }}
-                                onReset={() => resetMutation.mutate(item.key)}
+                                onReset={() => {
+                                  if (canWriteRuntimeSettings) {
+                                    resetMutation.mutate(item.key);
+                                  }
+                                }}
                               />
                             ))
                           )
@@ -3736,13 +3859,14 @@ export function SettingsPage() {
                           <button
                             type="button"
                             onClick={() => resetDraftsFromConfig(configQuery.data)}
+                            disabled={!canWriteRuntimeSettings}
                             className="px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-slate-300 dark:hover:text-white"
                           >
                             {t("settings.discard")}
                           </button>
                           <button
                             type="submit"
-                            disabled={saveMutation.isPending}
+                            disabled={!canWriteRuntimeSettings || saveMutation.isPending}
                             className={SETTINGS_MAIN_ACTION_CLASS}
                           >
                             {saveMutation.isPending ? (
@@ -3786,7 +3910,7 @@ export function SettingsPage() {
           busy={deleteProviderProfileMutation.isPending}
           onClose={() => setPendingDeleteProviderProfile(null)}
           onConfirm={() => {
-            if (pendingDeleteProviderProfile) {
+            if (canWriteProviderSettings && pendingDeleteProviderProfile) {
               deleteProviderProfileMutation.mutate(pendingDeleteProviderProfile.id);
             }
           }}

@@ -8,7 +8,7 @@ import {
 } from "./galleryImages";
 
 const createdAt = "2026-04-26T00:00:00Z";
-const defaultResourceGroup = { id: "group-default", key: "default", name: "默认分组" };
+const defaultResourceGroup = { id: "group-default", key: "default", name: "default" };
 
 function sourceAsset(overrides: Partial<SourceAsset>): SourceAsset {
   return {
@@ -47,6 +47,8 @@ function poster(overrides: Partial<PosterVariant>): PosterVariant {
 function product(sourceAssets: SourceAsset[]): ProductDetail {
   return {
     id: "product-1",
+    resource_group_id: defaultResourceGroup.id,
+    resource_group: defaultResourceGroup,
     name: "测试商品",
     category: null,
     price: null,

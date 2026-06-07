@@ -61,6 +61,7 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
         "/api/products",
         data={
             "name": "文案入口商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "copy",
             "entry_text": "强调免安装、整洁收纳和家居场景适配。",
         },
@@ -88,6 +89,7 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
         "/api/products",
         data={
             "name": "尾巴入口商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "tail",
             "entry_text": "免安装、收纳整洁、细节材质、不同场景摆放。",
         },
@@ -112,7 +114,11 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
 
     blank_created = client.post(
         "/api/products",
-        data={"name": "空白入口灵感", "initial_workflow_entry": "blank"},
+        data={
+            "name": "空白入口灵感",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "initial_workflow_entry": "blank",
+        },
     )
     assert blank_created.status_code == 201
     blank_product_id = blank_created.json()["id"]
@@ -128,21 +134,33 @@ def test_product_creation_supports_copy_and_tail_entries_without_image(configure
 
     image_missing = client.post(
         "/api/products",
-        data={"name": "图片入口商品", "initial_workflow_entry": "image"},
+        data={
+            "name": "图片入口商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "initial_workflow_entry": "image",
+        },
     )
     assert image_missing.status_code == 400
     assert image_missing.json()["detail"] == "请先上传灵感图"
 
     copy_missing_text = client.post(
         "/api/products",
-        data={"name": "缺内容文案入口", "initial_workflow_entry": "copy"},
+        data={
+            "name": "缺内容文案入口",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "initial_workflow_entry": "copy",
+        },
     )
     assert copy_missing_text.status_code == 400
     assert copy_missing_text.json()["detail"] == "入口内容不能为空"
 
     tail_missing_text = client.post(
         "/api/products",
-        data={"name": "缺内容尾巴入口", "initial_workflow_entry": "tail"},
+        data={
+            "name": "缺内容尾巴入口",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "initial_workflow_entry": "tail",
+        },
     )
     assert tail_missing_text.status_code == 400
     assert tail_missing_text.json()["detail"] == "入口内容不能为空"
@@ -160,6 +178,7 @@ def test_tail_splitter_max_items_uses_runtime_config_limit(configured_env: Path)
         "/api/products",
         data={
             "name": "尾巴拆分上限商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "tail",
             "entry_text": "主打免安装、收纳整洁、细节材质、不同场景摆放。",
         },
@@ -248,6 +267,7 @@ def test_tail_splitter_run_persists_pending_plan_and_apply_selected_items(config
         "/api/products",
         data={
             "name": "尾巴拆分商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "tail",
             "entry_text": "主打免安装、收纳整洁、细节材质、不同场景摆放。",
         },

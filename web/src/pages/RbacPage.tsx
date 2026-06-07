@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   KeyRound,
@@ -21,9 +20,17 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { useI18n } from "../lib/preferences";
-import type { GenerationResourceGroup, RbacApiPermission, RbacPermissionCatalog, RbacRolePermissions, RbacUser } from "../lib/types";
+import type {
+  GenerationResourceGroup,
+  RbacApiPermission,
+  RbacPermissionCatalog,
+  RbacRolePermissions,
+  RbacUser,
+} from "../lib/types";
 
 const RBAC_USER_PAGE_SIZE = 20;
+
+type RbacSectionId = "users" | "roles";
 
 type PendingUserAction =
   | { kind: "reset-password"; user: RbacUser }
@@ -107,10 +114,24 @@ export function toggleApiPermissionDraft(
   };
 }
 
+export function rbacUserResourceGroupLabels(user: RbacUser, fallback: string): string[] {
+  if (!user.resource_groups.length) {
+    return [fallback];
+  }
+  return user.resource_groups.map((group) => group.name);
+}
+
+export function rbacUserListQueryKey(page: number, username: string, roleId: string) {
+  return ["rbac-users", page, username, roleId] as const;
+}
+
+type RbacUserListQueryKey = ReturnType<typeof rbacUserListQueryKey>;
+
 export function RbacPage() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [activeSection, setActiveSection] = useState<RbacSectionId>("users");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [roleId, setRoleId] = useState("");
@@ -118,7 +139,6 @@ export function RbacPage() {
   const [roleName, setRoleName] = useState("");
   const [selectedPermissionRoleId, setSelectedPermissionRoleId] = useState("");
   const [rolePermissionDraft, setRolePermissionDraft] = useState<RolePermissionDraft | null>(null);
-  const [rolesCollapsed, setRolesCollapsed] = useState(false);
   const [roleSearch, setRoleSearch] = useState("");
   const [userSearchDraft, setUserSearchDraft] = useState("");
   const [userSearch, setUserSearch] = useState("");
@@ -129,9 +149,18 @@ export function RbacPage() {
   const [resourceGroupGrantDraft, setResourceGroupGrantDraft] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const userListQueryKey = useMemo(
+    () => rbacUserListQueryKey(userPage, userSearch, userRoleFilter),
+    [userPage, userSearch, userRoleFilter],
+  );
+  const currentUserListQueryKey = useRef<RbacUserListQueryKey>(userListQueryKey);
+
+  useEffect(() => {
+    currentUserListQueryKey.current = userListQueryKey;
+  }, [userListQueryKey]);
 
   const usersQuery = useQuery({
-    queryKey: ["rbac-users", userPage, userSearch, userRoleFilter],
+    queryKey: userListQueryKey,
     queryFn: () =>
       api.listRbacUsers({
         page: userPage,
@@ -192,6 +221,10 @@ export function RbacPage() {
     queryFn: () => api.getUserGenerationResourceGroupGrants(resourceGroupGrantUser!.id),
     enabled: Boolean(resourceGroupGrantUser && !resourceGroupGrantUser.is_admin),
   });
+
+  const refreshCurrentUserList = async () => {
+    await queryClient.invalidateQueries({ queryKey: currentUserListQueryKey.current, exact: true });
+  };
 
   useEffect(() => {
     if (!filteredRoles.length) {
@@ -263,8 +296,7 @@ export function RbacPage() {
       setDisplayName("");
       setMessage(t("rbac.userCreated"));
       setError("");
-      await queryClient.invalidateQueries({ queryKey: ["rbac-users"] });
-      await queryClient.invalidateQueries({ queryKey: ["rbac-roles"] });
+      await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
     onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.createUserFailed"))),
   });
@@ -288,8 +320,7 @@ export function RbacPage() {
       setPendingUserAction(null);
       setMessage(t("rbac.passwordReset"));
       setError("");
-      await queryClient.invalidateQueries({ queryKey: ["rbac-users"] });
-      await queryClient.invalidateQueries({ queryKey: ["rbac-roles"] });
+      await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
     onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.resetPasswordFailed"))),
   });
@@ -301,8 +332,7 @@ export function RbacPage() {
       setPendingUserAction(null);
       setMessage(t("rbac.userUpdated"));
       setError("");
-      await queryClient.invalidateQueries({ queryKey: ["rbac-users"] });
-      await queryClient.invalidateQueries({ queryKey: ["rbac-roles"] });
+      await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
     onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.updateUserFailed"))),
   });
@@ -331,7 +361,10 @@ export function RbacPage() {
       setResourceGroupGrantDraft([...payload.resource_group_ids]);
       setMessage(t("rbac.resourceGroupsSaved"));
       setError("");
-      await queryClient.invalidateQueries({ queryKey: ["rbac-user-generation-resource-groups", payload.user_id] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rbac-user-generation-resource-groups", payload.user_id] }),
+        refreshCurrentUserList(),
+      ]);
     },
     onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.saveResourceGroupsFailed"))),
   });
@@ -442,6 +475,32 @@ export function RbacPage() {
           </div>
         ) : null}
 
+        <div
+          className="inline-flex w-full gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:w-fit"
+          role="tablist"
+          aria-label={t("rbac.title")}
+        >
+          {(["users", "roles"] as const).map((section) => {
+            const active = activeSection === section;
+            return (
+              <button
+                key={section}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveSection(section)}
+                className={`inline-flex h-9 flex-1 items-center justify-center rounded-md px-4 text-sm font-semibold transition-colors sm:flex-none ${
+                  active
+                    ? "bg-slate-950 text-white shadow-sm dark:bg-violet-500"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+                }`}
+              >
+                {section === "users" ? t("rbac.userManagement") : t("rbac.roleManagement")}
+              </button>
+            );
+          })}
+        </div>
+
         {loading ? (
           <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-8 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
             <Loader2 size={16} className="animate-spin" />
@@ -453,8 +512,8 @@ export function RbacPage() {
           </div>
         ) : (
           <>
-            <section className="grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
-              <div className="pf-panel p-4">
+            {activeSection === "users" ? (
+              <section className="pf-panel p-4">
                 <div className="mb-4 flex items-center gap-2">
                   <UserPlus size={18} className="text-slate-500 dark:text-slate-400" />
                   <h2 className="text-sm font-semibold">{t("rbac.createUser")}</h2>
@@ -492,67 +551,46 @@ export function RbacPage() {
                     <span className="ml-1.5">{t("rbac.add")}</span>
                   </button>
                 </form>
-              </div>
-
-              <div className="pf-panel p-4">
-                <div className="mb-4 flex items-center gap-2">
-                  <ShieldCheck size={18} className="text-slate-500 dark:text-slate-400" />
-                  <h2 className="text-sm font-semibold">{t("rbac.createRole")}</h2>
-                </div>
-                <form className="grid gap-3" onSubmit={handleCreateRole}>
-                  <input
-                    value={roleCode}
-                    onChange={(event) => setRoleCode(event.target.value)}
-                    placeholder={t("rbac.roleCode")}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
-                  />
-                  <input
-                    value={roleName}
-                    onChange={(event) => setRoleName(event.target.value)}
-                    placeholder={t("rbac.roleName")}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
-                  />
-                  <button
-                    type="submit"
-                    disabled={createRoleMutation.isPending}
-                    className="inline-flex items-center justify-center rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold transition-colors hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:hover:bg-slate-900"
-                  >
-                    {createRoleMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-                    <span className="ml-1.5">{t("rbac.add")}</span>
-                  </button>
-                </form>
-              </div>
-            </section>
-
-            <section className="pf-panel p-4">
-              <div className="mb-4 flex items-center justify-between gap-2">
-                <h2 className="min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => setRolesCollapsed((current) => !current)}
-                    aria-expanded={!rolesCollapsed}
-                    aria-controls="rbac-role-management-content"
-                    aria-label={rolesCollapsed ? t("rbac.expandRoles") : t("rbac.collapseRoles")}
-                    title={rolesCollapsed ? t("rbac.expandRoles") : t("rbac.collapseRoles")}
-                    className="inline-flex min-w-0 items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-900"
-                  >
-                    <ChevronDown
-                      size={15}
-                      className={`shrink-0 text-slate-500 transition-transform dark:text-slate-400 ${
-                        rolesCollapsed ? "-rotate-90" : ""
-                      }`}
-                      aria-hidden="true"
+              </section>
+            ) : null}
+            {activeSection === "roles" ? (
+              <>
+                <section className="pf-panel p-4">
+                  <div className="mb-4 flex items-center gap-2">
+                    <ShieldCheck size={18} className="text-slate-500 dark:text-slate-400" />
+                    <h2 className="text-sm font-semibold">{t("rbac.createRole")}</h2>
+                  </div>
+                  <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]" onSubmit={handleCreateRole}>
+                    <input
+                      value={roleCode}
+                      onChange={(event) => setRoleCode(event.target.value)}
+                      placeholder={t("rbac.roleCode")}
+                      className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
                     />
-                    <span className="truncate text-sm font-semibold">{t("rbac.roleManagement")}</span>
-                  </button>
-                </h2>
-                <span className="text-xs text-slate-500 dark:text-slate-400">{roles.length}</span>
-              </div>
+                    <input
+                      value={roleName}
+                      onChange={(event) => setRoleName(event.target.value)}
+                      placeholder={t("rbac.roleName")}
+                      className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                    />
+                    <button
+                      type="submit"
+                      disabled={createRoleMutation.isPending}
+                      className="inline-flex items-center justify-center rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold transition-colors hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:hover:bg-slate-900"
+                    >
+                      {createRoleMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+                      <span className="ml-1.5">{t("rbac.add")}</span>
+                    </button>
+                  </form>
+                </section>
 
-              <div
-                id="rbac-role-management-content"
-                className={rolesCollapsed ? "hidden" : "grid gap-4 lg:grid-cols-[280px_1fr]"}
-              >
+                <section className="pf-panel p-4">
+                  <div className="mb-4 flex items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold">{t("rbac.roleManagement")}</h2>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{roles.length}</span>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
                 <div className="space-y-3">
                   <label className="relative block">
                     <span className="sr-only">{t("rbac.roleSearch")}</span>
@@ -740,7 +778,11 @@ export function RbacPage() {
               </div>
               </div>
             </section>
+              </>
+            ) : null}
 
+            {activeSection === "users" ? (
+              <>
             {resourceGroupGrantUser ? (
               <section className="pf-panel p-4">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -892,12 +934,13 @@ export function RbacPage() {
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
                   <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
-                    <tr>
-                      <th className="px-4 py-3">{t("rbac.username")}</th>
-                      <th className="px-4 py-3">{t("rbac.role")}</th>
-                      <th className="px-4 py-3">{t("rbac.status")}</th>
-                      <th className="px-4 py-3 text-right">{t("products.table.actions")}</th>
-                    </tr>
+	                    <tr>
+	                      <th className="px-4 py-3">{t("rbac.username")}</th>
+	                      <th className="px-4 py-3">{t("rbac.role")}</th>
+	                      <th className="px-4 py-3">{t("rbac.resourceGroups")}</th>
+	                      <th className="px-4 py-3">{t("rbac.status")}</th>
+	                      <th className="px-4 py-3 text-right">{t("products.table.actions")}</th>
+	                    </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {users.length ? (
@@ -923,11 +966,27 @@ export function RbacPage() {
                                 ) : null}
                               </div>
                               <div className="text-xs text-slate-500 dark:text-slate-400">{user.username}</div>
-                            </td>
-                            <td className="px-4 py-3">{user.role_name}</td>
-                            <td className="px-4 py-3">
-                              <span className={rbacUserStatusBadgeClassName(user)}>
-                                {disabled ? <Power size={12} aria-hidden="true" /> : null}
+	                            </td>
+	                            <td className="px-4 py-3">{user.role_name}</td>
+	                            <td className="px-4 py-3">
+	                              <div className="flex max-w-md flex-wrap gap-1.5">
+	                                {rbacUserResourceGroupLabels(user, t("rbac.noGrantedResourceGroups")).map((label) => (
+	                                  <span
+	                                    key={label}
+	                                    className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+	                                      user.resource_groups.length
+	                                        ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/10 dark:text-violet-100"
+	                                        : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400"
+	                                    }`}
+	                                  >
+	                                    {label}
+	                                  </span>
+	                                ))}
+	                              </div>
+	                            </td>
+	                            <td className="px-4 py-3">
+	                              <span className={rbacUserStatusBadgeClassName(user)}>
+	                                {disabled ? <Power size={12} aria-hidden="true" /> : null}
                                 {statusLabel}
                               </span>
                             </td>
@@ -978,12 +1037,12 @@ export function RbacPage() {
                           </tr>
                         );
                       })
-                    ) : (
-                      <tr>
-                        <td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
-                          {usersQuery.isFetching ? t("app.loading") : t("rbac.noMatchingUsers")}
-                        </td>
-                      </tr>
+	                    ) : (
+	                      <tr>
+	                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+	                          {usersQuery.isFetching ? t("app.loading") : t("rbac.noMatchingUsers")}
+	                        </td>
+	                      </tr>
                     )}
                   </tbody>
                 </table>
@@ -1004,6 +1063,8 @@ export function RbacPage() {
                 />
               </div>
             </section>
+	          </>
+	        ) : null}
           </>
         )}
       </main>

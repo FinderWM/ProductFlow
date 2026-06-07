@@ -11,6 +11,7 @@ from productflow_backend.application.auth import ensure_auth_bootstrapped
 from productflow_backend.application.canvas_templates import get_builtin_canvas_template
 from productflow_backend.domain.errors import BusinessValidationError
 from productflow_backend.domain.rbac import ADMIN_USER_ID
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
 
 
 def _password_md5(value: str) -> str:
@@ -23,6 +24,11 @@ def _create_user_client(app, admin_client: TestClient, username: str) -> TestCli
         json={"username": username, "display_name": username.title()},
     )
     assert created_user.status_code == 201
+    grant = admin_client.put(
+        f"/api/rbac/users/{created_user.json()['id']}/generation-resource-groups",
+        json={"resource_group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID]},
+    )
+    assert grant.status_code == 200
 
     client = TestClient(app)
     password_md5 = _password_md5(f"{username}-password")
@@ -37,7 +43,7 @@ def _create_user_client(app, admin_client: TestClient, username: str) -> TestCli
 def _create_product(client: TestClient, name: str) -> dict:
     created = client.post(
         "/api/products",
-        data={"name": name},
+        data={"name": name, "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": (f"{name}.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201

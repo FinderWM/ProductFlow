@@ -45,16 +45,30 @@ export function GalleryPage() {
   const [isDesktopGrid, setIsDesktopGrid] = useState(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
 
-  const galleryQuery = useQuery({
-    queryKey: ["gallery", selectedResourceGroupId || "all"],
-    queryFn: () => api.listGalleryEntries({ resource_group_id: selectedResourceGroupId || null }),
-  });
   const resourceGroupsQuery = useQuery({
     queryKey: ["my-generation-resource-groups"],
     queryFn: api.listMyGenerationResourceGroups,
   });
-  const entries = galleryQuery.data?.items ?? [];
   const resourceGroups = resourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [];
+  const galleryQuery = useQuery({
+    queryKey: ["gallery", selectedResourceGroupId],
+    queryFn: () => api.listGalleryEntries({ resource_group_id: selectedResourceGroupId }),
+    enabled: Boolean(selectedResourceGroupId),
+  });
+  const entries = galleryQuery.data?.items ?? [];
+
+  useEffect(() => {
+    if (!resourceGroups.length) {
+      if (selectedResourceGroupId) {
+        setSelectedResourceGroupId("");
+      }
+      return;
+    }
+    if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
+      setSelectedResourceGroupId(resourceGroups[0].id);
+    }
+  }, [resourceGroups, selectedResourceGroupId]);
+
   const resourceGroupFilter = (
     <label className="block min-w-[220px]">
       <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -63,7 +77,11 @@ export function GalleryPage() {
       <SelectField
         value={selectedResourceGroupId}
         options={[
-          { value: "", label: t("gallery.allResourceGroups") },
+          {
+            value: "",
+            label: resourceGroups.length ? t("gallery.selectResourceGroup") : t("gallery.noResourceGroups"),
+            disabled: true,
+          },
           ...resourceGroups.map((group) => ({ value: group.id, label: group.name })),
         ]}
         onChange={setSelectedResourceGroupId}

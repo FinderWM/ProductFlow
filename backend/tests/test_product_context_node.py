@@ -7,6 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login, _make_demo_image_bytes, _wait_for_workflow_run
 
+from productflow_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
+
 
 @pytest.fixture(autouse=True)
 def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,7 +71,7 @@ def test_product_context_document_upload_validates_text_documents(configured_env
 
     created = client.post(
         "/api/products",
-        data={"name": "露营灯"},
+        data={"name": "露营灯", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("lamp.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -119,6 +121,7 @@ def test_product_create_initializes_rich_product_context(configured_env: Path) -
         "/api/products",
         data={
             "name": "三阶魔方",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "category": "益智玩具",
             "price": "39.90",
             "initial_workflow_entry": "copy",
@@ -178,7 +181,7 @@ def test_product_create_initializes_rich_product_context(configured_env: Path) -
     }
     assert copy_node["config_json"]["source_note"] == long_text
 
-    listed = client.get("/api/products")
+    listed = client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert listed.status_code == 200
     item = next(item for item in listed.json()["items"] if item["id"] == product_id)
     assert item["initial_workflow_entry"] == "copy"
@@ -216,6 +219,7 @@ def test_product_create_accepts_markdown_long_text_over_legacy_limit(configured_
         "/api/products",
         data={
             "name": "长 Markdown 魔方",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "copy",
             "long_text": long_text,
         },
@@ -242,6 +246,7 @@ def test_product_create_rejects_markdown_long_text_over_limit(configured_env: Pa
         "/api/products",
         data={
             "name": "过长 Markdown",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "copy",
             "long_text": "x" * (PRODUCT_CONTEXT_MARKDOWN_TEXT_MAX_LENGTH + 1),
         },
@@ -262,6 +267,7 @@ def test_product_create_rejects_invalid_dynamic_fields_json(configured_env: Path
         "/api/products",
         data={
             "name": "动态字段坏 JSON",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "blank",
             "dynamic_fields_json": "{bad",
         },
@@ -273,6 +279,7 @@ def test_product_create_rejects_invalid_dynamic_fields_json(configured_env: Path
         "/api/products",
         data={
             "name": "动态字段非对象",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "blank",
             "dynamic_fields_json": "[1, 2]",
         },
@@ -290,7 +297,7 @@ def test_product_context_fields_flow_to_downstream_image_node(configured_env: Pa
 
     created = client.post(
         "/api/products",
-        data={"name": "折叠露营灯"},
+        data={"name": "折叠露营灯", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("lamp.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201

@@ -46,7 +46,7 @@ PROVIDER_CAPABILITIES = {
 UNSET_PROVIDER_FIELD = object()
 DEFAULT_GENERATION_CONFIG_PRIORITY = 100
 DEFAULT_GENERATION_CONFIG_MAX_CONCURRENCY = 1
-DEFAULT_GENERATION_RESOURCE_GROUP_NAME = "默认分组"
+DEFAULT_GENERATION_RESOURCE_GROUP_NAME = "default"
 RESOURCE_GROUP_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]{1,79}$")
 
 
@@ -322,8 +322,6 @@ def add_generation_resource_group(
 ) -> GenerationResourceGroup:
     _ensure_default_generation_resource_group(session)
     normalized_key = _normalize_resource_group_key(key)
-    if normalized_key == DEFAULT_GENERATION_RESOURCE_GROUP_KEY:
-        raise ValueError("default 是系统内置分组")
     if session.scalar(select(GenerationResourceGroup.id).where(GenerationResourceGroup.key == normalized_key)):
         raise ValueError("分组 key 已存在")
     group = GenerationResourceGroup(
@@ -355,11 +353,7 @@ def update_generation_resource_group(
 ) -> GenerationResourceGroup:
     group = require_generation_resource_group(session, resource_group_id)
     if key is not None:
-        if group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
-            raise ValueError("内置 default 分组不能修改 key")
         normalized_key = _normalize_resource_group_key(key)
-        if normalized_key == DEFAULT_GENERATION_RESOURCE_GROUP_KEY:
-            raise ValueError("default 是系统内置分组")
         existing_id = session.scalar(
             select(GenerationResourceGroup.id).where(
                 GenerationResourceGroup.key == normalized_key,
@@ -376,8 +370,6 @@ def update_generation_resource_group(
     if sort_order is not None:
         group.sort_order = int(sort_order)
     if enabled is not None:
-        if group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID and not enabled:
-            raise ValueError("内置 default 分组不能停用")
         group.enabled = enabled
     if commit:
         session.commit()
@@ -389,8 +381,6 @@ def update_generation_resource_group(
 
 def archive_generation_resource_group(session: Session, resource_group_id: str) -> GenerationResourceGroup:
     group = require_generation_resource_group(session, resource_group_id)
-    if group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID or group.key == DEFAULT_GENERATION_RESOURCE_GROUP_KEY:
-        raise ValueError("内置 default 分组不能归档")
     active_config_id = session.scalar(
         select(GenerationConfig.id).where(
             GenerationConfig.resource_group_id == group.id,
@@ -413,7 +403,7 @@ def require_generation_resource_group(
     require_enabled: bool = False,
 ) -> GenerationResourceGroup:
     group_id = _normalize_resource_group_id(resource_group_id)
-    if group_id is None:
+    if group_id is None or group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
         group = _ensure_default_generation_resource_group(session)
     else:
         group = session.get(GenerationResourceGroup, group_id)
@@ -1333,18 +1323,16 @@ def _ensure_default_generation_resource_group(session: Session) -> GenerationRes
             id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             key=DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
             name=DEFAULT_GENERATION_RESOURCE_GROUP_NAME,
-            description="系统内置默认供应商生成能力分组",
+            description="default 供应商生成能力分组",
             sort_order=0,
             enabled=True,
         )
         session.add(group)
         session.flush()
         return group
-    group.key = DEFAULT_GENERATION_RESOURCE_GROUP_KEY
-    group.name = group.name or DEFAULT_GENERATION_RESOURCE_GROUP_NAME
-    group.sort_order = min(int(group.sort_order or 0), 0)
-    group.enabled = True
-    group.archived_at = None
+    group.name = DEFAULT_GENERATION_RESOURCE_GROUP_NAME if group.name in {"", "默认分组"} else group.name
+    if group.description == "系统内置默认供应商生成能力分组":
+        group.description = "default 供应商生成能力分组"
     session.flush()
     return group
 

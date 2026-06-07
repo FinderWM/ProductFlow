@@ -612,7 +612,7 @@ def test_product_workflow_copy_run_normalizes_provider_scalar_lists(configured_e
 
     created = client.post(
         "/api/products",
-        data={"name": "手机摄影支架"},
+        data={"name": "手机摄影支架", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("tripod.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -707,7 +707,7 @@ def test_product_workflow_copy_run_retries_provider_payload_contract_mismatch(
 
     created = client.post(
         "/api/products",
-        data={"name": "折叠置物架"},
+        data={"name": "折叠置物架", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("shelf.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201
@@ -823,7 +823,7 @@ def test_image_generation_without_copy_link_uses_image_edit_prompt_mode(
 
     created = client.post(
         "/api/products",
-        data={"name": "露营杯"},
+        data={"name": "露营杯", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
         files={"image": ("cup.png", _make_demo_image_bytes(), "image/png")},
     )
     assert created.status_code == 201

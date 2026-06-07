@@ -210,7 +210,8 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  listProducts(input?: {
+  listProducts(input: {
+    resource_group_id: string;
     page?: number;
     page_size?: number;
     title?: string;
@@ -219,19 +220,20 @@ export const api = {
     owner_user_id?: string;
   }): Promise<ProductListResponse> {
     const params = new URLSearchParams({
-      page: String(input?.page ?? 1),
-      page_size: String(input?.page_size ?? 20),
+      resource_group_id: input.resource_group_id,
+      page: String(input.page ?? 1),
+      page_size: String(input.page_size ?? 20),
     });
-    if (input?.title) {
+    if (input.title) {
       params.set("title", input.title);
     }
-    if (input?.updated_from) {
+    if (input.updated_from) {
       params.set("updated_from", input.updated_from);
     }
-    if (input?.updated_to) {
+    if (input.updated_to) {
       params.set("updated_to", input.updated_to);
     }
-    if (input?.owner_user_id) {
+    if (input.owner_user_id) {
       params.set("owner_user_id", input.owner_user_id);
     }
     return request(`/api/products?${params.toString()}`);
@@ -400,6 +402,7 @@ export const api = {
   async createProduct(input: CreateProductInput): Promise<ProductDetail> {
     const formData = new FormData();
     formData.set("name", input.name);
+    formData.set("resource_group_id", input.resource_group_id);
     if (input.file) {
       formData.set("image", input.file);
     }
@@ -550,13 +553,9 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
-  listGalleryEntries(input?: { resource_group_id?: string | null }): Promise<GalleryEntryListResponse> {
-    const params = new URLSearchParams();
-    if (input?.resource_group_id) {
-      params.set("resource_group_id", input.resource_group_id);
-    }
-    const suffix = params.size ? `?${params.toString()}` : "";
-    return request(`/api/gallery${suffix}`);
+  listGalleryEntries(input: { resource_group_id: string }): Promise<GalleryEntryListResponse> {
+    const params = new URLSearchParams({ resource_group_id: input.resource_group_id });
+    return request(`/api/gallery?${params.toString()}`);
   },
   saveGalleryEntry(imageSessionAssetId: string): Promise<GalleryEntry> {
     return request("/api/gallery", {

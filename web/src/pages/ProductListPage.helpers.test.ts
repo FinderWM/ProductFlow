@@ -4,12 +4,15 @@ import type { ProductSummary } from "../lib/types";
 import { productKeyInfo, productMainThumbnailUrl, productStartImageThumbnailUrl } from "./ProductListPage.helpers";
 
 const createdAt = "2026-06-03T00:00:00Z";
+const defaultResourceGroup = { id: "group-default", key: "default", name: "default" };
 
 function product(overrides: Partial<ProductSummary>): ProductSummary {
   return {
     id: "product-1",
     owner_user_id: "user-1",
     owner_username: "libow",
+    resource_group_id: defaultResourceGroup.id,
+    resource_group: defaultResourceGroup,
     name: "测试灵感",
     category: null,
     price: null,

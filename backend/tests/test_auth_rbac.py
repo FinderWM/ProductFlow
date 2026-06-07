@@ -44,6 +44,11 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     )
     assert created_user.status_code == 201
     assert created_user.json()["password_pending"] is True
+    grant = admin_client.put(
+        f"/api/rbac/users/{created_user.json()['id']}/generation-resource-groups",
+        json={"resource_group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID]},
+    )
+    assert grant.status_code == 200
 
     user_client = TestClient(app)
     password_md5 = _password_md5("alice-password")
@@ -70,7 +75,7 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     assert "settings:migrate" not in payload["api_permissions"]
     assert "rbac:manage" not in payload["api_permissions"]
 
-    products = user_client.get("/api/products")
+    products = user_client.get("/api/products", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert products.status_code == 200
 
     status_page_data = user_client.get("/api/settings/generation-config-status")
@@ -122,7 +127,22 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
         json={"username": "campaign-user", "display_name": "Campaign User"},
     )
     assert created_user.status_code == 201
+    assert created_user.json()["resource_groups"] == []
     user_id = created_user.json()["id"]
+
+    admin_user_page = admin_client.get("/api/rbac/users", params={"username": "libow", "page": 1, "page_size": 10})
+    assert admin_user_page.status_code == 200
+    admin_user = next(item for item in admin_user_page.json()["items"] if item["is_admin"])
+    assert DEFAULT_GENERATION_RESOURCE_GROUP_ID in {group["id"] for group in admin_user["resource_groups"]}
+    assert group_id in {group["id"] for group in admin_user["resource_groups"]}
+
+    regular_user_page = admin_client.get(
+        "/api/rbac/users",
+        params={"username": "campaign-user", "page": 1, "page_size": 10},
+    )
+    assert regular_user_page.status_code == 200
+    regular_user = regular_user_page.json()["items"][0]
+    assert regular_user["resource_groups"] == []
 
     user_client = TestClient(app)
     password_md5 = _password_md5("campaign-password")
@@ -146,6 +166,14 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
     after_grant = user_client.get("/api/settings/my-generation-resource-groups")
     assert after_grant.status_code == 200
     assert [group["id"] for group in after_grant.json()] == [group_id]
+
+    granted_user_page = admin_client.get(
+        "/api/rbac/users",
+        params={"username": "campaign-user", "page": 1, "page_size": 10},
+    )
+    assert granted_user_page.status_code == 200
+    granted_user = granted_user_page.json()["items"][0]
+    assert granted_user["resource_groups"] == [{"id": group_id, "key": "campaign", "name": "活动分组"}]
 
 
 def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Path) -> None:
@@ -345,6 +373,29 @@ def test_settings_provider_write_permission_is_separate_from_runtime_write(confi
     )
     assert created_profile.status_code == 200
 
+    created_group = user_client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "provider_ops_group", "name": "供应商运维分组", "sort_order": 30, "enabled": True},
+    )
+    assert created_group.status_code == 200
+    group_id = created_group.json()["id"]
+
+    created_generation_config = user_client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_id": group_id,
+            "name": "供应商运维文案配置",
+            "purpose": "text",
+            "provider_kind": "mock",
+            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+            "config": {},
+            "priority": 50,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert created_generation_config.status_code == 200
+
     update_runtime = user_client.patch("/api/settings", json={"values": {"deletion_enabled": True}})
     assert update_runtime.status_code == 403
     assert update_runtime.json()["detail"] == "没有接口权限"
@@ -482,6 +533,7 @@ def test_tail_workflow_endpoints_follow_generate_and_write_permissions(
         "/api/products",
         data={
             "name": "Tail RBAC 商品",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "initial_workflow_entry": "tail",
             "entry_text": "免安装、收纳整洁、细节材质、不同场景摆放。",
         },

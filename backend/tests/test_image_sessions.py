@@ -2485,7 +2485,12 @@ def test_image_session_result_can_write_back_to_product(configured_env: Path) ->
 
     create_product_response = client.post(
         "/api/products",
-        data={"name": "护手霜", "category": "个护", "price": "59.00"},
+        data={
+            "name": "护手霜",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "category": "个护",
+            "price": "59.00",
+        },
         files={"image": ("cream.png", _make_demo_image_bytes(), "image/png")},
     )
     assert create_product_response.status_code == 201

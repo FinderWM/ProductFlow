@@ -44,6 +44,14 @@ Known contract:
 - `/api/rbac/*` is admin governance. Frontend `/rbac` access requires `is_admin && rbac:manage`; the `rbac` menu is navigation metadata and must not be the only gate.
 - Settings page access requires `settings` menu plus `settings:read`.
 - Global template management uses `templates:manage_global`, even when reached through settings-owned navigation.
+- Settings runtime writes use `settings:write`: `PATCH /api/settings` only. Frontend runtime sections such as prompts,
+  upload, queue, and security must disable field edits, reset buttons, and save submission without this permission.
+- Settings provider/generation writes use `settings:provider_write`: provider profiles, provider bindings,
+  generation resource groups, generation configs, and text generation config tests. Frontend settings subsections
+  `providers`, `resourceGroups`, `text`, and `image` must use this permission for page-level action buttons and local
+  submit guards.
+- Settings import uses `settings:migrate`: `/api/settings/import/preview` and `/api/settings/import`. Settings export is
+  read-only and stays on `settings:read`.
 
 When adding an API permission, update all of these together:
 

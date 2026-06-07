@@ -83,10 +83,12 @@ GENERATION_RESOURCE_GROUP_NODE_TYPES = frozenset(
 def _default_generation_resource_group_config(
     node_type: WorkflowNodeType,
     config_json: dict[str, Any] | None,
+    *,
+    resource_group_id: str | None,
 ) -> dict[str, Any]:
     config = dict(config_json or {})
     if node_type in GENERATION_RESOURCE_GROUP_NODE_TYPES:
-        config.setdefault("resource_group_id", DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+        config.setdefault("resource_group_id", resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID)
     return config
 
 
@@ -350,7 +352,12 @@ def create_workflow_node(
             _product_context_runtime_config(workflow, config_json)
             if node_type == WorkflowNodeType.PRODUCT_CONTEXT
             else normalize_workflow_node_config(
-                node_type, _default_generation_resource_group_config(node_type, config_json)
+                node_type,
+                _default_generation_resource_group_config(
+                    node_type,
+                    config_json,
+                    resource_group_id=workflow.product.resource_group_id,
+                ),
             )
         ),
     )
@@ -436,6 +443,7 @@ def materialize_node_group_template_to_workflow(
         position_y_offset=position_y_offset,
         existing_nodes_by_template_key=existing_nodes_by_template_key,
         external_source_nodes_by_template_source=external_source_nodes,
+        resource_group_id=workflow.product.resource_group_id,
     )
     workflow.updated_at = now_utc()
     session.flush()

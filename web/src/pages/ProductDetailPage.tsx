@@ -349,15 +349,6 @@ export function ProductDetailPage() {
     }
   }, [productGenerateBlocked, productGenerateBlockedTitle, t]);
 
-  const historyQuery = useQuery({
-    queryKey: ["product-history", productId, selectedHistoryResourceGroupId || "all"],
-    queryFn: () =>
-      api.getProductHistory(productId, {
-        resource_group_id: selectedHistoryResourceGroupId || null,
-      }),
-    enabled: Boolean(productId),
-  });
-
   const workflowQuery = useQuery({
     queryKey: ["product-workflow", productId],
     queryFn: () => api.getProductWorkflow(productId),
@@ -424,6 +415,26 @@ export function ProductDetailPage() {
     () => generationResourceGroupsQuery.data ?? [],
     [generationResourceGroupsQuery.data],
   );
+  useEffect(() => {
+    if (!workflowResourceGroups.length) {
+      if (selectedHistoryResourceGroupId) {
+        setSelectedHistoryResourceGroupId("");
+      }
+      return;
+    }
+    if (!selectedHistoryResourceGroupId || !workflowResourceGroups.some((group) => group.id === selectedHistoryResourceGroupId)) {
+      setSelectedHistoryResourceGroupId(workflowResourceGroups[0].id);
+    }
+  }, [selectedHistoryResourceGroupId, workflowResourceGroups]);
+
+  const historyQuery = useQuery({
+    queryKey: ["product-history", productId, selectedHistoryResourceGroupId],
+    queryFn: () =>
+      api.getProductHistory(productId, {
+        resource_group_id: selectedHistoryResourceGroupId,
+      }),
+    enabled: Boolean(productId && selectedHistoryResourceGroupId),
+  });
 
   const selectedNode = selectedNodeId
     ? workflow?.nodes.find((node) => node.id === selectedNodeId) ?? null
