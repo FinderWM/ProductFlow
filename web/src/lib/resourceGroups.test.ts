@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GenerationResourceGroup } from "./types";
 import {
-  activeGenerationResourceGroupsByPriority,
+  activeGenerationResourceGroupsInApiOrder,
   firstActiveGenerationResourceGroupId,
 } from "./resourceGroups";
 
@@ -22,8 +22,8 @@ function group(overrides: Partial<GenerationResourceGroup>): GenerationResourceG
 }
 
 describe("resource group selection helpers", () => {
-  it("sorts usable groups by descending priority and filters unavailable groups", () => {
-    const sorted = activeGenerationResourceGroupsByPriority([
+  it("filters unavailable groups while preserving API order", () => {
+    const filtered = activeGenerationResourceGroupsInApiOrder([
       group({ id: "default", name: "default", sort_order: 0 }),
       group({ id: "disabled", name: "Disabled", sort_order: 300, enabled: false }),
       group({ id: "archived", name: "Archived", sort_order: 300, archived_at: "2026-06-02T00:00:00Z" }),
@@ -32,14 +32,14 @@ describe("resource group selection helpers", () => {
       group({ id: "campaign", name: "Campaign", sort_order: 100 }),
     ]);
 
-    expect(sorted.map((item) => item.id)).toEqual(["premium-earlier", "premium-later", "campaign", "default"]);
+    expect(filtered.map((item) => item.id)).toEqual(["default", "premium-later", "premium-earlier", "campaign"]);
   });
 
-  it("selects the first concrete group after priority sorting", () => {
+  it("selects the first concrete group from API order", () => {
     expect(
       firstActiveGenerationResourceGroupId([
-        group({ id: "default", sort_order: 0 }),
         group({ id: "campaign", sort_order: 100 }),
+        group({ id: "default", sort_order: 0 }),
       ]),
     ).toBe("campaign");
     expect(firstActiveGenerationResourceGroupId([])).toBe("");

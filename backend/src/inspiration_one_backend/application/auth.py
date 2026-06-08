@@ -550,7 +550,7 @@ def list_available_generation_resource_groups_for_user(
                     GenerationResourceGroup.archived_at.is_(None),
                 )
                 .order_by(
-                    GenerationResourceGroup.sort_order,
+                    GenerationResourceGroup.sort_order.desc(),
                     GenerationResourceGroup.created_at,
                     GenerationResourceGroup.name,
                 )
@@ -569,7 +569,7 @@ def list_available_generation_resource_groups_for_user(
                 GenerationResourceGroup.archived_at.is_(None),
             )
             .order_by(
-                GenerationResourceGroup.sort_order,
+                GenerationResourceGroup.sort_order.desc(),
                 GenerationResourceGroup.created_at,
                 GenerationResourceGroup.name,
             )
@@ -622,7 +622,7 @@ def get_user_generation_resource_group_grant_ids(session: Session, *, user_id: s
                     GenerationResourceGroup.archived_at.is_(None),
                 )
                 .order_by(
-                    GenerationResourceGroup.sort_order,
+                    GenerationResourceGroup.sort_order.desc(),
                     GenerationResourceGroup.created_at,
                     GenerationResourceGroup.name,
                 )
@@ -640,7 +640,7 @@ def get_user_generation_resource_group_grant_ids(session: Session, *, user_id: s
                 GenerationResourceGroup.archived_at.is_(None),
             )
             .order_by(
-                GenerationResourceGroup.sort_order,
+                GenerationResourceGroup.sort_order.desc(),
                 GenerationResourceGroup.created_at,
                 GenerationResourceGroup.name,
             )

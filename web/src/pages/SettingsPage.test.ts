@@ -18,7 +18,7 @@ import {
   providerUsageFromGenerationConfigs,
   providerUsageLabelKeys,
   settingsSectionIds,
-  settingsGenerationResourceGroupsByPriority,
+  settingsGenerationResourceGroupsInApiOrder,
   shouldShowSettingsMigrationPanel,
   textConfigTestRecordForKey,
   type TextConfigTestState,
@@ -562,8 +562,8 @@ describe("SettingsPage provider profile helpers", () => {
     expect(providerDisableBlocked(providerProfile({ enabled: false }), { text: true, image: true })).toBe(false);
   });
 
-  it("orders settings generation groups by descending sort order while keeping disabled groups visible", () => {
-    const groups = settingsGenerationResourceGroupsByPriority([
+  it("keeps settings generation groups in API order while keeping disabled groups visible", () => {
+    const groups = settingsGenerationResourceGroupsInApiOrder([
       generationResourceGroup({ id: "default", name: "default", sort_order: 0 }),
       generationResourceGroup({ id: "disabled", name: "Disabled", sort_order: 300, enabled: false }),
       generationResourceGroup({ id: "archived", name: "Archived", sort_order: 500, archived_at: "2026-06-02T00:00:00Z" }),
@@ -571,7 +571,7 @@ describe("SettingsPage provider profile helpers", () => {
       generationResourceGroup({ id: "campaign", name: "Campaign", sort_order: 100 }),
     ]);
 
-    expect(groups.map((group) => group.id)).toEqual(["disabled", "premium", "campaign", "default"]);
+    expect(groups.map((group) => group.id)).toEqual(["default", "disabled", "premium", "campaign"]);
   });
 
   it("localizes the provider delete confirmation dialog copy", () => {

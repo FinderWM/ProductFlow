@@ -38,7 +38,7 @@ import { formatDateTimeSeconds, formatPrice } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import { API_INSPIRATIONS_WRITE, hasSessionApiPermission } from "../lib/rbac";
-import { activeGenerationResourceGroupsByPriority, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
+import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import { useSessionState } from "../lib/session";
 import type { GenerationResourceGroup, InspirationSummary, RbacUser } from "../lib/types";
 import { inspirationKeyInfo, inspirationMainThumbnailUrl } from "./InspirationListPage.helpers";
@@ -264,7 +264,7 @@ export function InspirationListPage() {
   });
   const inspirations = inspirationsQuery.data?.items ?? [];
   const resourceGroups = useMemo<GenerationResourceGroup[]>(
-    () => activeGenerationResourceGroupsByPriority(generationResourceGroupsQuery.data),
+    () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
   const total = inspirationsQuery.data?.total ?? 0;

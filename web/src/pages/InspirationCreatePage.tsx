@@ -32,6 +32,7 @@ import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization
 import { dynamicFieldsToRecord, type DynamicFieldDraft } from "../lib/dynamicFields";
 import { INSPIRATION_CONTEXT_MARKDOWN_MAX_LENGTH } from "../lib/markdown";
 import { useI18n } from "../lib/preferences";
+import { activeGenerationResourceGroupsInApiOrder } from "../lib/resourceGroups";
 import type { TranslationKey } from "../lib/i18n";
 import type {
   CanvasTemplateScope,
@@ -292,7 +293,7 @@ export function InspirationCreatePage() {
     queryFn: api.listMyGenerationResourceGroups,
   });
   const resourceGroups = useMemo<GenerationResourceGroup[]>(
-    () => generationResourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [],
+    () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
 

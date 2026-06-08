@@ -392,11 +392,12 @@ generation_config_id: selectedConfigId
   `['my-generation-resource-groups']`, `['generation-config-options']`, and generation status queries when relevant.
 - RBAC page uses the full group list for admin grant editing and account grant replacement. Admin users render a read-only
   group-grant panel because backend grants all enabled groups automatically.
-- `web/src/lib/resourceGroups.ts` is the frontend single source for active generation group option ordering and first
-  concrete default selection.
+- Backend group-list APIs own option ordering: descending `sort_order`, then ascending `created_at`, then ascending
+  `name`. Frontend selectors must not re-sort generation groups.
+- `web/src/lib/resourceGroups.ts` is the frontend single source for active generation group filtering and first concrete
+  default selection.
 - Selection controls that show account-available generation groups must use
-  `activeGenerationResourceGroupsByPriority(groups)`: include only enabled, unarchived groups, sort by descending
-  `sort_order`, and keep equal-priority ordering stable with `created_at` and `name`.
+  `activeGenerationResourceGroupsInApiOrder(groups)`: include only enabled, unarchived groups and preserve API order.
 - ImageChatPage reads `['my-generation-resource-groups']`, defaults to `firstActiveGenerationResourceGroupId(groups)`,
   requires one selected group before submit, and sends `resource_group_id` with `generation_config_mode: "auto"`.
 - InspirationDetail workflow inspector and tail-plan generation require a selected group for generation-capable nodes.
@@ -422,7 +423,7 @@ generation_config_id: selectedConfigId
 - Good: image-chat displays a compact "生成分组" selector with `default`, and generated round metadata shows the same
   group label.
 - Good: inspiration history, image-session list, and gallery filter options keep "所有分组" but initially select the first
-  concrete group returned by `activeGenerationResourceGroupsByPriority`.
+  concrete group returned by `activeGenerationResourceGroupsInApiOrder`.
 - Good: SettingsPage can create a group, then generation config cards assign text/image configs to that group.
 - Good: RBAC grant panel exposes checkbox grants for non-admin users and read-only copy for admins.
 - Base: a local default setup has one enabled `default` group.
@@ -435,8 +436,8 @@ generation_config_id: selectedConfigId
 - Image-chat helper tests include `resource_group_id` in submit signatures, task placeholders, and regenerate payloads.
 - InspirationDetail workflow config tests round-trip node `resource_group_id` and keep generated config mode automatic.
 - Gallery/inspiration-history tests cover filter query params and required `resource_group` result tags.
-- `web/src/lib/resourceGroups.test.ts` covers active group filtering, descending `sort_order`, stable tie-breaks, first
-  concrete default selection, and empty-list fallback.
+- `web/src/lib/resourceGroups.test.ts` covers active group filtering, API-order preservation, first concrete default
+  selection, and empty-list fallback. Backend tests cover descending `sort_order` and tie-break order.
 - Run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build`.
 
 #### 7. Wrong vs Correct

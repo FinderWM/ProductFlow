@@ -105,7 +105,7 @@ def _resource_groups_by_user(
                 GenerationResourceGroup.archived_at.is_(None),
             )
             .order_by(
-                GenerationResourceGroup.sort_order,
+                GenerationResourceGroup.sort_order.desc(),
                 GenerationResourceGroup.created_at,
                 GenerationResourceGroup.name,
             )
@@ -132,7 +132,7 @@ def _resource_groups_by_user(
         )
         .order_by(
             UserGenerationResourceGroupGrant.user_id,
-            GenerationResourceGroup.sort_order,
+            GenerationResourceGroup.sort_order.desc(),
             GenerationResourceGroup.created_at,
             GenerationResourceGroup.name,
         )

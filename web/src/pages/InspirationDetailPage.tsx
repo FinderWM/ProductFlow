@@ -47,7 +47,7 @@ import {
   API_STATUS_READ,
   hasSessionApiPermission,
 } from "../lib/rbac";
-import { activeGenerationResourceGroupsByPriority } from "../lib/resourceGroups";
+import { activeGenerationResourceGroupsInApiOrder } from "../lib/resourceGroups";
 import { useSessionState } from "../lib/session";
 import type {
   ApplyTailSplitPlanImageGenerationConfigInput,
@@ -465,7 +465,7 @@ export function InspirationDetailPage() {
     [imageGenerationMaxDimension],
   );
   const workflowResourceGroups = useMemo<GenerationResourceGroup[]>(
-    () => activeGenerationResourceGroupsByPriority(generationResourceGroupsQuery.data),
+    () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
   useEffect(() => {

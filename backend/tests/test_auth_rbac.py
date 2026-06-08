@@ -248,10 +248,20 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
     )
     assert created_group.status_code == 200
     group_id = created_group.json()["id"]
+    created_lower_group = admin_client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "campaign-low", "name": "低优先级活动分组", "sort_order": 10, "enabled": True},
+    )
+    assert created_lower_group.status_code == 200
+    lower_group_id = created_lower_group.json()["id"]
 
     admin_groups = admin_client.get("/api/settings/my-generation-resource-groups")
     assert admin_groups.status_code == 200
-    assert group_id in {group["id"] for group in admin_groups.json()}
+    assert [group["id"] for group in admin_groups.json()][:3] == [
+        group_id,
+        lower_group_id,
+        DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    ]
 
     created_user = admin_client.post(
         "/api/rbac/users",
@@ -264,8 +274,11 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
     admin_user_page = admin_client.get("/api/rbac/users", params={"username": "libow", "page": 1, "page_size": 10})
     assert admin_user_page.status_code == 200
     admin_user = next(item for item in admin_user_page.json()["items"] if item["is_admin"])
-    assert DEFAULT_GENERATION_RESOURCE_GROUP_ID in {group["id"] for group in admin_user["resource_groups"]}
-    assert group_id in {group["id"] for group in admin_user["resource_groups"]}
+    assert [group["id"] for group in admin_user["resource_groups"]][:3] == [
+        group_id,
+        lower_group_id,
+        DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    ]
 
     regular_user_page = admin_client.get(
         "/api/rbac/users",
@@ -290,14 +303,14 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
 
     grant = admin_client.put(
         f"/api/rbac/users/{user_id}/generation-resource-groups",
-        json={"resource_group_ids": [group_id]},
+        json={"resource_group_ids": [lower_group_id, group_id]},
     )
     assert grant.status_code == 200
-    assert grant.json() == {"user_id": user_id, "resource_group_ids": [group_id]}
+    assert grant.json() == {"user_id": user_id, "resource_group_ids": [group_id, lower_group_id]}
 
     after_grant = user_client.get("/api/settings/my-generation-resource-groups")
     assert after_grant.status_code == 200
-    assert [group["id"] for group in after_grant.json()] == [group_id]
+    assert [group["id"] for group in after_grant.json()] == [group_id, lower_group_id]
 
     granted_user_page = admin_client.get(
         "/api/rbac/users",
@@ -305,7 +318,10 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
     )
     assert granted_user_page.status_code == 200
     granted_user = granted_user_page.json()["items"][0]
-    assert granted_user["resource_groups"] == [{"id": group_id, "key": "campaign", "name": "活动分组"}]
+    assert granted_user["resource_groups"] == [
+        {"id": group_id, "key": "campaign", "name": "活动分组"},
+        {"id": lower_group_id, "key": "campaign-low", "name": "低优先级活动分组"},
+    ]
 
 
 def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Path) -> None:

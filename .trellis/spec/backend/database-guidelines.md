@@ -462,6 +462,10 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   in settings/status APIs but are not candidates for group-scoped generation scheduling.
 - Admin users can use every enabled, non-archived group. Non-admin users can use only enabled, non-archived groups granted
   through `user_generation_resource_group_grants`.
+- Generation resource group list APIs own display ordering. `list_generation_resource_groups(...)`,
+  `list_available_generation_resource_groups_for_user(...)`, `get_user_generation_resource_group_grant_ids(...)`, and
+  RBAC user serialization order by descending `generation_resource_groups.sort_order`, then ascending `created_at`, then
+  ascending `name`.
 - User-facing generation entry points must submit exactly one `resource_group_id`. Frontend selectors show available
   groups only and hide concrete generation config selection for normal generation flows.
 - Backend entry points must validate that the selected group exists, is enabled, is not archived, and is authorized for
@@ -480,6 +484,8 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Settings import/export documents include `generation_resource_groups`. Imported generation configs must reference an
   imported group, explicitly set `resource_group_id: null` for unbound configs, or fall back to `default` only for legacy
   payloads that omit the field entirely.
+- Frontend callers preserve API order and may only filter unusable rows for a given surface. Do not move generation group
+  `sort_order` sorting into React selectors or page-local helpers.
 
 ### 4. Validation & Error Matrix
 
@@ -503,12 +509,15 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Good: a non-admin account granted `campaign` can generate image-chat rounds with `resource_group_id=campaign`, and the
   scheduler claims only image configs whose `resource_group_id` is `campaign`.
 - Good: an admin sees `default` plus every other enabled group in `/api/settings/my-generation-resource-groups`.
+- Good: a higher `sort_order` group appears before lower-priority groups in settings, RBAC grants, generation entry
+  selectors, gallery filters, and inspiration filters because those surfaces use API order.
 - Base: local/mock setups have one enabled `default` group with text and image generation configs.
 - Base: a settings-only config can be unbound while the operator decides which group should own it.
 - Base: older generated rows with null group fields render as `default` and are returned by the default-group filter.
 - Bad: accepting a manual `generation_config_id` from a normal user flow and using it to bypass group authorization.
 - Bad: returning generated result DTOs without a `resource_group` tag because the raw row has a null group id.
 - Bad: authorizing a group through role permissions only; group grants are account-level.
+- Bad: sorting `GenerationResourceGroup[]` by `sort_order` in frontend code instead of using API order.
 
 ### 6. Tests Required
 
@@ -517,6 +526,8 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   config group assignment.
 - RBAC tests cover admin all-groups behavior and account-level grant replacement for non-admin users.
 - Scheduler tests cover purpose plus group filtering for automatic claims and manual config compatibility.
+- Group list tests cover descending `sort_order` for full/admin/user group APIs and verify RBAC user serialization
+  preserves that API order.
 - Settings/update tests cover omitted group preserving the existing value and explicit `null` clearing the group.
 - Workflow and image-session tests cover missing, unauthorized, disabled, archived, and valid group selection.
 - Serializer/filter tests cover inspiration list/history, workflow status/detail, image-session list/detail/status, and

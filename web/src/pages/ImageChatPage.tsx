@@ -39,7 +39,7 @@ import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { useI18n } from "../lib/preferences";
-import { activeGenerationResourceGroupsByPriority, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
+import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import {
   API_GALLERY_WRITE,
   API_IMAGE_CHAT_GENERATE,
@@ -431,7 +431,7 @@ export function ImageChatPage() {
     [imageGenerationMaxDimension],
   );
   const resourceGroups = useMemo(
-    () => activeGenerationResourceGroupsByPriority(generationResourceGroupsQuery.data),
+    () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
   const currentInspiration = isInspirationMode

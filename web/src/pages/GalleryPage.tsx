@@ -11,7 +11,7 @@ import { api } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
-import { activeGenerationResourceGroupsByPriority, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
+import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import type { GalleryEntry } from "../lib/types";
 import { galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
 
@@ -51,7 +51,7 @@ export function GalleryPage() {
     queryFn: api.listMyGenerationResourceGroups,
   });
   const resourceGroups = useMemo(
-    () => activeGenerationResourceGroupsByPriority(resourceGroupsQuery.data),
+    () => activeGenerationResourceGroupsInApiOrder(resourceGroupsQuery.data),
     [resourceGroupsQuery.data],
   );
   const galleryQuery = useQuery({

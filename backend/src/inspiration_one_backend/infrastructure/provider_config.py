@@ -303,7 +303,7 @@ def list_generation_resource_groups(
 ) -> list[GenerationResourceGroup]:
     ensure_provider_config_bootstrapped(session)
     statement = select(GenerationResourceGroup).order_by(
-        GenerationResourceGroup.sort_order,
+        GenerationResourceGroup.sort_order.desc(),
         GenerationResourceGroup.created_at,
         GenerationResourceGroup.name,
     )

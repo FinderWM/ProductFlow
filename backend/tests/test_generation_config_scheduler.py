@@ -23,6 +23,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     claim_generation_config,
     ensure_provider_config_bootstrapped,
     list_generation_configs,
+    list_generation_resource_groups,
     release_generation_config_claim,
     update_generation_config,
 )
@@ -79,6 +80,16 @@ def test_bootstrap_creates_default_generation_configs_and_states(db_session: Ses
 def test_generation_config_state_requires_existing_config(db_session: Session) -> None:
     with pytest.raises(ValueError, match="生成配置不存在"):
         _ensure_generation_config_state(db_session, "missing-generation-config")
+
+
+def test_list_generation_resource_groups_orders_by_priority_desc(db_session: Session) -> None:
+    ensure_provider_config_bootstrapped(db_session)
+    premium = add_generation_resource_group(db_session, key="premium", name="高优先级分组", sort_order=300)
+    campaign = add_generation_resource_group(db_session, key="campaign", name="活动分组", sort_order=100)
+
+    groups = list_generation_resource_groups(db_session)
+
+    assert [group.id for group in groups[:3]] == [premium.id, campaign.id, DEFAULT_GENERATION_RESOURCE_GROUP_ID]
 
 
 def test_auto_claim_prefers_higher_priority_healthy_config(db_session: Session) -> None:

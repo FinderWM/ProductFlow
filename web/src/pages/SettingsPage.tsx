@@ -49,7 +49,6 @@ import {
   API_SETTINGS_WRITE,
   hasSessionApiPermission,
 } from "../lib/rbac";
-import { generationResourceGroupPriorityDesc } from "../lib/resourceGroups";
 import { useSessionState } from "../lib/session";
 import type {
   ConfigItem,
@@ -587,10 +586,10 @@ export function providerDisableBlocked(profile: ProviderProfile, usage: Provider
   return profile.enabled && (usage.text || usage.image);
 }
 
-export function settingsGenerationResourceGroupsByPriority(
+export function settingsGenerationResourceGroupsInApiOrder(
   groups: readonly GenerationResourceGroup[] | null | undefined,
 ): GenerationResourceGroup[] {
-  return (groups ?? []).filter((group) => !group.archived_at).sort(generationResourceGroupPriorityDesc);
+  return (groups ?? []).filter((group) => !group.archived_at);
 }
 
 export function providerProfileCreatePayload(form: ProviderProfileFormState): ProviderProfileCreateRequest {
@@ -1611,7 +1610,7 @@ function GenerationResourceGroupSection({
   onArchive,
 }: GenerationResourceGroupSectionProps) {
   const { t } = useI18n();
-  const activeGroups = settingsGenerationResourceGroupsByPriority(groups);
+  const activeGroups = settingsGenerationResourceGroupsInApiOrder(groups);
   const newDraftKey = "new-generation-resource-group";
   const newDraft = drafts[newDraftKey] ?? emptyGenerationResourceGroupDraft();
   const cards = [
@@ -2479,7 +2478,7 @@ function GenerationConfigPoolSection({
   const { t } = useI18n();
   const configs = generationConfigsForPurpose(data, purpose);
   const profiles = data?.profiles ?? [];
-  const resourceGroups = settingsGenerationResourceGroupsByPriority(data?.generation_resource_groups);
+  const resourceGroups = settingsGenerationResourceGroupsInApiOrder(data?.generation_resource_groups);
   const newDraftKey = `new-${purpose}`;
   const newDraft =
     drafts[newDraftKey] ??
@@ -3020,7 +3019,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     const firstEnabledGroupId =
-      settingsGenerationResourceGroupsByPriority(providerConfigQuery.data?.generation_resource_groups).find(
+      settingsGenerationResourceGroupsInApiOrder(providerConfigQuery.data?.generation_resource_groups).find(
         (group) => group.enabled,
       )?.id ?? "";
     const nextDrafts: Record<string, GenerationConfigDraft> = {
