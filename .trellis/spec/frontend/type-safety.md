@@ -392,11 +392,19 @@ generation_config_id: selectedConfigId
   `['my-generation-resource-groups']`, `['generation-config-options']`, and generation status queries when relevant.
 - RBAC page uses the full group list for admin grant editing and account grant replacement. Admin users render a read-only
   group-grant panel because backend grants all enabled groups automatically.
-- ImageChatPage reads `['my-generation-resource-groups']`, defaults to the first enabled group, requires one selected
-  group before submit, and sends `resource_group_id` with `generation_config_mode: "auto"`.
+- `web/src/lib/resourceGroups.ts` is the frontend single source for active generation group option ordering and first
+  concrete default selection.
+- Selection controls that show account-available generation groups must use
+  `activeGenerationResourceGroupsByPriority(groups)`: include only enabled, unarchived groups, sort by descending
+  `sort_order`, and keep equal-priority ordering stable with `created_at` and `name`.
+- ImageChatPage reads `['my-generation-resource-groups']`, defaults to `firstActiveGenerationResourceGroupId(groups)`,
+  requires one selected group before submit, and sends `resource_group_id` with `generation_config_mode: "auto"`.
 - InspirationDetail workflow inspector and tail-plan generation require a selected group for generation-capable nodes.
-- Gallery and inspiration history filters pass `resource_group_id` as a query parameter only when a concrete group is
-  selected; the all-groups option omits it.
+- Gallery, image-session list, and inspiration history filters keep an all-groups option, but initial load and concrete
+  selection invalidation default to `firstActiveGenerationResourceGroupId(groups)` when a concrete group exists.
+- Gallery, image-session list, and inspiration history filters pass `resource_group_id` as a query parameter only when a
+  concrete group is selected; the all-groups option is used only after explicit user selection and omits
+  `resource_group_id`.
 - Generated result cards, previews, node-run rows, and history entries should display `resource_group.name` from the DTO.
   Do not derive labels from config ids or provider names.
 
@@ -406,15 +414,19 @@ generation_config_id: selectedConfigId
 - Selected group disappears, becomes disabled, or is archived after refetch -> page resets to the first enabled group or
   clears selection.
 - Generation submit without selected group -> page shows local validation and does not call the API.
-- Gallery/inspiration-history "all groups" selected -> omit `resource_group_id`; selected group -> include the exact id.
+- Gallery/image-session-list/inspiration-history "all groups" selected -> omit `resource_group_id`; selected group ->
+  include the exact id.
 - Missing required `resource_group` tag in a generated-result factory/test -> `just web-build` fails.
 
 #### 5. Good/Base/Bad Cases
-- Good: image-chat displays a compact "生成分组" selector with `默认分组`, and generated round metadata shows the same
+- Good: image-chat displays a compact "生成分组" selector with `default`, and generated round metadata shows the same
   group label.
+- Good: inspiration history, image-session list, and gallery filter options keep "所有分组" but initially select the first
+  concrete group returned by `activeGenerationResourceGroupsByPriority`.
 - Good: SettingsPage can create a group, then generation config cards assign text/image configs to that group.
 - Good: RBAC grant panel exposes checkbox grants for non-admin users and read-only copy for admins.
 - Base: a local default setup has one enabled `default` group.
+- Bad: a list filter defaults to the all-groups option when at least one concrete active group is available.
 - Bad: image-chat exposes `GenerationConfigOption` or provider profile details in the normal submit UI.
 - Bad: a gallery card renders group text by checking `resource_group_id === defaultId` in the component.
 
@@ -423,6 +435,8 @@ generation_config_id: selectedConfigId
 - Image-chat helper tests include `resource_group_id` in submit signatures, task placeholders, and regenerate payloads.
 - InspirationDetail workflow config tests round-trip node `resource_group_id` and keep generated config mode automatic.
 - Gallery/inspiration-history tests cover filter query params and required `resource_group` result tags.
+- `web/src/lib/resourceGroups.test.ts` covers active group filtering, descending `sort_order`, stable tie-breaks, first
+  concrete default selection, and empty-list fallback.
 - Run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build`.
 
 #### 7. Wrong vs Correct
