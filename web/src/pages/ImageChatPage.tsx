@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "vaul";
@@ -39,6 +39,7 @@ import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { useI18n } from "../lib/preferences";
+import { activeGenerationResourceGroupsByPriority, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import {
   API_GALLERY_WRITE,
   API_IMAGE_CHAT_GENERATE,
@@ -211,7 +212,6 @@ export function ImageChatPage() {
   const { inspirationId } = useParams();
   const isInspirationMode = Boolean(inspirationId);
   const routeStateScope = getImageChatRouteStateScope(inspirationId);
-  const autoCreateTriggered = useRef(false);
   const pendingGeneratedRoundCountRef = useRef<number | null>(null);
   const duplicateSubmitGuardRef = useRef<ImageGenerationSubmitGuard | null>(null);
   const mobileSessionButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -255,6 +255,7 @@ export function ImageChatPage() {
   const [selectedSessionOwnerUserId, setSelectedSessionOwnerUserId] = useState(
     () => readImageChatRouteState(routeStateScope)?.selectedSessionOwnerUserId ?? "",
   );
+  const [selectedSessionOwnerSearch, setSelectedSessionOwnerSearch] = useState("");
   const [onlyDeletedSessions, setOnlyDeletedSessions] = useState(
     () => readImageChatRouteState(routeStateScope)?.onlyDeletedSessions ?? false,
   );
@@ -362,6 +363,7 @@ export function ImageChatPage() {
 
   const currentUser = sessionState?.user ?? null;
   const isAdmin = Boolean(currentUser?.is_admin);
+  const deferredSessionOwnerSearch = useDeferredValue(selectedSessionOwnerSearch.trim());
   const sessionListScope = inspirationId ?? "standalone";
   const sessionListQueryKey = [
     "image-sessions",
@@ -411,8 +413,8 @@ export function ImageChatPage() {
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
   const rbacUsersQuery = useQuery({
-    queryKey: ["rbac-users"],
-    queryFn: () => api.listRbacUsers({ page_size: 100 }),
+    queryKey: ["rbac-users", "image-session-owner-filter", deferredSessionOwnerSearch],
+    queryFn: () => api.listRbacUsers({ page_size: 30, query: deferredSessionOwnerSearch || undefined }),
     enabled: isAdmin,
     retry: false,
     staleTime: RBAC_USERS_STALE_TIME_MS,
@@ -429,7 +431,7 @@ export function ImageChatPage() {
     [imageGenerationMaxDimension],
   );
   const resourceGroups = useMemo(
-    () => generationResourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [],
+    () => activeGenerationResourceGroupsByPriority(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
   const currentInspiration = isInspirationMode
@@ -471,13 +473,13 @@ export function ImageChatPage() {
       return;
     }
     if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
-      setSelectedResourceGroupId(resourceGroups[0].id);
+      setSelectedResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
     }
     if (
       selectedSessionResourceGroupId === null ||
       (selectedSessionResourceGroupId && !resourceGroups.some((group) => group.id === selectedSessionResourceGroupId))
     ) {
-      setSelectedSessionResourceGroupId(resourceGroups[0].id);
+      setSelectedSessionResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
     }
   }, [
     generationResourceGroupsQuery.isFetched,
@@ -517,7 +519,7 @@ export function ImageChatPage() {
     ) {
       return selectedSessionResourceGroupId;
     }
-    return resourceGroups[0]?.id ?? "";
+    return firstActiveGenerationResourceGroupId(resourceGroups);
   }
 
   function openCreateSessionDialog() {
@@ -597,21 +599,7 @@ export function ImageChatPage() {
   }, [createSessionDialogOpen, createSessionMutation.isPending]);
 
   useEffect(() => {
-    if (
-      sessionsQuery.isLoading ||
-      createSessionMutation.isPending ||
-      createSessionDialogOpen ||
-      generationResourceGroupsQuery.isLoading
-    ) {
-      return;
-    }
-    if (sessionItems.length === 0 && !autoCreateTriggered.current) {
-      autoCreateTriggered.current = true;
-      if (createSessionBlockedTitle) {
-        setErrorMessage(createSessionBlockedTitle);
-        return;
-      }
-      openCreateSessionDialog();
+    if (sessionsQuery.isLoading) {
       return;
     }
     if (selectedSessionId && sessionItems.some((item) => item.id === selectedSessionId)) {
@@ -620,14 +608,13 @@ export function ImageChatPage() {
     if (sessionItems.length) {
       setSelectedSessionId(sessionItems[0].id);
       resetImageSessionSelection();
+      return;
+    }
+    if (selectedSessionId) {
+      setSelectedSessionId(null);
+      resetImageSessionSelection();
     }
   }, [
-    createSessionMutation,
-    createSessionDialogOpen,
-    createSessionBlockedTitle,
-    generationResourceGroupsQuery.isLoading,
-    isInspirationMode,
-    openCreateSessionDialog,
     selectedSessionId,
     sessionItems,
     sessionsQuery.isLoading,
@@ -947,9 +934,6 @@ export function ImageChatPage() {
       if (!keepDeletedSessionVisible && selectedSessionId === deletedSessionId) {
         setSelectedSessionId(remainingSessions[0]?.id ?? null);
         resetImageSessionSelection();
-        if (!remainingSessions.length) {
-          autoCreateTriggered.current = false;
-        }
       }
       await queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       setSuccessMessage(t("chat.sessionDeleted"));
@@ -1614,7 +1598,7 @@ export function ImageChatPage() {
       .join(" · ");
 
     return (
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-950/40">
+      <div className="rounded-xl border border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-950/40">
         <button
           type="button"
           onClick={() => setSessionFiltersExpanded((expanded) => !expanded)}
@@ -1682,9 +1666,14 @@ export function ImageChatPage() {
                     ]}
                     onChange={setSelectedSessionOwnerUserId}
                     ariaLabel={t("chat.sessionOwnerFilter")}
+                    searchValue={selectedSessionOwnerSearch}
+                    onSearchChange={setSelectedSessionOwnerSearch}
+                    searchPlaceholder={t("chat.ownerSearchPlaceholder")}
+                    searchAriaLabel={t("chat.ownerSearch")}
+                    searchLoading={rbacUsersQuery.isFetching}
+                    searchLoadingLabel={t("app.loading")}
                     radius="lg"
                     visualSize="sm"
-                    disabled={rbacUsersQuery.isLoading}
                   />
                 </label>
                 <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
@@ -1899,7 +1888,7 @@ export function ImageChatPage() {
           >
             <span className="h-12 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
           </button>
-          <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
+          <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800 lg:px-8">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
@@ -1910,10 +1899,10 @@ export function ImageChatPage() {
                 onClick={openCreateSessionDialog}
                 disabled={createSessionDisabled}
                 title={createSessionButtonTitle}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                 aria-label={t("chat.newSession")}
               >
-                {createSessionMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={16} />}
+                {createSessionMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Plus size={18} />}
               </button>
             </div>
             <div className="mt-3">{renderSessionResourceGroupFilter()}</div>

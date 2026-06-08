@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image as ImageIcon, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -11,6 +11,7 @@ import { api } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
+import { activeGenerationResourceGroupsByPriority, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import type { GalleryEntry } from "../lib/types";
 import { galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
 
@@ -40,7 +41,7 @@ export function GalleryPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [previewEntry, setPreviewEntry] = useState<GalleryEntry | null>(null);
-  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState("");
+  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
   const [gridContentWidth, setGridContentWidth] = useState<number | null>(null);
   const [isDesktopGrid, setIsDesktopGrid] = useState(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -49,25 +50,31 @@ export function GalleryPage() {
     queryKey: ["my-generation-resource-groups"],
     queryFn: api.listMyGenerationResourceGroups,
   });
-  const resourceGroups = resourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [];
+  const resourceGroups = useMemo(
+    () => activeGenerationResourceGroupsByPriority(resourceGroupsQuery.data),
+    [resourceGroupsQuery.data],
+  );
   const galleryQuery = useQuery({
     queryKey: ["gallery", selectedResourceGroupId],
-    queryFn: () => api.listGalleryEntries({ resource_group_id: selectedResourceGroupId }),
-    enabled: Boolean(selectedResourceGroupId),
+    queryFn: () => api.listGalleryEntries({ resource_group_id: selectedResourceGroupId || null }),
+    enabled: selectedResourceGroupId !== null,
   });
   const entries = galleryQuery.data?.items ?? [];
 
   useEffect(() => {
+    if (!resourceGroupsQuery.isFetched) {
+      return;
+    }
     if (!resourceGroups.length) {
-      if (selectedResourceGroupId) {
+      if (selectedResourceGroupId === null) {
         setSelectedResourceGroupId("");
       }
       return;
     }
-    if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
-      setSelectedResourceGroupId(resourceGroups[0].id);
+    if (selectedResourceGroupId === null || (selectedResourceGroupId && !resourceGroups.some((group) => group.id === selectedResourceGroupId))) {
+      setSelectedResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
     }
-  }, [resourceGroups, selectedResourceGroupId]);
+  }, [resourceGroups, resourceGroupsQuery.isFetched, selectedResourceGroupId]);
 
   const resourceGroupFilter = (
     <label className="block min-w-[220px]">
@@ -75,12 +82,11 @@ export function GalleryPage() {
         {t("gallery.resourceGroupFilter")}
       </span>
       <SelectField
-        value={selectedResourceGroupId}
+        value={selectedResourceGroupId ?? ""}
         options={[
           {
             value: "",
-            label: resourceGroups.length ? t("gallery.selectResourceGroup") : t("gallery.noResourceGroups"),
-            disabled: true,
+            label: t("gallery.allResourceGroups"),
           },
           ...resourceGroups.map((group) => ({ value: group.id, label: group.name })),
         ]}
@@ -148,7 +154,7 @@ export function GalleryPage() {
               />
               <div className="absolute inset-0 bg-[linear-gradient(90deg,#f4eddf_0%,rgba(244,237,223,0.99)_36%,rgba(244,237,223,0.72)_52%,rgba(244,237,223,0.08)_76%,rgba(244,237,223,0)_100%)]" />
               <div className="absolute inset-x-0 bottom-0 h-px bg-[#020617]/10" />
-              <div className="absolute left-5 top-16 hidden h-64 flex-col items-center gap-4 text-[#1d4cff] sm:flex">
+              <div className="absolute left-4 top-16 hidden h-64 flex-col items-center gap-4 text-[#1d4cff] sm:left-6 sm:flex lg:left-8">
                 <span className="h-2 w-2 rounded-full bg-[#1d4cff]" />
                 <span className="h-28 w-px bg-[#1d4cff]/30" />
                 <span className="[writing-mode:vertical-rl] text-xs font-black uppercase tracking-[0.18em]">Gallery</span>

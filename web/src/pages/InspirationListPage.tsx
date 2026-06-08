@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useDeferredValue,
   useMemo,
   useRef,
   useState,
@@ -17,12 +18,13 @@ import {
   MoreHorizontal,
   Plus,
   Search,
-  Trash2,
+  Archive,
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { SelectField } from "../components/SelectField";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -36,6 +38,7 @@ import { formatDateTimeSeconds, formatPrice } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import { API_INSPIRATIONS_WRITE, hasSessionApiPermission } from "../lib/rbac";
+import { activeGenerationResourceGroupsByPriority, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import { useSessionState } from "../lib/session";
 import type { GenerationResourceGroup, InspirationSummary, RbacUser } from "../lib/types";
 import { inspirationKeyInfo, inspirationMainThumbnailUrl } from "./InspirationListPage.helpers";
@@ -50,6 +53,8 @@ const MOBILE_DELETE_ACTION_WIDTH_PX = 96;
 const MOBILE_DELETE_OPEN_THRESHOLD_PX = 42;
 const HOVER_IMAGE_PREVIEW_SIZE_PX = 224;
 const HOVER_IMAGE_PREVIEW_GAP_PX = 12;
+const SEARCH_PANEL_SINGLE_ROW_WIDTH_PX = 920;
+const ADMIN_SEARCH_PANEL_SINGLE_ROW_WIDTH_PX = 1_220;
 
 type InspirationQuickRangeId = "day" | "week" | "month";
 
@@ -58,6 +63,7 @@ interface InspirationSearchFilters {
   updated_from: string;
   updated_to: string;
   owner_user_id: string;
+  only_deleted: boolean;
 }
 
 const EMPTY_INSPIRATION_SEARCH: InspirationSearchFilters = {
@@ -65,6 +71,7 @@ const EMPTY_INSPIRATION_SEARCH: InspirationSearchFilters = {
   updated_from: "",
   updated_to: "",
   owner_user_id: "",
+  only_deleted: false,
 };
 
 const INSPIRATION_QUICK_RANGE_IDS: InspirationQuickRangeId[] = ["day", "week", "month"];
@@ -111,19 +118,20 @@ function normalizeInspirationSearchFilters(filters: InspirationSearchFilters): I
     updated_from: filters.updated_from,
     updated_to: filters.updated_to,
     owner_user_id: filters.owner_user_id,
+    only_deleted: Boolean(filters.only_deleted),
   };
 }
 
 function hasInspirationSearchFilters(filters: InspirationSearchFilters): boolean {
-  return Boolean(filters.title || filters.updated_from || filters.updated_to || filters.owner_user_id);
+  return Boolean(filters.title || filters.updated_from || filters.updated_to || filters.owner_user_id || filters.only_deleted);
 }
 
 function countInspirationSearchFilters(filters: InspirationSearchFilters): number {
   return [
     filters.title.trim(),
-    filters.updated_from,
-    filters.updated_to,
+    filters.updated_from || filters.updated_to ? "updated_range" : "",
     filters.owner_user_id,
+    filters.only_deleted ? "only_deleted" : "",
   ].filter(Boolean).length;
 }
 
@@ -215,22 +223,25 @@ export function InspirationListPage() {
   const [searchDraft, setSearchDraft] = useState<InspirationSearchFilters>(EMPTY_INSPIRATION_SEARCH);
   const [activeSearch, setActiveSearch] = useState<InspirationSearchFilters>(EMPTY_INSPIRATION_SEARCH);
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
+  const [ownerSearch, setOwnerSearch] = useState("");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [pendingDeleteInspiration, setPendingDeleteInspiration] = useState<InspirationSummary | null>(null);
+  const deferredOwnerSearch = useDeferredValue(ownerSearch.trim());
   const inspirationsQuery = useQuery({
     queryKey: ["inspirations", selectedResourceGroupId, page, PAGE_SIZE, activeSearch],
     queryFn: () =>
       api.listInspirations({
-        resource_group_id: selectedResourceGroupId ?? "",
+        resource_group_id: selectedResourceGroupId || null,
         page,
         page_size: PAGE_SIZE,
         title: activeSearch.title || undefined,
         updated_from: activeSearch.updated_from || undefined,
         updated_to: activeSearch.updated_to || undefined,
         owner_user_id: isAdmin ? activeSearch.owner_user_id || undefined : undefined,
+        only_deleted: isAdmin && activeSearch.only_deleted,
       }),
-    enabled: Boolean(selectedResourceGroupId),
+    enabled: selectedResourceGroupId !== null,
     placeholderData: keepPreviousData,
     staleTime: INSPIRATION_LIST_STALE_TIME_MS,
   });
@@ -240,8 +251,8 @@ export function InspirationListPage() {
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
   const rbacUsersQuery = useQuery({
-    queryKey: ["rbac-users"],
-    queryFn: () => api.listRbacUsers({ page_size: 100 }),
+    queryKey: ["rbac-users", "inspiration-owner-filter", deferredOwnerSearch],
+    queryFn: () => api.listRbacUsers({ page_size: 30, query: deferredOwnerSearch || undefined }),
     enabled: isAdmin,
     retry: false,
     staleTime: RBAC_USERS_STALE_TIME_MS,
@@ -253,7 +264,7 @@ export function InspirationListPage() {
   });
   const inspirations = inspirationsQuery.data?.items ?? [];
   const resourceGroups = useMemo<GenerationResourceGroup[]>(
-    () => generationResourceGroupsQuery.data?.filter((group) => group.enabled && !group.archived_at) ?? [],
+    () => activeGenerationResourceGroupsByPriority(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
   const total = inspirationsQuery.data?.total ?? 0;
@@ -275,17 +286,21 @@ export function InspirationListPage() {
   }, [page, inspirationsQuery.data, totalPages]);
 
   useEffect(() => {
+    if (!generationResourceGroupsQuery.isFetched) {
+      return;
+    }
     if (!resourceGroups.length) {
-      if (selectedResourceGroupId) {
-        setSelectedResourceGroupId(null);
+      if (selectedResourceGroupId === null) {
+        setSelectedResourceGroupId("");
+        setPage(1);
       }
       return;
     }
-    if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
-      setSelectedResourceGroupId(resourceGroups[0].id);
+    if (selectedResourceGroupId === null || (selectedResourceGroupId && !resourceGroups.some((group) => group.id === selectedResourceGroupId))) {
+      setSelectedResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
       setPage(1);
     }
-  }, [resourceGroups, selectedResourceGroupId]);
+  }, [generationResourceGroupsQuery.isFetched, resourceGroups, selectedResourceGroupId]);
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -431,7 +446,9 @@ export function InspirationListPage() {
             draft={searchDraft}
             isAdmin={isAdmin}
             users={rbacUsers}
-            usersLoading={rbacUsersQuery.isLoading}
+            usersLoading={rbacUsersQuery.isFetching}
+            ownerSearch={ownerSearch}
+            onOwnerSearchChange={setOwnerSearch}
             resourceGroups={resourceGroups}
             resourceGroupsLoading={generationResourceGroupsQuery.isLoading}
             selectedResourceGroupId={selectedResourceGroupId ?? ""}
@@ -443,7 +460,7 @@ export function InspirationListPage() {
             onClear={clearSearch}
             onMobileToggle={() => setMobileSearchOpen((current) => !current)}
             onResourceGroupChange={(value) => {
-              setSelectedResourceGroupId(value || null);
+              setSelectedResourceGroupId(value);
               setPage(1);
             }}
             onQuickRange={applyQuickRange}
@@ -517,11 +534,6 @@ export function InspirationListPage() {
           ) : generationResourceGroupsQuery.isError || inspirationsQuery.isError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
               {t("inspirations.loadFailed")}
-            </div>
-          ) : !resourceGroups.length ? (
-            <div className="rounded-xl border border-dashed border-zinc-300 bg-white px-6 py-14 text-center dark:border-slate-700/80 dark:bg-[#0f1726]">
-              <Search className="mx-auto mb-3 text-zinc-300 dark:text-slate-500" size={32} />
-              <div className="font-medium text-zinc-900 dark:text-white">{t("inspirations.noResourceGroups")}</div>
             </div>
           ) : inspirations.length ? (
             <>
@@ -629,7 +641,7 @@ export function InspirationListPage() {
         description={
           pendingDeleteInspiration ? t("inspirations.deleteConfirm", { name: pendingDeleteInspiration.name }) : ""
         }
-        confirmLabel={t("confirm.delete.confirm")}
+        confirmLabel={t("inspirations.delete")}
         cancelLabel={t("common.cancel")}
         busy={deleteInspirationMutation.isPending}
         onClose={() => setPendingDeleteInspiration(null)}
@@ -799,10 +811,10 @@ function InspirationMobileCard({
               ? t("inspirations.delete")
               : t("inspirations.deleteDisabled")
         }
-        className="group/delete absolute inset-y-0 right-0 flex w-24 items-center justify-center border-l border-red-300/50 bg-red-500 text-sm font-semibold text-white transition-[background-color,filter] hover:bg-red-600 hover:brightness-105 active:bg-red-700 disabled:bg-red-500/45 dark:border-red-300/25 dark:bg-red-500/80 dark:hover:bg-red-500 dark:active:bg-red-600"
+        className="group/delete absolute inset-y-0 right-0 flex w-24 items-center justify-center border-l border-amber-300/60 bg-amber-500 text-sm font-semibold text-white transition-[background-color,filter] hover:bg-amber-600 hover:brightness-105 active:bg-amber-700 disabled:bg-amber-500/45 dark:border-amber-200/25 dark:bg-amber-500/80 dark:hover:bg-amber-500 dark:active:bg-amber-600"
         style={{ opacity: deleteOpacity, pointerEvents: deleteOpen ? "auto" : "none" }}
       >
-        <Trash2 size={17} className="mr-1.5 shrink-0 transition-transform group-hover/delete:scale-110 group-active/delete:scale-95" aria-hidden="true" />
+        <Archive size={17} className="mr-1.5 shrink-0 transition-transform group-hover/delete:scale-110 group-active/delete:scale-95" aria-hidden="true" />
         <span className="whitespace-nowrap">{t("inspirations.delete")}</span>
       </button>
       <div
@@ -942,9 +954,9 @@ function InspirationTableRow({
                   ? t("inspirations.delete")
                   : t("inspirations.deleteDisabled")
             }
-            className="inline-flex items-center rounded-md px-2 py-1.5 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:hover:bg-red-500/10 dark:hover:text-red-200"
+            className="inline-flex items-center rounded-md px-2 py-1.5 text-sm font-medium text-amber-600 transition-colors hover:bg-amber-50 hover:text-amber-700 disabled:opacity-50 dark:text-amber-300 dark:hover:bg-amber-500/10 dark:hover:text-amber-100"
           >
-            <Trash2 size={14} className="mr-1" /> {t("inspirations.delete")}
+            <Archive size={14} className="mr-1" /> {t("inspirations.delete")}
           </button>
         </div>
       </td>
@@ -965,6 +977,7 @@ function InspirationSearchPanel({
   isAdmin,
   users,
   usersLoading,
+  ownerSearch,
   resourceGroups,
   resourceGroupsLoading,
   selectedResourceGroupId,
@@ -975,6 +988,7 @@ function InspirationSearchPanel({
   onChange,
   onClear,
   onMobileToggle,
+  onOwnerSearchChange,
   onResourceGroupChange,
   onQuickRange,
   onSubmit,
@@ -983,6 +997,7 @@ function InspirationSearchPanel({
   isAdmin: boolean;
   users: RbacUser[];
   usersLoading: boolean;
+  ownerSearch: string;
   resourceGroups: GenerationResourceGroup[];
   resourceGroupsLoading: boolean;
   selectedResourceGroupId: string;
@@ -993,27 +1008,101 @@ function InspirationSearchPanel({
   onChange: (filters: InspirationSearchFilters) => void;
   onClear: () => void;
   onMobileToggle: () => void;
+  onOwnerSearchChange: (value: string) => void;
   onResourceGroupChange: (resourceGroupId: string) => void;
   onQuickRange: (rangeId: InspirationQuickRangeId) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
 }) {
   const { t } = useI18n();
+  const panelRef = useRef<HTMLFormElement | null>(null);
+  const [singleRowLayoutAvailable, setSingleRowLayoutAvailable] = useState(false);
   const fieldClassName =
     "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm " +
     "outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 " +
     "dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-100 dark:focus:border-violet-400";
   const labelClassName = "text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500";
+  const selectedResourceGroup = resourceGroups.find((group) => group.id === selectedResourceGroupId);
+  const selectedOwner = users.find((user) => user.id === draft.owner_user_id);
+  const dateRangeSummary =
+    draft.updated_from || draft.updated_to ? `${draft.updated_from || "..."} - ${draft.updated_to || "..."}` : "";
+  const compactSummaryItems = [
+    {
+      key: "resource-group",
+      label: t("inspirations.resourceGroupFilter"),
+      value:
+        selectedResourceGroup?.name ??
+        (resourceGroupsLoading && !selectedResourceGroupId
+          ? t("app.loading")
+          : selectedResourceGroupId || t("inspirations.allResourceGroups")),
+    },
+    draft.title.trim()
+      ? {
+          key: "title",
+          label: t("inspirations.search.title"),
+          value: draft.title.trim(),
+        }
+      : null,
+    dateRangeSummary
+      ? {
+          key: "updated-range",
+          label: t("inspirations.search.updatedRange"),
+          value: dateRangeSummary,
+        }
+      : null,
+    isAdmin && draft.owner_user_id
+      ? {
+          key: "owner",
+          label: t("inspirations.search.owner"),
+          value: selectedOwner ? selectedOwner.display_name || selectedOwner.username : draft.owner_user_id,
+        }
+      : null,
+    isAdmin && draft.only_deleted
+      ? {
+          key: "only-deleted",
+          label: t("inspirations.search.onlyDeleted"),
+        }
+      : null,
+  ].filter((item): item is { key: string; label: string; value?: string } => Boolean(item));
+  const compactLayout = !singleRowLayoutAvailable;
+  const fieldsOpen = singleRowLayoutAvailable || mobileOpen;
+  const gridClassName = singleRowLayoutAvailable
+    ? isAdmin
+      ? "grid-cols-[minmax(13rem,1.25fr)_minmax(18rem,1fr)_minmax(10rem,0.75fr)_minmax(10rem,0.75fr)_minmax(8.5rem,auto)_auto] items-end"
+      : "grid-cols-[minmax(13rem,1.25fr)_minmax(18rem,1fr)_minmax(10rem,0.75fr)_auto] items-end"
+    : "md:grid-cols-2";
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) {
+      return;
+    }
+
+    const minWidth = isAdmin ? ADMIN_SEARCH_PANEL_SINGLE_ROW_WIDTH_PX : SEARCH_PANEL_SINGLE_ROW_WIDTH_PX;
+    const updateLayout = () => {
+      setSingleRowLayoutAvailable(panel.clientWidth >= minWidth);
+    };
+
+    updateLayout();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateLayout);
+      return () => window.removeEventListener("resize", updateLayout);
+    }
+
+    const observer = new ResizeObserver(updateLayout);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [isAdmin]);
 
   return (
-    <form onSubmit={onSubmit} className="pf-panel overflow-hidden px-4 py-3 md:px-5 lg:py-4">
-      <div className="flex items-center gap-2 lg:hidden">
+    <form ref={panelRef} onSubmit={onSubmit} className="pf-panel overflow-visible px-4 py-3 md:px-5 lg:py-4">
+      <div className={`${compactLayout ? "flex" : "hidden"} items-center gap-2`}>
         <button
           type="button"
           onClick={onMobileToggle}
           aria-expanded={mobileOpen}
           aria-controls="inspiration-search-fields"
           aria-label={mobileOpen ? t("inspirations.search.collapse") : t("inspirations.search.expand")}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1 text-left transition-colors active:scale-[0.99] hover:bg-slate-50 dark:hover:bg-violet-500/10"
+          className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-1.5 py-1 text-left transition-colors active:scale-[0.99] hover:bg-slate-50 dark:hover:bg-violet-500/10"
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-violet-500/14 dark:text-violet-200">
             <Search size={16} aria-hidden="true" />
@@ -1027,10 +1116,26 @@ function InspirationSearchPanel({
                 ? t("inspirations.search.activeCount", { count: activeCount })
                 : t("inspirations.search.collapsedHint")}
             </span>
+            <span className="mt-2 flex max-h-[3.75rem] flex-wrap gap-1.5 overflow-hidden">
+              {compactSummaryItems.map((item) => (
+                <span
+                  key={item.key}
+                  className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                >
+                  <span className="shrink-0 text-slate-400 dark:text-slate-500">{item.label}</span>
+                  {item.value ? (
+                    <>
+                      <span className="mx-1 shrink-0 text-slate-300 dark:text-slate-600">:</span>
+                      <span className="min-w-0 truncate">{item.value}</span>
+                    </>
+                  ) : null}
+                </span>
+              ))}
+            </span>
           </span>
           <ChevronDown
             size={17}
-            className={`shrink-0 text-slate-400 transition-transform duration-150 dark:text-slate-500 ${
+            className={`mt-2 shrink-0 text-slate-400 transition-transform duration-150 dark:text-slate-500 ${
               mobileOpen ? "rotate-180" : ""
             }`}
             aria-hidden="true"
@@ -1049,15 +1154,11 @@ function InspirationSearchPanel({
         ) : null}
       </div>
 
-      <div id="inspiration-search-fields" className={`${mobileOpen ? "mt-4 block" : "hidden"} lg:mt-0 lg:block`}>
+      <div id="inspiration-search-fields" className={`${fieldsOpen ? "block" : "hidden"} ${compactLayout ? "mt-4" : "mt-0"}`}>
         <div
-          className={`grid gap-4 md:grid-cols-2 xl:items-end ${
-            isAdmin
-              ? "xl:grid-cols-[minmax(0,1fr)_23rem_14rem_14rem_auto]"
-              : "xl:grid-cols-[minmax(0,1fr)_23rem_14rem_auto]"
-          }`}
+          className={`grid gap-4 ${gridClassName}`}
         >
-          <label className="min-w-0 space-y-2 md:col-span-2 xl:col-span-1">
+          <label className={`min-w-0 space-y-2 ${singleRowLayoutAvailable ? "" : "md:col-span-2"}`}>
             <span className={labelClassName}>{t("inspirations.search.title")}</span>
             <div className="relative">
               <Search
@@ -1074,43 +1175,58 @@ function InspirationSearchPanel({
             </div>
           </label>
 
-          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-            <label className="space-y-2">
-              <span className={labelClassName}>{t("inspirations.search.updatedFrom")}</span>
+          <fieldset className="min-w-0 space-y-2">
+            <legend className={labelClassName}>{t("inspirations.search.updatedRange")}</legend>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-[#0f1726]">
+              <label className="sr-only" htmlFor="inspiration-updated-from">
+                {t("inspirations.search.updatedFrom")}
+              </label>
               <input
+                id="inspiration-updated-from"
                 type="date"
                 value={draft.updated_from}
                 onChange={(event) => onChange({ ...draft, updated_from: event.target.value })}
-                className={fieldClassName}
+                className="h-8 min-w-0 rounded-lg border-0 bg-transparent px-1.5 text-sm font-medium text-slate-900 outline-none focus:bg-indigo-50/70 focus:ring-2 focus:ring-indigo-500/15 dark:text-slate-100 dark:focus:bg-violet-500/10 dark:focus:ring-violet-400/30"
               />
-            </label>
-            <label className="space-y-2">
-              <span className={labelClassName}>{t("inspirations.search.updatedTo")}</span>
+              <span className="text-xs font-semibold text-slate-300 dark:text-slate-600" aria-hidden="true">
+                -
+              </span>
+              <label className="sr-only" htmlFor="inspiration-updated-to">
+                {t("inspirations.search.updatedTo")}
+              </label>
               <input
+                id="inspiration-updated-to"
                 type="date"
                 value={draft.updated_to}
                 onChange={(event) => onChange({ ...draft, updated_to: event.target.value })}
-                className={fieldClassName}
+                className="h-8 min-w-0 rounded-lg border-0 bg-transparent px-1.5 text-sm font-medium text-slate-900 outline-none focus:bg-indigo-50/70 focus:ring-2 focus:ring-indigo-500/15 dark:text-slate-100 dark:focus:bg-violet-500/10 dark:focus:ring-violet-400/30"
               />
-            </label>
-          </div>
+            </div>
+          </fieldset>
 
           {isAdmin ? (
             <label className="space-y-2">
               <span className={labelClassName}>{t("inspirations.search.owner")}</span>
-              <select
+              <SelectField
                 value={draft.owner_user_id}
-                onChange={(event) => onChange({ ...draft, owner_user_id: event.target.value })}
-                disabled={usersLoading}
-                className={fieldClassName}
-              >
-                <option value="">{t("inspirations.search.allOwners")}</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.display_name || user.username} ({user.username})
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: t("inspirations.search.allOwners") },
+                  ...users.map((user) => ({
+                    value: user.id,
+                    label: `${user.display_name || user.username} (${user.username})`,
+                  })),
+                ]}
+                onChange={(value) => onChange({ ...draft, owner_user_id: value })}
+                ariaLabel={t("inspirations.search.owner")}
+                searchValue={ownerSearch}
+                onSearchChange={onOwnerSearchChange}
+                searchPlaceholder={t("inspirations.search.ownerSearchPlaceholder")}
+                searchAriaLabel={t("inspirations.search.ownerSearch")}
+                searchLoading={usersLoading}
+                searchLoadingLabel={t("app.loading")}
+                radius="xl"
+                visualSize="md"
+              />
             </label>
           ) : null}
 
@@ -1119,12 +1235,10 @@ function InspirationSearchPanel({
             <select
               value={selectedResourceGroupId}
               onChange={(event) => onResourceGroupChange(event.target.value)}
-              disabled={resourceGroupsLoading || !resourceGroups.length}
+              disabled={resourceGroupsLoading}
               className={fieldClassName}
             >
-              <option value="" disabled>
-                {resourceGroups.length ? t("inspirations.selectResourceGroup") : t("inspirations.noResourceGroups")}
-              </option>
+              <option value="">{t("inspirations.allResourceGroups")}</option>
               {resourceGroups.map((group) => (
                 <option key={group.id} value={group.id}>
                   {group.name}
@@ -1133,7 +1247,23 @@ function InspirationSearchPanel({
             </select>
           </label>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-2 md:col-span-2 md:justify-end xl:col-span-1 xl:justify-start">
+          {isAdmin ? (
+            <label className="flex h-11 items-center gap-2 self-end rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-200">
+              <input
+                type="checkbox"
+                checked={draft.only_deleted}
+                onChange={(event) => onChange({ ...draft, only_deleted: event.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+              />
+              <span className="truncate">{t("inspirations.search.onlyDeleted")}</span>
+            </label>
+          ) : null}
+
+          <div
+            className={`flex shrink-0 flex-wrap items-center gap-2 ${
+              singleRowLayoutAvailable ? "justify-start" : "md:col-span-2 md:justify-end"
+            }`}
+          >
             <button
               type="submit"
               disabled={fetching}

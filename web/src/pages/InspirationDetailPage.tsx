@@ -36,7 +36,7 @@ import {
   ResourceMetaBadges,
 } from "../components/ResourceGovernance";
 import { SelectField } from "../components/SelectField";
-import { TopNav } from "../components/TopNav";
+import { TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS, TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
@@ -47,6 +47,7 @@ import {
   API_STATUS_READ,
   hasSessionApiPermission,
 } from "../lib/rbac";
+import { activeGenerationResourceGroupsByPriority } from "../lib/resourceGroups";
 import { useSessionState } from "../lib/session";
 import type {
   ApplyTailSplitPlanImageGenerationConfigInput,
@@ -125,10 +126,12 @@ import {
   hasActiveWorkflow,
   isInspirationWorkflowStatusActive,
   mergeInspirationWorkflowStatusIntoDetail,
+  outputStringArray,
   outputText,
   pendingTailSplitPlan,
   readStoredNumber,
   shouldRefreshInspirationWorkflowDetailFromStatus,
+  workflowRunQueueText,
 } from "./inspiration-detail/utils";
 import {
   defaultConfigForType,
@@ -212,6 +215,55 @@ function hasReusableTailPublicNode(
   });
 }
 
+function latestActiveWorkflowRun(workflow: InspirationWorkflow | null | undefined): InspirationWorkflow["runs"][number] | null {
+  return workflow?.runs.find((run) => run.status === "running" || run.status === "waiting_confirmation") ?? null;
+}
+
+function mergeActiveRunNodeStatuses(workflow: InspirationWorkflow | null): InspirationWorkflow | null {
+  const activeRun = latestActiveWorkflowRun(workflow);
+  if (!workflow || !activeRun?.node_runs.length) {
+    return workflow;
+  }
+  const nodeRunByNodeId = new Map(activeRun.node_runs.map((nodeRun) => [nodeRun.node_id, nodeRun]));
+  let changed = false;
+  const nodes = workflow.nodes.map((node) => {
+    const nodeRun = nodeRunByNodeId.get(node.id);
+    if (!nodeRun) {
+      return node;
+    }
+    const nextFailureReason = nodeRun.failure_reason ?? node.failure_reason;
+    const nextLastRunAt = nodeRun.finished_at ?? nodeRun.started_at ?? node.last_run_at;
+    if (node.status === nodeRun.status && node.failure_reason === nextFailureReason && node.last_run_at === nextLastRunAt) {
+      return node;
+    }
+    changed = true;
+    return {
+      ...node,
+      status: nodeRun.status,
+      failure_reason: nextFailureReason,
+      last_run_at: nextLastRunAt,
+    };
+  });
+  return changed ? { ...workflow, nodes } : workflow;
+}
+
+function referenceImageNodesMissingSucceededOutput(
+  workflow: InspirationWorkflow,
+  status: InspirationWorkflowStatus,
+): string[] {
+  const statusByNodeId = new Map(status.nodes.map((node) => [node.id, node]));
+  return workflow.nodes
+    .filter((node) => {
+      const nodeStatus = statusByNodeId.get(node.id);
+      return (
+        node.node_type === "reference_image" &&
+        nodeStatus?.status === "succeeded" &&
+        outputStringArray(node, "source_asset_ids").length === 0
+      );
+    })
+    .map((node) => node.id);
+}
+
 export function InspirationDetailPage() {
   const { t } = useI18n();
   const session = useSessionState();
@@ -221,6 +273,7 @@ export function InspirationDetailPage() {
   const previousBodyUserSelectRef = useRef<string | null>(null);
   const workflowCanvasRef = useRef<WorkflowCanvasHandle | null>(null);
   const wasWorkflowActiveRef = useRef(false);
+  const artifactRefreshRequestedAtRef = useRef<Map<string, number>>(new Map());
   const workflowHistorySignatureRef = useRef<string | null>(null);
   const draftVersionRef = useRef(0);
   const previousDraftNodeIdRef = useRef<string | null>(null);
@@ -354,7 +407,7 @@ export function InspirationDetailPage() {
     queryFn: () => api.getInspirationWorkflow(inspirationId),
     enabled: Boolean(inspirationId),
   });
-  const workflow = workflowQuery.data ?? null;
+  const workflow = useMemo(() => mergeActiveRunNodeStatuses(workflowQuery.data ?? null), [workflowQuery.data]);
   const workflowInitialEntryMode = workflow?.initial_entry_mode ?? "image";
   const canvasTemplatesQuery = useQuery({
     queryKey: ["canvas-templates", normalizedTemplateSearch, templateCategoryId, templateScope, workflowInitialEntryMode],
@@ -412,7 +465,7 @@ export function InspirationDetailPage() {
     [imageGenerationMaxDimension],
   );
   const workflowResourceGroups = useMemo<GenerationResourceGroup[]>(
-    () => generationResourceGroupsQuery.data ?? [],
+    () => activeGenerationResourceGroupsByPriority(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
   useEffect(() => {
@@ -622,6 +675,9 @@ export function InspirationDetailPage() {
     }
     const currentWorkflow = queryClient.getQueryData<InspirationWorkflow>(["inspiration-workflow", inspirationId]);
     const shouldRefetchWorkflow = shouldRefreshInspirationWorkflowDetailFromStatus(currentWorkflow, status);
+    const missingSucceededOutputNodeIds = currentWorkflow
+      ? referenceImageNodesMissingSucceededOutput(currentWorkflow, status)
+      : [];
     if (currentWorkflow) {
       const nextWorkflow = mergeInspirationWorkflowStatusIntoDetail(currentWorkflow, status);
       queryClient.setQueryData(["inspiration-workflow", inspirationId], nextWorkflow);
@@ -630,10 +686,29 @@ export function InspirationDetailPage() {
         setError(latestRun.failure_reason);
       }
     }
+    if (missingSucceededOutputNodeIds.length) {
+      const now = Date.now();
+      const shouldRefreshArtifacts = missingSucceededOutputNodeIds.some((nodeId) => {
+        const lastRequestedAt = artifactRefreshRequestedAtRef.current.get(nodeId) ?? 0;
+        if (now - lastRequestedAt < 3000) {
+          return false;
+        }
+        artifactRefreshRequestedAtRef.current.set(nodeId, now);
+        return true;
+      });
+      if (shouldRefreshArtifacts) {
+        void queryClient.invalidateQueries({ queryKey: ["inspiration-workflow", inspirationId] });
+        void refreshInspirationArtifacts();
+      }
+    }
     if (shouldRefetchWorkflow) {
       void queryClient.invalidateQueries({ queryKey: ["inspiration-workflow", inspirationId] });
     }
   }, [inspirationId, queryClient, workflowStatusQuery.data]);
+
+  useEffect(() => {
+    artifactRefreshRequestedAtRef.current.clear();
+  }, [inspirationId, workflow?.id]);
 
   useEffect(() => {
     if (!wasWorkflowActiveRef.current && workflowActive) {
@@ -2057,13 +2132,31 @@ export function InspirationDetailPage() {
   const runSubmissionPending =
     runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending || retryFailedWorkflowNodesMutation.isPending;
   const pendingStartNodeId = runWorkflowMutation.isPending ? (runWorkflowMutation.variables?.startNodeId ?? null) : null;
+  const activeWorkflowRun = latestActiveWorkflowRun(workflow);
+  const activeWorkflowRunLabel =
+    activeWorkflowRun?.status === "waiting_confirmation"
+      ? t("detail.runStatus.waiting_confirmation")
+      : activeWorkflowRun?.status === "running"
+        ? t("detail.runStatus.running")
+        : "";
+  const activeWorkflowRunQueueText = activeWorkflowRun ? workflowRunQueueText(activeWorkflowRun, t) : "";
   const fullWorkflowRunBusy = runSubmissionPending || workflowActive;
+  const fullWorkflowRunSpinner = runSubmissionPending || activeWorkflowRun?.status === "running";
   const fullWorkflowRunDisabled = fullWorkflowRunBusy || inspirationGenerateBlocked;
   const fullWorkflowRunTitle = inspirationGenerateBlocked
     ? inspirationGenerateBlockedTitle
-    : fullWorkflowRunBusy
-      ? t("detail.workflowRunning")
-      : t("detail.runWorkflow");
+    : activeWorkflowRunQueueText || activeWorkflowRunLabel
+      ? [activeWorkflowRunLabel, activeWorkflowRunQueueText].filter(Boolean).join(" · ")
+      : runSubmissionPending
+        ? t("detail.workflowRunning")
+        : workflowActive
+          ? t("detail.workflowRunning")
+          : t("detail.runWorkflow");
+  const fullWorkflowRunLabel = runSubmissionPending
+    ? t("detail.running")
+    : activeWorkflowRunLabel
+      ? activeWorkflowRunLabel
+      : t("detail.runFullWorkflow");
   const workflowRunActionBusyRunId =
     (cancelWorkflowRunMutation.isPending ? cancelWorkflowRunMutation.variables : null) ??
     (retryWorkflowRunMutation.isPending ? retryWorkflowRunMutation.variables : null);
@@ -2433,7 +2526,29 @@ export function InspirationDetailPage() {
     !canvasTemplateSaveOpen;
   const fillReferenceBusy = bindNodeImageMutation.isPending;
   const queueOverview = canReadGenerationQueue ? (queueOverviewQuery.data ?? null) : null;
-  const showQueueOverview = Boolean(queueOverview && queueOverview.active_count > 0);
+  const queueOverviewText =
+    queueOverview && queueOverview.active_count > 0
+      ? t("detail.queueOverview", {
+          running: queueOverview.running_count,
+          queued: queueOverview.queued_count,
+          active: queueOverview.active_count,
+          max: queueOverview.max_concurrent_tasks,
+        })
+      : "";
+  const queueOverviewInlineText =
+    queueOverview && queueOverview.active_count > 0
+      ? t("detail.runRunningText", {
+          running: queueOverview.running_count,
+          queued: queueOverview.queued_count,
+        })
+      : "";
+  const activeRunQueueTextAlreadyIncludesGlobalCounts =
+    activeWorkflowRun?.status === "running" && typeof activeWorkflowRun.queue_position !== "number";
+  const showQueueOverview = Boolean(queueOverviewText && !activeWorkflowRun);
+  const activeWorkflowRunStatusClassName =
+    activeWorkflowRun?.status === "waiting_confirmation"
+      ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200"
+      : "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-400/35 dark:bg-blue-500/10 dark:text-blue-200";
   const canvasTemplates = canvasTemplatesQuery.data?.items ?? [];
   const canvasTemplateCategories: CanvasTemplateCategory[] = canvasTemplateCategoriesQuery.data?.items ?? [];
   const userCanvasTemplateCategories: CanvasTemplateCategory[] = userCanvasTemplateCategoriesQuery.data?.items ?? [];
@@ -2493,8 +2608,8 @@ export function InspirationDetailPage() {
         title={fullWorkflowRunTitle}
         aria-label={fullWorkflowRunTitle}
       >
-        {fullWorkflowRunBusy ? <Loader2 size={17} className="animate-spin" /> : <Play size={17} />}
-        <span className="mt-1 leading-tight">{fullWorkflowRunBusy ? t("detail.running") : t("detail.runFullWorkflow")}</span>
+        {fullWorkflowRunSpinner ? <Loader2 size={17} className="animate-spin" /> : <Play size={17} />}
+        <span className="mt-1 leading-tight">{fullWorkflowRunLabel}</span>
       </button>
       {failedWorkflowNodes.length > 0 ? (
         <button
@@ -2844,33 +2959,50 @@ export function InspirationDetailPage() {
 
   return (
     <div className="pf-workspace flex h-[100dvh] flex-col overflow-hidden text-sm text-zinc-900 dark:text-slate-100">
-      {!topChromeCollapsed ? <TopNav onHome={() => navigate("/inspirations")} breadcrumbs={inspiration.name} /> : null}
+      {!topChromeCollapsed ? (
+        <TopNav onHome={() => navigate("/inspirations")} breadcrumbs={inspiration.name} />
+      ) : (
+        <div className={`${TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS} shrink-0`} />
+      )}
 
       <main className="flex min-h-0 flex-1 flex-col border-t border-slate-200 bg-transparent dark:border-slate-800">
         {error ? (
-          <div className="z-20 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+          <div className="z-20 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200 sm:px-6 lg:px-8">
             <AlertCircle size={14} className="mr-2 inline" /> {error}
           </div>
         ) : null}
         {!error && notice ? (
-          <div className="z-20 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-700 dark:border-blue-400/35 dark:bg-blue-500/10 dark:text-blue-200">
+          <div className="z-20 border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-700 dark:border-blue-400/35 dark:bg-blue-500/10 dark:text-blue-200 sm:px-6 lg:px-8">
             <AlertCircle size={14} className="mr-2 inline" /> {notice}
           </div>
         ) : null}
         <ResourceMetaBadges
           resource={inspiration}
           showReason
-          className="z-20 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-[#0b1220]"
+          className="z-20 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-[#0b1220] sm:px-6 lg:px-8"
         />
-        <ResourceBlockedNotice resource={inspiration} className="z-20 rounded-none border-x-0 border-t-0 px-4 py-2" />
+        <ResourceBlockedNotice resource={inspiration} className="z-20 rounded-none border-x-0 border-t-0 px-4 py-2 sm:px-6 lg:px-8" />
+        {activeWorkflowRun ? (
+          <div className={`z-20 border-b px-4 py-2 text-xs sm:px-6 lg:px-8 ${activeWorkflowRunStatusClassName}`}>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="inline-flex items-center rounded-full border border-current/25 bg-white/55 px-2 py-0.5 text-[10px] font-semibold dark:bg-slate-950/25">
+                {activeWorkflowRunLabel}
+              </span>
+              {activeWorkflowRunQueueText ? (
+                <span className="min-w-0 truncate">{activeWorkflowRunQueueText}</span>
+              ) : null}
+              {queueOverviewInlineText && !activeRunQueueTextAlreadyIncludesGlobalCounts ? (
+                <span className="min-w-0 truncate opacity-90">{queueOverviewInlineText}</span>
+              ) : null}
+              <span className="text-[11px] opacity-75">
+                {t("detail.nodeRunCount", { count: activeWorkflowRun.node_runs.length })}
+              </span>
+            </div>
+          </div>
+        ) : null}
         {showQueueOverview && queueOverview ? (
-          <div className="z-20 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-            {t("detail.queueOverview", {
-              running: queueOverview.running_count,
-              queued: queueOverview.queued_count,
-              active: queueOverview.active_count,
-              max: queueOverview.max_concurrent_tasks,
-            })}
+          <div className="z-20 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200 sm:px-6 lg:px-8">
+            {queueOverviewText}
           </div>
         ) : null}
 
@@ -3154,8 +3286,8 @@ export function InspirationDetailPage() {
               title={fullWorkflowRunTitle}
               aria-label={fullWorkflowRunTitle}
             >
-              {fullWorkflowRunBusy ? <Loader2 size={17} className="mb-1 shrink-0 animate-spin" /> : <Play size={17} className="mb-1 shrink-0" />}
-              <span className="max-w-full text-center">{fullWorkflowRunBusy ? t("detail.running") : t("detail.runFullWorkflow")}</span>
+              {fullWorkflowRunSpinner ? <Loader2 size={17} className="mb-1 shrink-0 animate-spin" /> : <Play size={17} className="mb-1 shrink-0" />}
+              <span className="max-w-full text-center">{fullWorkflowRunLabel}</span>
             </button>
             {failedWorkflowNodes.length > 0 ? (
               <button
