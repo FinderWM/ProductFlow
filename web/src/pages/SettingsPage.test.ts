@@ -18,6 +18,7 @@ import {
   providerUsageFromGenerationConfigs,
   providerUsageLabelKeys,
   settingsSectionIds,
+  settingsGenerationResourceGroupsByPriority,
   shouldShowSettingsMigrationPanel,
   textConfigTestRecordForKey,
   type TextConfigTestState,
@@ -32,6 +33,7 @@ import type {
   ConfigItem,
   ConfigResponse,
   GenerationConfig,
+  GenerationResourceGroup,
   ProviderCapability,
   ProviderModel,
   ProviderProfile,
@@ -99,6 +101,20 @@ function generationConfig(overrides: Partial<GenerationConfig> & Pick<Generation
     updated_at: overrides.updated_at ?? "2026-05-13T00:00:00Z",
     state: overrides.state ?? null,
     today_stat: overrides.today_stat ?? null,
+  };
+}
+
+function generationResourceGroup(overrides: Partial<GenerationResourceGroup> = {}): GenerationResourceGroup {
+  return {
+    id: overrides.id ?? "group-default",
+    key: overrides.key ?? "default",
+    name: overrides.name ?? "default",
+    description: overrides.description ?? null,
+    sort_order: overrides.sort_order ?? 0,
+    enabled: overrides.enabled ?? true,
+    archived_at: overrides.archived_at ?? null,
+    created_at: overrides.created_at ?? "2026-05-13T00:00:00Z",
+    updated_at: overrides.updated_at ?? "2026-05-13T00:00:00Z",
   };
 }
 
@@ -544,6 +560,18 @@ describe("SettingsPage provider profile helpers", () => {
     expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: true, image: false })).toBe(true);
     expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: false, image: false })).toBe(false);
     expect(providerDisableBlocked(providerProfile({ enabled: false }), { text: true, image: true })).toBe(false);
+  });
+
+  it("orders settings generation groups by descending sort order while keeping disabled groups visible", () => {
+    const groups = settingsGenerationResourceGroupsByPriority([
+      generationResourceGroup({ id: "default", name: "default", sort_order: 0 }),
+      generationResourceGroup({ id: "disabled", name: "Disabled", sort_order: 300, enabled: false }),
+      generationResourceGroup({ id: "archived", name: "Archived", sort_order: 500, archived_at: "2026-06-02T00:00:00Z" }),
+      generationResourceGroup({ id: "premium", name: "Premium", sort_order: 200 }),
+      generationResourceGroup({ id: "campaign", name: "Campaign", sort_order: 100 }),
+    ]);
+
+    expect(groups.map((group) => group.id)).toEqual(["disabled", "premium", "campaign", "default"]);
   });
 
   it("localizes the provider delete confirmation dialog copy", () => {

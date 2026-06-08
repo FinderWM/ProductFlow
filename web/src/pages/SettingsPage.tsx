@@ -49,6 +49,7 @@ import {
   API_SETTINGS_WRITE,
   hasSessionApiPermission,
 } from "../lib/rbac";
+import { generationResourceGroupPriorityDesc } from "../lib/resourceGroups";
 import { useSessionState } from "../lib/session";
 import type {
   ConfigItem,
@@ -584,6 +585,12 @@ export function providerUsageLabelKeys(usage: ProviderProfileUsage): Translation
 
 export function providerDisableBlocked(profile: ProviderProfile, usage: ProviderProfileUsage): boolean {
   return profile.enabled && (usage.text || usage.image);
+}
+
+export function settingsGenerationResourceGroupsByPriority(
+  groups: readonly GenerationResourceGroup[] | null | undefined,
+): GenerationResourceGroup[] {
+  return (groups ?? []).filter((group) => !group.archived_at).sort(generationResourceGroupPriorityDesc);
 }
 
 export function providerProfileCreatePayload(form: ProviderProfileFormState): ProviderProfileCreateRequest {
@@ -1604,9 +1611,7 @@ function GenerationResourceGroupSection({
   onArchive,
 }: GenerationResourceGroupSectionProps) {
   const { t } = useI18n();
-  const activeGroups = groups
-    .filter((group) => !group.archived_at)
-    .sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name));
+  const activeGroups = settingsGenerationResourceGroupsByPriority(groups);
   const newDraftKey = "new-generation-resource-group";
   const newDraft = drafts[newDraftKey] ?? emptyGenerationResourceGroupDraft();
   const cards = [
@@ -2474,7 +2479,7 @@ function GenerationConfigPoolSection({
   const { t } = useI18n();
   const configs = generationConfigsForPurpose(data, purpose);
   const profiles = data?.profiles ?? [];
-  const resourceGroups = (data?.generation_resource_groups ?? []).filter((group) => !group.archived_at);
+  const resourceGroups = settingsGenerationResourceGroupsByPriority(data?.generation_resource_groups);
   const newDraftKey = `new-${purpose}`;
   const newDraft =
     drafts[newDraftKey] ??
@@ -3015,7 +3020,9 @@ export function SettingsPage() {
 
   useEffect(() => {
     const firstEnabledGroupId =
-      providerConfigQuery.data?.generation_resource_groups.find((group) => group.enabled && !group.archived_at)?.id ?? "";
+      settingsGenerationResourceGroupsByPriority(providerConfigQuery.data?.generation_resource_groups).find(
+        (group) => group.enabled,
+      )?.id ?? "";
     const nextDrafts: Record<string, GenerationConfigDraft> = {
       "new-text": { ...emptyGenerationConfigDraft("text"), resource_group_id: firstEnabledGroupId },
       "new-image": { ...emptyGenerationConfigDraft("image"), resource_group_id: firstEnabledGroupId },
