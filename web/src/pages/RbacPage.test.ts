@@ -4,6 +4,8 @@ import {
   buildPermissionGroups,
   rbacUserListQueryKey,
   rbacUserResourceGroupLabels,
+  rbacUserResourceGroupSummary,
+  rbacUserResourceGroupIds,
   rolePermissionDraftFromResponse,
   toggleApiPermissionDraft,
   toggleMenuPermissionDraft,
@@ -145,6 +147,37 @@ describe("RbacPage permission helpers", () => {
 
   it("returns the fallback label when a user has no generation group grants", () => {
     expect(rbacUserResourceGroupLabels(rbacUser(), "未授权分组")).toEqual(["未授权分组"]);
+  });
+
+  it("builds a compact summary for the user list and dialog trigger", () => {
+    expect(
+      rbacUserResourceGroupSummary(
+        rbacUser({
+          resource_groups: [
+            { id: "group-1", key: "campaign", name: "活动分组" },
+            { id: "group-2", key: "default", name: "default" },
+          ],
+        }),
+        "未授权分组",
+      ),
+    ).toBe("活动分组 / default");
+  });
+
+  it("uses the fallback summary when the user has no group grants", () => {
+    expect(rbacUserResourceGroupSummary(rbacUser({ resource_groups: [] }), "未授权分组")).toBe("未授权分组");
+  });
+
+  it("derives sorted resource group ids for opening the grant dialog", () => {
+    expect(
+      rbacUserResourceGroupIds(
+        rbacUser({
+          resource_groups: [
+            { id: "group-2", key: "default", name: "default" },
+            { id: "group-1", key: "campaign", name: "活动分组" },
+          ],
+        }),
+      ),
+    ).toEqual(["group-1", "group-2"]);
   });
 
   it("builds the rbac user list query key from current filters", () => {

@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
+import { useNotifications } from "../lib/notifications";
 import { useI18n } from "../lib/preferences";
 import type {
   GenerationResourceGroup,
@@ -121,14 +122,23 @@ export function rbacUserResourceGroupLabels(user: RbacUser, fallback: string): s
   return user.resource_groups.map((group) => group.name);
 }
 
+export function rbacUserResourceGroupSummary(user: RbacUser, fallback: string): string {
+  return rbacUserResourceGroupLabels(user, fallback).join(" / ");
+}
+
 export function rbacUserListQueryKey(page: number, username: string, roleId: string) {
   return ["rbac-users", page, username, roleId] as const;
 }
 
 type RbacUserListQueryKey = ReturnType<typeof rbacUserListQueryKey>;
 
+export function rbacUserResourceGroupIds(user: RbacUser): string[] {
+  return user.resource_groups.map((group) => group.id).sort();
+}
+
 export function RbacPage() {
   const { t } = useI18n();
+  const { notify } = useNotifications();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [activeSection, setActiveSection] = useState<RbacSectionId>("users");
@@ -205,10 +215,7 @@ export function RbacPage() {
     [permissionCatalogQuery.data],
   );
   const generationResourceGroups = useMemo(
-    () =>
-      (generationResourceGroupsQuery.data ?? [])
-        .filter((group) => !group.archived_at)
-        .sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name)),
+    () => (generationResourceGroupsQuery.data ?? []).filter((group) => !group.archived_at),
     [generationResourceGroupsQuery.data],
   );
 
@@ -364,7 +371,14 @@ export function RbacPage() {
       }),
     onSuccess: async (payload) => {
       setResourceGroupGrantDraft([...payload.resource_group_ids]);
+      setResourceGroupGrantUser(null);
       setMessage(t("rbac.resourceGroupsSaved"));
+      notify({
+        title: t("rbac.resourceGroupsSaved"),
+        variant: "success",
+        autoClose: true,
+        dedupeKey: "rbac-resource-group-grants-saved",
+      });
       setPasswordSetupToken("");
       setError("");
       await Promise.all([
@@ -423,6 +437,11 @@ export function RbacPage() {
     updateUserMutation.mutate({ userId: pendingUserAction.user.id, enabled: pendingUserAction.enabled });
   };
 
+  const openResourceGroupGrantDialog = (user: RbacUser) => {
+    setResourceGroupGrantUser(user);
+    setResourceGroupGrantDraft(user.is_admin ? [] : rbacUserResourceGroupIds(user));
+  };
+
   const loading = usersQuery.isLoading || rolesQuery.isLoading;
   const permissionsLoading = permissionCatalogQuery.isLoading || rolePermissionsQuery.isLoading;
   const resourceGroupGrantsLoading =
@@ -451,6 +470,7 @@ export function RbacPage() {
         : t("rbac.disable")
     : "";
   const emptyPermissionRoleMessage = roles.length ? t("rbac.noMatchingRoles") : t("rbac.noRoles");
+  const resourceGroupGrantDialogOpen = Boolean(resourceGroupGrantUser);
 
   return (
     <div className="pf-app">
@@ -799,85 +819,6 @@ export function RbacPage() {
 
             {activeSection === "users" ? (
               <>
-            {resourceGroupGrantUser ? (
-              <section className="pf-panel p-4">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h2 className="text-sm font-semibold">{t("rbac.resourceGroupGrants")}</h2>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      {resourceGroupGrantUser.display_name} · {resourceGroupGrantUser.username}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setResourceGroupGrantUser(null)}
-                      className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
-                    >
-                      {t("common.cancel")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => saveResourceGroupGrantsMutation.mutate()}
-                      disabled={
-                        resourceGroupGrantUser.is_admin ||
-                        resourceGroupGrantsLoading ||
-                        saveResourceGroupGrantsMutation.isPending
-                      }
-                      className="inline-flex h-9 items-center justify-center rounded-md bg-slate-950 px-3 text-xs font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
-                    >
-                      {saveResourceGroupGrantsMutation.isPending ? (
-                        <Loader2 size={14} className="mr-1.5 animate-spin" />
-                      ) : (
-                        <Save size={14} className="mr-1.5" />
-                      )}
-                      {t("rbac.saveResourceGroups")}
-                    </button>
-                  </div>
-                </div>
-                {resourceGroupGrantUser.is_admin ? (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-                    {t("rbac.adminResourceGroupsReadonly")}
-                  </div>
-                ) : resourceGroupGrantsLoading ? (
-                  <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-                    <Loader2 size={16} className="animate-spin" />
-                    {t("app.loading")}
-                  </div>
-                ) : generationResourceGroupsQuery.isError || resourceGroupGrantsQuery.isError ? (
-                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm font-medium text-red-700 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-200">
-                    {t("rbac.resourceGroupsLoadFailed")}
-                  </div>
-                ) : generationResourceGroups.length ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {generationResourceGroups.map((group) => (
-                      <ResourceGroupGrantCheckbox
-                        key={group.id}
-                        group={group}
-                        checked={resourceGroupGrantDraft.includes(group.id)}
-                        disabled={saveResourceGroupGrantsMutation.isPending}
-                        onToggle={(checked) => {
-                          setResourceGroupGrantDraft((current) => {
-                            const next = new Set(current);
-                            if (checked) {
-                              next.add(group.id);
-                            } else {
-                              next.delete(group.id);
-                            }
-                            return [...next].sort();
-                          });
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-                    {t("rbac.noResourceGroups")}
-                  </div>
-                )}
-              </section>
-            ) : null}
-
             <section className="pf-table-panel">
               <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -985,20 +926,22 @@ export function RbacPage() {
 	                            </td>
 	                            <td className="px-4 py-3">{user.role_name}</td>
 	                            <td className="px-4 py-3">
-	                              <div className="flex max-w-md flex-wrap gap-1.5">
-	                                {rbacUserResourceGroupLabels(user, t("rbac.noGrantedResourceGroups")).map((label) => (
-	                                  <span
-	                                    key={label}
-	                                    className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-	                                      user.resource_groups.length
-	                                        ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/10 dark:text-violet-100"
-	                                        : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400"
-	                                    }`}
-	                                  >
-	                                    {label}
-	                                  </span>
-	                                ))}
-	                              </div>
+	                              <button
+	                                type="button"
+	                                onClick={() => openResourceGroupGrantDialog(user)}
+	                                disabled={pendingUserActionBusy}
+	                                className={`inline-flex max-w-md items-center rounded-full border px-2.5 py-1 text-left text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 ${
+	                                  user.resource_groups.length
+	                                    ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100 dark:border-violet-400/40 dark:bg-violet-500/10 dark:text-violet-100 dark:hover:border-violet-300/60 dark:hover:bg-violet-500/16"
+	                                    : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+	                                }`}
+	                                aria-label={t("rbac.editResourceGroups")}
+	                                title={rbacUserResourceGroupSummary(user, t("rbac.noGrantedResourceGroups"))}
+	                              >
+	                                <span className="truncate">
+	                                  {rbacUserResourceGroupSummary(user, t("rbac.noGrantedResourceGroups"))}
+	                                </span>
+	                              </button>
 	                            </td>
 	                            <td className="px-4 py-3">
 	                              <span className={rbacUserStatusBadgeClassName(user)}>
@@ -1010,7 +953,7 @@ export function RbacPage() {
                               <div className="flex justify-end gap-2">
                                 <button
                                   type="button"
-                                  onClick={() => setResourceGroupGrantUser(user)}
+                                  onClick={() => openResourceGroupGrantDialog(user)}
                                   disabled={pendingUserActionBusy}
                                   className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-all hover:scale-[1.03] hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-violet-400/40 dark:hover:bg-violet-500/10 dark:hover:text-violet-100"
                                   aria-label={t("rbac.editResourceGroups")}
@@ -1095,6 +1038,170 @@ export function RbacPage() {
         onClose={() => setPendingUserAction(null)}
         onConfirm={handleConfirmUserAction}
       />
+      <ResourceGroupGrantDialog
+        open={resourceGroupGrantDialogOpen}
+        user={resourceGroupGrantUser}
+        groups={generationResourceGroups}
+        draft={resourceGroupGrantDraft}
+        loading={resourceGroupGrantsLoading}
+        busy={saveResourceGroupGrantsMutation.isPending}
+        hasError={generationResourceGroupsQuery.isError || resourceGroupGrantsQuery.isError}
+        onClose={() => {
+          if (saveResourceGroupGrantsMutation.isPending) {
+            return;
+          }
+          setResourceGroupGrantUser(null);
+        }}
+        onSave={() => saveResourceGroupGrantsMutation.mutate()}
+        onToggleGroup={(groupId, checked) => {
+          setResourceGroupGrantDraft((current) => {
+            const next = new Set(current);
+            if (checked) {
+              next.add(groupId);
+            } else {
+              next.delete(groupId);
+            }
+            return [...next].sort();
+          });
+        }}
+      />
+    </div>
+  );
+}
+
+interface ResourceGroupGrantDialogProps {
+  open: boolean;
+  user: RbacUser | null;
+  groups: GenerationResourceGroup[];
+  draft: string[];
+  loading: boolean;
+  busy: boolean;
+  hasError: boolean;
+  onClose: () => void;
+  onSave: () => void;
+  onToggleGroup: (groupId: string, checked: boolean) => void;
+}
+
+function ResourceGroupGrantDialog({
+  open,
+  user,
+  groups,
+  draft,
+  loading,
+  busy,
+  hasError,
+  onClose,
+  onSave,
+  onToggleGroup,
+}: ResourceGroupGrantDialogProps) {
+  const { t } = useI18n();
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [busy, onClose, open]);
+
+  if (!open || !user) {
+    return null;
+  }
+
+  const readonly = user.is_admin;
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("rbac.resourceGroupGrants")}
+        className="flex w-full max-w-3xl max-h-[min(80vh,720px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("rbac.resourceGroupGrants")}</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {user.display_name} · {user.username}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-white"
+            aria-label={t("common.cancel")}
+            title={t("common.cancel")}
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          {readonly ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+              {t("rbac.adminResourceGroupsReadonly")}
+            </div>
+          ) : loading ? (
+            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+              <Loader2 size={16} className="animate-spin" />
+              {t("app.loading")}
+            </div>
+          ) : hasError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-200">
+              {t("rbac.resourceGroupsLoadFailed")}
+            </div>
+          ) : groups.length ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {groups.map((group) => (
+                <ResourceGroupGrantCheckbox
+                  key={group.id}
+                  group={group}
+                  checked={draft.includes(group.id)}
+                  disabled={busy}
+                  onToggle={(checked) => onToggleGroup(group.id, checked)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+              {t("rbac.noResourceGroups")}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={readonly || loading || busy}
+            className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+          >
+            {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
+            {t("rbac.saveResourceGroups")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
