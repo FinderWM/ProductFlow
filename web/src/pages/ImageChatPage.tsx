@@ -103,6 +103,7 @@ import type {
   ImageToolOptions,
   GenerationResourceGroup,
   ModerationFields,
+  SessionUser,
   SourceAsset,
 } from "../lib/types";
 
@@ -188,6 +189,10 @@ function resourceGroupOptionLabel(group: GenerationResourceGroup, disabledLabel:
   return `${group.name}${suffix}`;
 }
 
+function ownerOptionLabel(user: Pick<SessionUser, "display_name" | "username">): string {
+  return `${user.display_name || user.username} (${user.username})`;
+}
+
 type PendingDeleteAction =
   | { kind: "session"; sessionId: string }
   | { kind: "inspirationReference"; assetId: string }
@@ -212,6 +217,7 @@ export function ImageChatPage() {
   const { inspirationId } = useParams();
   const isInspirationMode = Boolean(inspirationId);
   const routeStateScope = getImageChatRouteStateScope(inspirationId);
+  const initialRouteState = readImageChatRouteState(routeStateScope);
   const pendingGeneratedRoundCountRef = useRef<number | null>(null);
   const duplicateSubmitGuardRef = useRef<ImageGenerationSubmitGuard | null>(null);
   const mobileSessionButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -253,7 +259,10 @@ export function ImageChatPage() {
     () => readImageChatRouteState(routeStateScope)?.selectedSessionResourceGroupId ?? null,
   );
   const [selectedSessionOwnerUserId, setSelectedSessionOwnerUserId] = useState(
-    () => readImageChatRouteState(routeStateScope)?.selectedSessionOwnerUserId ?? "",
+    () => initialRouteState?.selectedSessionOwnerUserId ?? "",
+  );
+  const [sessionOwnerFilterInitialized, setSessionOwnerFilterInitialized] = useState(
+    () => initialRouteState !== undefined,
   );
   const [selectedSessionOwnerSearch, setSelectedSessionOwnerSearch] = useState("");
   const [onlyDeletedSessions, setOnlyDeletedSessions] = useState(
@@ -291,6 +300,16 @@ export function ImageChatPage() {
   const historyPanelStyle = {
     "--image-chat-history-panel-height": `${historyPanelHeight}px`,
   } as CSSProperties;
+  const currentUser = sessionState?.user ?? null;
+  const isAdmin = Boolean(currentUser?.is_admin);
+
+  useEffect(() => {
+    if (!isAdmin || !currentUser?.id || sessionOwnerFilterInitialized) {
+      return;
+    }
+    setSelectedSessionOwnerUserId((current) => current || currentUser.id);
+    setSessionOwnerFilterInitialized(true);
+  }, [currentUser?.id, isAdmin, sessionOwnerFilterInitialized]);
 
   useEffect(() => {
     writeImageChatRouteState(routeStateScope, {
@@ -361,8 +380,6 @@ export function ImageChatPage() {
     return () => window.removeEventListener("resize", clampPanelSizesToViewport);
   }, [historyPanelHeight, leftPanelWidth, rightPanelWidth]);
 
-  const currentUser = sessionState?.user ?? null;
-  const isAdmin = Boolean(currentUser?.is_admin);
   const deferredSessionOwnerSearch = useDeferredValue(selectedSessionOwnerSearch.trim());
   const sessionListScope = inspirationId ?? "standalone";
   const sessionListQueryKey = [
@@ -380,7 +397,7 @@ export function ImageChatPage() {
         owner_user_id: isAdmin ? selectedSessionOwnerUserId || undefined : undefined,
         only_deleted: isAdmin && onlyDeletedSessions,
       }),
-    enabled: selectedSessionResourceGroupId !== null,
+    enabled: selectedSessionResourceGroupId !== null && (!isAdmin || sessionOwnerFilterInitialized),
   });
 
   const sessionItems = sessionsQuery.data?.items ?? [];
@@ -1582,8 +1599,20 @@ export function ImageChatPage() {
     const selectedSessionResourceGroup = resourceGroups.find((group) => group.id === selectedSessionResourceGroupId);
     const selectedSessionOwner = rbacUsers.find((user) => user.id === selectedSessionOwnerUserId);
     const selectedSessionOwnerLabel = selectedSessionOwner
-      ? `${selectedSessionOwner.display_name || selectedSessionOwner.username} (${selectedSessionOwner.username})`
-      : selectedSessionOwnerUserId;
+      ? ownerOptionLabel(selectedSessionOwner)
+      : currentUser && currentUser.id === selectedSessionOwnerUserId
+        ? ownerOptionLabel(currentUser)
+        : selectedSessionOwnerUserId;
+    const sessionOwnerOptions = [
+      { value: "", label: t("chat.allOwners") },
+      ...(currentUser && !rbacUsers.some((user) => user.id === currentUser.id)
+        ? [{ value: currentUser.id, label: ownerOptionLabel(currentUser) }]
+        : []),
+      ...rbacUsers.map((user) => ({
+        value: user.id,
+        label: ownerOptionLabel(user),
+      })),
+    ];
     const activeFilterCount = [
       selectedSessionResourceGroupId,
       isAdmin && selectedSessionOwnerUserId,
@@ -1657,13 +1686,7 @@ export function ImageChatPage() {
                   </span>
                   <SelectField
                     value={selectedSessionOwnerUserId}
-                    options={[
-                      { value: "", label: t("chat.allOwners") },
-                      ...rbacUsers.map((user) => ({
-                        value: user.id,
-                        label: `${user.display_name || user.username} (${user.username})`,
-                      })),
-                    ]}
+                    options={sessionOwnerOptions}
                     onChange={setSelectedSessionOwnerUserId}
                     ariaLabel={t("chat.sessionOwnerFilter")}
                     searchValue={selectedSessionOwnerSearch}

@@ -40,7 +40,7 @@ import { useI18n } from "../lib/preferences";
 import { API_INSPIRATIONS_WRITE, hasSessionApiPermission } from "../lib/rbac";
 import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import { useSessionState } from "../lib/session";
-import type { GenerationResourceGroup, InspirationSummary, RbacUser } from "../lib/types";
+import type { GenerationResourceGroup, InspirationSummary, RbacUser, SessionUser } from "../lib/types";
 import { inspirationKeyInfo, inspirationMainThumbnailUrl } from "./InspirationListPage.helpers";
 
 const PAGE_SIZE = 12;
@@ -217,11 +217,13 @@ export function InspirationListPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const session = useSessionState();
-  const isAdmin = Boolean(session?.user?.is_admin);
+  const currentUser = session?.user ?? null;
+  const isAdmin = Boolean(currentUser?.is_admin);
   const canWriteInspirations = hasSessionApiPermission(session, API_INSPIRATIONS_WRITE);
   const [page, setPage] = useState(1);
   const [searchDraft, setSearchDraft] = useState<InspirationSearchFilters>(EMPTY_INSPIRATION_SEARCH);
   const [activeSearch, setActiveSearch] = useState<InspirationSearchFilters>(EMPTY_INSPIRATION_SEARCH);
+  const [adminOwnerFilterInitialized, setAdminOwnerFilterInitialized] = useState(false);
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
   const [ownerSearch, setOwnerSearch] = useState("");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -241,7 +243,7 @@ export function InspirationListPage() {
         owner_user_id: isAdmin ? activeSearch.owner_user_id || undefined : undefined,
         only_deleted: isAdmin && activeSearch.only_deleted,
       }),
-    enabled: selectedResourceGroupId !== null,
+    enabled: selectedResourceGroupId !== null && (!isAdmin || adminOwnerFilterInitialized),
     placeholderData: keepPreviousData,
     staleTime: INSPIRATION_LIST_STALE_TIME_MS,
   });
@@ -278,6 +280,16 @@ export function InspirationListPage() {
   const searchDraftActive = hasInspirationSearchFilters(searchDraft);
   const searchFilterCount = countInspirationSearchFilters(searchDraft) || countInspirationSearchFilters(activeSearch);
   const rbacUsers = rbacUsersQuery.data?.items ?? [];
+
+  useEffect(() => {
+    if (!isAdmin || !currentUser?.id || adminOwnerFilterInitialized) {
+      return;
+    }
+    setSearchDraft((current) => (current.owner_user_id ? current : { ...current, owner_user_id: currentUser.id }));
+    setActiveSearch((current) => (current.owner_user_id ? current : { ...current, owner_user_id: currentUser.id }));
+    setAdminOwnerFilterInitialized(true);
+    setPage(1);
+  }, [adminOwnerFilterInitialized, currentUser?.id, isAdmin]);
 
   useEffect(() => {
     if (inspirationsQuery.data && page > totalPages) {
@@ -445,6 +457,7 @@ export function InspirationListPage() {
           <InspirationSearchPanel
             draft={searchDraft}
             isAdmin={isAdmin}
+            currentUser={currentUser}
             users={rbacUsers}
             usersLoading={rbacUsersQuery.isFetching}
             ownerSearch={ownerSearch}
@@ -975,6 +988,7 @@ function ResourceGroupBadge({ name }: { name: string }) {
 function InspirationSearchPanel({
   draft,
   isAdmin,
+  currentUser,
   users,
   usersLoading,
   ownerSearch,
@@ -995,6 +1009,7 @@ function InspirationSearchPanel({
 }: {
   draft: InspirationSearchFilters;
   isAdmin: boolean;
+  currentUser: SessionUser | null;
   users: RbacUser[];
   usersLoading: boolean;
   ownerSearch: string;
@@ -1023,6 +1038,21 @@ function InspirationSearchPanel({
   const labelClassName = "text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500";
   const selectedResourceGroup = resourceGroups.find((group) => group.id === selectedResourceGroupId);
   const selectedOwner = users.find((user) => user.id === draft.owner_user_id);
+  const selectedOwnerLabel = selectedOwner
+    ? selectedOwner.display_name || selectedOwner.username
+    : currentUser && currentUser.id === draft.owner_user_id
+      ? currentUser.display_name || currentUser.username
+      : draft.owner_user_id;
+  const ownerOptions = [
+    { value: "", label: t("inspirations.search.allOwners") },
+    ...(currentUser && !users.some((user) => user.id === currentUser.id)
+      ? [{ value: currentUser.id, label: `${currentUser.display_name || currentUser.username} (${currentUser.username})` }]
+      : []),
+    ...users.map((user) => ({
+      value: user.id,
+      label: `${user.display_name || user.username} (${user.username})`,
+    })),
+  ];
   const dateRangeSummary =
     draft.updated_from || draft.updated_to ? `${draft.updated_from || "..."} - ${draft.updated_to || "..."}` : "";
   const compactSummaryItems = [
@@ -1053,7 +1083,7 @@ function InspirationSearchPanel({
       ? {
           key: "owner",
           label: t("inspirations.search.owner"),
-          value: selectedOwner ? selectedOwner.display_name || selectedOwner.username : draft.owner_user_id,
+          value: selectedOwnerLabel,
         }
       : null,
     isAdmin && draft.only_deleted
@@ -1209,13 +1239,7 @@ function InspirationSearchPanel({
               <span className={labelClassName}>{t("inspirations.search.owner")}</span>
               <SelectField
                 value={draft.owner_user_id}
-                options={[
-                  { value: "", label: t("inspirations.search.allOwners") },
-                  ...users.map((user) => ({
-                    value: user.id,
-                    label: `${user.display_name || user.username} (${user.username})`,
-                  })),
-                ]}
+                options={ownerOptions}
                 onChange={(value) => onChange({ ...draft, owner_user_id: value })}
                 ariaLabel={t("inspirations.search.owner")}
                 searchValue={ownerSearch}
