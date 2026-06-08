@@ -1899,10 +1899,15 @@ export function ImageChatPage() {
                 onClick={openCreateSessionDialog}
                 disabled={createSessionDisabled}
                 title={createSessionButtonTitle}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
+                className="inline-flex h-11 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                 aria-label={t("chat.newSession")}
               >
-                {createSessionMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Plus size={18} />}
+                {createSessionMutation.isPending ? (
+                  <Loader2 size={16} className="shrink-0 animate-spin" />
+                ) : (
+                  <Plus size={18} className="shrink-0" />
+                )}
+                <span>{t("chat.newSessionShort")}</span>
               </button>
             </div>
             <div className="mt-3">{renderSessionResourceGroupFilter()}</div>
@@ -2260,10 +2265,15 @@ export function ImageChatPage() {
                     onClick={openCreateSessionDialog}
                     disabled={createSessionDisabled}
                     title={createSessionButtonTitle}
-                    className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
+                    className="inline-flex h-11 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                     aria-label={t("chat.newSession")}
                   >
-                    {createSessionMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Plus size={18} />}
+                    {createSessionMutation.isPending ? (
+                      <Loader2 size={16} className="shrink-0 animate-spin" />
+                    ) : (
+                      <Plus size={18} className="shrink-0" />
+                    )}
+                    <span>{t("chat.newSessionShort")}</span>
                   </button>
                   <button
                     type="button"
@@ -2526,7 +2536,7 @@ export function ImageChatPage() {
             aria-modal="true"
             aria-labelledby={createSessionDialogTitleId}
             aria-describedby={createSessionDialogDescriptionId}
-            className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+            className="w-full max-w-md overflow-visible rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
           >
             <div className="flex items-start gap-3 px-5 pt-5">
               <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">

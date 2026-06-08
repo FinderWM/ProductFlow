@@ -112,11 +112,16 @@ export function ImageChatHistoryPanel({
         <div>
           <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("chat.history")}</div>
         </div>
-        {branchBaseSelected ? (
-          <div className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-100">
-            {t("chat.clickHistoryBase")}
+        <div className="flex min-w-0 items-center justify-end gap-2">
+          <div className="truncate rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+            {t("chat.historyMultiRoundHint")}
           </div>
-        ) : null}
+          {branchBaseSelected ? (
+            <div className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-100">
+              {t("chat.clickHistoryBase")}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {historyBranches.length ? (
