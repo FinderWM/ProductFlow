@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Loader2, Search } from "lucide-react";
 
 export interface SelectFieldOption {
   value: string;
@@ -23,6 +23,13 @@ interface SelectFieldProps {
   disabled?: boolean;
   radius?: "lg" | "xl";
   visualSize?: "sm" | "md";
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
+  searchPlaceholder?: string;
+  searchAriaLabel?: string;
+  searchLoading?: boolean;
+  searchLoadingLabel?: string;
+  emptyLabel?: string;
 }
 
 interface FlatOption extends SelectFieldOption {
@@ -40,14 +47,23 @@ export function SelectField({
   disabled = false,
   radius = "xl",
   visualSize = "md",
+  searchValue = "",
+  onSearchChange,
+  searchPlaceholder,
+  searchAriaLabel,
+  searchLoading = false,
+  searchLoadingLabel,
+  emptyLabel,
 }: SelectFieldProps) {
   const generatedId = useId();
   const buttonId = id ?? generatedId;
   const listboxId = `${buttonId}-listbox`;
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [open, setOpen] = useState(false);
   const [activeValue, setActiveValue] = useState(value);
+  const searchable = Boolean(onSearchChange);
 
   const flatOptions = useMemo<FlatOption[]>(() => {
     const groupedOptions = groups.flatMap((group) =>
@@ -59,7 +75,7 @@ export function SelectField({
     return [...options, ...groupedOptions];
   }, [groups, options]);
   const enabledOptions = flatOptions.filter((option) => !option.disabled);
-  const selectedOption = flatOptions.find((option) => option.value === value) ?? flatOptions[0] ?? null;
+  const selectedOption = flatOptions.find((option) => option.value === value) ?? (value ? { value, label: value } : flatOptions[0] ?? null);
   const activeOption = flatOptions.find((option) => option.value === activeValue && !option.disabled) ?? selectedOption;
 
   useEffect(() => {
@@ -84,12 +100,23 @@ export function SelectField({
     }
   }, [activeOption, open]);
 
+  useEffect(() => {
+    if (open && searchable) {
+      searchInputRef.current?.focus();
+    }
+  }, [open, searchable]);
+
   const radiusClassName = radius === "lg" ? "rounded-lg" : "rounded-xl";
   const sizeClassName = visualSize === "sm" ? "h-9 pl-2.5 pr-9 text-xs" : "h-10 pl-3 pr-10 text-sm";
-  const menuClassName = visualSize === "sm" ? "max-h-56 text-xs" : "max-h-64 text-sm";
+  const menuTextClassName = visualSize === "sm" ? "text-xs" : "text-sm";
+  const menuMaxHeightClassName = visualSize === "sm" ? "max-h-56" : "max-h-64";
   const iconSize = visualSize === "sm" ? 14 : 16;
   const iconRightClassName = visualSize === "sm" ? "right-2.5" : "right-3";
   const dividerRightClassName = visualSize === "sm" ? "right-7" : "right-8";
+  const searchInputClassName =
+    visualSize === "sm"
+      ? "h-8 pl-7 pr-8 text-xs"
+      : "h-9 pl-8 pr-9 text-sm";
 
   function moveActive(delta: number) {
     if (!enabledOptions.length) {
@@ -167,45 +194,83 @@ export function SelectField({
 
       {open && !disabled ? (
         <div
-          id={listboxId}
-          role="listbox"
-          aria-labelledby={buttonId}
-          className={`absolute z-[95] mt-1 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10 ${menuClassName}`}
+          className={`absolute z-[95] mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10 ${menuTextClassName}`}
         >
-          {groups.length
-            ? groups.map((group) => (
-                <div key={group.label}>
-                  <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    {group.label}
-                  </div>
-                  {group.options.map((option) => (
-                    <SelectOptionButton
-                      key={`${group.label}-${option.value}`}
-                      option={option}
-                      selected={option.value === value}
-                      active={option.value === activeOption?.value}
-                      visualSize={visualSize}
-                      onSelect={selectOption}
-                      refCallback={(element) => {
-                        optionRefs.current[option.value] = element;
-                      }}
-                    />
-                  ))}
-                </div>
-              ))
-            : options.map((option) => (
-                <SelectOptionButton
-                  key={option.value}
-                  option={option}
-                  selected={option.value === value}
-                  active={option.value === activeOption?.value}
-                  visualSize={visualSize}
-                  onSelect={selectOption}
-                  refCallback={(element) => {
-                    optionRefs.current[option.value] = element;
-                  }}
+          {searchable ? (
+            <div className="border-b border-slate-100 p-1.5 dark:border-slate-800">
+              <div className="relative">
+                <Search
+                  size={visualSize === "sm" ? 13 : 15}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
                 />
-              ))}
+                <input
+                  ref={searchInputRef}
+                  value={searchValue}
+                  onChange={(event) => onSearchChange?.(event.target.value)}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === "Escape") {
+                      setOpen(false);
+                    }
+                  }}
+                  aria-label={searchAriaLabel ?? searchPlaceholder}
+                  placeholder={searchPlaceholder}
+                  className={`w-full rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-900 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-slate-950 dark:focus:ring-violet-400/20 ${searchInputClassName}`}
+                />
+                {searchLoading ? (
+                  <Loader2
+                    size={visualSize === "sm" ? 13 : 15}
+                    className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-slate-400 dark:text-slate-500"
+                    aria-label={searchLoadingLabel}
+                  />
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-labelledby={buttonId}
+            className={`overflow-y-auto p-1 ${menuMaxHeightClassName}`}
+          >
+            {groups.length
+              ? groups.map((group) => (
+                  <div key={group.label}>
+                    <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      {group.label}
+                    </div>
+                    {group.options.map((option) => (
+                      <SelectOptionButton
+                        key={`${group.label}-${option.value}`}
+                        option={option}
+                        selected={option.value === value}
+                        active={option.value === activeOption?.value}
+                        visualSize={visualSize}
+                        onSelect={selectOption}
+                        refCallback={(element) => {
+                          optionRefs.current[option.value] = element;
+                        }}
+                      />
+                    ))}
+                  </div>
+                ))
+              : options.map((option) => (
+                  <SelectOptionButton
+                    key={option.value}
+                    option={option}
+                    selected={option.value === value}
+                    active={option.value === activeOption?.value}
+                    visualSize={visualSize}
+                    onSelect={selectOption}
+                    refCallback={(element) => {
+                      optionRefs.current[option.value] = element;
+                    }}
+                  />
+                ))}
+            {!flatOptions.length && emptyLabel ? (
+              <div className="px-2.5 py-2 text-xs font-medium text-slate-500 dark:text-slate-400">{emptyLabel}</div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>

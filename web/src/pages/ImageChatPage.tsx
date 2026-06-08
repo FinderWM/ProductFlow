@@ -40,6 +40,8 @@ import { formatDateTime } from "../lib/format";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { useI18n } from "../lib/preferences";
 import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
+import { useSensitiveImageMaskPreference } from "../lib/sensitiveImagePreferences";
+import { shouldShowSensitiveImageMaskPreference } from "../lib/sensitiveImages";
 import {
   API_GALLERY_WRITE,
   API_IMAGE_CHAT_GENERATE,
@@ -80,11 +82,11 @@ import {
   isImageSessionGenerationTaskCancelable,
   isImageSessionGenerationTaskRegeneratable,
   isImageSessionGenerationTaskRetryable,
+  latestImageSessionGenerationState,
   mergeImageSessionStatusIntoDetail,
   pruneSelectedReferenceIds,
   reconcileImageSessionSelection,
   requiresImageSessionGenerationBase,
-  selectImageGenerationTaskNextPlaceholderId,
   selectSubmittedImageGenerationTaskPlaceholderId,
   shouldBlockDuplicateGenerationSubmit,
   shouldRefreshImageSessionDetailFromStatus,
@@ -101,6 +103,7 @@ import type {
   ImageSessionListResponse,
   ImageSessionStatus,
   ImageToolOptions,
+  GenerationConfigSelectionMode,
   GenerationResourceGroup,
   ModerationFields,
   SessionUser,
@@ -116,6 +119,7 @@ const RBAC_USERS_STALE_TIME_MS = 5 * 60_000;
 const IMAGE_CHAT_GENERATION_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 type ImageChatResizeTarget = "left" | "right" | "history";
+type ImageChatGenerationDraftMode = "new_round" | "retry";
 
 interface ImageChatRouteState {
   selectedSessionId: string | null;
@@ -209,6 +213,10 @@ function assertImageChatActionAllowed(blockedTitle: string | null) {
   }
 }
 
+function imageRoundGenerationGroupId(round: ImageSessionRound): string {
+  return round.generation_group_id ?? round.id;
+}
+
 export function ImageChatPage() {
   const { t } = useI18n();
   const sessionState = useSessionState();
@@ -252,6 +260,8 @@ export function ImageChatPage() {
   const [settingsTab, setSettingsTab] = useState<ImageGenerationSettingsTab>(
     () => readImageChatRouteState(routeStateScope)?.settingsTab ?? "basic",
   );
+  const [generationConfigMode, setGenerationConfigMode] = useState<GenerationConfigSelectionMode>("auto");
+  const [generationConfigId, setGenerationConfigId] = useState<string | null>(null);
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(
     () => readImageChatRouteState(routeStateScope)?.selectedResourceGroupId ?? null,
   );
@@ -290,6 +300,8 @@ export function ImageChatPage() {
   const [mobileSessionDrawerOpen, setMobileSessionDrawerOpen] = useState(false);
   const [mobileHistoryDrawerOpen, setMobileHistoryDrawerOpen] = useState(false);
   const [mobileGenerationSheetOpen, setMobileGenerationSheetOpen] = useState(false);
+  const [generationDraftMode, setGenerationDraftMode] = useState<ImageChatGenerationDraftMode | null>(null);
+  const [retryGenerationTaskId, setRetryGenerationTaskId] = useState<string | null>(null);
 
   const leftPanelStyle = {
     "--image-chat-left-panel-width": `${leftPanelWidth}px`,
@@ -301,6 +313,7 @@ export function ImageChatPage() {
     "--image-chat-history-panel-height": `${historyPanelHeight}px`,
   } as CSSProperties;
   const currentUser = sessionState?.user ?? null;
+  const [maskSensitiveImages, setMaskSensitiveImages] = useSensitiveImageMaskPreference("image-chat");
   const isAdmin = Boolean(currentUser?.is_admin);
 
   useEffect(() => {
@@ -510,6 +523,16 @@ export function ImageChatPage() {
     setSelectedTaskPlaceholderId(null);
     setBranchBaseAssetId(null);
     setSelectedReferenceAssetIds([]);
+    setGenerationDraftMode(null);
+    setRetryGenerationTaskId(null);
+    setGenerationConfigMode("auto");
+    setGenerationConfigId(null);
+  }
+
+  function handleGenerationResourceGroupChange(value: string) {
+    setSelectedResourceGroupId(value || null);
+    setGenerationConfigMode("auto");
+    setGenerationConfigId(null);
   }
 
   function handleSelectSession(sessionId: string) {
@@ -644,6 +667,22 @@ export function ImageChatPage() {
   });
 
   const imageSession = sessionDetailQuery.data;
+  const latestGenerationState = useMemo(
+    () => latestImageSessionGenerationState(imageSession?.rounds ?? [], imageSession?.generation_tasks ?? []),
+    [imageSession],
+  );
+  const latestSucceededGenerationGroupId =
+    latestGenerationState.status === "succeeded" ? imageRoundGenerationGroupId(latestGenerationState.round) : null;
+  const latestSucceededRoundAssetIds = useMemo(() => {
+    if (!imageSession?.rounds.length || !latestSucceededGenerationGroupId) {
+      return new Set<string>();
+    }
+    return new Set(
+      imageSession.rounds
+        .filter((round) => imageRoundGenerationGroupId(round) === latestSucceededGenerationGroupId)
+        .map((round) => round.generated_asset.id),
+    );
+  }, [imageSession, latestSucceededGenerationGroupId]);
   const historyBranches = useMemo(
     () => buildImageSessionHistoryTree(imageSession?.rounds ?? [], imageSession?.generation_tasks ?? []),
     [imageSession],
@@ -720,6 +759,8 @@ export function ImageChatPage() {
     pendingGeneratedRoundCountRef.current = reconciled.pendingGeneratedRoundCount;
 
     if (reconciled.generatedRoundCompleted) {
+      setGenerationDraftMode(null);
+      setRetryGenerationTaskId(null);
       setSuccessMessage(t("chat.newCandidate"));
       setErrorMessage("");
     }
@@ -759,9 +800,23 @@ export function ImageChatPage() {
     }
     return imageSession.rounds.find((round) => round.generated_asset.id === branchBaseAssetId) ?? null;
   }, [branchBaseAssetId, imageSession]);
+  const generationDraftOpen = latestGenerationState.status === "empty" || generationDraftMode !== null;
+  const generationDraftRequiresBase =
+    generationDraftMode === "retry" ? Boolean(branchBaseAssetId) : requiresGenerationBase;
+  const generationDraftGateMessage =
+    generationDraftOpen
+      ? ""
+      : latestGenerationState.status === "succeeded"
+        ? t("chat.newRoundRequired")
+        : latestGenerationState.status === "failed"
+          ? t("chat.retryCurrentFailedRoundRequired")
+          : latestGenerationState.status === "active" || latestGenerationState.status === "refreshing"
+            ? t("chat.currentRoundActive")
+            : t("chat.newRoundUnavailable");
   const baseRequirementMessage =
-    requiresGenerationBase && !branchBaseRound ? t("chat.baseRequired") : "";
-  const resourceGroupRequirementMessage = !selectedResourceGroupId ? t("chat.resourceGroupRequired") : "";
+    generationDraftOpen && generationDraftRequiresBase && !branchBaseRound ? t("chat.baseRequired") : "";
+  const resourceGroupRequirementMessage =
+    generationDraftOpen && !selectedResourceGroupId ? t("chat.resourceGroupRequired") : "";
 
   const sourceImage = useMemo(
     () => inspirationQuery.data?.source_assets.find((asset) => asset.kind === "original_image") ?? null,
@@ -840,6 +895,37 @@ export function ImageChatPage() {
       : isInspirationMode && currentInspirationAdminReadonly
         ? adminReadonlyActionTitle
         : imageChatWritePermissionTitle;
+  const selectedPlaceholderActionBlockedTitle =
+    selectedPlaceholder && latestGenerationState.task?.id !== selectedPlaceholder.task_id
+      ? t("chat.historyRoundLocked")
+      : generationBlockedTitle;
+  const selectedRoundIsLatestSucceeded =
+    selectedRound !== null && latestSucceededRoundAssetIds.has(selectedRound.generated_asset.id);
+  const latestAvailableRound = imageSession?.rounds.at(-1) ?? null;
+  const newRoundBaseRound =
+    selectedRoundIsLatestSucceeded
+      ? selectedRound
+      : latestGenerationState.status === "succeeded"
+        ? latestGenerationState.round
+        : latestGenerationState.status === "failed"
+          ? latestAvailableRound
+          : null;
+  const canStartNewRoundWithoutBase =
+    latestGenerationState.status === "failed" && latestAvailableRound === null;
+  const newRoundUnavailableTitle =
+    latestGenerationState.status === "succeeded"
+      ? ""
+      : latestGenerationState.status === "failed"
+        ? ""
+        : latestGenerationState.status === "active" || latestGenerationState.status === "refreshing"
+          ? t("chat.currentRoundActive")
+          : latestGenerationState.status === "empty"
+            ? t("chat.firstRoundNotStarted")
+            : t("chat.newRoundUnavailable");
+  const newRoundBlockedTitle = generationSettingsBlockedTitle ?? newRoundUnavailableTitle;
+  const newRoundDisabled =
+    !(newRoundBaseRound || canStartNewRoundWithoutBase) ||
+    Boolean(generationSettingsBlockedTitle || newRoundUnavailableTitle);
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -981,6 +1067,10 @@ export function ImageChatPage() {
         setSelectedTaskPlaceholderId(placeholderId);
         setSelectedGeneratedAssetId(null);
       }
+      setGenerationDraftMode(null);
+      setRetryGenerationTaskId(null);
+      setGenerationConfigMode("auto");
+      setGenerationConfigId(null);
       setDraft("");
       setSuccessMessage(
         submittedCount > 1
@@ -1018,27 +1108,6 @@ export function ImageChatPage() {
     },
   });
 
-  const retryGenerationTaskMutation = useMutation({
-    mutationFn: (input: { sessionId: string; taskId: string }) => {
-      assertImageChatActionAllowed(generationBlockedTitle);
-      return api.retryImageSessionGenerationTask(input.sessionId, input.taskId);
-    },
-    onSuccess: (updated, input) => {
-      queryClient.setQueryData(["image-session", updated.id], updated);
-      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
-      const retriedTask = updated.generation_tasks.find((task) => task.id === input.taskId);
-      if (retriedTask) {
-        setSelectedTaskPlaceholderId(selectImageGenerationTaskNextPlaceholderId(retriedTask));
-        setSelectedGeneratedAssetId(null);
-      }
-      setSuccessMessage(t("chat.retrySubmitted"));
-      setErrorMessage("");
-    },
-    onError: (error) => {
-      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.retryFailed"));
-    },
-  });
-
   const cancelGenerationTaskMutation = useMutation({
     mutationFn: (input: { sessionId: string; taskId: string }) => {
       assertImageChatActionAllowed(generationBlockedTitle);
@@ -1059,10 +1128,11 @@ export function ImageChatPage() {
   const generateDisabled =
     !selectedSessionId ||
     !imageSession ||
+    !generationDraftOpen ||
     !draft.trim() ||
     generateMutation.isPending ||
     Boolean(generationBlockedTitle) ||
-    Boolean(baseRequirementMessage || resourceGroupRequirementMessage);
+    Boolean(generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage);
 
   const attachMutation = useMutation({
     mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; inspirationId?: string }) => {
@@ -1140,12 +1210,20 @@ export function ImageChatPage() {
       setErrorMessage(generationBlockedTitle);
       return;
     }
+    if (generationDraftGateMessage) {
+      setErrorMessage(generationDraftGateMessage);
+      return;
+    }
     if (baseRequirementMessage) {
       setErrorMessage(baseRequirementMessage);
       return;
     }
     if (resourceGroupRequirementMessage) {
       setErrorMessage(resourceGroupRequirementMessage);
+      return;
+    }
+    if (generationDraftMode === "retry" && !retryGenerationTaskId) {
+      setErrorMessage(t("chat.retryCurrentFailedRoundRequired"));
       return;
     }
     const selectedReferenceIds = pruneSelectedReferenceIds(
@@ -1156,13 +1234,14 @@ export function ImageChatPage() {
     const payload: ImageGenerationSubmitPayload = {
       prompt,
       size,
-      base_asset_id: requiresGenerationBase ? branchBaseAssetId : null,
+      base_asset_id: generationDraftRequiresBase ? branchBaseAssetId : null,
       selected_reference_asset_ids: selectedReferenceIds,
       generation_count: clampGenerationCount(generationCount),
       tool_options: compactedToolOptions,
       resource_group_id: selectedResourceGroupId ?? "",
-      generation_config_mode: "auto",
-      generation_config_id: null,
+      generation_config_mode: generationConfigMode,
+      generation_config_id: generationConfigMode === "manual" ? generationConfigId : null,
+      retry_generation_task_id: generationDraftMode === "retry" ? retryGenerationTaskId : null,
     };
     const signature = buildImageGenerationSubmitSignature(payload);
     const now = Date.now();
@@ -1212,16 +1291,55 @@ export function ImageChatPage() {
     setErrorMessage("");
   }
 
+  function restoreGenerationTaskDraft(task: ImageSessionGenerationTask, mode: ImageChatGenerationDraftMode) {
+    const payload = imageGenerationTaskSubmitPayload(task);
+    const nextBranchBaseAssetId = payload.base_asset_id ?? null;
+    const nextMaxReferenceCount = nextBranchBaseAssetId ? MAX_BRANCH_CONTEXT_IMAGES - 1 : MAX_BRANCH_CONTEXT_IMAGES;
+    setDraft(payload.prompt);
+    setPolishedPrompt("");
+    setSize(payload.size);
+    setToolOptions(payload.tool_options ?? {});
+    setGenerationCount(clampGenerationCount(payload.generation_count));
+    setSelectedResourceGroupId(payload.resource_group_id || selectedResourceGroupId || null);
+    setGenerationConfigMode(payload.generation_config_mode ?? "auto");
+    setGenerationConfigId(
+      payload.generation_config_mode === "manual" ? (payload.generation_config_id ?? null) : null,
+    );
+    setBranchBaseAssetId(nextBranchBaseAssetId);
+    setSelectedReferenceAssetIds(
+      pruneSelectedReferenceIds(
+        payload.selected_reference_asset_ids,
+        sessionReferenceAssets.map((asset) => asset.id),
+        nextMaxReferenceCount,
+      ),
+    );
+    setSelectedTaskPlaceholderId(
+      selectedPlaceholder?.task_id === task.id
+        ? selectedPlaceholder.id
+        : selectSubmittedImageGenerationTaskPlaceholderId([task], payload),
+    );
+    setSelectedGeneratedAssetId(null);
+    setSettingsTab("basic");
+    setGenerationDraftMode(mode);
+    setRetryGenerationTaskId(mode === "retry" ? task.id : null);
+  }
+
   function handleRetryGenerationTask(task: ImageSessionGenerationTask) {
-    if (!selectedSessionId || retryGenerationTaskMutation.isPending || !isImageSessionGenerationTaskRetryable(task)) {
+    if (!selectedSessionId || !imageSession || !isImageSessionGenerationTaskRetryable(task)) {
+      return;
+    }
+    if (latestGenerationState.task?.id !== task.id) {
+      setErrorMessage(t("chat.historyRoundLocked"));
       return;
     }
     if (generationBlockedTitle) {
       setErrorMessage(generationBlockedTitle);
       return;
     }
-    pendingGeneratedRoundCountRef.current = imageSession?.rounds.length ?? 0;
-    retryGenerationTaskMutation.mutate({ sessionId: selectedSessionId, taskId: task.id });
+    restoreGenerationTaskDraft(task, "retry");
+    setSuccessMessage(t("chat.retrySettingsRestored"));
+    setErrorMessage("");
+    setMobileGenerationSheetOpen(true);
   }
 
   function handleCancelGenerationTask(task: ImageSessionGenerationTask) {
@@ -1230,6 +1348,10 @@ export function ImageChatPage() {
       cancelGenerationTaskMutation.isPending ||
       !isImageSessionGenerationTaskCancelable(task)
     ) {
+      return;
+    }
+    if (latestGenerationState.task?.id !== task.id) {
+      setErrorMessage(t("chat.historyRoundLocked"));
       return;
     }
     if (generationBlockedTitle) {
@@ -1252,12 +1374,45 @@ export function ImageChatPage() {
       setErrorMessage(generationBlockedTitle);
       return;
     }
+    if (latestGenerationState.task?.id !== task.id) {
+      setErrorMessage(t("chat.historyRoundLocked"));
+      return;
+    }
     pendingGeneratedRoundCountRef.current = imageSession.rounds.length;
     const payload = imageGenerationTaskSubmitPayload(task);
     generateMutation.mutate({
       ...payload,
       resource_group_id: payload.resource_group_id || selectedResourceGroupId || "",
     });
+  }
+
+  function handleStartNewRound() {
+    if (!imageSession) {
+      return;
+    }
+    if (newRoundBlockedTitle) {
+      setErrorMessage(newRoundBlockedTitle);
+      return;
+    }
+    if (!newRoundBaseRound && !canStartNewRoundWithoutBase) {
+      setErrorMessage(t("chat.newRoundUnavailable"));
+      return;
+    }
+    const nextBaseAssetId = newRoundBaseRound?.generated_asset.id ?? null;
+    setSelectedGeneratedAssetId(nextBaseAssetId);
+    setSelectedTaskPlaceholderId(null);
+    setBranchBaseAssetId(nextBaseAssetId);
+    setSelectedReferenceAssetIds([]);
+    setDraft("");
+    setPolishedPrompt("");
+    setSettingsTab("basic");
+    setGenerationConfigMode("auto");
+    setGenerationConfigId(null);
+    setRetryGenerationTaskId(null);
+    setGenerationDraftMode("new_round");
+    setSuccessMessage(t("chat.newRoundReady"));
+    setErrorMessage("");
+    setMobileGenerationSheetOpen(true);
   }
 
   function handleRename() {
@@ -1305,8 +1460,10 @@ export function ImageChatPage() {
 
   function handleSelectHistoryRound(assetId: string) {
     setSelectedGeneratedAssetId(assetId);
-    setBranchBaseAssetId(assetId);
     setSelectedTaskPlaceholderId(null);
+    if (generationDraftMode === "new_round" && latestSucceededRoundAssetIds.has(assetId)) {
+      setBranchBaseAssetId(assetId);
+    }
     setSuccessMessage("");
     setErrorMessage("");
   }
@@ -1585,7 +1742,7 @@ export function ImageChatPage() {
               disabled: !group.enabled,
             })),
           ]}
-          onChange={(value) => setSelectedResourceGroupId(value || null)}
+          onChange={handleGenerationResourceGroupChange}
           ariaLabel={t("chat.resourceGroup")}
           radius="lg"
           visualSize="sm"
@@ -1597,6 +1754,10 @@ export function ImageChatPage() {
 
   function renderSessionResourceGroupFilter() {
     const selectedSessionResourceGroup = resourceGroups.find((group) => group.id === selectedSessionResourceGroupId);
+    const showSensitiveImageMaskPreference = shouldShowSensitiveImageMaskPreference(
+      selectedSessionResourceGroupId,
+      resourceGroups,
+    );
     const selectedSessionOwner = rbacUsers.find((user) => user.id === selectedSessionOwnerUserId);
     const selectedSessionOwnerLabel = selectedSessionOwner
       ? ownerOptionLabel(selectedSessionOwner)
@@ -1678,6 +1839,17 @@ export function ImageChatPage() {
                 disabled={generationResourceGroupsQuery.isLoading}
               />
             </label>
+            {showSensitiveImageMaskPreference ? (
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={maskSensitiveImages}
+                  onChange={(event) => setMaskSensitiveImages(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+                />
+                <span>{t("chat.maskSensitiveImages")}</span>
+              </label>
+            ) : null}
             {isAdmin ? (
               <>
                 <label className="block">
@@ -1837,6 +2009,18 @@ export function ImageChatPage() {
   }
 
   function renderGenerationSettingsSection(promptId: string) {
+    if (!generationDraftOpen) {
+      return (
+        <section className="space-y-3">
+          <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
+            <Settings size={15} /> {t("chat.generationSettings")}
+          </div>
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm font-medium leading-6 text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+            {generationDraftGateMessage}
+          </div>
+        </section>
+      );
+    }
     return (
       <section className="space-y-3">
         <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
@@ -1945,6 +2129,7 @@ export function ImageChatPage() {
             deletionBlockedTitle={sessionListDeletionBlockedTitle}
             currentUser={currentUser}
             variant="desktop"
+            maskSensitiveImages={maskSensitiveImages}
             onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession}
             t={t}
@@ -2111,10 +2296,11 @@ export function ImageChatPage() {
               selectedRound={selectedRound}
               selectedPlaceholder={selectedPlaceholder}
               branchBaseRound={branchBaseRound}
-              retryingTaskId={retryGenerationTaskMutation.isPending ? (retryGenerationTaskMutation.variables?.taskId ?? null) : null}
+              retryingTaskId={null}
               cancellingTaskId={cancelGenerationTaskMutation.isPending ? (cancelGenerationTaskMutation.variables?.taskId ?? null) : null}
               regenerating={generateMutation.isPending}
-              generationBlockedTitle={generationBlockedTitle}
+              maskSensitiveImages={maskSensitiveImages}
+              generationBlockedTitle={selectedPlaceholderActionBlockedTitle}
               onPreviewRound={setPreviewRound}
               onRetryGenerationTask={handleRetryGenerationTask}
               onCancelGenerationTask={handleCancelGenerationTask}
@@ -2156,6 +2342,11 @@ export function ImageChatPage() {
             onResizeStart={(event) => handlePanelResizeStart("history", event)}
             onSelectRound={handleSelectHistoryRound}
             onSelectPlaceholder={handleSelectHistoryPlaceholder}
+            onStartNewRound={handleStartNewRound}
+            newRoundDisabled={newRoundDisabled}
+            newRoundActive={generationDraftMode === "new_round"}
+            newRoundTitle={newRoundBlockedTitle || t("chat.newRound")}
+            maskSensitiveImages={maskSensitiveImages}
             onPreviewPrompt={setPromptPreview}
             t={t}
           />
@@ -2233,16 +2424,16 @@ export function ImageChatPage() {
             {generationBlockedResource ? (
               <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
             ) : null}
-            {baseRequirementMessage || resourceGroupRequirementMessage ? (
+            {generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage ? (
               <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                {baseRequirementMessage || resourceGroupRequirementMessage}
+                {generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage}
               </div>
             ) : null}
             <button
               type="button"
               onClick={handleGenerate}
               disabled={generateDisabled}
-              title={generationBlockedTitle ?? t("chat.startGenerate")}
+              title={generationBlockedTitle ?? (generationDraftGateMessage || t("chat.startGenerate"))}
               className="inline-flex w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
             >
               {generateMutation.isPending ? (
@@ -2322,6 +2513,7 @@ export function ImageChatPage() {
               deletionBlockedTitle={sessionListDeletionBlockedTitle}
               currentUser={currentUser}
               variant="mobile"
+              maskSensitiveImages={maskSensitiveImages}
               onSelectSession={handleSelectSession}
               onDeleteSession={handleDeleteSession}
               t={t}
@@ -2369,6 +2561,11 @@ export function ImageChatPage() {
               variant="mobileDrawer"
               onSelectRound={handleSelectHistoryRound}
               onSelectPlaceholder={handleSelectHistoryPlaceholder}
+              onStartNewRound={handleStartNewRound}
+              newRoundDisabled={newRoundDisabled}
+              newRoundActive={generationDraftMode === "new_round"}
+              newRoundTitle={newRoundBlockedTitle || t("chat.newRound")}
+              maskSensitiveImages={maskSensitiveImages}
               onPreviewPrompt={setPromptPreview}
               t={t}
             />
@@ -2414,15 +2611,25 @@ export function ImageChatPage() {
           <button
             ref={mobileSettingsButtonRef}
             type="button"
-            onClick={() => setMobileGenerationSheetOpen(true)}
+            onClick={() => {
+              if (!generationDraftOpen) {
+                handleStartNewRound();
+                return;
+              }
+              setMobileGenerationSheetOpen(true);
+            }}
+            disabled={!generationDraftOpen && newRoundDisabled}
+            title={generationDraftOpen ? t("chat.openGenerationSheet") : (newRoundBlockedTitle || t("chat.newRound"))}
             className={`flex min-h-11 min-w-0 items-center rounded-xl bg-indigo-600 text-left text-white shadow-md shadow-indigo-600/16 transition-colors hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-violet-600 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35 dark:focus-visible:ring-violet-300 ${
               selectedRound ? "flex-1 px-2.5" : "w-full px-3"
-            }`}
-            aria-label={t("chat.openGenerationSheet")}
+            } disabled:opacity-60`}
+            aria-label={generationDraftOpen ? t("chat.openGenerationSheet") : t("chat.newRound")}
           >
             <Sparkles size={17} className="mr-2 shrink-0" />
             <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold leading-5">{t("chat.mobileGenerate")}</span>
+              <span className="block text-sm font-semibold leading-5">
+                {generationDraftOpen ? t("chat.mobileGenerate") : t("chat.newRoundShort")}
+              </span>
             </span>
             <ChevronRight size={17} className="ml-2 shrink-0 text-indigo-100 dark:text-violet-100" />
           </button>
@@ -2465,16 +2672,16 @@ export function ImageChatPage() {
               {generationBlockedResource ? (
                 <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
               ) : null}
-              {baseRequirementMessage || resourceGroupRequirementMessage ? (
+              {generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage ? (
                 <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                  {baseRequirementMessage || resourceGroupRequirementMessage}
+                  {generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage}
                 </div>
               ) : null}
               <button
                 type="button"
                 onClick={handleGenerate}
                 disabled={generateDisabled}
-                title={generationBlockedTitle ?? t("chat.startGenerate")}
+                title={generationBlockedTitle ?? (generationDraftGateMessage || t("chat.startGenerate"))}
                 className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
               >
                 {generateMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Sparkles size={15} className="mr-2" />}

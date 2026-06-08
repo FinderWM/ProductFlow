@@ -23,19 +23,22 @@ router = APIRouter(
 
 @router.get("", response_model=GalleryEntryListResponse)
 def list_gallery_entries_endpoint(
-    resource_group_id: str = Query(..., min_length=1, max_length=36),
+    resource_group_id: str | None = Query(default=None, min_length=1, max_length=36),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_GALLERY_READ)),
 ) -> GalleryEntryListResponse:
-    resource_group = require_generation_resource_group_for_user(
-        session,
-        user_id=current_user.id,
-        is_admin=current_user.is_admin,
-        resource_group_id=resource_group_id,
-    )
+    normalized_group_id = (resource_group_id or "").strip() or None
+    if normalized_group_id is not None:
+        resource_group = require_generation_resource_group_for_user(
+            session,
+            user_id=current_user.id,
+            is_admin=current_user.is_admin,
+            resource_group_id=normalized_group_id,
+        )
+        normalized_group_id = resource_group.id
     items = list_gallery_entries(
         session,
-        resource_group_id=resource_group.id,
+        resource_group_id=normalized_group_id,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
     )

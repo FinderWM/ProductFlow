@@ -83,7 +83,7 @@ function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProf
 function generationConfig(overrides: Partial<GenerationConfig> & Pick<GenerationConfig, "purpose">): GenerationConfig {
   return {
     id: overrides.id ?? `${overrides.purpose}-config`,
-    resource_group_id: overrides.resource_group_id ?? "group-default",
+    resource_group_id: "resource_group_id" in overrides ? (overrides.resource_group_id ?? null) : "group-default",
     purpose: overrides.purpose,
     name: overrides.name ?? `${overrides.purpose} config`,
     provider_kind: overrides.provider_kind ?? "openai",
@@ -112,6 +112,7 @@ function generationResourceGroup(overrides: Partial<GenerationResourceGroup> = {
     description: overrides.description ?? null,
     sort_order: overrides.sort_order ?? 0,
     enabled: overrides.enabled ?? true,
+    blur_images_by_default: overrides.blur_images_by_default ?? false,
     archived_at: overrides.archived_at ?? null,
     created_at: overrides.created_at ?? "2026-05-13T00:00:00Z",
     updated_at: overrides.updated_at ?? "2026-05-13T00:00:00Z",
@@ -523,6 +524,33 @@ describe("SettingsPage provider profile helpers", () => {
       failure_threshold: 3,
       cooldown_minutes: 10,
     });
+  });
+
+  it("allows generation configs without a resource group", () => {
+    expect(
+      generationConfigPayloadFromDraft({
+        id: null,
+        resource_group_id: "",
+        purpose: "text",
+        name: "Unbound text",
+        provider_kind: "mock",
+        provider_profile_id: "",
+        brief_model: "mock-brief",
+        copy_model: "mock-copy",
+        model: "",
+        images_quality: "",
+        images_style: "",
+        responses_background_enabled: true,
+        gemini_api_version: "v1beta",
+        gemini_output_mime_type: "",
+        priority: "100",
+        max_concurrency: "1",
+        enabled: true,
+        availability_window_minutes: "",
+        failure_threshold: "",
+        cooldown_minutes: "",
+      }).resource_group_id,
+    ).toBeNull();
   });
 
   it("leaves blank scheduler policy fields as runtime defaults", () => {

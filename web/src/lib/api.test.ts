@@ -61,3 +61,103 @@ describe("api.createInspiration", () => {
     expect(body.get("context_document")).toBe(documentFile);
   });
 });
+
+describe("api.listRbacUsers", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends the owner search keyword as an API query parameter", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [], total: 0, page: 1, page_size: 30 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await api.listRbacUsers({ page_size: 30, query: "负责人" });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/rbac/users?page=1&page_size=30&query=");
+    expect(decodeURIComponent(String(fetchMock.mock.calls[0][0]))).toContain("query=负责人");
+  });
+});
+
+describe("api.findWeatherLocation", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("falls back to Nominatim when Open-Meteo cannot resolve a district query", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ generationtime_ms: 0.2 })))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              place_id: 246041329,
+              lat: "23.0859958",
+              lon: "113.3119935",
+              name: "海珠区",
+              display_name: "海珠区, 广州市, 广东省, 中国",
+            },
+          ]),
+        ),
+      );
+
+    const location = await api.findWeatherLocation({ query: "广州海珠区", language: "zh" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("geocoding-api.open-meteo.com");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("nominatim.openstreetmap.org");
+    expect(location).toEqual({
+      id: 246041329,
+      name: "海珠区, 广州市, 广东省, 中国",
+      latitude: 23.0859958,
+      longitude: 113.3119935,
+      country: null,
+      admin1: null,
+      timezone: null,
+    });
+  });
+});
+
+describe("api.getCurrentWeather", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("normalizes humidity and pressure when the weather source provides them", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          current: {
+            time: "2026-06-07T10:30",
+            temperature_2m: 28.4,
+            relative_humidity_2m: 83,
+            surface_pressure: 1006.2,
+            weather_code: 82,
+            is_day: 1,
+          },
+          timezone: "Asia/Shanghai",
+        }),
+      ),
+    );
+
+    const weather = await api.getCurrentWeather({ latitude: 23.086, longitude: 113.312 });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "current=temperature_2m%2Crelative_humidity_2m%2Csurface_pressure%2Cpressure_msl%2Cweather_code%2Cis_day",
+    );
+    expect(weather).toEqual({
+      weather_code: 82,
+      condition: "rain",
+      temperature_celsius: 28.4,
+      humidity_percent: 83,
+      pressure_hpa: 1006.2,
+      is_day: true,
+      observed_at: "2026-06-07T10:30",
+      timezone: "Asia/Shanghai",
+    });
+  });
+});

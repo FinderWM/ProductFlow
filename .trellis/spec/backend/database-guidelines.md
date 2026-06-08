@@ -419,7 +419,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 
 - Trigger: changing provider profile/generation config settings, generation scheduling, account grants, workflow
   generation requests, image-session generation requests, generated-result serializers, settings import/export, or
-  resource-group list filters.
+  resource-group list filters/sensitive-image display metadata.
 - This is a cross-layer contract because `generation_resource_groups`, `generation_configs.resource_group_id`, account
   grants, durable generation rows, API schemas, and frontend selectors must all agree on the selected group.
 
@@ -433,6 +433,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   - `description: Text | null`
   - `sort_order: int`
   - `enabled: bool`
+  - `blur_images_by_default: bool`
   - `archived_at: datetime | null`
 - DB table: `user_generation_resource_group_grants`
   - unique `(user_id, resource_group_id)`
@@ -448,7 +449,8 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   - `GET /api/image-sessions?resource_group_id=<id>`; omitted `resource_group_id` means all visible sessions for the
     current inspiration/standalone scope.
   - `GET /api/gallery?resource_group_id=<id>`; omitted `resource_group_id` means all visible gallery entries.
-  - generation submit/status/result DTOs expose `resource_group_id` and `resource_group { id, key, name }`.
+  - generation submit/status/result DTOs expose `resource_group_id` and
+    `resource_group { id, key, name, blur_images_by_default }`.
 - Runtime selection:
   - `GenerationConfigSelection(resource_group_id=...)`
   - `claim_generation_config(session, purpose, resource_group_id=..., generation_config_id=None)`
@@ -471,19 +473,29 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Backend entry points must validate that the selected group exists, is enabled, is not archived, and is authorized for
   the actor before enqueueing durable work.
 - Image-chat session creation uses a confirmation step that submits the selected `resource_group_id` for actor
-  authorization validation and as the frontend's initial generation group. The `image_sessions` row itself does not own
-  group membership; persisted list/archive group tags remain on generation tasks, rounds, and gallery entries.
+  authorization validation and as the session's current list group. `ImageSession.resource_group_id` is the single owner
+  field for image-session list filtering and displayed list group. New generation submissions and restored failed-task
+  submissions overwrite that session field with the selected group before enqueue. Historical task/round group fields stay
+  as archive metadata only; they must not make a session appear in multiple concrete group filters.
 - Text scheduling can claim only text configs in the selected group; image scheduling can claim only image configs in the
   selected group. Provider/profile availability, freeze state, and concurrency checks still apply inside that group.
   Unbound configs must not be used as implicit fallback configs for any selected group.
 - Generated briefs, copy sets, poster variants, workflow node runs, image-session tasks, image-session rounds, and gallery
   entries must serialize a group tag. If a legacy row has `resource_group_id is None`, serializers and default-group
-  filters treat it as `default`.
+  filters treat it as `default`. Image-session list summaries serialize their list tag from `ImageSession.resource_group_id`;
+  task/round tags remain historical display data.
 - List filters are optional and single-select. Omitted or blank `resource_group_id` means no group filtering; a concrete
   group id must still be validated for existence, enabled/not-archived status, and actor authorization before filtering.
 - Settings import/export documents include `generation_resource_groups`. Imported generation configs must reference an
   imported group, explicitly set `resource_group_id: null` for unbound configs, or fall back to `default` only for legacy
   payloads that omit the field entirely.
+- `generation_resource_groups.blur_images_by_default` is display metadata for list thumbnails. Settings create/update and
+  import/export must preserve it; serializers for group tags must include it so frontend list rows can decide per item.
+- `user_ui_preferences` stores account-level visual preferences. Sensitive-image fields default to `true` for both
+  inspiration and image-chat scopes. API reads may create a missing row with defaults; PATCH updates only submitted
+  fields.
+- Sensitive-image masking is visual screen shielding only. It must not be treated as authorization, storage isolation,
+  redaction, or download protection.
 - Frontend callers preserve API order and may only filter unusable rows for a given surface. Do not move generation group
   `sort_order` sorting into React selectors or page-local helpers.
 
@@ -500,6 +512,10 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Settings `PATCH /api/settings/generation-configs/{id}` omits `resource_group_id` -> keep the existing group.
 - Settings `PATCH /api/settings/generation-configs/{id}` sends `resource_group_id: null` -> clear the group and persist
   `NULL`.
+- Settings group create omits `blur_images_by_default` -> persist `false`.
+- Settings group patch omits `blur_images_by_default` -> keep the existing value.
+- Settings import payload omits `generation_resource_groups[].blur_images_by_default` for legacy documents -> import as
+  `false`.
 - Omitted list filter on inspirations, image sessions, gallery, or inspiration history -> no group filter is applied.
 - Filtering list/history rows by `default` includes legacy null-group rows where that compatibility path still exists;
   filtering by another group matches only that exact group id.
@@ -511,11 +527,16 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Good: an admin sees `default` plus every other enabled group in `/api/settings/my-generation-resource-groups`.
 - Good: a higher `sort_order` group appears before lower-priority groups in settings, RBAC grants, generation entry
   selectors, gallery filters, and inspiration filters because those surfaces use API order.
+- Good: a sensitive group exports/imports with `blur_images_by_default=true`, and generated result group tags carry that
+  value for list-thumbnail masking.
 - Base: local/mock setups have one enabled `default` group with text and image generation configs.
+- Base: groups default to `blur_images_by_default=false` so existing lists render unmasked until explicitly configured.
 - Base: a settings-only config can be unbound while the operator decides which group should own it.
 - Base: older generated rows with null group fields render as `default` and are returned by the default-group filter.
 - Bad: accepting a manual `generation_config_id` from a normal user flow and using it to bypass group authorization.
 - Bad: returning generated result DTOs without a `resource_group` tag because the raw row has a null group id.
+- Bad: deriving thumbnail masking from the currently selected list filter instead of each row's serialized
+  `resource_group.blur_images_by_default`.
 - Bad: authorizing a group through role permissions only; group grants are account-level.
 - Bad: sorting `GenerationResourceGroup[]` by `sort_order` in frontend code instead of using API order.
 
@@ -523,7 +544,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 
 - Migration/bootstrap test creates `default`, backfills existing generation configs, and preserves legacy result display.
 - Settings API tests cover create/update/archive groups, default-group protection, import/export counts, and generation
-  config group assignment.
+  config group assignment, including `blur_images_by_default` defaulting and round-trip preservation.
 - RBAC tests cover admin all-groups behavior and account-level grant replacement for non-admin users.
 - Scheduler tests cover purpose plus group filtering for automatic claims and manual config compatibility.
 - Group list tests cover descending `sort_order` for full/admin/user group APIs and verify RBAC user serialization
@@ -532,6 +553,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Workflow and image-session tests cover missing, unauthorized, disabled, archived, and valid group selection.
 - Serializer/filter tests cover inspiration list/history, workflow status/detail, image-session list/detail/status, and
   gallery group tags, including omitted-filter all rows and default-filter legacy null rows.
+- Serializer tests cover `resource_group.blur_images_by_default` on generated result tags.
 - Frontend gates must run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` after DTO/selector
   changes.
 
@@ -562,6 +584,23 @@ Correct:
 return PosterVariantResponse(
     resource_group_id=poster.resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     resource_group=serialize_generation_resource_group_tag(group, resource_group_id=poster.resource_group_id),
+)
+```
+
+Wrong:
+
+```python
+return GenerationResourceGroupTag(id=group.id, key=group.key, name=group.name)
+```
+
+Correct:
+
+```python
+return GenerationResourceGroupTag(
+    id=group.id,
+    key=group.key,
+    name=group.name,
+    blur_images_by_default=group.blur_images_by_default,
 )
 ```
 
@@ -2008,6 +2047,97 @@ Correct:
 
 ```python
 provider = dependencies.text_provider(runtime_claim.generation_config_id, session=session)
+```
+
+---
+
+## Scenario: Image-session resource-group list semantics
+
+### 1. Scope / Trigger
+
+- Trigger: changing image-session creation, image-session list filtering, gallery filtering, generation task/round
+  resource-group fields, or frontend calls to `/api/image-sessions` and `/api/gallery`.
+
+### 2. Signatures
+
+- DB: `image_sessions.resource_group_id: String(36) NOT NULL`, indexed by `ix_image_sessions_resource_group_id`.
+- DB: `image_session_rounds.resource_group_id: String(36) | null` records the successful generated round group as
+  historical/archive metadata.
+- DB: `image_session_generation_tasks.resource_group_id: String(36) | null` records the submitted task group as
+  historical/archive metadata.
+- DB: `image_gallery_entries.resource_group_id: String(36) | null` records the gallery/list archive group.
+- API: `GET /api/image-sessions` returns all visible sessions; `?resource_group_id=<id>` filters by one group.
+- API: `GET /api/gallery` returns all visible gallery entries; `?resource_group_id=<id>` filters by one group.
+
+### 3. Contracts
+
+- Image-session creation persists the selected group on `ImageSession.resource_group_id`; legacy/omitted internal calls may
+  fall back to `DEFAULT_GENERATION_RESOURCE_GROUP_ID`.
+- New image-session generation submissions overwrite `ImageSession.resource_group_id` with the selected group before the
+  durable task is enqueued. Restoring the latest failed task and resubmitting it updates the same session field too.
+- Image-session list filtering is single-owner: a concrete filter matches only `ImageSession.resource_group_id`. Historical
+  round/task groups must not make a session appear in multiple concrete group filters.
+- List summary `latest_resource_group` comes from `ImageSession.resource_group_id`, not the newest historical round/task.
+- List summary `rounds_count` is historical-tree count: successful round groups plus non-hidden task generation groups,
+  deduplicated by generation group id. It is not filter-relative.
+- All-groups list projection uses the same session-owned tag and historical-tree count for each returned session.
+- Gallery filtering uses `ImageGalleryEntry.resource_group_id`; it must not infer ownership from `ImageSessionAsset`.
+- Frontend list calls must keep an "all groups" option and omit `resource_group_id` for that option.
+- Concrete image-session group filtering must use `ImageSession.resource_group_id` so the query stays aligned with the
+  single-owner contract.
+
+### 4. Validation & Error Matrix
+
+- Missing `resource_group_id` on `GET /api/image-sessions` -> all visible sessions for the current scope.
+- Missing `resource_group_id` on `GET /api/gallery` -> all visible gallery entries.
+- Disabled, archived, or unauthorized group id -> `require_generation_resource_group_for_user(...)` rejects the request.
+- Session has no task/round -> returned only when `ImageSession.resource_group_id` matches the selected group.
+- Session has historical rounds/tasks in multiple groups -> returned only in the session's current group filter.
+- Last generation submission used `premium` after earlier `default` rounds -> `ImageSession.resource_group_id = premium`,
+  the session appears in `premium`, and list `latest_resource_group` displays `premium`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a default empty session appears in the default filter and is absent from a premium-group filter.
+- Good: a session with older default rounds and a newer premium failed task appears only in the premium filter after the
+  premium submission updates `ImageSession.resource_group_id`.
+- Good: a session with `rounds_count = 5` keeps that historical count in all-groups and in the current concrete group.
+- Good: "all groups" returns both default and premium sessions without sending `resource_group_id`.
+- Base: legacy null task/round/gallery group values count as `default` for compatibility.
+- Base: a backfill migration may use historical round/task timestamps once to initialize `ImageSession.resource_group_id`
+  for old sessions; after that, current submissions own the field.
+- Bad: filtering image sessions by `EXISTS` over historical round/task group fields.
+- Bad: changing `latest_resource_group` to use the newest historical failed/succeeded task instead of
+  `ImageSession.resource_group_id`.
+- Bad: the frontend removes the "all groups" option from image-session/gallery filters.
+
+### 6. Tests Required
+
+- Backend route test: missing image-session/gallery group query returns all visible records.
+- Backend list test: empty sessions only appear in their stored group.
+- Backend list test: mixed-group historical task/round sessions appear only in `ImageSession.resource_group_id`'s current
+  group filter.
+- Backend submit test: new image-session generation and restored failed-task submission update
+  `ImageSession.resource_group_id`.
+- Backend summary test: `latest_resource_group` uses `ImageSession.resource_group_id`, while `rounds_count` uses
+  historical-tree count.
+- Backend route test: unauthorized member cannot list an ungranted image-session/gallery group.
+- Frontend build/type check: image-session and gallery list calls accept omitted `resource_group_id` for all-groups.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+stmt = stmt.where(or_(has_matching_round, has_matching_task, ~has_any_round & ~has_any_task))
+latest_group = task_or_round.resource_group
+```
+
+Correct:
+
+```python
+stmt = stmt.where(ImageSession.resource_group_id == group_id)
+latest_group = image_session.resource_group
 ```
 
 ---

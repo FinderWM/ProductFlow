@@ -9,6 +9,7 @@ from inspiration_one_backend.application.image_sessions import ImageSessionStatu
 from inspiration_one_backend.domain.durable_generation_tasks import IMAGE_SESSION_GENERATION_TASK_CONTRACT
 from inspiration_one_backend.domain.enums import ImageSessionAssetKind, JobStatus
 from inspiration_one_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ImageSession,
     ImageSessionAsset,
     ImageSessionGenerationTask,
@@ -195,6 +196,7 @@ class GenerateImageSessionRoundRequest(BaseModel):
     tool_options: ImageToolOptionsRequest | None = None
     generation_config_mode: Literal["auto", "manual"] = "auto"
     generation_config_id: str | None = Field(default=None, min_length=1, max_length=36)
+    retry_generation_task_id: str | None = Field(default=None, min_length=1, max_length=36)
 
     @field_validator("size")
     @classmethod
@@ -352,24 +354,36 @@ def serialize_image_session_generation_task(
     )
 
 
-def serialize_image_session_summary(image_session: ImageSession) -> ImageSessionSummaryResponse:
+def _image_session_task_visible_group_id(task: ImageSessionGenerationTask) -> str | None:
+    if task.status == JobStatus.SUCCEEDED and task.result_generation_group_id is None:
+        return None
+    return task.result_generation_group_id or f"task:{task.id}"
+
+
+def _image_session_visible_round_count(image_session: ImageSession) -> int:
+    group_ids = {round_item.generation_group_id or round_item.id for round_item in image_session.rounds}
+    for task in image_session.generation_tasks:
+        group_id = _image_session_task_visible_group_id(task)
+        if group_id is not None:
+            group_ids.add(group_id)
+    return len(group_ids)
+
+
+def serialize_image_session_summary(
+    image_session: ImageSession,
+    *,
+    resource_group_id: str | None = None,
+) -> ImageSessionSummaryResponse:
     latest_round = max(image_session.rounds, key=lambda item: item.created_at, default=None)
-    latest_task = max(image_session.generation_tasks, key=lambda item: item.created_at, default=None)
-    latest_resource_group_id = None
-    latest_resource_group = None
-    if latest_round is not None and (latest_task is None or latest_round.created_at >= latest_task.created_at):
-        latest_resource_group_id = latest_round.resource_group_id
-        latest_resource_group = latest_round.resource_group
-    elif latest_task is not None:
-        latest_resource_group_id = latest_task.resource_group_id
-        latest_resource_group = latest_task.resource_group
+    latest_resource_group_id = image_session.resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID
+    latest_resource_group = image_session.resource_group
     return ImageSessionSummaryResponse(
         id=image_session.id,
         owner_user_id=image_session.owner_user_id,
         owner_username=image_session.owner.username if image_session.owner else None,
         inspiration_id=image_session.inspiration_id,
         title=image_session.title,
-        rounds_count=len(image_session.rounds),
+        rounds_count=_image_session_visible_round_count(image_session),
         latest_resource_group_id=latest_resource_group_id,
         latest_resource_group=(
             serialize_generation_resource_group_tag(

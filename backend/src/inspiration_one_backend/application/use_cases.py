@@ -658,6 +658,7 @@ def list_inspirations(
     updated_to: datetime | None = None,
     owner_user_id: str | None = None,
     resource_group_id: str | None = None,
+    only_deleted: bool = False,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
     require_resource_group_grant: bool = False,
@@ -668,20 +669,27 @@ def list_inspirations(
     filters = []
     if actor_user_id is not None and not actor_is_admin:
         filters.append(Inspiration.owner_user_id == actor_user_id)
+    if only_deleted and actor_is_admin:
+        filters.append(Inspiration.deleted_at.is_not(None))
+    else:
         filters.append(Inspiration.deleted_at.is_(None))
     if actor_is_admin and owner_user_id:
         filters.append(Inspiration.owner_user_id == owner_user_id)
-    resource_group = _resolve_inspiration_resource_group(
-        session,
-        resource_group_id=resource_group_id,
-        actor_user_id=actor_user_id,
-        actor_is_admin=actor_is_admin,
-        require_user_grant=require_resource_group_grant,
-    )
-    if resource_group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
-        filters.append(or_(Inspiration.resource_group_id == resource_group.id, Inspiration.resource_group_id.is_(None)))
-    else:
-        filters.append(Inspiration.resource_group_id == resource_group.id)
+    normalized_group_id = (resource_group_id or "").strip() or None
+    if normalized_group_id is not None:
+        resource_group = _resolve_inspiration_resource_group(
+            session,
+            resource_group_id=normalized_group_id,
+            actor_user_id=actor_user_id,
+            actor_is_admin=actor_is_admin,
+            require_user_grant=require_resource_group_grant,
+        )
+        if resource_group.id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
+            filters.append(
+                or_(Inspiration.resource_group_id == resource_group.id, Inspiration.resource_group_id.is_(None))
+            )
+        else:
+            filters.append(Inspiration.resource_group_id == resource_group.id)
     if status is not None:
         filters.append(_inspiration_status_filter(status))
     normalized_title = _normalize_optional_search_text(title, max_length=120)

@@ -1,26 +1,39 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   BarChart3,
   BookOpen,
   Check,
   ChevronDown,
+  Cloud,
+  CloudDrizzle,
+  CloudFog,
+  CloudLightning,
+  CloudMoon,
+  CloudRain,
+  CloudSnow,
+  CloudSun,
   Flower2,
   Languages,
   Leaf,
+  Loader2,
   LogOut,
   MoreHorizontal,
   Monitor,
   Moon,
+  RefreshCw,
   Rose,
   Settings,
   ShieldCheck,
   Sun,
   UserRound,
-  Wand2,
+  X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
+import { useCurrentWeather, weatherGeocodingLanguage } from "../lib/currentWeather";
 import { LOCALES, type Locale, type TranslationKey } from "../lib/i18n";
 import { usePreferences } from "../lib/preferences";
 import {
@@ -35,7 +48,14 @@ import {
 } from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
-import type { SessionState, SessionUser } from "../lib/types";
+import type { CurrentWeather, CurrentWeatherCondition, SessionState, SessionUser } from "../lib/types";
+import {
+  isBadWeatherCondition,
+  isExtremeWeather,
+  weatherConditionTranslationKey,
+  weatherLocationDisplayName,
+} from "../lib/weather";
+import { searchWeatherLocations, weatherSources } from "../lib/weatherSources";
 
 interface TopNavProps {
   breadcrumbs?: string;
@@ -75,6 +95,10 @@ export interface DesktopNavLayout {
 
 const DESKTOP_NAV_GAP_PX = 4;
 const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 10;
+const NAV_AUTO_HIDE_DELAY_MS = 5_000;
+const CURTAIN_EASING = "cubic-bezier(0.18, 0.9, 0.2, 1.12)";
+export const TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS = "h-[4.5rem] md:h-[4.65rem]";
+const TOP_CHROME_OPEN_HEIGHT_CLASS = "h-[4.75rem] md:h-[4.65rem]";
 
 const navItems: TopNavItem[] = [
   {
@@ -234,6 +258,30 @@ const themeIcons: Record<ThemePreference, typeof Sun> = {
   system: Monitor,
 };
 
+const weatherConditionIcons: Record<CurrentWeatherCondition, LucideIcon> = {
+  clear: Sun,
+  partly_cloudy: CloudSun,
+  cloudy: Cloud,
+  fog: CloudFog,
+  drizzle: CloudDrizzle,
+  rain: CloudRain,
+  snow: CloudSnow,
+  thunderstorm: CloudLightning,
+};
+
+function weatherIconFor(weather: CurrentWeather | null, fallbackIsDay: boolean): LucideIcon {
+  if (!weather) {
+    return fallbackIsDay ? Sun : Moon;
+  }
+  if (weather.condition === "clear") {
+    return weather.is_day ? Sun : Moon;
+  }
+  if (weather.condition === "partly_cloudy") {
+    return weather.is_day ? CloudSun : CloudMoon;
+  }
+  return weatherConditionIcons[weather.condition];
+}
+
 const localeLabelKey: Record<Locale, TranslationKey> = {
   "zh-CN": "locale.zhCN",
   "en-US": "locale.enUS",
@@ -294,11 +342,146 @@ function accountMenuClassName(open: boolean) {
   ].join(" ");
 }
 
+function weatherMenuClassName(open: boolean) {
+  return [
+    "absolute left-0 top-11 z-50 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
+    open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
+  ].join(" ");
+}
+
+function weatherInfoClassName(open: boolean) {
+  return [
+    "absolute left-0 top-9 z-[60] w-80 select-text rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
+    open
+      ? "hidden"
+      : "invisible translate-y-1 opacity-0 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100",
+  ].join(" ");
+}
+
+function weatherTriggerClassName(emphasis: "default" | "warning" | "danger") {
+  return [
+    "inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 !bg-white !text-black shadow-sm shadow-slate-950/[0.06] transition-colors hover:!bg-white hover:border-slate-300 hover:!text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:!bg-white dark:!text-black dark:shadow-black/20 dark:hover:!bg-white dark:hover:border-slate-500 dark:hover:!text-black dark:focus-visible:ring-violet-400",
+    emphasis === "danger"
+      ? "border-red-300 ring-2 ring-red-100 hover:border-red-400 dark:border-red-300 dark:ring-red-200"
+      : emphasis === "warning"
+        ? "border-amber-300 ring-2 ring-amber-100 hover:border-amber-400 dark:border-amber-300 dark:ring-amber-200"
+        : "",
+  ].join(" ");
+}
+
+function weatherEmphasisTextClassName(emphasis: "default" | "warning" | "danger") {
+  if (emphasis === "danger") {
+    return "text-red-600 dark:text-red-300";
+  }
+  if (emphasis === "warning") {
+    return "text-amber-700 dark:text-amber-200";
+  }
+  return "text-slate-950 dark:text-white";
+}
+
 function desktopMoreMenuClassName(open: boolean) {
   return [
     "absolute right-0 top-10 z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
     open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
   ].join(" ");
+}
+
+function curtainShellClassName(open: boolean) {
+  return [
+    "sticky top-0 z-50 overflow-visible transition-[height] duration-700",
+    open ? TOP_CHROME_OPEN_HEIGHT_CLASS : TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS,
+  ].join(" ");
+}
+
+function curtainPanelClassName(open: boolean) {
+  return [
+    "absolute inset-x-0 top-0 border-b border-slate-200 bg-white/94 px-3 py-3 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl transition-[transform,opacity,filter] duration-700 will-change-transform dark:border-slate-800 dark:bg-[#070b13]/94 sm:px-4 lg:px-5",
+    open
+      ? "pointer-events-auto translate-y-0 opacity-100 blur-0"
+      : "pointer-events-none -translate-y-[calc(100%-0.7rem)] opacity-0 blur-[1px]",
+  ].join(" ");
+}
+
+function curtainHandleClassName(open: boolean) {
+  return [
+    "absolute left-1/2 z-[55] inline-flex h-7 w-16 -translate-x-1/2 items-center justify-center rounded-b-xl border border-t-0 border-slate-200 bg-white/95 text-slate-500 shadow-lg shadow-slate-950/10 backdrop-blur transition-[transform,opacity] duration-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-[#070b13]/95 dark:text-slate-300 dark:shadow-black/30 dark:focus-visible:ring-violet-400",
+    open ? "pointer-events-none top-0 -translate-y-3 opacity-0" : "top-0 translate-y-0 opacity-100",
+  ].join(" ");
+}
+
+function mobileBottomNavClassName(open: boolean) {
+  return [
+    "fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/96 px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.4rem)] shadow-[0_-10px_30px_rgba(15,23,42,0.12)] backdrop-blur transition-[transform,opacity] duration-700 dark:border-slate-800 dark:bg-slate-950/94 dark:shadow-[0_-18px_40px_rgba(0,0,0,0.35)] md:hidden",
+    open ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-[calc(100%-0.7rem)] opacity-0",
+  ].join(" ");
+}
+
+function weatherTemperatureLabel(weather: CurrentWeather): string | null {
+  return weather.temperature_celsius === null ? null : String(Math.round(weather.temperature_celsius));
+}
+
+function weatherTemperatureValue(weather: CurrentWeather): string {
+  const temperature = weatherTemperatureLabel(weather);
+  return temperature ? `${temperature}°C` : "--";
+}
+
+function weatherHumidityValue(weather: CurrentWeather): string | null {
+  return weather.humidity_percent === null || weather.humidity_percent === undefined
+    ? null
+    : `${Math.round(weather.humidity_percent)}%`;
+}
+
+function weatherPressureValue(weather: CurrentWeather): string | null {
+  return weather.pressure_hpa === null || weather.pressure_hpa === undefined
+    ? null
+    : `${Math.round(weather.pressure_hpa)} hPa`;
+}
+
+function formatWeatherTimestamp(value: string | null | undefined, locale: Locale): string {
+  if (!value) {
+    return "--";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--";
+  }
+  return new Intl.DateTimeFormat(locale, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function weatherTitle({
+  fallbackIsDay,
+  hasSavedLocation,
+  locationName,
+  t,
+  weather,
+}: {
+  fallbackIsDay: boolean;
+  hasSavedLocation: boolean;
+  locationName: string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+  weather: CurrentWeather | null;
+}): string {
+  if (weather) {
+    const condition = t(weatherConditionTranslationKey(weather.condition));
+    const temperature = weatherTemperatureLabel(weather);
+    if (locationName) {
+      return temperature
+        ? t("weather.currentWithLocation", { location: locationName, condition, temperature })
+        : t("weather.currentWithLocationNoTemperature", { location: locationName, condition });
+    }
+    return temperature
+      ? t("weather.current", { condition, temperature })
+      : t("weather.currentNoTemperature", { condition });
+  }
+  if (hasSavedLocation) {
+    return t("weather.loading");
+  }
+  return t(fallbackIsDay ? "weather.defaultDay" : "weather.defaultNight");
 }
 
 function preferenceMenuItemClassName(active: boolean) {
@@ -517,16 +700,320 @@ function AccountMenu({ identity, onLogout }: { identity: AccountIdentity; onLogo
   );
 }
 
-export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
+function WeatherControl() {
+  const { locale, t } = usePreferences();
+  const weatherState = useCurrentWeather();
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [draftLocation, setDraftLocation] = useState(weatherState.savedLocationQuery);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [localErrorKey, setLocalErrorKey] = useState<TranslationKey | null>(null);
+  const locationName = weatherLocationDisplayName(weatherState.resolvedLocation) || weatherState.savedLocationQuery;
+  const locationSearchResult = useQuery({
+    queryKey: [
+      "weather-location-options",
+      weatherState.weatherSourceId,
+      searchQuery,
+      weatherGeocodingLanguage(locale),
+    ],
+    queryFn: () =>
+      searchWeatherLocations(weatherState.weatherSourceId, {
+        query: searchQuery,
+        language: weatherGeocodingLanguage(locale),
+      }),
+    enabled: open && searchQuery.trim().length > 0,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  const WeatherIcon = weatherIconFor(weatherState.weather, weatherState.fallbackIsDay);
+  const TriggerIcon = weatherState.isLoading && weatherState.hasSavedLocation ? Loader2 : WeatherIcon;
+  const baseTriggerLabel = weatherTitle({
+    fallbackIsDay: weatherState.fallbackIsDay,
+    hasSavedLocation: weatherState.hasSavedLocation,
+    locationName,
+    t,
+    weather: weatherState.weather,
+  });
+  const searchEmpty =
+    searchQuery.trim().length > 0 && locationSearchResult.isSuccess && locationSearchResult.data.length === 0;
+  const searchErrorKey = locationSearchResult.error
+    ? "weather.locationFailed"
+    : searchEmpty
+      ? "weather.locationNotFound"
+      : null;
+  const statusErrorKey = localErrorKey ?? searchErrorKey ?? weatherState.errorKey;
+  const triggerLabel = statusErrorKey ? t(statusErrorKey) : baseTriggerLabel;
+  const statusText = statusErrorKey
+    ? t(statusErrorKey)
+    : locationSearchResult.isLoading
+      ? t("weather.searchingLocations")
+      : weatherState.hasSavedLocation
+        ? weatherState.isLoading
+          ? t("weather.loading")
+          : t("weather.savedLocation", { location: locationName || weatherState.savedLocationQuery })
+        : triggerLabel;
+  const weatherConditionLabel = weatherState.weather
+    ? t(weatherConditionTranslationKey(weatherState.weather.condition))
+    : null;
+  const badWeather = weatherState.weather ? isBadWeatherCondition(weatherState.weather.condition) : false;
+  const extremeWeather = weatherState.weather ? isExtremeWeather(weatherState.weather) : false;
+  const weatherEmphasis = extremeWeather ? "danger" : badWeather ? "warning" : "default";
+  const humidityValue = weatherState.weather ? weatherHumidityValue(weatherState.weather) : null;
+  const pressureValue = weatherState.weather ? weatherPressureValue(weatherState.weather) : null;
+  const weatherInfoTitle = statusErrorKey ? t(statusErrorKey) : baseTriggerLabel;
+  const nextRefreshMinutes = weatherState.nextWeatherRefreshAt
+    ? Math.max(0, Math.ceil((weatherState.nextWeatherRefreshAt - Date.now()) / 60_000))
+    : weatherState.weatherRefreshMinutes;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setDraftLocation(weatherState.savedLocationQuery);
+    setSearchQuery("");
+    setLocalErrorKey(null);
+  }, [open, weatherState.savedLocationQuery]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="group relative shrink-0"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          setOpen(false);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        aria-label={triggerLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className={weatherTriggerClassName(weatherEmphasis)}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <TriggerIcon
+          size={17}
+          aria-hidden="true"
+          className={TriggerIcon === Loader2 ? "animate-spin" : undefined}
+        />
+      </button>
+      <div role="tooltip" className={weatherInfoClassName(open)}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
+              {t("weather.infoTitle")}
+            </div>
+            <div
+              className={[
+                "mt-1 truncate text-sm font-semibold",
+                weatherEmphasisTextClassName(weatherEmphasis),
+              ].join(" ")}
+            >
+              {weatherInfoTitle}
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={!weatherState.resolvedLocation || weatherState.isRefreshingWeather}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-white"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void weatherState.refreshWeather();
+            }}
+          >
+            <RefreshCw
+              size={13}
+              aria-hidden="true"
+              className={weatherState.isRefreshingWeather ? "animate-spin" : undefined}
+            />
+            {t(weatherState.isRefreshingWeather ? "weather.refreshing" : "weather.refreshWeather")}
+          </button>
+        </div>
+        <dl className="mt-3 grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoCondition")}</dt>
+          <dd
+            className={[
+              "font-medium",
+              weatherEmphasis === "default"
+                ? "text-slate-700 dark:text-slate-200"
+                : weatherEmphasisTextClassName(weatherEmphasis),
+            ].join(" ")}
+          >
+            {weatherConditionLabel ?? "--"}
+          </dd>
+          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoTemperature")}</dt>
+          <dd className="font-medium text-slate-700 dark:text-slate-200">
+            {weatherState.weather ? weatherTemperatureValue(weatherState.weather) : "--"}
+          </dd>
+          {humidityValue ? (
+            <>
+              <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoHumidity")}</dt>
+              <dd className="font-medium text-slate-700 dark:text-slate-200">{humidityValue}</dd>
+            </>
+          ) : null}
+          {pressureValue ? (
+            <>
+              <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoPressure")}</dt>
+              <dd className="font-medium text-slate-700 dark:text-slate-200">{pressureValue}</dd>
+            </>
+          ) : null}
+          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoObservedAt")}</dt>
+          <dd className="font-medium text-slate-700 dark:text-slate-200">
+            {formatWeatherTimestamp(weatherState.weather?.observed_at, locale)}
+          </dd>
+          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoSource")}</dt>
+          <dd className="font-medium text-slate-700 dark:text-slate-200">
+            {t(weatherSources[weatherState.weatherSourceId].labelKey)}
+          </dd>
+          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoNextRefresh")}</dt>
+          <dd className="font-medium text-slate-700 dark:text-slate-200">
+            {t("weather.nextRefreshIn", { minutes: nextRefreshMinutes })}
+          </dd>
+        </dl>
+      </div>
+      <div role="dialog" aria-label={t("weather.location")} aria-hidden={!open} className={weatherMenuClassName(open)}>
+        <form
+          className="space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const nextLocation = draftLocation.trim();
+            if (!nextLocation) {
+              setLocalErrorKey("weather.locationRequired");
+              return;
+            }
+            setSearchQuery(nextLocation);
+            setLocalErrorKey(null);
+          }}
+        >
+          <label htmlFor="weather-location-input" className="block text-xs font-semibold text-slate-500 dark:text-slate-400">
+            {t("weather.locationLabel")}
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="weather-location-input"
+              value={draftLocation}
+              onChange={(event) => {
+                setDraftLocation(event.target.value);
+                setSearchQuery("");
+                setLocalErrorKey(null);
+              }}
+              placeholder={t("weather.locationPlaceholder")}
+              className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+            />
+            <button
+              type="submit"
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:focus-visible:ring-violet-400"
+            >
+              {locationSearchResult.isLoading ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
+              {t("weather.searchLocation")}
+            </button>
+          </div>
+          {locationSearchResult.data?.length ? (
+            <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-950">
+              {locationSearchResult.data.map((location) => {
+                const label = weatherLocationDisplayName(location);
+                return (
+                  <button
+                    key={`${location.latitude}:${location.longitude}:${label}`}
+                    type="button"
+                    className="flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-sm transition hover:bg-white hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-900 dark:hover:text-white dark:focus-visible:ring-violet-400"
+                    onClick={() => {
+                      weatherState.setWeatherLocation(location, searchQuery || draftLocation);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-slate-200">
+                      {label}
+                    </span>
+                    <span className="shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                      {location.latitude.toFixed(2)}, {location.longitude.toFixed(2)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between gap-3">
+            <p
+              className={[
+                "min-w-0 flex-1 truncate text-xs font-medium",
+                statusErrorKey ? "text-red-600 dark:text-red-300" : "text-slate-500 dark:text-slate-400",
+              ].join(" ")}
+            >
+              {statusText}
+            </p>
+            <button
+              type="button"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:ring-violet-400"
+              onClick={() => {
+                weatherState.clearWeatherLocation();
+                setDraftLocation("");
+                setLocalErrorKey(null);
+              }}
+            >
+              <X size={13} aria-hidden="true" />
+              {t("weather.clearLocation")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export function GlobalBrandMark({ to }: { to: string }) {
+  return (
+    <div className="fixed left-4 top-3 z-[70] flex max-w-[calc(100vw-2rem)] items-center gap-2 text-sm sm:left-6 sm:max-w-[calc(100vw-3rem)] lg:left-8 lg:max-w-[calc(100vw-4rem)]">
+      <WeatherControl />
+      <Link
+        to={to}
+        aria-label="Inspiration One"
+        className="min-w-0 truncate text-left text-[15px] font-semibold text-slate-950 transition-colors hover:text-indigo-700 focus:outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-100 dark:hover:text-indigo-300 dark:focus-visible:ring-violet-400 sm:text-base"
+      >
+        Inspiration One
+      </Link>
+    </div>
+  );
+}
+
+export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
   const desktopNavAreaRef = useRef<HTMLDivElement | null>(null);
   const desktopMeasureRowRef = useRef<HTMLDivElement | null>(null);
   const desktopMeasureItemRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const desktopMoreMeasureRef = useRef<HTMLSpanElement | null>(null);
   const desktopMoreMenuRef = useRef<HTMLDivElement | null>(null);
   const desktopMoreCloseTimerRef = useRef<number | null>(null);
+  const curtainRef = useRef<HTMLDivElement | null>(null);
+  const curtainAutoHideTimerRef = useRef<number | null>(null);
   const [desktopOverflowKeys, setDesktopOverflowKeys] = useState<string[]>([]);
   const [desktopMoreOpen, setDesktopMoreOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [curtainOpen, setCurtainOpen] = useState(true);
   const location = useLocation();
   const { locale, setLocale, t, themePreference, setThemePreference } = usePreferences();
   const session = useSessionState();
@@ -566,6 +1053,28 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
   const desktopOverflowNavItems = visibleNavItems.filter((item) => desktopOverflowKeySet.has(item.to));
   const desktopOverflowActive = desktopOverflowNavItems.some((item) => item.match(location.pathname));
   const account = accountIdentity(session?.user, t("nav.account"));
+
+  const clearCurtainAutoHideTimer = useCallback(() => {
+    if (curtainAutoHideTimerRef.current !== null) {
+      window.clearTimeout(curtainAutoHideTimerRef.current);
+      curtainAutoHideTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleCurtainAutoHide = useCallback(() => {
+    clearCurtainAutoHideTimer();
+    curtainAutoHideTimerRef.current = window.setTimeout(() => {
+      setCurtainOpen(false);
+      setDesktopMoreOpen(false);
+      setMobileMoreOpen(false);
+      curtainAutoHideTimerRef.current = null;
+    }, NAV_AUTO_HIDE_DELAY_MS);
+  }, [clearCurtainAutoHideTimer]);
+
+  const keepCurtainOpen = useCallback(() => {
+    setCurtainOpen(true);
+    scheduleCurtainAutoHide();
+  }, [scheduleCurtainAutoHide]);
 
   const clearDesktopMoreCloseTimer = useCallback(() => {
     if (desktopMoreCloseTimerRef.current !== null) {
@@ -614,7 +1123,36 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
     updateDesktopNavLayout();
   }, [locale, updateDesktopNavLayout]);
 
-  useEffect(() => () => clearDesktopMoreCloseTimer(), [clearDesktopMoreCloseTimer]);
+  useEffect(
+    () => () => {
+      clearDesktopMoreCloseTimer();
+      clearCurtainAutoHideTimer();
+    },
+    [clearCurtainAutoHideTimer, clearDesktopMoreCloseTimer],
+  );
+
+  useEffect(() => {
+    scheduleCurtainAutoHide();
+  }, [location.pathname, scheduleCurtainAutoHide]);
+
+  useEffect(() => {
+    const handlePageActivity = () => {
+      if (curtainOpen) {
+        scheduleCurtainAutoHide();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePageActivity, true);
+    document.addEventListener("keydown", handlePageActivity, true);
+    document.addEventListener("wheel", handlePageActivity, true);
+    document.addEventListener("touchstart", handlePageActivity, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePageActivity, true);
+      document.removeEventListener("keydown", handlePageActivity, true);
+      document.removeEventListener("wheel", handlePageActivity, true);
+      document.removeEventListener("touchstart", handlePageActivity, true);
+    };
+  }, [curtainOpen, scheduleCurtainAutoHide]);
 
   useEffect(() => {
     const navArea = desktopNavAreaRef.current;
@@ -715,130 +1253,136 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
 
   return (
     <>
-      <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/94 px-3 py-3 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl dark:border-slate-800 dark:bg-[#070b13]/94 sm:px-4 lg:px-5">
-        <div className="mx-auto flex w-full max-w-[1500px] items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2 text-sm md:min-w-40 md:shrink-0 lg:min-w-44 2xl:w-64">
-            {onHome ? (
-              <button
-                type="button"
-                className="flex min-w-0 items-center text-base font-semibold text-slate-950 transition-colors hover:text-indigo-700 dark:text-slate-100 dark:hover:text-indigo-300"
-                onClick={onHome}
-              >
-                <span className="mr-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm shadow-slate-950/20 dark:bg-white dark:text-slate-950">
-                  <Wand2 size={17} />
-                </span>
-                <span className="min-w-0 truncate text-[15px] sm:text-base">Inspiration One</span>
-              </button>
-            ) : (
-              <div className="flex min-w-0 items-center text-base font-semibold text-slate-950 dark:text-slate-100">
-                <span className="mr-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white shadow-sm shadow-slate-950/20 dark:bg-white dark:text-slate-950">
-                  <Wand2 size={17} />
-                </span>
-                <span className="min-w-0 truncate text-[15px] sm:text-base">Inspiration One</span>
-              </div>
-            )}
-            {breadcrumbs ? (
-              <div className="hidden min-w-0 items-center gap-2 2xl:flex">
-                <span className="text-slate-300 dark:text-slate-700">/</span>
-                <span className="truncate font-medium text-slate-600 dark:text-slate-400">{breadcrumbs}</span>
-              </div>
-            ) : null}
-          </div>
+      <div
+        ref={curtainRef}
+        className={curtainShellClassName(curtainOpen)}
+        style={{ transitionTimingFunction: CURTAIN_EASING }}
+        onPointerDown={keepCurtainOpen}
+        onFocusCapture={keepCurtainOpen}
+        onKeyDownCapture={keepCurtainOpen}
+      >
+        <nav
+          aria-hidden={!curtainOpen}
+          className={curtainPanelClassName(curtainOpen)}
+          style={{ transitionTimingFunction: CURTAIN_EASING }}
+        >
+          <div className="mx-auto flex w-full max-w-[1500px] items-center justify-between gap-3 pl-[12.75rem] sm:pl-[14rem] lg:pl-[15rem]">
+            <div className="hidden min-w-0 items-center gap-2 text-sm 2xl:flex 2xl:w-64">
+              {breadcrumbs ? (
+                <>
+                  <span className="text-slate-300 dark:text-slate-700">/</span>
+                  <span className="truncate font-medium text-slate-600 dark:text-slate-400">{breadcrumbs}</span>
+                </>
+              ) : null}
+            </div>
 
-          <div ref={desktopNavAreaRef} className="hidden min-w-0 flex-1 justify-center md:flex">
-            <div className="relative flex max-w-full min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/70 p-1 shadow-inner shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-none">
-              <div className="flex min-w-0 items-center gap-1">
-                {desktopVisibleNavItems.map((item) => renderDesktopNavItem(item))}
-                {desktopOverflowNavItems.length ? (
-                  <div
-                    ref={desktopMoreMenuRef}
-                    className="relative"
-                    onPointerEnter={() => {
-                      clearDesktopMoreCloseTimer();
-                      setDesktopMoreOpen(true);
-                    }}
-                    onPointerLeave={scheduleDesktopMoreClose}
-                    onBlur={(event) => {
-                      const nextTarget = event.relatedTarget;
-                      if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+            <div ref={desktopNavAreaRef} className="hidden min-w-0 flex-1 justify-center md:flex">
+              <div className="relative flex max-w-full min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/70 p-1 shadow-inner shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-none">
+                <div className="flex min-w-0 items-center gap-1">
+                  {desktopVisibleNavItems.map((item) => renderDesktopNavItem(item))}
+                  {desktopOverflowNavItems.length ? (
+                    <div
+                      ref={desktopMoreMenuRef}
+                      className="relative"
+                      onPointerEnter={() => {
                         clearDesktopMoreCloseTimer();
-                        setDesktopMoreOpen(false);
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        clearDesktopMoreCloseTimer();
-                        setDesktopMoreOpen(false);
-                      }
-                    }}
-                  >
-                    <button
-                      type="button"
-                      aria-label={t("nav.more")}
-                      aria-haspopup="menu"
-                      aria-expanded={desktopMoreOpen}
-                      className={navItemClassName(desktopOverflowActive || desktopMoreOpen)}
-                      onClick={() => {
-                        clearDesktopMoreCloseTimer();
+                        keepCurtainOpen();
                         setDesktopMoreOpen(true);
                       }}
+                      onPointerLeave={scheduleDesktopMoreClose}
+                      onBlur={(event) => {
+                        const nextTarget = event.relatedTarget;
+                        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                          clearDesktopMoreCloseTimer();
+                          setDesktopMoreOpen(false);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          clearDesktopMoreCloseTimer();
+                          setDesktopMoreOpen(false);
+                        }
+                      }}
                     >
-                      <MoreHorizontal size={16} aria-hidden="true" />
-                    </button>
-                    <div
-                      role="menu"
-                      aria-label={t("nav.more")}
-                      aria-hidden={!desktopMoreOpen}
-                      className={desktopMoreMenuClassName(desktopMoreOpen)}
-                    >
-                      {desktopOverflowNavItems.map((item) => {
-                        const Icon = item.icon;
-                        const active = item.match(location.pathname);
-                        const label = t(item.labelKey);
-                        return (
-                          <Link
-                            key={item.to}
-                            to={item.to}
-                            role="menuitem"
-                            aria-current={active ? "page" : undefined}
-                            className={menuItemClassName(active)}
-                            onClick={() => {
-                              clearDesktopMoreCloseTimer();
-                              setDesktopMoreOpen(false);
-                            }}
-                          >
-                            <Icon size={16} aria-hidden="true" />
-                            <span className="truncate">{label}</span>
-                          </Link>
-                        );
-                      })}
+                      <button
+                        type="button"
+                        aria-label={t("nav.more")}
+                        aria-haspopup="menu"
+                        aria-expanded={desktopMoreOpen}
+                        className={navItemClassName(desktopOverflowActive || desktopMoreOpen)}
+                        onClick={() => {
+                          clearDesktopMoreCloseTimer();
+                          keepCurtainOpen();
+                          setDesktopMoreOpen(true);
+                        }}
+                      >
+                        <MoreHorizontal size={16} aria-hidden="true" />
+                      </button>
+                      <div
+                        role="menu"
+                        aria-label={t("nav.more")}
+                        aria-hidden={!desktopMoreOpen}
+                        className={desktopMoreMenuClassName(desktopMoreOpen)}
+                      >
+                        {desktopOverflowNavItems.map((item) => {
+                          const Icon = item.icon;
+                          const active = item.match(location.pathname);
+                          const label = t(item.labelKey);
+                          return (
+                            <Link
+                              key={item.to}
+                              to={item.to}
+                              role="menuitem"
+                              aria-current={active ? "page" : undefined}
+                              className={menuItemClassName(active)}
+                              onClick={() => {
+                                clearDesktopMoreCloseTimer();
+                                setDesktopMoreOpen(false);
+                              }}
+                            >
+                              <Icon size={16} aria-hidden="true" />
+                              <span className="truncate">{label}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ) : null}
-              </div>
-              <div
-                ref={desktopMeasureRowRef}
-                aria-hidden="true"
-                className="pointer-events-none absolute left-0 top-0 flex items-center gap-1 opacity-0"
-              >
-                {visibleNavItems.map((item) => renderDesktopNavMeasurementItem(item))}
-                <span ref={desktopMoreMeasureRef} className={navItemClassName(false)}>
-                  <MoreHorizontal size={16} aria-hidden="true" />
-                </span>
+                  ) : null}
+                </div>
+                <div
+                  ref={desktopMeasureRowRef}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-0 top-0 flex items-center gap-1 opacity-0"
+                >
+                  {visibleNavItems.map((item) => renderDesktopNavMeasurementItem(item))}
+                  <span ref={desktopMoreMeasureRef} className={navItemClassName(false)}>
+                    <MoreHorizontal size={16} aria-hidden="true" />
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex shrink-0 items-center gap-1 md:hidden">
-            {renderPreferenceControls()}
-          </div>
+            <div className="flex shrink-0 items-center gap-1 md:hidden">
+              {renderPreferenceControls()}
+            </div>
 
-          <div className="hidden shrink-0 items-center justify-end gap-1.5 md:flex">
-            {renderPreferenceControls()}
-            {onLogout ? <AccountMenu identity={account} onLogout={onLogout} /> : null}
+            <div className="hidden shrink-0 items-center justify-end gap-1.5 md:flex">
+              {renderPreferenceControls()}
+              {onLogout ? <AccountMenu identity={account} onLogout={onLogout} /> : null}
+            </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+        <button
+          type="button"
+          aria-label={t("nav.more")}
+          aria-expanded={curtainOpen}
+          className={curtainHandleClassName(curtainOpen)}
+          style={{ transitionTimingFunction: CURTAIN_EASING }}
+          onClick={keepCurtainOpen}
+        >
+          <ChevronDown size={17} aria-hidden="true" />
+        </button>
+      </div>
 
       {mobileMoreOpen ? (
         <div className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+5.25rem)] z-50 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/15 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/40 md:hidden">
@@ -889,7 +1433,9 @@ export function TopNav({ breadcrumbs, onHome, onLogout }: TopNavProps) {
 
       <div
         aria-label={t("nav.mobile")}
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/96 px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.4rem)] shadow-[0_-10px_30px_rgba(15,23,42,0.12)] backdrop-blur dark:border-slate-800 dark:bg-slate-950/94 dark:shadow-[0_-18px_40px_rgba(0,0,0,0.35)] md:hidden"
+        className={mobileBottomNavClassName(curtainOpen)}
+        style={{ transitionTimingFunction: CURTAIN_EASING }}
+        onPointerDown={keepCurtainOpen}
       >
         <div
           className="mx-auto grid w-full max-w-lg gap-1"

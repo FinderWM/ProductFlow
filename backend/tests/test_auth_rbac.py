@@ -319,8 +319,8 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
     assert granted_user_page.status_code == 200
     granted_user = granted_user_page.json()["items"][0]
     assert granted_user["resource_groups"] == [
-        {"id": group_id, "key": "campaign", "name": "活动分组"},
-        {"id": lower_group_id, "key": "campaign-low", "name": "低优先级活动分组"},
+        {"id": group_id, "key": "campaign", "name": "活动分组", "blur_images_by_default": False},
+        {"id": lower_group_id, "key": "campaign-low", "name": "低优先级活动分组", "blur_images_by_default": False},
     ]
 
 
@@ -349,6 +349,12 @@ def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Pa
         )
         assert created_user.status_code == 201
 
+    display_name_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "display-only-owner", "display_name": "可视化负责人", "role_id": beta_role_id},
+    )
+    assert display_name_user.status_code == 201
+
     username_page = admin_client.get("/api/rbac/users", params={"username": "alpha", "page": 1, "page_size": 1})
     assert username_page.status_code == 200
     username_payload = username_page.json()
@@ -357,6 +363,12 @@ def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Pa
     assert username_payload["page_size"] == 1
     assert len(username_payload["items"]) == 1
     assert username_payload["items"][0]["username"] == "alpha-one"
+
+    display_name_page = admin_client.get("/api/rbac/users", params={"query": "负责人", "page": 1, "page_size": 10})
+    assert display_name_page.status_code == 200
+    display_name_payload = display_name_page.json()
+    assert display_name_payload["total"] == 1
+    assert display_name_payload["items"][0]["username"] == "display-only-owner"
 
     role_page = admin_client.get("/api/rbac/users", params={"role_id": alpha_role_id, "page": 1, "page_size": 10})
     assert role_page.status_code == 200
@@ -368,7 +380,7 @@ def test_admin_can_page_and_filter_rbac_users_and_role_counts(configured_env: Pa
     assert roles.status_code == 200
     role_counts = {role["code"]: role["user_count"] for role in roles.json()}
     assert role_counts["alpha_ops"] == 2
-    assert role_counts["beta_ops"] == 1
+    assert role_counts["beta_ops"] == 2
 
 
 def test_runtime_and_generation_option_apis_require_matching_rbac_permission(configured_env: Path) -> None:
@@ -545,6 +557,22 @@ def test_settings_provider_write_permission_is_separate_from_runtime_write(confi
         },
     )
     assert created_generation_config.status_code == 200
+    generation_config_id = created_generation_config.json()["id"]
+    assert created_generation_config.json()["resource_group_id"] == group_id
+
+    renamed_generation_config = user_client.patch(
+        f"/api/settings/generation-configs/{generation_config_id}",
+        json={"name": "供应商运维文案配置改名"},
+    )
+    assert renamed_generation_config.status_code == 200
+    assert renamed_generation_config.json()["resource_group_id"] == group_id
+
+    cleared_generation_config = user_client.patch(
+        f"/api/settings/generation-configs/{generation_config_id}",
+        json={"resource_group_id": None},
+    )
+    assert cleared_generation_config.status_code == 200
+    assert cleared_generation_config.json()["resource_group_id"] is None
 
     update_runtime = user_client.patch("/api/settings", json={"values": {"deletion_enabled": True}})
     assert update_runtime.status_code == 403

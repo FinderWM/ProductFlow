@@ -69,6 +69,8 @@ import type {
   UpdateUserTemplateGroupInput,
   UserUsageStatsResponse,
   UserGenerationResourceGroupGrants,
+  UserUiPreferences,
+  UserUiPreferencesUpdateRequest,
   WeatherCoordinates,
   WeatherLocation,
 } from "./types";
@@ -329,6 +331,7 @@ export const api = {
     page?: number;
     page_size?: number;
     username?: string;
+    query?: string;
     role_id?: string;
   }): Promise<RbacUserListResponse> {
     const params = new URLSearchParams({
@@ -337,6 +340,9 @@ export const api = {
     });
     if (input?.username) {
       params.set("username", input.username);
+    }
+    if (input?.query) {
+      params.set("query", input.query);
     }
     if (input?.role_id) {
       params.set("role_id", input.role_id);
@@ -562,6 +568,15 @@ export const api = {
   getRuntimeConfig(): Promise<RuntimeConfig> {
     return request("/api/settings/runtime");
   },
+  getUserUiPreferences(): Promise<UserUiPreferences> {
+    return request("/api/settings/ui-preferences");
+  },
+  updateUserUiPreferences(payload: UserUiPreferencesUpdateRequest): Promise<UserUiPreferences> {
+    return request("/api/settings/ui-preferences", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
   getGenerationQueueOverview(): Promise<GenerationQueueOverview> {
     return request("/api/generation-queue");
   },
@@ -651,7 +666,7 @@ export const api = {
     return request(`/api/copy-sets/${copySetId}/confirm`, { method: "POST" });
   },
   listImageSessions(
-    inspirationId?: string,
+    inspirationId: string | undefined,
     input?: { resource_group_id?: string | null; owner_user_id?: string; only_deleted?: boolean },
   ): Promise<ImageSessionListResponse> {
     const params = new URLSearchParams();
@@ -716,6 +731,7 @@ export const api = {
       resource_group_id: string;
       generation_config_mode?: GenerationConfigSelectionMode;
       generation_config_id?: string | null;
+      retry_generation_task_id?: string | null;
     },
   ): Promise<ImageSessionDetail> {
     return request(`/api/image-sessions/${sessionId}/generate`, {

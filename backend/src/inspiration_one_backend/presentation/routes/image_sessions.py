@@ -83,7 +83,9 @@ def list_image_sessions_endpoint(
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
     )
-    return ImageSessionListResponse(items=[serialize_image_session_summary(item) for item in items])
+    return ImageSessionListResponse(
+        items=[serialize_image_session_summary(item, resource_group_id=normalized_group_id) for item in items]
+    )
 
 
 @router.post("/image-sessions", response_model=ImageSessionDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -102,6 +104,7 @@ def create_image_session_endpoint(
     image_session = create_image_session(
         session,
         inspiration_id=payload.inspiration_id,
+        resource_group_id=payload.resource_group_id,
         title=payload.title,
         owner_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
@@ -273,6 +276,7 @@ def generate_image_session_round_endpoint(
         tool_options=payload.tool_options.model_dump(exclude_none=True) if payload.tool_options else None,
         generation_config_mode=payload.generation_config_mode,
         generation_config_id=payload.generation_config_id,
+        retry_generation_task_id=payload.retry_generation_task_id,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
     )

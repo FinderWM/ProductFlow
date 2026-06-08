@@ -42,7 +42,7 @@ export function GenerationCanvasPlaceholder({
   const regeneratable = isImageSessionGenerationTaskRegeneratable(candidate.task);
   const queueText = generationTaskQueueText(candidate.task, t);
   const retryMetadata = imageGenerationRetryMetadata(candidate.task);
-  const nonRetryableReason = candidate.failure_reason ?? retryMetadata?.last_failure_reason;
+  const failureReason = candidate.failure_reason ?? retryMetadata?.last_failure_reason;
 
   return (
     <div className="relative z-0 h-full min-h-0 w-full overflow-hidden px-4 pb-4 pt-14 sm:px-6 sm:pb-6 sm:pt-16">
@@ -98,22 +98,26 @@ export function GenerationCanvasPlaceholder({
               {t("chat.cancelGeneration")}
             </button>
           ) : null}
-          {failed && retryable ? (
-            <button
-              type="button"
-              onClick={() => onRetry(candidate.task)}
-              disabled={retrying || Boolean(actionBlockedTitle)}
-              title={actionBlockedTitle ?? t("chat.retryGeneration")}
-              className="mt-5 inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-500/20 transition-colors hover:bg-red-500 disabled:opacity-60"
-            >
-              {retrying ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
-              {t("chat.retryGeneration")}
-            </button>
-          ) : failed ? (
-            <div className="mt-5 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-medium leading-5 text-red-500 dark:border-red-400/40 dark:bg-[#0b1220] dark:text-red-200">
-              <div>{t("chat.notRetryable")}</div>
-              {nonRetryableReason ? <div className="mt-1 text-red-500/80 dark:text-red-100/80">{nonRetryableReason}</div> : null}
-            </div>
+          {failed ? (
+            <>
+              {failureReason ? (
+                <div className="mt-5 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-medium leading-5 text-red-500 dark:border-red-400/40 dark:bg-[#0b1220] dark:text-red-200">
+                  {failureReason}
+                </div>
+              ) : null}
+              {retryable ? (
+                <button
+                  type="button"
+                  onClick={() => onRetry(candidate.task)}
+                  disabled={retrying || Boolean(actionBlockedTitle)}
+                  title={actionBlockedTitle ?? t("chat.retryGeneration")}
+                  className="mt-4 inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-500/20 transition-colors hover:bg-red-500 disabled:opacity-60"
+                >
+                  {retrying ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
+                  {t("chat.retryGeneration")}
+                </button>
+              ) : null}
+            </>
           ) : cancelled ? (
             <>
               <div className="mt-5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">

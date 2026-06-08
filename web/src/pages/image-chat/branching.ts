@@ -60,6 +60,7 @@ export interface ImageHistoryBranch {
   base_asset_id: string | null;
   parent_group_id: string | null;
   depth: number;
+  branch_index: number | null;
   prompt: string;
   created_at: string;
   candidates: ImageHistoryCandidate[];
@@ -75,6 +76,7 @@ export interface ImageGenerationSubmitPayload {
   tool_options?: ImageToolOptions | null;
   generation_config_mode?: GenerationConfigSelectionMode;
   generation_config_id?: string | null;
+  retry_generation_task_id?: string | null;
 }
 
 export interface ImageGenerationSubmitGuard {
@@ -90,6 +92,14 @@ export interface ImageGenerationRetryMetadata {
   auto_retry_attempt?: number;
   max_attempts?: number;
 }
+
+export type LatestImageSessionGenerationState =
+  | { status: "empty"; round: null; task: null }
+  | { status: "active"; round: null; task: ImageSessionGenerationTask }
+  | { status: "failed"; round: null; task: ImageSessionGenerationTask }
+  | { status: "cancelled"; round: null; task: ImageSessionGenerationTask }
+  | { status: "refreshing"; round: null; task: ImageSessionGenerationTask }
+  | { status: "succeeded"; round: ImageSessionRound; task: null };
 
 export interface ImageSessionSelectionState {
   selectedGeneratedAssetId: string | null;
@@ -140,6 +150,10 @@ function compareCreatedAt(left: string, right: string): number {
   return Date.parse(left) - Date.parse(right);
 }
 
+function taskGenerationEventAt(task: ImageSessionGenerationTask): string {
+  return task.finished_at ?? task.progress_updated_at ?? task.started_at ?? task.created_at;
+}
+
 function getRoundGroupId(round: ImageSessionRound): string {
   return round.generation_group_id ?? round.id;
 }
@@ -164,6 +178,7 @@ function taskMatchesSubmitPayload(task: ImageSessionGenerationTask, payload: Ima
       resource_group_id: task.resource_group_id ?? "",
       generation_config_mode: task.generation_config_mode,
       generation_config_id: task.requested_generation_config_id,
+      retry_generation_task_id: payload.retry_generation_task_id === task.id ? task.id : null,
     }) === buildImageGenerationSubmitSignature(payload)
   );
 }
@@ -239,7 +254,10 @@ function sortCandidates(left: ImageHistoryCandidate, right: ImageHistoryCandidat
 
 function calculateBranchDepth(
   branchId: string,
-  branchesById: Map<string, Omit<ImageHistoryBranch, "depth" | "candidates"> & { candidates: ImageHistoryCandidate[] }>,
+  branchesById: Map<
+    string,
+    Omit<ImageHistoryBranch, "depth" | "branch_index" | "candidates"> & { candidates: ImageHistoryCandidate[] }
+  >,
   seen = new Set<string>(),
 ): number {
   if (seen.has(branchId)) {
@@ -290,7 +308,7 @@ export function buildImageSessionHistoryTree(
 ): ImageHistoryBranch[] {
   const branchesById = new Map<
     string,
-    Omit<ImageHistoryBranch, "depth" | "candidates"> & { candidates: ImageHistoryCandidate[] }
+    Omit<ImageHistoryBranch, "depth" | "branch_index" | "candidates"> & { candidates: ImageHistoryCandidate[] }
   >();
   const assetGroupByAssetId = new Map<string, string>();
 
@@ -388,16 +406,24 @@ export function buildImageSessionHistoryTree(
     ...branch,
     id,
     depth: calculateBranchDepth(id, branchesById),
+    branch_index: null,
     candidates: [...branch.candidates].sort(sortCandidates),
   }));
-  return sortBranches(branches);
+  let nextBranchIndex = 1;
+  return sortBranches(branches).map((branch, index) => ({
+    ...branch,
+    branch_index: branch.base_asset_id || index > 0 ? nextBranchIndex++ : null,
+  }));
 }
 
 export function requiresImageSessionGenerationBase(
   rounds: ImageSessionRound[],
   tasks: ImageSessionGenerationTask[],
 ): boolean {
-  return rounds.length > 0 || tasks.length > 0;
+  return (
+    rounds.length > 0 ||
+    tasks.some((task) => task.status === "queued" || task.status === "running" || task.status === "succeeded")
+  );
 }
 
 export function findImageHistoryPlaceholder(
@@ -507,10 +533,6 @@ export function reconcileImageSessionSelection({
   if (nextBranchBaseAssetId && !roundAssetIds.has(nextBranchBaseAssetId)) {
     nextBranchBaseAssetId = null;
   }
-  if (nextSelectedGeneratedAssetId && !nextSelectedTaskPlaceholderId && roundAssetIds.has(nextSelectedGeneratedAssetId)) {
-    nextBranchBaseAssetId = nextSelectedGeneratedAssetId;
-  }
-
   const prunedReferenceAssetIds = pruneSelectedReferenceIds(
     selectedReferenceAssetIds,
     availableReferenceAssetIds,
@@ -524,9 +546,6 @@ export function reconcileImageSessionSelection({
       nextSelectedTaskPlaceholderId = null;
       if (!selectedPlaceholderReplacementRound) {
         nextSelectedGeneratedAssetId = latestAssetId;
-        if (latestAssetId) {
-          nextBranchBaseAssetId = latestAssetId;
-        }
       }
     }
   }
@@ -570,11 +589,12 @@ export function isImageSessionGenerationTaskActive(task: ImageSessionGenerationT
 }
 
 export function isImageSessionGenerationTaskRetryable(task: ImageSessionGenerationTask): boolean {
-  return task.status === "failed" && task.is_retryable;
+  return task.status === "failed";
 }
 
 export function isImageSessionGenerationTaskRegeneratable(task: ImageSessionGenerationTask): boolean {
-  return task.status === "cancelled";
+  void task;
+  return false;
 }
 
 export function imageGenerationRetryMetadata(task: ImageSessionGenerationTask): ImageGenerationRetryMetadata | null {
@@ -614,6 +634,57 @@ export function isImageSessionGenerationTaskAutoRetrying(task: ImageSessionGener
 
 export function isImageSessionGenerationTaskCancelable(task: ImageSessionGenerationTask): boolean {
   return (task.status === "queued" || task.status === "running") && task.is_cancelable;
+}
+
+export function latestImageSessionGenerationState(
+  rounds: ImageSessionRound[],
+  tasks: ImageSessionGenerationTask[],
+): LatestImageSessionGenerationState {
+  const events: Array<
+    | { status: "active" | "failed" | "cancelled" | "refreshing"; created_at: string; task: ImageSessionGenerationTask }
+    | { status: "succeeded"; created_at: string; round: ImageSessionRound }
+  > = [];
+
+  for (const round of rounds) {
+    events.push({ status: "succeeded", created_at: round.created_at, round });
+  }
+  for (const task of tasks) {
+    if (task.status === "queued" || task.status === "running") {
+      events.push({ status: "active", created_at: taskGenerationEventAt(task), task });
+      continue;
+    }
+    if (task.status === "failed" || task.status === "cancelled") {
+      events.push({ status: task.status, created_at: taskGenerationEventAt(task), task });
+      continue;
+    }
+    if (task.status === "succeeded" && !task.result_generation_group_id) {
+      events.push({ status: "refreshing", created_at: taskGenerationEventAt(task), task });
+    }
+  }
+
+  const latest = events.sort((left, right) => {
+    const createdAtDelta = Date.parse(right.created_at) - Date.parse(left.created_at);
+    if (createdAtDelta !== 0) {
+      return createdAtDelta;
+    }
+    return right.status.localeCompare(left.status);
+  })[0];
+
+  if (!latest) {
+    return { status: "empty", round: null, task: null };
+  }
+  if (latest.status === "succeeded") {
+    return { status: "succeeded", round: latest.round, task: null };
+  }
+  return { status: latest.status, round: null, task: latest.task };
+}
+
+export function isCurrentImageSessionGenerationTask(
+  task: ImageSessionGenerationTask,
+  rounds: ImageSessionRound[],
+  tasks: ImageSessionGenerationTask[],
+): boolean {
+  return latestImageSessionGenerationState(rounds, tasks).task?.id === task.id;
 }
 
 export function mergeImageSessionStatusIntoDetail(
@@ -669,6 +740,7 @@ export function buildImageGenerationSubmitSignature(payload: ImageGenerationSubm
     resource_group_id: payload.resource_group_id,
     generation_config_mode: payload.generation_config_mode ?? "auto",
     generation_config_id: payload.generation_config_mode === "manual" ? (payload.generation_config_id ?? null) : null,
+    retry_generation_task_id: payload.retry_generation_task_id ?? null,
   });
 }
 

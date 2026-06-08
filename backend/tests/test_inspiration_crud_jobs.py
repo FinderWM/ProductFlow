@@ -453,6 +453,13 @@ def test_inspiration_list_filters_by_selected_resource_group(configured_env: Pat
     assert {item["id"] for item in premium_list.json()["items"]} == {premium_inspiration.json()["id"]}
     assert premium_list.json()["items"][0]["resource_group"]["key"] == "premium-list"
 
+    all_list = client.get("/api/inspirations")
+    assert all_list.status_code == 200
+    assert {item["id"] for item in all_list.json()["items"]} == {
+        default_inspiration.json()["id"],
+        premium_inspiration.json()["id"],
+    }
+
 
 def test_successful_workflow_generation_updates_inspiration_resource_group(
     configured_env: Path,
@@ -869,7 +876,15 @@ def test_inspiration_can_be_deleted_from_api(configured_env: Path, db_session) -
 
     listed = client.get("/api/inspirations", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert listed.status_code == 200
-    listed_inspiration = next(item for item in listed.json()["items"] if item["id"] == inspiration_id)
+    assert all(item["id"] != inspiration_id for item in listed.json()["items"])
+
+    listed_only_deleted = client.get(
+        "/api/inspirations",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "only_deleted": True},
+    )
+    assert listed_only_deleted.status_code == 200
+    assert {item["id"] for item in listed_only_deleted.json()["items"]} == {inspiration_id}
+    listed_inspiration = listed_only_deleted.json()["items"][0]
     assert listed_inspiration["deleted_at"] is not None
     assert listed_inspiration["deleted_by_user_id"] is not None
     visible_to_admin = client.get(f"/api/inspirations/{inspiration_id}")
@@ -1064,26 +1079,16 @@ def test_inspiration_status_filter_uses_database_pagination_before_eager_loading
     assert failed_inspirations == []
 
 
-def test_inspiration_list_requires_resource_group_for_authorized_entry(db_session, configured_env: Path) -> None:  # noqa: ARG001
+def test_inspiration_list_all_filter_omits_resource_group(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
 
-    missing_group_response = client.get("/api/inspirations")
-    assert missing_group_response.status_code == 422
-
-    with pytest.raises(BusinessValidationError, match="请选择供应商生成分组"):
-        list_inspirations(
-            db_session,
-            status=None,
-            page=1,
-            page_size=20,
-            resource_group_id="",
-            actor_is_admin=True,
-            require_resource_group_grant=True,
-        )
+    response = client.get("/api/inspirations")
+    assert response.status_code == 200
+    assert response.json()["items"] == []
 
 
 def test_inspiration_reference_image_can_be_deleted(configured_env: Path, db_session) -> None:

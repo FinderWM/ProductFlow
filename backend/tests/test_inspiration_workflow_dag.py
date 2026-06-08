@@ -520,11 +520,12 @@ def test_real_image_config_uses_provider_even_when_legacy_poster_mode_is_templat
             purpose=IMAGE_PURPOSE,
             provider_kind="openai_images",
             provider_profile_id=profile.id,
-            model_settings={"model": "gpt-image-2"},
-            config={"images_quality": "high", "images_style": "natural"},
-            priority=200,
-            commit=False,
-        )
+                model_settings={"model": "gpt-image-2"},
+                config={"images_quality": "high", "images_style": "natural"},
+                resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+                priority=200,
+                commit=False,
+            )
         session.add(AppSetting(key="poster_generation_mode", value="template"))
         session.commit()
     finally:

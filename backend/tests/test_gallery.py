@@ -84,9 +84,6 @@ def test_gallery_list_filters_by_selected_resource_group(configured_env: Path, d
     client = TestClient(app)
     _login(client)
 
-    missing_group = client.get("/api/gallery")
-    assert missing_group.status_code == 422
-
     premium_group = GenerationResourceGroup(key="premium-gallery", name="高阶图库分组", sort_order=20)
     db_session.add(premium_group)
     db_session.flush()
@@ -155,6 +152,10 @@ def test_gallery_list_filters_by_selected_resource_group(configured_env: Path, d
     assert premium_list.status_code == 200
     assert {item["id"] for item in premium_list.json()["items"]} == {premium_entry.id}
     assert premium_list.json()["items"][0]["resource_group"]["key"] == "premium-gallery"
+
+    all_list = client.get("/api/gallery")
+    assert all_list.status_code == 200
+    assert {item["id"] for item in all_list.json()["items"]} == {default_entry.id, premium_entry.id}
 
 
 def test_gallery_list_rejects_ungranted_resource_group_for_member(configured_env: Path) -> None:

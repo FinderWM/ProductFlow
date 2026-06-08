@@ -6,12 +6,14 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  CloudSun,
   Download,
   FileJson,
   Image,
   KeyRound,
   Link2,
   Layers3,
+  BellRing,
   Pencil,
   Plus,
   Loader2,
@@ -40,6 +42,13 @@ import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import type { TranslationKey } from "../lib/i18n";
+import {
+  DEFAULT_NOTIFICATION_AUTO_CLOSE_MS,
+  MAX_NOTIFICATION_AUTO_CLOSE_MS,
+  MIN_NOTIFICATION_AUTO_CLOSE_MS,
+  readNotificationAutoCloseMs,
+  writeNotificationAutoCloseMs,
+} from "../lib/notifications";
 import type { ParameterHelpKey } from "../lib/parameterHelp";
 import { useI18n } from "../lib/preferences";
 import {
@@ -72,6 +81,16 @@ import type {
   TextGenerationConfigTestResponse,
 } from "../lib/types";
 import {
+  MAX_WEATHER_REFRESH_MINUTES,
+  MIN_WEATHER_REFRESH_MINUTES,
+  normalizeWeatherSourceId,
+  readWeatherSettings,
+  WEATHER_SOURCE_IDS,
+  weatherSources,
+  writeWeatherRefreshMinutes,
+  writeWeatherSourceId,
+} from "../lib/weatherSources";
+import {
   downloadSettingsExport,
   isSettingsExportPayload,
   settingsImportSummaryCounts,
@@ -87,6 +106,8 @@ export type SettingsSectionId =
   | "upload"
   | "queue"
   | "globalTemplates"
+  | "weather"
+  | "notifications"
   | "security"
   | "migration";
 
@@ -157,6 +178,7 @@ export interface GenerationResourceGroupDraft {
   description: string;
   sort_order: string;
   enabled: boolean;
+  blur_images_by_default: boolean;
 }
 
 export interface TextConfigTestDraft {
@@ -208,6 +230,8 @@ const PANEL_CLASS =
 const SETTINGS_MAIN_ACTION_CLASS =
   "inline-flex h-11 items-center justify-center rounded-lg bg-indigo-600 px-5 text-sm font-semibold text-white " +
   "shadow-sm shadow-indigo-500/25 hover:bg-indigo-500 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-400";
+
+const SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS = 3000;
 
 const PROVIDER_DRAWER_INPUT_CLASS =
   "h-[43px] w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-950 " +
@@ -273,6 +297,20 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: Layers3,
   },
   {
+    id: "weather",
+    labelKey: "settings.section.weather",
+    descriptionKey: "settings.section.weatherDescription",
+    groupKey: "settings.groupExperience",
+    icon: CloudSun,
+  },
+  {
+    id: "notifications",
+    labelKey: "settings.section.notifications",
+    descriptionKey: "settings.section.notificationsDescription",
+    groupKey: "settings.groupExperience",
+    icon: BellRing,
+  },
+  {
     id: "security",
     labelKey: "settings.section.security",
     descriptionKey: "settings.section.securityDescription",
@@ -288,7 +326,12 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   },
 ];
 
-const SETTINGS_GROUPS: TranslationKey[] = ["settings.groupProviders", "settings.groupWorkflow", "settings.groupSecurity"];
+const SETTINGS_GROUPS: TranslationKey[] = [
+  "settings.groupProviders",
+  "settings.groupWorkflow",
+  "settings.groupExperience",
+  "settings.groupSecurity",
+];
 const GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX = "全局生成配置 / ";
 const LEGACY_GENERATION_QUEUE_CATEGORY = "生成队列";
 
@@ -661,7 +704,7 @@ function generationConfigDraft(config: GenerationConfig): GenerationConfigDraft 
         : "mock";
   return {
     id: config.id,
-    resource_group_id: config.resource_group_id,
+    resource_group_id: config.resource_group_id ?? "",
     purpose: config.purpose,
     name: config.name,
     provider_kind: providerKind,
@@ -750,6 +793,7 @@ function emptyGenerationResourceGroupDraft(): GenerationResourceGroupDraft {
     description: "",
     sort_order: "100",
     enabled: true,
+    blur_images_by_default: false,
   };
 }
 
@@ -761,7 +805,29 @@ function generationResourceGroupDraft(group: GenerationResourceGroup): Generatio
     description: group.description ?? "",
     sort_order: String(group.sort_order),
     enabled: group.enabled,
+    blur_images_by_default: Boolean(group.blur_images_by_default),
   };
+}
+
+function generationConfigCountsForResourceGroup(
+  generationConfigs: GenerationConfig[],
+  resourceGroupId: string,
+): { text: number; image: number } {
+  return generationConfigs.reduce(
+    (counts, generationConfig) => {
+      if (generationConfig.resource_group_id !== resourceGroupId) {
+        return counts;
+      }
+      if (generationConfig.purpose === "text") {
+        counts.text += 1;
+      }
+      if (generationConfig.purpose === "image") {
+        counts.image += 1;
+      }
+      return counts;
+    },
+    { text: 0, image: 0 },
+  );
 }
 
 function generationResourceGroupPayloadFromDraft(
@@ -773,6 +839,7 @@ function generationResourceGroupPayloadFromDraft(
     description: draft.description.trim() || null,
     sort_order: numberDraftValue(draft.sort_order, 100),
     enabled: draft.enabled,
+    blur_images_by_default: draft.blur_images_by_default,
   };
 }
 
@@ -1036,6 +1103,93 @@ function SettingsFormField({ label, children, className = "", helpKey, helpConte
       </span>
       {children}
     </label>
+  );
+}
+
+function WeatherSettingsPanel({ onSaved }: { onSaved: () => void }) {
+  const { t } = useI18n();
+  const [weatherSettings, setWeatherSettings] = useState(readWeatherSettings);
+
+  return (
+    <section className={`${PANEL_CLASS} space-y-5`}>
+      <div>
+        <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+          {t("settings.weather.title")}
+        </h2>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+          {t("settings.weather.description")}
+        </p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SettingsFormField label={t("settings.weather.source")}>
+          <SelectField
+            value={weatherSettings.sourceId}
+            options={WEATHER_SOURCE_IDS.map((sourceId) => ({
+              value: sourceId,
+              label: t(weatherSources[sourceId].labelKey),
+            }))}
+            onChange={(value) => {
+              const sourceId = normalizeWeatherSourceId(value);
+              writeWeatherSourceId(sourceId);
+              setWeatherSettings(readWeatherSettings());
+              onSaved();
+            }}
+            radius="lg"
+          />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.weather.refreshMinutes")}>
+          <input
+            type="number"
+            min={MIN_WEATHER_REFRESH_MINUTES}
+            max={MAX_WEATHER_REFRESH_MINUTES}
+            value={weatherSettings.refreshMinutes}
+            onChange={(event) => {
+              const nextValue = Number(event.target.value);
+              writeWeatherRefreshMinutes(nextValue);
+              setWeatherSettings(readWeatherSettings());
+              onSaved();
+            }}
+            className={INPUT_CLASS}
+          />
+        </SettingsFormField>
+      </div>
+    </section>
+  );
+}
+
+function NotificationSettingsPanel({ onSaved }: { onSaved: () => void }) {
+  const { t } = useI18n();
+  const [notificationAutoCloseMs, setNotificationAutoCloseMs] = useState(readNotificationAutoCloseMs);
+
+  return (
+    <section className={`${PANEL_CLASS} space-y-5`}>
+      <div>
+        <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+          {t("settings.notification.title")}
+        </h2>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+          {t("settings.notification.description")}
+        </p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SettingsFormField label={t("settings.notification.autoCloseMs")}>
+          <input
+            type="number"
+            min={MIN_NOTIFICATION_AUTO_CLOSE_MS}
+            max={MAX_NOTIFICATION_AUTO_CLOSE_MS}
+            step={500}
+            value={notificationAutoCloseMs}
+            onChange={(event) => {
+              const nextValue = Number(event.target.value || DEFAULT_NOTIFICATION_AUTO_CLOSE_MS);
+              writeNotificationAutoCloseMs(nextValue);
+              setNotificationAutoCloseMs(readNotificationAutoCloseMs());
+              onSaved();
+            }}
+            className={INPUT_CLASS}
+          />
+        </SettingsFormField>
+      </div>
+    </section>
   );
 }
 
@@ -1590,6 +1744,7 @@ function generationResourceGroupStatusClassName(group: GenerationResourceGroupDr
 
 interface GenerationResourceGroupSectionProps {
   groups: GenerationResourceGroup[];
+  generationConfigs: GenerationConfig[];
   drafts: Record<string, GenerationResourceGroupDraft>;
   pending: boolean;
   archivingGroupId: string | null;
@@ -1601,6 +1756,7 @@ interface GenerationResourceGroupSectionProps {
 
 function GenerationResourceGroupSection({
   groups,
+  generationConfigs,
   drafts,
   pending,
   archivingGroupId,
@@ -1611,6 +1767,7 @@ function GenerationResourceGroupSection({
 }: GenerationResourceGroupSectionProps) {
   const { t } = useI18n();
   const activeGroups = settingsGenerationResourceGroupsInApiOrder(groups);
+  const activeGenerationConfigs = generationConfigs.filter((config) => !config.archived_at);
   const newDraftKey = "new-generation-resource-group";
   const newDraft = drafts[newDraftKey] ?? emptyGenerationResourceGroupDraft();
   const cards = [
@@ -1618,8 +1775,9 @@ function GenerationResourceGroupSection({
       key: group.id,
       group,
       draft: drafts[group.id] ?? generationResourceGroupDraft(group),
+      counts: generationConfigCountsForResourceGroup(activeGenerationConfigs, group.id),
     })),
-    { key: newDraftKey, group: null, draft: newDraft },
+    { key: newDraftKey, group: null, draft: newDraft, counts: { text: 0, image: 0 } },
   ];
 
   return (
@@ -1633,11 +1791,12 @@ function GenerationResourceGroupSection({
         </p>
       </div>
       <div className="grid gap-4">
-        {cards.map(({ key, group, draft }) => (
+        {cards.map(({ key, group, draft, counts }) => (
           <GenerationResourceGroupCard
             key={key}
             group={group}
             draft={draft}
+            counts={counts}
             pending={pending || archivingGroupId === group?.id}
             canWrite={canWrite}
             onChange={(next) => onChange(generationResourceGroupDraftKey(next), next)}
@@ -1653,6 +1812,7 @@ function GenerationResourceGroupSection({
 interface GenerationResourceGroupCardProps {
   group: GenerationResourceGroup | null;
   draft: GenerationResourceGroupDraft;
+  counts: { text: number; image: number };
   pending: boolean;
   canWrite: boolean;
   onChange: (next: GenerationResourceGroupDraft) => void;
@@ -1663,6 +1823,7 @@ interface GenerationResourceGroupCardProps {
 function GenerationResourceGroupCard({
   group,
   draft,
+  counts,
   pending,
   canWrite,
   onChange,
@@ -1687,6 +1848,16 @@ function GenerationResourceGroupCard({
           <p className="mt-1 font-mono text-xs text-slate-500 dark:text-slate-400">
             {draft.key || t("settings.resourceGroup.keyPlaceholder")}
           </p>
+          {!isNew ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                {t("settings.resourceGroup.textConfigCount", { count: counts.text })}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                {t("settings.resourceGroup.imageConfigCount", { count: counts.image })}
+              </span>
+            </div>
+          ) : null}
         </div>
         {onArchive ? (
           <button
@@ -1752,6 +1923,16 @@ function GenerationResourceGroupCard({
             className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
           />
           {t("settings.resourceGroup.enabled")}
+        </label>
+        <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={draft.blur_images_by_default}
+            disabled={!canWrite}
+            onChange={(event) => onChange({ ...draft, blur_images_by_default: event.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
+          />
+          {t("settings.resourceGroup.blurImagesByDefault")}
         </label>
         <button
           type="button"
@@ -2304,12 +2485,8 @@ interface GenerationConfigPoolSectionProps {
   onSave: (draft: GenerationConfigDraft) => void;
   onArchive: (configId: string) => void;
   onTextTestDraftChange?: (draft: TextConfigTestDraft) => void;
-  onTestTextConfig?: (draft: GenerationConfigDraft) => void;
+  onTestTextConfig?: (key: string, draft: GenerationConfigDraft) => void;
   onRefreshSort: () => void;
-}
-
-function generationConfigDraftKey(draft: GenerationConfigDraft): string {
-  return draft.id ?? `new-${draft.purpose}`;
 }
 
 function providerProfilesForGenerationConfig(
@@ -2335,6 +2512,15 @@ function generationConfigSuccessRate(config: GenerationConfig): string {
     return "0%";
   }
   return `${Math.round((stat.success_count / stat.attempt_count) * 100)}%`;
+}
+
+function generationConfigTabClassName(active: boolean): string {
+  return [
+    "inline-flex min-h-9 items-center rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors",
+    active
+      ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-violet-400 dark:bg-violet-500/15 dark:text-violet-100"
+      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:bg-slate-800",
+  ].join(" ");
 }
 
 function isActiveFrozenUntil(value: string | null | undefined): boolean {
@@ -2476,19 +2662,37 @@ function GenerationConfigPoolSection({
   onRefreshSort,
 }: GenerationConfigPoolSectionProps) {
   const { t } = useI18n();
-  const configs = generationConfigsForPurpose(data, purpose);
   const profiles = data?.profiles ?? [];
   const resourceGroups = settingsGenerationResourceGroupsInApiOrder(data?.generation_resource_groups);
-  const newDraftKey = `new-${purpose}`;
+  const firstEnabledGroupId = resourceGroups.find((group) => group.enabled)?.id ?? "";
+  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
+  const activeResourceGroupId = selectedResourceGroupId ?? firstEnabledGroupId;
+  useEffect(() => {
+    if (selectedResourceGroupId === null || selectedResourceGroupId === "") {
+      return;
+    }
+    if (!resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
+      setSelectedResourceGroupId(firstEnabledGroupId || "");
+    }
+  }, [firstEnabledGroupId, resourceGroups, selectedResourceGroupId]);
+  const configs = generationConfigsForPurpose(data, purpose).filter((config) =>
+    activeResourceGroupId ? config.resource_group_id === activeResourceGroupId : !config.resource_group_id,
+  );
+  const newDraftKey = `new-${purpose}-${activeResourceGroupId || "unbound"}`;
   const newDraft =
     drafts[newDraftKey] ??
     ({
       ...emptyGenerationConfigDraft(purpose),
-      resource_group_id: resourceGroups.find((group) => group.enabled)?.id ?? "",
+      resource_group_id: activeResourceGroupId,
     } satisfies GenerationConfigDraft);
   const cards = [
-    ...configs.map((config) => ({ key: config.id, config, draft: drafts[config.id] ?? generationConfigDraft(config) })),
-    { key: newDraftKey, config: null, draft: newDraft },
+    ...configs.map((config) => ({
+      key: config.id,
+      draftKey: config.id,
+      config,
+      draft: drafts[config.id] ?? generationConfigDraft(config),
+    })),
+    { key: newDraftKey, draftKey: newDraftKey, config: null, draft: newDraft },
   ];
 
   return (
@@ -2514,7 +2718,29 @@ function GenerationConfigPoolSection({
           {t("settings.generation.refreshSort")}
         </button>
       </div>
-      {cards.map(({ key, config, draft }) => {
+      <div className="flex flex-wrap gap-2">
+        {resourceGroups.map((group) => {
+          const active = activeResourceGroupId === group.id;
+          return (
+            <button
+              key={group.id}
+              type="button"
+              onClick={() => setSelectedResourceGroupId(group.id)}
+              className={generationConfigTabClassName(active)}
+            >
+              {group.enabled ? group.name : `${group.name} (${t("settings.resourceGroup.disabled")})`}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setSelectedResourceGroupId("")}
+          className={generationConfigTabClassName(activeResourceGroupId === "")}
+        >
+          {t("settings.generation.unboundResourceGroup")}
+        </button>
+      </div>
+      {cards.map(({ key, draftKey, config, draft }) => {
         const testRecord = textConfigTestRecordForKey(textTestState, key);
         return (
           <GenerationConfigCard
@@ -2525,10 +2751,10 @@ function GenerationConfigPoolSection({
             profiles={providerProfilesForGenerationConfig(profiles, draft)}
             pending={pending || archivingConfigId === config?.id}
             canWrite={canWrite}
-            onChange={(next) => onChange(generationConfigDraftKey(next), next)}
+            onChange={(next) => onChange(draftKey, next)}
             onSave={() => onSave(draft)}
             onArchive={config ? () => onArchive(config.id) : undefined}
-            onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(draft) : undefined}
+            onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(key, draft) : undefined}
             testing={Boolean(testRecord?.testing)}
             testResult={testRecord?.result ?? null}
             testError={testRecord?.error ?? ""}
@@ -2721,10 +2947,7 @@ function GenerationConfigCard({
             options={[
               {
                 value: "",
-                label: resourceGroups.length
-                  ? t("settings.generation.selectResourceGroup")
-                  : t("settings.generation.noResourceGroups"),
-                disabled: true,
+                label: t("settings.generation.unboundResourceGroup"),
               },
               ...resourceGroups.map((group) => ({
                 value: group.id,
@@ -2842,7 +3065,6 @@ function GenerationConfigCard({
           disabled={
             controlsDisabled ||
             !draft.name.trim() ||
-            !draft.resource_group_id ||
             (draft.provider_kind !== "mock" && !draft.provider_profile_id)
           }
           className={SETTINGS_MAIN_ACTION_CLASS}
@@ -3061,6 +3283,19 @@ export function SettingsPage() {
           t(section.descriptionKey).toLowerCase().includes(normalizedSectionSearch),
       )
     : SETTINGS_SECTIONS;
+  const handleActiveSectionChange = useCallback((section: SettingsSectionId) => {
+    setActiveSection(section);
+    setSavedMessage("");
+    setError("");
+  }, []);
+
+  useEffect(() => {
+    if (!savedMessage) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setSavedMessage(""), SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [savedMessage]);
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -3481,7 +3716,7 @@ export function SettingsPage() {
                               <button
                                 key={section.id}
                                 type="button"
-                                onClick={() => setActiveSection(section.id)}
+                                onClick={() => handleActiveSectionChange(section.id)}
                                 className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
                                   active
                                     ? "bg-indigo-50 font-semibold text-indigo-700 ring-1 ring-indigo-200 dark:bg-violet-500/18 dark:text-violet-100 dark:ring-violet-400/35"
@@ -3512,7 +3747,7 @@ export function SettingsPage() {
                         label: t(section.labelKey),
                       })),
                     }))}
-                    onChange={(value) => setActiveSection(value as SettingsSectionId)}
+                    onChange={(value) => handleActiveSectionChange(value as SettingsSectionId)}
                     radius="lg"
                   />
                 </div>
@@ -3585,6 +3820,22 @@ export function SettingsPage() {
                         {t("nav.globalTemplates")}
                       </button>
                     </div>
+                  ) : null}
+                  {activeSection === "weather" ? (
+                    <WeatherSettingsPanel
+                      onSaved={() => {
+                        setError("");
+                        setSavedMessage(t("settings.weather.saved"));
+                      }}
+                    />
+                  ) : null}
+                  {activeSection === "notifications" ? (
+                    <NotificationSettingsPanel
+                      onSaved={() => {
+                        setError("");
+                        setSavedMessage(t("settings.notification.saved"));
+                      }}
+                    />
                   ) : null}
                   {error ? (
                     <div className="mb-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
@@ -3667,6 +3918,7 @@ export function SettingsPage() {
                     {activeSection === "resourceGroups" ? (
                       <GenerationResourceGroupSection
                         groups={providerConfigQuery.data?.generation_resource_groups ?? []}
+                        generationConfigs={providerConfigQuery.data?.generation_configs ?? []}
                         drafts={generationResourceGroupDrafts}
                         pending={resourceGroupPending}
                         archivingGroupId={archivingGenerationResourceGroupId}
@@ -3694,6 +3946,7 @@ export function SettingsPage() {
 
                     {activeSection === "text" ? (
                       <GenerationConfigPoolSection
+                        key="text-generation-configs"
                         data={providerConfigQuery.data}
                         purpose="text"
                         drafts={generationConfigDrafts}
@@ -3722,12 +3975,12 @@ export function SettingsPage() {
                         onTextTestDraftChange={(draft) => {
                           setTextConfigTestState((current) => ({ ...current, draft }));
                         }}
-                        onTestTextConfig={(draft) => {
+                        onTestTextConfig={(key, draft) => {
                           if (!canWriteProviderSettings) {
                             return;
                           }
                           testTextGenerationConfigMutation.mutate({
-                            key: generationConfigDraftKey(draft),
+                            key,
                             payload: textGenerationConfigTestPayload(draft, textConfigTestState.draft),
                           });
                         }}
@@ -3739,6 +3992,7 @@ export function SettingsPage() {
 
                     {activeSection === "image" ? (
                       <GenerationConfigPoolSection
+                        key="image-generation-configs"
                         data={providerConfigQuery.data}
                         purpose="image"
                         drafts={generationConfigDrafts}

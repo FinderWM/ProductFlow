@@ -24,6 +24,7 @@ interface SessionReferencePanelProps {
   onFiles: (files: File[]) => void;
   onToggle: (assetId: string, checked: boolean) => void;
   onDelete: (assetId: string) => void;
+  onPreview: (asset: ImageSessionAsset) => void;
   t: ImageChatTranslate;
 }
 
@@ -38,6 +39,7 @@ export function SessionReferencePanel({
   onFiles,
   onToggle,
   onDelete,
+  onPreview,
   t,
 }: SessionReferencePanelProps) {
   return (
@@ -79,7 +81,13 @@ export function SessionReferencePanel({
                     : "border-slate-200 dark:border-slate-700"
                 }`}
               >
-                <a href={api.toApiUrl(asset.preview_url)} target="_blank" rel="noreferrer" title={asset.original_filename}>
+                <button
+                  type="button"
+                  onClick={() => onPreview(asset)}
+                  title={asset.original_filename}
+                  aria-label={t("detail.previewImage", { alt: asset.original_filename })}
+                  className="block w-full"
+                >
                   <img
                     src={api.toApiUrl(asset.thumbnail_url)}
                     alt={asset.original_filename}
@@ -87,7 +95,7 @@ export function SessionReferencePanel({
                     decoding="async"
                     className="h-20 w-full object-cover"
                   />
-                </a>
+                </button>
                 <ResourceMetaBadges
                   resource={asset}
                   className="absolute left-1 top-1 max-w-[calc(100%-2.5rem)]"
@@ -135,6 +143,7 @@ interface InspirationAssociationPanelProps {
   deletingReferenceAssetId: string | null;
   onTargetInspirationChange: (value: string) => void;
   onDeleteReference: (assetId: string) => void;
+  onPreviewReference: (asset: SourceAsset) => void;
   onAttach: (target: "reference" | "main_source") => void;
   saveBlockedTitle?: string | null;
   editBlockedTitle?: string | null;
@@ -153,6 +162,7 @@ export function InspirationAssociationPanel({
   deletingReferenceAssetId,
   onTargetInspirationChange,
   onDeleteReference,
+  onPreviewReference,
   onAttach,
   saveBlockedTitle = null,
   editBlockedTitle = null,
@@ -209,7 +219,13 @@ export function InspirationAssociationPanel({
             const assetBlockedTitle = inspirationBlocked ? inspirationBlockedTitle : getResourceBlockedActionTitle(asset, t("resource.blockedAction"));
             return (
               <div key={asset.id} className="group relative overflow-hidden rounded-md border border-zinc-200 bg-white dark:border-slate-700 dark:bg-slate-950/70">
-                <a href={api.toApiUrl(asset.preview_url)} target="_blank" rel="noreferrer" title={asset.original_filename}>
+                <button
+                  type="button"
+                  onClick={() => onPreviewReference(asset)}
+                  title={asset.original_filename}
+                  aria-label={t("detail.previewImage", { alt: asset.original_filename })}
+                  className="block w-full"
+                >
                   <img
                     src={api.toApiUrl(asset.thumbnail_url)}
                     alt={asset.original_filename}
@@ -217,7 +233,7 @@ export function InspirationAssociationPanel({
                     decoding="async"
                     className="h-16 w-full object-cover"
                   />
-                </a>
+                </button>
                 <ResourceMetaBadges
                   resource={assetBlocked && inspirationBlocked ? inspiration : asset}
                   className="absolute left-1 top-1 max-w-[calc(100%-2rem)]"

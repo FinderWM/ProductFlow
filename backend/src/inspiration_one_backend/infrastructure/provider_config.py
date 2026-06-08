@@ -146,7 +146,6 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
 
     _ensure_default_generation_resource_group(session)
     if _generation_config_exists(session):
-        _ensure_generation_configs_have_default_resource_group(session)
         _ensure_generation_config_states(session)
         if commit:
             session.commit()
@@ -158,7 +157,6 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
     if existing_bindings:
         for binding in existing_bindings:
             _add_generation_config_from_binding(session, binding)
-        _ensure_generation_configs_have_default_resource_group(session)
         _ensure_generation_config_states(session)
         if commit:
             session.commit()
@@ -168,6 +166,7 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
 
     settings = _load_effective_legacy_settings(session)
     profiles_by_connection: dict[tuple[str, str], ProviderProfile] = {}
+    default_group_id = default_generation_resource_group_id(session)
 
     text_kind = _normalize_provider_kind(settings.text_provider_kind, allowed=TEXT_PROVIDER_KINDS, default="mock")
     image_kind = _normalize_provider_kind(settings.image_provider_kind, allowed=IMAGE_PROVIDER_KINDS, default="mock")
@@ -182,6 +181,7 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
         )
         add_generation_config(
             session,
+            resource_group_id=default_group_id,
             name="默认文案配置",
             purpose=TEXT_PURPOSE,
             provider_kind="openai",
@@ -196,6 +196,7 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
     else:
         add_generation_config(
             session,
+            resource_group_id=default_group_id,
             name="默认文案配置",
             purpose=TEXT_PURPOSE,
             provider_kind="mock",
@@ -219,6 +220,7 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
         )
         add_generation_config(
             session,
+            resource_group_id=default_group_id,
             name="默认图片配置",
             purpose=IMAGE_PURPOSE,
             provider_kind=image_kind,
@@ -234,6 +236,7 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
     else:
         add_generation_config(
             session,
+            resource_group_id=default_group_id,
             name="默认图片配置",
             purpose=IMAGE_PURPOSE,
             provider_kind="mock",
@@ -320,6 +323,7 @@ def add_generation_resource_group(
     description: str | None = None,
     sort_order: int = 100,
     enabled: bool = True,
+    blur_images_by_default: bool = False,
     commit: bool = True,
 ) -> GenerationResourceGroup:
     _ensure_default_generation_resource_group(session)
@@ -332,6 +336,7 @@ def add_generation_resource_group(
         description=_normalize_optional_text(description),
         sort_order=int(sort_order),
         enabled=enabled,
+        blur_images_by_default=blur_images_by_default,
     )
     session.add(group)
     if commit:
@@ -351,6 +356,7 @@ def update_generation_resource_group(
     description: str | None | object = UNSET_PROVIDER_FIELD,
     sort_order: int | None = None,
     enabled: bool | None = None,
+    blur_images_by_default: bool | None = None,
     commit: bool = True,
 ) -> GenerationResourceGroup:
     group = require_generation_resource_group(session, resource_group_id)
@@ -373,6 +379,8 @@ def update_generation_resource_group(
         group.sort_order = int(sort_order)
     if enabled is not None:
         group.enabled = enabled
+    if blur_images_by_default is not None:
+        group.blur_images_by_default = blur_images_by_default
     if commit:
         session.commit()
         session.refresh(group)
@@ -560,14 +568,19 @@ def add_generation_config(
     )
     if provider_kind == "mock":
         provider_profile_id = None
-    resource_group = require_generation_resource_group(session, resource_group_id)
+    normalized_resource_group_id = _normalize_resource_group_id(resource_group_id)
+    resource_group = (
+        require_generation_resource_group(session, normalized_resource_group_id)
+        if normalized_resource_group_id is not None
+        else None
+    )
     settings = get_runtime_settings()
     generation_config_kwargs = {
         "name": _normalize_required_text(name, "配置名称"),
         "purpose": purpose,
         "provider_kind": provider_kind,
         "provider_profile_id": provider_profile_id,
-        "resource_group_id": resource_group.id,
+        "resource_group_id": resource_group.id if resource_group is not None else None,
         "model_settings_json": _normalize_binding_model_settings(purpose=purpose, model_settings=model_settings),
         "config_json": _normalize_binding_config(purpose=purpose, provider_kind=provider_kind, config=config),
         "priority": int(priority),
@@ -598,7 +611,7 @@ def update_generation_config(
     session: Session,
     generation_config_id: str,
     *,
-    resource_group_id: str | None = None,
+    resource_group_id: str | None | object = UNSET_PROVIDER_FIELD,
     name: str | None = None,
     purpose: str | None = None,
     provider_kind: str | None = None,
@@ -625,11 +638,14 @@ def update_generation_config(
     next_availability_window = int(availability_window_minutes or generation_config.availability_window_minutes)
     next_failure_threshold = int(failure_threshold or generation_config.failure_threshold)
     next_cooldown = int(cooldown_minutes or generation_config.cooldown_minutes)
-    next_resource_group = (
-        require_generation_resource_group(session, resource_group_id)
-        if resource_group_id is not None
-        else require_generation_resource_group(session, generation_config.resource_group_id)
-    )
+    if resource_group_id is UNSET_PROVIDER_FIELD:
+        next_resource_group_id = generation_config.resource_group_id
+    else:
+        next_resource_group_id = _normalize_resource_group_id(
+            resource_group_id if isinstance(resource_group_id, str) else None
+        )
+    if next_resource_group_id is not None:
+        require_generation_resource_group(session, next_resource_group_id)
     _validate_generation_config_payload(
         session,
         purpose=next_purpose,
@@ -644,7 +660,7 @@ def update_generation_config(
     )
     if name is not None:
         generation_config.name = _normalize_required_text(name, "配置名称")
-    generation_config.resource_group_id = next_resource_group.id
+    generation_config.resource_group_id = next_resource_group_id
     generation_config.purpose = next_purpose
     generation_config.provider_kind = next_provider_kind
     generation_config.provider_profile_id = None if next_provider_kind == "mock" else next_provider_profile_id
@@ -1288,7 +1304,11 @@ def _select_generation_config_for_resolution(
             )
         )
     else:
-        generation_config = _default_generation_config(session, purpose)
+        generation_config = _default_generation_config(
+            session,
+            purpose,
+            resource_group_id=default_generation_resource_group_id(session),
+        )
     if generation_config is None:
         raise RuntimeError("生成配置未初始化")
     if not generation_config.enabled:
@@ -1334,6 +1354,7 @@ def _ensure_default_generation_resource_group(session: Session) -> GenerationRes
             description="default 供应商生成能力分组",
             sort_order=0,
             enabled=True,
+            blur_images_by_default=False,
         )
         session.add(group)
         session.flush()
@@ -1343,16 +1364,6 @@ def _ensure_default_generation_resource_group(session: Session) -> GenerationRes
         group.description = "default 供应商生成能力分组"
     session.flush()
     return group
-
-
-def _ensure_generation_configs_have_default_resource_group(session: Session) -> None:
-    default_group_id = default_generation_resource_group_id(session)
-    session.execute(
-        update(GenerationConfig)
-        .where(GenerationConfig.resource_group_id.is_(None))
-        .values(resource_group_id=default_group_id)
-    )
-    session.flush()
 
 
 def _ensure_generation_config_state(session: Session, generation_config_id: str) -> GenerationConfigState:

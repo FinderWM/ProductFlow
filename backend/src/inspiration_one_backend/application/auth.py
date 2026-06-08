@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import func, inspect, select
+from sqlalchemy import func, inspect, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from inspiration_one_backend.config import get_settings
@@ -410,6 +410,7 @@ def list_users(
     page: int = 1,
     page_size: int = 100,
     username: str | None = None,
+    query: str | None = None,
     role_id: str | None = None,
 ) -> tuple[list[AuthUser], int]:
     ensure_auth_bootstrapped(session)
@@ -417,8 +418,12 @@ def list_users(
     page_size = min(max(page_size, 1), 100)
     start = (page - 1) * page_size
     filters = [AuthUser.archived_at.is_(None)]
+    normalized_query = query.strip() if query else ""
     normalized_username = username.strip() if username else ""
-    if normalized_username:
+    if normalized_query:
+        pattern = f"%{normalized_query}%"
+        filters.append(or_(AuthUser.username.ilike(pattern), AuthUser.display_name.ilike(pattern)))
+    elif normalized_username:
         filters.append(AuthUser.username.ilike(f"%{normalized_username}%"))
     normalized_role_id = role_id.strip() if role_id else ""
     if normalized_role_id:

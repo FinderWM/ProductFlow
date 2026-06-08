@@ -1,4 +1,4 @@
-import { History, Loader2, MessagesSquare, Trash2 } from "lucide-react";
+import { Archive, History, Loader2, MessagesSquare } from "lucide-react";
 
 import {
   getResourceBlockedActionTitle,
@@ -6,8 +6,10 @@ import {
   isResourceDeleted,
   ResourceMetaBadges,
 } from "../../components/ResourceGovernance";
+import { SensitiveImageOverlay, sensitiveImageClassName } from "../../components/SensitiveImageMask";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
+import { shouldMaskSensitiveImage } from "../../lib/sensitiveImages";
 import type { ImageSessionSummary, SessionUser } from "../../lib/types";
 import type { ImageChatTranslate } from "./display";
 
@@ -20,6 +22,7 @@ interface ImageChatSessionListProps {
   deletionBlockedTitle?: string | null;
   currentUser?: SessionUser | null;
   variant: "desktop" | "mobile";
+  maskSensitiveImages: boolean;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   t: ImageChatTranslate;
@@ -34,13 +37,14 @@ export function ImageChatSessionList({
   deletionBlockedTitle = null,
   currentUser = null,
   variant,
+  maskSensitiveImages,
   onSelectSession,
   onDeleteSession,
   t,
 }: ImageChatSessionListProps) {
   const containerClassName =
     variant === "desktop"
-      ? "flex gap-3 overflow-x-auto p-3 lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-2 lg:overflow-x-visible lg:overflow-y-auto"
+      ? "flex gap-3 overflow-x-auto p-3 lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-2 lg:overflow-x-visible lg:overflow-y-auto lg:px-8"
       : "min-h-0 flex-1 space-y-2 overflow-y-auto p-3";
 
   return (
@@ -74,6 +78,7 @@ export function ImageChatSessionList({
             deletionBlockedTitle={deletionBlockedTitle}
             currentUser={currentUser}
             variant={variant}
+            maskSensitiveImages={maskSensitiveImages}
             onSelectSession={onSelectSession}
             onDeleteSession={onDeleteSession}
             t={t}
@@ -96,6 +101,7 @@ interface ImageChatSessionCardProps {
   deletionBlockedTitle: string | null;
   currentUser: SessionUser | null;
   variant: "desktop" | "mobile";
+  maskSensitiveImages: boolean;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   t: ImageChatTranslate;
@@ -109,6 +115,7 @@ function ImageChatSessionCard({
   deletionBlockedTitle,
   currentUser,
   variant,
+  maskSensitiveImages,
   onSelectSession,
   onDeleteSession,
   t,
@@ -133,6 +140,7 @@ function ImageChatSessionCard({
   const blockedTitle = getResourceBlockedActionTitle(item, t("resource.blockedAction"));
   const adminReadonly = Boolean(currentUser?.is_admin && item.owner_user_id && currentUser.id !== item.owner_user_id);
   const deleteDisabled = deleting || !deletionEnabled || Boolean(deletionBlockedTitle) || blocked || deleted || adminReadonly;
+  const latestImageMasked = shouldMaskSensitiveImage(maskSensitiveImages, item.latest_resource_group);
 
   return (
     <div className={cardClassName}>
@@ -144,11 +152,14 @@ function ImageChatSessionCard({
               alt={item.title}
               loading="lazy"
               decoding="async"
-              className="h-full w-full object-cover"
+              className={sensitiveImageClassName(latestImageMasked, "h-full w-full object-cover")}
             />
           ) : (
             <MessagesSquare size={18} />
           )}
+          {item.latest_generated_asset ? (
+            <SensitiveImageOverlay masked={latestImageMasked} label={t("common.sensitiveImageMasked")} />
+          ) : null}
           {active ? <div className="absolute inset-0 ring-2 ring-inset ring-indigo-500/60 dark:ring-violet-400/80" /> : null}
         </div>
         <div className="min-w-0 flex-1">
@@ -159,6 +170,11 @@ function ImageChatSessionCard({
             <History size={11} />
             <span>{t("chat.roundCount", { count: item.rounds_count })}</span>
           </div>
+          {item.latest_resource_group ? (
+            <div className="mt-1 inline-flex max-w-full rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:border-violet-400/30 dark:bg-violet-500/12 dark:text-violet-100">
+              <span className="truncate">{item.latest_resource_group.name}</span>
+            </div>
+          ) : null}
           <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500">{formatDateTime(item.updated_at)}</div>
           <ResourceMetaBadges resource={item} className="mt-1" />
         </div>
@@ -183,7 +199,7 @@ function ImageChatSessionCard({
         }
         className={deleteClassName}
       >
-        {deleting ? <Loader2 size={variant === "desktop" ? 13 : 14} className="animate-spin" /> : <Trash2 size={variant === "desktop" ? 13 : 15} />}
+        {deleting ? <Loader2 size={variant === "desktop" ? 13 : 14} className="animate-spin" /> : <Archive size={variant === "desktop" ? 13 : 15} />}
       </button>
     </div>
   );

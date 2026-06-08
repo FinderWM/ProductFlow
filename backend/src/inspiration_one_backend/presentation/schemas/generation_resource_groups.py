@@ -15,6 +15,7 @@ class GenerationResourceGroupTagResponse(BaseModel):
     id: str
     key: str
     name: str
+    blur_images_by_default: bool = False
 
 
 def serialize_generation_resource_group_tag(
@@ -23,7 +24,12 @@ def serialize_generation_resource_group_tag(
     resource_group_id: str | None,
 ) -> GenerationResourceGroupTagResponse:
     if group is not None:
-        return GenerationResourceGroupTagResponse(id=group.id, key=group.key, name=group.name)
+        return GenerationResourceGroupTagResponse(
+            id=group.id,
+            key=group.key,
+            name=group.name,
+            blur_images_by_default=group.blur_images_by_default,
+        )
     resolved_id = resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID
     if resolved_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
         return GenerationResourceGroupTagResponse(

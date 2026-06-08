@@ -1,4 +1,5 @@
 import { useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { Plus } from "lucide-react";
 
 import type { PromptPreview } from "../../components/PromptPreviewDialog";
 import { getVerticalWheelMappedScrollLeft } from "./resizableLayout";
@@ -29,6 +30,11 @@ interface ImageChatHistoryPanelProps {
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onSelectRound: (assetId: string) => void;
   onSelectPlaceholder: (placeholderId: string) => void;
+  onStartNewRound?: () => void;
+  newRoundDisabled?: boolean;
+  newRoundActive?: boolean;
+  newRoundTitle?: string;
+  maskSensitiveImages: boolean;
   onPreviewPrompt: (preview: PromptPreview) => void;
   t: ImageChatTranslate;
 }
@@ -44,6 +50,11 @@ export function ImageChatHistoryPanel({
   onResizeStart,
   onSelectRound,
   onSelectPlaceholder,
+  onStartNewRound,
+  newRoundDisabled = false,
+  newRoundActive = false,
+  newRoundTitle,
+  maskSensitiveImages,
   onPreviewPrompt,
   t,
 }: ImageChatHistoryPanelProps) {
@@ -64,6 +75,24 @@ export function ImageChatHistoryPanel({
   if (variant === "mobileDrawer") {
     return (
       <div className="flex min-h-0 flex-1 flex-col bg-white dark:bg-[#0f1726]">
+        {onStartNewRound ? (
+          <div className="border-b border-slate-200 px-2 py-2 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={onStartNewRound}
+              disabled={newRoundDisabled}
+              title={newRoundTitle ?? t("chat.newRound")}
+              className={`inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors disabled:opacity-60 ${
+                newRoundActive
+                  ? "border border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-100"
+                  : "bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 hover:bg-indigo-500 dark:bg-violet-500 dark:hover:bg-violet-400"
+              }`}
+            >
+              <Plus size={14} />
+              {t("chat.newRound")}
+            </button>
+          </div>
+        ) : null}
         {historyBranches.length ? (
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-2 py-3">
             {historyBranches.map((branch) => (
@@ -74,6 +103,7 @@ export function ImageChatHistoryPanel({
                 selectedTaskPlaceholderId={selectedTaskPlaceholderId}
                 branchBaseAssetId={branchBaseAssetId}
                 variant="mobileDrawer"
+                maskSensitiveImages={maskSensitiveImages}
                 onSelectRound={onSelectRound}
                 onSelectPlaceholder={onSelectPlaceholder}
                 onPreviewPrompt={onPreviewPrompt}
@@ -116,7 +146,22 @@ export function ImageChatHistoryPanel({
           <div className="truncate rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
             {t("chat.historyMultiRoundHint")}
           </div>
-          {branchBaseSelected ? (
+          {onStartNewRound ? (
+            <button
+              type="button"
+              onClick={onStartNewRound}
+              disabled={newRoundDisabled}
+              title={newRoundTitle ?? t("chat.newRound")}
+              className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors disabled:opacity-60 ${
+                newRoundActive
+                  ? "border border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-100"
+                  : "bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 hover:bg-indigo-500 dark:bg-violet-500 dark:hover:bg-violet-400"
+              }`}
+            >
+              <Plus size={13} />
+              {t("chat.newRound")}
+            </button>
+          ) : branchBaseSelected ? (
             <div className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-100">
               {t("chat.clickHistoryBase")}
             </div>
@@ -136,6 +181,7 @@ export function ImageChatHistoryPanel({
               selectedGeneratedAssetId={selectedGeneratedAssetId}
               selectedTaskPlaceholderId={selectedTaskPlaceholderId}
               branchBaseAssetId={branchBaseAssetId}
+              maskSensitiveImages={maskSensitiveImages}
               onSelectRound={onSelectRound}
               onSelectPlaceholder={onSelectPlaceholder}
               onPreviewPrompt={onPreviewPrompt}

@@ -24,6 +24,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { SensitiveImageOverlay, sensitiveImageClassName } from "../components/SensitiveImageMask";
 import { SelectField } from "../components/SelectField";
 import {
   getResourceBlockedActionTitle,
@@ -39,6 +40,8 @@ import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import { API_INSPIRATIONS_WRITE, hasSessionApiPermission } from "../lib/rbac";
 import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
+import { useSensitiveImageMaskPreference } from "../lib/sensitiveImagePreferences";
+import { shouldMaskSensitiveImage, shouldShowSensitiveImageMaskPreference } from "../lib/sensitiveImages";
 import { useSessionState } from "../lib/session";
 import type { GenerationResourceGroup, InspirationSummary, RbacUser, SessionUser } from "../lib/types";
 import { inspirationKeyInfo, inspirationMainThumbnailUrl } from "./InspirationListPage.helpers";
@@ -229,6 +232,7 @@ export function InspirationListPage() {
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [pendingDeleteInspiration, setPendingDeleteInspiration] = useState<InspirationSummary | null>(null);
+  const [maskSensitiveImages, setMaskSensitiveImages] = useSensitiveImageMaskPreference("inspirations");
   const deferredOwnerSearch = useDeferredValue(ownerSearch.trim());
   const inspirationsQuery = useQuery({
     queryKey: ["inspirations", selectedResourceGroupId, page, PAGE_SIZE, activeSearch],
@@ -465,6 +469,7 @@ export function InspirationListPage() {
             resourceGroups={resourceGroups}
             resourceGroupsLoading={generationResourceGroupsQuery.isLoading}
             selectedResourceGroupId={selectedResourceGroupId ?? ""}
+            maskSensitiveImages={maskSensitiveImages}
             active={searchDraftActive || searchActive}
             activeCount={searchFilterCount}
             fetching={inspirationsQuery.isFetching}
@@ -476,6 +481,7 @@ export function InspirationListPage() {
               setSelectedResourceGroupId(value);
               setPage(1);
             }}
+            onMaskSensitiveImagesChange={setMaskSensitiveImages}
             onQuickRange={applyQuickRange}
             onSubmit={submitSearch}
           />
@@ -560,6 +566,7 @@ export function InspirationListPage() {
                       key={inspiration.id}
                       inspiration={inspiration}
                       className={inspirations.length === 1 ? "md:col-span-2" : undefined}
+                      maskSensitiveImages={maskSensitiveImages}
                       deletionEnabled={deletionEnabled}
                       deleteBlockedTitle={
                         canWriteInspirations ? deleteBlockedTitle : t("inspirations.writePermissionRequired")
@@ -592,6 +599,7 @@ export function InspirationListPage() {
                         <InspirationTableRow
                           key={inspiration.id}
                           inspiration={inspiration}
+                          maskSensitiveImages={maskSensitiveImages}
                           deletionEnabled={deletionEnabled}
                           deleteBlockedTitle={
                             canWriteInspirations ? deleteBlockedTitle : t("inspirations.writePermissionRequired")
@@ -671,6 +679,7 @@ export function InspirationListPage() {
 function InspirationMobileCard({
   inspiration,
   className = "",
+  maskSensitiveImages,
   deletionEnabled,
   deleteBlockedTitle = null,
   isDeleting,
@@ -679,6 +688,7 @@ function InspirationMobileCard({
 }: {
   inspiration: InspirationSummary;
   className?: string;
+  maskSensitiveImages: boolean;
   deletionEnabled: boolean;
   deleteBlockedTitle?: string | null;
   isDeleting: boolean;
@@ -841,7 +851,7 @@ function InspirationMobileCard({
         style={{ transform: `translateX(${visualOffset}px)` }}
       >
       <div className="flex min-w-0 gap-3">
-        <InspirationThumbnail inspiration={inspiration} compact />
+        <InspirationThumbnail inspiration={inspiration} compact maskSensitiveImages={maskSensitiveImages} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-start justify-between gap-2">
             <div className="min-h-11 min-w-0 flex-1 pr-1 text-left">
@@ -868,7 +878,7 @@ function InspirationMobileCard({
               </span>
             </div>
           ) : null}
-          <InspirationKeyInfoCell inspiration={inspiration} compact />
+          <InspirationKeyInfoCell inspiration={inspiration} compact maskSensitiveImages={maskSensitiveImages} />
         </div>
       </div>
       </div>
@@ -878,6 +888,7 @@ function InspirationMobileCard({
 
 function InspirationTableRow({
   inspiration,
+  maskSensitiveImages,
   deletionEnabled,
   deleteBlockedTitle = null,
   isDeleting,
@@ -885,6 +896,7 @@ function InspirationTableRow({
   onDelete,
 }: {
   inspiration: InspirationSummary;
+  maskSensitiveImages: boolean;
   deletionEnabled: boolean;
   deleteBlockedTitle?: string | null;
   isDeleting: boolean;
@@ -919,7 +931,7 @@ function InspirationTableRow({
     >
       <td className="px-5 py-4">
         <div className="flex min-w-0 items-center gap-3">
-          <InspirationThumbnail inspiration={inspiration} />
+          <InspirationThumbnail inspiration={inspiration} maskSensitiveImages={maskSensitiveImages} />
           <div className="min-w-0 flex-1">
             <div className="block max-w-full truncate text-left font-medium text-slate-950 transition-colors group-hover:text-indigo-700 dark:text-slate-100 dark:group-hover:text-violet-200" title={inspiration.name}>
               {inspiration.name}
@@ -941,7 +953,7 @@ function InspirationTableRow({
         </div>
       </td>
       <td className="px-5 py-4">
-        <InspirationKeyInfoCell inspiration={inspiration} />
+        <InspirationKeyInfoCell inspiration={inspiration} maskSensitiveImages={maskSensitiveImages} />
       </td>
       <td className="px-5 py-4">
         <StatusPill status={inspiration.workflow_state} />
@@ -995,6 +1007,7 @@ function InspirationSearchPanel({
   resourceGroups,
   resourceGroupsLoading,
   selectedResourceGroupId,
+  maskSensitiveImages,
   active,
   activeCount,
   fetching,
@@ -1004,6 +1017,7 @@ function InspirationSearchPanel({
   onMobileToggle,
   onOwnerSearchChange,
   onResourceGroupChange,
+  onMaskSensitiveImagesChange,
   onQuickRange,
   onSubmit,
 }: {
@@ -1016,6 +1030,7 @@ function InspirationSearchPanel({
   resourceGroups: GenerationResourceGroup[];
   resourceGroupsLoading: boolean;
   selectedResourceGroupId: string;
+  maskSensitiveImages: boolean;
   active: boolean;
   activeCount: number;
   fetching: boolean;
@@ -1025,6 +1040,7 @@ function InspirationSearchPanel({
   onMobileToggle: () => void;
   onOwnerSearchChange: (value: string) => void;
   onResourceGroupChange: (resourceGroupId: string) => void;
+  onMaskSensitiveImagesChange: (enabled: boolean) => void;
   onQuickRange: (rangeId: InspirationQuickRangeId) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -1037,6 +1053,10 @@ function InspirationSearchPanel({
     "dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-100 dark:focus:border-violet-400";
   const labelClassName = "text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500";
   const selectedResourceGroup = resourceGroups.find((group) => group.id === selectedResourceGroupId);
+  const showSensitiveImageMaskPreference = shouldShowSensitiveImageMaskPreference(
+    selectedResourceGroupId,
+    resourceGroups,
+  );
   const selectedOwner = users.find((user) => user.id === draft.owner_user_id);
   const selectedOwnerLabel = selectedOwner
     ? selectedOwner.display_name || selectedOwner.username
@@ -1318,6 +1338,17 @@ function InspirationSearchPanel({
               {t(INSPIRATION_QUICK_RANGE_LABEL_KEYS[rangeId])}
             </button>
           ))}
+          {showSensitiveImageMaskPreference ? (
+            <label className="inline-flex min-h-8 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 sm:ml-auto">
+              <input
+                type="checkbox"
+                checked={maskSensitiveImages}
+                onChange={(event) => onMaskSensitiveImagesChange(event.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+              />
+              <span>{t("inspirations.maskSensitiveImages")}</span>
+            </label>
+          ) : null}
         </div>
       </div>
     </form>
@@ -1370,7 +1401,16 @@ function hoverImagePreviewGeometry(anchorRect: DOMRect) {
   };
 }
 
-function HoverImagePreview({ imageUrl, anchorRect }: { imageUrl: string; anchorRect: DOMRect }) {
+function HoverImagePreview({
+  imageUrl,
+  anchorRect,
+  masked,
+}: {
+  imageUrl: string;
+  anchorRect: DOMRect;
+  masked: boolean;
+}) {
+  const { t } = useI18n();
   const geometry = hoverImagePreviewGeometry(anchorRect);
   return (
     <div
@@ -1383,7 +1423,13 @@ function HoverImagePreview({ imageUrl, anchorRect }: { imageUrl: string; anchorR
       }}
       aria-hidden="true"
     >
-      <img src={api.toApiUrl(imageUrl)} alt="" className="h-full w-full rounded-xl object-cover" decoding="async" />
+      <img
+        src={api.toApiUrl(imageUrl)}
+        alt=""
+        className={sensitiveImageClassName(masked, "h-full w-full rounded-xl object-cover")}
+        decoding="async"
+      />
+      <SensitiveImageOverlay masked={masked} label={t("common.sensitiveImageMasked")} />
     </div>
   );
 }
@@ -1394,13 +1440,16 @@ function HoverableImageFrame({
   alt,
   className,
   iconSize,
+  masked = false,
 }: {
   imageUrl: string | null;
   previewUrl?: string | null;
   alt: string;
   className: string;
   iconSize: number;
+  masked?: boolean;
 }) {
+  const { t } = useI18n();
   const [failed, setFailed] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const shouldShowImage = Boolean(imageUrl) && !failed;
@@ -1417,7 +1466,7 @@ function HoverableImageFrame({
 
   return (
     <div
-      className={className}
+      className={`${className} relative`}
       onPointerEnter={showPreview}
       onPointerLeave={hidePreview}
       onPointerCancel={hidePreview}
@@ -1426,7 +1475,7 @@ function HoverableImageFrame({
         <img
           src={api.toApiUrl(imageUrl)}
           alt={alt}
-          className="h-full w-full object-cover"
+          className={sensitiveImageClassName(masked, "h-full w-full object-cover")}
           decoding="async"
           loading="lazy"
           onError={() => {
@@ -1437,16 +1486,28 @@ function HoverableImageFrame({
       ) : (
         <ImageIcon size={iconSize} strokeWidth={1.5} />
       )}
+      {shouldShowImage ? (
+        <SensitiveImageOverlay masked={masked} label={t("common.sensitiveImageMasked")} />
+      ) : null}
       {shouldShowImage && hoverPreviewUrl && anchorRect ? (
-        <HoverImagePreview imageUrl={hoverPreviewUrl} anchorRect={anchorRect} />
+        <HoverImagePreview imageUrl={hoverPreviewUrl} anchorRect={anchorRect} masked={masked} />
       ) : null}
     </div>
   );
 }
 
-function InspirationKeyInfoCell({ inspiration, compact = false }: { inspiration: InspirationSummary; compact?: boolean }) {
+function InspirationKeyInfoCell({
+  inspiration,
+  compact = false,
+  maskSensitiveImages,
+}: {
+  inspiration: InspirationSummary;
+  compact?: boolean;
+  maskSensitiveImages: boolean;
+}) {
   const { t } = useI18n();
   const info = inspirationKeyInfo(inspiration);
+  const masked = shouldMaskSensitiveImage(maskSensitiveImages, inspiration.resource_group);
 
   if (info.kind === "image") {
     const title = info.filename ?? t("inspirations.keyInfo.startImage");
@@ -1462,6 +1523,7 @@ function InspirationKeyInfoCell({ inspiration, compact = false }: { inspiration:
           previewUrl={info.previewUrl}
           alt={t("inspirations.keyInfo.startImageAlt", { name: inspiration.name })}
           iconSize={15}
+          masked={masked}
           className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-500"
         />
         {!compact && info.filename ? (
@@ -1497,9 +1559,18 @@ function InspirationKeyInfoCell({ inspiration, compact = false }: { inspiration:
   );
 }
 
-function InspirationThumbnail({ inspiration, compact = false }: { inspiration: InspirationSummary; compact?: boolean }) {
+function InspirationThumbnail({
+  inspiration,
+  compact = false,
+  maskSensitiveImages,
+}: {
+  inspiration: InspirationSummary;
+  compact?: boolean;
+  maskSensitiveImages: boolean;
+}) {
   const thumbUrl = inspirationMainThumbnailUrl(inspiration);
   const previewUrl = inspiration.latest_generated_image_preview_url ?? inspiration.latest_generated_image_thumbnail_url;
+  const masked = shouldMaskSensitiveImage(maskSensitiveImages, inspiration.resource_group);
 
   return (
     <HoverableImageFrame
@@ -1507,6 +1578,7 @@ function InspirationThumbnail({ inspiration, compact = false }: { inspiration: I
       previewUrl={previewUrl}
       alt={inspiration.name}
       iconSize={18}
+      masked={masked}
       className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-slate-400 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-500 ${
         compact ? "h-20 w-20" : "h-16 w-16"
       }`}

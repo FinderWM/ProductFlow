@@ -10,7 +10,7 @@ from inspiration_one_backend.application.image_generation_core import (
 )
 from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.config import normalize_image_generation_size
-from inspiration_one_backend.domain.enums import ImageSessionAssetKind
+from inspiration_one_backend.domain.enums import ImageSessionAssetKind, JobStatus
 from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
 from inspiration_one_backend.infrastructure.db.models import ImageSession, ImageSessionAsset
 from inspiration_one_backend.infrastructure.image.chat_service import ImageChatTurn
@@ -161,16 +161,19 @@ def _has_prior_generation_request(
     *,
     current_generation_task_id: str | None = None,
 ) -> bool:
+    blocking_statuses = {JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.SUCCEEDED}
     if current_generation_task_id is not None:
         tasks = sorted(image_session.generation_tasks, key=lambda task: (task.created_at, task.id))
-        if tasks:
-            return tasks[0].id != current_generation_task_id
+        for index, task in enumerate(tasks):
+            if task.id != current_generation_task_id:
+                continue
+            if index == 0:
+                return False
+            return any(item.status in blocking_statuses for item in tasks[:index]) or bool(image_session.rounds)
+
     if image_session.rounds:
         return True
-    if current_generation_task_id is None:
-        return bool(image_session.generation_tasks)
-
-    tasks = sorted(image_session.generation_tasks, key=lambda task: (task.created_at, task.id))
-    if not tasks:
-        return False
-    return tasks[0].id != current_generation_task_id
+    return any(
+        task.id != current_generation_task_id and task.status in blocking_statuses
+        for task in image_session.generation_tasks
+    )

@@ -142,6 +142,28 @@ class AuthUser(Base, TimestampMixin):
         primaryjoin=lambda: child_parent_join(AuthUser.role_id, AuthRole.id),
         foreign_keys=lambda: [AuthUser.role_id],
     )
+    ui_preferences: Mapped[UserUiPreference | None] = relationship(
+        back_populates="user",
+        primaryjoin=lambda: parent_child_join(AuthUser.id, UserUiPreference.user_id),
+        foreign_keys=lambda: [UserUiPreference.user_id],
+        uselist=False,
+    )
+
+
+class UserUiPreference(Base, TimestampMixin):
+    """账号级 UI 偏好，只影响当前用户的展示方式。"""
+
+    __tablename__ = "user_ui_preferences"
+
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    mask_sensitive_images_in_inspirations: Mapped[bool] = mapped_column(Boolean, default=True)
+    mask_sensitive_images_in_image_chat: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    user: Mapped[AuthUser] = relationship(
+        back_populates="ui_preferences",
+        primaryjoin=lambda: child_parent_join(UserUiPreference.user_id, AuthUser.id),
+        foreign_keys=lambda: [UserUiPreference.user_id],
+    )
 
 
 class RbacMenu(Base):
@@ -256,6 +278,7 @@ class GenerationResourceGroup(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=100)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    blur_images_by_default: Mapped[bool] = mapped_column(Boolean, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -443,9 +466,9 @@ class GenerationConfig(Base, TimestampMixin):
         String(36),
         nullable=True,
     )
-    resource_group_id: Mapped[str] = mapped_column(
+    resource_group_id: Mapped[str | None] = mapped_column(
         String(36),
-        default=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        nullable=True,
     )
     model_settings_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -1056,6 +1079,7 @@ class ImageSession(Base, TimestampMixin):
     __tablename__ = "image_sessions"
     __table_args__ = (
         Index("ix_image_sessions_owner_user_id", "owner_user_id"),
+        Index("ix_image_sessions_resource_group_id", "resource_group_id"),
         Index("ix_image_sessions_enabled", "enabled"),
         Index("ix_image_sessions_deleted_at", "deleted_at"),
     )
@@ -1068,6 +1092,10 @@ class ImageSession(Base, TimestampMixin):
     inspiration_id: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,
+    )
+    resource_group_id: Mapped[str] = mapped_column(
+        String(36),
+        default=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     title: Mapped[str] = mapped_column(String(255))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -1099,6 +1127,10 @@ class ImageSession(Base, TimestampMixin):
         back_populates="image_sessions",
         primaryjoin=lambda: child_parent_join(ImageSession.inspiration_id, Inspiration.id),
         foreign_keys=lambda: [ImageSession.inspiration_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageSession.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [ImageSession.resource_group_id],
     )
     assets: Mapped[list[ImageSessionAsset]] = relationship(
         back_populates="session",
@@ -1177,6 +1209,7 @@ class ImageSessionRound(Base):
         Index("uq_image_session_rounds_generated_asset_id", "generated_asset_id", unique=True),
         Index("ix_image_session_rounds_generation_group_id", "generation_group_id"),
         Index("ix_image_session_rounds_base_asset_id", "base_asset_id"),
+        Index("ix_image_session_rounds_session_resource_group", "session_id", "resource_group_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -1237,6 +1270,7 @@ class ImageSessionGenerationTask(Base):
     __table_args__ = (
         Index("ix_image_session_generation_tasks_session_id", "session_id"),
         Index("ix_image_session_generation_tasks_status", "status"),
+        Index("ix_image_session_generation_tasks_session_resource_group", "session_id", "resource_group_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

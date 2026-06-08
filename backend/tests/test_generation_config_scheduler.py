@@ -38,7 +38,7 @@ def _add_mock_config(
     max_concurrency: int = 1,
     enabled: bool = True,
     failure_threshold: int = 3,
-    resource_group_id: str | None = None,
+    resource_group_id: str | None = DEFAULT_GENERATION_RESOURCE_GROUP_ID,
 ) -> GenerationConfig:
     return add_generation_config(
         session,
@@ -123,6 +123,39 @@ def test_claim_generation_config_is_scoped_by_resource_group(db_session: Session
     assert grouped_claim is not None
     assert grouped_claim.generation_config_id == grouped_config.id
     assert grouped_claim.resource_group_id == group.id
+
+
+def test_unbound_generation_config_is_not_claimed_by_group_scheduler(db_session: Session) -> None:
+    ensure_provider_config_bootstrapped(db_session)
+    unbound_config = _add_mock_config(
+        db_session,
+        purpose=IMAGE_PURPOSE,
+        name="未绑定图片",
+        priority=1000,
+        resource_group_id=None,
+    )
+    group = add_generation_resource_group(db_session, key="empty-campaign", name="空活动分组")
+
+    default_claim = claim_generation_config(db_session, purpose=IMAGE_PURPOSE)
+    grouped_claim = claim_generation_config(db_session, purpose=IMAGE_PURPOSE, resource_group_id=group.id)
+
+    assert unbound_config.resource_group_id is None
+    assert default_claim is not None
+    assert default_claim.generation_config_id != unbound_config.id
+    assert default_claim.resource_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+    assert grouped_claim is None
+
+
+def test_update_generation_config_can_clear_resource_group(db_session: Session) -> None:
+    config = _add_mock_config(db_session, purpose=TEXT_PURPOSE, name="可清除文案")
+
+    update_generation_config(db_session, config.id, name="可清除文案重命名")
+    db_session.refresh(config)
+    assert config.resource_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+
+    update_generation_config(db_session, config.id, resource_group_id=None)
+    db_session.refresh(config)
+    assert config.resource_group_id is None
 
 
 def test_claim_respects_max_concurrency(db_session: Session) -> None:

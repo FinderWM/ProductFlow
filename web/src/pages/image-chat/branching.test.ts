@@ -14,8 +14,10 @@ import {
   imageGenerationTaskSubmitPayload,
   isImageSessionGenerationTaskActive,
   isImageSessionGenerationTaskAutoRetrying,
+  isCurrentImageSessionGenerationTask,
   isImageSessionGenerationTaskRegeneratable,
   isImageSessionGenerationTaskRetryable,
+  latestImageSessionGenerationState,
   mergeImageSessionStatusIntoDetail,
   reconcileImageSessionSelection,
   requiresImageSessionGenerationBase,
@@ -188,9 +190,9 @@ describe("image chat branching helpers", () => {
     );
 
     expect(branches).toHaveLength(2);
-    expect(branches.map((branch) => [branch.id, branch.depth, branch.parent_group_id])).toEqual([
-      ["root-group", 0, null],
-      ["task:task-branch", 1, "root-group"],
+    expect(branches.map((branch) => [branch.id, branch.depth, branch.branch_index, branch.parent_group_id])).toEqual([
+      ["root-group", 0, null, null],
+      ["task:task-branch", 1, 1, "root-group"],
     ]);
     expect(branches[1].candidates).toHaveLength(4);
     expect(branches[1].candidates.map((candidate) => candidate.status)).toEqual([
@@ -198,6 +200,40 @@ describe("image chat branching helpers", () => {
       "running",
       "running",
       "running",
+    ]);
+  });
+
+  it("assigns visible branch indexes by history order instead of tree depth", () => {
+    const branches = buildImageSessionHistoryTree(
+      [
+        round({
+          id: "root-round",
+          generation_group_id: "root-group",
+          generated_asset: asset("root-asset"),
+          created_at: "2026-04-27T00:00:00Z",
+        }),
+        round({
+          id: "branch-round-1",
+          generation_group_id: "branch-group-1",
+          base_asset_id: "root-asset",
+          generated_asset: asset("branch-asset-1"),
+          created_at: "2026-04-27T00:01:00Z",
+        }),
+        round({
+          id: "branch-round-2",
+          generation_group_id: "branch-group-2",
+          base_asset_id: "root-asset",
+          generated_asset: asset("branch-asset-2"),
+          created_at: "2026-04-27T00:02:00Z",
+        }),
+      ],
+      [],
+    );
+
+    expect(branches.map((branch) => [branch.id, branch.depth, branch.branch_index])).toEqual([
+      ["root-group", 0, null],
+      ["branch-group-1", 1, 1],
+      ["branch-group-2", 1, 2],
     ]);
   });
 
@@ -279,6 +315,7 @@ describe("image chat branching helpers", () => {
     ]);
 
     expect(branches.map((branch) => branch.id)).toEqual(["task:queued-task", "task:failed-task"]);
+    expect(branches.map((branch) => branch.branch_index)).toEqual([null, 1]);
     expect(branches[0].candidates.map((candidate) => candidate.status)).toEqual(["queued", "queued"]);
     expect(branches[1].candidates.map((candidate) => candidate.status)).toEqual(["failed", "failed", "failed"]);
     expect(findImageHistoryPlaceholder(branches, "task:failed-task:candidate:3")?.failure_reason).toBe(
@@ -286,7 +323,7 @@ describe("image chat branching helpers", () => {
     );
   });
 
-  it("requires a generated base after any prior round or generation task", () => {
+  it("requires a generated base after prior results or active generation tasks", () => {
     expect(requiresImageSessionGenerationBase([], [])).toBe(false);
     expect(
       requiresImageSessionGenerationBase(
@@ -310,6 +347,17 @@ describe("image chat branching helpers", () => {
         ],
       ),
     ).toBe(true);
+    expect(
+      requiresImageSessionGenerationBase(
+        [],
+        [
+          task({
+            id: "failed-task",
+            status: "failed",
+          }),
+        ],
+      ),
+    ).toBe(false);
   });
 
   it("finds the generated round that replaces a selected task placeholder", () => {
@@ -371,7 +419,7 @@ describe("image chat branching helpers", () => {
     ).toMatchObject({
       selectedGeneratedAssetId: "branch-asset-2",
       selectedTaskPlaceholderId: null,
-      branchBaseAssetId: "branch-asset-2",
+      branchBaseAssetId: null,
     });
   });
 
@@ -397,7 +445,7 @@ describe("image chat branching helpers", () => {
     ).toMatchObject({
       selectedGeneratedAssetId: "asset-2",
       selectedTaskPlaceholderId: null,
-      branchBaseAssetId: "asset-2",
+      branchBaseAssetId: null,
     });
   });
 
@@ -437,7 +485,7 @@ describe("image chat branching helpers", () => {
     ).toMatchObject({
       selectedGeneratedAssetId: "asset-1",
       selectedTaskPlaceholderId: null,
-      branchBaseAssetId: "asset-1",
+      branchBaseAssetId: null,
       pendingGeneratedRoundCount: null,
       generatedRoundCompleted: true,
     });
@@ -595,37 +643,115 @@ describe("image chat branching helpers", () => {
 
   it("detects failed tasks that can be manually retried", () => {
     expect(isImageSessionGenerationTaskRetryable(task({ status: "failed", is_retryable: true }))).toBe(true);
-    expect(isImageSessionGenerationTaskRetryable(task({ status: "failed", is_retryable: false }))).toBe(false);
+    expect(isImageSessionGenerationTaskRetryable(task({ status: "failed", is_retryable: false }))).toBe(true);
     expect(isImageSessionGenerationTaskRetryable(task({ status: "queued", is_retryable: true }))).toBe(false);
   });
 
-  it("builds a new generation payload from a cancelled task", () => {
-    const cancelledTask = task({
-      status: "cancelled",
+  it("builds a generation form payload from a failed task with all original config", () => {
+    const failedTask = task({
+      status: "failed",
       prompt: "same prompt",
       size: "1536x1024",
       base_asset_id: "base-1",
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 3,
       tool_options: { model: "image-model", quality: "high" },
-      resource_group_id: "group-cancelled",
-      resource_group: { id: "group-cancelled", key: "cancelled", name: "Cancelled group" },
+      resource_group_id: "group-failed",
+      resource_group: { id: "group-failed", key: "failed", name: "Failed group" },
       generation_config_mode: "manual",
       requested_generation_config_id: "config-1",
     });
 
-    expect(isImageSessionGenerationTaskRegeneratable(cancelledTask)).toBe(true);
-    expect(isImageSessionGenerationTaskRegeneratable(task({ status: "failed" }))).toBe(false);
-    expect(imageGenerationTaskSubmitPayload(cancelledTask)).toEqual({
+    expect(isImageSessionGenerationTaskRetryable(failedTask)).toBe(true);
+    expect(imageGenerationTaskSubmitPayload(failedTask)).toEqual({
       prompt: "same prompt",
       size: "1536x1024",
       base_asset_id: "base-1",
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 3,
       tool_options: { model: "image-model", quality: "high" },
-      resource_group_id: "group-cancelled",
+      resource_group_id: "group-failed",
       generation_config_mode: "manual",
       generation_config_id: "config-1",
+    });
+  });
+
+  it("does not allow cancelled or failed tasks through the direct regenerate path", () => {
+    expect(isImageSessionGenerationTaskRegeneratable(task({ status: "cancelled" }))).toBe(false);
+    expect(isImageSessionGenerationTaskRegeneratable(task({ status: "failed" }))).toBe(false);
+  });
+
+  it("detects the latest generation state so only the current round is actionable", () => {
+    const firstRound = round({
+      id: "first-round",
+      generated_asset: asset("first-asset"),
+      created_at: "2026-04-27T00:01:00Z",
+    });
+    const failedAfterFirstRound = task({
+      id: "latest-failed",
+      status: "failed",
+      created_at: "2026-04-27T00:02:00Z",
+    });
+
+    expect(latestImageSessionGenerationState([firstRound], [failedAfterFirstRound])).toMatchObject({
+      status: "failed",
+      task: { id: "latest-failed" },
+      round: null,
+    });
+    expect(isCurrentImageSessionGenerationTask(failedAfterFirstRound, [firstRound], [failedAfterFirstRound])).toBe(true);
+    expect(
+      isCurrentImageSessionGenerationTask(
+        task({ id: "older-failed", status: "failed", created_at: "2026-04-27T00:00:30Z" }),
+        [firstRound],
+        [failedAfterFirstRound],
+      ),
+    ).toBe(false);
+  });
+
+  it("treats a newer successful round as the latest state for starting a new round", () => {
+    const olderFailedTask = task({
+      id: "older-failed",
+      status: "failed",
+      created_at: "2026-04-27T00:01:00Z",
+    });
+    const latestRound = round({
+      id: "latest-round",
+      generated_asset: asset("latest-asset"),
+      created_at: "2026-04-27T00:02:00Z",
+    });
+
+    expect(latestImageSessionGenerationState([latestRound], [olderFailedTask])).toMatchObject({
+      status: "succeeded",
+      round: { id: "latest-round" },
+      task: null,
+    });
+    expect(isCurrentImageSessionGenerationTask(olderFailedTask, [latestRound], [olderFailedTask])).toBe(false);
+  });
+
+  it("uses terminal task time when a multi-candidate generation fails after partial success", () => {
+    const partialRound = round({
+      id: "partial-round",
+      generated_asset: asset("partial-asset"),
+      generation_group_id: "group-1",
+      candidate_index: 1,
+      candidate_count: 2,
+      created_at: "2026-04-27T00:02:00Z",
+    });
+    const failedTask = task({
+      id: "failed-after-partial",
+      status: "failed",
+      result_generation_group_id: "group-1",
+      generation_count: 2,
+      completed_candidates: 1,
+      failure_reason: "second candidate failed",
+      created_at: "2026-04-27T00:01:00Z",
+      finished_at: "2026-04-27T00:03:00Z",
+    });
+
+    expect(latestImageSessionGenerationState([partialRound], [failedTask])).toMatchObject({
+      status: "failed",
+      task: { id: "failed-after-partial" },
+      round: null,
     });
   });
 
@@ -761,6 +887,9 @@ describe("image chat branching helpers", () => {
       }),
     );
     expect(signature).not.toBe(buildImageGenerationSubmitSignature({ ...payload, resource_group_id: "other-group" }));
+    expect(signature).not.toBe(
+      buildImageGenerationSubmitSignature({ ...payload, retry_generation_task_id: "failed-task-1" }),
+    );
   });
 
   it("blocks identical duplicate submits only inside the short guard window", () => {

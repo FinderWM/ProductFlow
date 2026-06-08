@@ -11,7 +11,7 @@ ProductFlow uses four state categories:
 1. Server state: TanStack Query in pages and `AppRoutes()`.
 2. Local UI/form state: React `useState`, `useMemo`, and `useEffect` inside page components.
 3. URL state: React Router params and navigation.
-4. Durable local UI preferences: locale and theme mode in `PreferencesProvider`.
+4. Durable local UI preferences: locale/theme mode plus documented local-only visual preferences.
 
 There is no Redux, Zustand, Jotai, custom event bus, or durable browser-local onboarding state.
 
@@ -73,7 +73,8 @@ Do not introduce a global store just to track current page or inspiration ID; us
 
 ## Durable UI Preferences
 
-Locale and theme are the only durable browser-local UI preferences currently supported:
+The durable browser-local UI preferences currently supported are locale/theme. Sensitive-image mask toggles are account
+server state:
 
 - Provider: `PreferencesProvider` in `web/src/lib/preferences.tsx`, mounted once in `App.tsx` inside `BrowserRouter`.
 - Locale storage key: `productflow.locale`; default locale is `zh-CN`.
@@ -83,9 +84,22 @@ Locale and theme are the only durable browser-local UI preferences currently sup
   `data-theme` / `data-theme-preference` attributes.
 - Use `useI18n()` or `usePreferences()` in components that need locale/theme values; do not create page-local duplicate
   locale/theme state.
+- Sensitive-image mask provider: `useSensitiveImageMaskPreference(scope)` in
+  `web/src/lib/sensitiveImagePreferences.ts`, backed by TanStack Query key `['user-ui-preferences']`.
+- Sensitive-image mask scopes are exactly `"inspirations"` and `"image-chat"`.
+- Sensitive-image mask fields are `mask_sensitive_images_in_inspirations` and
+  `mask_sensitive_images_in_image_chat` on `UserUiPreferences`.
+- Sensitive-image mask default is `true`; missing account preferences should resolve to `true` until the server row is
+  loaded or created.
+- Sensitive-image mask state is a personal visual preference. It gates rendering only when a row's
+  `resource_group.blur_images_by_default` is true; it does not change server filters, permissions, downloads, gallery
+  behavior, or generated data.
+- Sensitive-image mask preference controls should render only when the current list filter is all groups (`""`) or the
+  selected concrete group has `blur_images_by_default=true`. Hide the control for non-sensitive concrete group filters
+  without changing the saved account preference.
 
-Locale and theme are not server records. Do not store them in TanStack Query, add backend settings for them, or persist
-them with auth/session state unless a future inspiration requirement explicitly changes that boundary.
+Sensitive-image mask toggles are not browser-local preferences. Do not store them in `localStorage`; use
+`GET/PATCH /api/settings/ui-preferences` and update the TanStack Query cache.
 
 Good:
 
@@ -143,4 +157,5 @@ Keep error display local unless multiple pages need a shared notification system
 - Hiding route state in local storage or globals instead of using React Router params.
 - Storing API keys or admin keys in frontend local storage. Authentication is session-cookie based.
 - Reintroducing durable browser-local onboarding, tour, help, or tutorial state without a new approved inspiration requirement.
-- Adding new durable local preferences outside `PreferencesProvider` without updating this spec and focused helper tests.
+- Adding new durable local preferences outside `PreferencesProvider` or a focused preference helper without updating this
+  spec and focused helper tests.

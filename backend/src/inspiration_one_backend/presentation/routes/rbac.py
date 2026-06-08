@@ -74,12 +74,13 @@ def list_permission_catalog_endpoint(session: Session = Depends(get_session)) ->
 @router.get("/users", response_model=RbacUserListResponse)
 def list_users_endpoint(
     username: str | None = Query(default=None, max_length=80),
+    query: str | None = Query(default=None, max_length=120),
     role_id: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     session: Session = Depends(get_session),
 ) -> RbacUserListResponse:
-    users, total = list_users(session, page=page, page_size=page_size, username=username, role_id=role_id)
+    users, total = list_users(session, page=page, page_size=page_size, username=username, query=query, role_id=role_id)
     resource_groups_by_user = _resource_groups_by_user(session, users)
     return RbacUserListResponse(
         items=[serialize_user(user, resource_groups=resource_groups_by_user.get(user.id, [])) for user in users],

@@ -48,6 +48,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     ProviderBinding,
     ProviderProfile,
     UserGenerationResourceGroupGrant,
+    UserUiPreference,
 )
 from inspiration_one_backend.infrastructure.db.models import (
     CanvasTemplate as DbCanvasTemplate,
@@ -136,6 +137,8 @@ from inspiration_one_backend.presentation.schemas.settings import (
     SettingsProviderProfileExport,
     TextGenerationConfigTestRequest,
     TextGenerationConfigTestResponse,
+    UserUiPreferencesResponse,
+    UserUiPreferencesUpdateRequest,
 )
 
 router = APIRouter(
@@ -282,9 +285,33 @@ def _serialize_generation_resource_group(group: GenerationResourceGroup) -> Gene
         description=group.description,
         sort_order=group.sort_order,
         enabled=group.enabled,
+        blur_images_by_default=group.blur_images_by_default,
         archived_at=_serialize_dt(group.archived_at),
         created_at=group.created_at.isoformat(),
         updated_at=group.updated_at.isoformat(),
+    )
+
+
+def _get_or_create_user_ui_preferences(session: Session, user_id: str, *, commit: bool) -> UserUiPreference:
+    preferences = session.get(UserUiPreference, user_id)
+    if preferences is not None:
+        return preferences
+
+    preferences = UserUiPreference(user_id=user_id)
+    session.add(preferences)
+    if commit:
+        session.commit()
+        session.refresh(preferences)
+    return preferences
+
+
+def _serialize_user_ui_preferences(preferences: UserUiPreference) -> UserUiPreferencesResponse:
+    return UserUiPreferencesResponse(
+        user_id=preferences.user_id,
+        mask_sensitive_images_in_inspirations=preferences.mask_sensitive_images_in_inspirations,
+        mask_sensitive_images_in_image_chat=preferences.mask_sensitive_images_in_image_chat,
+        created_at=preferences.created_at.isoformat(),
+        updated_at=preferences.updated_at.isoformat(),
     )
 
 
@@ -592,6 +619,7 @@ def _settings_generation_resource_group_export(group: GenerationResourceGroup) -
         description=group.description,
         sort_order=group.sort_order,
         enabled=group.enabled,
+        blur_images_by_default=group.blur_images_by_default,
     )
 
 
@@ -738,6 +766,7 @@ def _normalize_import_generation_resource_groups(document: SettingsExportDocumen
             description="default 供应商生成能力分组",
             sort_order=0,
             enabled=True,
+            blur_images_by_default=False,
         )
     ]
     for group in source_groups:
@@ -762,6 +791,7 @@ def _normalize_import_generation_resource_groups(document: SettingsExportDocumen
                 "description": _normalize_optional_text(group.description),
                 "sort_order": group.sort_order,
                 "enabled": group.enabled,
+                "blur_images_by_default": group.blur_images_by_default,
             }
         )
     if DEFAULT_GENERATION_RESOURCE_GROUP_ID not in seen_ids and DEFAULT_GENERATION_RESOURCE_GROUP_KEY not in seen_keys:
@@ -774,6 +804,7 @@ def _normalize_import_generation_resource_groups(document: SettingsExportDocumen
                 "description": "default 供应商生成能力分组",
                 "sort_order": 0,
                 "enabled": True,
+                "blur_images_by_default": False,
             },
         )
     return groups
@@ -924,8 +955,11 @@ def _normalize_import_generation_configs(
             model_settings=item.model_settings,
         )
         provider_profile_id = item.provider_profile_id
-        resource_group_id = item.resource_group_id or fallback_resource_group_id
-        if resource_group_id not in resource_group_ids:
+        if "resource_group_id" in item.model_fields_set:
+            resource_group_id = item.resource_group_id.strip() if item.resource_group_id else None
+        else:
+            resource_group_id = fallback_resource_group_id
+        if resource_group_id is not None and resource_group_id not in resource_group_ids:
             raise ValueError("生成配置引用的分组不存在")
         if item.provider_kind == "mock":
             provider_profile_id = None
@@ -1246,6 +1280,7 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
                     description=group["description"],
                     sort_order=group["sort_order"],
                     enabled=group["enabled"],
+                    blur_images_by_default=group["blur_images_by_default"],
                 )
             )
         session.flush()
@@ -1355,6 +1390,39 @@ def list_generation_config_options_endpoint(
 
 
 @router.get(
+    "/ui-preferences",
+    response_model=UserUiPreferencesResponse,
+    dependencies=[READ_GENERATION_RUNTIME_PERMISSION],
+)
+def get_user_ui_preferences_endpoint(
+    current_user: AuthUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> UserUiPreferencesResponse:
+    preferences = _get_or_create_user_ui_preferences(session, current_user.id, commit=True)
+    return _serialize_user_ui_preferences(preferences)
+
+
+@router.patch(
+    "/ui-preferences",
+    response_model=UserUiPreferencesResponse,
+    dependencies=[READ_GENERATION_RUNTIME_PERMISSION],
+)
+def update_user_ui_preferences_endpoint(
+    payload: UserUiPreferencesUpdateRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> UserUiPreferencesResponse:
+    preferences = _get_or_create_user_ui_preferences(session, current_user.id, commit=False)
+    if payload.mask_sensitive_images_in_inspirations is not None:
+        preferences.mask_sensitive_images_in_inspirations = payload.mask_sensitive_images_in_inspirations
+    if payload.mask_sensitive_images_in_image_chat is not None:
+        preferences.mask_sensitive_images_in_image_chat = payload.mask_sensitive_images_in_image_chat
+    session.commit()
+    session.refresh(preferences)
+    return _serialize_user_ui_preferences(preferences)
+
+
+@router.get(
     "/generation-resource-groups",
     response_model=list[GenerationResourceGroupResponse],
     dependencies=[READ_SETTINGS_PERMISSION],
@@ -1384,6 +1452,7 @@ def create_generation_resource_group_endpoint(
             description=payload.description,
             sort_order=payload.sort_order,
             enabled=payload.enabled,
+            blur_images_by_default=payload.blur_images_by_default,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1411,6 +1480,7 @@ def update_generation_resource_group_endpoint(
             description=payload.description if "description" in fields_set else UNSET_PROVIDER_FIELD,
             sort_order=payload.sort_order,
             enabled=payload.enabled,
+            blur_images_by_default=payload.blur_images_by_default,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1585,7 +1655,7 @@ def update_generation_config_endpoint(
         generation_config = update_generation_config(
             session,
             generation_config_id,
-            resource_group_id=payload.resource_group_id if "resource_group_id" in fields_set else None,
+            resource_group_id=payload.resource_group_id if "resource_group_id" in fields_set else UNSET_PROVIDER_FIELD,
             name=payload.name,
             purpose=payload.purpose,
             provider_kind=payload.provider_kind,

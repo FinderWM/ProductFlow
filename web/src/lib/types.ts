@@ -27,6 +27,16 @@ export type WorkflowRetryHint = "retry_later" | "revise_input" | "check_settings
 export type CanvasTemplateKind = "full_canvas" | "node_group";
 export type CanvasTemplateScope = "global" | "user";
 export type CanvasTemplateReviewStatus = "none" | "pending" | "approved" | "rejected";
+export type CurrentWeatherCondition =
+  | "clear"
+  | "partly_cloudy"
+  | "cloudy"
+  | "fog"
+  | "drizzle"
+  | "rain"
+  | "snow"
+  | "thunderstorm";
+export type WeatherSourceId = "open_meteo";
 export type CanvasTemplateScenario =
   | "main_image"
   | "taobao_main_image"
@@ -82,6 +92,30 @@ export interface SessionMenu {
   code: string;
   title: string;
   sort_order: number;
+}
+
+export interface WeatherCoordinates {
+  latitude: number;
+  longitude: number;
+}
+
+export interface WeatherLocation extends WeatherCoordinates {
+  id?: number | null;
+  name: string;
+  country?: string | null;
+  admin1?: string | null;
+  timezone?: string | null;
+}
+
+export interface CurrentWeather {
+  weather_code: number;
+  condition: CurrentWeatherCondition;
+  temperature_celsius: number | null;
+  humidity_percent?: number | null;
+  pressure_hpa?: number | null;
+  is_day: boolean;
+  observed_at?: string | null;
+  timezone?: string | null;
 }
 
 export interface RbacUser {
@@ -176,6 +210,7 @@ export interface GenerationResourceGroup {
   description?: string | null;
   sort_order: number;
   enabled: boolean;
+  blur_images_by_default: boolean;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -185,6 +220,7 @@ export interface GenerationResourceGroupTag {
   id: string;
   key: string;
   name: string;
+  blur_images_by_default?: boolean;
 }
 
 export interface GenerationResourceGroupCreateRequest {
@@ -193,6 +229,7 @@ export interface GenerationResourceGroupCreateRequest {
   description?: string | null;
   sort_order?: number;
   enabled?: boolean;
+  blur_images_by_default?: boolean;
 }
 
 export interface GenerationResourceGroupUpdateRequest {
@@ -201,6 +238,7 @@ export interface GenerationResourceGroupUpdateRequest {
   description?: string | null;
   sort_order?: number | null;
   enabled?: boolean | null;
+  blur_images_by_default?: boolean | null;
 }
 
 export interface CreativeBriefSummary {
@@ -850,6 +888,8 @@ export interface ImageSessionSummary extends ModerationFields {
   inspiration_id: string | null;
   title: string;
   rounds_count: number;
+  latest_resource_group_id?: string | null;
+  latest_resource_group?: GenerationResourceGroupTag | null;
   latest_generated_asset: ImageSessionAsset | null;
   created_at: string;
   updated_at: string;
@@ -975,6 +1015,19 @@ export interface ConfigUpdateRequest {
   reset_keys?: string[];
 }
 
+export interface UserUiPreferences {
+  user_id: string;
+  mask_sensitive_images_in_inspirations: boolean;
+  mask_sensitive_images_in_image_chat: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserUiPreferencesUpdateRequest {
+  mask_sensitive_images_in_inspirations?: boolean | null;
+  mask_sensitive_images_in_image_chat?: boolean | null;
+}
+
 export type ProviderCapability = "text_responses" | "image_responses" | "image_images" | "image_google_gemini";
 export type ProviderPurpose = "text" | "image";
 export type ProviderType = "openai_compatible" | "google_gemini";
@@ -1075,7 +1128,7 @@ export interface GenerationConfigStatAggregate {
 
 export interface GenerationConfig {
   id: string;
-  resource_group_id: string;
+  resource_group_id: string | null;
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1097,7 +1150,7 @@ export interface GenerationConfig {
 
 export interface GenerationConfigOption {
   id: string;
-  resource_group_id: string;
+  resource_group_id: string | null;
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1108,7 +1161,7 @@ export interface GenerationConfigOption {
 
 export interface GenerationConfigStatusConfig {
   id: string;
-  resource_group_id: string;
+  resource_group_id: string | null;
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1326,6 +1379,7 @@ export interface SettingsExportGenerationResourceGroup {
   description?: string | null;
   sort_order: number;
   enabled: boolean;
+  blur_images_by_default: boolean;
 }
 
 export interface SettingsExportCanvasTemplateCategory {

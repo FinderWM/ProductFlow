@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
+import { ZoomableImage } from "../../components/ZoomableImage";
 import { IMAGE_PREVIEW_SURFACE_CLASS_NAME } from "./constants";
 import { DownloadLink } from "./ImageDownloadComponents";
 
@@ -42,13 +43,14 @@ export function ImagePreviewModal({ image, onClose }: ImagePreviewModalProps) {
             </button>
           </div>
         </div>
-        <div className={`flex min-h-0 flex-1 items-center justify-center p-4 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}>
-          <img
-            src={image.previewUrl}
-            alt={image.alt}
-            className="max-h-[calc(100vh-11rem)] max-w-full object-contain"
-          />
-        </div>
+        <ZoomableImage
+          src={image.previewUrl}
+          alt={image.alt}
+          zoomOutLabel={t("imagePreview.zoomOut")}
+          zoomInLabel={t("imagePreview.zoomIn")}
+          resetLabel={t("imagePreview.reset")}
+          className={`h-[calc(100vh-11rem)] p-4 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
+        />
       </div>
     </div>
   );

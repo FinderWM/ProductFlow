@@ -570,8 +570,11 @@ def run_generation_task(task_id: str) -> None:
 
 - API: `POST /api/image-sessions/{image_session_id}/generate` returns `202 Accepted` after validation, durable task
   creation, and enqueue; it must not wait for an image provider call.
+- Request DTO: `GenerateImageSessionRoundRequest.retry_generation_task_id: str | None` means the user restored the
+  current latest failed generation task, reviewed/edited its configuration, and is resubmitting into that same durable
+  task/round.
 - API: `POST /api/image-sessions/{image_session_id}/generation-tasks/{task_id}/retry` returns `202 Accepted` after
-  resetting a failed retryable task to `queued` and enqueueing the same durable task ID.
+  resetting a failed task to `queued` and enqueueing the same durable task ID.
 - API: `POST /api/image-sessions/{image_session_id}/generation-tasks/{task_id}/cancel` returns
   `ImageSessionDetailResponse` after durably marking an active task `cancelled`.
 - DB: `image_session_generation_tasks` stores `session_id`, `prompt`, `size`, `base_asset_id`,
@@ -587,8 +590,9 @@ def run_generation_task(task_id: str) -> None:
   candidates may be reset to queued; stale partial-success tasks are marked failed without retry.
 - Response DTO: `ImageSessionDetailResponse.generation_tasks` exposes task summaries so route entry/refresh can show
   active or failed generation work without a separate orchestration endpoint.
-- Each generation task summary exposes `attempts`, `is_retryable`, and `is_cancelable` so the frontend can decide whether
-  to render manual retry/cancel affordances.
+- Each generation task summary exposes `attempts`, `is_retryable`, and `is_cancelable`. For image-session generation
+  tasks, terminal `failed` status is sufficient for the manual retry affordance; failure classification controls automatic
+  retry only and must not force users to rebuild prompts, references, size, group, or tool parameters.
 - Each generation task summary includes global queue fields: `queue_active_count`, `queue_running_count`,
   `queue_queued_count`, `queue_max_concurrent_tasks`, `queued_ahead_count`, and `queue_position`.
 - Queue overview API: `GET /api/generation-queue` returns `active_count`, `running_count`, `queued_count`, and
@@ -605,6 +609,17 @@ def run_generation_task(task_id: str) -> None:
   have no queue position and should be displayed as front-of-queue work.
 - New image-session generation work must create a queued task even when all running slots are occupied. The worker claim
   count must be based on running DB rows, not an in-process slot, because API/worker processes may be replicated.
+- When `POST /generate` receives `retry_generation_task_id`, it must update and reset that same failed
+  `ImageSessionGenerationTask` row instead of creating another task. The submitted prompt, size, base image, selected
+  references, generation count, tool options, resource group, and generation-config fields overwrite the saved task
+  request fields before enqueue.
+- When `POST /generate` does not receive `retry_generation_task_id`, it creates a new durable task. If the session has no
+  successful rounds and only terminal failed/cancelled tasks, the request may omit `base_asset_id`; active queued/running
+  tasks and succeeded tasks without materialized rounds still block no-base submission.
+- `retry_generation_task_id` is valid only for the latest failed generation event in the session. Latest successful
+  rounds, active tasks, cancelled tasks, and historical failed tasks must not be restored through this operation.
+- A restored retry must preserve `result_generation_group_id` when present. If the failed task has no group yet, assign
+  one before enqueue so all results produced by the resubmission land in one durable round group.
 - Queue enqueue failure after task creation must mark the task `failed` (or otherwise return a stable `503`) before the
   route responds; do not strand a queued row that no worker can consume.
 - Worker claim must be atomic at the database boundary: update `queued -> running` with a status condition and no-op when
@@ -614,7 +629,7 @@ def run_generation_task(task_id: str) -> None:
   without creating new rounds when cancellation is observed.
 - Worker failures must retry through application state, not Dramatiq actor retries. Keep
   `run_image_session_generation_task(max_retries=0)`, increment `attempts` on each worker claim, reset the same task to
-  `queued` while the finite cap has not been reached, and leave terminal failed tasks `is_retryable=true`.
+  `queued` while the finite cap has not been reached, and leave terminal failed tasks manually retryable.
 - On success, create normal `image_session_assets` and `image_session_rounds` rows. Multi-candidate generations still use
   one `generation_group_id` with one round/asset per candidate.
 - Retrying a partial-success generation task must preserve `completed_candidates` and `result_generation_group_id`, then
@@ -635,7 +650,17 @@ def run_generation_task(task_id: str) -> None:
 - Redis/Dramatiq send failure after DB task creation -> mark task `failed`, then return `503`,
   `任务队列暂不可用，请稍后重试`.
 - Manual retry for a non-`failed` task -> `400`, `只有失败的生成任务可以重试`.
-- Manual retry for `failed` task with `is_retryable=false` -> `400`, `该生成任务不可重试`.
+- Manual retry for a historical `failed` task -> `400`, `只能恢复最后一次失败的生成任务`.
+- Manual retry for the latest `failed` task -> reset the same task row to `queued`, clear `failure_reason`, keep saved
+  request parameters, and enqueue the same task ID even if the previous failure was not auto-retryable.
+- `POST /generate` with `retry_generation_task_id` for the latest `failed` task -> update the same task row from the
+  request payload, clear `failure_reason`, preserve/set `result_generation_group_id`, and enqueue the same task ID.
+- `POST /generate` with `retry_generation_task_id` for a historical failed task, successful latest round, active task, or
+  cancelled task -> `400`; do not create a new task as a fallback.
+- `POST /generate` without `retry_generation_task_id` after a failed first round and no successful rounds -> accept a new
+  queued task with `base_asset_id = null`.
+- `POST /generate` without `retry_generation_task_id` while a no-base first task is still queued/running -> `400`,
+  `后续生图必须选择一张本会话已生成图片作为基图`.
 - Manual cancel for an active task -> task becomes `cancelled`, exits the active queue, and duplicate worker delivery
   no-ops.
 - Manual cancel for a terminal succeeded/failed task -> `400`, `已结束的生成任务不能取消`.
@@ -654,8 +679,16 @@ def run_generation_task(task_id: str) -> None:
   assets and 3 rounds sharing one `generation_group_id`, then marks the task `succeeded`.
 - Good: browser refreshes during generation; `ImageSessionDetail.generation_tasks` still contains queued/running task
   state, so the frontend resumes polling and disables duplicate submission.
+- Good: user restores the latest failed task, edits the prompt, and confirms; `/generate` returns the same task id as
+  `queued`, and later worker output uses that task's `result_generation_group_id`.
+- Good: user abandons a failed first round and clicks new round; `/generate` creates a second task without a base image
+  instead of mutating the failed task.
 - Base: worker receives the same task ID after the task already succeeded; it exits without calling the provider.
 - Bad: route calls `generate_image_session_round(...)` or an image provider directly and holds the HTTP request open.
+- Bad: restored failed-task submission creates a fresh `ImageSessionGenerationTask`, because generated data then appears
+  as a new round instead of completing the failed one.
+- Bad: historical failed tasks are retry-actionable after a newer success/failure exists; this reopens locked history and
+  can mix results into stale branches.
 - Bad: active generation cap checks a process-local counter or lock; replicated API processes can exceed the public demo
   cap.
 - Bad: worker claim reads a queued task, mutates the ORM object, and commits without a conditional `WHERE status='queued'`;
@@ -671,8 +704,15 @@ def run_generation_task(task_id: str) -> None:
 - Worker failure test: provider exception marks the task failed with a generic reason and does not leak the raw exception.
 - Auto retry cap test: repeated provider failure calls the provider only up to the finite application cap, then leaves the
   task failed + retryable with `attempts` exposed in detail/status responses.
-- Manual retry route tests: failed retryable task resets to queued and enqueues; non-failed retry returns `400`; enqueue
-  failure returns `503` and keeps the task retryable.
+- Manual retry route tests: any failed task resets to queued and enqueues, including tasks previously marked
+  non-auto-retryable; historical failed retry returns `400`; non-failed retry returns `400`; enqueue failure returns
+  `503` and keeps the task retryable.
+- Restored submit test: `POST /generate` with `retry_generation_task_id` updates the same failed task's request fields,
+  preserves/sets `result_generation_group_id`, does not insert another task, and enqueues the same task ID.
+- Restored submit rejection test: historical failed task id returns `400` and does not enqueue or create a new task.
+- Failed-first-round new submit test: after the first no-base task is marked failed, another no-base `/generate` without
+  `retry_generation_task_id` creates a new queued task; the same request while the first task is active still returns
+  `400`.
 - Manual cancel route tests: active task becomes `cancelled`, terminal task cancellation is rejected, and duplicate worker
   delivery no-ops for cancelled tasks.
 - Partial retry test: a task that saved candidate 1/2 and failed resumes at candidate 2 without duplicating candidate 1 or
@@ -728,6 +768,26 @@ updated = session.execute(
 if updated.rowcount != 1:
     return
 call_provider()
+```
+
+Wrong:
+
+```python
+# Restoring a failed round must not create a second durable task.
+result = create_image_session_generation_task(session, image_session_id=session_id, prompt=request.prompt, ...)
+```
+
+Correct:
+
+```python
+result = _reset_latest_failed_image_session_generation_task_from_submit(
+    session,
+    image_session_id=session_id,
+    retry_generation_task_id=request.retry_generation_task_id,
+    prompt=request.prompt,
+    ...,
+)
+enqueue_or_mark_failed(result.task.id, enqueue=enqueue_image_session_generation_task, mark_failed=mark_failed)
 ```
 
 Wrong:

@@ -3,7 +3,10 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { Loader2 } from "lucide-react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
+import { GlobalBrandMark } from "./components/TopNav";
 import { api } from "./lib/api";
+import { CurrentWeatherProvider } from "./lib/currentWeather";
+import { NotificationProvider } from "./lib/notifications";
 import { PreferencesProvider, useI18n } from "./lib/preferences";
 import {
   API_GALLERY_READ,
@@ -18,6 +21,7 @@ import {
   hasSessionMenuApiPermission,
 } from "./lib/rbac";
 import { SessionStateProvider } from "./lib/session";
+import { TaskNotificationBridge } from "./lib/taskNotifications";
 import type { SessionState } from "./lib/types";
 
 const GalleryPage = lazy(() =>
@@ -145,37 +149,41 @@ function AppRoutes() {
 
   return (
     <SessionStateProvider value={sessionState}>
-      <Suspense fallback={<LoadingScreen />}>
-        <Routes>
-          <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
-          <Route path="/inspirations" element={menuRoute("inspirations", <InspirationListPage />)} />
-          <Route
-            path="/inspirations/new"
-            element={permissionRoute("inspirations", API_INSPIRATIONS_WRITE, <InspirationCreatePage />)}
-          />
-          <Route path="/workflow/templates" element={menuRoute("inspirations", <TemplateManagementPage mode="personal" />)} />
-          <Route path="/image-chat" element={menuRoute("image_chat", <ImageChatPage />)} />
-          <Route path="/gallery" element={menuRoute("gallery", <GalleryPage />)} />
-          <Route path="/help" element={authenticatedRoute(<HelpPage />)} />
-          <Route path="/settings" element={menuRoute("settings", <SettingsPage />)} />
-          <Route
-            path="/settings/global-templates"
-            element={permissionRoute("settings", API_GLOBAL_TEMPLATES_MANAGE, <TemplateManagementPage mode="global" />)}
-          />
-          <Route path="/rbac" element={menuRoute("rbac", <RbacPage />)} />
-          <Route path="/status" element={menuRoute("status", <StatusPage />)} />
-          <Route path="/usage-stats" element={menuRoute("usage_stats", <UsageStatsPage />)} />
-          <Route
-            path="/inspirations/:inspirationId/image-chat"
-            element={menuRoute("image_chat", <ImageChatPage />)}
-          />
-          <Route
-            path="/inspirations/:inspirationId"
-            element={menuRoute("inspirations", <InspirationDetailPage />)}
-          />
-          <Route path="*" element={<Navigate to={authenticated ? defaultAuthenticatedPath : "/login"} replace />} />
-        </Routes>
-      </Suspense>
+      <CurrentWeatherProvider enabled={authenticated}>
+        {authenticated ? <GlobalBrandMark to={defaultAuthenticatedPath} /> : null}
+        <TaskNotificationBridge enabled={authenticated} />
+        <Suspense fallback={<LoadingScreen />}>
+          <Routes>
+            <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
+            <Route path="/inspirations" element={menuRoute("inspirations", <InspirationListPage />)} />
+            <Route
+              path="/inspirations/new"
+              element={permissionRoute("inspirations", API_INSPIRATIONS_WRITE, <InspirationCreatePage />)}
+            />
+            <Route path="/workflow/templates" element={menuRoute("inspirations", <TemplateManagementPage mode="personal" />)} />
+            <Route path="/image-chat" element={menuRoute("image_chat", <ImageChatPage />)} />
+            <Route path="/gallery" element={menuRoute("gallery", <GalleryPage />)} />
+            <Route path="/help" element={authenticatedRoute(<HelpPage />)} />
+            <Route path="/settings" element={menuRoute("settings", <SettingsPage />)} />
+            <Route
+              path="/settings/global-templates"
+              element={permissionRoute("settings", API_GLOBAL_TEMPLATES_MANAGE, <TemplateManagementPage mode="global" />)}
+            />
+            <Route path="/rbac" element={menuRoute("rbac", <RbacPage />)} />
+            <Route path="/status" element={menuRoute("status", <StatusPage />)} />
+            <Route path="/usage-stats" element={menuRoute("usage_stats", <UsageStatsPage />)} />
+            <Route
+              path="/inspirations/:inspirationId/image-chat"
+              element={menuRoute("image_chat", <ImageChatPage />)}
+            />
+            <Route
+              path="/inspirations/:inspirationId"
+              element={menuRoute("inspirations", <InspirationDetailPage />)}
+            />
+            <Route path="*" element={<Navigate to={authenticated ? defaultAuthenticatedPath : "/login"} replace />} />
+          </Routes>
+        </Suspense>
+      </CurrentWeatherProvider>
     </SessionStateProvider>
   );
 }
@@ -196,11 +204,13 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <PreferencesProvider>
-        <BrowserRouter>
-          <div className="min-h-screen bg-white font-sans text-zinc-900 selection:bg-zinc-200 dark:bg-[#060a12] dark:text-slate-100 dark:selection:bg-indigo-500/30">
-            <AppRoutes />
-          </div>
-        </BrowserRouter>
+        <NotificationProvider>
+          <BrowserRouter>
+            <div className="min-h-screen bg-white font-sans text-zinc-900 selection:bg-zinc-200 dark:bg-[#060a12] dark:text-slate-100 dark:selection:bg-indigo-500/30">
+              <AppRoutes />
+            </div>
+          </BrowserRouter>
+        </NotificationProvider>
       </PreferencesProvider>
     </QueryClientProvider>
   );

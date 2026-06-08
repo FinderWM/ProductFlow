@@ -365,16 +365,16 @@ generation_config_id: selectedConfigId
 
 #### 1. Scope / Trigger
 - Trigger: changes to generation group settings UI, RBAC user grants, image-chat generation, workflow inspector
-  generation settings, gallery/inspiration-history filters, or generated-result DTOs.
+  generation settings, gallery/inspiration-history filters, generated-result DTOs, or sensitive-image list masking.
 - This is a cross-layer DTO contract. Frontend types mirror backend `snake_case` fields and page code must keep group
   selection separate from concrete provider config management.
 
 #### 2. Signatures
 - Shared DTOs in `web/src/lib/types.ts`:
-  - `GenerationResourceGroup`
-  - `GenerationResourceGroupTag`
-  - `GenerationResourceGroupCreateRequest`
-  - `GenerationResourceGroupUpdateRequest`
+  - `GenerationResourceGroup` includes `blur_images_by_default: boolean`.
+  - `GenerationResourceGroupTag` includes `blur_images_by_default: boolean`.
+  - `GenerationResourceGroupCreateRequest` may include `blur_images_by_default?: boolean`.
+  - `GenerationResourceGroupUpdateRequest` may include `blur_images_by_default?: boolean | null`.
   - `UserGenerationResourceGroupGrants`
 - API methods in `web/src/lib/api.ts`:
   - `listGenerationResourceGroups()`
@@ -386,6 +386,7 @@ generation_config_id: selectedConfigId
   - `updateUserGenerationResourceGroupGrants(userId, { resource_group_ids })`
 - Generated result DTOs carry `resource_group_id?: string | null` plus required
   `resource_group: GenerationResourceGroupTag`.
+- Settings export/import DTOs that carry `generation_resource_groups` preserve `blur_images_by_default`.
 
 #### 3. Contracts
 - SettingsPage owns group CRUD and generation config group assignment. Mutations invalidate `['provider-config']`,
@@ -408,6 +409,18 @@ generation_config_id: selectedConfigId
   `resource_group_id`.
 - Generated result cards, previews, node-run rows, and history entries should display `resource_group.name` from the DTO.
   Do not derive labels from config ids or provider names.
+- Sensitive-image masking uses `shouldMaskSensitiveImage(personalMaskEnabled, row.resource_group)`: return true only when
+  the personal list preference is enabled and that row's `resource_group.blur_images_by_default` is true.
+- Personal sensitive-image preferences are account-level server DTOs in `UserUiPreferences`, loaded through
+  `api.getUserUiPreferences()` and patched through `api.updateUserUiPreferences(...)`. Do not create page-local DTO copies
+  or localStorage-specific aliases for these fields.
+- Sensitive-image masking currently applies only to inspiration list thumbnails/previews, image-chat session/history
+  thumbnails, and the image-chat center current-result image. Gallery UI is outside this behavior unless a later
+  requirement explicitly adds it.
+- `SensitiveImageMask` renders an icon-only overlay. Use `intensity="soft"` for list/history thumbnails and
+  `intensity="strong"` for the image-chat center current-result image.
+- Page code must evaluate masking per row from the row DTO. Do not mask all visible images just because the selected list
+  filter points at a sensitive group.
 
 #### 4. Validation & Error Matrix
 - `listMyGenerationResourceGroups()` returns no enabled groups -> generation controls are disabled and show the
@@ -418,6 +431,9 @@ generation_config_id: selectedConfigId
 - Gallery/image-session-list/inspiration-history "all groups" selected -> omit `resource_group_id`; selected group ->
   include the exact id.
 - Missing required `resource_group` tag in a generated-result factory/test -> `just web-build` fails.
+- Missing `blur_images_by_default` in `GenerationResourceGroupTag` factories -> TypeScript tests/build fail.
+- `personalMaskEnabled=false` -> do not mask, even when `resource_group.blur_images_by_default=true`.
+- `personalMaskEnabled=true` with missing/null/false `resource_group.blur_images_by_default` -> do not mask.
 
 #### 5. Good/Base/Bad Cases
 - Good: image-chat displays a compact "生成分组" selector with `default`, and generated round metadata shows the same
@@ -425,11 +441,19 @@ generation_config_id: selectedConfigId
 - Good: inspiration history, image-session list, and gallery filter options keep "所有分组" but initially select the first
   concrete group returned by `activeGenerationResourceGroupsInApiOrder`.
 - Good: SettingsPage can create a group, then generation config cards assign text/image configs to that group.
+- Good: SettingsPage can enable `blur_images_by_default` for a group, and inspiration/image-chat lists mask only rows
+  whose own `resource_group.blur_images_by_default` is true while the page preference is enabled.
+- Good: image-chat center current-result masking uses the same selected round `resource_group` predicate as history
+  thumbnails, but renders with the stronger mask intensity.
 - Good: RBAC grant panel exposes checkbox grants for non-admin users and read-only copy for admins.
 - Base: a local default setup has one enabled `default` group.
 - Bad: a list filter defaults to the all-groups option when at least one concrete active group is available.
 - Bad: image-chat exposes `GenerationConfigOption` or provider profile details in the normal submit UI.
 - Bad: a gallery card renders group text by checking `resource_group_id === defaultId` in the component.
+- Bad: using the selected filter group to decide masking for every visible list item.
+- Bad: applying sensitive-image masking to gallery cards without a new gallery-specific requirement and tests.
+- Bad: showing a text label such as "已遮罩" inside the mask overlay.
+- Bad: using the thumbnail-strength mask on the image-chat center current-result image.
 
 #### 6. Tests Required
 - SettingsPage tests cover group payloads, import/export counts, and generation config `resource_group_id`.
@@ -438,6 +462,7 @@ generation_config_id: selectedConfigId
 - Gallery/inspiration-history tests cover filter query params and required `resource_group` result tags.
 - `web/src/lib/resourceGroups.test.ts` covers active group filtering, API-order preservation, first concrete default
   selection, and empty-list fallback. Backend tests cover descending `sort_order` and tie-break order.
+- `web/src/lib/sensitiveImages.test.ts` covers per-row masking and local preference key/default parsing.
 - Run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build`.
 
 #### 7. Wrong vs Correct
@@ -471,6 +496,18 @@ Correct:
 
 ```tsx
 <span>{entry.resource_group.name}</span>
+```
+
+Wrong:
+
+```tsx
+const masked = selectedResourceGroup?.blur_images_by_default && maskSensitiveImages;
+```
+
+Correct:
+
+```tsx
+const masked = shouldMaskSensitiveImage(maskSensitiveImages, entry.resource_group);
 ```
 
 ---

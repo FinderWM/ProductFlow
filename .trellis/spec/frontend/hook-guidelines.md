@@ -92,6 +92,8 @@ nodes or running workflow runs.
   `api.getImageSessionStatus(sessionId)`.
 - Backend status fields used by the page: `rounds_count`, `latest_round_id`, `has_active_generation_task`,
   `generation_tasks`, `updated_at`, and `title`.
+- Generate submit payload includes `retry_generation_task_id?: string | null`. It is set only when the user restored the
+  current latest failed task's configuration and confirms generation from that restored draft.
 
 ### 3. Contracts
 
@@ -102,8 +104,20 @@ nodes or running workflow runs.
 - Active `generation_tasks` must not be used as a session-wide submit lock. The submit button may be disabled while the
   current mutation is pending, but queued/running tasks in the same session still allow a changed prompt, size, branch
   base image, reference selection, generation count, or tool-options payload to submit immediately.
+- Failed ImageChat generation-task placeholders should expose manual retry whenever `task.status === "failed"`. Do not
+  hide the retry action based on `task.is_retryable`; backend failure classification only controls automatic retry, while
+  manual retry reuses the saved task payload so users do not rebuild prompt, size, references, group, or tool options.
+- Restored failed-task drafts must submit through `POST /api/image-sessions/{id}/generate` with the original task id in
+  `retry_generation_task_id`. The page must not call the legacy retry endpoint from this flow, and it must not allow a
+  restored retry draft to degrade into a new task if the hidden task id is missing.
+- The new-round action is available when the latest generation state is succeeded or failed. For a failed latest state,
+  new-round creates a new task and does not pass `retry_generation_task_id`; restore/retry is the separate action that
+  updates the failed task.
+- Only the latest failed generation state exposes restore/retry. Historical failed tasks must remain visible but
+  non-actionable.
 - Accidental duplicate prevention for ImageChat is a short local guard keyed by prompt, size, branch base image, selected
-  references, generation count, and normalized tool options. It blocks only very-short-window identical payload repeats.
+  references, generation count, normalized tool options, generation config selection, resource group, and
+  `retry_generation_task_id`. It blocks only very-short-window identical payload repeats.
 - When status shows a new round count/latest round or a task changes from active to terminal, invalidate/refetch the full
   detail query once so generated candidates/history appear.
 - Keep write mutations authoritative: create/update/upload/delete/generate handlers may still set full detail cache from
@@ -121,6 +135,15 @@ nodes or running workflow runs.
 - Status terminal or new latest round -> invalidate `['image-session', selectedSessionId]` and the session list key.
 - Status API error -> normal React Query error state; do not clear existing full detail cache only because a status poll
   failed.
+- Failed task with `is_retryable=false` from older cache/API data -> still render manual retry because `failed` is the
+  user-action contract for ImageChat generation tasks.
+- Restored retry draft with a missing hidden task id -> show the current-failed-round recovery message and do not submit.
+- Historical failed task selected while a newer failure, active task, or successful round is latest -> show the history
+  locked message and do not restore that task.
+- Latest failed task + user chooses new round -> open a new-round draft. If no successful round exists yet, submit without
+  a base image; if a successful round exists, preselect the latest available generated image as the base.
+- Latest successful round -> retry/restore is unavailable; user uses the new-round action before submitting another
+  generated result.
 - Selected task placeholder no longer exists because the generated round arrived -> select the matching generated round
   when possible; otherwise fall back to the latest generated asset.
 - Selected generated asset or branch base no longer exists -> clear or fall back through the selection reconciliation
@@ -132,10 +155,24 @@ nodes or running workflow runs.
 
 - Good: active task updates the visible queue position every 1500ms without refetching every historical round and asset.
 - Good: one queued/running task is visible in the history tree while a different payload can be submitted immediately.
+- Good: a failed task that stopped automatic retry because of provider policy or parameter rejection still shows the same
+  restore button and then submits `retry_generation_task_id` through `api.generateImageSessionRound(...)` after user
+  confirmation.
+- Good: a latest failed first round still enables "new round"; the resulting submit omits `retry_generation_task_id` and
+  creates a separate task.
+- Good: a failed task with partial candidates keeps the same task placeholder and result group; restored submission fills
+  remaining candidates into that same round group.
 - Base: a task failure appears in the task card, then full detail is refetched once.
 - Bad: status polling replaces the detail cache with a partial object missing `assets` or `rounds`.
 - Bad: broadening this ImageChat status query to InspirationDetail workflow polling without a separate workflow DTO.
 - Bad: disabling ImageChat submission solely because `has_active_generation_task` is true.
+- Bad: treating `ImageSessionGenerationTask.is_retryable=false` as a reason to hide the failed-task manual retry button.
+- Bad: restored failed-task configuration calls `api.retryImageSessionGenerationTask(...)` immediately, because the user
+  cannot review or adjust the saved settings before resubmission.
+- Bad: restored failed-task configuration omits `retry_generation_task_id`, because the backend creates a new task/round
+  instead of updating the current failed round.
+- Bad: latest failed state disables the new-round button; users must be able to abandon the failed round without
+  overwriting it.
 
 ### 6. Tests Required
 
@@ -143,6 +180,9 @@ nodes or running workflow runs.
 - Pure helper tests for merging status into cached detail without replacing `assets` or `rounds`.
 - Pure helper tests for deciding when status requires a full detail refresh.
 - Pure helper tests for task-derived history placeholders/tree structure and the short duplicate-submit guard.
+- Pure helper tests for failed-task retry visibility ignoring `is_retryable`.
+- Pure helper tests for latest generation state so only the current failed task is retry-actionable.
+- Pure helper tests for duplicate-submit signatures including `retry_generation_task_id`.
 - Pure helper tests for ImageChat selection reconciliation: placeholder-to-round replacement, selected asset fallback,
   branch base cleanup, reference selection pruning, and pending generation completion.
 - Run `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build`.
@@ -159,6 +199,21 @@ Correct:
 
 ```tsx
 useQuery({ queryKey: ["image-session-status", id], refetchInterval: 1500 });
+```
+
+Wrong:
+
+```tsx
+api.generateImageSessionRound(sessionId, imageGenerationTaskSubmitPayload(failedTask));
+```
+
+Correct:
+
+```tsx
+api.generateImageSessionRound(sessionId, {
+  ...imageGenerationTaskSubmitPayload(failedTask),
+  retry_generation_task_id: failedTask.id,
+});
 ```
 
 ## Scenario: InspirationDetail active-workflow lightweight status polling

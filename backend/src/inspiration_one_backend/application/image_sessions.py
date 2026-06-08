@@ -147,6 +147,7 @@ def _image_session_query():
             selectinload(ImageSession.rounds).selectinload(ImageSessionRound.resource_group),
             selectinload(ImageSession.generation_tasks),
             selectinload(ImageSession.generation_tasks).selectinload(ImageSessionGenerationTask.resource_group),
+            selectinload(ImageSession.resource_group),
             selectinload(ImageSession.owner),
             selectinload(ImageSession.deleted_by),
             selectinload(ImageSession.inspiration).selectinload(Inspiration.source_assets),
@@ -258,6 +259,68 @@ def _validate_manual_image_generation_config_selection(
         raise BusinessValidationError("生图任务只能使用图片生成配置")
 
 
+def _authorized_image_generation_config_selection(
+    session: Session,
+    *,
+    image_session: ImageSession,
+    resource_group_id: str | None,
+    generation_config_mode: str = "auto",
+    generation_config_id: str | None = None,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> GenerationConfigSelection:
+    selection = _generation_config_selection(resource_group_id, generation_config_mode, generation_config_id)
+    group_actor_user_id = actor_user_id or image_session.owner_user_id
+    group_actor_is_admin = actor_is_admin or (
+        actor_user_id is None and bool(image_session.owner and image_session.owner.is_admin)
+    )
+    group = require_generation_resource_group_for_user(
+        session,
+        user_id=group_actor_user_id,
+        is_admin=group_actor_is_admin,
+        resource_group_id=selection.resource_group_id,
+    )
+    return GenerationConfigSelection(
+        mode=selection.mode,
+        generation_config_id=selection.generation_config_id,
+        resource_group_id=group.id,
+    )
+
+
+def _image_generation_task_event_at(task: ImageSessionGenerationTask) -> datetime:
+    return task.finished_at or task.progress_updated_at or task.started_at or task.created_at
+
+
+def _event_timestamp(value: datetime) -> float:
+    return value.timestamp()
+
+
+def _latest_image_generation_event(image_session: ImageSession) -> tuple[str, str, JobStatus] | None:
+    events: list[tuple[float, int, str, str, JobStatus]] = []
+    for round_item in image_session.rounds:
+        events.append((_event_timestamp(round_item.created_at), 0, "round", round_item.id, JobStatus.SUCCEEDED))
+    for task in image_session.generation_tasks:
+        if task.status in {JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELLED}:
+            events.append((_event_timestamp(_image_generation_task_event_at(task)), 1, "task", task.id, task.status))
+        elif task.status == JobStatus.SUCCEEDED and not task.result_generation_group_id:
+            events.append((_event_timestamp(_image_generation_task_event_at(task)), 1, "task", task.id, task.status))
+    if not events:
+        return None
+    latest = max(events, key=lambda item: (item[0], item[1], item[3]))
+    return latest[2], latest[3], latest[4]
+
+
+def _require_latest_failed_image_generation_task(
+    image_session: ImageSession,
+    task: ImageSessionGenerationTask,
+) -> None:
+    if task.status != JobStatus.FAILED:
+        raise BusinessValidationError("只有失败的生成任务可以重试")
+    latest = _latest_image_generation_event(image_session)
+    if latest != ("task", task.id, JobStatus.FAILED):
+        raise BusinessValidationError("只能恢复最后一次失败的生成任务")
+
+
 def polish_image_session_prompt(
     *,
     session: Session,
@@ -346,28 +409,12 @@ def list_image_sessions(
         stmt = stmt.where(ImageSession.inspiration_id == inspiration_id)
     normalized_group_id = (resource_group_id or "").strip() or None
     if normalized_group_id is not None:
-        round_group_filter = ImageSessionRound.resource_group_id == normalized_group_id
-        task_group_filter = ImageSessionGenerationTask.resource_group_id == normalized_group_id
         if normalized_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
-            round_group_filter = or_(round_group_filter, ImageSessionRound.resource_group_id.is_(None))
-            task_group_filter = or_(task_group_filter, ImageSessionGenerationTask.resource_group_id.is_(None))
-        has_matching_round = (
-            select(ImageSessionRound.id)
-            .where(ImageSessionRound.session_id == ImageSession.id, round_group_filter)
-            .exists()
-        )
-        has_matching_task = (
-            select(ImageSessionGenerationTask.id)
-            .where(ImageSessionGenerationTask.session_id == ImageSession.id, task_group_filter)
-            .exists()
-        )
-        has_any_round = select(ImageSessionRound.id).where(ImageSessionRound.session_id == ImageSession.id).exists()
-        has_any_task = (
-            select(ImageSessionGenerationTask.id)
-            .where(ImageSessionGenerationTask.session_id == ImageSession.id)
-            .exists()
-        )
-        stmt = stmt.where(or_(has_matching_round, has_matching_task, ~has_any_round & ~has_any_task))
+            stmt = stmt.where(
+                or_(ImageSession.resource_group_id == normalized_group_id, ImageSession.resource_group_id.is_(None))
+            )
+        else:
+            stmt = stmt.where(ImageSession.resource_group_id == normalized_group_id)
     return list(session.scalars(stmt).all())
 
 
@@ -441,6 +488,7 @@ def create_image_session(
     session: Session,
     *,
     inspiration_id: str | None,
+    resource_group_id: str | None = DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     title: str | None = None,
     owner_user_id: str | None = None,
     actor_is_admin: bool = False,
@@ -461,8 +509,12 @@ def create_image_session(
         )
         ensure_resource_usable(inspiration)
     normalized_title = (title or DEFAULT_SESSION_TITLE).strip() or DEFAULT_SESSION_TITLE
+    normalized_group_id = (resource_group_id or "").strip() or DEFAULT_GENERATION_RESOURCE_GROUP_ID
     image_session = ImageSession(
-        owner_user_id=resolved_owner_user_id, inspiration_id=inspiration_id, title=normalized_title
+        owner_user_id=resolved_owner_user_id,
+        inspiration_id=inspiration_id,
+        resource_group_id=normalized_group_id,
+        title=normalized_title,
     )
     session.add(image_session)
     session.commit()
@@ -984,22 +1036,15 @@ def create_image_session_generation_task(
     )
     ensure_resource_usable(image_session)
     normalized_tool_options = normalize_tool_options(tool_options)
-    generation_config_selection = _generation_config_selection(
-        resource_group_id,
-        generation_config_mode,
-        generation_config_id,
-    )
-    group_actor_user_id = actor_user_id or image_session.owner_user_id
-    group_actor_is_admin = actor_is_admin or (
-        actor_user_id is None and bool(image_session.owner and image_session.owner.is_admin)
-    )
-    group = require_generation_resource_group_for_user(
+    generation_config_selection = _authorized_image_generation_config_selection(
         session,
-        user_id=group_actor_user_id,
-        is_admin=group_actor_is_admin,
-        resource_group_id=generation_config_selection.resource_group_id,
+        image_session=image_session,
+        resource_group_id=resource_group_id,
+        generation_config_mode=generation_config_mode,
+        generation_config_id=generation_config_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
     )
-    generation_config_selection = GenerationConfigSelection(resource_group_id=group.id)
     normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
         image_session,
         size=size,
@@ -1023,8 +1068,93 @@ def create_image_session_generation_task(
         generation_count=generation_count,
     )
     session.add(task)
+    image_session.resource_group_id = generation_config_selection.resource_group_id
     image_session.updated_at = now_utc()
     session.commit()
+    session.expire_all()
+    return ImageSessionGenerationTaskCreationResult(
+        task=session.get(ImageSessionGenerationTask, task.id) or task,
+        image_session=_get_image_session_or_raise(session, image_session.id),
+    )
+
+
+def _reset_latest_failed_image_session_generation_task_from_submit(
+    session: Session,
+    *,
+    image_session_id: str,
+    retry_generation_task_id: str,
+    prompt: str,
+    size: str,
+    resource_group_id: str | None,
+    base_asset_id: str | None = None,
+    selected_reference_asset_ids: list[str] | None = None,
+    generation_count: int = 1,
+    tool_options: dict[str, Any] | None = None,
+    generation_config_mode: str = "auto",
+    generation_config_id: str | None = None,
+    actor_user_id: str | None = None,
+    actor_is_admin: bool = False,
+) -> ImageSessionGenerationTaskCreationResult:
+    ensure_provider_config_bootstrapped(session)
+    image_session = _get_image_session_or_raise(
+        session,
+        image_session_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
+    ensure_actor_can_mutate_owner(
+        owner_user_id=image_session.owner_user_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="连续生图会话不存在",
+    )
+    ensure_resource_usable(image_session)
+    task = session.scalar(
+        select(ImageSessionGenerationTask).where(
+            ImageSessionGenerationTask.id == retry_generation_task_id,
+            ImageSessionGenerationTask.session_id == image_session_id,
+        )
+    )
+    if task is None:
+        raise NotFoundError("生成任务不存在")
+    _require_latest_failed_image_generation_task(image_session, task)
+
+    normalized_tool_options = normalize_tool_options(tool_options)
+    generation_config_selection = _authorized_image_generation_config_selection(
+        session,
+        image_session=image_session,
+        resource_group_id=resource_group_id,
+        generation_config_mode=generation_config_mode,
+        generation_config_id=generation_config_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
+    normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
+        image_session,
+        size=size,
+        base_asset_id=base_asset_id,
+        selected_reference_asset_ids=selected_reference_asset_ids,
+        generation_count=generation_count,
+        current_generation_task_id=task.id,
+        max_generation_count=IMAGE_SESSION_GENERATION_MAX_COUNT,
+    )
+    task.prompt = prompt.strip()
+    task.size = normalized_size
+    task.base_asset_id = normalized_base_asset_id
+    task.selected_reference_asset_ids = normalized_reference_ids
+    task.tool_options = normalized_tool_options
+    task.generation_config_mode = generation_config_selection.mode
+    task.requested_generation_config_id = generation_config_selection.generation_config_id
+    task.used_generation_config_id = None
+    task.resource_group_id = generation_config_selection.resource_group_id
+    task.generation_count = generation_count
+    image_session.resource_group_id = generation_config_selection.resource_group_id
+    _reset_image_generation_task_for_retry(
+        session,
+        task=task,
+        progress_phase="manual_retry_queued",
+        result_generation_group_id=task.result_generation_group_id or new_id(),
+    )
     session.expire_all()
     return ImageSessionGenerationTaskCreationResult(
         task=session.get(ImageSessionGenerationTask, task.id) or task,
@@ -1045,25 +1175,44 @@ def submit_image_session_generation_task(
     tool_options: dict[str, Any] | None = None,
     generation_config_mode: str = "auto",
     generation_config_id: str | None = None,
+    retry_generation_task_id: str | None = None,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
     enqueue: Callable[[str], None] | None = None,
 ) -> ImageSession:
-    result = create_image_session_generation_task(
-        session,
-        image_session_id=image_session_id,
-        prompt=prompt,
-        size=size,
-        base_asset_id=base_asset_id,
-        selected_reference_asset_ids=selected_reference_asset_ids,
-        generation_count=generation_count,
-        tool_options=tool_options,
-        resource_group_id=resource_group_id,
-        generation_config_mode=generation_config_mode,
-        generation_config_id=generation_config_id,
-        actor_user_id=actor_user_id,
-        actor_is_admin=actor_is_admin,
-    )
+    if retry_generation_task_id:
+        result = _reset_latest_failed_image_session_generation_task_from_submit(
+            session,
+            image_session_id=image_session_id,
+            retry_generation_task_id=retry_generation_task_id,
+            prompt=prompt,
+            size=size,
+            base_asset_id=base_asset_id,
+            selected_reference_asset_ids=selected_reference_asset_ids,
+            generation_count=generation_count,
+            tool_options=tool_options,
+            resource_group_id=resource_group_id,
+            generation_config_mode=generation_config_mode,
+            generation_config_id=generation_config_id,
+            actor_user_id=actor_user_id,
+            actor_is_admin=actor_is_admin,
+        )
+    else:
+        result = create_image_session_generation_task(
+            session,
+            image_session_id=image_session_id,
+            prompt=prompt,
+            size=size,
+            base_asset_id=base_asset_id,
+            selected_reference_asset_ids=selected_reference_asset_ids,
+            generation_count=generation_count,
+            tool_options=tool_options,
+            resource_group_id=resource_group_id,
+            generation_config_mode=generation_config_mode,
+            generation_config_id=generation_config_id,
+            actor_user_id=actor_user_id,
+            actor_is_admin=actor_is_admin,
+        )
     enqueue_or_mark_failed(
         result.task.id,
         enqueue=enqueue or enqueue_image_session_generation_task,
@@ -1112,10 +1261,7 @@ def retry_image_session_generation_task(
     )
     if task is None:
         raise NotFoundError("生成任务不存在")
-    if task.status != JobStatus.FAILED:
-        raise BusinessValidationError("只有失败的生成任务可以重试")
-    if not task.is_retryable:
-        raise BusinessValidationError("该生成任务不可重试")
+    _require_latest_failed_image_generation_task(image_session, task)
     require_generation_resource_group_for_user(
         session,
         user_id=actor_user_id,
@@ -1128,6 +1274,9 @@ def retry_image_session_generation_task(
         task=task,
         progress_phase="manual_retry_queued",
     )
+    image_session.resource_group_id = task.resource_group_id
+    image_session.updated_at = now_utc()
+    session.commit()
     enqueue_or_mark_failed(
         task.id,
         enqueue=enqueue or enqueue_image_session_generation_task,
@@ -1501,7 +1650,7 @@ def _handle_image_generation_task_failure(
             status=JobStatus.FAILED,
             failure_reason=reason,
             result_generation_group_id=result_generation_group_id,
-            is_retryable=False,
+            is_retryable=True,
         )
         return
     if task.attempts < IMAGE_SESSION_GENERATION_MAX_ATTEMPTS:

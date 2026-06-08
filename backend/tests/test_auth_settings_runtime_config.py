@@ -22,8 +22,10 @@ from inspiration_one_backend.infrastructure.db.models import (
     AppSetting,
     GenerationConfig,
     GenerationConfigDailyStat,
+    GenerationResourceGroup,
     ProviderBinding,
     ProviderProfile,
+    UserUiPreference,
 )
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
 from inspiration_one_backend.infrastructure.openai_client import (
@@ -58,6 +60,75 @@ def test_auth_session_required(configured_env: Path) -> None:
     authorized = client.get("/api/inspirations", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert authorized.status_code == 200
     assert authorized.json()["items"] == []
+
+
+def test_user_ui_preferences_require_login(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/api/settings/ui-preferences")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "请先登录"
+
+
+def test_user_ui_preferences_default_to_masking_and_persist(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    initial = client.get("/api/settings/ui-preferences")
+
+    assert initial.status_code == 200
+    payload = initial.json()
+    assert payload["mask_sensitive_images_in_inspirations"] is True
+    assert payload["mask_sensitive_images_in_image_chat"] is True
+
+    session = get_session_factory()()
+    try:
+        preferences = session.get(UserUiPreference, payload["user_id"])
+        assert preferences is not None
+        assert preferences.mask_sensitive_images_in_inspirations is True
+        assert preferences.mask_sensitive_images_in_image_chat is True
+    finally:
+        session.close()
+
+
+def test_user_ui_preferences_patch_updates_only_submitted_fields(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    updated_inspirations = client.patch(
+        "/api/settings/ui-preferences",
+        json={"mask_sensitive_images_in_inspirations": False},
+    )
+
+    assert updated_inspirations.status_code == 200
+    inspirations_payload = updated_inspirations.json()
+    assert inspirations_payload["mask_sensitive_images_in_inspirations"] is False
+    assert inspirations_payload["mask_sensitive_images_in_image_chat"] is True
+
+    updated_image_chat = client.patch(
+        "/api/settings/ui-preferences",
+        json={"mask_sensitive_images_in_image_chat": False},
+    )
+
+    assert updated_image_chat.status_code == 200
+    image_chat_payload = updated_image_chat.json()
+    assert image_chat_payload["mask_sensitive_images_in_inspirations"] is False
+    assert image_chat_payload["mask_sensitive_images_in_image_chat"] is False
+
+    reloaded = client.get("/api/settings/ui-preferences")
+    assert reloaded.status_code == 200
+    assert reloaded.json()["mask_sensitive_images_in_inspirations"] is False
+    assert reloaded.json()["mask_sensitive_images_in_image_chat"] is False
 
 
 def test_auth_session_survives_small_wall_clock_rollback(
@@ -421,6 +492,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     imported_profile_id = "11111111-1111-4111-8111-111111111111"
     document["runtime_config"]["generation_max_concurrent_tasks"] = 4
     document["runtime_config"]["deletion_enabled"] = True
+    document["generation_resource_groups"][0]["blur_images_by_default"] = True
     document["provider_profiles"] = [
         {
             "id": imported_profile_id,
@@ -526,6 +598,9 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
         assert bindings["text"].provider_profile_id == imported_profile_id
         assert bindings["image"].provider_kind == "openai_responses"
         assert bindings["image"].config_json == {"responses_background_enabled": True}
+        default_group = session.get(GenerationResourceGroup, DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+        assert default_group is not None
+        assert default_group.blur_images_by_default is True
     finally:
         session.close()
 

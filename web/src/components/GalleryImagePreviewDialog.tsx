@@ -2,6 +2,8 @@ import { Download, X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 import { api } from "../lib/api";
+import { useI18n } from "../lib/preferences";
+import { ZoomableImage } from "./ZoomableImage";
 
 export interface GalleryPreviewMetadataRow {
   label: string;
@@ -39,6 +41,8 @@ export function GalleryImagePreviewDialog({
   closeLabel,
   onClose,
 }: GalleryImagePreviewDialogProps) {
+  const { t } = useI18n();
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -63,9 +67,14 @@ export function GalleryImagePreviewDialog({
         className="grid h-[calc(100svh-1rem)] max-h-[calc(100svh-1rem)] w-full max-w-[calc(100vw-1rem)] min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,42svh)] overflow-hidden rounded-lg bg-white shadow-2xl sm:h-[calc(100svh-2rem)] sm:max-h-[calc(100svh-2rem)] sm:max-w-[calc(100vw-2rem)] lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] lg:grid-rows-1 xl:max-w-[92rem] animate-spring-pop-in"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex min-h-0 items-center justify-center bg-slate-950">
-          <img src={imageUrl} alt={imageAlt} decoding="async" className="h-full max-h-full w-full object-contain" />
-        </div>
+        <ZoomableImage
+          src={imageUrl}
+          alt={imageAlt}
+          zoomOutLabel={t("imagePreview.zoomOut")}
+          zoomInLabel={t("imagePreview.zoomIn")}
+          resetLabel={t("imagePreview.reset")}
+          className="bg-slate-950"
+        />
         <aside className="flex min-h-0 flex-col border-t border-slate-200 lg:border-l lg:border-t-0">
           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
             <div className="min-w-0">

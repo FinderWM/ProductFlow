@@ -48,6 +48,19 @@ class ConfigUpdateRequest(BaseModel):
     reset_keys: list[str] = Field(default_factory=list)
 
 
+class UserUiPreferencesResponse(BaseModel):
+    user_id: str
+    mask_sensitive_images_in_inspirations: bool = True
+    mask_sensitive_images_in_image_chat: bool = True
+    created_at: str
+    updated_at: str
+
+
+class UserUiPreferencesUpdateRequest(BaseModel):
+    mask_sensitive_images_in_inspirations: bool | None = None
+    mask_sensitive_images_in_image_chat: bool | None = None
+
+
 class ProviderProfileResponse(BaseModel):
     id: str
     name: str
@@ -81,6 +94,7 @@ class GenerationResourceGroupResponse(BaseModel):
     description: str | None = None
     sort_order: int
     enabled: bool
+    blur_images_by_default: bool = False
     archived_at: str | None = None
     created_at: str
     updated_at: str
@@ -92,6 +106,7 @@ class GenerationResourceGroupCreateRequest(BaseModel):
     description: str | None = None
     sort_order: int = 100
     enabled: bool = True
+    blur_images_by_default: bool = False
 
 
 class GenerationResourceGroupUpdateRequest(BaseModel):
@@ -100,6 +115,7 @@ class GenerationResourceGroupUpdateRequest(BaseModel):
     description: str | None = None
     sort_order: int | None = None
     enabled: bool | None = None
+    blur_images_by_default: bool | None = None
 
 
 class GenerationConfigStateResponse(BaseModel):
@@ -143,7 +159,7 @@ class GenerationConfigStatAggregateResponse(BaseModel):
 
 class GenerationConfigResponse(BaseModel):
     id: str
-    resource_group_id: str
+    resource_group_id: str | None = None
     purpose: str
     name: str
     provider_kind: str
@@ -165,7 +181,7 @@ class GenerationConfigResponse(BaseModel):
 
 class GenerationConfigOptionResponse(BaseModel):
     id: str
-    resource_group_id: str
+    resource_group_id: str | None = None
     purpose: str
     name: str
     provider_kind: str
@@ -176,7 +192,7 @@ class GenerationConfigOptionResponse(BaseModel):
 
 class GenerationConfigStatusConfigResponse(BaseModel):
     id: str
-    resource_group_id: str
+    resource_group_id: str | None = None
     purpose: str
     name: str
     provider_kind: str
@@ -357,6 +373,7 @@ class SettingsGenerationResourceGroupExport(BaseModel):
     description: str | None = None
     sort_order: int = 100
     enabled: bool = True
+    blur_images_by_default: bool = False
 
 
 class SettingsGenerationConfigExport(BaseModel):

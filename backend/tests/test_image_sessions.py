@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from base64 import b64encode
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -143,7 +143,7 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
 
 
 def test_image_session_list_filters_by_selected_resource_group(configured_env: Path, db_session) -> None:
-    from inspiration_one_backend.domain.enums import ImageSessionAssetKind
+    from inspiration_one_backend.domain.enums import ImageSessionAssetKind, JobStatus
     from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
@@ -151,10 +151,14 @@ def test_image_session_list_filters_by_selected_resource_group(configured_env: P
     _login(client)
 
     premium_group = GenerationResourceGroup(key="premium-session-list", name="高阶生图分组", sort_order=20)
-    default_session = ImageSession(title="默认分组会话")
-    premium_session = ImageSession(title="高阶分组会话")
-    empty_session = ImageSession(title="空会话")
-    db_session.add_all([premium_group, default_session, premium_session, empty_session])
+    db_session.add(premium_group)
+    db_session.flush()
+    default_session = ImageSession(title="默认分组会话", resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+    premium_session = ImageSession(title="高阶分组会话", resource_group_id=premium_group.id)
+    empty_session = ImageSession(title="空会话", resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+    premium_empty_session = ImageSession(title="高阶空会话", resource_group_id=premium_group.id)
+    mixed_session = ImageSession(title="跨分组会话", resource_group_id=premium_group.id)
+    db_session.add_all([default_session, premium_session, empty_session, premium_empty_session, mixed_session])
     db_session.flush()
     default_asset = ImageSessionAsset(
         session_id=default_session.id,
@@ -170,7 +174,21 @@ def test_image_session_list_filters_by_selected_resource_group(configured_env: P
         mime_type="image/png",
         storage_path="image-sessions/premium-session.png",
     )
-    db_session.add_all([default_asset, premium_asset])
+    mixed_default_asset = ImageSessionAsset(
+        session_id=mixed_session.id,
+        kind=ImageSessionAssetKind.GENERATED_IMAGE,
+        original_filename="mixed-default.png",
+        mime_type="image/png",
+        storage_path="image-sessions/mixed-default.png",
+    )
+    mixed_premium_asset = ImageSessionAsset(
+        session_id=mixed_session.id,
+        kind=ImageSessionAssetKind.GENERATED_IMAGE,
+        original_filename="mixed-premium.png",
+        mime_type="image/png",
+        storage_path="image-sessions/mixed-premium.png",
+    )
+    db_session.add_all([default_asset, premium_asset, mixed_default_asset, mixed_premium_asset])
     db_session.flush()
     db_session.add_all(
         [
@@ -196,7 +214,45 @@ def test_image_session_list_filters_by_selected_resource_group(configured_env: P
                 generated_asset_id=premium_asset.id,
                 resource_group_id=premium_group.id,
             ),
+            ImageSessionRound(
+                session_id=mixed_session.id,
+                prompt="跨分组默认生成",
+                assistant_message="ok",
+                size="1024x1024",
+                model_name="mock",
+                provider_name="mock",
+                prompt_version="v1",
+                generated_asset_id=mixed_default_asset.id,
+                resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+                created_at=datetime(2026, 6, 1, tzinfo=UTC),
+            ),
+            ImageSessionRound(
+                session_id=mixed_session.id,
+                prompt="跨分组高阶生成",
+                assistant_message="ok",
+                size="1024x1024",
+                model_name="mock",
+                provider_name="mock",
+                prompt_version="v1",
+                generated_asset_id=mixed_premium_asset.id,
+                resource_group_id=premium_group.id,
+                created_at=datetime(2026, 6, 2, tzinfo=UTC),
+            ),
         ]
+    )
+    db_session.add(
+        ImageSessionGenerationTask(
+            session_id=mixed_session.id,
+            status=JobStatus.FAILED,
+            prompt="跨分组高阶失败",
+            size="1024x1024",
+            generation_count=1,
+            completed_candidates=0,
+            resource_group_id=premium_group.id,
+            failure_reason="图片供应商拒绝了本次请求",
+            created_at=datetime(2026, 6, 3, tzinfo=UTC),
+            finished_at=datetime(2026, 6, 3, 0, 1, tzinfo=UTC),
+        )
     )
     db_session.commit()
 
@@ -205,15 +261,26 @@ def test_image_session_list_filters_by_selected_resource_group(configured_env: P
         params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
     )
     assert default_list.status_code == 200
-    assert {item["id"] for item in default_list.json()["items"]} == {default_session.id, empty_session.id}
+    assert {item["id"] for item in default_list.json()["items"]} == {
+        default_session.id,
+        empty_session.id,
+    }
     default_item = next(item for item in default_list.json()["items"] if item["id"] == default_session.id)
     assert default_item["latest_resource_group"]["key"] == "default"
 
     premium_list = client.get("/api/image-sessions", params={"resource_group_id": premium_group.id})
     assert premium_list.status_code == 200
-    assert {item["id"] for item in premium_list.json()["items"]} == {premium_session.id, empty_session.id}
+    assert {item["id"] for item in premium_list.json()["items"]} == {
+        premium_session.id,
+        premium_empty_session.id,
+        mixed_session.id,
+    }
     premium_item = next(item for item in premium_list.json()["items"] if item["id"] == premium_session.id)
     assert premium_item["latest_resource_group"]["key"] == "premium-session-list"
+    premium_mixed_item = next(item for item in premium_list.json()["items"] if item["id"] == mixed_session.id)
+    assert premium_mixed_item["latest_resource_group"]["key"] == "premium-session-list"
+    assert premium_mixed_item["latest_generated_asset"]["id"] == mixed_premium_asset.id
+    assert premium_mixed_item["rounds_count"] == 3
 
     all_list = client.get("/api/image-sessions")
     assert all_list.status_code == 200
@@ -221,6 +288,8 @@ def test_image_session_list_filters_by_selected_resource_group(configured_env: P
         default_session.id,
         premium_session.id,
         empty_session.id,
+        premium_empty_session.id,
+        mixed_session.id,
     }
 
 
@@ -262,15 +331,24 @@ def test_image_session_list_filters_by_owner_for_admin(configured_env: Path) -> 
     other_session = other_client.post("/api/image-sessions", json={"title": "B 用户会话"})
     assert other_session.status_code == 201
 
-    owner_filtered = admin_client.get("/api/image-sessions", params={"owner_user_id": owner_id})
+    owner_filtered = admin_client.get(
+        "/api/image-sessions",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "owner_user_id": owner_id},
+    )
     assert owner_filtered.status_code == 200
     assert {item["id"] for item in owner_filtered.json()["items"]} == {owner_session.json()["id"]}
 
-    other_filtered = admin_client.get("/api/image-sessions", params={"owner_user_id": other_id})
+    other_filtered = admin_client.get(
+        "/api/image-sessions",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "owner_user_id": other_id},
+    )
     assert other_filtered.status_code == 200
     assert {item["id"] for item in other_filtered.json()["items"]} == {other_session.json()["id"]}
 
-    non_admin_attempt = owner_client.get("/api/image-sessions", params={"owner_user_id": other_id})
+    non_admin_attempt = owner_client.get(
+        "/api/image-sessions",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "owner_user_id": other_id},
+    )
     assert non_admin_attempt.status_code == 200
     assert {item["id"] for item in non_admin_attempt.json()["items"]} == {owner_session.json()["id"]}
 
@@ -305,6 +383,60 @@ def test_image_session_create_validates_selected_resource_group(configured_env: 
         json={"resource_group_id": premium_group.id, "title": "管理员分组会话"},
     )
     assert admin_created.status_code == 201
+
+
+def test_image_session_generation_updates_current_resource_group(
+    configured_env: Path,
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    sent: list[str] = []
+    monkeypatch.setattr(
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
+        lambda task_id: sent.append(task_id),
+    )
+    premium_group = GenerationResourceGroup(key="premium-session-current", name="高阶当前归属分组", sort_order=30)
+    db_session.add(premium_group)
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/image-sessions",
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "title": "当前归属会话"},
+    )
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+
+    submitted = client.post(
+        f"/api/image-sessions/{session_id}/generate",
+        json={
+            "resource_group_id": premium_group.id,
+            "prompt": "用高阶分组提交",
+            "size": "1024x1024",
+        },
+    )
+    assert submitted.status_code == 202
+    assert sent == [submitted.json()["generation_tasks"][0]["id"]]
+
+    db_session.expire_all()
+    persisted = db_session.get(ImageSession, session_id)
+    assert persisted is not None
+    assert persisted.resource_group_id == premium_group.id
+
+    default_list = client.get("/api/image-sessions", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
+    assert default_list.status_code == 200
+    assert session_id not in {item["id"] for item in default_list.json()["items"]}
+
+    premium_list = client.get("/api/image-sessions", params={"resource_group_id": premium_group.id})
+    assert premium_list.status_code == 200
+    premium_item = next(item for item in premium_list.json()["items"] if item["id"] == session_id)
+    assert premium_item["latest_resource_group"]["key"] == "premium-session-current"
+    assert premium_item["rounds_count"] == 1
 
 
 def test_generation_config_options_use_runtime_rbac_without_settings_permission(configured_env: Path) -> None:
@@ -393,6 +525,7 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from inspiration_one_backend.domain.enums import JobStatus
     from inspiration_one_backend.presentation.api import create_app
 
     sent: list[str] = []
@@ -454,6 +587,28 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     assert duplicate_without_base.status_code == 400
     assert duplicate_without_base.json()["detail"] == "后续生图必须选择一张本会话已生成图片作为基图"
     assert sent == [task["id"]]
+
+    persisted.status = JobStatus.FAILED
+    persisted.failure_reason = "图片生成失败，请稍后重试"
+    persisted.finished_at = datetime.now(UTC)
+    db_session.commit()
+
+    sent.clear()
+    new_round_after_failure = client.post(
+        f"/api/image-sessions/{created.json()['id']}/generate",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "失败后开启新一轮",
+            "size": "1024x1024",
+        },
+    )
+    assert new_round_after_failure.status_code == 202
+    new_round_payload = new_round_after_failure.json()
+    assert len(new_round_payload["generation_tasks"]) == 2
+    new_task = next(item for item in new_round_payload["generation_tasks"] if item["prompt"] == "失败后开启新一轮")
+    assert new_task["id"] != task["id"]
+    assert new_task["base_asset_id"] is None
+    assert sent == [new_task["id"]]
 
 
 def test_first_queued_image_session_task_without_base_still_executes_if_later_task_exists(
@@ -821,6 +976,80 @@ def test_image_session_manual_retry_resets_failed_task_and_enqueues(
     assert task.is_retryable is True
 
 
+def test_image_session_generate_with_retry_task_updates_same_failed_task(
+    configured_env: Path,
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.presentation.api import create_app
+
+    sent: list[str] = []
+    monkeypatch.setattr(
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
+        lambda task_id: sent.append(task_id),
+    )
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post("/api/image-sessions", json={"title": "恢复配置提交"})
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+    submitted = client.post(
+        f"/api/image-sessions/{session_id}/generate",
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "prompt": "失败前配置", "size": "1024x1024"},
+    )
+    assert submitted.status_code == 202
+    task_id = submitted.json()["generation_tasks"][0]["id"]
+
+    db_session.expire_all()
+    task = db_session.get(ImageSessionGenerationTask, task_id)
+    assert task is not None
+    task.status = JobStatus.FAILED
+    task.failure_reason = "图片生成失败，请稍后重试"
+    task.finished_at = datetime.now(UTC)
+    task.result_generation_group_id = "failed-generation-group"
+    task.is_retryable = True
+    db_session.commit()
+
+    sent.clear()
+    retried = client.post(
+        f"/api/image-sessions/{session_id}/generate",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "恢复后调整提示词",
+            "size": "1536x1024",
+            "generation_count": 2,
+            "retry_generation_task_id": task_id,
+        },
+    )
+
+    assert retried.status_code == 202
+    payload = retried.json()
+    assert len(payload["generation_tasks"]) == 1
+    retry_payload = payload["generation_tasks"][0]
+    assert retry_payload["id"] == task_id
+    assert retry_payload["status"] == "queued"
+    assert retry_payload["prompt"] == "恢复后调整提示词"
+    assert retry_payload["size"] == "1536x1024"
+    assert retry_payload["generation_count"] == 2
+    assert retry_payload["failure_reason"] is None
+    assert retry_payload["result_generation_group_id"] == "failed-generation-group"
+    assert sent == [task_id]
+
+    db_session.expire_all()
+    tasks = db_session.query(ImageSessionGenerationTask).all()
+    assert len(tasks) == 1
+    persisted = tasks[0]
+    assert persisted.id == task_id
+    assert persisted.status == JobStatus.QUEUED
+    assert persisted.prompt == "恢复后调整提示词"
+    assert persisted.size == "1536x1024"
+    assert persisted.generation_count == 2
+    assert persisted.result_generation_group_id == "failed-generation-group"
+
+
 def test_image_session_manual_cancel_marks_active_task_cancelled_and_worker_noops(
     configured_env: Path,
     db_session,
@@ -1089,7 +1318,82 @@ def test_image_session_manual_retry_rejects_non_failed_task(
     assert retried.json()["detail"] == "只有失败的生成任务可以重试"
 
 
-def test_image_session_manual_retry_rejects_non_retryable_failed_task(
+def test_image_session_manual_retry_rejects_historical_failed_task(
+    configured_env: Path,
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.domain.enums import JobStatus
+    from inspiration_one_backend.presentation.api import create_app
+
+    sent: list[str] = []
+    monkeypatch.setattr(
+        "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
+        lambda task_id: sent.append(task_id),
+    )
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post("/api/image-sessions", json={"title": "历史失败不可恢复"})
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+    now = datetime.now(UTC)
+    old_failed = ImageSessionGenerationTask(
+        session_id=session_id,
+        status=JobStatus.FAILED,
+        prompt="旧失败",
+        size="1024x1024",
+        selected_reference_asset_ids=[],
+        tool_options=None,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        generation_count=1,
+        failure_reason="旧失败",
+        created_at=now - timedelta(minutes=2),
+        finished_at=now - timedelta(minutes=2),
+    )
+    latest_failed = ImageSessionGenerationTask(
+        session_id=session_id,
+        status=JobStatus.FAILED,
+        prompt="最新失败",
+        size="1024x1024",
+        selected_reference_asset_ids=[],
+        tool_options=None,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        generation_count=1,
+        failure_reason="最新失败",
+        created_at=now - timedelta(minutes=1),
+        finished_at=now - timedelta(minutes=1),
+    )
+    db_session.add_all([old_failed, latest_failed])
+    db_session.commit()
+
+    retried = client.post(f"/api/image-sessions/{session_id}/generation-tasks/{old_failed.id}/retry")
+
+    assert retried.status_code == 400
+    assert retried.json()["detail"] == "只能恢复最后一次失败的生成任务"
+    assert sent == []
+    db_session.expire_all()
+    persisted = db_session.get(ImageSessionGenerationTask, old_failed.id)
+    assert persisted is not None
+    assert persisted.status == JobStatus.FAILED
+
+    restored_submit = client.post(
+        f"/api/image-sessions/{session_id}/generate",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "尝试恢复旧失败",
+            "size": "1024x1024",
+            "retry_generation_task_id": old_failed.id,
+        },
+    )
+
+    assert restored_submit.status_code == 400
+    assert restored_submit.json()["detail"] == "只能恢复最后一次失败的生成任务"
+    assert sent == []
+
+
+def test_image_session_manual_retry_allows_failed_task_marked_non_auto_retry(
     configured_env: Path,
     db_session,
     monkeypatch: pytest.MonkeyPatch,
@@ -1130,8 +1434,18 @@ def test_image_session_manual_retry_rejects_non_retryable_failed_task(
 
     retried = client.post(f"/api/image-sessions/{session_id}/generation-tasks/{task_id}/retry")
 
-    assert retried.status_code == 400
-    assert retried.json()["detail"] == "该生成任务不可重试"
+    assert retried.status_code == 202
+    retry_payload = retried.json()["generation_tasks"][0]
+    assert retry_payload["id"] == task_id
+    assert retry_payload["status"] == "queued"
+    assert retry_payload["failure_reason"] is None
+    assert retry_payload["is_retryable"] is True
+    db_session.expire_all()
+    task = db_session.get(ImageSessionGenerationTask, task_id)
+    assert task is not None
+    assert task.status == JobStatus.QUEUED
+    assert task.failure_reason is None
+    assert task.is_retryable is True
 
 
 def test_image_session_manual_retry_enqueue_failure_keeps_task_retryable(
@@ -1296,7 +1610,7 @@ def test_image_session_worker_auto_retry_exposes_last_failure_metadata(
     assert sent == [result.task.id]
 
 
-def test_image_session_worker_non_retryable_policy_failure_stops_without_auto_retry(
+def test_image_session_worker_policy_failure_stops_without_auto_retry_but_allows_manual_retry(
     configured_env: Path,
     db_session,
     monkeypatch: pytest.MonkeyPatch,
@@ -1339,7 +1653,7 @@ def test_image_session_worker_non_retryable_policy_failure_stops_without_auto_re
     assert task is not None
     assert task.status == JobStatus.FAILED
     assert task.failure_reason == "图片供应商拒绝了本次内容或安全策略，请调整提示词或参考图后重试"
-    assert task.is_retryable is False
+    assert task.is_retryable is True
     assert task.attempts == 1
     assert sent == []
 
@@ -1347,11 +1661,12 @@ def test_image_session_worker_non_retryable_policy_failure_stops_without_auto_re
     client = TestClient(app)
     _login(client)
     retried = client.post(f"/api/image-sessions/{image_session.id}/generation-tasks/{task.id}/retry")
-    assert retried.status_code == 400
-    assert retried.json()["detail"] == "该生成任务不可重试"
+    assert retried.status_code == 202
+    assert retried.json()["generation_tasks"][0]["status"] == "queued"
+    assert sent == [task.id]
 
 
-def test_image_session_worker_non_retryable_parameter_failure_stops_without_auto_retry(
+def test_image_session_worker_parameter_failure_stops_without_auto_retry_but_allows_manual_retry(
     configured_env: Path,
     db_session,
     monkeypatch: pytest.MonkeyPatch,
@@ -1393,7 +1708,7 @@ def test_image_session_worker_non_retryable_parameter_failure_stops_without_auto
     assert task is not None
     assert task.status == JobStatus.FAILED
     assert task.failure_reason == "图片供应商参数不支持，请检查尺寸、模型或高级参数后重试"
-    assert task.is_retryable is False
+    assert task.is_retryable is True
     assert task.attempts == 1
     assert sent == []
 
@@ -2624,15 +2939,24 @@ def test_image_session_can_be_deleted_with_files(configured_env: Path, db_sessio
     deleted = client.delete(f"/api/image-sessions/{session_id}")
     assert deleted.status_code == 204
 
-    listed = client.get("/api/image-sessions")
+    listed = client.get(
+        "/api/image-sessions",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    )
     assert listed.status_code == 200
     assert all(item["id"] != session_id for item in listed.json()["items"])
 
-    admin_listed = admin_client.get("/api/image-sessions")
+    admin_listed = admin_client.get(
+        "/api/image-sessions",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    )
     assert admin_listed.status_code == 200
     assert all(item["id"] != session_id for item in admin_listed.json()["items"])
 
-    admin_listed_only_deleted = admin_client.get("/api/image-sessions", params={"only_deleted": True})
+    admin_listed_only_deleted = admin_client.get(
+        "/api/image-sessions",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "only_deleted": True},
+    )
     assert admin_listed_only_deleted.status_code == 200
     assert {item["id"] for item in admin_listed_only_deleted.json()["items"]} == {session_id}
     admin_session = admin_listed_only_deleted.json()["items"][0]

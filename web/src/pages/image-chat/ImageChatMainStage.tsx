@@ -1,7 +1,9 @@
 import { Layers3, Sparkles } from "lucide-react";
 
+import { SensitiveImageOverlay, sensitiveImageClassName } from "../../components/SensitiveImageMask";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
+import { shouldMaskSensitiveImage } from "../../lib/sensitiveImages";
 import type { ImageSessionGenerationTask, ImageSessionRound } from "../../lib/types";
 import type { ImageHistoryPlaceholderCandidate } from "./branching";
 import { GenerationCanvasPlaceholder } from "./GenerationCanvasPlaceholder";
@@ -15,6 +17,7 @@ interface ImageChatMainStageProps {
   retryingTaskId: string | null;
   cancellingTaskId: string | null;
   regenerating: boolean;
+  maskSensitiveImages: boolean;
   generationBlockedTitle?: string | null;
   onPreviewRound: (round: ImageSessionRound) => void;
   onRetryGenerationTask: (task: ImageSessionGenerationTask) => void;
@@ -30,6 +33,7 @@ export function ImageChatMainStage({
   retryingTaskId,
   cancellingTaskId,
   regenerating,
+  maskSensitiveImages,
   generationBlockedTitle = null,
   onPreviewRound,
   onRetryGenerationTask,
@@ -37,6 +41,8 @@ export function ImageChatMainStage({
   onRegenerateGenerationTask,
   t,
 }: ImageChatMainStageProps) {
+  const selectedImageMasked = shouldMaskSensitiveImage(maskSensitiveImages, selectedRound?.resource_group);
+
   return (
     <div className="relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-600/80 dark:bg-[#121b2d] dark:shadow-[0_0_0_1px_rgba(139,92,246,0.10),0_24px_80px_rgba(0,0,0,0.35)] sm:min-h-[22rem] lg:min-h-[360px]">
       <div className="absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:20px_20px] dark:bg-[radial-gradient(rgba(148,163,184,0.26)_1px,transparent_1px)]" />
@@ -69,7 +75,7 @@ export function ImageChatMainStage({
           <button
             type="button"
             onClick={() => onPreviewRound(selectedRound)}
-            className="flex h-full w-full items-center justify-center rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400"
+            className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400"
             aria-label={t("chat.previewCurrent")}
             title={t("chat.previewCurrent")}
           >
@@ -77,8 +83,13 @@ export function ImageChatMainStage({
               src={api.toApiUrl(selectedRound.generated_asset.preview_url)}
               alt={t("chat.currentResultAlt")}
               decoding="async"
-              className="max-h-full max-w-full object-contain drop-shadow-2xl"
+              className={sensitiveImageClassName(
+                selectedImageMasked,
+                "max-h-full max-w-full object-contain drop-shadow-2xl",
+                "strong",
+              )}
             />
+            <SensitiveImageOverlay masked={selectedImageMasked} label={t("common.sensitiveImageMasked")} intensity="strong" />
           </button>
         </div>
       ) : selectedPlaceholder ? (

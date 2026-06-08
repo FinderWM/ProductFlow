@@ -1,8 +1,10 @@
 import type { CSSProperties } from "react";
 import { Check, History, Layers3, Loader2, Sparkles } from "lucide-react";
 
+import { SensitiveImageOverlay, sensitiveImageClassName } from "../../components/SensitiveImageMask";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
+import { shouldMaskSensitiveImage } from "../../lib/sensitiveImages";
 import type { PromptPreview } from "../../components/PromptPreviewDialog";
 import type { ImageHistoryBranch, ImageHistoryCandidate } from "./branching";
 import type { ImageChatTranslate } from "./display";
@@ -14,6 +16,7 @@ interface HistoryBranchStripProps {
   selectedTaskPlaceholderId: string | null;
   branchBaseAssetId: string | null;
   variant?: "desktop" | "mobileDrawer";
+  maskSensitiveImages: boolean;
   onSelectRound: (assetId: string) => void;
   onSelectPlaceholder: (placeholderId: string) => void;
   onPreviewPrompt: (preview: PromptPreview) => void;
@@ -26,15 +29,18 @@ export function HistoryBranchStrip({
   selectedTaskPlaceholderId,
   branchBaseAssetId,
   variant = "desktop",
+  maskSensitiveImages,
   onSelectRound,
   onSelectPlaceholder,
   onPreviewPrompt,
   t,
 }: HistoryBranchStripProps) {
   const depthOffset = Math.min(branch.depth, 4) * 18;
-  const branchLabel = branch.base_asset_id ? t("chat.branch", { depth: branch.depth }) : t("chat.firstRound");
+  const branchIndex = branch.branch_index;
+  const isBranch = branchIndex !== null;
+  const branchLabel = isBranch ? t("chat.branch", { depth: branchIndex }) : t("chat.firstRound");
   const promptPreview = {
-    title: branch.base_asset_id ? t("chat.branchPrompt") : t("chat.firstPrompt"),
+    title: isBranch ? t("chat.branchPrompt") : t("chat.firstPrompt"),
     text: branch.prompt,
     meta: `${t("chat.imageCount", { count: branch.candidates.length })} · ${formatDateTime(branch.created_at)}`,
   };
@@ -43,7 +49,7 @@ export function HistoryBranchStrip({
     return (
       <div className="flex flex-col items-center gap-2">
         <div className="inline-flex min-h-7 max-w-[5.75rem] items-center gap-1 rounded-full border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-800 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100">
-          {branch.depth > 0 ? <Layers3 size={12} /> : <History size={12} />}
+          {isBranch ? <Layers3 size={12} /> : <History size={12} />}
           <span className="truncate">{branchLabel}</span>
         </div>
         <div className="flex flex-col gap-2">
@@ -55,6 +61,7 @@ export function HistoryBranchStrip({
               selectedTaskPlaceholderId={selectedTaskPlaceholderId}
               branchBaseAssetId={branchBaseAssetId}
               variant="mobileDrawer"
+              maskSensitiveImages={maskSensitiveImages}
               onSelectRound={onSelectRound}
               onSelectPlaceholder={onSelectPlaceholder}
               t={t}
@@ -76,7 +83,7 @@ export function HistoryBranchStrip({
       <div className="flex w-max items-center gap-1 px-0.5 text-[11px] text-slate-500 dark:text-slate-400 lg:hidden">
         <div className="flex min-w-0 items-center gap-1 rounded-full border border-slate-200 bg-white/86 px-1.5 py-0.5 shadow-sm dark:border-slate-700 dark:bg-[#0b1220]/88">
           <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 font-semibold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100">
-            {branch.depth > 0 ? <Layers3 size={12} /> : <History size={12} />}
+            {isBranch ? <Layers3 size={12} /> : <History size={12} />}
             {branchLabel}
           </span>
           <span className="pr-1">{t("chat.imageCount", { count: branch.candidates.length })}</span>
@@ -85,7 +92,7 @@ export function HistoryBranchStrip({
       <div className="hidden w-28 shrink-0 flex-col justify-between rounded-xl bg-white p-2 text-xs text-slate-500 ring-1 ring-slate-200 dark:bg-[#0b1220] dark:text-slate-400 dark:ring-slate-600/80 lg:flex">
         <div>
           <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-100">
-            {branch.depth > 0 ? <Layers3 size={12} /> : <History size={12} />}
+            {isBranch ? <Layers3 size={12} /> : <History size={12} />}
             {branchLabel}
           </div>
           <div className="mt-1">{t("chat.imageCount", { count: branch.candidates.length })}</div>
@@ -107,6 +114,7 @@ export function HistoryBranchStrip({
             selectedTaskPlaceholderId={selectedTaskPlaceholderId}
             branchBaseAssetId={branchBaseAssetId}
             variant={variant}
+            maskSensitiveImages={maskSensitiveImages}
             onSelectRound={onSelectRound}
             onSelectPlaceholder={onSelectPlaceholder}
             t={t}
@@ -123,6 +131,7 @@ interface HistoryCandidateCardProps {
   selectedTaskPlaceholderId: string | null;
   branchBaseAssetId: string | null;
   variant?: "desktop" | "mobileDrawer";
+  maskSensitiveImages: boolean;
   onSelectRound: (assetId: string) => void;
   onSelectPlaceholder: (placeholderId: string) => void;
   t: ImageChatTranslate;
@@ -134,6 +143,7 @@ function HistoryCandidateCard({
   selectedTaskPlaceholderId,
   branchBaseAssetId,
   variant = "desktop",
+  maskSensitiveImages,
   onSelectRound,
   onSelectPlaceholder,
   t,
@@ -182,6 +192,7 @@ function HistoryCandidateCard({
   const round = candidate.round;
   const active = round.generated_asset.id === selectedGeneratedAssetId;
   const asBase = round.generated_asset.id === branchBaseAssetId;
+  const imageMasked = shouldMaskSensitiveImage(maskSensitiveImages, round.resource_group);
   const candidateLabel =
     round.candidate_count > 1 ? `${round.candidate_index}/${round.candidate_count}` : imageRoundSizeLabel(round, t);
   return (
@@ -192,8 +203,9 @@ function HistoryCandidateCard({
           alt={variant === "mobileDrawer" ? candidateLabel : round.prompt}
           loading="lazy"
           decoding="async"
-          className="h-full w-full object-cover"
+          className={sensitiveImageClassName(imageMasked, "h-full w-full object-cover")}
         />
+        <SensitiveImageOverlay masked={imageMasked} label={t("common.sensitiveImageMasked")} />
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/80 via-slate-950/24 to-transparent px-1.5 pb-1 pt-5 text-white lg:p-1.5 lg:pt-8">
           <div className="flex items-center justify-between gap-2 text-[11px] font-medium">
             <span className="min-w-0 truncate">{candidateLabel}</span>

@@ -325,8 +325,10 @@ file paths, or tracebacks must fall back to the generic queue/provider failure d
     re-enqueue the task.
   - retryable failures after the cap is reached become `failed`, set `finished_at`, and remain `is_retryable=true` so the
     owning image session can expose a manual retry action.
-  - non-retryable provider rejections become `failed` immediately, set `finished_at`, and set `is_retryable=false`. This
-    includes content-policy/safety refusals, unsupported or invalid provider parameters, and explicit request rejections.
+  - provider rejections that are unsafe or wasteful to auto-retry, such as content-policy/safety refusals, unsupported or
+    invalid provider parameters, and explicit request rejections, become `failed` immediately and set `finished_at`, but
+    still remain manually retryable. The failure classification controls automatic retry only; a user clicking retry
+    should reuse the saved task prompt, size, references, group, and tool options instead of forcing a new setup.
   - a sanitized safe detail, generic detail, or partial-success `failure_reason` is stored only on the terminal failed
     state.
   - `completed_candidates` and `result_generation_group_id` must be preserved when at least one candidate was already
@@ -352,11 +354,11 @@ file paths, or tracebacks must fall back to the generic queue/provider failure d
 - Retryable provider/network failure before the retry cap -> task returns to `queued`, `failure_reason = null`,
   `progress_phase = "auto_retry_queued"`, and `progress_metadata.last_failure_reason` contains the safe user-facing
   reason.
-- Content-policy/safety refusal -> task `failed`, `is_retryable = false`, no automatic retry, and manual retry endpoint
-  returns `400` with `"该生成任务不可重试"`.
-- Unsupported provider parameter or actionable unsupported dimension -> task `failed`, `is_retryable = false`, no
+- Content-policy/safety refusal -> task `failed`, `is_retryable = true`, no automatic retry, and manual retry endpoint
+  accepts the same failed task ID.
+- Unsupported provider parameter or actionable unsupported dimension -> task `failed`, `is_retryable = true`, no
   automatic retry. Safe dimension details such as `"image2 不支持 64x64，最小尺寸为 512x512"` may keep the
-  `图片生成失败：...` prefix.
+  `图片生成失败：...` prefix, and manual retry reuses the saved task parameters.
 - Queued task consumed while global running capacity is full -> task remains `queued`, `attempts` stays unchanged,
   provider is not called, progress phase becomes a waiting-for-capacity state, and the task is re-enqueued with delay.
 - Partial failure after candidate 1 of 2 -> automatic retry preserves the existing generation group and resumes at
@@ -392,8 +394,8 @@ file paths, or tracebacks must fall back to the generic queue/provider failure d
   sanitized safe detail or generic safe reason as appropriate, and leaves `is_retryable=true`.
 - Worker test: retryable failure before the retry cap exposes `progress_metadata.last_failure_reason` while the task is
   queued for automatic retry.
-- Worker test: content-policy and unsupported-parameter failures stop immediately with `is_retryable=false` and do not
-  enqueue an automatic retry.
+- Worker test: content-policy and unsupported-parameter failures stop immediately without enqueuing an automatic retry,
+  but serialize as manually retryable and the manual retry route resets the same failed task to `queued`.
 - Worker test: wrapped provider exceptions still inspect the exception chain so rate limits, content-policy refusals,
   connection interruptions, provider 5xx errors, and unsupported-parameter failures do not collapse into the outer generic
   request-failure text.
