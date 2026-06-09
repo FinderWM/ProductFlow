@@ -191,7 +191,7 @@ For runtime settings:
   - `config_json: JSON object`
 - DB table: `generation_configs`
   - `id: String(36)`
-  - `resource_group_id: String(36) | null`
+  - `resource_group_id: String(36) | null` compatibility mirror for the first bound group
   - `purpose: "text" | "image"`
   - `name: String(120)`
   - `provider_kind: "mock" | "openai" | "openai_responses" | "openai_images" | "google_gemini_image"`
@@ -205,6 +205,12 @@ For runtime settings:
   - `failure_threshold: int`
   - `cooldown_minutes: int`
   - `archived_at: datetime | null`
+- DB table: `generation_config_resource_groups`
+  - primary key `(generation_config_id, resource_group_id)`
+  - `generation_config_id: String(36)` references `generation_configs.id` by application validation
+  - `resource_group_id: String(36)` references `generation_resource_groups.id` by application validation
+  - `created_at: datetime`
+  - ordinary index on `resource_group_id`
 - DB table: `generation_config_states`
   - `generation_config_id: String(36)` primary key referencing `generation_configs.id` by application validation
   - `current_concurrency: int`
@@ -270,20 +276,22 @@ For runtime settings:
   optional `gemini_output_mime_type`. Do not require or persist Responses background config for `openai_images`, Google
   Gemini, or `mock`.
 - `GET /api/settings/generation-config-options` requires a matching workbench/image-chat read permission or
-  `settings:read`. It returns only non-secret fields (`id`, `resource_group_id`, `purpose`, `name`, `provider_kind`,
-  `enabled`, `priority`, `frozen_until`) for workflow and image-chat selectors.
-- Settings create/update APIs may store `generation_configs.resource_group_id = null`. This means the config is
-  intentionally unbound in the settings workspace; it is not a fallback/default config for normal generation.
+  `settings:read`. It returns only non-secret fields (`id`, `resource_group_id`, `resource_group_ids`, `purpose`, `name`,
+  `provider_kind`, `enabled`, `priority`, `frozen_until`) for workflow and image-chat selectors.
+- Settings create/update APIs use `resource_group_ids: list[str]` as the owner field. Legacy `resource_group_id` is still
+  accepted when `resource_group_ids` is absent and response `resource_group_id` mirrors the first binding. Empty
+  `resource_group_ids` means the config is intentionally unbound in the settings workspace; it is not a fallback/default
+  config for normal generation.
 - `GET /api/settings/generation-config-status` requires `status:read`. It may receive `start_date=YYYY-MM-DD` and
   `end_date=YYYY-MM-DD`; when omitted, the range defaults to today's local stat date. The response must keep today's
   aggregate fields for compatibility, add selected-range totals, split text/image attempts by `GenerationConfig.purpose`,
   and return per-config `range_stat` values aggregated from `generation_config_daily_stats`.
-- Automatic scheduling filters by the selected group, then filters disabled, archived, frozen, over-capacity,
-  profile-disabled, and capability-incompatible configs before claiming capacity with a conditional DB update on
-  `generation_config_states.current_concurrency`. Unbound configs (`resource_group_id is null`) are excluded from
-  group-scoped automatic claims.
-- Manual scheduling targets the supplied config id but still respects enabled state, profile availability, freeze state,
-  and max concurrency. Capacity/freeze exhaustion returns `None` to keep durable tasks queued.
+- Automatic scheduling filters by the selected group through `generation_config_resource_groups`, then filters disabled,
+  archived, frozen, over-capacity, profile-disabled, and capability-incompatible configs before claiming capacity with a
+  conditional DB update on `generation_config_states.current_concurrency`. Unbound configs are excluded from group-scoped
+  automatic claims.
+- Manual scheduling targets the supplied config id but still respects selected-group membership, enabled state, profile
+  availability, freeze state, and max concurrency. Capacity/freeze exhaustion returns `None` to keep durable tasks queued.
 - Only real provider execution outcomes update `generation_config_daily_stats` and failure windows. Queue wait,
   validation errors, user cancellation, and missing inspiration/workflow references must not count as provider failures.
 - Daily stats use the running machine's local calendar date. Do not add a separate env-only timezone setting for stats.
@@ -320,6 +328,10 @@ For runtime settings:
   `400`.
 - Missing `responses_background_enabled` -> only `openai_responses` image bindings fail. `openai_images` and `mock` must
   not require that field.
+- `POST/PATCH /api/settings/generation-configs` with `resource_group_ids` present -> replace all group bindings and update
+  compatibility `resource_group_id` to the first binding or `null`.
+- `POST/PATCH /api/settings/generation-configs` with only legacy `resource_group_id` -> store zero or one group binding.
+- Manual config id with a selected group not present in the config's group bindings -> no runtime claim.
 
 ### 5. Good/Base/Bad Cases
 
@@ -329,12 +341,16 @@ For runtime settings:
   config per purpose.
 - Good: a Google Gemini profile has `provider_type="google_gemini"`, no `base_url`, capability
   `image_google_gemini`, and the image config stores `provider_kind="google_gemini_image"` plus Gemini-specific config.
+- Good: one image generation config can bind to `campaign` and `seasonal`; automatic claims for either group can select it
+  while claims for other groups cannot.
 - Base: default local development has mock text/image configs and no real provider profile.
 - Base: status pages read `generation_config_states` plus today's stats row; they do not scan historical usage events.
 - Bad: showing `text_api_key` or `image_api_key` in `/api/settings`.
 - Bad: constructing an OpenAI client from `get_runtime_settings().image_api_key`.
 - Bad: modeling Google Gemini as an OpenAI-compatible gateway or storing a Gemini custom endpoint in `base_url`.
 - Bad: letting a failed task remain running because release/update stats raised on naive-vs-aware datetime comparison.
+- Bad: filtering runtime candidates only by the compatibility `generation_configs.resource_group_id` field after
+  multi-group bindings exist.
 
 ### 6. Tests Required
 
@@ -345,6 +361,8 @@ For runtime settings:
 - Generation config validation test for required capabilities and active profile constraints.
 - Scheduler tests for priority selection, max concurrency, manual disabled/frozen/full config behavior, failure window,
   freeze count, stats counters, and SQLite naive datetime handling.
+- Scheduler tests cover one config bound to multiple resource groups and prove unbound configs are not automatic
+  group-scoped candidates.
 - Profile update test that active configs prevent removing required capabilities and disabling the profile.
 - Resolver test proving existing generation configs override stale legacy `app_settings` rows.
 - Resolver test proving missing binding/profile model settings do not fall back to stale legacy model rows or env values.
@@ -358,6 +376,8 @@ For runtime settings:
 - Provider payload test that `google_gemini_image` dispatches to the official `google-genai` client with text plus
   reference image parts, aspect-ratio mapping, sanitized request metadata, and generic provider errors.
 - Provider payload tests should set legacy provider kind explicitly when they rely on env bootstrap.
+- Migration/API tests cover `generation_config_resource_groups` creation, legacy `resource_group_id` backfill, create/update
+  with `resource_group_ids`, and import/export compatibility with both old and new fields.
 
 ### 7. Wrong vs Correct
 
@@ -421,7 +441,8 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   generation requests, image-session generation requests, generated-result serializers, settings import/export, or
   resource-group list filters/sensitive-image display metadata.
 - This is a cross-layer contract because `generation_resource_groups`, `generation_configs.resource_group_id`, account
-  grants, durable generation rows, API schemas, and frontend selectors must all agree on the selected group.
+  grants, `generation_config_resource_groups`, durable generation rows, API schemas, and frontend selectors must all agree
+  on the selected group.
 
 ### 2. Signatures
 
@@ -438,7 +459,8 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - DB table: `user_generation_resource_group_grants`
   - unique `(user_id, resource_group_id)`
 - DB columns:
-  - `generation_configs.resource_group_id: String(36) | null`
+  - `generation_configs.resource_group_id: String(36) | null` compatibility mirror for the first config binding
+  - `generation_config_resource_groups.(generation_config_id, resource_group_id)` stores actual config-to-group bindings
   - generated-result rows that are shown or filtered by group carry nullable `resource_group_id`; legacy null values
     display as the built-in default group.
 - API:
@@ -460,7 +482,7 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - `ensure_provider_config_bootstrapped(session)` must ensure the built-in `default` group exists before creating or
   backfilling generation configs.
 - Existing provider profiles and text/image generation configs belong to the `default` group during migration/bootstrap.
-- Settings users may leave a text/image generation config unbound or clear its group later. Unbound configs stay visible
+- Settings users may leave a text/image generation config unbound or clear all of its groups later. Unbound configs stay visible
   in settings/status APIs but are not candidates for group-scoped generation scheduling.
 - Admin users can use every enabled, non-archived group. Non-admin users can use only enabled, non-archived groups granted
   through `user_generation_resource_group_grants`.
@@ -477,18 +499,18 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   field for image-session list filtering and displayed list group. New generation submissions and restored failed-task
   submissions overwrite that session field with the selected group before enqueue. Historical task/round group fields stay
   as archive metadata only; they must not make a session appear in multiple concrete group filters.
-- Text scheduling can claim only text configs in the selected group; image scheduling can claim only image configs in the
-  selected group. Provider/profile availability, freeze state, and concurrency checks still apply inside that group.
-  Unbound configs must not be used as implicit fallback configs for any selected group.
+- Text scheduling can claim only text configs with a binding for the selected group; image scheduling can claim only image
+  configs with a binding for the selected group. Provider/profile availability, freeze state, and concurrency checks still
+  apply inside that group. Unbound configs must not be used as implicit fallback configs for any selected group.
 - Generated briefs, copy sets, poster variants, workflow node runs, image-session tasks, image-session rounds, and gallery
   entries must serialize a group tag. If a legacy row has `resource_group_id is None`, serializers and default-group
   filters treat it as `default`. Image-session list summaries serialize their list tag from `ImageSession.resource_group_id`;
   task/round tags remain historical display data.
 - List filters are optional and single-select. Omitted or blank `resource_group_id` means no group filtering; a concrete
   group id must still be validated for existence, enabled/not-archived status, and actor authorization before filtering.
-- Settings import/export documents include `generation_resource_groups`. Imported generation configs must reference an
-  imported group, explicitly set `resource_group_id: null` for unbound configs, or fall back to `default` only for legacy
-  payloads that omit the field entirely.
+- Settings import/export documents include `generation_resource_groups` and generation config `resource_group_ids`.
+  Imported generation configs prefer `resource_group_ids`, fall back to legacy `resource_group_id` when the list field is
+  absent, and may explicitly use an empty list for unbound configs.
 - `generation_resource_groups.blur_images_by_default` is display metadata for list thumbnails. Settings create/update and
   import/export must preserve it; serializers for group tags must include it so frontend list rows can decide per item.
 - `user_ui_preferences` stores account-level visual preferences. Sensitive-image fields default to `true` for both
@@ -509,9 +531,11 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   the selected group stays recorded on the task/run.
 - `default` group archive or disable attempt -> settings API returns `400`.
 - Imported generation config references a missing group id -> import preview/commit returns `400`.
-- Settings `PATCH /api/settings/generation-configs/{id}` omits `resource_group_id` -> keep the existing group.
-- Settings `PATCH /api/settings/generation-configs/{id}` sends `resource_group_id: null` -> clear the group and persist
-  `NULL`.
+- Settings `PATCH /api/settings/generation-configs/{id}` omits both group fields -> keep the existing bindings.
+- Settings `PATCH /api/settings/generation-configs/{id}` sends `resource_group_ids: []` -> clear bindings and persist
+  compatibility `resource_group_id = NULL`.
+- Settings `PATCH /api/settings/generation-configs/{id}` sends only legacy `resource_group_id: null` -> clear bindings for
+  compatibility clients.
 - Settings group create omits `blur_images_by_default` -> persist `false`.
 - Settings group patch omits `blur_images_by_default` -> keep the existing value.
 - Settings import payload omits `generation_resource_groups[].blur_images_by_default` for legacy documents -> import as
@@ -523,7 +547,9 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 ### 5. Good/Base/Bad Cases
 
 - Good: a non-admin account granted `campaign` can generate image-chat rounds with `resource_group_id=campaign`, and the
-  scheduler claims only image configs whose `resource_group_id` is `campaign`.
+  scheduler claims only image configs whose bindings include `campaign`.
+- Good: one text config bound to both `campaign` and `default` appears in both settings group tabs and can be claimed by
+  either selected group.
 - Good: an admin sees `default` plus every other enabled group in `/api/settings/my-generation-resource-groups`.
 - Good: a higher `sort_order` group appears before lower-priority groups in settings, RBAC grants, generation entry
   selectors, gallery filters, and inspiration filters because those surfaces use API order.
@@ -544,12 +570,13 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 
 - Migration/bootstrap test creates `default`, backfills existing generation configs, and preserves legacy result display.
 - Settings API tests cover create/update/archive groups, default-group protection, import/export counts, and generation
-  config group assignment, including `blur_images_by_default` defaulting and round-trip preservation.
+  config multi-group assignment, including `blur_images_by_default` defaulting and round-trip preservation.
 - RBAC tests cover admin all-groups behavior and account-level grant replacement for non-admin users.
 - Scheduler tests cover purpose plus group filtering for automatic claims and manual config compatibility.
 - Group list tests cover descending `sort_order` for full/admin/user group APIs and verify RBAC user serialization
   preserves that API order.
-- Settings/update tests cover omitted group preserving the existing value and explicit `null` clearing the group.
+- Settings/update tests cover omitted group fields preserving existing config bindings, `resource_group_ids` replacing all
+  bindings, and legacy `resource_group_id: null` clearing the bindings.
 - Workflow and image-session tests cover missing, unauthorized, disabled, archived, and valid group selection.
 - Serializer/filter tests cover inspiration list/history, workflow status/detail, image-session list/detail/status, and
   gallery group tags, including omitted-filter all rows and default-filter legacy null rows.

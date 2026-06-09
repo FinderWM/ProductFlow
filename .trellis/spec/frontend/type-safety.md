@@ -277,9 +277,9 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   copy before download.
 - `generation_resource_groups` is the provider/generation grouping payload. It includes `id`, `key`, `name`,
   `description`, `sort_order`, `enabled`, `archived_at`, `created_at`, and `updated_at`.
-- `generation_configs` is the runtime provider-selection payload. It includes `resource_group_id`, `purpose`, `name`,
-  `provider_kind`, `provider_profile_id`, `model_settings`, `config`, `priority`, `max_concurrency`, `enabled`,
-  `availability_window_minutes`, `failure_threshold`, and `cooldown_minutes`.
+- `generation_configs` is the runtime provider-selection payload. It includes `resource_group_ids`, compatibility
+  `resource_group_id`, `purpose`, `name`, `provider_kind`, `provider_profile_id`, `model_settings`, `config`, `priority`,
+  `max_concurrency`, `enabled`, `availability_window_minutes`, `failure_threshold`, and `cooldown_minutes`.
 - `provider_bindings` is compatibility data only. New UI and workflow/image-chat selectors should read
   `generation_configs` or `generation-config-options`.
 - `canvas_template_categories` and `canvas_templates` mirror backend export rows and preserve backend `snake_case` fields,
@@ -293,13 +293,18 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   `['config']`, `['provider-config']`, `['runtime-config']`, `['canvas-templates']`, and
   `['canvas-template-categories']`.
 - `GET /api/settings/generation-config-options` requires backend RBAC and intentionally returns only non-secret selection
-  fields: `id`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`, `frozen_until`.
+  fields: `id`, `resource_group_id`, `resource_group_ids`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`,
+  `frozen_until`.
 - `GET /api/settings/generation-config-status` requires `status:read` and accepts optional `start_date` / `end_date`
   query parameters in backend `YYYY-MM-DD` stat-date format. Keep `today_*` fields as today's local stat bucket, use
   `range_*` fields for the selected date range, and render per-config `range_stat` instead of recalculating stats from
   frontend history.
 - Workflow and image-chat request DTOs preserve backend snake_case fields. User-facing generation submits
   `resource_group_id`; normal image-chat submits `generation_config_mode: "auto"` and `generation_config_id: null`.
+- SettingsPage generation config drafts use `resource_group_ids: string[]` as the source of truth. Payload helpers include
+  both `resource_group_ids` and compatibility `resource_group_id: resource_group_ids[0] ?? null`.
+- Frontend helpers may fall back from missing/empty `resource_group_ids` to legacy `resource_group_id` only when reading
+  backend or imported legacy rows. New exports and save payloads must include `resource_group_ids`.
 
 #### 4. Validation & Error Matrix
 - Invalid JSON file -> SettingsPage shows a local invalid-file error before calling the API.
@@ -307,8 +312,10 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
 - User cancels export/import confirmation -> do not call the API.
 - Successful import -> invalidate settings/runtime/session queries so UI reflects the imported values.
 - Export payload missing `generation_resource_groups` -> local payload validation rejects the file before preview.
-- Missing `resource_group_id` in generation config export rows -> backend import handles only legacy payloads; frontend
-  current exports must include it.
+- Missing both `resource_group_ids` and legacy `resource_group_id` in generation config export rows -> backend import treats
+  the config as legacy/unbound according to backend rules; frontend current exports must include `resource_group_ids`.
+- `resource_group_ids: []` in generation config rows -> render as unbound in SettingsPage and preserve an empty list when
+  saving.
 
 #### 5. Good/Base/Bad Cases
 - Good: export downloads exactly the typed backend payload, including `generation_resource_groups` and
@@ -317,18 +324,26 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
 - Good: preview with `includes_api_keys=true` shows sensitive-file warning before commit.
 - Good: SettingsPage config cards use group DTOs for assignment, while image-chat generation uses only account-available
   group DTOs.
+- Good: a SettingsPage generation config card can check both `default` and `campaign`; save payload contains
+  `resource_group_ids: ["default-id", "campaign-id"]` plus compatibility `resource_group_id: "default-id"`.
+- Good: reading a legacy config with only `resource_group_id: "default-id"` derives `resource_group_ids: ["default-id"]`
+  for the draft.
 - Base: import file contains `mock` generation configs and no provider API keys.
 - Bad: adding `admin_access_required` back to `RuntimeConfig` or SettingsPage security controls.
 - Bad: frontend reads `preview.metadata.summary` when backend returns flat preview fields.
 - Bad: converting DTO fields to camelCase in `types.ts` without an explicit API mapping layer.
 - Bad: reusing provider profile DTOs for generation config selectors and accidentally exposing `api_key`.
 - Bad: showing concrete generation-config choices in image-chat normal generation after groups are available.
+- Bad: using only `resource_group_id` in SettingsPage filters or save payloads after multi-group config bindings are
+  supported.
 
 #### 6. Tests Required
 - SettingsPage tests for export confirmation and generated JSON download path.
 - SettingsPage tests for import preview summary, API-key warning, commit confirmation, and query invalidation.
 - Helper tests proving workflow/image-chat payloads round-trip `resource_group_id`; image-chat normal generation keeps
   `generation_config_mode: "auto"` and `generation_config_id: null`.
+- SettingsPage helper tests prove `resource_group_ids` payload construction, multi-group tab filtering/counting, unbound
+  empty-list handling, and legacy `resource_group_id` fallback.
 - `pnpm --dir web build` after any settings migration DTO change.
 
 #### 7. Wrong vs Correct
@@ -359,6 +374,19 @@ Correct:
 generation_config_id: selectedConfigId
 ```
 
+Wrong:
+
+```ts
+resource_group_id: draft.resource_group_id
+```
+
+Correct:
+
+```ts
+resource_group_id: draft.resource_group_ids[0] ?? null,
+resource_group_ids: draft.resource_group_ids,
+```
+
 ---
 
 ### Scenario: Generation resource group frontend DTOs
@@ -375,6 +403,8 @@ generation_config_id: selectedConfigId
   - `GenerationResourceGroupTag` includes `blur_images_by_default: boolean`.
   - `GenerationResourceGroupCreateRequest` may include `blur_images_by_default?: boolean`.
   - `GenerationResourceGroupUpdateRequest` may include `blur_images_by_default?: boolean | null`.
+  - `GenerationConfig`, `GenerationConfigOption`, `GenerationConfigStatus`, and `SettingsGenerationConfigExport` include
+    `resource_group_ids: string[]` plus compatibility `resource_group_id?: string | null`.
   - `UserGenerationResourceGroupGrants`
 - API methods in `web/src/lib/api.ts`:
   - `listGenerationResourceGroups()`
@@ -389,7 +419,9 @@ generation_config_id: selectedConfigId
 - Settings export/import DTOs that carry `generation_resource_groups` preserve `blur_images_by_default`.
 
 #### 3. Contracts
-- SettingsPage owns group CRUD and generation config group assignment. Mutations invalidate `['provider-config']`,
+- SettingsPage owns group CRUD and generation config group assignment. Generation config assignment is multi-select:
+  settings filters and counts use `resource_group_ids.includes(group.id)`, while the unbound tab uses
+  `resource_group_ids.length === 0`. Mutations invalidate `['provider-config']`,
   `['my-generation-resource-groups']`, `['generation-config-options']`, and generation status queries when relevant.
 - RBAC page uses the full group list for admin grant editing and account grant replacement. Admin users render a read-only
   group-grant panel because backend grants all enabled groups automatically.
@@ -409,6 +441,8 @@ generation_config_id: selectedConfigId
   `resource_group_id`.
 - Generated result cards, previews, node-run rows, and history entries should display `resource_group.name` from the DTO.
   Do not derive labels from config ids or provider names.
+- Runtime resources such as inspirations, image sessions, workflow node runs, rounds, and gallery entries stay single-group
+  DTOs with one `resource_group_id`; only generation provider configs use `resource_group_ids`.
 - Sensitive-image masking uses `shouldMaskSensitiveImage(personalMaskEnabled, row.resource_group)`: return true only when
   the personal list preference is enabled and that row's `resource_group.blur_images_by_default` is true.
 - Personal sensitive-image preferences are account-level server DTOs in `UserUiPreferences`, loaded through
@@ -427,6 +461,8 @@ generation_config_id: selectedConfigId
   group-required message.
 - Selected group disappears, becomes disabled, or is archived after refetch -> page resets to the first enabled group or
   clears selection.
+- SettingsPage generation config draft with no checked groups -> save an empty `resource_group_ids` list and show the config
+  only in the unbound settings tab.
 - Generation submit without selected group -> page shows local validation and does not call the API.
 - Gallery/image-session-list/inspiration-history "all groups" selected -> omit `resource_group_id`; selected group ->
   include the exact id.
@@ -441,6 +477,8 @@ generation_config_id: selectedConfigId
 - Good: inspiration history, image-session list, and gallery filter options keep "所有分组" but initially select the first
   concrete group returned by `activeGenerationResourceGroupsInApiOrder`.
 - Good: SettingsPage can create a group, then generation config cards assign text/image configs to that group.
+- Good: SettingsPage can assign a text/image generation config to multiple groups with checkboxes; each selected group tab
+  shows and counts that config.
 - Good: SettingsPage can enable `blur_images_by_default` for a group, and inspiration/image-chat lists mask only rows
   whose own `resource_group.blur_images_by_default` is true while the page preference is enabled.
 - Good: image-chat center current-result masking uses the same selected round `resource_group` predicate as history
@@ -450,13 +488,16 @@ generation_config_id: selectedConfigId
 - Bad: a list filter defaults to the all-groups option when at least one concrete active group is available.
 - Bad: image-chat exposes `GenerationConfigOption` or provider profile details in the normal submit UI.
 - Bad: a gallery card renders group text by checking `resource_group_id === defaultId` in the component.
+- Bad: treating `GenerationConfig.resource_group_id` as the source of truth for SettingsPage group tabs after
+  `resource_group_ids` exists.
 - Bad: using the selected filter group to decide masking for every visible list item.
 - Bad: applying sensitive-image masking to gallery cards without a new gallery-specific requirement and tests.
 - Bad: showing a text label such as "已遮罩" inside the mask overlay.
 - Bad: using the thumbnail-strength mask on the image-chat center current-result image.
 
 #### 6. Tests Required
-- SettingsPage tests cover group payloads, import/export counts, and generation config `resource_group_id`.
+- SettingsPage tests cover group payloads, import/export counts, generation config `resource_group_ids`, and legacy
+  `resource_group_id` fallback.
 - Image-chat helper tests include `resource_group_id` in submit signatures, task placeholders, and regenerate payloads.
 - InspirationDetail workflow config tests round-trip node `resource_group_id` and keep generated config mode automatic.
 - Gallery/inspiration-history tests cover filter query params and required `resource_group` result tags.
