@@ -482,6 +482,47 @@ describe("SettingsPage provider profile helpers", () => {
     });
   });
 
+  it("builds OpenAI Chat image generation config payloads without Images or Responses config", () => {
+    expect(
+      generationConfigPayloadFromDraft({
+        id: null,
+        resource_group_id: "group-default",
+        purpose: "image",
+        name: "Packy Banana",
+        provider_kind: "openai_chat_image",
+        provider_profile_id: "profile-packy",
+        brief_model: "",
+        copy_model: "",
+        model: " gemini-3-pro-image-preview-16-9-4K ",
+        images_quality: "high",
+        images_style: "vivid",
+        responses_background_enabled: true,
+        gemini_api_version: "v1beta",
+        gemini_output_mime_type: " image/png ",
+        priority: "80",
+        max_concurrency: "2",
+        enabled: true,
+        availability_window_minutes: "15",
+        failure_threshold: "4",
+        cooldown_minutes: "20",
+      }),
+    ).toEqual({
+      resource_group_id: "group-default",
+      name: "Packy Banana",
+      purpose: "image",
+      provider_kind: "openai_chat_image",
+      provider_profile_id: "profile-packy",
+      model_settings: { model: "gemini-3-pro-image-preview-16-9-4K" },
+      config: {},
+      priority: 80,
+      max_concurrency: 2,
+      enabled: true,
+      availability_window_minutes: 15,
+      failure_threshold: 4,
+      cooldown_minutes: 20,
+    });
+  });
+
   it("builds text generation config payloads with text models only", () => {
     expect(
       generationConfigPayloadFromDraft({
@@ -616,11 +657,15 @@ describe("SettingsPage provider profile helpers", () => {
   });
 
   it("localizes Google Gemini provider labels", () => {
+    expect(translate("zh-CN", "settings.provider.capability.imageChat")).toBe("Chat Completions 图片");
+    expect(translate("zh-CN", "settings.provider.interface.openaiChatImage")).toBe("OpenAI Chat 图片");
     expect(translate("zh-CN", "settings.provider.capability.imageGoogleGemini")).toBe("Google Gemini 图片");
     expect(translate("zh-CN", "settings.provider.type.googleGemini")).toBe("Google Gemini");
     expect(translate("zh-CN", "settings.provider.interface.googleGeminiImage")).toBe(
       "Google Gemini Image (未实测)",
     );
+    expect(translate("en-US", "settings.provider.capability.imageChat")).toBe("Chat Completions image");
+    expect(translate("en-US", "settings.provider.interface.openaiChatImage")).toBe("OpenAI Chat Image");
     expect(translate("en-US", "settings.provider.capability.imageGoogleGemini")).toBe("Google Gemini image");
     expect(translate("en-US", "settings.provider.type.googleGemini")).toBe("Google Gemini");
     expect(translate("en-US", "settings.provider.interface.googleGeminiImage")).toBe(

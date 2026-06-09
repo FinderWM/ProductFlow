@@ -207,7 +207,12 @@ interface TextGenerationConfigTestMutationInput {
 }
 
 type TextProviderKind = "mock" | "openai";
-type ImageProviderKind = "mock" | "openai_responses" | "openai_images" | "google_gemini_image";
+type ImageProviderKind =
+  | "mock"
+  | "openai_responses"
+  | "openai_images"
+  | "openai_chat_image"
+  | "google_gemini_image";
 type ProviderModelKind = TextProviderKind | ImageProviderKind;
 
 const INPUT_CLASS =
@@ -351,6 +356,7 @@ const PROVIDER_CAPABILITY_OPTIONS: Array<{ value: ProviderCapability; labelKey: 
   { value: "text_responses", labelKey: "settings.provider.capability.textResponses" },
   { value: "image_responses", labelKey: "settings.provider.capability.imageResponses" },
   { value: "image_images", labelKey: "settings.provider.capability.imageImages" },
+  { value: "image_chat", labelKey: "settings.provider.capability.imageChat" },
   { value: "image_google_gemini", labelKey: "settings.provider.capability.imageGoogleGemini" },
 ];
 
@@ -699,6 +705,7 @@ function generationConfigDraft(config: GenerationConfig): GenerationConfigDraft 
         : "mock"
       : config.provider_kind === "openai_responses" ||
           config.provider_kind === "openai_images" ||
+          config.provider_kind === "openai_chat_image" ||
           config.provider_kind === "google_gemini_image"
         ? config.provider_kind
         : "mock";
@@ -2498,6 +2505,8 @@ function providerProfilesForGenerationConfig(
       ? "text_responses"
       : draft.provider_kind === "openai_responses"
         ? "image_responses"
+        : draft.provider_kind === "openai_chat_image"
+          ? "image_chat"
         : draft.provider_kind === "google_gemini_image"
           ? "image_google_gemini"
           : "image_images";
@@ -2808,6 +2817,7 @@ function GenerationConfigCard({
           { value: "mock", label: t("settings.provider.interface.mock") },
           { value: "openai_responses", label: t("settings.provider.interface.openaiResponses") },
           { value: "openai_images", label: t("settings.provider.interface.openaiImages") },
+          { value: "openai_chat_image", label: t("settings.provider.interface.openaiChatImage") },
           { value: "google_gemini_image", label: t("settings.provider.interface.googleGeminiImage") },
         ];
   const busy = pending;
@@ -2974,7 +2984,10 @@ function GenerationConfigCard({
                     ? value === "openai"
                       ? "openai"
                       : "mock"
-                    : value === "openai_responses" || value === "openai_images" || value === "google_gemini_image"
+                    : value === "openai_responses" ||
+                        value === "openai_images" ||
+                        value === "openai_chat_image" ||
+                        value === "google_gemini_image"
                       ? value
                       : "mock",
                 provider_profile_id: "",
@@ -3099,6 +3112,7 @@ function GenerationConfigImageFields({
         providerKind={
           draft.provider_kind === "openai_responses" ||
           draft.provider_kind === "openai_images" ||
+          draft.provider_kind === "openai_chat_image" ||
           draft.provider_kind === "google_gemini_image"
             ? draft.provider_kind
             : "mock"

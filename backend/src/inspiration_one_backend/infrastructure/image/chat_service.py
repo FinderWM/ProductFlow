@@ -17,6 +17,10 @@ from inspiration_one_backend.infrastructure.image.gemini_provider import (
     GoogleGeminiReferenceImage,
 )
 from inspiration_one_backend.infrastructure.image.images_provider import ImagesReferenceImage, OpenAIImagesClient
+from inspiration_one_backend.infrastructure.image.openai_chat_provider import (
+    ChatCompletionsImageResult,
+    OpenAIChatImageClient,
+)
 from inspiration_one_backend.infrastructure.image.responses_provider import (
     OpenAIResponsesImageClient,
     ResponsesReferenceImage,
@@ -108,6 +112,14 @@ class ImageChatService:
             )
         if self.provider_kind == "openai_images":
             return self._generate_openai_images(
+                prompt=prompt,
+                size=size,
+                history=history,
+                manual_reference_images=manual_reference_images,
+                tool_options=tool_options,
+            )
+        if self.provider_kind == "openai_chat_image":
+            return self._generate_openai_chat_image(
                 prompt=prompt,
                 size=size,
                 history=history,
@@ -357,6 +369,50 @@ class ImageChatService:
             size=size,
             generated_at=result.generated_at,
             provider_response_id=None,
+            previous_response_id=None,
+            image_generation_call_id=None,
+            provider_request_json=result.provider_request_json,
+            provider_output_json=result.provider_output_json,
+        )
+
+    def _generate_openai_chat_image(
+        self,
+        prompt: str,
+        size: str,
+        history: list[ImageChatTurn],
+        manual_reference_images: list[str],
+        tool_options: dict | None,
+    ) -> GeneratedChatImage:
+        client = OpenAIChatImageClient(self.provider_config)
+        full_prompt = self._build_prompt(prompt=prompt, history=history, size=size)
+        result = client.generate_image(
+            prompt=full_prompt,
+            size=size,
+            reference_images=self._collect_images_api_references(history, manual_reference_images),
+            model=self._openai_chat_model_option(tool_options),
+        )
+        return self._chat_image_from_openai_chat_result(result, size=size)
+
+    def _openai_chat_model_option(self, tool_options: dict | None) -> str | None:
+        if not isinstance(tool_options, dict):
+            return None
+        return self._optional_tool_text(tool_options.get("model"))
+
+    def _chat_image_from_openai_chat_result(
+        self,
+        result: ChatCompletionsImageResult,
+        *,
+        size: str,
+    ) -> GeneratedChatImage:
+        return GeneratedChatImage(
+            bytes_data=result.bytes_data,
+            mime_type=result.mime_type,
+            model_name=result.model_name,
+            provider_name=result.provider_name,
+            prompt_version=self.prompt_version,
+            size=size,
+            generated_at=result.generated_at,
+            provider_response_id=result.provider_response_id,
             previous_response_id=None,
             image_generation_call_id=None,
             provider_request_json=result.provider_request_json,

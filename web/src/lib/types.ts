@@ -1028,7 +1028,12 @@ export interface UserUiPreferencesUpdateRequest {
   mask_sensitive_images_in_image_chat?: boolean | null;
 }
 
-export type ProviderCapability = "text_responses" | "image_responses" | "image_images" | "image_google_gemini";
+export type ProviderCapability =
+  | "text_responses"
+  | "image_responses"
+  | "image_images"
+  | "image_chat"
+  | "image_google_gemini";
 export type ProviderPurpose = "text" | "image";
 export type ProviderType = "openai_compatible" | "google_gemini";
 

@@ -30,17 +30,19 @@ PROVIDER_TYPE_GOOGLE_GEMINI = "google_gemini"
 PROVIDER_TYPES = {PROVIDER_TYPE_OPENAI_COMPATIBLE, PROVIDER_TYPE_GOOGLE_GEMINI}
 
 TEXT_PROVIDER_KINDS = {"mock", "openai"}
-IMAGE_PROVIDER_KINDS = {"mock", "openai_responses", "openai_images", "google_gemini_image"}
+IMAGE_PROVIDER_KINDS = {"mock", "openai_responses", "openai_images", "openai_chat_image", "google_gemini_image"}
 REAL_IMAGE_PROVIDER_KINDS = IMAGE_PROVIDER_KINDS - {"mock"}
 PROVIDER_PURPOSES = {TEXT_PURPOSE, IMAGE_PURPOSE}
 CAPABILITY_TEXT_RESPONSES = "text_responses"
 CAPABILITY_IMAGE_RESPONSES = "image_responses"
 CAPABILITY_IMAGE_IMAGES = "image_images"
+CAPABILITY_IMAGE_CHAT = "image_chat"
 CAPABILITY_IMAGE_GOOGLE_GEMINI = "image_google_gemini"
 PROVIDER_CAPABILITIES = {
     CAPABILITY_TEXT_RESPONSES,
     CAPABILITY_IMAGE_RESPONSES,
     CAPABILITY_IMAGE_IMAGES,
+    CAPABILITY_IMAGE_CHAT,
     CAPABILITY_IMAGE_GOOGLE_GEMINI,
 }
 UNSET_PROVIDER_FIELD = object()
@@ -86,7 +88,7 @@ class ResolvedTextProviderConfig:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedImageProviderConfig:
-    provider_kind: Literal["mock", "openai_responses", "openai_images", "google_gemini_image"]
+    provider_kind: Literal["mock", "openai_responses", "openai_images", "openai_chat_image", "google_gemini_image"]
     model: str
     provider_profile_id: str | None = None
     api_key: str | None = None
@@ -209,8 +211,8 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
             commit=False,
         )
 
-    if image_kind in {"openai_responses", "openai_images"}:
-        image_capability = CAPABILITY_IMAGE_RESPONSES if image_kind == "openai_responses" else CAPABILITY_IMAGE_IMAGES
+    if image_kind in {"openai_responses", "openai_images", "openai_chat_image"}:
+        image_capability = _capability_for_kind(image_kind)
         image_profile = _profile_for_legacy_connection(
             session,
             profiles_by_connection,
@@ -1144,7 +1146,7 @@ def _resolved_image_provider_config_from_generation_config(
             generation_config_id=generation_config.id,
             generation_config_name=generation_config.name,
         )
-    if kind not in {"openai_responses", "openai_images", "google_gemini_image"}:
+    if kind not in {"openai_responses", "openai_images", "openai_chat_image", "google_gemini_image"}:
         raise RuntimeError(f"暂不支持的图片 provider: {kind}")
     profile = _require_active_profile_for_config(generation_config)
     _require_capability(profile, _capability_for_kind(kind))
@@ -1705,6 +1707,8 @@ def _capability_for_kind(provider_kind: str) -> str:
         return CAPABILITY_IMAGE_RESPONSES
     if provider_kind == "openai_images":
         return CAPABILITY_IMAGE_IMAGES
+    if provider_kind == "openai_chat_image":
+        return CAPABILITY_IMAGE_CHAT
     if provider_kind == "google_gemini_image":
         return CAPABILITY_IMAGE_GOOGLE_GEMINI
     raise ValueError("供应商接口类型不支持真实供应商档案")

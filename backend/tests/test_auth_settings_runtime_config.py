@@ -1297,6 +1297,72 @@ def test_provider_config_supports_google_gemini_profiles_bindings_and_import(con
     assert preview.json()["provider_profile_count"] >= 1
 
 
+def test_provider_config_supports_openai_chat_image_profiles_and_bindings(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Packy Banana",
+            "provider_type": "openai_compatible",
+            "base_url": "https://www.packyapi.com",
+            "api_key": "packy-secret-key",
+            "capabilities": ["image_chat"],
+            "default_models": {"image_model": "gemini-3-pro-image-preview-16-9-4K"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    profile = created.json()
+    profile_id = profile["id"]
+    assert profile["provider_type"] == "openai_compatible"
+    assert profile["capabilities"] == ["image_chat"]
+    assert "packy-secret-key" not in str(profile)
+
+    rejected_binding = client.patch(
+        "/api/settings/provider-bindings/image",
+        json={
+            "provider_kind": "openai_images",
+            "provider_profile_id": profile_id,
+            "model_settings": {"model": "gpt-image-1"},
+            "config": {},
+        },
+    )
+    assert rejected_binding.status_code == 400
+    assert "不支持当前接口能力" in rejected_binding.json()["detail"]
+
+    image_binding = client.patch(
+        "/api/settings/provider-bindings/image",
+        json={
+            "provider_kind": "openai_chat_image",
+            "provider_profile_id": profile_id,
+            "model_settings": {"model": "gemini-3-pro-image-preview-16-9-4K"},
+            "config": {"images_quality": "high", "responses_background_enabled": True},
+        },
+    )
+    assert image_binding.status_code == 200
+    assert image_binding.json()["provider_kind"] == "openai_chat_image"
+    assert image_binding.json()["config"] == {}
+
+    image_config = resolve_image_provider_config()
+    assert image_config.provider_kind == "openai_chat_image"
+    assert image_config.api_key == "packy-secret-key"
+    assert image_config.base_url == "https://www.packyapi.com"
+    assert image_config.model == "gemini-3-pro-image-preview-16-9-4K"
+
+    exported = client.get("/api/settings/export")
+    assert exported.status_code == 200
+    document = exported.json()
+    exported_image = next(item for item in document["provider_bindings"] if item["purpose"] == "image")
+    assert exported_image["provider_kind"] == "openai_chat_image"
+    assert exported_image["config"] == {}
+
+
 def test_provider_model_list_endpoint_fetches_openai_compatible_models(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -212,8 +212,8 @@ docker compose up -d --build --remove-orphans
 
 Existing provider selection is centralized in:
 
-- `backend/src/productflow_backend/infrastructure/text/factory.py`
-- `backend/src/productflow_backend/infrastructure/image/factory.py`
+- `backend/src/inspiration_one_backend/infrastructure/text/factory.py`
+- `backend/src/inspiration_one_backend/infrastructure/image/factory.py`
 
 Routes and use cases call provider interfaces/factories, not concrete SDK classes directly. If adding providers, update the
 factory, config definitions, tests, and settings UI types together.
@@ -222,6 +222,81 @@ Workflow execution has an additional explicit dependency seam in
 `application/inspiration_workflow_dependencies.py`. Default workflow execution dependencies resolve providers directly through
 the infrastructure provider factories. Tests and future composition code that need fake providers should pass a
 `WorkflowExecutionDependencies` instance directly rather than patching the `inspiration_workflows.py` facade.
+
+#### Scenario: OpenAI-compatible Chat Completions image providers
+
+##### 1. Scope / Trigger
+- Trigger: adding or changing a third-party image provider that generates images through `/v1/chat/completions`.
+- Applies to OpenAI-compatible gateway models such as Packy Banana/Gemini image models where the provider profile is
+  `provider_type="openai_compatible"`.
+
+##### 2. Signatures
+- Provider kind: `openai_chat_image`.
+- Required provider capability: `image_chat`.
+- Backend client: `OpenAIChatImageClient.generate_image(prompt, size, reference_images=None, model=None)`.
+- Poster provider: `OpenAIChatImageProvider.generate_poster_image(...)` and `generate_poster_images(...)`.
+- Continuous image chat: `ImageChatService.generate(...)` dispatches `provider_kind="openai_chat_image"`.
+- Frontend mirror: `ProviderCapability` includes `image_chat`; settings image provider kind includes
+  `openai_chat_image`.
+
+##### 3. Contracts
+- Request endpoint is `<base_url>/v1/chat/completions`; if `base_url` already ends with `/v1`, append
+  `/chat/completions`.
+- Request payload includes:
+  - `model`
+  - `messages=[{"role":"user","content":[{"type":"text","text": prompt}, image_url parts...]}]`
+  - `stream=false`
+- Reference images are sent as Chat Completions `image_url` parts containing data URLs.
+- Persisted provider request JSON records endpoint family, model, size, `stream=false`, prompt character count, and
+  reference-image metadata only.
+- Persisted provider output JSON records response metadata and `_inspiration_one` image source/mime/byte-count metadata
+  only.
+- Do not persist or log prompt bodies, data URLs, raw base64, image bytes, API keys, or full provider responses.
+
+##### 4. Validation & Error Matrix
+- Missing API key -> `RuntimeError("图片供应商档案缺少 API Key")`.
+- Profile missing `image_chat` -> settings validation error `"供应商档案不支持当前接口能力"`.
+- Provider returns no supported image source -> `RuntimeError("图片供应商没有返回图片结果，请稍后重试")`.
+- HTTP/client/parse failure -> `RuntimeError("图片供应商请求失败，请检查供应商配置后重试")`.
+- Supported output shapes include `choices[].message.images[].image_url.url`, data URL text, plain HTTP(S) URL text, and
+  raw base64 image text.
+
+##### 5. Good/Base/Bad Cases
+- Good: Packy-style profile uses `base_url="https://www.packyapi.com"`, capability `image_chat`, and generation config
+  kind `openai_chat_image`.
+- Good: image-session branching sends only the explicitly selected base image plus selected reference images.
+- Base: existing `openai_images`, `openai_responses`, and `google_gemini_image` providers keep their current capabilities
+  and routes.
+- Bad: routing Packy Banana through Responses `image_generation` or Images `/v1/images/*`.
+- Bad: enabling stream/SSE parsing for image generation results.
+- Bad: storing returned data URLs or raw base64 in `provider_request_json` or `provider_output_json`.
+
+##### 6. Tests Required
+- Provider payload test asserts endpoint URL, `stream=false`, text plus `image_url` content parts, and sanitized persisted
+  request metadata.
+- Provider response tests cover data URL, HTTP(S) URL download, and raw base64 outputs.
+- Settings runtime test asserts `image_chat` capability accepts `openai_chat_image` and rejects mismatched image provider
+  kinds.
+- Image-session test asserts selected base/reference images are passed as Chat Completions references.
+- Frontend build must pass after updating provider kind/capability unions and settings labels.
+
+##### 7. Wrong vs Correct
+Wrong:
+
+```python
+client.responses.create(model=model, input=prompt, tools=[{"type": "image_generation"}])
+```
+
+Correct:
+
+```python
+payload = {
+    "model": model,
+    "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, *image_parts]}],
+    "stream": False,
+}
+httpx.Client(...).post(chat_completions_url, json=payload)
+```
 
 #### Scenario: Workflow execution dependency seams
 

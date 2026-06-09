@@ -56,6 +56,10 @@ from inspiration_one_backend.infrastructure.image.gemini_provider import (
     map_inspiration_one_size_to_gemini_image_config,
 )
 from inspiration_one_backend.infrastructure.image.images_provider import OpenAIImagesImageProvider
+from inspiration_one_backend.infrastructure.image.openai_chat_provider import (
+    OpenAIChatImageClient,
+    OpenAIChatImageProvider,
+)
 from inspiration_one_backend.infrastructure.image.responses_provider import (
     OpenAIResponsesImageClient,
     OpenAIResponsesImageProvider,
@@ -1746,6 +1750,261 @@ def test_openai_images_provider_factory_and_client_generate_payload(
         "style": "vivid",
     }
     assert result.provider_output_json == {}
+
+
+def test_openai_chat_image_provider_factory_and_client_sends_non_stream_payload(
+    configured_env: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("IMAGE_BASE_URL", "https://www.packyapi.com")
+    monkeypatch.setenv("IMAGE_API_KEY", "demo-api-key")
+    monkeypatch.setenv("IMAGE_PROVIDER_KIND", "openai_chat_image")
+    monkeypatch.setenv("IMAGE_GENERATE_MODEL", "gemini-3-pro-image-preview-16-9-4K")
+    get_settings.cache_clear()
+
+    calls: list[dict] = []
+    client_kwargs: list[dict] = []
+
+    class DummyResponse:
+        content = b""
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "id": "chatcmpl-image-1",
+                "model": "gemini-3-pro-image-preview-16-9-4K",
+                "choices": [
+                    {
+                        "message": {
+                            "images": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": _make_demo_image_data_url()},
+                                }
+                            ]
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            client_kwargs.append(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            calls.append({"method": "post", "url": url, "json": json})
+            return DummyResponse()
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.image.openai_chat_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    from inspiration_one_backend.infrastructure.image.factory import get_image_provider
+    from inspiration_one_backend.infrastructure.image.images_provider import ImagesReferenceImage
+
+    assert isinstance(get_image_provider(), OpenAIChatImageProvider)
+
+    result = OpenAIChatImageClient().generate_image(
+        prompt="生成灵感产物图",
+        size="1024x1024",
+        reference_images=[ImagesReferenceImage(_make_demo_image_bytes(), "image/png", "base.png")],
+    )
+
+    assert client_kwargs == [
+        {
+            "timeout": OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
+            "headers": {
+                **OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+                "Authorization": "Bearer demo-api-key",
+                "Content-Type": "application/json",
+            },
+        }
+    ]
+    assert calls[0]["url"] == "https://www.packyapi.com/v1/chat/completions"
+    payload = calls[0]["json"]
+    assert payload["model"] == "gemini-3-pro-image-preview-16-9-4K"
+    assert payload["stream"] is False
+    assert payload["messages"][0]["content"][0] == {"type": "text", "text": "生成灵感产物图"}
+    assert payload["messages"][0]["content"][1]["type"] == "image_url"
+    assert payload["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert result.mime_type == "image/png"
+    assert result.model_name == "gemini-3-pro-image-preview-16-9-4K"
+    assert result.provider_response_id == "chatcmpl-image-1"
+    assert result.provider_request_json == {
+        "endpoint": "chat/completions",
+        "model": "gemini-3-pro-image-preview-16-9-4K",
+        "size": "1024x1024",
+        "stream": False,
+        "message_count": 1,
+        "prompt_character_count": 7,
+        "reference_image_count": 1,
+        "reference_images": [
+            {"filename": "base.png", "mime_type": "image/png", "byte_count": len(_make_demo_image_bytes())}
+        ],
+    }
+    assert result.provider_output_json["_inspiration_one"] == {
+        "endpoint": "chat/completions",
+        "stream": False,
+        "image_source": "data_url",
+        "image_mime_type": "image/png",
+        "image_byte_count": len(_make_demo_image_bytes()),
+    }
+    assert "base64" not in str(result.provider_request_json).lower()
+    assert _make_demo_image_bytes().hex() not in str(result.provider_output_json)
+
+
+def test_openai_chat_image_client_parses_url_and_raw_base64_outputs(
+    configured_env: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("IMAGE_BASE_URL", "https://chat.example/v1")
+    monkeypatch.setenv("IMAGE_API_KEY", "demo-api-key")
+    monkeypatch.setenv("IMAGE_PROVIDER_KIND", "openai_chat_image")
+    monkeypatch.setenv("IMAGE_GENERATE_MODEL", "chat-image-model")
+    get_settings.cache_clear()
+
+    encoded_result = _make_demo_image_data_url().split(",", maxsplit=1)[1]
+    post_responses = [
+        {
+            "id": "chatcmpl-url",
+            "choices": [{"message": {"content": "![image](https://cdn.example/generated.png)"}}],
+        },
+        {
+            "id": "chatcmpl-b64",
+            "choices": [{"message": {"content": encoded_result}}],
+        },
+    ]
+    get_urls: list[str] = []
+
+    class DummyJSONResponse:
+        content = b""
+        headers: dict[str, str] = {}
+
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self.payload
+
+    class DummyImageResponse:
+        content = _make_demo_image_bytes()
+        headers = {"content-type": "image/png; charset=utf-8"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            return DummyJSONResponse(post_responses.pop(0))
+
+        def get(self, url: str):
+            get_urls.append(url)
+            return DummyImageResponse()
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.image.openai_chat_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    url_result = OpenAIChatImageClient().generate_image(prompt="URL 输出", size="1024x1024")
+    b64_result = OpenAIChatImageClient().generate_image(prompt="base64 输出", size="1024x1024")
+
+    assert get_urls == ["https://cdn.example/generated.png"]
+    assert url_result.provider_output_json["_inspiration_one"]["image_source"] == "url"
+    assert url_result.mime_type == "image/png"
+    assert b64_result.provider_output_json["_inspiration_one"]["image_source"] == "base64"
+    assert b64_result.mime_type == "image/png"
+    assert b64_result.bytes_data == _make_demo_image_bytes()
+
+
+def test_image_session_openai_chat_image_uses_explicit_references(
+    configured_env: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("IMAGE_BASE_URL", "https://chat.example")
+    monkeypatch.setenv("IMAGE_API_KEY", "demo-api-key")
+    monkeypatch.setenv("IMAGE_PROVIDER_KIND", "openai_chat_image")
+    monkeypatch.setenv("IMAGE_GENERATE_MODEL", "chat-image-model")
+    get_settings.cache_clear()
+
+    calls: list[dict] = []
+
+    class DummyResponse:
+        content = b""
+        headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "id": "chatcmpl-session",
+                "choices": [{"message": {"images": [{"image_url": {"url": _make_demo_image_data_url()}}]}}],
+            }
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            calls.append({"url": url, "json": json})
+            return DummyResponse()
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.image.openai_chat_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    from inspiration_one_backend.infrastructure.image.chat_service import ImageChatService, ImageChatTurn
+
+    result = ImageChatService().generate(
+        prompt="只改背景",
+        size="1024x1024",
+        history=[ImageChatTurn(role="assistant", content="上一张", image_data_url=_make_demo_image_data_url())],
+        manual_reference_images=[_make_demo_image_data_url(), _make_demo_image_data_url()],
+    )
+
+    content = calls[0]["json"]["messages"][0]["content"]
+    assert calls[0]["url"] == "https://chat.example/v1/chat/completions"
+    assert calls[0]["json"]["stream"] is False
+    assert [part["type"] for part in content] == ["text", "image_url", "image_url", "image_url"]
+    assert result.provider_name == "openai-chat-image"
+    assert result.provider_response_id == "chatcmpl-session"
+    assert result.provider_request_json["reference_image_count"] == 3
+    assert result.provider_request_json["reference_images"] == [
+        {"filename": "base.png", "mime_type": "image/png", "byte_count": len(_make_demo_image_bytes())},
+        {"filename": "reference-1.png", "mime_type": "image/png", "byte_count": len(_make_demo_image_bytes())},
+        {"filename": "reference-2.png", "mime_type": "image/png", "byte_count": len(_make_demo_image_bytes())},
+    ]
 
 
 def test_google_gemini_provider_factory_and_client_generate_payload(
