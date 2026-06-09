@@ -5,6 +5,8 @@ import {
   configValuesFromChangedDrafts,
   draftsFromConfig,
   filterProviderModels,
+  type GenerationConfigDraft,
+  generationConfigResourceGroupIds,
   generationConfigPayloadFromDraft,
   markTextConfigTestFailed,
   markTextConfigTestStarted,
@@ -81,9 +83,18 @@ function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProf
 }
 
 function generationConfig(overrides: Partial<GenerationConfig> & Pick<GenerationConfig, "purpose">): GenerationConfig {
+  const resourceGroupId =
+    "resource_group_id" in overrides ? (overrides.resource_group_id ?? null) : "group-default";
+  const resourceGroupIds =
+    "resource_group_ids" in overrides
+      ? (overrides.resource_group_ids ?? [])
+      : resourceGroupId
+        ? [resourceGroupId]
+        : [];
   return {
     id: overrides.id ?? `${overrides.purpose}-config`,
-    resource_group_id: "resource_group_id" in overrides ? (overrides.resource_group_id ?? null) : "group-default",
+    resource_group_id: resourceGroupId,
+    resource_group_ids: resourceGroupIds,
     purpose: overrides.purpose,
     name: overrides.name ?? `${overrides.purpose} config`,
     provider_kind: overrides.provider_kind ?? "openai",
@@ -101,6 +112,31 @@ function generationConfig(overrides: Partial<GenerationConfig> & Pick<Generation
     updated_at: overrides.updated_at ?? "2026-05-13T00:00:00Z",
     state: overrides.state ?? null,
     today_stat: overrides.today_stat ?? null,
+  };
+}
+
+function generationConfigDraft(overrides: Partial<GenerationConfigDraft> & Pick<GenerationConfigDraft, "purpose">): GenerationConfigDraft {
+  return {
+    id: null,
+    resource_group_ids: ["group-default"],
+    name: "Config",
+    provider_kind: overrides.purpose === "text" ? "mock" : "mock",
+    provider_profile_id: "",
+    brief_model: "",
+    copy_model: "",
+    model: "",
+    images_quality: "",
+    images_style: "",
+    responses_background_enabled: true,
+    gemini_api_version: "v1beta",
+    gemini_output_mime_type: "",
+    priority: "100",
+    max_concurrency: "1",
+    enabled: true,
+    availability_window_minutes: "10",
+    failure_threshold: "3",
+    cooldown_minutes: "10",
+    ...overrides,
   };
 }
 
@@ -443,30 +479,24 @@ describe("SettingsPage provider profile helpers", () => {
 
   it("builds Google Gemini image generation config payloads without OpenAI-specific config", () => {
     expect(
-      generationConfigPayloadFromDraft({
-        id: null,
-        resource_group_id: "group-default",
+      generationConfigPayloadFromDraft(generationConfigDraft({
         purpose: "image",
         name: "Gemini image",
         provider_kind: "google_gemini_image",
         provider_profile_id: "profile-gemini",
-        brief_model: "",
-        copy_model: "",
         model: " gemini-2.5-flash-image ",
         images_quality: "high",
         images_style: "vivid",
-        responses_background_enabled: true,
-        gemini_api_version: "v1beta",
         gemini_output_mime_type: " image/png ",
         priority: "80",
         max_concurrency: "2",
-        enabled: true,
         availability_window_minutes: "15",
         failure_threshold: "4",
         cooldown_minutes: "20",
-      }),
+      })),
     ).toEqual({
       resource_group_id: "group-default",
+      resource_group_ids: ["group-default"],
       name: "Gemini image",
       purpose: "image",
       provider_kind: "google_gemini_image",
@@ -484,30 +514,24 @@ describe("SettingsPage provider profile helpers", () => {
 
   it("builds OpenAI Chat image generation config payloads without Images or Responses config", () => {
     expect(
-      generationConfigPayloadFromDraft({
-        id: null,
-        resource_group_id: "group-default",
+      generationConfigPayloadFromDraft(generationConfigDraft({
         purpose: "image",
         name: "Packy Banana",
         provider_kind: "openai_chat_image",
         provider_profile_id: "profile-packy",
-        brief_model: "",
-        copy_model: "",
         model: " gemini-3-pro-image-preview-16-9-4K ",
         images_quality: "high",
         images_style: "vivid",
-        responses_background_enabled: true,
-        gemini_api_version: "v1beta",
         gemini_output_mime_type: " image/png ",
         priority: "80",
         max_concurrency: "2",
-        enabled: true,
         availability_window_minutes: "15",
         failure_threshold: "4",
         cooldown_minutes: "20",
-      }),
+      })),
     ).toEqual({
       resource_group_id: "group-default",
+      resource_group_ids: ["group-default"],
       name: "Packy Banana",
       purpose: "image",
       provider_kind: "openai_chat_image",
@@ -525,30 +549,17 @@ describe("SettingsPage provider profile helpers", () => {
 
   it("builds text generation config payloads with text models only", () => {
     expect(
-      generationConfigPayloadFromDraft({
-        id: null,
-        resource_group_id: "group-default",
+      generationConfigPayloadFromDraft(generationConfigDraft({
         purpose: "text",
         name: "Primary text",
         provider_kind: "openai",
         provider_profile_id: "profile-1",
         brief_model: " gpt-5.4 ",
         copy_model: " gpt-5.4 ",
-        model: "",
-        images_quality: "",
-        images_style: "",
-        responses_background_enabled: true,
-        gemini_api_version: "v1beta",
-        gemini_output_mime_type: "",
-        priority: "100",
-        max_concurrency: "1",
-        enabled: true,
-        availability_window_minutes: "10",
-        failure_threshold: "3",
-        cooldown_minutes: "10",
-      }),
+      })),
     ).toEqual({
       resource_group_id: "group-default",
+      resource_group_ids: ["group-default"],
       name: "Primary text",
       purpose: "text",
       provider_kind: "openai",
@@ -569,60 +580,62 @@ describe("SettingsPage provider profile helpers", () => {
 
   it("allows generation configs without a resource group", () => {
     expect(
-      generationConfigPayloadFromDraft({
-        id: null,
-        resource_group_id: "",
+      generationConfigPayloadFromDraft(generationConfigDraft({
+        resource_group_ids: [],
         purpose: "text",
         name: "Unbound text",
         provider_kind: "mock",
-        provider_profile_id: "",
         brief_model: "mock-brief",
         copy_model: "mock-copy",
-        model: "",
-        images_quality: "",
-        images_style: "",
-        responses_background_enabled: true,
-        gemini_api_version: "v1beta",
-        gemini_output_mime_type: "",
-        priority: "100",
-        max_concurrency: "1",
-        enabled: true,
         availability_window_minutes: "",
         failure_threshold: "",
         cooldown_minutes: "",
-      }).resource_group_id,
+      })).resource_group_id,
     ).toBeNull();
   });
 
   it("leaves blank scheduler policy fields as runtime defaults", () => {
     expect(
-      generationConfigPayloadFromDraft({
-        id: null,
-        resource_group_id: "group-default",
+      generationConfigPayloadFromDraft(generationConfigDraft({
         purpose: "text",
         name: "Default policy text",
         provider_kind: "mock",
-        provider_profile_id: "",
         brief_model: "mock-brief",
         copy_model: "mock-copy",
-        model: "",
-        images_quality: "",
-        images_style: "",
-        responses_background_enabled: true,
-        gemini_api_version: "v1beta",
-        gemini_output_mime_type: "",
-        priority: "100",
-        max_concurrency: "1",
-        enabled: true,
         availability_window_minutes: "",
         failure_threshold: "",
         cooldown_minutes: "",
-      }),
+      })),
     ).toMatchObject({
       availability_window_minutes: null,
       failure_threshold: null,
       cooldown_minutes: null,
     });
+  });
+
+  it("mirrors multiple generation resource groups in payloads and legacy fallback helpers", () => {
+    const payload = generationConfigPayloadFromDraft(
+      generationConfigDraft({
+        purpose: "text",
+        resource_group_ids: ["group-default", "group-seasonal"],
+        name: "Shared text",
+        provider_kind: "mock",
+        brief_model: "mock-brief",
+        copy_model: "mock-copy",
+      }),
+    );
+
+    expect(payload.resource_group_id).toBe("group-default");
+    expect(payload.resource_group_ids).toEqual(["group-default", "group-seasonal"]);
+    expect(
+      generationConfigResourceGroupIds(
+        generationConfig({
+          purpose: "text",
+          resource_group_id: "legacy-group",
+          resource_group_ids: [],
+        }),
+      ),
+    ).toEqual(["legacy-group"]);
   });
 
   it("blocks disabling an enabled provider that is currently used by a generation config", () => {

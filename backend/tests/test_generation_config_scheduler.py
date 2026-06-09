@@ -10,6 +10,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     GenerationConfig,
     GenerationConfigDailyStat,
+    GenerationConfigResourceGroup,
     GenerationConfigState,
     GenerationResourceGroup,
 )
@@ -123,6 +124,42 @@ def test_claim_generation_config_is_scoped_by_resource_group(db_session: Session
     assert grouped_claim is not None
     assert grouped_claim.generation_config_id == grouped_config.id
     assert grouped_claim.resource_group_id == group.id
+
+
+def test_generation_config_can_be_claimed_from_multiple_resource_groups(db_session: Session) -> None:
+    ensure_provider_config_bootstrapped(db_session)
+    campaign = add_generation_resource_group(db_session, key="campaign", name="活动分组")
+    seasonal = add_generation_resource_group(db_session, key="seasonal", name="季节分组")
+    shared_config = _add_mock_config(
+        db_session,
+        purpose=TEXT_PURPOSE,
+        name="共享文案",
+        priority=1000,
+        max_concurrency=2,
+        resource_group_id=None,
+    )
+
+    update_generation_config(db_session, shared_config.id, resource_group_ids=[campaign.id, seasonal.id])
+
+    campaign_claim = claim_generation_config(db_session, purpose=TEXT_PURPOSE, resource_group_id=campaign.id)
+    seasonal_claim = claim_generation_config(db_session, purpose=TEXT_PURPOSE, resource_group_id=seasonal.id)
+    db_session.refresh(shared_config)
+
+    assert campaign_claim is not None
+    assert campaign_claim.generation_config_id == shared_config.id
+    assert campaign_claim.resource_group_id == campaign.id
+    assert seasonal_claim is not None
+    assert seasonal_claim.generation_config_id == shared_config.id
+    assert seasonal_claim.resource_group_id == seasonal.id
+    assert shared_config.resource_group_id == campaign.id
+    assert {
+        link.resource_group_id
+        for link in db_session.scalars(
+            select(GenerationConfigResourceGroup).where(
+                GenerationConfigResourceGroup.generation_config_id == shared_config.id
+            )
+        )
+    } == {campaign.id, seasonal.id}
 
 
 def test_unbound_generation_config_is_not_claimed_by_group_scheduler(db_session: Session) -> None:

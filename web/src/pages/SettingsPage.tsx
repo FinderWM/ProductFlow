@@ -150,7 +150,7 @@ export interface ProviderDrawerViewState {
 
 export interface GenerationConfigDraft {
   id: string | null;
-  resource_group_id: string;
+  resource_group_ids: string[];
   purpose: "text" | "image";
   name: string;
   provider_kind: TextProviderKind | ImageProviderKind;
@@ -672,10 +672,14 @@ function generationConfigsForPurpose(
     .sort((left, right) => right.priority - left.priority || left.name.localeCompare(right.name));
 }
 
+export function generationConfigResourceGroupIds(config: GenerationConfig): string[] {
+  return config.resource_group_ids?.length ? config.resource_group_ids : config.resource_group_id ? [config.resource_group_id] : [];
+}
+
 function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfigDraft {
   return {
     id: null,
-    resource_group_id: "",
+    resource_group_ids: [],
     purpose,
     name: purpose === "text" ? "Text config" : "Image config",
     provider_kind: purpose === "text" ? "mock" : "mock",
@@ -711,7 +715,7 @@ function generationConfigDraft(config: GenerationConfig): GenerationConfigDraft 
         : "mock";
   return {
     id: config.id,
-    resource_group_id: config.resource_group_id ?? "",
+    resource_group_ids: generationConfigResourceGroupIds(config),
     purpose: config.purpose,
     name: config.name,
     provider_kind: providerKind,
@@ -776,7 +780,8 @@ export function generationConfigPayloadFromDraft(
             }
           : {};
   return {
-    resource_group_id: draft.resource_group_id || null,
+    resource_group_id: draft.resource_group_ids[0] ?? null,
+    resource_group_ids: draft.resource_group_ids,
     name: draft.name.trim(),
     purpose: draft.purpose,
     provider_kind: draft.provider_kind,
@@ -822,7 +827,7 @@ function generationConfigCountsForResourceGroup(
 ): { text: number; image: number } {
   return generationConfigs.reduce(
     (counts, generationConfig) => {
-      if (generationConfig.resource_group_id !== resourceGroupId) {
+      if (!generationConfigResourceGroupIds(generationConfig).includes(resourceGroupId)) {
         return counts;
       }
       if (generationConfig.purpose === "text") {
@@ -2685,14 +2690,16 @@ function GenerationConfigPoolSection({
     }
   }, [firstEnabledGroupId, resourceGroups, selectedResourceGroupId]);
   const configs = generationConfigsForPurpose(data, purpose).filter((config) =>
-    activeResourceGroupId ? config.resource_group_id === activeResourceGroupId : !config.resource_group_id,
+    activeResourceGroupId
+      ? generationConfigResourceGroupIds(config).includes(activeResourceGroupId)
+      : generationConfigResourceGroupIds(config).length === 0,
   );
   const newDraftKey = `new-${purpose}-${activeResourceGroupId || "unbound"}`;
   const newDraft =
     drafts[newDraftKey] ??
     ({
       ...emptyGenerationConfigDraft(purpose),
-      resource_group_id: activeResourceGroupId,
+      resource_group_ids: activeResourceGroupId ? [activeResourceGroupId] : [],
     } satisfies GenerationConfigDraft);
   const cards = [
     ...configs.map((config) => ({
@@ -2951,26 +2958,45 @@ function GenerationConfigCard({
             placeholder={t("settings.generation.namePlaceholder")}
           />
         </SettingsFormField>
-        <SettingsFormField label={t("settings.generation.resourceGroup")}>
-          <SelectField
-            value={draft.resource_group_id}
-            options={[
-              {
-                value: "",
-                label: t("settings.generation.unboundResourceGroup"),
-              },
-              ...resourceGroups.map((group) => ({
-                value: group.id,
-                label: group.enabled
-                  ? group.name
-                  : `${group.name} (${t("settings.resourceGroup.disabled")})`,
-                disabled: !group.enabled,
-              })),
-            ]}
-            onChange={(value) => onChange({ ...draft, resource_group_id: value })}
-            disabled={controlsDisabled}
-            radius="lg"
-          />
+        <SettingsFormField label={t("settings.generation.resourceGroups")}>
+          <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-[#111b2d]">
+            {resourceGroups.length ? (
+              resourceGroups.map((group) => {
+                const checked = draft.resource_group_ids.includes(group.id);
+                const disabled = controlsDisabled || !group.enabled;
+                return (
+                  <label
+                    key={group.id}
+                    className={`flex min-h-10 items-center gap-3 rounded-md border px-3 py-2 text-sm transition ${
+                      checked
+                        ? "border-indigo-200 bg-white text-slate-950 shadow-sm dark:border-violet-400/40 dark:bg-slate-900 dark:text-white"
+                        : "border-transparent text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
+                    } ${disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={(event) => {
+                        const nextIds = event.target.checked
+                          ? [...draft.resource_group_ids, group.id]
+                          : draft.resource_group_ids.filter((resourceGroupId) => resourceGroupId !== group.id);
+                        onChange({ ...draft, resource_group_ids: nextIds });
+                      }}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:focus:ring-violet-400"
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {group.enabled ? group.name : `${group.name} (${t("settings.resourceGroup.disabled")})`}
+                    </span>
+                  </label>
+                );
+              })
+            ) : (
+              <span className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
+                {t("settings.generation.noResourceGroups")}
+              </span>
+            )}
+          </div>
         </SettingsFormField>
         <SettingsFormField label={t("settings.provider.apiInterfaceLabel")} helpKey="settingsProviderApiInterface">
           <SelectField
@@ -3259,8 +3285,14 @@ export function SettingsPage() {
         (group) => group.enabled,
       )?.id ?? "";
     const nextDrafts: Record<string, GenerationConfigDraft> = {
-      "new-text": { ...emptyGenerationConfigDraft("text"), resource_group_id: firstEnabledGroupId },
-      "new-image": { ...emptyGenerationConfigDraft("image"), resource_group_id: firstEnabledGroupId },
+      "new-text": {
+        ...emptyGenerationConfigDraft("text"),
+        resource_group_ids: firstEnabledGroupId ? [firstEnabledGroupId] : [],
+      },
+      "new-image": {
+        ...emptyGenerationConfigDraft("image"),
+        resource_group_ids: firstEnabledGroupId ? [firstEnabledGroupId] : [],
+      },
     };
     for (const generationConfig of providerConfigQuery.data?.generation_configs ?? []) {
       if (!generationConfig.archived_at) {

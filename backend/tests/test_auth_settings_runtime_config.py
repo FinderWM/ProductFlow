@@ -22,6 +22,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     AppSetting,
     GenerationConfig,
     GenerationConfigDailyStat,
+    GenerationConfigResourceGroup,
     GenerationResourceGroup,
     ProviderBinding,
     ProviderProfile,
@@ -601,6 +602,12 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
         default_group = session.get(GenerationResourceGroup, DEFAULT_GENERATION_RESOURCE_GROUP_ID)
         assert default_group is not None
         assert default_group.blur_images_by_default is True
+        generation_configs = session.scalars(select(GenerationConfig).order_by(GenerationConfig.purpose)).all()
+        assert {config.resource_group_id for config in generation_configs} == {DEFAULT_GENERATION_RESOURCE_GROUP_ID}
+        assert {
+            (link.generation_config_id, link.resource_group_id)
+            for link in session.scalars(select(GenerationConfigResourceGroup)).all()
+        } == {(config.id, DEFAULT_GENERATION_RESOURCE_GROUP_ID) for config in generation_configs}
     finally:
         session.close()
 
@@ -905,6 +912,73 @@ def test_generation_config_status_filters_date_range_and_splits_purpose_stats(co
     )
     assert invalid.status_code == 400
     assert invalid.json()["detail"] == "日期范围无效"
+
+
+def test_generation_config_api_accepts_multiple_resource_groups(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created_group = client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "seasonal", "name": "季节分组", "sort_order": 120, "enabled": True},
+    )
+    assert created_group.status_code == 200
+    seasonal_group_id = created_group.json()["id"]
+
+    created_config = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_ids": [seasonal_group_id, DEFAULT_GENERATION_RESOURCE_GROUP_ID],
+            "name": "共享文案配置",
+            "purpose": "text",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+            "config": {},
+            "priority": 300,
+            "max_concurrency": 2,
+            "enabled": True,
+            "availability_window_minutes": 5,
+            "failure_threshold": 3,
+            "cooldown_minutes": 10,
+        },
+    )
+    assert created_config.status_code == 200
+    payload = created_config.json()
+    assert payload["resource_group_id"] == seasonal_group_id
+    assert payload["resource_group_ids"] == [seasonal_group_id, DEFAULT_GENERATION_RESOURCE_GROUP_ID]
+
+    listed = client.get("/api/settings/provider-config")
+    assert listed.status_code == 200
+    listed_config = next(item for item in listed.json()["generation_configs"] if item["id"] == payload["id"])
+    assert listed_config["resource_group_id"] == seasonal_group_id
+    assert listed_config["resource_group_ids"] == [seasonal_group_id, DEFAULT_GENERATION_RESOURCE_GROUP_ID]
+
+    explicit_null_groups = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "resource_group_ids": None,
+            "name": "显式未绑定文案配置",
+            "purpose": "text",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+            "config": {},
+            "priority": 200,
+            "max_concurrency": 1,
+            "enabled": True,
+            "availability_window_minutes": 5,
+            "failure_threshold": 3,
+            "cooldown_minutes": 10,
+        },
+    )
+    assert explicit_null_groups.status_code == 200
+    assert explicit_null_groups.json()["resource_group_id"] is None
+    assert explicit_null_groups.json()["resource_group_ids"] == []
 
 
 def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bindings(configured_env: Path) -> None:

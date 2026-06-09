@@ -16,6 +16,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     AppSetting,
     GenerationConfig,
     GenerationConfigDailyStat,
+    GenerationConfigResourceGroup,
     GenerationConfigState,
     GenerationResourceGroup,
     ProviderBinding,
@@ -148,6 +149,7 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
 
     _ensure_default_generation_resource_group(session)
     if _generation_config_exists(session):
+        _ensure_generation_config_resource_group_links(session)
         _ensure_generation_config_states(session)
         if commit:
             session.commit()
@@ -288,6 +290,7 @@ def list_generation_configs(session: Session) -> list[GenerationConfig]:
             .options(
                 selectinload(GenerationConfig.provider_profile),
                 selectinload(GenerationConfig.resource_group),
+                selectinload(GenerationConfig.resource_group_links),
                 selectinload(GenerationConfig.state),
             )
             .where(GenerationConfig.archived_at.is_(None))
@@ -394,8 +397,13 @@ def update_generation_resource_group(
 def archive_generation_resource_group(session: Session, resource_group_id: str) -> GenerationResourceGroup:
     group = require_generation_resource_group(session, resource_group_id)
     active_config_id = session.scalar(
-        select(GenerationConfig.id).where(
-            GenerationConfig.resource_group_id == group.id,
+        select(GenerationConfigResourceGroup.generation_config_id)
+        .join(
+            GenerationConfig,
+            GenerationConfig.id == GenerationConfigResourceGroup.generation_config_id,
+        )
+        .where(
+            GenerationConfigResourceGroup.resource_group_id == group.id,
             GenerationConfig.archived_at.is_(None),
         )
     )
@@ -542,6 +550,7 @@ def add_generation_config(
     *,
     generation_config_id: str | None = None,
     resource_group_id: str | None = None,
+    resource_group_ids: list[str] | None = None,
     name: str,
     purpose: str,
     provider_kind: str,
@@ -570,11 +579,10 @@ def add_generation_config(
     )
     if provider_kind == "mock":
         provider_profile_id = None
-    normalized_resource_group_id = _normalize_resource_group_id(resource_group_id)
-    resource_group = (
-        require_generation_resource_group(session, normalized_resource_group_id)
-        if normalized_resource_group_id is not None
-        else None
+    normalized_resource_group_ids = _normalize_generation_config_resource_group_ids(
+        session,
+        resource_group_ids=resource_group_ids,
+        resource_group_id=resource_group_id,
     )
     settings = get_runtime_settings()
     generation_config_kwargs = {
@@ -582,7 +590,7 @@ def add_generation_config(
         "purpose": purpose,
         "provider_kind": provider_kind,
         "provider_profile_id": provider_profile_id,
-        "resource_group_id": resource_group.id if resource_group is not None else None,
+        "resource_group_id": _compat_resource_group_id(normalized_resource_group_ids),
         "model_settings_json": _normalize_binding_model_settings(purpose=purpose, model_settings=model_settings),
         "config_json": _normalize_binding_config(purpose=purpose, provider_kind=provider_kind, config=config),
         "priority": int(priority),
@@ -599,6 +607,7 @@ def add_generation_config(
     generation_config = GenerationConfig(**generation_config_kwargs)
     session.add(generation_config)
     session.flush()
+    _sync_generation_config_resource_groups(session, generation_config, normalized_resource_group_ids)
     _ensure_generation_config_state(session, generation_config.id)
     _sync_compat_provider_bindings(session)
     if commit:
@@ -614,6 +623,7 @@ def update_generation_config(
     generation_config_id: str,
     *,
     resource_group_id: str | None | object = UNSET_PROVIDER_FIELD,
+    resource_group_ids: list[str] | None | object = UNSET_PROVIDER_FIELD,
     name: str | None = None,
     purpose: str | None = None,
     provider_kind: str | None = None,
@@ -640,14 +650,20 @@ def update_generation_config(
     next_availability_window = int(availability_window_minutes or generation_config.availability_window_minutes)
     next_failure_threshold = int(failure_threshold or generation_config.failure_threshold)
     next_cooldown = int(cooldown_minutes or generation_config.cooldown_minutes)
-    if resource_group_id is UNSET_PROVIDER_FIELD:
-        next_resource_group_id = generation_config.resource_group_id
-    else:
-        next_resource_group_id = _normalize_resource_group_id(
-            resource_group_id if isinstance(resource_group_id, str) else None
+    if resource_group_ids is not UNSET_PROVIDER_FIELD:
+        next_resource_group_ids = _normalize_generation_config_resource_group_ids(
+            session,
+            resource_group_ids=resource_group_ids if isinstance(resource_group_ids, list) else [],
+            resource_group_id=None,
         )
-    if next_resource_group_id is not None:
-        require_generation_resource_group(session, next_resource_group_id)
+    elif resource_group_id is UNSET_PROVIDER_FIELD:
+        next_resource_group_ids = generation_config_resource_group_ids(generation_config)
+    else:
+        next_resource_group_ids = _normalize_generation_config_resource_group_ids(
+            session,
+            resource_group_ids=None,
+            resource_group_id=resource_group_id if isinstance(resource_group_id, str) else None,
+        )
     _validate_generation_config_payload(
         session,
         purpose=next_purpose,
@@ -662,7 +678,7 @@ def update_generation_config(
     )
     if name is not None:
         generation_config.name = _normalize_required_text(name, "配置名称")
-    generation_config.resource_group_id = next_resource_group_id
+    generation_config.resource_group_id = _compat_resource_group_id(next_resource_group_ids)
     generation_config.purpose = next_purpose
     generation_config.provider_kind = next_provider_kind
     generation_config.provider_profile_id = None if next_provider_kind == "mock" else next_provider_profile_id
@@ -683,6 +699,7 @@ def update_generation_config(
     generation_config.availability_window_minutes = next_availability_window
     generation_config.failure_threshold = next_failure_threshold
     generation_config.cooldown_minutes = next_cooldown
+    _sync_generation_config_resource_groups(session, generation_config, next_resource_group_ids)
     _ensure_generation_config_state(session, generation_config.id)
     _sync_compat_provider_bindings(session)
     if commit:
@@ -946,7 +963,7 @@ def claim_generation_config(
             session.flush()
             return GenerationConfigClaim(
                 generation_config_id=generation_config.id,
-                resource_group_id=generation_config.resource_group_id,
+                resource_group_id=resource_group.id,
                 purpose=generation_config.purpose,
                 provider_kind=generation_config.provider_kind,
                 score=score,
@@ -1240,12 +1257,13 @@ def _profile_for_legacy_connection(
 
 
 def _add_generation_config_from_binding(session: Session, binding: ProviderBinding) -> None:
+    default_group_id = default_generation_resource_group_id(session)
     generation_config = GenerationConfig(
         name="默认文案配置" if binding.purpose == TEXT_PURPOSE else "默认图片配置",
         purpose=binding.purpose,
         provider_kind=binding.provider_kind,
         provider_profile_id=None if binding.provider_kind == "mock" else binding.provider_profile_id,
-        resource_group_id=default_generation_resource_group_id(session),
+        resource_group_id=default_group_id,
         model_settings_json=dict(binding.model_settings_json or {}),
         config_json=dict(binding.config_json or {}),
         priority=DEFAULT_GENERATION_CONFIG_PRIORITY,
@@ -1257,6 +1275,7 @@ def _add_generation_config_from_binding(session: Session, binding: ProviderBindi
     )
     session.add(generation_config)
     session.flush()
+    _sync_generation_config_resource_groups(session, generation_config, [default_group_id])
     _ensure_generation_config_state(session, generation_config.id)
 
 
@@ -1273,13 +1292,17 @@ def _default_generation_config(
         .options(
             selectinload(GenerationConfig.provider_profile),
             selectinload(GenerationConfig.resource_group),
+            selectinload(GenerationConfig.resource_group_links),
             selectinload(GenerationConfig.state),
         )
         .where(GenerationConfig.purpose == purpose, GenerationConfig.archived_at.is_(None))
         .order_by(GenerationConfig.priority.desc(), GenerationConfig.created_at)
     )
     if resolved_resource_group_id is not None:
-        statement = statement.where(GenerationConfig.resource_group_id == resolved_resource_group_id)
+        statement = statement.join(
+            GenerationConfigResourceGroup,
+            GenerationConfigResourceGroup.generation_config_id == GenerationConfig.id,
+        ).where(GenerationConfigResourceGroup.resource_group_id == resolved_resource_group_id)
     if not include_disabled:
         statement = statement.where(GenerationConfig.enabled.is_(True))
     return session.scalar(statement)
@@ -1297,6 +1320,7 @@ def _select_generation_config_for_resolution(
             .options(
                 selectinload(GenerationConfig.provider_profile),
                 selectinload(GenerationConfig.resource_group),
+                selectinload(GenerationConfig.resource_group_links),
                 selectinload(GenerationConfig.state),
             )
             .where(
@@ -1338,6 +1362,19 @@ def _ensure_generation_config_states(session: Session) -> None:
     config_ids = list(session.scalars(select(GenerationConfig.id)).all())
     for config_id in config_ids:
         _ensure_generation_config_state(session, config_id)
+
+
+def _ensure_generation_config_resource_group_links(session: Session) -> None:
+    configs = list(
+        session.scalars(
+            select(GenerationConfig).options(selectinload(GenerationConfig.resource_group_links))
+        ).all()
+    )
+    for generation_config in configs:
+        if generation_config.resource_group_links:
+            continue
+        if generation_config.resource_group_id:
+            _sync_generation_config_resource_groups(session, generation_config, [generation_config.resource_group_id])
 
 
 def _ensure_default_generation_resource_group(session: Session) -> GenerationResourceGroup:
@@ -1401,6 +1438,79 @@ def _sync_compat_provider_bindings(session: Session) -> None:
         binding.provider_profile_id = generation_config.provider_profile_id
         binding.model_settings_json = dict(generation_config.model_settings_json or {})
         binding.config_json = dict(generation_config.config_json or {})
+
+
+def generation_config_resource_group_ids(generation_config: GenerationConfig) -> list[str]:
+    links = list(generation_config.resource_group_links or [])
+    if links:
+        linked_ids = _dedupe_ordered([link.resource_group_id for link in links if link.resource_group_id])
+        if generation_config.resource_group_id in linked_ids:
+            remaining_ids = [
+                resource_group_id
+                for resource_group_id in linked_ids
+                if resource_group_id != generation_config.resource_group_id
+            ]
+            return [generation_config.resource_group_id, *remaining_ids]
+        return linked_ids
+    if generation_config.resource_group_id:
+        return [generation_config.resource_group_id]
+    return []
+
+
+def _normalize_generation_config_resource_group_ids(
+    session: Session,
+    *,
+    resource_group_ids: list[str] | None,
+    resource_group_id: str | None,
+) -> list[str]:
+    raw_ids = (
+        resource_group_ids
+        if resource_group_ids is not None
+        else ([resource_group_id] if resource_group_id else [])
+    )
+    normalized_ids = _dedupe_ordered(
+        [
+            normalized_id
+            for value in raw_ids
+            if (normalized_id := _normalize_resource_group_id(value)) is not None
+        ]
+    )
+    for normalized_id in normalized_ids:
+        require_generation_resource_group(session, normalized_id)
+    return normalized_ids
+
+
+def _compat_resource_group_id(resource_group_ids: list[str]) -> str | None:
+    return resource_group_ids[0] if resource_group_ids else None
+
+
+def _sync_generation_config_resource_groups(
+    session: Session,
+    generation_config: GenerationConfig,
+    resource_group_ids: list[str],
+) -> None:
+    existing_links = {
+        link.resource_group_id: link
+        for link in session.scalars(
+            select(GenerationConfigResourceGroup).where(
+                GenerationConfigResourceGroup.generation_config_id == generation_config.id
+            )
+        ).all()
+    }
+    desired_ids = set(resource_group_ids)
+    for resource_group_id, link in existing_links.items():
+        if resource_group_id not in desired_ids:
+            session.delete(link)
+    for resource_group_id in resource_group_ids:
+        if resource_group_id not in existing_links:
+            session.add(
+                GenerationConfigResourceGroup(
+                    generation_config_id=generation_config.id,
+                    resource_group_id=resource_group_id,
+                )
+            )
+    generation_config.resource_group_id = _compat_resource_group_id(resource_group_ids)
+    session.flush()
 
 
 def _get_binding(session: Session, purpose: str) -> ProviderBinding | None:
@@ -1522,14 +1632,19 @@ def _candidate_generation_configs(
         raise ValueError("用途必须是 text 或 image")
     statement = (
         select(GenerationConfig)
+        .join(
+            GenerationConfigResourceGroup,
+            GenerationConfigResourceGroup.generation_config_id == GenerationConfig.id,
+        )
         .options(
             selectinload(GenerationConfig.provider_profile),
             selectinload(GenerationConfig.resource_group),
+            selectinload(GenerationConfig.resource_group_links),
             selectinload(GenerationConfig.state),
         )
         .where(
             GenerationConfig.purpose == purpose,
-            GenerationConfig.resource_group_id == resource_group_id,
+            GenerationConfigResourceGroup.resource_group_id == resource_group_id,
             GenerationConfig.archived_at.is_(None),
         )
     )
@@ -1923,6 +2038,7 @@ def provider_config_tables_available() -> bool:
         session = get_session_factory()()
         try:
             session.scalar(select(GenerationConfig.id).limit(1))
+            session.scalar(select(GenerationConfigResourceGroup.generation_config_id).limit(1))
             session.scalar(select(GenerationConfigState.generation_config_id).limit(1))
             session.scalar(select(GenerationConfigDailyStat.id).limit(1))
             return True

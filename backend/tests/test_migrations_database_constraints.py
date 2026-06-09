@@ -23,6 +23,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     CanvasTemplate,
     CanvasTemplateCategory,
     CopySet,
+    GenerationConfigResourceGroup,
     ImageGalleryEntry,
     ImageSessionAsset,
     ImageSessionGenerationTask,
@@ -79,6 +80,20 @@ def test_workflow_run_model_has_retryability_and_progress_metadata() -> None:
     assert table.c.is_retryable.default is not None
     assert "progress_metadata" in table.c
     assert table.c.progress_metadata.nullable
+
+
+def test_generation_config_resource_group_model_matches_migration_contract() -> None:
+    table = GenerationConfigResourceGroup.__table__
+    assert table.c.generation_config_id.type.length == 36
+    assert table.c.resource_group_id.type.length == 36
+    assert not table.c.generation_config_id.nullable
+    assert not table.c.resource_group_id.nullable
+    assert not table.c.created_at.nullable
+    assert table.c.created_at.default is not None
+    assert table.c.created_at.default.arg.__name__ == utcnow.__name__
+    assert {index.name for index in table.indexes} == {"ix_generation_config_resource_groups_group"}
+    assert not table.foreign_keys
+    assert not [constraint for constraint in table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
 
 def test_gallery_entry_model_matches_migration_contract() -> None:

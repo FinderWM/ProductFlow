@@ -1134,6 +1134,7 @@ export interface GenerationConfigStatAggregate {
 export interface GenerationConfig {
   id: string;
   resource_group_id: string | null;
+  resource_group_ids: string[];
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1156,6 +1157,7 @@ export interface GenerationConfig {
 export interface GenerationConfigOption {
   id: string;
   resource_group_id: string | null;
+  resource_group_ids: string[];
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1167,6 +1169,7 @@ export interface GenerationConfigOption {
 export interface GenerationConfigStatusConfig {
   id: string;
   resource_group_id: string | null;
+  resource_group_ids: string[];
   purpose: ProviderPurpose;
   name: string;
   provider_kind: string;
@@ -1250,6 +1253,7 @@ export interface UserUsageStatsResponse {
 
 export interface GenerationConfigCreateRequest {
   resource_group_id?: string | null;
+  resource_group_ids?: string[] | null;
   name: string;
   purpose: ProviderPurpose;
   provider_kind: string;
@@ -1266,6 +1270,7 @@ export interface GenerationConfigCreateRequest {
 
 export interface GenerationConfigUpdateRequest {
   resource_group_id?: string | null;
+  resource_group_ids?: string[] | null;
   name?: string | null;
   purpose?: ProviderPurpose | null;
   provider_kind?: string | null;
@@ -1363,6 +1368,7 @@ export interface SettingsExportProviderBinding {
 export interface SettingsExportGenerationConfig {
   id?: string | null;
   resource_group_id?: string | null;
+  resource_group_ids?: string[] | null;
   name: string;
   purpose: ProviderPurpose;
   provider_kind: string;

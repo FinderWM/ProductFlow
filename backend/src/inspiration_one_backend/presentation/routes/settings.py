@@ -43,6 +43,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     AuthUser,
     GenerationConfig,
     GenerationConfigDailyStat,
+    GenerationConfigResourceGroup,
     GenerationConfigState,
     GenerationResourceGroup,
     ProviderBinding,
@@ -70,6 +71,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     capability_for_provider_kind,
     create_provider_profile,
     ensure_provider_config_bootstrapped,
+    generation_config_resource_group_ids,
     generation_config_status_summary,
     is_real_image_provider_kind,
     list_generation_configs,
@@ -417,9 +419,11 @@ def _serialize_generation_config(
     *,
     today_stats: dict[str, GenerationConfigDailyStat],
 ) -> GenerationConfigResponse:
+    resource_group_ids = generation_config_resource_group_ids(generation_config)
     return GenerationConfigResponse(
         id=generation_config.id,
-        resource_group_id=generation_config.resource_group_id,
+        resource_group_id=resource_group_ids[0] if resource_group_ids else None,
+        resource_group_ids=resource_group_ids,
         purpose=generation_config.purpose,
         name=generation_config.name,
         provider_kind=generation_config.provider_kind,
@@ -446,9 +450,11 @@ def _serialize_generation_config_status_config(
     today_stats: dict[str, GenerationConfigDailyStat],
     range_stats: dict[str, _GenerationConfigStatAggregate],
 ) -> GenerationConfigStatusConfigResponse:
+    resource_group_ids = generation_config_resource_group_ids(generation_config)
     return GenerationConfigStatusConfigResponse(
         id=generation_config.id,
-        resource_group_id=generation_config.resource_group_id,
+        resource_group_id=resource_group_ids[0] if resource_group_ids else None,
+        resource_group_ids=resource_group_ids,
         purpose=generation_config.purpose,
         name=generation_config.name,
         provider_kind=generation_config.provider_kind,
@@ -465,9 +471,11 @@ def _serialize_generation_config_status_config(
 
 def _serialize_generation_config_option(generation_config: GenerationConfig) -> GenerationConfigOptionResponse:
     state = generation_config.state
+    resource_group_ids = generation_config_resource_group_ids(generation_config)
     return GenerationConfigOptionResponse(
         id=generation_config.id,
-        resource_group_id=generation_config.resource_group_id,
+        resource_group_id=resource_group_ids[0] if resource_group_ids else None,
+        resource_group_ids=resource_group_ids,
         purpose=generation_config.purpose,
         name=generation_config.name,
         provider_kind=generation_config.provider_kind,
@@ -623,6 +631,27 @@ def _settings_generation_resource_group_export(group: GenerationResourceGroup) -
     )
 
 
+def _settings_generation_config_export(generation_config: GenerationConfig) -> SettingsGenerationConfigExport:
+    resource_group_ids = generation_config_resource_group_ids(generation_config)
+    return SettingsGenerationConfigExport(
+        id=generation_config.id,
+        resource_group_id=resource_group_ids[0] if resource_group_ids else None,
+        resource_group_ids=resource_group_ids,
+        name=generation_config.name,
+        purpose=generation_config.purpose,
+        provider_kind=generation_config.provider_kind,
+        provider_profile_id=generation_config.provider_profile_id,
+        model_settings=dict(generation_config.model_settings_json or {}),
+        config=dict(generation_config.config_json or {}),
+        priority=generation_config.priority,
+        max_concurrency=generation_config.max_concurrency,
+        enabled=generation_config.enabled,
+        availability_window_minutes=generation_config.availability_window_minutes,
+        failure_threshold=generation_config.failure_threshold,
+        cooldown_minutes=generation_config.cooldown_minutes,
+    )
+
+
 def _build_settings_export_document(session: Session) -> SettingsExportDocument:
     ensure_provider_config_bootstrapped(session)
     settings = get_runtime_settings()
@@ -691,23 +720,7 @@ def _build_settings_export_document(session: Session) -> SettingsExportDocument:
             _settings_generation_resource_group_export(group) for group in generation_resource_groups
         ],
         generation_configs=[
-            SettingsGenerationConfigExport(
-                id=generation_config.id,
-                resource_group_id=generation_config.resource_group_id,
-                name=generation_config.name,
-                purpose=generation_config.purpose,
-                provider_kind=generation_config.provider_kind,
-                provider_profile_id=generation_config.provider_profile_id,
-                model_settings=dict(generation_config.model_settings_json or {}),
-                config=dict(generation_config.config_json or {}),
-                priority=generation_config.priority,
-                max_concurrency=generation_config.max_concurrency,
-                enabled=generation_config.enabled,
-                availability_window_minutes=generation_config.availability_window_minutes,
-                failure_threshold=generation_config.failure_threshold,
-                cooldown_minutes=generation_config.cooldown_minutes,
-            )
-            for generation_config in generation_configs
+            _settings_generation_config_export(generation_config) for generation_config in generation_configs
         ],
         canvas_template_categories=[
             _serialize_canvas_template_category_export(category) for category in template_categories
@@ -914,6 +927,7 @@ def _normalize_import_generation_configs(
             {
                 "id": None,
                 "resource_group_id": fallback_resource_group_id,
+                "resource_group_ids": [fallback_resource_group_id],
                 "name": "默认文案配置" if binding["purpose"] == "text" else "默认图片配置",
                 "purpose": binding["purpose"],
                 "provider_kind": binding["provider_kind"],
@@ -955,11 +969,20 @@ def _normalize_import_generation_configs(
             model_settings=item.model_settings,
         )
         provider_profile_id = item.provider_profile_id
-        if "resource_group_id" in item.model_fields_set:
+        if "resource_group_ids" in item.model_fields_set and item.resource_group_ids is not None:
+            item_resource_group_ids = _dedupe_ordered(
+                [
+                    resource_group_id.strip()
+                    for resource_group_id in item.resource_group_ids
+                    if resource_group_id.strip()
+                ]
+            )
+        elif "resource_group_id" in item.model_fields_set:
             resource_group_id = item.resource_group_id.strip() if item.resource_group_id else None
+            item_resource_group_ids = [resource_group_id] if resource_group_id is not None else []
         else:
-            resource_group_id = fallback_resource_group_id
-        if resource_group_id is not None and resource_group_id not in resource_group_ids:
+            item_resource_group_ids = [fallback_resource_group_id]
+        if any(resource_group_id not in resource_group_ids for resource_group_id in item_resource_group_ids):
             raise ValueError("生成配置引用的分组不存在")
         if item.provider_kind == "mock":
             provider_profile_id = None
@@ -977,7 +1000,8 @@ def _normalize_import_generation_configs(
         generation_configs.append(
             {
                 "id": config_id,
-                "resource_group_id": resource_group_id,
+                "resource_group_id": item_resource_group_ids[0] if item_resource_group_ids else None,
+                "resource_group_ids": item_resource_group_ids,
                 "name": item.name.strip(),
                 "purpose": item.purpose,
                 "provider_kind": item.provider_kind,
@@ -1264,6 +1288,7 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
 
         session.execute(delete(GenerationConfigDailyStat))
         session.execute(delete(GenerationConfigState))
+        session.execute(delete(GenerationConfigResourceGroup))
         session.execute(delete(GenerationConfig))
         session.execute(delete(UserGenerationResourceGroupGrant))
         session.execute(delete(GenerationResourceGroup))
@@ -1305,6 +1330,7 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
                 session,
                 generation_config_id=generation_config["id"],
                 resource_group_id=generation_config["resource_group_id"],
+                resource_group_ids=generation_config["resource_group_ids"],
                 name=generation_config["name"],
                 purpose=generation_config["purpose"],
                 provider_kind=generation_config["provider_kind"],
@@ -1611,9 +1637,15 @@ def create_generation_config_endpoint(
 ) -> GenerationConfigResponse:
     try:
         ensure_provider_config_bootstrapped(session)
+        create_resource_group_ids = (
+            payload.resource_group_ids if "resource_group_ids" in payload.model_fields_set else None
+        )
+        if "resource_group_ids" in payload.model_fields_set and create_resource_group_ids is None:
+            create_resource_group_ids = []
         generation_config = add_generation_config(
             session,
             resource_group_id=payload.resource_group_id,
+            resource_group_ids=create_resource_group_ids,
             name=payload.name,
             purpose=payload.purpose,
             provider_kind=payload.provider_kind,
@@ -1656,6 +1688,9 @@ def update_generation_config_endpoint(
             session,
             generation_config_id,
             resource_group_id=payload.resource_group_id if "resource_group_id" in fields_set else UNSET_PROVIDER_FIELD,
+            resource_group_ids=(
+                payload.resource_group_ids if "resource_group_ids" in fields_set else UNSET_PROVIDER_FIELD
+            ),
             name=payload.name,
             purpose=payload.purpose,
             provider_kind=payload.provider_kind,

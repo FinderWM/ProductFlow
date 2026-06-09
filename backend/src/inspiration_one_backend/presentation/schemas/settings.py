@@ -160,6 +160,7 @@ class GenerationConfigStatAggregateResponse(BaseModel):
 class GenerationConfigResponse(BaseModel):
     id: str
     resource_group_id: str | None = None
+    resource_group_ids: list[str] = Field(default_factory=list)
     purpose: str
     name: str
     provider_kind: str
@@ -182,6 +183,7 @@ class GenerationConfigResponse(BaseModel):
 class GenerationConfigOptionResponse(BaseModel):
     id: str
     resource_group_id: str | None = None
+    resource_group_ids: list[str] = Field(default_factory=list)
     purpose: str
     name: str
     provider_kind: str
@@ -193,6 +195,7 @@ class GenerationConfigOptionResponse(BaseModel):
 class GenerationConfigStatusConfigResponse(BaseModel):
     id: str
     resource_group_id: str | None = None
+    resource_group_ids: list[str] = Field(default_factory=list)
     purpose: str
     name: str
     provider_kind: str
@@ -274,6 +277,7 @@ class ProviderBindingUpdateRequest(BaseModel):
 
 class GenerationConfigCreateRequest(BaseModel):
     resource_group_id: str | None = Field(default=None, max_length=36)
+    resource_group_ids: list[str] | None = None
     name: str = Field(min_length=1)
     purpose: str = Field(min_length=1, max_length=40)
     provider_kind: str = Field(min_length=1, max_length=40)
@@ -290,6 +294,7 @@ class GenerationConfigCreateRequest(BaseModel):
 
 class GenerationConfigUpdateRequest(BaseModel):
     resource_group_id: str | None = Field(default=None, max_length=36)
+    resource_group_ids: list[str] | None = None
     name: str | None = None
     purpose: str | None = None
     provider_kind: str | None = None
@@ -379,6 +384,7 @@ class SettingsGenerationResourceGroupExport(BaseModel):
 class SettingsGenerationConfigExport(BaseModel):
     id: str | None = Field(default=None, max_length=36)
     resource_group_id: str | None = Field(default=None, max_length=36)
+    resource_group_ids: list[str] | None = None
     name: str = Field(min_length=1, max_length=120)
     purpose: str = Field(min_length=1, max_length=40)
     provider_kind: str = Field(min_length=1, max_length=40)

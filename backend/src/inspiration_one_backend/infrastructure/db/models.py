@@ -293,6 +293,27 @@ class UserGenerationResourceGroupGrant(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class GenerationConfigResourceGroup(Base):
+    """生成配置和供应商能力分组的多对多绑定。"""
+
+    __tablename__ = "generation_config_resource_groups"
+    __table_args__ = (Index("ix_generation_config_resource_groups_group", "resource_group_id"),)
+
+    generation_config_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    resource_group_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    generation_config: Mapped[GenerationConfig] = relationship(
+        back_populates="resource_group_links",
+        primaryjoin=lambda: parent_child_join(GenerationConfig.id, GenerationConfigResourceGroup.generation_config_id),
+        foreign_keys=lambda: [GenerationConfigResourceGroup.generation_config_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(GenerationConfigResourceGroup.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [GenerationConfigResourceGroup.resource_group_id],
+    )
+
+
 class CanvasTemplateCategory(Base, TimestampMixin):
     """数据库化画布模板分类，支持全局和用户个人范围。"""
 
@@ -488,6 +509,13 @@ class GenerationConfig(Base, TimestampMixin):
     resource_group: Mapped[GenerationResourceGroup | None] = relationship(
         primaryjoin=lambda: child_parent_join(GenerationConfig.resource_group_id, GenerationResourceGroup.id),
         foreign_keys=lambda: [GenerationConfig.resource_group_id],
+    )
+    resource_group_links: Mapped[list[GenerationConfigResourceGroup]] = relationship(
+        back_populates="generation_config",
+        cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(GenerationConfig.id, GenerationConfigResourceGroup.generation_config_id),
+        foreign_keys=lambda: [GenerationConfigResourceGroup.generation_config_id],
+        order_by=lambda: (GenerationConfigResourceGroup.created_at, GenerationConfigResourceGroup.resource_group_id),
     )
     state: Mapped[GenerationConfigState | None] = relationship(
         back_populates="generation_config",
