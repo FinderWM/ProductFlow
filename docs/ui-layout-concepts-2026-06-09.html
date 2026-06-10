@@ -1,0 +1,2595 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inspiration One UI layout concepts</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #151719;
+        --muted: #687078;
+        --subtle: #8d949b;
+        --paper: #f6f7f4;
+        --panel: rgba(255, 255, 255, 0.72);
+        --core: #fbfbf8;
+        --line: rgba(30, 34, 38, 0.1);
+        --line-strong: rgba(30, 34, 38, 0.18);
+        --accent: #2f6f63;
+        --accent-2: #9f6b42;
+        --deep: #111412;
+        --shadow: 0 32px 86px rgba(33, 38, 42, 0.08);
+        --soft-shadow: 0 18px 44px rgba(55, 62, 67, 0.055);
+        --cursor-x: 50vw;
+        --cursor-y: 18vh;
+        --ease: cubic-bezier(0.32, 0.72, 0, 1);
+        font-family: Geist, "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+      }
+
+      body:has(#theme-mist:checked) {
+        --ink: #151719;
+        --muted: #66727d;
+        --subtle: #8b96a0;
+        --paper: #f5f8fb;
+        --core: #fbfcfd;
+        --accent: #4f7583;
+        --accent-2: #b06f58;
+      }
+
+      body:has(#theme-sage:checked) {
+        --ink: #122016;
+        --muted: #5c735f;
+        --subtle: #7f947f;
+        --paper: #e4f0dd;
+        --core: #f7fbef;
+        --accent: #3e7951;
+        --accent-2: #c28a3e;
+      }
+
+      body:has(#theme-dusk:checked) {
+        --ink: #e8decb;
+        --muted: #b7ad9e;
+        --subtle: #948c7d;
+        --paper: #20231b;
+        --core: #292d23;
+        --accent: #92aa7a;
+        --accent-2: #c69b66;
+        --line: rgba(255, 245, 224, 0.11);
+        --line-strong: rgba(255, 245, 224, 0.18);
+        --shadow: 0 32px 86px rgba(18, 16, 12, 0.16);
+        --soft-shadow: 0 18px 44px rgba(18, 16, 12, 0.1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        background:
+          linear-gradient(120deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent 38%),
+          linear-gradient(245deg, color-mix(in srgb, var(--accent-2) 10%, transparent), transparent 34%),
+          var(--paper);
+        color: var(--ink);
+        transition: background 900ms var(--ease), color 900ms var(--ease);
+      }
+
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(
+            420px circle at var(--cursor-x) var(--cursor-y),
+            color-mix(in srgb, var(--accent) 16%, transparent),
+            transparent 58%
+          ),
+          radial-gradient(
+            720px circle at calc(var(--cursor-x) + 18vw) calc(var(--cursor-y) + 10vh),
+            color-mix(in srgb, var(--accent-2) 8%, transparent),
+            transparent 62%
+          );
+        opacity: 0.56;
+        transition: opacity 700ms var(--ease);
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 20;
+        opacity: 0.026;
+        background-image:
+          repeating-linear-gradient(0deg, rgba(17, 20, 18, 0.28) 0 1px, transparent 1px 3px),
+          repeating-linear-gradient(90deg, rgba(17, 20, 18, 0.16) 0 1px, transparent 1px 4px);
+        mix-blend-mode: multiply;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .theme-input {
+        position: fixed;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .theme-dock {
+        position: fixed;
+        right: 24px;
+        bottom: 22px;
+        z-index: 12;
+        display: flex;
+        gap: 6px;
+        padding: 7px;
+        border-radius: 999px;
+        background: rgba(250, 250, 246, 0.78);
+        box-shadow: 0 14px 38px rgba(35, 40, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(24px);
+        opacity: 0.86;
+      }
+
+      .theme-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        border-radius: 999px;
+        padding: 8px 11px;
+        color: #515851;
+        font-size: 11px;
+        font-weight: 680;
+        cursor: pointer;
+        transition: transform 680ms var(--ease), background 680ms var(--ease), color 680ms var(--ease);
+      }
+
+      .theme-option::before {
+        content: "";
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--swatch);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+      }
+
+      .theme-option:hover {
+        transform: translateY(-1px);
+        background: rgba(18, 21, 18, 0.06);
+      }
+
+      body:has(#theme-mist:checked) label[for="theme-mist"],
+      body:has(#theme-sage:checked) label[for="theme-sage"],
+      body:has(#theme-dusk:checked) label[for="theme-dusk"] {
+        background: #121512;
+        color: #fbf9f1;
+      }
+
+      body:has(#theme-dusk:checked) label[for="theme-dusk"] {
+        background: #3a402f;
+        color: #f2ead8;
+      }
+
+      .page {
+        position: relative;
+        z-index: 1;
+        width: min(1320px, calc(100% - clamp(48px, 8vw, 144px)));
+        margin: 0 auto;
+        padding: 36px 0 128px;
+      }
+
+      .concept-nav {
+        position: sticky;
+        top: 18px;
+        z-index: 10;
+        width: max-content;
+        max-width: calc(100vw - 32px);
+        margin: 0 auto 82px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px;
+        border-radius: 999px;
+        background: rgba(250, 250, 246, 0.8);
+        box-shadow: 0 14px 42px rgba(35, 40, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(24px);
+      }
+
+      .brand-chip {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 16px;
+        border-radius: 999px;
+        background: #121512;
+        color: #f7f5ee;
+        font-weight: 660;
+        letter-spacing: 0.01em;
+      }
+
+      .brand-chip small {
+        display: block;
+        margin-top: 1px;
+        color: rgba(247, 245, 238, 0.68);
+        font-size: 10px;
+        font-weight: 560;
+        letter-spacing: 0.04em;
+      }
+
+      .brand-chip span {
+        white-space: nowrap;
+      }
+
+      .brand-mark {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.12)),
+          var(--accent);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+      }
+
+      .weather-logo {
+        position: relative;
+        display: inline-block;
+        width: 34px;
+        height: 34px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at 42% 38%, rgba(255, 246, 196, 0.95) 0 18%, transparent 19%),
+          radial-gradient(circle at 62% 62%, rgba(177, 213, 195, 0.8) 0 24%, transparent 25%),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04)),
+          var(--accent);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.36),
+          0 0 0 1px rgba(255, 255, 255, 0.16),
+          0 12px 24px rgba(47, 111, 99, 0.24);
+        overflow: hidden;
+      }
+
+      .weather-logo.compact {
+        width: 28px;
+        height: 28px;
+      }
+
+      .weather-logo::before,
+      .weather-logo::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+        pointer-events: none;
+      }
+
+      .weather-logo::before {
+        width: 18px;
+        height: 7px;
+        left: 12px;
+        top: 18px;
+        background: rgba(255, 255, 255, 0.84);
+        box-shadow: -6px 1px 0 rgba(255, 255, 255, 0.56), 7px 2px 0 rgba(255, 255, 255, 0.42);
+        animation: drift 4.8s var(--ease) infinite alternate;
+      }
+
+      .weather-logo::after {
+        inset: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.26);
+        animation: breathe 3.2s var(--ease) infinite;
+      }
+
+      @keyframes drift {
+        from {
+          transform: translateX(-2px);
+        }
+        to {
+          transform: translateX(3px);
+        }
+      }
+
+      @keyframes breathe {
+        0%,
+        100% {
+          transform: scale(0.9);
+          opacity: 0.46;
+        }
+        50% {
+          transform: scale(1.12);
+          opacity: 0.88;
+        }
+      }
+
+      .runtime-switch {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        max-width: min(390px, 30vw);
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 5px;
+        border-radius: 999px;
+        background: rgba(18, 21, 18, 0.06);
+      }
+
+      .runtime-switch::-webkit-scrollbar {
+        display: none;
+      }
+
+      .runtime-switch span {
+        flex: 0 0 auto;
+        padding: 8px 11px;
+        border-radius: 999px;
+        color: #59615a;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .runtime-switch .active {
+        background: #121512;
+        color: #fbf9f1;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      }
+
+      .nav-link {
+        flex: 0 0 auto;
+        padding: 10px 14px;
+        border-radius: 999px;
+        color: #4f565b;
+        font-size: 13px;
+        white-space: nowrap;
+        transition: transform 680ms var(--ease), background 680ms var(--ease), color 680ms var(--ease);
+      }
+
+      .nav-link:hover {
+        transform: translateY(-1px);
+        background: rgba(18, 21, 18, 0.06);
+        color: #171a18;
+      }
+
+      .nav-more {
+        position: relative;
+      }
+
+      .nav-more-button {
+        border: 0;
+        background: transparent;
+        font: inherit;
+      }
+
+      .more-panel {
+        position: absolute;
+        top: calc(100% + 12px);
+        right: 0;
+        width: 218px;
+        border-radius: 24px;
+        padding: 7px;
+        background: rgba(250, 250, 246, 0.84);
+        box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(24px);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(8px);
+        transition: opacity 620ms var(--ease), transform 620ms var(--ease);
+      }
+
+      .nav-more:hover .more-panel,
+      .nav-more:focus-within .more-panel {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+      }
+
+      .more-item,
+      .locale-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 11px 12px;
+        border-radius: 17px;
+        color: #4f5650;
+        font-size: 12px;
+      }
+
+      .more-item.active,
+      .locale-item.active {
+        background: #121512;
+        color: #fbf9f1;
+      }
+
+      .locale-switch {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px;
+        border-radius: 999px;
+        background: rgba(18, 21, 18, 0.06);
+      }
+
+      .locale-switch span {
+        padding: 8px 10px;
+        border-radius: 999px;
+        color: #59615a;
+        font-size: 11px;
+        font-weight: 660;
+        white-space: nowrap;
+      }
+
+      .locale-switch .active {
+        background: #121512;
+        color: #fbf9f1;
+      }
+
+      .compact-action-dock {
+        position: fixed;
+        left: 18px;
+        bottom: 18px;
+        z-index: 14;
+        display: none;
+        align-items: end;
+      }
+
+      .action-ball {
+        border: 0;
+        appearance: none;
+        display: grid;
+        width: 58px;
+        height: 58px;
+        place-items: center;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.44), transparent 28%),
+          #121512;
+        color: #fbf9f1;
+        font-size: 12px;
+        font-weight: 760;
+        font-family: inherit;
+        cursor: pointer;
+        box-shadow: 0 22px 52px rgba(20, 24, 20, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      }
+
+      .compact-action-panel {
+        position: absolute;
+        left: 70px;
+        bottom: 0;
+        width: min(310px, calc(100vw - 100px));
+        border-radius: 28px;
+        padding: 8px;
+        background: rgba(250, 250, 246, 0.82);
+        box-shadow: 0 18px 54px rgba(35, 40, 42, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(24px);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(10px) scale(0.96);
+        transform-origin: bottom left;
+        transition: opacity 620ms var(--ease), transform 620ms var(--ease);
+      }
+
+      .compact-action-dock:hover .compact-action-panel,
+      .compact-action-dock:focus-within .compact-action-panel {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0) scale(1);
+      }
+
+      .compact-quick-row,
+      .compact-more-row,
+      .compact-system-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .compact-more-row,
+      .compact-system-row {
+        margin-top: 7px;
+      }
+
+      .compact-quick,
+      .compact-secondary,
+      .compact-system {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 34px;
+        border-radius: 999px;
+        padding: 8px 11px;
+        color: #4d554d;
+        background: rgba(18, 21, 18, 0.06);
+        font-size: 12px;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+
+      .compact-quick.primary {
+        background: #121512;
+        color: #fbf9f1;
+      }
+
+      .compact-system {
+        color: #667063;
+        font-size: 11px;
+      }
+
+      .compact-control-block {
+        display: grid;
+        gap: 6px;
+        width: 100%;
+      }
+
+      .compact-control-label {
+        color: var(--subtle);
+        font-size: 10px;
+        font-weight: 760;
+        text-transform: uppercase;
+      }
+
+      .compact-system-group {
+        display: flex;
+        gap: 7px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .compact-system-group::-webkit-scrollbar {
+        display: none;
+      }
+
+      .compact-layout-switch {
+        display: flex;
+        gap: 7px;
+        overflow-x: auto;
+        padding: 2px;
+        scrollbar-width: none;
+      }
+
+      .compact-layout-switch::-webkit-scrollbar {
+        display: none;
+      }
+
+      .compact-layout-option {
+        flex: 0 0 auto;
+        min-width: max-content;
+      }
+
+      .compact-layout-option.active {
+        background: #121512;
+        color: #fbf9f1;
+      }
+
+      body:has(#theme-dusk:checked) .nav-link,
+      body:has(#theme-dusk:checked) .more-item,
+      body:has(#theme-dusk:checked) .locale-switch span,
+      body:has(#theme-dusk:checked) .runtime-switch span {
+        color: #e9dec9;
+      }
+
+      body:has(#theme-dusk:checked) .nav-link:hover,
+      body:has(#theme-dusk:checked) .more-item:hover {
+        color: #fff3db;
+        background: rgba(255, 245, 224, 0.11);
+      }
+
+      body:has(#theme-dusk:checked) .locale-switch .active,
+      body:has(#theme-dusk:checked) .runtime-switch .active,
+      body:has(#theme-dusk:checked) .compact-quick.primary {
+        background: #5b6847;
+        color: #fff4dc;
+      }
+
+      body:has(#theme-dusk:checked) .compact-action-panel {
+        background: rgba(38, 42, 32, 0.86);
+      }
+
+      body:has(#theme-dusk:checked) .compact-quick,
+      body:has(#theme-dusk:checked) .compact-secondary,
+      body:has(#theme-dusk:checked) .compact-system,
+      body:has(#theme-dusk:checked) .compact-layout-option {
+        background: rgba(255, 245, 224, 0.09);
+        color: #efe4cf;
+      }
+
+      body:has(#theme-dusk:checked) .compact-layout-option.active {
+        background: #5b6847;
+        color: #fff4dc;
+      }
+
+      body:has(#theme-dusk:checked) .compact-control-label {
+        color: #d5c9b3;
+      }
+
+      .intro {
+        display: grid;
+        grid-template-columns: minmax(0, 0.88fr) minmax(300px, 0.46fr);
+        gap: clamp(48px, 6vw, 92px);
+        align-items: end;
+        margin-bottom: clamp(96px, 10vw, 148px);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        width: max-content;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 6px 11px;
+        background: rgba(18, 21, 18, 0.06);
+        color: #485048;
+        font-size: 10px;
+        font-weight: 720;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: 18px 0 0;
+        font-size: clamp(38px, 4.8vw, 68px);
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .intro-copy {
+        margin: 0;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.8;
+      }
+
+      .menu-landing {
+        display: grid;
+        grid-template-columns: minmax(0, 0.78fr) minmax(260px, 0.42fr);
+        gap: 28px;
+        padding: 18px 34px 36px;
+      }
+
+      .menu-summary {
+        min-height: 500px;
+        border-radius: 28px;
+        padding: 28px;
+        background: rgba(255, 255, 255, 0.54);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.82), 0 8px 22px rgba(37, 43, 46, 0.032);
+      }
+
+      .menu-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+        margin-top: 26px;
+      }
+
+      .menu-summary-card {
+        min-height: 156px;
+        border-radius: 24px;
+        padding: 20px;
+        background: rgba(18, 21, 18, 0.045);
+      }
+
+      .latest-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .latest-item {
+        display: grid;
+        grid-template-columns: 54px minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: center;
+        min-height: 72px;
+        border-radius: 22px;
+        padding: 12px;
+        background: rgba(18, 21, 18, 0.045);
+      }
+
+      .latest-thumb {
+        width: 54px;
+        height: 54px;
+        border-radius: 17px;
+        background:
+          linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent 52%),
+          rgba(18, 21, 18, 0.08);
+      }
+
+      .latest-copy {
+        min-width: 0;
+      }
+
+      .latest-copy strong {
+        display: block;
+        font-size: 14px;
+      }
+
+      .latest-copy span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .item-arrow {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border-radius: 50%;
+        background: rgba(18, 21, 18, 0.07);
+        color: #3f4740;
+      }
+
+      .section-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+      }
+
+      .gallery-strip {
+        display: flex;
+        gap: 18px;
+        margin-top: 26px;
+        overflow-x: auto;
+        padding: 2px 0 16px;
+        scroll-snap-type: x proximity;
+        scrollbar-width: thin;
+      }
+
+      .gallery-strip-card {
+        flex: 0 0 clamp(190px, 28vw, 280px);
+        min-height: 290px;
+        border-radius: 28px;
+        padding: 8px;
+        background: rgba(18, 21, 18, 0.045);
+        scroll-snap-align: start;
+      }
+
+      .gallery-strip-core {
+        height: 100%;
+        min-height: 274px;
+        border-radius: 22px;
+        background:
+          linear-gradient(155deg, rgba(246, 237, 214, 0.92), rgba(102, 126, 111, 0.62)),
+          linear-gradient(35deg, rgba(18, 21, 18, 0.1), transparent);
+      }
+
+      .pagination-note {
+        display: inline-flex;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .menu-summary-art {
+        min-height: 500px;
+        border-radius: 28px;
+        background:
+          linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent 48%),
+          linear-gradient(320deg, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 48%),
+          rgba(18, 21, 18, 0.08);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.4);
+      }
+
+      .handoff-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .handoff-chip {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 46px;
+        border-radius: 999px;
+        padding: 12px 14px 12px 18px;
+        color: #4d554d;
+        background: rgba(18, 21, 18, 0.055);
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .handoff-chip span {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 50%;
+        background: rgba(18, 21, 18, 0.08);
+      }
+
+      .notification-popover {
+        position: fixed;
+        top: 112px;
+        right: 36px;
+        z-index: 11;
+        width: min(268px, calc(100vw - 32px));
+        border-radius: 24px;
+        padding: 6px;
+        background: rgba(255, 255, 255, 0.3);
+        box-shadow: 0 14px 38px rgba(35, 40, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(24px);
+        opacity: 0.82;
+        transform: scale(0.96);
+        transform-origin: top right;
+      }
+
+      .notification-core {
+        border-radius: 19px;
+        padding: 12px;
+        background: rgba(251, 251, 248, 0.72);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.92);
+      }
+
+      body:has(#theme-dusk:checked) .notification-core,
+      body:has(#theme-dusk:checked) .frame,
+      body:has(#theme-dusk:checked) .rail,
+      body:has(#theme-dusk:checked) .panel,
+      body:has(#theme-dusk:checked) .menu-summary,
+      body:has(#theme-dusk:checked) .metric,
+      body:has(#theme-dusk:checked) .asset-tile,
+      body:has(#theme-dusk:checked) .chat-bubble,
+      body:has(#theme-dusk:checked) .step-card,
+      body:has(#theme-dusk:checked) .phone-core,
+      body:has(#theme-dusk:checked) .composer-core {
+        background: rgba(32, 35, 29, 0.88);
+      }
+
+      body:has(#theme-dusk:checked) .concept-nav,
+      body:has(#theme-dusk:checked) .theme-dock,
+      body:has(#theme-dusk:checked) .frame-shell,
+      body:has(#theme-dusk:checked) .phone,
+      body:has(#theme-dusk:checked) .notification-popover {
+        background: rgba(28, 31, 26, 0.7);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+
+      body:has(#theme-dusk:checked) .pill,
+      body:has(#theme-dusk:checked) .runtime-switch,
+      body:has(#theme-dusk:checked) .locale-switch,
+      body:has(#theme-dusk:checked) .more-panel,
+      body:has(#theme-dusk:checked) .list-card,
+      body:has(#theme-dusk:checked) .composer {
+        background: rgba(255, 255, 255, 0.08);
+        color: #e8decb;
+      }
+
+      .notification-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .notification-count {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border-radius: 50%;
+        background: #121512;
+        color: #fbf9f1;
+        font-size: 11px;
+        font-weight: 760;
+      }
+
+      .notice-item {
+        margin-top: 9px;
+        padding: 9px;
+        border-radius: 14px;
+        background: rgba(18, 21, 18, 0.055);
+      }
+
+      .notice-item strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 12px;
+      }
+
+      .notice-item span {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .section {
+        margin-top: clamp(96px, 10vw, 152px);
+        scroll-margin-top: 128px;
+      }
+
+      .route-return,
+      .route-subpage {
+        display: none;
+      }
+
+      .route-return {
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin: -46px auto 46px;
+        padding: 8px 8px 8px 18px;
+        border-radius: 999px;
+        background: rgba(250, 250, 246, 0.74);
+        box-shadow: 0 16px 42px rgba(35, 40, 42, 0.075), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(22px);
+      }
+
+      .route-return span {
+        min-width: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .route-subpage {
+        margin-top: 0;
+        min-height: calc(100dvh - 210px);
+      }
+
+      body:has(.route-subpage:target) .main-route {
+        display: none;
+      }
+
+      body:has(.route-subpage:target) .route-return {
+        display: flex;
+      }
+
+      body:has(.route-subpage:target) .route-subpage:target {
+        display: block;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: clamp(36px, 6vw, 84px);
+        margin-bottom: 34px;
+      }
+
+      h2 {
+        margin: 10px 0 0;
+        font-size: clamp(27px, 3.2vw, 44px);
+        line-height: 1.06;
+        letter-spacing: 0;
+      }
+
+      .section-head p {
+        max-width: 430px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.75;
+      }
+
+      .frame-shell {
+        border-radius: 38px;
+        padding: 9px;
+        background: rgba(255, 255, 255, 0.38);
+        box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+      }
+
+      .frame {
+        min-height: clamp(560px, 54vw, 690px);
+        overflow: hidden;
+        border-radius: 29px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 247, 244, 0.92)),
+          #fbfbf8;
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.88);
+      }
+
+      .app-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 30px 34px 18px;
+      }
+
+      .app-title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .app-title strong {
+        display: block;
+        font-size: 18px;
+        letter-spacing: 0;
+      }
+
+      .app-title span,
+      .mini-label {
+        color: var(--subtle);
+        font-size: 12px;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .pill {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: rgba(18, 21, 18, 0.06);
+        color: #434943;
+        font: inherit;
+        font-size: 12px;
+      }
+
+      .primary-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        border: 0;
+        border-radius: 999px;
+        padding: 8px 8px 8px 18px;
+        background: #121512;
+        color: #fbf9f1;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 660;
+        transition: transform 680ms var(--ease);
+      }
+
+      .primary-pill:active {
+        transform: scale(0.98);
+      }
+
+      .primary-pill .arrow {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.12);
+        transition: transform 680ms var(--ease);
+      }
+
+      .primary-pill:hover .arrow {
+        transform: translate(2px, -1px) scale(1.04);
+      }
+
+      .workspace-grid {
+        display: grid;
+        grid-template-columns: minmax(190px, 0.32fr) minmax(0, 1fr) minmax(230px, 0.38fr);
+        gap: 24px;
+        padding: 18px 34px 36px;
+      }
+
+      .rail,
+      .panel,
+      .metric,
+      .asset-tile,
+      .chat-bubble {
+        border-radius: 26px;
+        background: rgba(255, 255, 255, 0.54);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.82), 0 8px 22px rgba(37, 43, 46, 0.032);
+      }
+
+      .rail {
+        padding: 16px;
+      }
+
+      .rail-item {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 10px 12px;
+        border-radius: 16px;
+        color: #59615a;
+        font-size: 12px;
+      }
+
+      .rail-item.active {
+        background: #121512;
+        color: #fbf9f1;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.68;
+      }
+
+      .main-canvas {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 24px;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+        max-width: 640px;
+      }
+
+      .metric {
+        padding: 20px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 16px;
+        font-size: 30px;
+        letter-spacing: 0;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .kanban {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 20px;
+      }
+
+      .panel {
+        padding: 22px;
+      }
+
+      .list-card {
+        margin-top: 16px;
+        padding: 16px;
+        border-radius: 20px;
+        background: rgba(18, 21, 18, 0.045);
+      }
+
+      .line {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(18, 21, 18, 0.12);
+      }
+
+      .line.short {
+        width: 54%;
+      }
+
+      .line.mid {
+        width: 74%;
+      }
+
+      .inspector {
+        display: grid;
+        gap: 20px;
+      }
+
+      .preview-window {
+        min-height: 220px;
+        border-radius: 22px;
+        background:
+          linear-gradient(135deg, rgba(47, 111, 99, 0.2), transparent 45%),
+          linear-gradient(320deg, rgba(159, 107, 66, 0.22), transparent 42%),
+          #202722;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+      }
+
+      .create-grid {
+        display: grid;
+        grid-template-columns: minmax(230px, 0.44fr) minmax(0, 1fr);
+        gap: 28px;
+        padding: 18px 34px 36px;
+      }
+
+      .step-stack {
+        display: grid;
+        gap: 18px;
+      }
+
+      .step-card {
+        border-radius: 22px;
+        padding: 20px;
+        background: rgba(255, 255, 255, 0.58);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.9);
+      }
+
+      .step-card.active {
+        background: #121512;
+        color: #fbf9f1;
+      }
+
+      .flow-canvas {
+        min-height: 500px;
+        position: relative;
+        border-radius: 26px;
+        padding: 30px;
+        background:
+          linear-gradient(rgba(18, 21, 18, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(18, 21, 18, 0.05) 1px, transparent 1px),
+          rgba(255, 255, 255, 0.58);
+        background-size: 34px 34px;
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.86);
+      }
+
+      .node {
+        position: absolute;
+        width: 172px;
+        min-height: 92px;
+        border-radius: 22px;
+        padding: 14px;
+        background: rgba(251, 251, 248, 0.92);
+        box-shadow: 0 18px 42px rgba(41, 46, 48, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.96);
+      }
+
+      .node.dark {
+        background: #151916;
+        color: #fbf9f1;
+      }
+
+      .node.a {
+        transform: translate(5%, 20%);
+      }
+
+      .node.b {
+        transform: translate(135%, 85%);
+      }
+
+      .node.c {
+        transform: translate(255%, 28%);
+      }
+
+      .chat-frame {
+        display: grid;
+        grid-template-columns: 210px minmax(0, 1fr) 220px;
+        gap: 24px;
+        padding: 18px 34px 36px;
+      }
+
+      .chat-center {
+        display: grid;
+        grid-template-rows: 1fr auto;
+        gap: 20px;
+        min-height: 520px;
+      }
+
+      .image-stage {
+        border-radius: 26px;
+        padding: 18px;
+        background:
+          linear-gradient(135deg, rgba(47, 111, 99, 0.18), transparent 46%),
+          linear-gradient(320deg, rgba(16, 18, 17, 0.9), rgba(34, 40, 36, 0.92));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+      }
+
+      .image-stage-grid {
+        height: 100%;
+        min-height: 350px;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 18px;
+      }
+
+      .image-card {
+        border-radius: 22px;
+        background:
+          linear-gradient(150deg, rgba(247, 242, 228, 0.86), rgba(115, 132, 111, 0.58)),
+          linear-gradient(40deg, rgba(18, 21, 18, 0.14), transparent);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
+      }
+
+      .composer {
+        border-radius: 28px;
+        padding: 8px;
+        background: rgba(18, 21, 18, 0.08);
+      }
+
+      .composer-core {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 64px;
+        border-radius: 22px;
+        padding: 10px 10px 10px 18px;
+        background: rgba(251, 251, 248, 0.94);
+      }
+
+      .gallery-frame {
+        padding: 18px 34px 36px;
+      }
+
+      .gallery-toolbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 24px;
+      }
+
+      .masonry {
+        columns: 4 190px;
+        column-gap: 22px;
+      }
+
+      .asset-tile {
+        display: inline-block;
+        width: 100%;
+        margin: 0 0 22px;
+        padding: 8px;
+        break-inside: avoid;
+      }
+
+      .asset-core {
+        border-radius: 18px;
+        background:
+          linear-gradient(155deg, rgba(246, 237, 214, 0.92), rgba(102, 126, 111, 0.62)),
+          linear-gradient(35deg, rgba(18, 21, 18, 0.1), transparent);
+      }
+
+      .asset-core.tall {
+        height: 260px;
+      }
+
+      .asset-core.mid {
+        height: 210px;
+      }
+
+      .asset-core.short {
+        height: 150px;
+      }
+
+      .mobile-strip {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 24px;
+        margin-top: 32px;
+      }
+
+      .phone {
+        min-height: 320px;
+        border-radius: 32px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.42);
+        box-shadow: var(--soft-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+      }
+
+      .phone-core {
+        height: 100%;
+        border-radius: 22px;
+        padding: 14px;
+        background: rgba(251, 251, 248, 0.92);
+      }
+
+      .phone-title {
+        height: 16px;
+        width: 58%;
+        border-radius: 999px;
+        background: rgba(18, 21, 18, 0.22);
+      }
+
+      .phone-block {
+        margin-top: 12px;
+        border-radius: 18px;
+        background: rgba(18, 21, 18, 0.08);
+      }
+
+      .phone-block.hero {
+        height: 92px;
+      }
+
+      .phone-block.list {
+        height: 38px;
+      }
+
+      .phone-nav {
+        margin-top: 32px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 7px;
+      }
+
+      .phone-nav span {
+        height: 28px;
+        border-radius: 999px;
+        background: rgba(18, 21, 18, 0.1);
+      }
+
+      .caption {
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .breakpoint-ladder {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr 0.72fr;
+        gap: 24px;
+      }
+
+      .system-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+      }
+
+      .subpage-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(260px, 0.4fr);
+        gap: 24px;
+        padding: 18px 34px 36px;
+      }
+
+      .subpage-flow {
+        display: grid;
+        gap: 16px;
+      }
+
+      .subpage-card {
+        border-radius: 28px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.42);
+        box-shadow: var(--soft-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.84);
+      }
+
+      .subpage-core {
+        min-height: 144px;
+        border-radius: 21px;
+        padding: 20px;
+        background: rgba(251, 251, 248, 0.82);
+      }
+
+      .subpage-core h3 {
+        margin: 12px 0 0;
+        font-size: 20px;
+      }
+
+      .subpage-core p {
+        max-width: 620px;
+      }
+
+      .subpage-sidebar {
+        min-height: 100%;
+        border-radius: 28px;
+        padding: 24px;
+        background:
+          linear-gradient(140deg, color-mix(in srgb, var(--accent) 13%, transparent), transparent 48%),
+          rgba(18, 21, 18, 0.055);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.52);
+      }
+
+      .subpage-sidebar .handoff-list {
+        margin-top: 18px;
+      }
+
+      .system-card {
+        min-height: 270px;
+        border-radius: 34px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.4);
+        box-shadow: var(--soft-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      }
+
+      .system-core {
+        height: 100%;
+        border-radius: 26px;
+        padding: 24px;
+        background: rgba(251, 251, 248, 0.82);
+      }
+
+      .system-core h3 {
+        margin-bottom: 18px;
+      }
+
+      .system-lines {
+        display: grid;
+        gap: 9px;
+      }
+
+      .system-lines span {
+        height: 26px;
+        border-radius: 999px;
+        background: rgba(18, 21, 18, 0.08);
+      }
+
+      .doc-lines {
+        display: grid;
+        gap: 8px;
+      }
+
+      .doc-lines span {
+        height: 9px;
+        border-radius: 999px;
+        background: rgba(18, 21, 18, 0.11);
+      }
+
+      .doc-lines span:nth-child(2n) {
+        width: 76%;
+      }
+
+      body:has(#theme-dusk:checked) .doc-lines span {
+        background: rgba(244, 232, 206, 0.1);
+      }
+
+      body:has(#theme-dusk:checked) .menu-summary-card,
+      body:has(#theme-dusk:checked) .latest-item,
+      body:has(#theme-dusk:checked) .gallery-strip-card,
+      body:has(#theme-dusk:checked) .handoff-chip {
+        background: rgba(244, 232, 206, 0.1);
+        color: #efe4cf;
+      }
+
+      body:has(#theme-dusk:checked) .latest-thumb,
+      body:has(#theme-dusk:checked) .item-arrow {
+        background: rgba(244, 232, 206, 0.12);
+        color: #efe4cf;
+      }
+
+      .breakpoint-card {
+        border-radius: 34px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.4);
+        box-shadow: var(--soft-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      }
+
+      .breakpoint-core {
+        min-height: 292px;
+        border-radius: 26px;
+        padding: 24px;
+        background: rgba(251, 251, 248, 0.82);
+      }
+
+      body:has(#theme-dusk:checked) .breakpoint-core {
+        background: rgba(32, 35, 29, 0.88);
+      }
+
+      body:has(#theme-dusk:checked) .system-core {
+        background: rgba(41, 45, 35, 0.88);
+      }
+
+      body:has(#theme-dusk:checked) .subpage-core {
+        background: rgba(41, 45, 35, 0.88);
+      }
+
+      body:has(#theme-dusk:checked) .subpage-card,
+      body:has(#theme-dusk:checked) .subpage-sidebar,
+      body:has(#theme-dusk:checked) .route-return {
+        background: rgba(244, 232, 206, 0.08);
+      }
+
+      body:has(#theme-dusk:checked) .line,
+      body:has(#theme-dusk:checked) .wire-cell,
+      body:has(#theme-dusk:checked) .system-lines span,
+      body:has(#theme-dusk:checked) .phone-block,
+      body:has(#theme-dusk:checked) .phone-nav span {
+        background: rgba(244, 232, 206, 0.1);
+      }
+
+      .wire-desktop,
+      .wire-tablet,
+      .wire-phone {
+        display: grid;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .wire-desktop {
+        grid-template-columns: 0.28fr 1fr 0.38fr;
+      }
+
+      .wire-tablet {
+        grid-template-columns: 0.18fr 1fr;
+      }
+
+      .wire-phone {
+        grid-template-columns: 1fr;
+      }
+
+      .wire-cell {
+        min-height: 150px;
+        border-radius: 18px;
+        background: rgba(18, 21, 18, 0.08);
+      }
+
+      .wire-cell.short {
+        min-height: 70px;
+      }
+
+      .fade-up {
+        animation: fade-up 900ms var(--ease) both;
+      }
+
+      .delay-1 {
+        animation-delay: 120ms;
+      }
+
+      .delay-2 {
+        animation-delay: 220ms;
+      }
+
+      .delay-3 {
+        animation-delay: 320ms;
+      }
+
+      @keyframes fade-up {
+        from {
+          transform: translateY(28px);
+          opacity: 0;
+          filter: blur(10px);
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+          filter: blur(0);
+        }
+      }
+
+      @keyframes mobile-ambient {
+        0%,
+        100% {
+          transform: translate3d(-4vw, -1vh, 0) scale(1);
+          opacity: 0.46;
+        }
+        50% {
+          transform: translate3d(5vw, 2vh, 0) scale(1.08);
+          opacity: 0.62;
+        }
+      }
+
+      @media (max-width: 980px) {
+        .intro,
+        .menu-landing,
+        .workspace-grid,
+        .create-grid,
+        .chat-frame {
+          grid-template-columns: 1fr;
+        }
+
+	        .metrics,
+	        .kanban,
+        .menu-summary-grid,
+        .mobile-strip,
+        .breakpoint-ladder,
+        .subpage-grid,
+        .system-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .frame {
+          min-height: auto;
+        }
+
+        .chat-center {
+          min-height: auto;
+        }
+
+        .concept-nav {
+          width: min(520px, calc(100vw - 32px));
+          overflow: hidden;
+          justify-content: center;
+        }
+
+        .nav-link,
+        .nav-more,
+        .runtime-switch,
+        .locale-switch {
+          display: none;
+        }
+
+        .compact-action-dock {
+          display: flex;
+        }
+
+        .compact-action-panel {
+          width: min(286px, calc(100vw - 100px));
+        }
+
+        .compact-quick-row,
+        .compact-more-row,
+        .compact-system-row {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 7px;
+        }
+
+        .compact-more-row,
+        .compact-system-row {
+          margin-top: 10px;
+          padding-top: 10px;
+          border-top: 1px solid rgba(18, 21, 18, 0.07);
+        }
+
+        .compact-quick,
+        .compact-secondary,
+        .compact-system {
+          justify-content: flex-start;
+          width: 100%;
+          min-height: 36px;
+          padding: 9px 12px;
+        }
+
+        .compact-system-group .compact-system,
+        .compact-layout-option {
+          justify-content: center;
+          width: auto;
+          min-width: max-content;
+          padding-inline: 13px;
+        }
+
+        .compact-layout-switch {
+          width: 100%;
+          gap: 7px;
+          padding: 2px 0 3px;
+        }
+
+        .section-head {
+          display: block;
+        }
+
+        .section-head p {
+          margin-top: 12px;
+        }
+
+        .app-top,
+        .gallery-toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+	        .top-actions {
+	          flex-wrap: wrap;
+	        }
+
+	        .notification-popover {
+	          top: 96px;
+	          right: 14px;
+	          width: min(250px, calc(100vw - 28px));
+	          opacity: 0.72;
+	        }
+
+        .theme-dock {
+          right: 12px;
+          bottom: 12px;
+          max-width: calc(100vw - 104px);
+          overflow-x: auto;
+        }
+
+	        .node {
+	          position: static;
+          width: auto;
+          min-height: 84px;
+          margin-bottom: 12px;
+          transform: none !important;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          width: min(100% - 24px, 1480px);
+          padding-top: 16px;
+        }
+
+        h1 {
+          font-size: clamp(38px, 11vw, 58px);
+        }
+
+        .frame-shell {
+          border-radius: 26px;
+          padding: 6px;
+        }
+
+        .frame {
+          border-radius: 21px;
+        }
+
+        .brand-chip {
+          max-width: calc(100vw - 40px);
+          white-space: nowrap;
+        }
+
+        .brand-chip small {
+          display: none;
+        }
+
+        .compact-action-dock {
+          left: 12px;
+          right: 12px;
+          bottom: 12px;
+        }
+
+        .compact-action-panel {
+          left: 0;
+          bottom: 70px;
+          width: min(258px, calc(100vw - 28px));
+          max-height: min(700px, calc(100dvh - 96px));
+          overflow: auto;
+          padding: 8px;
+          border-radius: 24px;
+          transform-origin: bottom left;
+        }
+
+        .compact-more-row,
+        .compact-system-row {
+          margin-top: 8px;
+          padding-top: 8px;
+        }
+
+        .compact-quick-row,
+        .compact-more-row,
+        .compact-system-row {
+          gap: 5px;
+        }
+
+        .latest-item {
+          grid-template-columns: 46px minmax(0, 1fr) auto;
+          min-height: 64px;
+        }
+
+        .latest-thumb {
+          width: 46px;
+          height: 46px;
+          border-radius: 15px;
+        }
+
+        .gallery-strip-card {
+          flex-basis: 210px;
+        }
+
+        .theme-option {
+          padding: 8px 9px;
+        }
+
+        .theme-dock {
+          display: none;
+        }
+
+        body::after {
+          --cursor-x: 42vw;
+          --cursor-y: 24vh;
+          opacity: 0.54;
+          animation: mobile-ambient 6.8s var(--ease) infinite;
+        }
+
+        .notification-popover {
+          top: 86px;
+          right: 12px;
+          width: auto;
+          border-radius: 999px;
+          padding: 5px;
+          opacity: 0.72;
+        }
+
+        .notification-core {
+          border-radius: 999px;
+          padding: 8px 9px 8px 12px;
+        }
+
+        .notification-core .mini-label,
+        .notice-item {
+          display: none;
+        }
+
+        .notification-head {
+          gap: 8px;
+        }
+
+      }
+    </style>
+	  </head>
+	  <body>
+	    <input class="theme-input" type="radio" name="theme" id="theme-mist" checked />
+	    <input class="theme-input" type="radio" name="theme" id="theme-sage" />
+	    <input class="theme-input" type="radio" name="theme" id="theme-dusk" />
+	    <div class="theme-dock" aria-label="主题切换">
+	      <label class="theme-option" style="--swatch: #f5f8fb" for="theme-mist">雾白</label>
+	      <label class="theme-option" style="--swatch: #e4f0dd" for="theme-sage">青木</label>
+	      <label class="theme-option" style="--swatch: #20231b" for="theme-dusk">夜幕</label>
+	    </div>
+	    <main class="page">
+	      <nav class="concept-nav" aria-label="概念稿导航">
+	        <a class="brand-chip" href="#top">
+	          <span class="weather-logo" aria-hidden="true"></span>
+	          <span>Inspiration One<small>杭州 28°C / 晴转多云</small></span>
+	        </a>
+	        <div class="runtime-switch" aria-label="运行时布局切换">
+	          <span>经典</span>
+	          <span class="active">工作台</span>
+	          <span>专注</span>
+	          <span>媒体</span>
+	          <span>移动优先</span>
+	        </div>
+	        <a class="nav-link" href="#resource-library">资源库</a>
+	        <a class="nav-link" href="#workspace">灵感</a>
+	        <a class="nav-link" href="#chat">文/图生图</a>
+	        <a class="nav-link" href="#gallery">画廊</a>
+	        <a class="nav-link" href="#status">状态</a>
+	        <a class="nav-link" href="#settings-subpage">配置</a>
+	        <div class="nav-more">
+	          <button class="nav-link nav-more-button" type="button">更多</button>
+	          <div class="more-panel" aria-label="更多菜单">
+	            <a class="more-item" href="#stats-subpage">个人统计 <span>↗</span></a>
+	            <a class="more-item" href="#permissions-subpage">权限管理 <span>↗</span></a>
+	            <a class="more-item" href="#help-subpage">帮助 <span>↗</span></a>
+	            <a class="more-item" href="#template-subpage">模板 <span>↗</span></a>
+	            <a class="more-item" href="#template-subpage">全局模板 <span>↗</span></a>
+	            <a class="more-item" href="#responsive">窗口适应 <span>↗</span></a>
+	            <a class="more-item" href="#mobile-subpage">移动端骨架 <span>↗</span></a>
+	          </div>
+	        </div>
+	        <div class="locale-switch" aria-label="语言切换">
+	          <span class="active">简</span>
+	          <span>EN</span>
+	          <span>日</span>
+	        </div>
+	      </nav>
+
+	      <div class="compact-action-dock" aria-label="小窗口操作球">
+	        <button class="action-ball" type="button">操作</button>
+	          <div class="compact-action-panel">
+	          <div class="compact-quick-row" aria-label="高频快捷入口">
+	            <a class="compact-quick primary" href="#resource-library">资源库</a>
+	            <a class="compact-quick primary" href="#workspace">灵感</a>
+	            <a class="compact-quick primary" href="#chat">文/图生图</a>
+	            <a class="compact-quick" href="#gallery">画廊</a>
+	            <a class="compact-quick" href="#status">状态</a>
+	          </div>
+	          <div class="compact-more-row" aria-label="收缩菜单入口">
+	            <a class="compact-secondary" href="#template-subpage">模板</a>
+	            <a class="compact-secondary" href="#template-subpage">全局模板</a>
+	            <a class="compact-secondary" href="#stats-subpage">个人统计</a>
+	            <a class="compact-secondary" href="#permissions-subpage">权限管理</a>
+	            <a class="compact-secondary" href="#help-subpage">帮助</a>
+	            <a class="compact-secondary" href="#settings-subpage">配置</a>
+	            <a class="compact-secondary" href="#responsive">窗口适应</a>
+	            <a class="compact-secondary" href="#mobile-subpage">移动端骨架</a>
+	          </div>
+	          <div class="compact-system-row" aria-label="低频系统入口">
+	            <div class="compact-control-block">
+	              <span class="compact-control-label">语言</span>
+	              <div class="compact-system-group" aria-label="语言切换">
+	                <span class="compact-system compact-layout-option active">简</span>
+	                <span class="compact-system compact-layout-option">EN</span>
+	                <span class="compact-system compact-layout-option">日</span>
+	              </div>
+	            </div>
+	            <div class="compact-control-block">
+	              <span class="compact-control-label">布局</span>
+	              <div class="compact-layout-switch" aria-label="布局方案切换">
+	                <span class="compact-system compact-layout-option">经典</span>
+	                <span class="compact-system compact-layout-option active">工作台</span>
+	                <span class="compact-system compact-layout-option">专注</span>
+	                <span class="compact-system compact-layout-option">媒体</span>
+	                <span class="compact-system compact-layout-option">移动优先</span>
+	              </div>
+	            </div>
+	            <div class="compact-control-block">
+	              <span class="compact-control-label">主题</span>
+	              <div class="compact-system-group" aria-label="主题切换">
+	                <label class="compact-system compact-layout-option active" for="theme-mist">雾白</label>
+	                <label class="compact-system compact-layout-option" for="theme-sage">青木</label>
+	                <label class="compact-system compact-layout-option" for="theme-dusk">夜幕</label>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      </div>
+
+	      <aside class="notification-popover fade-up delay-2" aria-label="右上角通知弹窗">
+	        <div class="notification-core">
+	          <div class="notification-head">
+	            <div>
+	              <strong>通知中心</strong>
+	              <div class="mini-label">右上角系统层，不被页面内容遮挡</div>
+	            </div>
+	            <span class="notification-count">3</span>
+	          </div>
+	          <div class="notice-item">
+	            <strong>图片生成完成</strong>
+	            <span>“夏季主图 A/B” 已生成 4 张候选图，可进入画廊审图。</span>
+	          </div>
+	          <div class="notice-item">
+	            <strong>队列接近上限</strong>
+	            <span>当前全局并发 6 / 8，建议稍后再提交大批量任务。</span>
+	          </div>
+	        </div>
+	      </aside>
+
+	      <div class="route-return" aria-label="子页面返回入口">
+	        <span>当前为独立子页面视图；主页面只保留一级菜单总览。</span>
+	        <a class="handoff-chip" href="#top">返回主页面 <span>↗</span></a>
+	      </div>
+
+	      <header id="top" class="intro fade-up main-route">
+        <div>
+          <span class="eyebrow">workspace concept / review draft</span>
+          <h1>保留经典布局，新增一套更安静的工作台布局。</h1>
+        </div>
+        <p class="intro-copy">
+          大窗口布局方案只在顶部菜单切换；小窗口收入操作球。主页只展示一级菜单入口和页面职责，具体新建、编辑、预览、保存等动作进入子页面完成。
+        </p>
+	      </header>
+
+	      <section id="responsive" class="section fade-up delay-1 route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">00 / responsive behavior</span>
+	            <h2>新 UI 继承窗口大小适应逻辑。</h2>
+	          </div>
+	          <p>当前窗口变化逻辑需要在 `workspace` 中完整体现：宽屏三栏，中等宽度弱化侧栏和右侧面板，移动端退回单列任务流与底部导航。</p>
+	        </div>
+	        <div class="breakpoint-ladder">
+	          <div class="breakpoint-card">
+	            <div class="breakpoint-core">
+	              <span class="eyebrow">1440 / desktop</span>
+	              <h3>三栏工作台</h3>
+	              <p class="caption">导航 rail、主内容、上下文 inspector 同屏，适合长时间操作。</p>
+	              <div class="wire-desktop">
+	                <div class="wire-cell"></div>
+	                <div class="wire-cell"></div>
+	                <div class="wire-cell"></div>
+	              </div>
+	            </div>
+	          </div>
+	          <div class="breakpoint-card">
+	            <div class="breakpoint-core">
+	              <span class="eyebrow">1024 / compact</span>
+	              <h3>侧栏压缩</h3>
+	              <p class="caption">rail 只保留图标，右侧 inspector 可折叠或转为浮层。</p>
+	              <div class="wire-tablet">
+	                <div class="wire-cell"></div>
+	                <div class="wire-cell"></div>
+	                <div class="wire-cell short"></div>
+	                <div class="wire-cell short"></div>
+	              </div>
+	            </div>
+	          </div>
+	          <div class="breakpoint-card">
+	            <div class="breakpoint-core">
+	              <span class="eyebrow">390 / mobile</span>
+	              <h3>单列任务流</h3>
+	              <p class="caption">页面内容纵向排列，设置、历史、筛选进入 sheet，主操作沉到底部。</p>
+	              <div class="wire-phone">
+	                <div class="wire-cell short"></div>
+	                <div class="wire-cell"></div>
+	                <div class="wire-cell short"></div>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="resource-library" class="section fade-up delay-1 main-route">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">01 / resource landing</span>
+	            <h2>资源库保留为一级素材总览页。</h2>
+	          </div>
+	          <p>一级页只呈现资源分组摘要、最新保存资源和可复用素材入口。分组创建、资源归档、预览、下载、入库和载入操作进入资源库子页面或现有独立路由。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="app-top">
+	              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+	                <div>
+	                  <strong>资源库</strong>
+	                  <span>最新 3 个资源 / 管理进入子页面</span>
+	                </div>
+	              </div>
+	            </div>
+	            <div class="menu-landing">
+	              <div class="menu-summary">
+	                <span class="eyebrow">resource overview</span>
+	                <h3>资源库默认展示最新三个。</h3>
+	                <p class="caption">一级页让用户快速判断可复用素材状态。完整分组、批量管理、归档、预览和下载都从子页面完成。</p>
+	                <div class="latest-list">
+	                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>夏季海报成图</strong><span>主图素材 / 刚保存</span></div><span class="item-arrow">↗</span></div>
+	                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>端午活动参考图</strong><span>参考资源 / 12 分钟前</span></div><span class="item-arrow">↗</span></div>
+	                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>新品白底图</strong><span>可载入节点 / 今天</span></div><span class="item-arrow">↗</span></div>
+	                </div>
+	                <div class="menu-summary-grid">
+	                  <div class="menu-summary-card"><span class="eyebrow">groups</span><h3>分组摘要</h3><p class="caption">显示常用分组和资源数量，不展开完整 CRUD。</p></div>
+	                  <div class="menu-summary-card"><span class="eyebrow">reuse</span><h3>复用提示</h3><p class="caption">提示可载入灵感节点或文/图生图参考图的素材。</p></div>
+	                </div>
+	                <div class="section-actions">
+	                  <a class="handoff-chip" href="#resource-library-subpage">更多资源 <span>↗</span></a>
+	                  <a class="handoff-chip" href="#resource-library-subpage">管理资源库 <span>↗</span></a>
+	                </div>
+	              </div>
+	              <aside class="menu-summary-art"></aside>
+	            </div>
+	          </div>
+	        </div>
+	        <p class="caption">核对点：资源库一级页不直接展示分组编辑、归档确认、完整网格和大预览，只提供进入资源管理子页面的路径。</p>
+	      </section>
+
+	      <section id="workspace" class="section fade-up delay-1 main-route">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">02 / inspiration landing</span>
+            <h2>灵感保留为一级总览页。</h2>
+          </div>
+          <p>主页只呈现灵感数量、最近内容和待处理提醒。新建、编辑、审图、详情查看跳到对应子页面，避免一级页承载完整操作流程。</p>
+        </div>
+        <div class="frame-shell">
+          <div class="frame">
+            <div class="app-top">
+              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+                <div>
+                  <strong>灵感</strong>
+                  <span>最新 3 条 / 更多进入子页面</span>
+                </div>
+              </div>
+            </div>
+            <div class="menu-landing">
+              <div class="menu-summary">
+                <span class="eyebrow">latest three</span>
+                <h3>灵感列表默认展示最新三个。</h3>
+                <p class="caption">更多灵感、筛选、详情、编辑、审图全部进入子页面。创建灵感入口固定放在列表下方。</p>
+                <div class="latest-list">
+                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>夏季主图 A/B</strong><span>待审图 / 8 分钟前</span></div><span class="item-arrow">↗</span></div>
+                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>端午活动文案</strong><span>生成中 / 21 分钟前</span></div><span class="item-arrow">↗</span></div>
+                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>新品详情页素材</strong><span>已归档 / 今天</span></div><span class="item-arrow">↗</span></div>
+                </div>
+                <div class="section-actions">
+                  <a class="handoff-chip" href="#inspiration-subpage">更多灵感 <span>↗</span></a>
+                  <a class="handoff-chip" href="#inspiration-create-subpage">创建灵感 <span>↗</span></a>
+                </div>
+              </div>
+              <aside class="menu-summary-art"></aside>
+            </div>
+          </div>
+        </div>
+        <p class="caption">核对点：灵感一级页不再直接出现新建表单、编辑表单和审图操作，只提供进入子页面的路径。</p>
+      </section>
+
+      <section id="chat" class="section fade-up delay-2 main-route">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">03 / image chat landing</span>
+	            <h2>文/图生图保留为会话入口页。</h2>
+          </div>
+          <p>一级页只展示会话、参考素材、最近结果和队列摘要。生成、参数设置、结果精修进入子页面或浮层工作区。</p>
+        </div>
+        <div class="frame-shell">
+          <div class="frame">
+            <div class="app-top">
+              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+                <div>
+	                  <strong>文/图生图</strong>
+                  <span>最新 3 个会话 / 更多进入子页面</span>
+                </div>
+              </div>
+            </div>
+            <div class="menu-landing">
+              <div class="menu-summary">
+                <span class="eyebrow">latest three sessions</span>
+                <h3>文/图生图默认展示最新三个。</h3>
+                <p class="caption">更多会话、生成参数、素材引用、结果精修进入子页面。新建文/图生图会话入口固定在列表下方。</p>
+                <div class="latest-list">
+                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>夏季海报生成</strong><span>4 张候选 / 3 分钟前</span></div><span class="item-arrow">↗</span></div>
+                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>商品白底图优化</strong><span>2 张参考图 / 今天</span></div><span class="item-arrow">↗</span></div>
+                  <div class="latest-item"><div class="latest-thumb"></div><div class="latest-copy"><strong>活动氛围图</strong><span>已完成 / 昨天</span></div><span class="item-arrow">↗</span></div>
+                </div>
+                <div class="section-actions">
+                  <a class="handoff-chip" href="#chat-subpage">更多会话 <span>↗</span></a>
+                  <a class="handoff-chip" href="#chat-create-subpage">新建文/图生图会话 <span>↗</span></a>
+                </div>
+              </div>
+              <aside class="menu-summary-art"></aside>
+            </div>
+          </div>
+        </div>
+	        <p class="caption">核对点：文/图生图一级页只保留最新三条和新建文/图生图会话入口。</p>
+      </section>
+
+      <section id="gallery" class="section fade-up main-route">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">04 / gallery landing</span>
+	            <h2>画廊保留媒体库一级页。</h2>
+          </div>
+	          <p>一级页展示媒体分组、最近资产和筛选摘要。图片预览、下载、批量管理、敏感处理进入子页面。</p>
+        </div>
+        <div class="frame-shell">
+          <div class="frame">
+            <div class="app-top">
+              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+                <div>
+                  <strong>画廊</strong>
+                  <span>横向滚动 / 自动分页加载</span>
+                </div>
+              </div>
+            </div>
+            <div class="menu-landing">
+              <div class="menu-summary">
+                <span class="eyebrow">media index</span>
+                <h3>画廊横向滚动。</h3>
+                <p class="caption">资源以横向轨道展示，滚动到尾部自动加载下一页。预览、下载、批量处理进入子页面。</p>
+                <div class="gallery-strip" aria-label="画廊横向滚动分页">
+                  <div class="gallery-strip-card"><div class="gallery-strip-core"></div></div>
+                  <div class="gallery-strip-card"><div class="gallery-strip-core"></div></div>
+                  <div class="gallery-strip-card"><div class="gallery-strip-core"></div></div>
+                  <div class="gallery-strip-card"><div class="gallery-strip-core"></div></div>
+                  <div class="gallery-strip-card"><div class="gallery-strip-core"></div></div>
+                </div>
+                <span class="pagination-note">滚动末端自动加载下一页</span>
+                <div class="section-actions">
+                  <a class="handoff-chip" href="#gallery-subpage">画廊更多 <span>↗</span></a>
+                  <a class="handoff-chip" href="#gallery-detail-subpage">图片详情子页面 <span>↗</span></a>
+                </div>
+              </div>
+              <aside class="menu-summary-art"></aside>
+            </div>
+          </div>
+        </div>
+	        <p class="caption">核对点：画廊主页横向滚动，详细预览和批量处理进入子页面。</p>
+	      </section>
+
+	      <section id="status" class="section fade-up main-route">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">05 / complete menu coverage</span>
+	            <h2>状态、统计、帮助只保留简介。</h2>
+	          </div>
+	          <p>状态和统计的详细信息都进入子页面。帮助只展示简介和入口。权限管理、配置不放在主页面展示，从主菜单直接进入子页面。</p>
+	        </div>
+	        <div class="system-grid">
+	          <div class="system-card">
+	            <div class="system-core">
+	              <span class="eyebrow">primary</span>
+	              <h3>状态</h3>
+	              <div class="system-lines"><span></span><span></span><span></span></div>
+	              <p class="caption">主页只显示健康摘要，队列、刷新和异常项进入状态子页面。</p>
+	              <div class="handoff-list"><a class="handoff-chip" href="#status-subpage">状态详情 <span>↗</span></a></div>
+	            </div>
+	          </div>
+	          <div class="system-card">
+	            <div class="system-core">
+	              <span class="eyebrow">more</span>
+	              <h3>个人统计</h3>
+	              <div class="system-lines"><span></span><span></span><span></span></div>
+	              <p class="caption">主页只显示统计摘要，趋势、明细和导出进入统计子页面。</p>
+	              <div class="handoff-list"><a class="handoff-chip" href="#stats-subpage">统计详情 <span>↗</span></a></div>
+	            </div>
+	          </div>
+	          <div class="system-card">
+	            <div class="system-core">
+	              <span class="eyebrow">more</span>
+	              <h3>帮助</h3>
+	              <div class="system-lines"><span></span><span></span><span></span></div>
+	              <p class="caption">主页只展示帮助简介，完整文档、目录和搜索进入帮助子页面。</p>
+	              <div class="handoff-list"><a class="handoff-chip" href="#help-subpage">帮助文档 <span>↗</span></a></div>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="resource-library-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / resource library</span>
+	            <h2>资源库子页面承载分组和资源管理。</h2>
+	          </div>
+	          <p>从资源库一级页进入后，再展示分组创建、重命名、归档、资源分组调整、预览、下载和载入入口。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="app-top">
+	              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+	                <div><strong>管理资源库</strong><span>分组 / 预览 / 下载 / 归档</span></div>
+	              </div>
+	              <div class="top-actions"><button class="pill">新建分组</button><button class="pill">筛选</button></div>
+	            </div>
+	            <div class="subpage-grid">
+	              <div class="subpage-flow">
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">groups</span><h3>资源分组管理</h3><p class="caption">创建、重命名、归档分组，并调整资源所属分组。</p><div class="system-lines"><span></span><span></span><span></span></div></div></div>
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">assets</span><h3>资源网格和预览</h3><p class="caption">展示资源缩略图、来源、分组、敏感标记、下载和归档入口。</p><div class="doc-lines"><span></span><span></span><span></span></div></div></div>
+	              </div>
+	              <aside class="subpage-sidebar">
+	                <span class="eyebrow">reuse</span>
+	                <h3>资源复用集中处理。</h3>
+	                <p class="caption">载入灵感节点、添加到文/图生图参考图、保存生成结果到资源库，都保留现有弹窗和嵌套预览。</p>
+	                <div class="handoff-list"><a class="handoff-chip" href="#resource-library">返回资源库首页 <span>↗</span></a></div>
+	              </aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="inspiration-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / inspiration list</span>
+	            <h2>灵感子页面承载列表和处理动作。</h2>
+	          </div>
+	          <p>从一级页进入后再展示筛选、详情、编辑、审图和批量操作，避免主页信息过载。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="app-top">
+	              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+	                <div><strong>更多灵感</strong><span>筛选 / 详情 / 审图 / 编辑</span></div>
+	              </div>
+	              <div class="top-actions"><button class="pill">筛选</button><button class="primary-pill">创建<span class="arrow">↗</span></button></div>
+	            </div>
+	            <div class="subpage-grid">
+	              <div class="subpage-flow">
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">queue</span><h3>待审灵感队列</h3><p class="caption">按生成状态、来源、标签、时间筛选。每条记录点击进入详情页完成审图和编辑。</p><div class="doc-lines"><span></span><span></span><span></span></div></div></div>
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">detail</span><h3>灵感详情抽屉</h3><p class="caption">展示原始输入、生成文案、关联图片、操作历史和归档入口。</p><div class="system-lines"><span></span><span></span><span></span></div></div></div>
+	              </div>
+	              <aside class="subpage-sidebar">
+	                <span class="eyebrow">actions</span>
+	                <h3>高频动作固定在子页。</h3>
+	                <p class="caption">一级页保留概览；批量归档、审图、导出和标记全部在子页面完成。</p>
+	                <div class="handoff-list"><a class="handoff-chip" href="#workspace">返回灵感首页 <span>↗</span></a></div>
+	              </aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="inspiration-create-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / create inspiration</span>
+	            <h2>创建灵感进入独立工作流。</h2>
+	          </div>
+	          <p>创建入口在灵感列表下方，进入后再显示表单、模板、素材引用和预览。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="app-top">
+	              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+	                <div><strong>创建灵感</strong><span>输入 / 模板 / 预览 / 保存</span></div>
+	              </div>
+	            </div>
+	            <div class="subpage-grid">
+	              <div class="subpage-flow">
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">step 01</span><h3>输入商品和目标</h3><p class="caption">承载真实创建表单、素材引用、语气选择和目标渠道。</p><div class="system-lines"><span></span><span></span><span></span></div></div></div>
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">step 02</span><h3>预览和保存</h3><p class="caption">生成前预览摘要，保存后回到详情页或继续创建下一条。</p><div class="doc-lines"><span></span><span></span><span></span></div></div></div>
+	              </div>
+	              <aside class="subpage-sidebar">
+	                <span class="eyebrow">template</span>
+	                <h3>模板选择独立展示。</h3>
+	                <p class="caption">不在一级页展开模板细节，创建流程内只显示当前任务需要的模板候选。</p>
+	              </aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="chat-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / image sessions</span>
+	            <h2>文/图生图子页面承载会话历史。</h2>
+	          </div>
+	          <p>一级页只放最新三个，会话列表、筛选、结果精修和参数复用进入子页面。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="app-top">
+	              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+	                <div><strong>更多会话</strong><span>历史 / 参数 / 结果 / 重跑</span></div>
+	              </div>
+	              <div class="top-actions"><button class="pill">引用素材</button><button class="primary-pill">新建<span class="arrow">↗</span></button></div>
+	            </div>
+	            <div class="subpage-grid">
+	              <div class="subpage-flow">
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">sessions</span><h3>会话列表和生成状态</h3><p class="caption">按模型、素材、状态和更新时间组织会话，点击进入生成工作区。</p><div class="system-lines"><span></span><span></span><span></span></div></div></div>
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">results</span><h3>结果精修入口</h3><p class="caption">放大、变体、下载、入库和复用参数都在子页面展示。</p><div class="doc-lines"><span></span><span></span><span></span></div></div></div>
+	              </div>
+	              <aside class="subpage-sidebar"><span class="eyebrow">handoff</span><h3>生成工作区从这里打开。</h3><p class="caption">主页不出现完整参数面板，避免用户刚进入就被复杂控件压住。</p></aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="chat-create-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / new image chat</span>
+	            <h2>新建文/图生图会话进入独立画布。</h2>
+	          </div>
+	          <p>会话创建按钮在列表下方，进入后再展示提示词、参考图、模型参数和生成队列。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="app-top">
+	              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+	                <div><strong>新建会话</strong><span>提示词 / 参考图 / 参数 / 队列</span></div>
+	              </div>
+	            </div>
+	            <div class="chat-frame">
+	              <aside class="rail"><div class="rail-item active"><span class="dot"></span>提示词</div><div class="rail-item"><span class="dot"></span>参考图</div><div class="rail-item"><span class="dot"></span>参数</div></aside>
+	              <main class="chat-center"><div class="image-stage"><div class="image-stage-grid"><div class="image-card"></div><div class="image-card"></div><div class="image-card"></div><div class="image-card"></div></div></div><div class="composer"><div class="composer-core"><div class="line mid"></div><button class="primary-pill">生成<span class="arrow">↗</span></button></div></div></main>
+	              <aside class="inspector"><div class="panel"><span class="eyebrow">queue</span><p class="caption">队列、成本、模型选择和结果保存都在工作区内完成。</p></div></aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="gallery-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / gallery index</span>
+	            <h2>画廊子页面承载媒体管理。</h2>
+	          </div>
+	          <p>横向一级页进入后，再展示完整筛选、批量下载、敏感处理和素材归档。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="app-top">
+	              <div class="app-title">
+	                <span class="weather-logo compact" aria-hidden="true"></span>
+	                <div><strong>画廊更多</strong><span>分组 / 批量 / 下载 / 归档</span></div>
+	              </div>
+	              <div class="top-actions"><button class="pill">筛选</button><button class="pill">批量</button></div>
+	            </div>
+	            <div class="gallery-frame">
+	              <div class="gallery-toolbar"><span class="eyebrow">media grid</span><p class="caption">媒体管理子页可以保留更密集的信息，但仍维持足够留白。</p></div>
+	              <div class="masonry"><div class="asset-tile"><div class="asset-core tall"></div></div><div class="asset-tile"><div class="asset-core mid"></div></div><div class="asset-tile"><div class="asset-core short"></div></div><div class="asset-tile"><div class="asset-core tall"></div></div><div class="asset-tile"><div class="asset-core mid"></div></div></div>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="gallery-detail-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / asset detail</span>
+	            <h2>图片详情子页面展示预览和操作。</h2>
+	          </div>
+	          <p>单图预览、下载、复用为参考图、敏感处理和关联灵感都进入详情子页面。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="subpage-grid">
+	              <div class="preview-window"></div>
+	              <aside class="subpage-sidebar"><span class="eyebrow">asset</span><h3>单图操作集中在侧栏。</h3><p class="caption">保留预览空间，操作区只放当前图片相关命令。</p><div class="handoff-list"><a class="handoff-chip" href="#gallery-subpage">下载 <span>↗</span></a><a class="handoff-chip" href="#chat-create-subpage">复用参考图 <span>↗</span></a><a class="handoff-chip" href="#status-subpage">敏感处理 <span>↗</span></a></div></aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="status-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / status detail</span>
+	            <h2>状态子页面展示系统细节。</h2>
+	          </div>
+	          <p>队列、任务、模型、存储和异常项进入状态详情，不挤占一级菜单首页。</p>
+	        </div>
+	        <div class="system-grid">
+	          <div class="system-card"><div class="system-core"><span class="eyebrow">queue</span><h3>生成队列</h3><div class="system-lines"><span></span><span></span><span></span></div><p class="caption">显示并发、等待、失败和重试入口。</p></div></div>
+	          <div class="system-card"><div class="system-core"><span class="eyebrow">health</span><h3>服务健康</h3><div class="system-lines"><span></span><span></span><span></span></div><p class="caption">展示 API、Worker、存储和模型连接状态。</p></div></div>
+	        </div>
+	      </section>
+
+	      <section id="stats-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / personal stats</span>
+	            <h2>个人统计子页面展示趋势和明细。</h2>
+	          </div>
+	          <p>趋势、用量、成功率、成本和导出进入子页面，一级页只保留摘要入口。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="workspace-grid">
+	              <aside class="rail"><div class="rail-item active"><span class="dot"></span>趋势</div><div class="rail-item"><span class="dot"></span>用量</div><div class="rail-item"><span class="dot"></span>导出</div></aside>
+	              <main class="main-canvas"><div class="metrics"><div class="metric"><span class="mini-label">本周灵感</span><strong>128</strong></div><div class="metric"><span class="mini-label">图片生成</span><strong>64</strong></div><div class="metric"><span class="mini-label">通过率</span><strong>91%</strong></div></div><div class="panel"><span class="eyebrow">trend</span><div class="system-lines"><span></span><span></span><span></span></div></div></main>
+	              <aside class="inspector"><div class="panel"><span class="eyebrow">export</span><p class="caption">导出和明细下钻只在统计子页出现。</p></div></aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="permissions-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / permissions</span>
+	            <h2>权限管理只从主菜单进入子页面。</h2>
+	          </div>
+	          <p>成员、角色、授权范围和访问密钥属于低频管理任务，不放在主页面展示。</p>
+	        </div>
+	        <div class="system-grid">
+	          <div class="system-card"><div class="system-core"><span class="eyebrow">members</span><h3>成员和角色</h3><div class="system-lines"><span></span><span></span><span></span></div><p class="caption">集中配置成员权限和角色分组。</p></div></div>
+	          <div class="system-card"><div class="system-core"><span class="eyebrow">access</span><h3>访问密钥</h3><div class="system-lines"><span></span><span></span><span></span></div><p class="caption">管理后台访问、API Key 和审计记录。</p></div></div>
+	        </div>
+	      </section>
+
+	      <section id="settings-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / settings</span>
+	            <h2>配置页调整默认 UI 布局方案。</h2>
+	          </div>
+	          <p>当前 UI 设计和新探索方案都需要保留。设置页用于默认布局方案配置，用户运行时仍可通过菜单随时切换。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="subpage-grid">
+	              <div class="subpage-flow">
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">layout presets</span><h3>布局方案预留横向切换空间</h3><p class="caption">经典、工作台、专注、媒体、移动优先只是当前样例，后续可以继续增加方案。</p><div class="compact-layout-switch"><span class="compact-system compact-layout-option">经典</span><span class="compact-system compact-layout-option active">工作台</span><span class="compact-system compact-layout-option">专注</span><span class="compact-system compact-layout-option">媒体</span><span class="compact-system compact-layout-option">移动优先</span></div></div></div>
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">theme</span><h3>主题影响背景和阅读色</h3><p class="caption">雾白、青木、夜幕需要保持明显区分，夜幕保留护眼阅读对比。</p><div class="doc-lines"><span></span><span></span><span></span></div></div></div>
+	              </div>
+	              <aside class="subpage-sidebar"><span class="eyebrow">runtime</span><h3>设置默认，不锁死运行时。</h3><p class="caption">用户可以在使用过程中通过顶部菜单或小窗操作球切换布局方案。</p></aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+	      <section id="template-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / templates</span>
+	            <h2>模板和全局模板进入子页面管理。</h2>
+	          </div>
+	          <p>模板属于低频配置，不放在主页面；从更多菜单进入后再展示分类、启停和编辑。</p>
+	        </div>
+	        <div class="system-grid">
+	          <div class="system-card"><div class="system-core"><span class="eyebrow">templates</span><h3>业务模板</h3><div class="doc-lines"><span></span><span></span><span></span><span></span></div><p class="caption">灵感、图片生成和文案模板分组管理。</p></div></div>
+	          <div class="system-card"><div class="system-core"><span class="eyebrow">global</span><h3>全局模板</h3><div class="doc-lines"><span></span><span></span><span></span><span></span></div><p class="caption">全局提示词、默认语气、渠道规则从这里配置。</p></div></div>
+	        </div>
+	      </section>
+
+	      <section id="help-subpage" class="section fade-up route-subpage">
+	        <div class="section-head">
+	          <div>
+	            <span class="eyebrow">subpage / help docs</span>
+	            <h2>帮助文档进入可搜索子页面。</h2>
+	          </div>
+	          <p>主页面只展示简介。完整目录、搜索、常见问题和操作说明进入帮助子页面。</p>
+	        </div>
+	        <div class="frame-shell">
+	          <div class="frame">
+	            <div class="subpage-grid">
+	              <div class="subpage-flow">
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">search</span><h3>帮助搜索</h3><p class="caption">按功能、菜单、任务状态和错误类型搜索文档。</p><div class="doc-lines"><span></span><span></span><span></span></div></div></div>
+	                <div class="subpage-card"><div class="subpage-core"><span class="eyebrow">faq</span><h3>常见问题</h3><p class="caption">将使用说明集中到子页面，不占用业务主页空间。</p><div class="doc-lines"><span></span><span></span><span></span></div></div></div>
+	              </div>
+	              <aside class="subpage-sidebar"><span class="eyebrow">docs</span><h3>文档目录固定在侧栏。</h3><p class="caption">适合后续接入真实帮助文档和版本说明。</p></aside>
+	            </div>
+	          </div>
+	        </div>
+	      </section>
+
+      <section id="mobile-subpage" class="section fade-up route-subpage">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">mobile collapse</span>
+            <h2>移动端骨架统一为单列任务流。</h2>
+          </div>
+          <p>所有非对称桌面布局在 768px 以下回落到单列。底部导航保留，但页面级主操作使用单一底部操作岛，避免多个抽屉和 CTA 互相挤压。</p>
+        </div>
+        <div class="mobile-strip">
+          <div class="phone"><div class="phone-core"><div class="phone-title"></div><div class="phone-block hero"></div><div class="phone-block list"></div><div class="phone-block list"></div><div class="phone-nav"><span></span><span></span><span></span><span></span></div></div></div>
+          <div class="phone"><div class="phone-core"><div class="phone-title"></div><div class="phone-block list"></div><div class="phone-block list"></div><div class="phone-block hero"></div><div class="phone-nav"><span></span><span></span><span></span><span></span></div></div></div>
+          <div class="phone"><div class="phone-core"><div class="phone-title"></div><div class="phone-block hero"></div><div class="phone-block hero"></div><div class="phone-nav"><span></span><span></span><span></span><span></span></div></div></div>
+          <div class="phone"><div class="phone-core"><div class="phone-title"></div><div class="phone-block list"></div><div class="phone-block list"></div><div class="phone-block list"></div><div class="phone-nav"><span></span><span></span><span></span><span></span></div></div></div>
+	        </div>
+	      </section>
+	    </main>
+	    <script>
+	      const root = document.documentElement;
+
+	      window.addEventListener(
+	        "pointermove",
+	        (event) => {
+	          root.style.setProperty("--cursor-x", `${event.clientX}px`);
+	          root.style.setProperty("--cursor-y", `${event.clientY}px`);
+	        },
+	        { passive: true },
+	      );
+	    </script>
+	  </body>
+	</html>

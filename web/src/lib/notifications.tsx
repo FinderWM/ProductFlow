@@ -163,7 +163,7 @@ function NotificationCard({
   return (
     <article
       className={[
-        "relative overflow-hidden rounded-xl border shadow-xl transition",
+        "pf-shell-notification-card relative overflow-hidden rounded-xl border shadow-xl transition",
         compact ? "px-3 py-2" : "px-4 py-3",
         variantClassNames[notification.variant],
       ].join(" ")}
@@ -171,7 +171,7 @@ function NotificationCard({
       <div className="flex items-start gap-3">
         <span
           className={[
-            "inline-flex shrink-0 items-center justify-center rounded-lg",
+            "pf-shell-notification-icon inline-flex shrink-0 items-center justify-center rounded-lg",
             compact ? "h-7 w-7" : "h-8 w-8",
             iconClassNames[notification.variant],
           ].join(" ")}
@@ -185,7 +185,7 @@ function NotificationCard({
         <button
           type="button"
           aria-label={t("notification.close")}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-violet-400"
+          className="pf-shell-secondary-action inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-violet-400"
           onClick={() => onDismiss(notification.id)}
         >
           <X size={14} aria-hidden="true" />
@@ -207,20 +207,20 @@ function NotificationDrawer({
   const { t } = useI18n();
   return (
     <section
-      className="relative rounded-2xl border border-slate-200 bg-white/96 p-2 shadow-2xl shadow-slate-950/12 backdrop-blur-xl dark:border-slate-700 dark:bg-[#0f1726]/96 dark:shadow-black/35"
+      className="pf-shell-notification-drawer relative rounded-2xl border border-slate-200 bg-white/96 p-2 shadow-2xl shadow-slate-950/12 backdrop-blur-xl dark:border-slate-700 dark:bg-[#0f1726]/96 dark:shadow-black/35"
       aria-label={t("notification.drawer")}
     >
-      <div className="absolute -top-2 left-6 h-4 w-28 rounded-t-xl border border-b-0 border-slate-200 bg-white dark:border-slate-700 dark:bg-[#0f1726]" />
-      <div className="relative flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/80">
+      <div className="pf-shell-notification-handle absolute -top-2 left-6 h-4 w-28 rounded-t-xl border border-b-0 border-slate-200 bg-white dark:border-slate-700 dark:bg-[#0f1726]" />
+      <div className="pf-shell-notification-header relative flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/80">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold text-slate-950 dark:text-white">
+          <h2 className="pf-shell-value truncate text-sm font-semibold text-slate-950 dark:text-white">
             {t("notification.drawerTitle", { count: notifications.length })}
           </h2>
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t("notification.drawerDescription")}</p>
+          <p className="pf-shell-muted mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t("notification.drawerDescription")}</p>
         </div>
         <button
           type="button"
-          className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg px-2 text-xs font-semibold text-slate-500 transition hover:bg-white hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-violet-400"
+          className="pf-shell-secondary-action inline-flex h-8 shrink-0 items-center justify-center rounded-lg px-2 text-xs font-semibold text-slate-500 transition hover:bg-white hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-violet-400"
           onClick={onClear}
         >
           {t("notification.clearAll")}

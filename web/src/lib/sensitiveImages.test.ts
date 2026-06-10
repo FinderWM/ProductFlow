@@ -44,6 +44,12 @@ describe("sensitive image masking helpers", () => {
     });
   });
 
+  it("keeps layout scheme out of sensitive mask patch payloads", () => {
+    expect(sensitiveImageMaskPreferenceUpdate("inspirations", true)).toEqual({
+      mask_sensitive_images_in_inspirations: true,
+    });
+  });
+
   it("reads the matching account preference field for each list", () => {
     const preferences = {
       user_id: "user-1",

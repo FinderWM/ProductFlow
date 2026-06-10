@@ -17,6 +17,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     ImageSessionAsset,
     Inspiration,
     PosterVariant,
+    ResourceLibraryAsset,
     SourceAsset,
 )
 
@@ -27,6 +28,7 @@ ResourceType = Literal[
     "image_session",
     "image_session_asset",
     "image_gallery_entry",
+    "resource_library_asset",
     "canvas_template",
     "canvas_template_category",
 ]
@@ -127,6 +129,10 @@ def require_gallery_entry_usable(entry: ImageGalleryEntry) -> None:
     require_resource_usable("image_gallery_entry", entry)
 
 
+def require_resource_library_asset_usable(asset: ResourceLibraryAsset) -> None:
+    require_resource_usable("resource_library_asset", asset)
+
+
 def require_resource_usable(resource_type: ResourceType, resource: Any) -> None:
     if not resource_moderation_state(resource_type, resource).effective_enabled:
         raise BusinessValidationError(RESOURCE_DISABLED_DETAIL)
@@ -149,6 +155,8 @@ def resource_type_for_instance(resource: Any) -> ResourceType:
         return "image_session_asset"
     if isinstance(resource, ImageGalleryEntry):
         return "image_gallery_entry"
+    if isinstance(resource, ResourceLibraryAsset):
+        return "resource_library_asset"
     if isinstance(resource, CanvasTemplate):
         return "canvas_template"
     if isinstance(resource, CanvasTemplateCategory):
@@ -236,6 +244,8 @@ def effective_disabled_source_for(resource_type: ResourceType, resource: Any) ->
         return _own_disabled_source("image_gallery_entry", resource) or _image_session_asset_disabled_source(
             resource.asset
         )
+    if resource_type == "resource_library_asset":
+        return _own_disabled_source("resource_library_asset", resource)
     if resource_type == "canvas_template":
         return _own_disabled_source("canvas_template", resource) or _canvas_template_category_disabled_source(
             resource.category
@@ -346,6 +356,12 @@ def _load_resource_for_moderation(session: Session, resource_type: ResourceType,
             )
             .where(ImageGalleryEntry.id == resource_id)
         )
+    if resource_type == "resource_library_asset":
+        return session.scalar(
+            select(ResourceLibraryAsset)
+            .options(selectinload(ResourceLibraryAsset.owner), selectinload(ResourceLibraryAsset.disabled_by))
+            .where(ResourceLibraryAsset.id == resource_id)
+        )
     if resource_type == "canvas_template":
         return session.scalar(
             select(CanvasTemplate)
@@ -377,7 +393,13 @@ def _moderation_result(resource_type: ResourceType, resource: Any) -> ResourceMo
 
 
 def _resource_owner(resource_type: ResourceType, resource: Any) -> Any | None:
-    if resource_type in {"inspiration", "image_session", "image_session_asset", "image_gallery_entry"}:
+    if resource_type in {
+        "inspiration",
+        "image_session",
+        "image_session_asset",
+        "image_gallery_entry",
+        "resource_library_asset",
+    }:
         return getattr(resource, "owner", None)
     if resource_type in {"source_asset", "poster_variant"}:
         inspiration = getattr(resource, "inspiration", None)

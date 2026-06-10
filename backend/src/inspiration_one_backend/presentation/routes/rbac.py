@@ -61,9 +61,13 @@ router = APIRouter(
 
 @router.get("/permissions", response_model=RbacPermissionCatalogResponse)
 def list_permission_catalog_endpoint(session: Session = Depends(get_session)) -> RbacPermissionCatalogResponse:
-    menus = list(session.scalars(select(RbacMenu).order_by(RbacMenu.sort_order)))
+    menus = list(session.scalars(select(RbacMenu).where(RbacMenu.enabled.is_(True)).order_by(RbacMenu.sort_order)))
     api_permissions = list(
-        session.scalars(select(RbacApiPermission).order_by(RbacApiPermission.menu_code, RbacApiPermission.sort_order))
+        session.scalars(
+            select(RbacApiPermission)
+            .where(RbacApiPermission.enabled.is_(True))
+            .order_by(RbacApiPermission.menu_code, RbacApiPermission.sort_order)
+        )
     )
     return RbacPermissionCatalogResponse(
         menus=[serialize_menu(menu) for menu in menus],

@@ -24,6 +24,8 @@ router = APIRouter(
 @router.get("", response_model=GalleryEntryListResponse)
 def list_gallery_entries_endpoint(
     resource_group_id: str | None = Query(default=None, min_length=1, max_length=36),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_GALLERY_READ)),
 ) -> GalleryEntryListResponse:
@@ -36,13 +38,19 @@ def list_gallery_entries_endpoint(
             resource_group_id=normalized_group_id,
         )
         normalized_group_id = resource_group.id
-    items = list_gallery_entries(
+    result = list_gallery_entries(
         session,
         resource_group_id=normalized_group_id,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
+        limit=limit,
+        offset=offset,
     )
-    return GalleryEntryListResponse(items=[serialize_gallery_entry(item) for item in items])
+    return GalleryEntryListResponse(
+        items=[serialize_gallery_entry(item) for item in result.items],
+        has_more=result.has_more,
+        next_offset=result.next_offset,
+    )
 
 
 @router.post("", response_model=GalleryEntryResponse, status_code=status.HTTP_201_CREATED)

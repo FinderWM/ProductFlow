@@ -12,6 +12,14 @@ import { workflowNodeDisplayTitle } from "./nodeDisplay";
 import { outputStringArray } from "./utils";
 
 type TranslateFunction = (key: TranslationKey, params?: TranslationParams) => string;
+export type DownloadableImageWithResourceLibrarySource = DownloadableImage & {
+  resourceLibrarySource?: {
+    source_type: "source_asset" | "poster_variant";
+    source_id: string;
+    title?: string;
+    thumbnail_url?: string | null;
+  };
+};
 
 const defaultT: TranslateFunction = (key, params) => translate(DEFAULT_LOCALE, key, params);
 const IMAGE_SOURCE_ASSET_KINDS = new Set<SourceAsset["kind"]>([
@@ -34,7 +42,7 @@ export function buildSourceImageDownload(
   label: string,
   previewUrl?: string,
   t: TranslateFunction = defaultT,
-): DownloadableImage {
+): DownloadableImageWithResourceLibrarySource {
   const inspirationName = sanitizeFilenamePart(inspiration.name, t("chat.inspirationFallback"));
   const imageLabel = sanitizeFilenamePart(label, t("detail.referenceImage"));
   const extension = getExtensionFromFilename(
@@ -46,6 +54,12 @@ export function buildSourceImageDownload(
     downloadUrl: toImageUrl(asset.download_url, asset.preview_url),
     filename: `${inspirationName}-${imageLabel}-${compactDateTime(asset.created_at)}${extension}`,
     alt: `${inspiration.name} ${label}`,
+    resourceLibrarySource: {
+      source_type: "source_asset",
+      source_id: asset.id,
+      title: label,
+      thumbnail_url: asset.thumbnail_url,
+    },
   };
 }
 
@@ -54,7 +68,7 @@ export function buildPosterDownload(
   poster: PosterVariant,
   previewUrl?: string,
   t: TranslateFunction = defaultT,
-): DownloadableImage {
+): DownloadableImageWithResourceLibrarySource {
   const inspirationLabel = sanitizeFilenamePart(inspirationName, t("chat.inspirationFallback"));
   const posterLabel = poster.kind === "main_image" ? t("detail.mainImage") : t("detail.promoImage");
   const extension = getExtensionFromMime(poster.mime_type);
@@ -63,6 +77,12 @@ export function buildPosterDownload(
     downloadUrl: toImageUrl(poster.download_url, poster.preview_url),
     filename: `${inspirationLabel}-${posterLabel}-${compactDateTime(poster.created_at)}${extension}`,
     alt: `${inspirationName} ${posterLabel}`,
+    resourceLibrarySource: {
+      source_type: "poster_variant",
+      source_id: poster.id,
+      title: posterLabel,
+      thumbnail_url: poster.thumbnail_url,
+    },
   };
 }
 
@@ -81,6 +101,28 @@ export function getNodeImageDownload(
   inspiration: InspirationDetail,
   t: TranslateFunction = defaultT,
 ): DownloadableImage | null {
+  const sourceAsset = getNodeImageSourceAsset(node, inspiration);
+  if (node.node_type === "inspiration_context" && sourceAsset) {
+    const hasExplicitContextImage =
+      typeof node.output_json?.image_source_asset_id === "string" ||
+      typeof node.config_json.image_source_asset_id === "string";
+    return buildSourceImageDownload(
+      inspiration,
+      sourceAsset,
+      hasExplicitContextImage ? workflowNodeDisplayTitle(node, t) : t("detail.mainImage"),
+      undefined,
+      t,
+    );
+  }
+  return sourceAsset
+    ? buildSourceImageDownload(inspiration, sourceAsset, workflowNodeDisplayTitle(node, t), undefined, t)
+    : null;
+}
+
+export function getNodeImageSourceAsset(
+  node: WorkflowNode,
+  inspiration: InspirationDetail,
+): SourceAsset | null {
   if (node.node_type === "inspiration_context") {
     const imageSourceAssetId =
       typeof node.output_json?.image_source_asset_id === "string"
@@ -93,9 +135,7 @@ export function getNodeImageDownload(
           (asset) => asset.id === imageSourceAssetId && IMAGE_SOURCE_ASSET_KINDS.has(asset.kind),
         )
       : null;
-    return contextAsset
-      ? buildSourceImageDownload(inspiration, contextAsset, workflowNodeDisplayTitle(node, t), undefined, t)
-      : getSourceImageDownload(inspiration, t);
+    return contextAsset ?? getSourceImageAsset(inspiration);
   }
   if (node.node_type === "reference_image") {
     const ids = outputStringArray(node, "source_asset_ids");
@@ -104,9 +144,7 @@ export function getNodeImageDownload(
         inspiration.source_assets.find((item: SourceAsset) => item.id === id),
       )
       .find((item): item is SourceAsset => Boolean(item));
-    return asset
-      ? buildSourceImageDownload(inspiration, asset, workflowNodeDisplayTitle(node, t), undefined, t)
-      : null;
+    return asset ?? null;
   }
   return null;
 }

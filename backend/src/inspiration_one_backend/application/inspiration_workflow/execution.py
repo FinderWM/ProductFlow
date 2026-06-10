@@ -93,13 +93,19 @@ from inspiration_one_backend.domain.workflow_rules import (
 from inspiration_one_backend.infrastructure.db.models import (
     CopySet,
     CreativeBrief,
+    GenerationConfig,
     InspirationWorkflow,
     WorkflowNode,
     WorkflowNodeRun,
     WorkflowRun,
 )
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
-from inspiration_one_backend.infrastructure.provider_config import ensure_provider_config_bootstrapped
+from inspiration_one_backend.infrastructure.provider_config import (
+    IMAGE_PURPOSE,
+    TEXT_PURPOSE,
+    ensure_provider_config_bootstrapped,
+    generation_config_resource_group_ids,
+)
 from inspiration_one_backend.infrastructure.queue import enqueue_workflow_node_run, enqueue_workflow_run
 from inspiration_one_backend.infrastructure.storage import LocalStorage
 
@@ -204,11 +210,47 @@ def _workflow_generation_config_selection(
     for_execution: bool = False,
 ) -> GenerationConfigSelection:
     selection = generation_config_selection_from_config(raw_config)
-    if selection.mode == "manual" or selection.generation_config_id is not None:
-        _generation_resource_group_config_error("生成入口只能选择供应商生成分组", for_execution=for_execution)
     if not selection.resource_group_id:
         _generation_resource_group_config_error("请选择供应商生成分组", for_execution=for_execution)
-    return GenerationConfigSelection(resource_group_id=selection.resource_group_id)
+    if selection.mode == "manual" and not selection.generation_config_id:
+        _generation_resource_group_config_error("手动指定生成配置时必须选择配置", for_execution=for_execution)
+    return selection
+
+
+def _workflow_generation_config_purpose(node_type: WorkflowNodeType) -> str:
+    return IMAGE_PURPOSE if node_type == WorkflowNodeType.IMAGE_GENERATION else TEXT_PURPOSE
+
+
+def _workflow_generation_config_purpose_error(node_type: WorkflowNodeType) -> str:
+    if node_type == WorkflowNodeType.IMAGE_GENERATION:
+        return "生图节点只能使用图片生成配置"
+    if node_type == WorkflowNodeType.TAIL_SPLITTER:
+        return "尾巴节点只能使用文案生成配置"
+    return "文案节点只能使用文案生成配置"
+
+
+def _validate_manual_workflow_generation_config_selection(
+    session: Session,
+    *,
+    selection: GenerationConfigSelection,
+    purpose: str,
+    purpose_error_message: str,
+    for_execution: bool = False,
+) -> None:
+    if selection.mode != "manual":
+        return
+    if not selection.generation_config_id:
+        _generation_resource_group_config_error("手动指定生成配置时必须选择配置", for_execution=for_execution)
+    generation_config = session.get(GenerationConfig, selection.generation_config_id)
+    if generation_config is None or generation_config.archived_at is not None:
+        _generation_resource_group_config_error("生成配置不存在", for_execution=for_execution)
+    if generation_config.purpose != purpose:
+        _generation_resource_group_config_error(purpose_error_message, for_execution=for_execution)
+    if selection.resource_group_id not in generation_config_resource_group_ids(generation_config):
+        _generation_resource_group_config_error(
+            "手动指定的生成配置不属于当前供应商生成分组",
+            for_execution=for_execution,
+        )
 
 
 def _validate_workflow_generation_resource_groups(
@@ -223,11 +265,22 @@ def _validate_workflow_generation_resource_groups(
         if node.id not in node_ids_to_run or node.node_type not in WORKFLOW_RESOURCE_GROUP_NODE_TYPES:
             continue
         selection = _workflow_generation_config_selection(node.config_json)
-        require_generation_resource_group_for_user(
+        group = require_generation_resource_group_for_user(
             session,
             user_id=actor_user_id,
             is_admin=actor_is_admin,
             resource_group_id=selection.resource_group_id,
+        )
+        authorized_selection = GenerationConfigSelection(
+            mode=selection.mode,
+            generation_config_id=selection.generation_config_id,
+            resource_group_id=group.id,
+        )
+        _validate_manual_workflow_generation_config_selection(
+            session,
+            selection=authorized_selection,
+            purpose=_workflow_generation_config_purpose(node.node_type),
+            purpose_error_message=_workflow_generation_config_purpose_error(node.node_type),
         )
 
 
@@ -253,7 +306,19 @@ def _workflow_generation_config_selection_for_execution(
             retry_hint="check_settings",
             failure_category="invalid_node_config",
         ) from exc
-    return GenerationConfigSelection(resource_group_id=group.id)
+    authorized_selection = GenerationConfigSelection(
+        mode=selection.mode,
+        generation_config_id=selection.generation_config_id,
+        resource_group_id=group.id,
+    )
+    _validate_manual_workflow_generation_config_selection(
+        session,
+        selection=authorized_selection,
+        purpose=_workflow_generation_config_purpose(node.node_type),
+        purpose_error_message=_workflow_generation_config_purpose_error(node.node_type),
+        for_execution=True,
+    )
+    return authorized_selection
 
 
 def start_inspiration_workflow_run(

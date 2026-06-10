@@ -1,4 +1,4 @@
-import { Check, Image as ImageIcon, ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { Check, Image as ImageIcon, ImagePlus, Library, Loader2, Trash2 } from "lucide-react";
 
 import { ImageDropZone } from "../../components/ImageDropZone";
 import { ParameterHelpLabel } from "../../components/ParameterHelp";
@@ -21,7 +21,9 @@ interface SessionReferencePanelProps {
   deletingAssetId: string | null;
   disabled: boolean;
   selectionDisabled?: boolean;
+  resourceLibraryDisabledTitle?: string | null;
   onFiles: (files: File[]) => void;
+  onOpenResourceLibrary?: () => void;
   onToggle: (assetId: string, checked: boolean) => void;
   onDelete: (assetId: string) => void;
   onPreview: (asset: ImageSessionAsset) => void;
@@ -36,7 +38,9 @@ export function SessionReferencePanel({
   deletingAssetId,
   disabled,
   selectionDisabled = disabled,
+  resourceLibraryDisabledTitle = null,
   onFiles,
+  onOpenResourceLibrary,
   onToggle,
   onDelete,
   onPreview,
@@ -64,6 +68,18 @@ export function SessionReferencePanel({
       <div className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
         {t("chat.selectedReferences", { selected: selectedAssetIds.length, max: maxSelectedCount })}
       </div>
+      {onOpenResourceLibrary ? (
+        <button
+          type="button"
+          onClick={onOpenResourceLibrary}
+          disabled={Boolean(resourceLibraryDisabledTitle)}
+          title={resourceLibraryDisabledTitle ?? t("chat.resourceLibrary.addReference")}
+          className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+        >
+          <Library size={15} className="mr-2" />
+          {t("chat.resourceLibrary.addReference")}
+        </button>
+      ) : null}
       {assets.length ? (
         <div className="mt-3 grid grid-cols-4 gap-2">
           {assets.map((asset) => {

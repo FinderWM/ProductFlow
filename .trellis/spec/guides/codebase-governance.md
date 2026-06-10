@@ -29,6 +29,11 @@ Classify every backend route before merging:
 
 - Public auth boundary: `/api/auth/session`, `/api/auth/login`, `/api/auth/password`, and `DELETE /api/auth/session`.
 - Private business API: requires `require_api_permission(...)` or `require_any_api_permission(...)`.
+- Authenticated-default personal API: requires `require_authenticated` and must be listed as an explicit prefix exception
+  in `backend/tests/test_route_rbac_contract.py`. Current exception: `/api/resource-library/*`, because personal resource
+  library is a default capability for every logged-in user rather than an RBAC-granted workspace surface.
+  Do not add authenticated-default surfaces such as resource library to RBAC `MENU_DEFINITIONS`, default role menu grants,
+  or API permission definitions.
 - Admin governance API: requires both `require_admin` and the API permission that represents the action.
 
 Frontend gates must match backend gates:
@@ -36,12 +41,16 @@ Frontend gates must match backend gates:
 - Route access in `App.tsx` must check the same API permission required by the backend.
 - Admin-only routes or controls must also check `session.user.is_admin`.
 - Navigation visibility must not be weaker than route/API access.
+- Authenticated-default navigation should use authenticated-session checks, not backend RBAC menu grants. For resource
+  library, the shared top nav item keeps `menuCode: null`, and the route gate uses a login-state `hasAccess` check.
 - Page-level action buttons must be hidden or disabled according to the API they call.
 - Reusable composite checks belong in `web/src/lib/rbac.ts`; route and navigation declarations should call helpers instead of duplicating boolean logic.
 
 Known contract:
 
 - `/api/rbac/*` is admin governance. Frontend `/rbac` access requires `is_admin && rbac:manage`; the `rbac` menu is navigation metadata and must not be the only gate.
+- `/api/resource-library/*` is authenticated-default personal scope. It must not appear as a role-editable RBAC menu or
+  `resource_library:*` API permission; `/api/rbac/permissions` should list only enabled catalog entries from current code.
 - Settings page access requires `settings` menu plus `settings:read`.
 - Global template management uses `templates:manage_global`, even when reached through settings-owned navigation.
 - Settings runtime writes use `settings:write`: `PATCH /api/settings` only. Frontend runtime sections such as prompts,
@@ -65,7 +74,8 @@ Backend route gates are enforced by `backend/tests/test_route_rbac_contract.py`:
 
 - Every public route must be listed in the test allowlist by method and path.
 - Every private `/api` route must expose `require_api_permission(...)` or `require_any_api_permission(...)` through the
-  FastAPI dependency tree.
+  FastAPI dependency tree, unless it is listed in the authenticated-default prefix matrix.
+- Authenticated-default prefixes must expose `require_authenticated` through the FastAPI dependency tree.
 - Admin governance routes must expose both `require_admin` and their action permission in the test prefix matrix.
 - When adding a protected route, run
   `uv run --directory backend pytest tests/test_route_rbac_contract.py tests/test_auth_rbac.py`.

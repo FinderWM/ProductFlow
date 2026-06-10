@@ -1,6 +1,7 @@
 import {
   useEffect,
   useDeferredValue,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -215,7 +216,16 @@ function usePressOpen(onOpen: () => void) {
   };
 }
 
-export function InspirationListPage() {
+interface InspirationListPageProps {
+  mode?: "auto" | "full";
+}
+
+export function InspirationListPage(props: InspirationListPageProps = {}) {
+  void props.mode;
+  return <InspirationFullListPage />;
+}
+
+function InspirationFullListPage() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1217,6 +1227,8 @@ function InspirationSearchPanel({
                 aria-hidden="true"
               />
               <input
+                id="inspiration-search-title"
+                name="inspiration_search_title"
                 value={draft.title}
                 onChange={(event) => onChange({ ...draft, title: event.target.value })}
                 placeholder={t("inspirations.search.titlePlaceholder")}
@@ -1277,6 +1289,8 @@ function InspirationSearchPanel({
           <label className="space-y-2">
             <span className={labelClassName}>{t("inspirations.resourceGroupFilter")}</span>
             <select
+              id="inspiration-resource-group-filter"
+              name="inspiration_resource_group_filter"
               value={selectedResourceGroupId}
               onChange={(event) => onResourceGroupChange(event.target.value)}
               disabled={resourceGroupsLoading}
@@ -1294,6 +1308,8 @@ function InspirationSearchPanel({
           {isAdmin ? (
             <label className="flex h-11 items-center gap-2 self-end rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-200">
               <input
+                id="inspiration-only-deleted-filter"
+                name="inspiration_only_deleted_filter"
                 type="checkbox"
                 checked={draft.only_deleted}
                 onChange={(event) => onChange({ ...draft, only_deleted: event.target.checked })}
@@ -1341,6 +1357,8 @@ function InspirationSearchPanel({
           {showSensitiveImageMaskPreference ? (
             <label className="inline-flex min-h-8 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 sm:ml-auto">
               <input
+                id="inspiration-mask-sensitive-images"
+                name="inspiration_mask_sensitive_images"
                 type="checkbox"
                 checked={maskSensitiveImages}
                 onChange={(event) => onMaskSensitiveImagesChange(event.target.checked)}
@@ -1600,6 +1618,7 @@ function Pagination({
   floating?: boolean;
 }) {
   const { t } = useI18n();
+  const pageInputId = useId();
   const [draftPage, setDraftPage] = useState(String(page));
 
   useEffect(() => {
@@ -1638,6 +1657,8 @@ function Pagination({
       <label className="flex items-center gap-1.5 px-1 text-xs tabular-nums text-zinc-500 dark:text-slate-400">
         <span className="sr-only">{t("pagination.pageInput")}</span>
         <input
+          id={pageInputId}
+          name="inspiration_page"
           type="text"
           inputMode="numeric"
           pattern="[0-9]*"

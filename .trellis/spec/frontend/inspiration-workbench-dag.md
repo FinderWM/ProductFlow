@@ -242,6 +242,19 @@
   right-click as the only way to retrieve inspiration images.
 - Type-specific inspector forms are required for inspiration context, reference image, copy generation, and image generation;
   avoid generic JSON editors for normal user flows.
+- Generation-capable inspector forms must expose generation config scheduling next to the selected generation group:
+  `copy_generation` and `tail_splitter` filter manual options to `purpose="text"`, while `image_generation` filters to
+  `purpose="image"`. Auto mode persists `generation_config_mode: "auto"` and `generation_config_id: null`; manual mode
+  persists the selected config id.
+- `draftFromNode(...)` and `nodeConfigFromDraft(...)` must round-trip `resource_group_id`, `generation_config_mode`, and
+  `generation_config_id` for workflow `copy_generation`, `tail_splitter`, and `image_generation` nodes. Switching a node
+  to a resource group that does not contain the selected manual config resets that config selection to auto before save or
+  run.
+- Running a workflow node with `generation_config_mode="manual"` and no `generation_config_id` is a local validation error:
+  show the inspector generation-config-required message and do not submit the run mutation.
+- The tail-split plan dialog must expose image generation config scheduling for generated downstream image nodes. It filters
+  options to `purpose="image"` for the selected group and sends `image_generation_config.generation_config_mode/id` with
+  the apply request.
 - Workbench inspector parameter help must use the shared `ParameterHelpButton` / `ParameterHelpLabel` components and the
   global `web/src/lib/parameterHelp.ts` registry. Add help for non-obvious node parameters such as inspiration context long
   text/document/dynamic fields, reference role, copy instruction/generation config/tone/channel/visual guidance, tail
@@ -758,6 +771,88 @@ const structureBusy = layoutMutationBusy || workflowActive;
 
 Use persisted workflow activity to control polling and unsafe structural mutations. Use node status plus submission
 pending state for individual node run actions, while keeping layout dragging independent from provider execution.
+
+## Scenario: Inspiration canvas gallery modal
+
+### 1. Scope / Trigger
+- Trigger: editing `InspirationDetailPage`, `pages/inspiration-detail/ImagesPanel.tsx`, image preview/download helpers,
+  reference-node fill actions, or personal resource-library save actions exposed from the canvas gallery.
+- This scope is the current inspiration's derived gallery only. It is not the global `/gallery` page and must not inherit
+  global gallery filters or management behavior.
+
+### 2. Signatures
+- Entry state: `InspirationDetailPage` uses `galleryOpen` and opens `ImagesPanel` directly from the canvas Images/Gallery
+  sidebar action.
+- Component: `ImagesPanel({ open, onClose, inspiration, posters, referenceAssets, ... })`.
+- Data sources: current `InspirationDetail.poster_variants` plus current inspiration `SourceAsset` records that are image
+  references.
+- Fill actions: `api.bindWorkflowNodeImage(nodeId, { source_asset_id })` or
+  `api.bindWorkflowNodeImage(nodeId, { poster_variant_id })`.
+
+### 3. Contracts
+- The canvas gallery opens as a page-level modal, not as an inline right-toolbar grid and not through a second nested
+  "open gallery" button.
+- The modal is scoped to the current inspiration. It must not render a supplier/provider/generated resource-group filter.
+- A generated resource-group badge on an image card is display metadata only; it must not become a filtering control in
+  the canvas modal.
+- Personal resource library remains separate: save-to-library actions may appear on individual image cards, while
+  resource-library selection opens from image-bearing slots such as `reference_image` upload areas.
+- The global `/gallery` page may keep its own gallery-specific list/filter behavior; do not reuse `GalleryPage` inside the
+  canvas modal.
+
+### 4. Validation & Error Matrix
+- Clicking the canvas Images/Gallery entry -> `galleryOpen=true` and a modal with the current inspiration images appears.
+- No selected `reference_image` node -> preview/download still work, fill action is disabled with the existing select-node
+  hint.
+- Current inspiration has no images -> modal shows the image empty state, not a global gallery list.
+- Adding `api.listGalleryEntries(...)`, `resource_group_id`, or generation-group select state to `ImagesPanel` -> wrong
+  boundary; the modal is no longer scoped to current inspiration data.
+
+### 5. Good/Base/Bad Cases
+- Good: `ImagesPanel` receives already-derived `posters` and `referenceAssets` from `InspirationDetailPage`.
+- Good: each card can preview, download, fill the selected reference node, and save that one image to resource library.
+- Base: generated image cards may show their source generation group as passive metadata.
+- Bad: adding supplier/provider group dropdowns, "all groups" filters, or global gallery API queries to the canvas modal.
+- Bad: placing the resource-library picker under the canvas gallery button instead of under image upload/selection slots.
+
+### 6. Tests Required
+- Frontend build must type-check `ImagesPanel` props whenever the modal contract changes.
+- Images-tab regressions should cover direct modal open/close, absence of resource-group/provider filters, preview action,
+  reference fill for both source assets and poster variants, and per-card save-to-resource-library action.
+- Manual browser verification should check the canvas toolbar entry opens one modal immediately and never shows a second
+  "打开图库" step.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```tsx
+<GalleryPage mode="modal" />
+```
+
+This imports global gallery list/filter semantics into the inspiration canvas.
+
+#### Correct
+
+```tsx
+<ImagesPanel open={galleryOpen} posters={posters} referenceAssets={referenceAssets} />
+```
+
+Keep the modal fed by the current inspiration detail payload.
+
+#### Wrong
+
+```tsx
+api.listGalleryEntries({ resource_group_id: selectedResourceGroupId })
+```
+
+#### Correct
+
+```tsx
+const artifactCount = posters.length + referenceAssets.length;
+```
+
+Canvas gallery content is derived locally from the current inspiration.
 
 ## Scenario: Tail splitter confirmation UX
 

@@ -15,7 +15,20 @@
   --pf-border-soft: rgb(226 232 240 / 0.86);
   --pf-text: #0f172a;
   --pf-muted: #64748b;
+  --pf-subtle: #8b96a0;
+  --pf-accent: #047857;
+  --pf-accent-2: #b06f58;
+  --pf-danger: #a85545;
+  --pf-deep: #121512;
+  --pf-line: rgb(18 21 18 / 0.09);
+  --pf-line-strong: rgb(18 21 18 / 0.16);
+  --pf-workspace-glow: rgb(20 184 166 / 0.16);
   --pf-shadow: 0 18px 52px rgb(15 23 42 / 0.08);
+  --pf-cursor-x: 52vw;
+  --pf-cursor-y: 18vh;
+  --pf-motion-standard: cubic-bezier(0.32, 0.72, 0, 1);
+  --pf-motion-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --pf-motion-snap: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 :root.dark {
@@ -27,7 +40,75 @@
   --pf-border-soft: rgb(51 65 85 / 0.7);
   --pf-text: #e2e8f0;
   --pf-muted: #94a3b8;
+  --pf-subtle: #718096;
+  --pf-accent: #a7f3d0;
+  --pf-accent-2: #c69b66;
+  --pf-danger: #d99278;
+  --pf-deep: #f4ead7;
+  --pf-line: rgb(244 232 206 / 0.1);
+  --pf-line-strong: rgb(244 232 206 / 0.18);
+  --pf-workspace-glow: rgb(129 140 248 / 0.14);
   --pf-shadow: 0 24px 70px rgb(0 0 0 / 0.28);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="mist"] {
+  --pf-bg: #f5f8fb;
+  --pf-bg-soft: #eaf1f6;
+  --pf-panel: #fbfcfd;
+  --pf-panel-soft: #f0f5f8;
+  --pf-border: rgb(18 21 18 / 0.11);
+  --pf-border-soft: rgb(18 21 18 / 0.075);
+  --pf-text: #151719;
+  --pf-muted: #66727d;
+  --pf-subtle: #8b96a0;
+  --pf-accent: #4f7583;
+  --pf-accent-2: #b06f58;
+  --pf-danger: #a85545;
+  --pf-deep: #121512;
+  --pf-line: rgb(18 21 18 / 0.085);
+  --pf-line-strong: rgb(18 21 18 / 0.15);
+  --pf-workspace-glow: rgb(79 117 131 / 0.16);
+  --pf-shadow: 0 32px 86px rgb(33 38 42 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="sage"] {
+  --pf-bg: #e4f0dd;
+  --pf-bg-soft: #d8e8cf;
+  --pf-panel: #f7fbef;
+  --pf-panel-soft: #edf6e5;
+  --pf-border: rgb(18 32 22 / 0.12);
+  --pf-border-soft: rgb(18 32 22 / 0.085);
+  --pf-text: #122016;
+  --pf-muted: #5c735f;
+  --pf-subtle: #7f947f;
+  --pf-accent: #3e7951;
+  --pf-accent-2: #c28a3e;
+  --pf-danger: #a35f3f;
+  --pf-deep: #121512;
+  --pf-line: rgb(18 32 22 / 0.085);
+  --pf-line-strong: rgb(18 32 22 / 0.16);
+  --pf-workspace-glow: rgb(62 121 81 / 0.17);
+  --pf-shadow: 0 32px 86px rgb(34 50 31 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] {
+  --pf-bg: #20231b;
+  --pf-bg-soft: #252a20;
+  --pf-panel: #292d23;
+  --pf-panel-soft: #20231b;
+  --pf-border: rgb(255 245 224 / 0.13);
+  --pf-border-soft: rgb(255 245 224 / 0.09);
+  --pf-text: #e8decb;
+  --pf-muted: #b7ad9e;
+  --pf-subtle: #948c7d;
+  --pf-accent: #92aa7a;
+  --pf-accent-2: #c69b66;
+  --pf-danger: #d99278;
+  --pf-deep: #f2ead8;
+  --pf-line: rgb(255 245 224 / 0.11);
+  --pf-line-strong: rgb(255 245 224 / 0.18);
+  --pf-workspace-glow: rgb(146 170 122 / 0.12);
+  --pf-shadow: 0 32px 86px rgb(18 16 12 / 0.16);
 }
 
 html,
@@ -70,6 +151,63 @@ body {
 :root.dark body {
   background: var(--pf-bg);
   color: rgb(226 232 240);
+}
+
+:root[data-ui-layout-scheme="workspace"] body {
+  background-color: var(--pf-bg) !important;
+  background-image:
+    linear-gradient(120deg, color-mix(in srgb, var(--pf-accent) 9%, transparent), transparent 38%),
+    linear-gradient(245deg, color-mix(in srgb, var(--pf-accent-2) 10%, transparent), transparent 34%);
+  background-repeat: no-repeat;
+  color: var(--pf-text);
+  transition: background-color 900ms var(--pf-motion-standard), color 900ms var(--pf-motion-standard);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="mist"],
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="mist"] body,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="mist"] #root {
+  background-color: #f5f8fb !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="sage"],
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="sage"] body,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="sage"] #root {
+  background-color: #e4f0dd !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"],
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] body,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] #root {
+  background-color: #20231b !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="mist"] body {
+  background:
+    linear-gradient(120deg, rgb(79 117 131 / 0.09), transparent 38%),
+    linear-gradient(245deg, rgb(176 111 88 / 0.1), transparent 34%),
+    #f5f8fb !important;
+  color: #151719 !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="sage"] body {
+  background:
+    linear-gradient(120deg, rgb(62 121 81 / 0.09), transparent 38%),
+    linear-gradient(245deg, rgb(194 138 62 / 0.1), transparent 34%),
+    #e4f0dd !important;
+  color: #122016 !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] body {
+  background:
+    linear-gradient(120deg, rgb(146 170 122 / 0.09), transparent 38%),
+    linear-gradient(245deg, rgb(198 155 102 / 0.1), transparent 34%),
+    #20231b !important;
+  color: #e8decb !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-root-shell {
+  background: transparent !important;
+  color: var(--pf-text);
 }
 
 button,
@@ -276,11 +414,1281 @@ textarea {
 }
 
 .pf-workspace {
+  position: relative;
+  isolation: isolate;
   min-height: 100dvh;
+  overflow-x: clip;
   background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--pf-panel-soft) 68%, transparent), transparent 28rem),
+    linear-gradient(120deg, color-mix(in srgb, var(--pf-accent) 9%, transparent), transparent 38%),
+    linear-gradient(245deg, color-mix(in srgb, var(--pf-accent-2) 10%, transparent), transparent 34%),
     var(--pf-bg);
+  background-color: var(--pf-bg);
   color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace,
+:root[data-ui-layout-scheme="workspace"] .pf-app {
+  position: relative;
+  isolation: isolate;
+  min-height: 100dvh;
+  overflow-x: clip;
+  background:
+    radial-gradient(
+      420px circle at var(--pf-cursor-x) var(--pf-cursor-y),
+      color-mix(in srgb, var(--pf-accent) 16%, transparent),
+      transparent 58%
+    ),
+    radial-gradient(
+      720px circle at calc(var(--pf-cursor-x) + 18vw) calc(var(--pf-cursor-y) + 10vh),
+      color-mix(in srgb, var(--pf-accent-2) 8%, transparent),
+      transparent 62%
+    ),
+    linear-gradient(120deg, color-mix(in srgb, var(--pf-accent) 9%, transparent), transparent 38%),
+    linear-gradient(245deg, color-mix(in srgb, var(--pf-accent-2) 10%, transparent), transparent 34%),
+    var(--pf-bg);
+  background-color: var(--pf-bg);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-app {
+  background:
+    radial-gradient(420px circle at var(--pf-cursor-x) var(--pf-cursor-y), rgb(146 170 122 / 0.13), transparent 58%),
+    radial-gradient(
+      720px circle at calc(var(--pf-cursor-x) + 18vw) calc(var(--pf-cursor-y) + 10vh),
+      rgb(198 155 102 / 0.08),
+      transparent 62%
+    ),
+    linear-gradient(120deg, color-mix(in srgb, var(--pf-accent) 8%, transparent), transparent 38%),
+    linear-gradient(245deg, color-mix(in srgb, var(--pf-accent-2) 8%, transparent), transparent 34%),
+    var(--pf-bg);
+  background-color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace, .pf-app) > main {
+  position: relative;
+  z-index: 1;
+}
+
+.pf-workspace::after {
+  display: none;
+}
+
+@keyframes pf-workspace-ambient-field {
+  from {
+    opacity: 0.24;
+    transform: translate3d(-2.5%, -1%, 0) scale(1);
+  }
+
+  to {
+    opacity: 0.42;
+    transform: translate3d(2%, 1.2%, 0) scale(1.035);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace, .pf-app)::after {
+    content: "";
+    position: fixed;
+    inset: -16%;
+    z-index: 0;
+    display: block;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        440px circle at 20% 18%,
+        color-mix(in srgb, var(--pf-accent) 14%, transparent),
+        transparent 62%
+      ),
+      radial-gradient(
+        680px circle at 76% 32%,
+        color-mix(in srgb, var(--pf-accent-2) 8%, transparent),
+        transparent 66%
+      );
+    animation: pf-workspace-ambient-field 14s var(--pf-motion-standard) infinite alternate;
+    will-change: transform, opacity;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace, .pf-app)::after {
+    animation: none;
+    opacity: 0.22;
+    transform: none;
+  }
+}
+
+.pf-workspace-card {
+  border: 1px solid var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 86%, transparent);
+  box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 255 255 / 0.5);
+}
+
+.pf-workspace-card-soft {
+  border: 1px solid var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel-soft) 74%, transparent);
+}
+
+.pf-workspace-title {
+  color: var(--pf-text);
+}
+
+.pf-workspace-copy,
+.pf-workspace-muted {
+  color: var(--pf-muted);
+}
+
+.pf-workspace-subtle {
+  color: var(--pf-subtle);
+}
+
+.pf-workspace-accent {
+  color: var(--pf-accent);
+}
+
+.pf-workspace-accent-secondary {
+  color: var(--pf-accent-2);
+}
+
+.pf-workspace-chip {
+  border: 1px solid var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel) 78%, transparent);
+  color: var(--pf-muted);
+}
+
+.pf-workspace-icon {
+  background: color-mix(in srgb, var(--pf-accent) 12%, transparent);
+  color: var(--pf-accent);
+}
+
+.pf-workspace-media-frame {
+  background: color-mix(in srgb, var(--pf-deep) 92%, var(--pf-bg));
+}
+
+.pf-workspace-action-primary {
+  background: var(--pf-deep);
+  color: var(--pf-bg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+
+.pf-workspace-action-primary:hover {
+  background: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+}
+
+.pf-workspace-action-secondary {
+  border: 1px solid var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 44%, transparent);
+  color: var(--pf-text);
+}
+
+.pf-workspace-action-secondary:hover {
+  background: color-mix(in srgb, var(--pf-deep) 7%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-card {
+  background: rgb(32 35 29 / 0.88);
+  box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-card-soft,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-chip {
+  background: rgb(244 232 206 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-action-primary {
+  background: #5b6847;
+  color: #f2ead8;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-curtain-panel {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel) 80%, transparent);
+  box-shadow: 0 14px 42px rgb(35 40 42 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.42);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-curtain-handle {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel) 82%, transparent);
+  color: var(--pf-muted);
+  box-shadow: 0 14px 36px rgb(35 40 42 / 0.1);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-nav-frame {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-deep) 6%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.24);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-link {
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-link:hover {
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-nav-item,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-menu-item,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-mobile-menu-item,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-mobile-preference-option,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-preference-trigger {
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-nav-item[aria-current="page"],
+:root[data-ui-layout-scheme="workspace"] .pf-shell-menu-item[aria-current="page"],
+:root[data-ui-layout-scheme="workspace"] .pf-shell-menu-item[aria-checked="true"],
+:root[data-ui-layout-scheme="workspace"] .pf-shell-mobile-menu-item[aria-current="page"],
+:root[data-ui-layout-scheme="workspace"] .pf-shell-mobile-preference-option[aria-pressed="true"] {
+  background: var(--pf-deep);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-nav-item[aria-current="page"],
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-menu-item[aria-current="page"],
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-menu-item[aria-checked="true"],
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-mobile-menu-item[aria-current="page"],
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-mobile-preference-option[aria-pressed="true"] {
+  background: #5b6847;
+  color: #f2ead8;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-nav-item:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-menu-item:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-mobile-menu-item:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-mobile-preference-option:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-preference-trigger:hover {
+  background: color-mix(in srgb, var(--pf-deep) 6%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-menu-surface,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-account-surface,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-weather-surface,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-operation-panel,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-notification-card,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-notification-drawer {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 88%, transparent);
+  color: var(--pf-text);
+  box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 255 255 / 0.42);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-menu-surface :where(.pf-shell-section-label),
+:root[data-ui-layout-scheme="workspace"] .pf-shell-account-surface :where(.pf-shell-section-label),
+:root[data-ui-layout-scheme="workspace"] .pf-shell-weather-surface :where(.pf-shell-section-label),
+:root[data-ui-layout-scheme="workspace"] .pf-shell-operation-panel :where(.pf-shell-section-label) {
+  color: var(--pf-subtle);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-account-summary,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-soft-surface,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-notification-header,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-notification-handle {
+  border: 1px solid var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel-soft) 72%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-trigger-icon,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-badge,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-notification-icon {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-accent) 10%, transparent);
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-trigger-title,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-value {
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-trigger-subtitle,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-trigger-chevron,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-muted {
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-check {
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-control-group {
+  border-color: var(--pf-line);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-weather-trigger {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 72%, transparent) !important;
+  color: var(--pf-accent) !important;
+  box-shadow: 0 14px 34px rgb(35 40 42 / 0.1), inset 0 1px 0 rgb(255 255 255 / 0.4);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-input {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 82%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-input:focus {
+  border-color: var(--pf-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pf-accent) 18%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-primary-action {
+  background: var(--pf-deep);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-primary-action:hover {
+  background: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-secondary-action {
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-secondary-action:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-list-option:hover {
+  background: color-mix(in srgb, var(--pf-deep) 6%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-menu-surface,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-account-surface,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-weather-surface,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-operation-panel,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-notification-card,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-notification-drawer {
+  background: rgb(28 31 26 / 0.86);
+  box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-operation-ball {
+  border-color: var(--pf-line-strong);
+  background: var(--pf-deep);
+  color: var(--pf-bg);
+  box-shadow: 0 18px 44px rgb(35 40 42 / 0.16);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-operation-ball[aria-expanded="true"] {
+  background: var(--pf-accent);
+  color: #fbf9f1;
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-white,
+  .bg-white\/95,
+  .bg-white\/90,
+  .bg-white\/85,
+  .bg-white\/80,
+  .bg-white\/70
+) {
+  background-color: color-mix(in srgb, var(--pf-panel) 88%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-slate-50,
+  .bg-slate-50\/70,
+  .bg-slate-50\/80,
+  .bg-slate-50\/90,
+  .bg-slate-100,
+  .bg-slate-100\/70,
+  .bg-slate-100\/80,
+  .bg-slate-200,
+  .bg-slate-200\/70,
+  .bg-slate-300,
+  .bg-zinc-50,
+  .bg-zinc-50\/40,
+  .bg-zinc-50\/60,
+  .bg-zinc-50\/70,
+  .bg-zinc-50\/80,
+  .bg-zinc-100,
+  .bg-zinc-100\/80,
+  .bg-zinc-200,
+  .bg-zinc-200\/70,
+  .bg-zinc-300
+) {
+  background-color: color-mix(in srgb, var(--pf-panel-soft) 82%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-slate-950,
+  .bg-slate-950\/18,
+  .bg-slate-950\/25,
+  .bg-slate-950\/30,
+  .bg-slate-950\/35,
+  .bg-slate-950\/40,
+  .bg-slate-950\/42,
+  .bg-slate-950\/45,
+  .bg-slate-950\/50,
+  .bg-slate-950\/55,
+  .bg-slate-950\/56,
+  .bg-slate-950\/60,
+  .bg-slate-950\/62,
+  .bg-slate-950\/64,
+  .bg-slate-950\/70,
+  .bg-slate-950\/72,
+  .bg-slate-950\/75,
+  .bg-slate-950\/78,
+  .bg-slate-950\/80,
+  .bg-slate-950\/82,
+  .bg-slate-950\/86,
+  .bg-slate-950\/88,
+  .bg-slate-950\/90,
+  .bg-slate-950\/94,
+  .bg-slate-950\/95,
+  .bg-slate-900,
+  .bg-slate-900\/40,
+  .bg-slate-900\/70,
+  .bg-slate-900\/80,
+  .bg-slate-900\/85,
+  .bg-slate-800,
+  .bg-slate-800\/60,
+  .bg-slate-800\/80,
+  .bg-slate-700,
+  .bg-slate-600,
+  .bg-zinc-950,
+  .bg-zinc-950\/70,
+  .bg-zinc-900,
+  .bg-zinc-800,
+  .bg-blue-700,
+  .bg-blue-600,
+  .bg-indigo-700,
+  .bg-indigo-600,
+  .bg-indigo-500,
+  .bg-violet-600,
+  .bg-violet-500,
+  .bg-fuchsia-600,
+  .bg-fuchsia-500,
+  .bg-purple-600,
+  .bg-purple-500
+) {
+  background-color: var(--pf-deep);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-indigo-50,
+  .bg-indigo-50\/20,
+  .bg-indigo-50\/30,
+  .bg-indigo-50\/40,
+  .bg-indigo-50\/45,
+  .bg-indigo-50\/60,
+  .bg-indigo-50\/70,
+  .bg-indigo-100,
+  .bg-indigo-200\/30,
+  .bg-indigo-300\/50,
+  .bg-indigo-400\/60,
+  .bg-indigo-500\/10,
+  .bg-indigo-500\/15,
+  .bg-indigo-500\/20,
+  .bg-indigo-500\/30,
+  .bg-indigo-950\/10,
+  .bg-indigo-950\/15,
+  .bg-blue-50,
+  .bg-blue-50\/40,
+  .bg-blue-50\/50,
+  .bg-blue-500\/10,
+  .bg-blue-500\/12,
+  .bg-blue-500\/15,
+  .bg-sky-50,
+  .bg-sky-50\/90,
+  .bg-sky-500\/12,
+  .bg-cyan-50,
+  .bg-teal-50,
+  .bg-emerald-50,
+  .bg-emerald-50\/90,
+  .bg-emerald-100,
+  .bg-emerald-400\/15,
+  .bg-emerald-500\/10,
+  .bg-emerald-500\/12,
+  .bg-emerald-500\/15,
+  .bg-green-50,
+  .bg-green-500\/10,
+  .bg-purple-50,
+  .bg-purple-300\/60,
+  .bg-purple-400\/50,
+  .bg-fuchsia-50,
+  .bg-fuchsia-50\/70,
+  .bg-fuchsia-50\/80,
+  .bg-fuchsia-50\/90,
+  .bg-fuchsia-100,
+  .bg-violet-500\/12,
+  .bg-violet-500\/14,
+  .bg-violet-500\/15,
+  .bg-violet-500\/16,
+  .bg-violet-500\/18,
+  .bg-violet-500\/20,
+  .bg-violet-500\/25,
+  .bg-violet-500\/30,
+  .bg-violet-500\/5,
+  .bg-violet-500\/85,
+  .bg-violet-400\/40,
+  .bg-violet-50,
+  .bg-violet-50\/90,
+  .bg-fuchsia-500\/10,
+  .bg-fuchsia-500\/12,
+  .bg-fuchsia-500\/15,
+  .bg-purple-500\/10,
+  .bg-purple-500\/12,
+  .bg-purple-500\/15,
+  .bg-pink-400\/60
+) {
+  background-color: color-mix(in srgb, var(--pf-accent) 12%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-amber-50,
+  .bg-amber-50\/90,
+  .bg-amber-500\/10,
+  .bg-amber-500\/12,
+  .bg-amber-500\/15,
+  .bg-orange-50
+) {
+  background-color: color-mix(in srgb, var(--pf-accent-2) 14%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-red-50,
+  .bg-red-100,
+  .bg-red-500\/10,
+  .bg-red-500\/12,
+  .bg-red-500\/15,
+  .bg-red-500\/16,
+  .bg-red-500\/18,
+  .bg-rose-50,
+  .bg-rose-50\/70,
+  .bg-rose-500\/10,
+  .bg-rose-950\/20,
+  .bg-red-950\/30
+) {
+  background-color: color-mix(in srgb, var(--pf-danger) 14%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-amber-500,
+  .bg-amber-500\/45,
+  .bg-amber-500\/80,
+  .bg-amber-600,
+  .bg-amber-700,
+  .bg-orange-500
+) {
+  background-color: var(--pf-accent-2);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-red-400,
+  .bg-red-500,
+  .bg-red-600,
+  .bg-rose-500
+) {
+  background-color: var(--pf-danger);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .border-slate-100,
+  .border-slate-200,
+  .border-slate-200\/40,
+  .border-slate-200\/50,
+  .border-slate-200\/70,
+  .border-slate-200\/80,
+  .border-slate-200\/85,
+  .border-slate-300,
+  .border-slate-400,
+  .border-slate-400\/85,
+  .border-slate-500,
+  .border-slate-500\/70,
+  .border-slate-500\/85,
+  .border-slate-600,
+  .border-slate-600\/80,
+  .border-slate-700,
+  .border-slate-700\/70,
+  .border-slate-700\/75,
+  .border-slate-700\/80,
+  .border-slate-700\/85,
+  .border-slate-700\/90,
+  .border-slate-800,
+  .border-slate-800\/80,
+  .border-slate-900,
+  .border-zinc-100,
+  .border-zinc-200,
+  .border-zinc-300,
+  .border-zinc-900,
+  .border-indigo-100,
+  .border-indigo-200,
+  .border-indigo-200\/50,
+  .border-indigo-300,
+  .border-indigo-400,
+  .border-indigo-400\/20,
+  .border-indigo-500,
+  .border-indigo-500\/20,
+  .border-indigo-500\/30,
+  .border-indigo-500\/40,
+  .border-indigo-500\/50,
+  .border-indigo-600,
+  .border-blue-100,
+  .border-blue-200,
+  .border-blue-300,
+  .border-blue-400\/35,
+  .border-blue-400\/40,
+  .border-blue-500,
+  .border-sky-100,
+  .border-sky-200,
+  .border-sky-300,
+  .border-sky-400,
+  .border-sky-400\/35,
+  .border-emerald-100,
+  .border-emerald-200,
+  .border-emerald-300,
+  .border-emerald-300\/40,
+  .border-emerald-300\/50,
+  .border-emerald-400\/30,
+  .border-emerald-400\/35,
+  .border-emerald-400\/40,
+  .border-emerald-500,
+  .border-emerald-500\/35,
+  .border-purple-200,
+  .border-fuchsia-100,
+  .border-fuchsia-200,
+  .border-fuchsia-300,
+  .border-fuchsia-400,
+  .border-fuchsia-400\/35,
+  .border-fuchsia-500,
+  .border-violet-100,
+  .border-violet-300,
+  .border-violet-300\/50,
+  .border-violet-300\/55,
+  .border-violet-300\/60,
+  .border-violet-400,
+  .border-violet-400\/20,
+  .border-violet-400\/30,
+  .border-violet-400\/35,
+  .border-violet-400\/40,
+  .border-violet-400\/45,
+  .border-violet-400\/50,
+  .border-violet-400\/55,
+  .border-violet-400\/60,
+  .border-violet-400\/70,
+  .border-violet-500
+) {
+  border-color: var(--pf-line-strong);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .border-amber-100,
+  .border-amber-200,
+  .border-amber-200\/25,
+  .border-amber-300,
+  .border-amber-300\/35,
+  .border-amber-300\/40,
+  .border-amber-300\/60,
+  .border-amber-400,
+  .border-amber-400\/25,
+  .border-amber-400\/35,
+  .border-amber-400\/40
+) {
+  border-color: color-mix(in srgb, var(--pf-accent-2) 42%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .border-red-100,
+  .border-red-200,
+  .border-red-300,
+  .border-red-300\/50,
+  .border-red-300\/70,
+  .border-red-400,
+  .border-red-400\/20,
+  .border-red-400\/25,
+  .border-red-400\/30,
+  .border-red-400\/35,
+  .border-red-400\/40,
+  .border-red-400\/45,
+  .border-red-400\/50,
+  .border-red-400\/60,
+  .border-red-400\/70,
+  .border-red-500,
+  .border-red-500\/35,
+  .border-red-900\/50,
+  .border-rose-200,
+  .border-rose-400\/40
+) {
+  border-color: color-mix(in srgb, var(--pf-danger) 42%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .text-slate-950,
+  .text-slate-900,
+  .text-slate-800,
+  .text-slate-100,
+  .text-slate-200,
+  .text-zinc-950,
+  .text-zinc-900,
+  .text-zinc-800,
+  .text-zinc-100,
+  .text-zinc-200
+) {
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .text-slate-700,
+  .text-slate-600,
+  .text-slate-300,
+  .text-zinc-700,
+  .text-zinc-600,
+  .text-zinc-300
+) {
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .text-slate-500,
+  .text-slate-400,
+  .text-slate-50,
+  .text-zinc-500,
+  .text-zinc-400,
+  .text-zinc-50,
+  .text-zinc-300
+) {
+  color: var(--pf-subtle);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .text-indigo-700,
+  .text-indigo-950,
+  .text-indigo-900,
+  .text-indigo-900\/80,
+  .text-indigo-800,
+  .text-indigo-700\/80,
+  .text-indigo-700\/85,
+  .text-indigo-600,
+  .text-indigo-600\/70,
+  .text-indigo-600\/75,
+  .text-indigo-600\/85,
+  .text-indigo-500,
+  .text-indigo-400,
+  .text-indigo-300,
+  .text-indigo-200,
+  .text-indigo-100,
+  .text-blue-800,
+  .text-blue-700,
+  .text-blue-600,
+  .text-blue-200,
+  .text-blue-100,
+  .text-sky-900,
+  .text-sky-700,
+  .text-sky-600,
+  .text-sky-200,
+  .text-sky-100,
+  .text-violet-100,
+  .text-violet-100\/60,
+  .text-violet-100\/70,
+  .text-violet-100\/75,
+  .text-violet-100\/80,
+  .text-violet-200,
+  .text-violet-300,
+  .text-violet-400,
+  .text-violet-50,
+  .text-violet-700,
+  .text-violet-900,
+  .text-fuchsia-100,
+  .text-fuchsia-100\/75,
+  .text-fuchsia-200,
+  .text-fuchsia-300,
+  .text-fuchsia-400,
+  .text-fuchsia-500,
+  .text-fuchsia-600,
+  .text-fuchsia-700,
+  .text-fuchsia-800\/80,
+  .text-fuchsia-900,
+  .text-purple-100,
+  .text-purple-200,
+  .text-purple-300,
+  .text-purple-400,
+  .text-purple-500,
+  .text-purple-600
+) {
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .text-emerald-50,
+  .text-emerald-100,
+  .text-emerald-100\/75,
+  .text-emerald-200,
+  .text-emerald-300,
+  .text-emerald-900,
+  .text-emerald-800,
+  .text-emerald-700\/80,
+  .text-emerald-700,
+  .text-emerald-600,
+  .text-amber-950,
+  .text-amber-900,
+  .text-amber-800,
+  .text-amber-700,
+  .text-amber-600,
+  .text-amber-300,
+  .text-amber-200,
+  .text-amber-100,
+  .text-orange-700,
+  .text-orange-600
+) {
+  color: var(--pf-accent-2);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .text-red-900,
+  .text-red-700,
+  .text-red-700\/85,
+  .text-red-600,
+  .text-red-600\/80,
+  .text-red-500,
+  .text-red-300,
+  .text-red-200,
+  .text-red-200\/80,
+  .text-red-100,
+  .text-red-100\/85,
+  .text-rose-800,
+  .text-rose-700,
+  .text-rose-600,
+  .text-rose-300,
+  .text-rose-200,
+  .text-rose-100
+) {
+  color: var(--pf-danger);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .bg-sky-500,
+  .bg-cyan-500,
+  .bg-teal-500,
+  .bg-blue-500,
+  .bg-green-500,
+  .bg-emerald-500,
+  .bg-violet-500,
+  .bg-fuchsia-500,
+  .bg-purple-500
+) {
+  background-color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(.bg-gradient-to-r, .bg-gradient-to-b),
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-gradient-to"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-sky"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-blue"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-cyan"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-teal"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-emerald"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-green"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-amber"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-orange"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-red"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-rose"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-indigo"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-violet"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-fuchsia"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="from-purple"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-sky"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-blue"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-cyan"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-teal"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-emerald"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-green"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-amber"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-orange"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-red"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-rose"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-indigo"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-violet"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-fuchsia"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="to-purple"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-sky"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-blue"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-cyan"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-teal"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-emerald"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-green"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-amber"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-orange"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-red"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-rose"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-indigo"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-violet"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-fuchsia"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="via-purple"] {
+  background-image: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-indigo-500:hover,
+  .hover\:bg-indigo-600:hover,
+  .hover\:bg-indigo-700:hover,
+  .hover\:bg-sky-500:hover,
+  .hover\:bg-sky-600:hover,
+  .hover\:bg-blue-50:hover,
+  .hover\:bg-blue-500:hover,
+  .hover\:bg-blue-600:hover,
+  .hover\:bg-blue-700:hover,
+  .hover\:bg-emerald-50:hover,
+  .hover\:bg-emerald-500:hover,
+  .hover\:bg-green-50:hover,
+  .hover\:bg-green-500:hover,
+  .hover\:bg-violet-500:hover,
+  .hover\:bg-violet-600:hover,
+  .hover\:bg-fuchsia-500:hover,
+  .hover\:bg-fuchsia-600:hover,
+  .hover\:bg-purple-500:hover,
+  .hover\:bg-purple-600:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-indigo"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-blue"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-sky"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-cyan"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-teal"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-emerald"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-green"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-violet"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-fuchsia"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-purple"] {
+  --tw-ring-color: color-mix(in srgb, var(--pf-accent) 34%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-amber"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-orange"] {
+  --tw-ring-color: color-mix(in srgb, var(--pf-accent-2) 34%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-red"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-rose"] {
+  --tw-ring-color: color-mix(in srgb, var(--pf-danger) 34%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-indigo"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-blue"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-sky"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-cyan"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-teal"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-emerald"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-green"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-violet"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-fuchsia"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-purple"] {
+  --tw-shadow-color: color-mix(in srgb, var(--pf-accent) 22%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-amber"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-orange"] {
+  --tw-shadow-color: color-mix(in srgb, var(--pf-accent-2) 22%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-red"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="shadow-rose"] {
+  --tw-shadow-color: color-mix(in srgb, var(--pf-danger) 22%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="bg-[#f3eadc]"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="bg-[#f4eddf]"] {
+  background-color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="bg-[#1d4cff]"] {
+  background-color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="bg-[#020617]"] {
+  background-color: var(--pf-line-strong);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-[#"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-slate"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-zinc"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-blue"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-sky"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-cyan"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-teal"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-emerald"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-green"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-violet"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-indigo"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-fuchsia"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-purple"] {
+  background-color: color-mix(in srgb, var(--pf-panel) 86%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-amber"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-orange"] {
+  background-color: color-mix(in srgb, var(--pf-accent-2) 14%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-red"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-rose"] {
+  background-color: color-mix(in srgb, var(--pf-danger) 14%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-slate"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-zinc"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-blue"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-sky"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-cyan"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-teal"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-emerald"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-green"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-violet"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-indigo"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-fuchsia"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-purple"] {
+  border-color: var(--pf-line-strong);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-amber"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-orange"] {
+  border-color: color-mix(in srgb, var(--pf-accent-2) 42%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-red"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-rose"] {
+  border-color: color-mix(in srgb, var(--pf-danger) 42%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:text-white,
+  .dark\:text-slate-50,
+  .dark\:text-slate-100,
+  .dark\:text-slate-200,
+  .dark\:text-zinc-50,
+  .dark\:text-zinc-100,
+  .dark\:text-zinc-200
+) {
+  color: var(--pf-text);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:text-slate-300,
+  .dark\:text-zinc-300
+) {
+  color: var(--pf-muted);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:text-slate-400,
+  .dark\:text-slate-500,
+  .dark\:text-slate-600,
+  .dark\:text-zinc-400,
+  .dark\:text-zinc-500,
+  .dark\:text-zinc-600
+) {
+  color: var(--pf-subtle);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-violet"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-indigo"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-blue"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-sky"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-cyan"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-teal"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-emerald"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-green"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-fuchsia"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-purple"] {
+  color: var(--pf-accent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-amber"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-orange"] {
+  color: var(--pf-accent-2);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-red"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-rose"] {
+  color: var(--pf-danger);
+}
+
+:root[data-ui-layout-scheme="workspace"] .btn-primary-spring {
+  background: var(--pf-deep);
+  color: var(--pf-bg);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pf-deep) 48%, transparent), 0 3px 8px color-mix(in srgb, var(--pf-accent) 18%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .btn-primary-spring:hover {
+  background: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pf-accent) 42%, transparent), 0 6px 14px color-mix(in srgb, var(--pf-accent) 28%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .btn-primary-spring {
+  background: #5b6847;
+  color: #f2ead8;
+}
+
+:root[data-ui-layout-scheme="workspace"] .btn-secondary-spring {
+  background: color-mix(in srgb, var(--pf-panel-soft) 82%, transparent);
+  color: var(--pf-muted);
+  box-shadow: 0 0 0 1px var(--pf-line);
+}
+
+:root[data-ui-layout-scheme="workspace"] .btn-secondary-spring:hover {
+  background: color-mix(in srgb, var(--pf-deep) 6%, transparent);
+  color: var(--pf-text);
+  box-shadow: 0 0 0 1px var(--pf-line-strong);
+}
+
+:root[data-ui-layout-scheme="workspace"] .glass-inspector,
+:root[data-ui-layout-scheme="workspace"] .glass-empty-state,
+:root[data-ui-layout-scheme="workspace"] .config-bubble,
+:root[data-ui-layout-scheme="workspace"] .copy-editor-card {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 88%, transparent);
+  color: var(--pf-text);
+  box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 255 255 / 0.28);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .glass-inspector,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .glass-empty-state,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .config-bubble,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .copy-editor-card {
+  background: rgb(32 35 29 / 0.88);
+  box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"] .glass-empty-state:hover {
+  border-color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .input-premium,
+:root[data-ui-layout-scheme="workspace"] .textarea-premium {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 88%, transparent);
+  color: var(--pf-text);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--pf-deep) 4%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .input-premium:focus,
+:root[data-ui-layout-scheme="workspace"] .textarea-premium:focus {
+  border-color: var(--pf-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--pf-accent) 16%, transparent), inset 0 1px 2px color-mix(in srgb, var(--pf-deep) 4%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .input-premium::placeholder,
+:root[data-ui-layout-scheme="workspace"] .textarea-premium::placeholder {
+  color: var(--pf-subtle);
+}
+
+:root[data-ui-layout-scheme="workspace"] .copy-editor-card {
+  border-left-color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .copy-editor-item {
+  border-left-color: color-mix(in srgb, var(--pf-accent) 64%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .copy-add-field {
+  border-color: color-mix(in srgb, var(--pf-accent) 28%, transparent);
+  background-color: color-mix(in srgb, var(--pf-accent) 10%, transparent);
+  color: var(--pf-accent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--pf-accent) 8%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .copy-add-field:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 42%, transparent);
+  background-color: color-mix(in srgb, var(--pf-accent) 16%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .workflow-canvas-controls {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 88%, transparent);
+  box-shadow: var(--pf-shadow);
+  --xy-controls-button-background-color-hover: color-mix(in srgb, var(--pf-accent) 10%, transparent);
+  --xy-controls-button-color: var(--pf-muted);
+  --xy-controls-button-color-hover: var(--pf-text);
+  --xy-controls-button-border-color: var(--pf-line);
+}
+
+:root[data-ui-layout-scheme="workspace"] .workflow-canvas-minimap {
+  border-color: var(--pf-line-strong);
+  box-shadow: var(--pf-shadow);
+}
+
+:root[data-ui-layout-scheme="workspace"] .workflow-canvas-minimap .workflow-canvas-minimap-node-running {
+  fill: var(--pf-accent) !important;
+  stroke: var(--pf-accent-2) !important;
+  filter: drop-shadow(0 2px 7px color-mix(in srgb, var(--pf-accent) 70%, transparent));
+  animation-name: workflow-minimap-running-bounce-workspace;
+}
+
+@keyframes workflow-minimap-running-bounce-workspace {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    filter: drop-shadow(0 2px 5px color-mix(in srgb, var(--pf-accent) 48%, transparent));
+  }
+  45% {
+    transform: translateY(-10%) scale(1.18);
+    filter: drop-shadow(0 5px 10px color-mix(in srgb, var(--pf-accent) 76%, transparent));
+  }
+}
+
+@keyframes running-glow-workspace {
+  0%, 100% {
+    border-color: color-mix(in srgb, var(--pf-accent) 60%, transparent);
+    box-shadow: 0 0 10px 1px color-mix(in srgb, var(--pf-accent) 18%, transparent), 0 1px 3px color-mix(in srgb, var(--pf-deep) 8%, transparent);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--pf-accent-2) 82%, transparent);
+    box-shadow: 0 0 20px 4px color-mix(in srgb, var(--pf-accent-2) 34%, transparent), 0 3px 12px color-mix(in srgb, var(--pf-accent) 16%, transparent);
+  }
+}
+
+@keyframes queued-glow-workspace {
+  0%, 100% {
+    border-color: color-mix(in srgb, var(--pf-subtle) 52%, transparent);
+    box-shadow: 0 0 8px 1px color-mix(in srgb, var(--pf-subtle) 14%, transparent), 0 1px 2px color-mix(in srgb, var(--pf-deep) 5%, transparent);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--pf-accent) 68%, transparent);
+    box-shadow: 0 0 16px 2px color-mix(in srgb, var(--pf-accent) 24%, transparent), 0 2px 6px color-mix(in srgb, var(--pf-accent) 10%, transparent);
+  }
+}
+
+@keyframes resize-handle-glow-workspace {
+  0%, 100% {
+    background-color: color-mix(in srgb, var(--pf-accent) 38%, transparent);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--pf-accent) 15%, transparent);
+  }
+  50% {
+    background-color: color-mix(in srgb, var(--pf-accent-2) 64%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--pf-accent-2) 32%, transparent);
+  }
+}
+
+:root[data-ui-layout-scheme="workspace"] .animate-running-glow {
+  animation-name: running-glow-workspace !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .animate-queued-glow {
+  animation-name: queued-glow-workspace !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .animate-handle-glow {
+  animation-name: resize-handle-glow-workspace;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace svg [fill="#6366f1"],
+:root[data-ui-layout-scheme="workspace"] .pf-workspace svg [fill="#2563eb"],
+:root[data-ui-layout-scheme="workspace"] .pf-workspace svg [fill="#818cf8"] {
+  fill: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace svg [stroke="#6366f1"],
+:root[data-ui-layout-scheme="workspace"] .pf-workspace svg [stroke="#2563eb"],
+:root[data-ui-layout-scheme="workspace"] .pf-workspace svg [stroke="#1d4ed8"],
+:root[data-ui-layout-scheme="workspace"] .pf-workspace svg [stroke="#818cf8"],
+:root[data-ui-layout-scheme="workspace"] .pf-workspace svg [stroke="#c4b5fd"] {
+  stroke: var(--pf-accent);
 }
 
 .pf-workspace-stage {
@@ -299,6 +1707,16 @@ textarea {
   background:
     radial-gradient(circle at top right, rgb(129 140 248 / 0.16), transparent 26rem),
     var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-gallery-feed {
+  background:
+    radial-gradient(
+      circle at top right,
+      color-mix(in srgb, var(--pf-accent) 14%, transparent),
+      transparent 26rem
+    ),
+    color-mix(in srgb, var(--pf-bg-soft) 76%, transparent);
 }
 
 @media (min-width: 640px) {
@@ -950,4 +2368,98 @@ textarea {
   color: rgb(237 233 254);
   background-color: rgb(139 92 246 / 0.2);
   border-color: rgb(167 139 250 / 0.55);
+}
+
+/* Workspace palette guard: keep late classic/dark utilities from repainting the new scheme. */
+:root[data-ui-layout-scheme="workspace"] .workflow-canvas-controls {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 88%, transparent);
+  box-shadow: var(--pf-shadow);
+  --xy-controls-button-background-color-hover: color-mix(in srgb, var(--pf-accent) 10%, transparent);
+  --xy-controls-button-color: var(--pf-muted);
+  --xy-controls-button-color-hover: var(--pf-text);
+  --xy-controls-button-border-color: var(--pf-line);
+}
+
+:root[data-ui-layout-scheme="workspace"] .workflow-canvas-minimap {
+  border-color: var(--pf-line-strong);
+  box-shadow: var(--pf-shadow);
+}
+
+:root[data-ui-layout-scheme="workspace"] .workflow-canvas-minimap .workflow-canvas-minimap-node-running {
+  fill: var(--pf-accent) !important;
+  stroke: var(--pf-accent-2) !important;
+  filter: drop-shadow(0 2px 7px color-mix(in srgb, var(--pf-accent) 70%, transparent));
+}
+
+:root[data-ui-layout-scheme="workspace"] .animate-shimmer {
+  background-color: color-mix(in srgb, var(--pf-panel-soft) 82%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .animate-shimmer::after {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--pf-panel) 24%, transparent) 20%,
+    color-mix(in srgb, var(--pf-panel) 58%, transparent) 60%,
+    transparent 100%
+  );
+}
+
+@layer theme {
+  :root[data-ui-layout-scheme="workspace"] :where(body, body *)[class~="!bg-white"] {
+    background-color: color-mix(in srgb, var(--pf-panel) 88%, transparent) !important;
+  }
+
+  :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class~="dark:!bg-[#111b2d]"] {
+    background-color: color-mix(in srgb, var(--pf-panel) 88%, transparent) !important;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+    [class~="!bg-indigo-50"],
+    [class~="!bg-indigo-100"]
+  ) {
+    background-color: color-mix(in srgb, var(--pf-accent) 12%, transparent) !important;
+  }
+
+  :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+    [class~="dark:!bg-violet-500/20"],
+    [class~="dark:!bg-violet-500/30"]
+  ) {
+    background-color: color-mix(in srgb, var(--pf-accent) 12%, transparent) !important;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+    [class~="!border-indigo-500"],
+    [class~="!border-indigo-600"]
+  ) {
+    border-color: var(--pf-accent) !important;
+  }
+
+  :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+    [class~="dark:!border-violet-200"],
+    [class~="dark:!border-violet-300"]
+  ) {
+    border-color: var(--pf-accent) !important;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] :where(body, body *)[class~="!ring-indigo-100"] {
+    --tw-ring-color: color-mix(in srgb, var(--pf-accent) 24%, transparent) !important;
+  }
+
+  :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class~="dark:!ring-violet-400/25"] {
+    --tw-ring-color: color-mix(in srgb, var(--pf-accent) 24%, transparent) !important;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] :where(body, body *)[class~="!text-black"] {
+    color: var(--pf-text) !important;
+  }
+
+  :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class~="dark:!text-black"] {
+    color: var(--pf-text) !important;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] .pf-shell-weather-trigger {
+    color: var(--pf-accent) !important;
+  }
 }

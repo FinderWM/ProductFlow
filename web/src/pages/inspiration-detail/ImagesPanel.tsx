@@ -1,4 +1,4 @@
-import { Image as ImageIcon } from "lucide-react";
+import { Image as ImageIcon, Loader2, Save, X } from "lucide-react";
 import {
   isResourceBlocked,
   ResourceBlockedNotice,
@@ -6,86 +6,118 @@ import {
 } from "../../components/ResourceGovernance";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
-import type { GenerationResourceGroup, PosterVariant, InspirationDetail, SourceAsset, WorkflowNode } from "../../lib/types";
+import type { PosterVariant, InspirationDetail, SourceAsset, WorkflowNode } from "../../lib/types";
 
 import { PosterThumb, SourceAssetThumb } from "./ImageDownloadComponents";
 import { workflowNodeDisplayTitle } from "./nodeDisplay";
 
 interface ImagesPanelProps {
+  open: boolean;
+  onClose: () => void;
   inspiration: InspirationDetail;
   posters: PosterVariant[];
   referenceAssets: SourceAsset[];
   artifactCount: number;
-  resourceGroups: GenerationResourceGroup[];
-  selectedResourceGroupId: string;
-  onResourceGroupChange: (resourceGroupId: string) => void;
   selectedReferenceNode: WorkflowNode | null;
   posterSourceAssetIds: Map<string, string>;
   onPreviewImage: (image: DownloadableImage) => void;
   onFillFromSourceAsset: (sourceAssetId: string) => void;
   onFillFromPoster: (posterId: string) => void;
+  onSavePosterToResourceLibrary?: (poster: PosterVariant) => void;
+  onSaveSourceAssetToResourceLibrary?: (asset: SourceAsset) => void;
+  savedPosterIds?: Set<string>;
+  savedSourceAssetIds?: Set<string>;
   fillReferenceBusy: boolean;
   fillBlockedTitle?: string | null;
+  resourceLibraryWriteDisabledTitle?: string | null;
+  savingResourceLibrarySourceId?: string | null;
 }
 
 export function ImagesPanel({
+  open,
+  onClose,
   inspiration,
   posters,
   referenceAssets,
   artifactCount,
-  resourceGroups,
-  selectedResourceGroupId,
-  onResourceGroupChange,
   selectedReferenceNode,
   posterSourceAssetIds,
   onPreviewImage,
   onFillFromSourceAsset,
   onFillFromPoster,
+  onSavePosterToResourceLibrary,
+  onSaveSourceAssetToResourceLibrary,
+  savedPosterIds = new Set(),
+  savedSourceAssetIds = new Set(),
   fillReferenceBusy,
   fillBlockedTitle = null,
+  resourceLibraryWriteDisabledTitle = null,
+  savingResourceLibrarySourceId = null,
 }: ImagesPanelProps) {
   const { t } = useI18n();
   const canFillReference = Boolean(selectedReferenceNode);
   const inspirationBlocked = isResourceBlocked(inspiration);
   const selectedReferenceLabel = selectedReferenceNode ? workflowNodeDisplayTitle(selectedReferenceNode, t) : "";
+  const canSaveToResourceLibrary = Boolean(onSavePosterToResourceLibrary || onSaveSourceAssetToResourceLibrary);
+
+  if (!open) {
+    return null;
+  }
+
   return (
-    <section>
-      <div className="mb-3 space-y-2 text-xs text-zinc-500 dark:text-slate-400">
-        <ResourceBlockedNotice resource={inspiration} />
-        <label className="block">
-          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
-            {t("detail.images.resourceGroupFilter")}
-          </span>
-          <select
-            value={selectedResourceGroupId}
-            onChange={(event) => onResourceGroupChange(event.target.value)}
-            disabled={!resourceGroups.length}
-            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400"
-          >
-            <option value="" disabled>
-              {resourceGroups.length ? t("detail.images.selectResourceGroup") : t("detail.images.noResourceGroups")}
-            </option>
-            {resourceGroups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div>{artifactCount ? t("detail.downloadableCount", { count: artifactCount }) : t("detail.waitingAssets")}</div>
-        {canFillReference ? (
-          <div className="text-indigo-600 dark:text-violet-400 font-semibold">
-            {t("detail.fillInto", { label: selectedReferenceLabel })}
-          </div>
-        ) : (
-          <div>{t("detail.selectImageNodeFirst")}</div>
-        )}
-      </div>
-      {artifactCount ? (
-        <div className="grid grid-cols-2 gap-2">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("detail.images.galleryModalTitle")}
+      className="fixed inset-0 z-[74] flex items-center justify-center bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="flex h-[min(880px,calc(100dvh-2rem))] w-full max-w-6xl min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800 sm:px-5">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
+                  <ImageIcon size={18} className="text-indigo-600 dark:text-violet-300" />
+                  <span>{t("detail.images.galleryModalTitle")}</span>
+                </div>
+                <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {artifactCount ? t("detail.downloadableCount", { count: artifactCount }) : t("detail.waitingAssets")}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                aria-label={t("resourceLibrary.close")}
+                title={t("resourceLibrary.close")}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="shrink-0 border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/35 sm:px-5">
+              <div className="min-w-0 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <ResourceBlockedNotice resource={inspiration} />
+                {canFillReference ? (
+                  <div className="font-semibold text-indigo-600 dark:text-violet-300">
+                    {t("detail.fillInto", { label: selectedReferenceLabel })}
+                  </div>
+                ) : (
+                  <div>{t("detail.selectImageNodeFirst")}</div>
+                )}
+                </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+              {artifactCount ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
           {posters.map((poster) => {
             const sourceAssetId = posterSourceAssetIds.get(poster.id);
             const posterBlocked = inspirationBlocked || isResourceBlocked(poster);
+            const saving = savingResourceLibrarySourceId === poster.id;
             return (
               <div key={poster.id} className="space-y-1.5">
                 <PosterThumb
@@ -108,11 +140,21 @@ export function ImagesPanel({
                 />
                 <ResourceMetaBadges resource={poster} showReason />
                 <ResourceGroupBadge name={poster.resource_group.name} />
+                {onSavePosterToResourceLibrary ? (
+                  <SaveToLibraryButton
+                    busy={saving}
+                    disabled={!canSaveToResourceLibrary || posterBlocked || Boolean(resourceLibraryWriteDisabledTitle)}
+                    saved={savedPosterIds.has(poster.id)}
+                    title={resourceLibraryWriteDisabledTitle ?? t("resourceLibrary.saveToLibrary")}
+                    onClick={() => onSavePosterToResourceLibrary(poster)}
+                  />
+                ) : null}
               </div>
             );
           })}
           {referenceAssets.map((asset) => {
             const assetBlocked = inspirationBlocked || isResourceBlocked(asset);
+            const saving = savingResourceLibrarySourceId === asset.id;
             return (
               <div key={asset.id} className="space-y-1.5">
                 <SourceAssetThumb
@@ -128,17 +170,56 @@ export function ImagesPanel({
                   useAsReferenceBusy={fillReferenceBusy}
                 />
                 <ResourceMetaBadges resource={asset} showReason />
+                {onSaveSourceAssetToResourceLibrary ? (
+                  <SaveToLibraryButton
+                    busy={saving}
+                    disabled={!canSaveToResourceLibrary || assetBlocked || Boolean(resourceLibraryWriteDisabledTitle)}
+                    saved={savedSourceAssetIds.has(asset.id)}
+                    title={resourceLibraryWriteDisabledTitle ?? t("resourceLibrary.saveToLibrary")}
+                    onClick={() => onSaveSourceAssetToResourceLibrary(asset)}
+                  />
+                ) : null}
               </div>
             );
           })}
-        </div>
-      ) : (
-        <div className="glass-empty-state flex min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center text-xs leading-relaxed text-zinc-500 dark:text-slate-400">
-          <ImageIcon size={18} className="text-indigo-500 opacity-80 dark:text-violet-400" />
-          <div>{t("detail.noImages")}</div>
-        </div>
-      )}
-    </section>
+                </div>
+              ) : (
+                <div className="glass-empty-state flex min-h-[320px] flex-col items-center justify-center gap-2 p-6 text-center text-xs leading-relaxed text-zinc-500 dark:text-slate-400">
+                  <ImageIcon size={20} className="text-indigo-500 opacity-80 dark:text-violet-400" />
+                  <div>{t("detail.noImages")}</div>
+                </div>
+              )}
+            </div>
+          </div>
+    </div>
+  );
+}
+
+function SaveToLibraryButton({
+  busy,
+  disabled,
+  saved,
+  title,
+  onClick,
+}: {
+  busy: boolean;
+  disabled: boolean;
+  saved: boolean;
+  title: string;
+  onClick: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || busy}
+      title={title}
+      className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+    >
+      {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
+      {saved ? t("resourceLibrary.alreadyInLibrary") : t("resourceLibrary.saveToLibrary")}
+    </button>
   );
 }
 

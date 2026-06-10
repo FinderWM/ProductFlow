@@ -14,6 +14,8 @@ from inspiration_one_backend.domain.enums import (
     ImageSessionAssetKind,
     JobStatus,
     PosterKind,
+    ResourceLibraryAssetKind,
+    ResourceLibrarySourceType,
     SourceAssetKind,
     WorkflowNodeStatus,
     WorkflowNodeType,
@@ -29,8 +31,12 @@ from inspiration_one_backend.infrastructure.db.models import (
     ImageSessionGenerationTask,
     InspirationWorkflow,
     PosterVariant,
+    ResourceLibraryAsset,
+    ResourceLibraryAssetGroup,
+    ResourceLibraryGroup,
     SourceAsset,
     UserCanvasTemplate,
+    UserUiPreference,
     WorkflowNode,
     WorkflowNodeRun,
     WorkflowRun,
@@ -48,6 +54,8 @@ def test_sqlalchemy_enum_columns_use_application_values_without_database_constra
     enum_columns = (
         (SourceAsset.__table__.c.kind, SourceAssetKind),
         (ImageSessionAsset.__table__.c.kind, ImageSessionAssetKind),
+        (ResourceLibraryAsset.__table__.c.kind, ResourceLibraryAssetKind),
+        (ResourceLibraryAsset.__table__.c.source_type, ResourceLibrarySourceType),
         (CopySet.__table__.c.status, CopyStatus),
         (PosterVariant.__table__.c.kind, PosterKind),
         (ImageSessionGenerationTask.__table__.c.status, JobStatus),
@@ -80,6 +88,20 @@ def test_workflow_run_model_has_retryability_and_progress_metadata() -> None:
     assert table.c.is_retryable.default is not None
     assert "progress_metadata" in table.c
     assert table.c.progress_metadata.nullable
+
+
+def test_user_ui_preferences_model_matches_layout_scheme_contract() -> None:
+    table = UserUiPreference.__table__
+    assert table.c.user_id.type.length == 36
+    assert not table.c.user_id.nullable
+    assert table.c.ui_layout_scheme.type.length == 32
+    assert not table.c.ui_layout_scheme.nullable
+    assert table.c.ui_layout_scheme.default is not None
+    assert table.c.ui_layout_scheme.default.arg == "classic"
+    assert not table.c.mask_sensitive_images_in_inspirations.nullable
+    assert not table.c.mask_sensitive_images_in_image_chat.nullable
+    assert not table.foreign_keys
+    assert not [constraint for constraint in table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
 
 def test_generation_config_resource_group_model_matches_migration_contract() -> None:
@@ -119,6 +141,68 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
         "ix_image_gallery_entries_enabled",
     }
     assert not table.foreign_keys
+
+
+def test_resource_library_models_match_migration_contract() -> None:
+    group_table = ResourceLibraryGroup.__table__
+    assert group_table.c.id.type.length == 36
+    assert not group_table.c.id.nullable
+    assert group_table.c.id.default is not None
+    assert group_table.c.id.default.arg.__name__ == new_id.__name__
+    assert group_table.c.owner_user_id.type.length == 36
+    assert not group_table.c.owner_user_id.nullable
+    assert group_table.c.name.type.length == 120
+    assert not group_table.c.name.nullable
+    assert not group_table.c.sort_order.nullable
+    assert group_table.c.archived_at.nullable
+    assert not group_table.c.created_at.nullable
+    assert not group_table.c.updated_at.nullable
+    assert {index.name for index in group_table.indexes} == {
+        "ix_resource_library_groups_owner_archived",
+        "ix_resource_library_groups_owner_user_id",
+        "uq_resource_library_groups_owner_name_active",
+    }
+    assert not group_table.foreign_keys
+    assert not [constraint for constraint in group_table.constraints if isinstance(constraint, sa.CheckConstraint)]
+
+    asset_table = ResourceLibraryAsset.__table__
+    assert asset_table.c.id.type.length == 36
+    assert not asset_table.c.id.nullable
+    assert asset_table.c.owner_user_id.type.length == 36
+    assert not asset_table.c.owner_user_id.nullable
+    assert asset_table.c.kind.type.enums == [member.value for member in ResourceLibraryAssetKind]
+    assert asset_table.c.source_type.type.enums == [member.value for member in ResourceLibrarySourceType]
+    assert asset_table.c.original_filename.type.length == 255
+    assert asset_table.c.mime_type.type.length == 100
+    assert asset_table.c.storage_path.type.length == 500
+    assert asset_table.c.source_resource_id.nullable
+    assert not asset_table.c.enabled.nullable
+    assert asset_table.c.disabled_at.nullable
+    assert asset_table.c.disabled_by_user_id.nullable
+    assert asset_table.c.disabled_reason.nullable
+    assert asset_table.c.archived_at.nullable
+    assert {index.name for index in asset_table.indexes} == {
+        "ix_resource_library_assets_enabled",
+        "ix_resource_library_assets_kind",
+        "ix_resource_library_assets_owner_archived",
+        "ix_resource_library_assets_owner_user_id",
+        "uq_resource_library_assets_owner_source",
+    }
+    assert not asset_table.foreign_keys
+    assert not [constraint for constraint in asset_table.constraints if isinstance(constraint, sa.CheckConstraint)]
+
+    link_table = ResourceLibraryAssetGroup.__table__
+    assert link_table.c.asset_id.type.length == 36
+    assert link_table.c.group_id.type.length == 36
+    assert not link_table.c.asset_id.nullable
+    assert not link_table.c.group_id.nullable
+    assert not link_table.c.created_at.nullable
+    assert link_table.c.created_at.default is not None
+    assert link_table.c.created_at.default.arg.__name__ == utcnow.__name__
+    assert {column.name for column in link_table.primary_key.columns} == {"asset_id", "group_id"}
+    assert {index.name for index in link_table.indexes} == {"ix_resource_library_asset_groups_group"}
+    assert not link_table.foreign_keys
+    assert not [constraint for constraint in link_table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
 
 def test_user_canvas_template_model_matches_migration_contract() -> None:
@@ -636,6 +720,148 @@ def test_gallery_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, m
     engine = sa.create_engine(f"sqlite:///{database_path}")
     inspector = sa.inspect(engine)
     assert "image_gallery_entries" not in inspector.get_table_names()
+    engine.dispose()
+    get_settings.cache_clear()
+
+
+def test_ui_layout_scheme_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "ui-layout-scheme-migration.db"
+    storage_root = tmp_path / "storage"
+    monkeypatch.setenv("ADMIN_ACCESS_KEY", "super-secret-admin-key")
+    monkeypatch.setenv("SESSION_SECRET", "super-secret-session-key-123")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/9")
+    monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    command.upgrade(config, "head")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    columns = {column["name"]: column for column in inspector.get_columns("user_ui_preferences")}
+    assert columns["ui_layout_scheme"]["nullable"] is False
+    assert columns["ui_layout_scheme"]["type"].length == 32
+
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO user_ui_preferences (
+                    user_id,
+                    mask_sensitive_images_in_inspirations,
+                    mask_sensitive_images_in_image_chat,
+                    created_at,
+                    updated_at
+                )
+                VALUES ('user-1', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+            ),
+        )
+        stored = connection.execute(
+            sa.text("SELECT ui_layout_scheme FROM user_ui_preferences WHERE user_id = 'user-1'"),
+        ).scalar_one()
+    assert stored == "classic"
+
+    engine.dispose()
+    command.downgrade(config, "20260609_0051")
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("user_ui_preferences")}
+    assert "ui_layout_scheme" not in columns
+    engine.dispose()
+    get_settings.cache_clear()
+
+
+def test_resource_library_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "resource-library-migration.db"
+    storage_root = tmp_path / "storage"
+    monkeypatch.setenv("ADMIN_ACCESS_KEY", "super-secret-admin-key")
+    monkeypatch.setenv("SESSION_SECRET", "super-secret-session-key-123")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/9")
+    monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    command.upgrade(config, "head")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    assert {
+        "resource_library_groups",
+        "resource_library_assets",
+        "resource_library_asset_groups",
+    } <= set(inspector.get_table_names())
+
+    group_columns = {column["name"]: column for column in inspector.get_columns("resource_library_groups")}
+    assert group_columns["id"]["nullable"] is False
+    assert group_columns["owner_user_id"]["nullable"] is False
+    assert group_columns["name"]["nullable"] is False
+    assert group_columns["sort_order"]["nullable"] is False
+    assert group_columns["archived_at"]["nullable"] is True
+    group_indexes = {index["name"]: index for index in inspector.get_indexes("resource_library_groups")}
+    assert bool(group_indexes["uq_resource_library_groups_owner_name_active"]["unique"])
+    assert group_indexes["uq_resource_library_groups_owner_name_active"]["column_names"] == ["owner_user_id", "name"]
+    assert group_indexes["ix_resource_library_groups_owner_archived"]["column_names"] == [
+        "owner_user_id",
+        "archived_at",
+    ]
+
+    asset_columns = {column["name"]: column for column in inspector.get_columns("resource_library_assets")}
+    assert asset_columns["id"]["nullable"] is False
+    assert asset_columns["owner_user_id"]["nullable"] is False
+    assert asset_columns["kind"]["nullable"] is False
+    assert asset_columns["source_type"]["nullable"] is False
+    assert asset_columns["source_resource_id"]["nullable"] is True
+    assert asset_columns["enabled"]["nullable"] is False
+    assert asset_columns["archived_at"]["nullable"] is True
+    asset_indexes = {index["name"]: index for index in inspector.get_indexes("resource_library_assets")}
+    assert bool(asset_indexes["uq_resource_library_assets_owner_source"]["unique"])
+    assert asset_indexes["uq_resource_library_assets_owner_source"]["column_names"] == [
+        "owner_user_id",
+        "source_type",
+        "source_resource_id",
+    ]
+    assert asset_indexes["ix_resource_library_assets_owner_archived"]["column_names"] == [
+        "owner_user_id",
+        "archived_at",
+    ]
+    assert asset_indexes["ix_resource_library_assets_kind"]["column_names"] == ["kind"]
+
+    link_columns = {column["name"]: column for column in inspector.get_columns("resource_library_asset_groups")}
+    assert link_columns["asset_id"]["nullable"] is False
+    assert link_columns["group_id"]["nullable"] is False
+    assert link_columns["created_at"]["nullable"] is False
+    assert set(inspector.get_pk_constraint("resource_library_asset_groups")["constrained_columns"]) == {
+        "asset_id",
+        "group_id",
+    }
+    link_indexes = {index["name"]: index for index in inspector.get_indexes("resource_library_asset_groups")}
+    assert link_indexes["ix_resource_library_asset_groups_group"]["column_names"] == ["group_id"]
+    assert not [
+        foreign_key
+        for table_name in (
+            "resource_library_groups",
+            "resource_library_assets",
+            "resource_library_asset_groups",
+        )
+        for foreign_key in inspector.get_foreign_keys(table_name)
+    ]
+
+    engine.dispose()
+    command.downgrade(config, "20260609_0050")
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    assert not {
+        "resource_library_groups",
+        "resource_library_assets",
+        "resource_library_asset_groups",
+    } & set(inspector.get_table_names())
     engine.dispose()
     get_settings.cache_clear()
 

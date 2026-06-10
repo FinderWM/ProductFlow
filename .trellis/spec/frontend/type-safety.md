@@ -300,7 +300,9 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   `range_*` fields for the selected date range, and render per-config `range_stat` instead of recalculating stats from
   frontend history.
 - Workflow and image-chat request DTOs preserve backend snake_case fields. User-facing generation submits
-  `resource_group_id`; normal image-chat submits `generation_config_mode: "auto"` and `generation_config_id: null`.
+  `resource_group_id`; ImageChat prompt polish/image generation and workflow generation-capable node config may submit either
+  `generation_config_mode: "auto", generation_config_id: null` or
+  `generation_config_mode: "manual", generation_config_id: <id>`.
 - SettingsPage generation config drafts use `resource_group_ids: string[]` as the source of truth. Payload helpers include
   both `resource_group_ids` and compatibility `resource_group_id: resource_group_ids[0] ?? null`.
 - Frontend helpers may fall back from missing/empty `resource_group_ids` to legacy `resource_group_id` only when reading
@@ -322,8 +324,8 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   `generation_configs`, then importing that JSON previews the same counts.
 - Good: export/import previews include template category/template counts and key/name summaries.
 - Good: preview with `includes_api_keys=true` shows sensitive-file warning before commit.
-- Good: SettingsPage config cards use group DTOs for assignment, while image-chat generation uses only account-available
-  group DTOs.
+- Good: SettingsPage config cards use group DTOs for assignment, while ImageChat and workflow generation selectors use
+  account-available group DTOs plus non-secret `GenerationConfigOption` rows filtered by selected group and purpose.
 - Good: a SettingsPage generation config card can check both `default` and `campaign`; save payload contains
   `resource_group_ids: ["default-id", "campaign-id"]` plus compatibility `resource_group_id: "default-id"`.
 - Good: reading a legacy config with only `resource_group_id: "default-id"` derives `resource_group_ids: ["default-id"]`
@@ -333,15 +335,19 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
 - Bad: frontend reads `preview.metadata.summary` when backend returns flat preview fields.
 - Bad: converting DTO fields to camelCase in `types.ts` without an explicit API mapping layer.
 - Bad: reusing provider profile DTOs for generation config selectors and accidentally exposing `api_key`.
-- Bad: showing concrete generation-config choices in image-chat normal generation after groups are available.
+- Bad: showing ImageChat/workflow prompt-polish, copy, or tail configs without `purpose="text"` or image-generation configs
+  without `purpose="image"`.
+- Bad: allowing an ImageChat/workflow manual `generation_config_id` to remain selected after the user switches to a
+  resource group that does not include that config's `resource_group_ids`.
 - Bad: using only `resource_group_id` in SettingsPage filters or save payloads after multi-group config bindings are
   supported.
 
 #### 6. Tests Required
 - SettingsPage tests for export confirmation and generated JSON download path.
 - SettingsPage tests for import preview summary, API-key warning, commit confirmation, and query invalidation.
-- Helper tests proving workflow/image-chat payloads round-trip `resource_group_id`; image-chat normal generation keeps
-  `generation_config_mode: "auto"` and `generation_config_id: null`.
+- Helper tests proving workflow/image-chat payloads round-trip `resource_group_id`; auto generation keeps
+  `generation_config_mode: "auto"` and `generation_config_id: null`, while manual generation submits the selected config
+  id for ImageChat and workflow nodes.
 - SettingsPage helper tests prove `resource_group_ids` payload construction, multi-group tab filtering/counting, unbound
   empty-list handling, and legacy `resource_group_id` fallback.
 - `pnpm --dir web build` after any settings migration DTO change.
@@ -431,9 +437,11 @@ resource_group_ids: draft.resource_group_ids,
   default selection.
 - Selection controls that show account-available generation groups must use
   `activeGenerationResourceGroupsInApiOrder(groups)`: include only enabled, unarchived groups and preserve API order.
-- ImageChatPage reads `['my-generation-resource-groups']`, defaults to `firstActiveGenerationResourceGroupId(groups)`,
-  requires one selected group before submit, and sends `resource_group_id` with `generation_config_mode: "auto"`.
-- InspirationDetail workflow inspector and tail-plan generation require a selected group for generation-capable nodes.
+- ImageChatPage reads `['my-generation-resource-groups']` and `['generation-config-options']`, defaults to
+  `firstActiveGenerationResourceGroupId(groups)`, requires one selected group before submit, and filters manual
+  prompt-polish/image-generation config options by selected group plus `purpose`.
+- InspirationDetail workflow inspector and tail-plan generation require a selected group for generation-capable nodes, and
+  filter manual config options by selected group plus node purpose: `text` for copy/tail and `image` for image nodes.
 - Gallery, image-session list, and inspiration history filters keep an all-groups option, but initial load and concrete
   selection invalidation default to `firstActiveGenerationResourceGroupId(groups)` when a concrete group exists.
 - Gallery, image-session list, and inspiration history filters pass `resource_group_id` as a query parameter only when a
@@ -499,7 +507,8 @@ resource_group_ids: draft.resource_group_ids,
 - SettingsPage tests cover group payloads, import/export counts, generation config `resource_group_ids`, and legacy
   `resource_group_id` fallback.
 - Image-chat helper tests include `resource_group_id` in submit signatures, task placeholders, and regenerate payloads.
-- InspirationDetail workflow config tests round-trip node `resource_group_id` and keep generated config mode automatic.
+- InspirationDetail workflow config tests round-trip node `resource_group_id` plus `generation_config_mode/id` for
+  copy/tail/image nodes.
 - Gallery/inspiration-history tests cover filter query params and required `resource_group` result tags.
 - `web/src/lib/resourceGroups.test.ts` covers active group filtering, API-order preservation, first concrete default
   selection, and empty-list fallback. Backend tests cover descending `sort_order` and tie-break order.

@@ -9,6 +9,8 @@ export type SourceAssetKind =
   | "context_image"
   | "context_document";
 export type ImageSessionAssetKind = "reference_upload" | "generated_image";
+export type ResourceLibraryAssetKind = "image" | "document" | "other";
+export type ResourceLibrarySourceType = "source_asset" | "poster_variant" | "image_session_asset" | "upload";
 export type GenerationConfigSelectionMode = "auto" | "manual";
 export type WorkflowNodeType =
   | "inspiration_context"
@@ -932,6 +934,64 @@ export interface InspirationWritebackResponse {
   message: string;
 }
 
+export interface ResourceLibraryGroup {
+  id: string;
+  owner_user_id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResourceLibraryGroupListResponse {
+  items: ResourceLibraryGroup[];
+}
+
+export interface ResourceLibraryAssetGroup {
+  id: string;
+  name: string;
+  sort_order: number;
+}
+
+export interface ResourceLibraryAsset extends ModerationFields {
+  id: string;
+  owner_user_id: string;
+  kind: ResourceLibraryAssetKind;
+  original_filename: string;
+  mime_type: string;
+  source_type: ResourceLibrarySourceType;
+  source_resource_id: string | null;
+  groups: ResourceLibraryAssetGroup[];
+  group_ids: string[];
+  download_url: string;
+  preview_url: string;
+  thumbnail_url: string;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResourceLibraryAssetListResponse {
+  items: ResourceLibraryAsset[];
+}
+
+export interface SaveResourceLibraryAssetInput {
+  source_type: ResourceLibrarySourceType;
+  source_id: string;
+  group_ids: string[];
+}
+
+export interface ResourceLibrarySourceStatus {
+  source_id: string;
+  saved: boolean;
+  asset: ResourceLibraryAsset | null;
+  group_ids: string[];
+}
+
+export interface ResourceLibrarySourceStatusListResponse {
+  items: ResourceLibrarySourceStatus[];
+}
+
 export interface GalleryEntry extends ModerationFields {
   id: string;
   owner_user_id?: string;
@@ -964,6 +1024,8 @@ export interface GalleryEntry extends ModerationFields {
 
 export interface GalleryEntryListResponse {
   items: GalleryEntry[];
+  has_more: boolean;
+  next_offset: number | null;
 }
 
 export type ConfigSource = "database" | "env_default";
@@ -1017,6 +1079,7 @@ export interface ConfigUpdateRequest {
 
 export interface UserUiPreferences {
   user_id: string;
+  ui_layout_scheme?: string | null;
   mask_sensitive_images_in_inspirations: boolean;
   mask_sensitive_images_in_image_chat: boolean;
   created_at: string;
@@ -1024,6 +1087,7 @@ export interface UserUiPreferences {
 }
 
 export interface UserUiPreferencesUpdateRequest {
+  ui_layout_scheme?: string | null;
   mask_sensitive_images_in_inspirations?: boolean | null;
   mask_sensitive_images_in_image_chat?: boolean | null;
 }

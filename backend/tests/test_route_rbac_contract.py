@@ -30,6 +30,8 @@ ADMIN_ROUTE_PREFIX_PERMISSIONS: Mapping[str, str] = {
     "/api/resource-moderation": API_RESOURCES_MODERATE,
 }
 
+AUTHENTICATED_DEFAULT_ROUTE_PREFIXES = frozenset({"/api/resource-library"})
+
 HTTP_METHODS = frozenset({"DELETE", "GET", "PATCH", "POST", "PUT"})
 PERMISSION_DEPENDENCY_QUALNAMES = frozenset(
     {
@@ -43,6 +45,7 @@ PERMISSION_DEPENDENCY_QUALNAMES = frozenset(
 class RouteGate:
     dependency_names: tuple[str, ...]
     api_permissions: frozenset[str]
+    has_authenticated: bool
     has_admin: bool
 
 
@@ -97,6 +100,11 @@ def _route_methods(route: APIRoute) -> tuple[str, ...]:
 
 def _validate_private_route(method: str, path: str, gate: RouteGate) -> list[str]:
     failures: list[str] = []
+    if _is_authenticated_default_route(path):
+        if not gate.has_authenticated:
+            failures.append(_format_failure(method, path, gate, "missing authentication dependency"))
+        return failures
+
     if not gate.api_permissions:
         failures.append(_format_failure(method, path, gate, "missing API permission dependency"))
 
@@ -125,6 +133,13 @@ def _required_admin_permission(path: str) -> str | None:
     return None
 
 
+def _is_authenticated_default_route(path: str) -> bool:
+    return any(
+        path == prefix or path.startswith(f"{prefix}/")
+        for prefix in AUTHENTICATED_DEFAULT_ROUTE_PREFIXES
+    )
+
+
 def _inspect_route_gate(route: APIRoute) -> RouteGate:
     dependency_calls = tuple(_iter_dependency_calls(route.dependant))
     dependency_names = tuple(_call_name(call) for call in dependency_calls)
@@ -133,6 +148,7 @@ def _inspect_route_gate(route: APIRoute) -> RouteGate:
         api_permissions=frozenset(
             permission for call in dependency_calls for permission in _api_permissions_from_dependency(call)
         ),
+        has_authenticated=any(_is_authenticated_dependency(call) for call in dependency_calls),
         has_admin=any(_is_admin_dependency(call) for call in dependency_calls),
     )
 
@@ -175,6 +191,13 @@ def _permission_codes_from_value(value: Any) -> frozenset[str]:
 def _is_admin_dependency(call: Any) -> bool:
     return call is deps.require_admin or (
         getattr(call, "__module__", "") == deps.__name__ and getattr(call, "__qualname__", "") == "require_admin"
+    )
+
+
+def _is_authenticated_dependency(call: Any) -> bool:
+    return call is deps.require_authenticated or (
+        getattr(call, "__module__", "") == deps.__name__
+        and getattr(call, "__qualname__", "") == "require_authenticated"
     )
 
 

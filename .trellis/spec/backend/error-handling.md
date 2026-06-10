@@ -192,9 +192,88 @@ Account login is always required for private workspace routes. Legacy admin-key 
 detail `"请使用账号密码登录"`, and unauthenticated `GET /api/auth/session` returns `authenticated=false` plus
 `access_required=true`.
 
-Routes that require auth bind explicit RBAC permissions at the route boundary. Examples include inspiration routes using
-`API_INSPIRATIONS_*`, image-chat routes using `API_IMAGE_CHAT_*`, status routes using `API_STATUS_READ`, and settings
-routes using `API_SETTINGS_READ` / `API_SETTINGS_WRITE`.
+Routes that require auth usually bind explicit RBAC permissions at the route boundary. Examples include inspiration routes
+using `API_INSPIRATIONS_*`, image-chat routes using `API_IMAGE_CHAT_*`, status routes using `API_STATUS_READ`, and
+settings routes using `API_SETTINGS_READ` / `API_SETTINGS_WRITE`. The current exception is `/api/resource-library/*`,
+which is a personal default capability for every logged-in user and uses `require_authenticated` without an extra API
+permission dependency.
+
+### Scenario: Authenticated-default personal API
+
+#### 1. Scope / Trigger
+- Trigger: adding a personal capability that every logged-in account receives by default, without RBAC assignment.
+- Current scope: `/api/resource-library/*`.
+
+#### 2. Signatures
+- Backend dependency: `Depends(require_authenticated)`.
+- Frontend private route: authenticated session only.
+- Route contract test matrix: `AUTHENTICATED_DEFAULT_ROUTE_PREFIXES = {"/api/resource-library"}`.
+- RBAC catalog: authenticated-default personal APIs must not add `resource_library`-style entries to
+  `MENU_DEFINITIONS`, `DEFAULT_ROLE_MENU_CODES`, or `API_PERMISSION_DEFINITIONS`.
+
+#### 3. Contracts
+- Unauthenticated request -> `401`, `{"detail": "请先登录"}`.
+- Authenticated request does not require `require_api_permission(...)`.
+- The feature still performs owner checks in application use cases; auth-only does not mean cross-user access.
+- Resource library is a default logged-in capability. It must stay out of the RBAC permission catalog and role menu
+  assignment UI; frontend navigation should expose it through authenticated-session access rather than a backend menu grant.
+- `ensure_auth_bootstrapped(...)` must disable stale RBAC catalog rows that are no longer in the code registry, so old local
+  databases do not keep showing removed menus such as `resource_library`.
+
+#### 4. Validation & Error Matrix
+- Missing session cookie -> `401`.
+- Logged-in user accessing own resource library -> allowed by route dependency.
+- Logged-in user accessing another user's source/resource -> application ownership check returns the expected business
+  error.
+- Existing `rbac_menus.code="resource_library"` row from an older DB -> disabled by bootstrap and omitted from
+  `/api/rbac/permissions` and `/api/auth/session`.
+- Authenticated-default route missing from `AUTHENTICATED_DEFAULT_ROUTE_PREFIXES` -> `test_route_rbac_contract.py` fails.
+- Authenticated-default route missing `require_authenticated` -> `test_route_rbac_contract.py` fails.
+
+#### 5. Good/Base/Bad Cases
+- Good: resource library routes depend on `require_authenticated`, and list/save/load/archive use cases check ownership.
+- Good: a member can call `/api/resource-library/groups` without any `resource_library:*` API permission and without a
+  `resource_library` menu grant in the session payload.
+- Base: RBAC-gated routes continue using `require_api_permission(...)`.
+- Bad: adding resource library to `MENU_DEFINITIONS` or default role menus just so it appears in navigation.
+- Bad: adding an auth-only private API without updating the route contract test matrix.
+
+#### 6. Tests Required
+- `uv run --directory backend pytest tests/test_route_rbac_contract.py tests/test_auth_rbac.py`.
+- Feature tests must cover owner isolation for every auth-only source/load path.
+- RBAC tests must assert resource library is usable by a logged-in member while absent from RBAC menu/API permission
+  catalogs, including the legacy-row case.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+@router.get("/personal-api")
+def personal_endpoint(user: CurrentUser = Depends(require_authenticated)): ...
+```
+
+without a route-contract prefix update.
+
+Correct:
+
+```python
+AUTHENTICATED_DEFAULT_ROUTE_PREFIXES = frozenset({"/api/resource-library"})
+```
+
+and each matching route exposes `require_authenticated`.
+
+Wrong:
+
+```python
+MenuDefinition("resource_library", "资源库", 35)
+```
+
+Correct:
+
+```tsx
+{ code: "resource_library", to: "/resource-library", hasAccess: (session) => Boolean(session?.authenticated) }
+```
 
 `presentation/api.py` registers `presentation/session.py::ClockStableSessionMiddleware` for signed cookie sessions. It is
 a thin wrapper around Starlette's session middleware that keeps the timestamp signer monotonic within the process. This

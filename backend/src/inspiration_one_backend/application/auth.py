@@ -741,6 +741,19 @@ def _normalize_role_menu_codes(menu_codes: set[str], api_permission_codes: Itera
 
 
 def _ensure_registry(session: Session) -> None:
+    valid_menu_codes = {definition.code for definition in MENU_DEFINITIONS}
+    valid_api_permission_codes = {definition.code for definition in API_PERMISSION_DEFINITIONS}
+
+    stale_menus = session.scalars(select(RbacMenu).where(RbacMenu.code.not_in(valid_menu_codes))).all()
+    for menu in stale_menus:
+        menu.enabled = False
+
+    stale_permissions = session.scalars(
+        select(RbacApiPermission).where(RbacApiPermission.code.not_in(valid_api_permission_codes))
+    ).all()
+    for permission in stale_permissions:
+        permission.enabled = False
+
     for definition in MENU_DEFINITIONS:
         menu = session.get(RbacMenu, definition.code)
         if menu is None:

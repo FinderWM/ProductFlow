@@ -73,8 +73,8 @@ Do not introduce a global store just to track current page or inspiration ID; us
 
 ## Durable UI Preferences
 
-The durable browser-local UI preferences currently supported are locale/theme. Sensitive-image mask toggles are account
-server state:
+The durable browser-local UI preferences currently supported are locale/theme and workspace appearance. Sensitive-image
+mask toggles are account server state:
 
 - Provider: `PreferencesProvider` in `web/src/lib/preferences.tsx`, mounted once in `App.tsx` inside `BrowserRouter`.
 - Locale storage key: `productflow.locale`; default locale is `zh-CN`.
@@ -82,8 +82,14 @@ server state:
 - Supported theme preferences are `light`, `dark`, and `system`; `system` resolves from `prefers-color-scheme`.
 - The provider updates `document.documentElement.lang`, root `class="dark"` when the resolved theme is dark, and root
   `data-theme` / `data-theme-preference` attributes.
+- Workspace appearance storage key: `inspiration-one.workspace-appearance`; supported values are `mist`, `sage`, and
+  `dusk`, defaulting to `mist`.
+- Workspace appearance is a local visual preference used by the `workspace` layout to change background and reading color
+  variables. It writes root `data-workspace-appearance` and stays separate from account-level `ui_layout_scheme`.
+- Runtime workspace appearance changes may set the resolved light/dark theme so existing `dark:*` UI surfaces keep readable
+  contrast, but they do not change routing, RBAC, API payloads, or server preferences.
 - Use `useI18n()` or `usePreferences()` in components that need locale/theme values; do not create page-local duplicate
-  locale/theme state.
+  locale/theme/workspace appearance state.
 - Sensitive-image mask provider: `useSensitiveImageMaskPreference(scope)` in
   `web/src/lib/sensitiveImagePreferences.ts`, backed by TanStack Query key `['user-ui-preferences']`.
 - Sensitive-image mask scopes are exactly `"inspirations"` and `"image-chat"`.

@@ -35,6 +35,17 @@ function generationConfigIdFromNode(node: WorkflowNode | null): string | null {
   return generationConfigId || null;
 }
 
+function generationConfigFromDraft(draft: NodeConfigDraft): {
+  generation_config_mode: "auto" | "manual";
+  generation_config_id: string | null;
+} {
+  const mode = draft.generationConfigMode === "manual" ? "manual" : "auto";
+  return {
+    generation_config_mode: mode,
+    generation_config_id: mode === "manual" ? draft.generationConfigId : null,
+  };
+}
+
 function recordString(record: Record<string, unknown> | null | undefined, key: string, fallback = ""): string {
   const value = record?.[key];
   if (typeof value !== "string") {
@@ -177,8 +188,7 @@ export function nodeConfigFromDraft(
       purpose: configString(node, "purpose"),
       output_mode: configString(node, "output_mode", "blocks"),
       resource_group_id: draft.resourceGroupId,
-      generation_config_mode: "auto",
-      generation_config_id: null,
+      ...generationConfigFromDraft(draft),
     };
   }
   if (node.node_type === "image_generation") {
@@ -188,8 +198,7 @@ export function nodeConfigFromDraft(
       instruction: draft.instruction,
       size: draft.size,
       resource_group_id: draft.resourceGroupId,
-      generation_config_mode: "auto",
-      generation_config_id: null,
+      ...generationConfigFromDraft(draft),
       ...(toolOptions ? { tool_options: toolOptions } : { tool_options: null }),
     };
   }
@@ -201,8 +210,7 @@ export function nodeConfigFromDraft(
       source_text: draft.sourceNote,
       max_items: Number.isFinite(parsedMaxItems) ? parsedMaxItems : 8,
       resource_group_id: draft.resourceGroupId,
-      generation_config_mode: "auto",
-      generation_config_id: null,
+      ...generationConfigFromDraft(draft),
       document_source:
         base.document_source && typeof base.document_source === "object" ? base.document_source : null,
     };

@@ -73,6 +73,16 @@ text colors. The app uses a root `dark` class from `PreferencesProvider`, so Tai
 path for component-level theme variants. Existing examples include `TopNav.tsx`, `InspirationListPage.tsx`,
 `InspirationCreatePage.tsx`, and `SettingsPage.tsx`.
 
+The `workspace` layout scheme is the exception to the default slate/zinc color language. Workspace first-level pages and
+workspace shell surfaces should use semantic `pf-workspace-*` / `pf-shell-*` classes backed by `web/src/index.css`
+variables. Keep the palette aligned with `docs/ui-layout-concepts-2026-06-09.html`: `mist` uses `#f5f8fb` / `#fbfcfd`
+with `#4f7583` and `#b06f58`; `sage` uses `#e4f0dd` / `#f7fbef` with `#3e7951` and `#c28a3e`; `dusk` uses `#20231b` /
+`#292d23` with `#e8decb`, `#92aa7a`, and `#c69b66`. Do not add new workspace landing cards with hard-coded
+`bg-slate-*`, `dark:bg-[#07111b]`, or indigo/violet chrome unless the surface is deliberately falling back to classic.
+Workspace background motion is also centralized: `UiLayoutSchemeProvider` owns desktop fine-pointer updates to
+`--pf-cursor-x/y`, and CSS owns the coarse-pointer ambient fallback. Do not add page-local pointer listeners for workspace
+background effects; extend `web/src/lib/workspaceMotion.ts` and the semantic CSS variables instead.
+
 When adding image preview or canvas surfaces, keep images inspectable in both themes. Dark variants should change chrome
 and empty/loading/error states, not tint or obscure inspiration thumbnails.
 
@@ -327,6 +337,9 @@ Pages provide data and mutations; the shared picker owns only presentational siz
   in a separate header unless that page needs an additional hero call-to-action.
 - `TopNav` may use React Router primitives such as `NavLink` / `useLocation`, but must not fetch session or settings data
   directly. Session logout remains a page-owned mutation passed in through `onLogout`.
+- Shared authenticated page frames, including `workspace` landing frames, must pass `onLogout` into `TopNav` whenever the
+  page can be reached by an authenticated session. Otherwise the account menu disappears even though the primary menu,
+  locale, layout, theme, weather, and notification shell still render.
 - `TopNav` owns the compact global locale and theme controls. Do not add separate per-page language/theme toggles unless a
   page-specific workflow requires an additional local affordance.
 

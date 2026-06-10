@@ -490,8 +490,10 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
   `list_available_generation_resource_groups_for_user(...)`, `get_user_generation_resource_group_grant_ids(...)`, and
   RBAC user serialization order by descending `generation_resource_groups.sort_order`, then ascending `created_at`, then
   ascending `name`.
-- User-facing generation entry points must submit exactly one `resource_group_id`. Frontend selectors show available
-  groups only and hide concrete generation config selection for normal generation flows.
+- User-facing generation entry points must submit exactly one `resource_group_id`. ImageChat prompt polish/image generation
+  and workflow `copy_generation` / `tail_splitter` / `image_generation` nodes may additionally submit
+  `generation_config_mode="manual"` plus one `generation_config_id`; auto mode submits no config id. Manual configs must
+  be validated after group authorization and before durable work is queued or executed.
 - Backend entry points must validate that the selected group exists, is enabled, is not archived, and is authorized for
   the actor before enqueueing durable work.
 - Image-chat session creation uses a confirmation step that submits the selected `resource_group_id` for actor
@@ -502,6 +504,13 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Text scheduling can claim only text configs with a binding for the selected group; image scheduling can claim only image
   configs with a binding for the selected group. Provider/profile availability, freeze state, and concurrency checks still
   apply inside that group. Unbound configs must not be used as implicit fallback configs for any selected group.
+- ImageChat prompt polish plus workflow `copy_generation` / `tail_splitter` manual selection can use only `text` configs
+  bound to the selected group. ImageChat generation plus workflow `image_generation` manual selection can use only `image`
+  configs bound to the selected group. Group authorization must not rebuild `GenerationConfigSelection` in a way that drops
+  `mode` or `generation_config_id`.
+- Tail-split plan application may create downstream workflow `image_generation` nodes with either auto scheduling or a
+  manual image-purpose generation config. The generated node config stores `generation_config_mode` and
+  `generation_config_id` so later node runs use the chosen image config.
 - Generated briefs, copy sets, poster variants, workflow node runs, image-session tasks, image-session rounds, and gallery
   entries must serialize a group tag. If a legacy row has `resource_group_id is None`, serializers and default-group
   filters treat it as `default`. Image-session list summaries serialize their list tag from `ImageSession.resource_group_id`;
@@ -529,6 +538,14 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Non-admin actor without a grant -> `403` or typed validation detail from the owning generation use case.
 - Group has no currently claimable config for the requested purpose -> durable task remains queued for scheduler retry;
   the selected group stays recorded on the task/run.
+- Manual ImageChat generation config id missing -> `400`, "手动指定生成配置时必须选择配置".
+- Manual ImageChat generation config id does not exist or is archived -> `400`, "生成配置不存在".
+- Manual prompt-polish config has non-`text` purpose -> `400`, "文案润色只能使用文案生成配置".
+- Manual image-generation config has non-`image` purpose -> `400`, "生图任务只能使用图片生成配置".
+- Manual workflow copy config has non-`text` purpose -> `400`, "文案节点只能使用文案生成配置".
+- Manual workflow tail config has non-`text` purpose -> `400`, "尾巴节点只能使用文案生成配置".
+- Manual workflow image config has non-`image` purpose -> `400`, "生图节点只能使用图片生成配置".
+- Manual config is not bound to the selected group -> `400`, "手动指定的生成配置不属于当前供应商生成分组".
 - `default` group archive or disable attempt -> settings API returns `400`.
 - Imported generation config references a missing group id -> import preview/commit returns `400`.
 - Settings `PATCH /api/settings/generation-configs/{id}` omits both group fields -> keep the existing bindings.
@@ -548,6 +565,10 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 
 - Good: a non-admin account granted `campaign` can generate image-chat rounds with `resource_group_id=campaign`, and the
   scheduler claims only image configs whose bindings include `campaign`.
+- Good: ImageChat prompt polish with `generation_config_mode=manual` records/uses the selected `text` config from the
+  selected group, while image generation task rows persist manual mode and `requested_generation_config_id`.
+- Good: workflow copy/tail/image nodes with manual generation config mode claim the selected config for the matching
+  purpose, and tail-plan-created image nodes preserve the selected image config in `config_json`.
 - Good: one text config bound to both `campaign` and `default` appears in both settings group tabs and can be claimed by
   either selected group.
 - Good: an admin sees `default` plus every other enabled group in `/api/settings/my-generation-resource-groups`.
@@ -559,7 +580,8 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Base: groups default to `blur_images_by_default=false` so existing lists render unmasked until explicitly configured.
 - Base: a settings-only config can be unbound while the operator decides which group should own it.
 - Base: older generated rows with null group fields render as `default` and are returned by the default-group filter.
-- Bad: accepting a manual `generation_config_id` from a normal user flow and using it to bypass group authorization.
+- Bad: accepting a manual `generation_config_id` from a normal user flow and using it to bypass group authorization or
+  purpose/group-binding validation.
 - Bad: returning generated result DTOs without a `resource_group` tag because the raw row has a null group id.
 - Bad: deriving thumbnail masking from the currently selected list filter instead of each row's serialized
   `resource_group.blur_images_by_default`.
@@ -578,6 +600,8 @@ if state.frozen_until and _as_aware_utc(state.frozen_until) > datetime.now(UTC):
 - Settings/update tests cover omitted group fields preserving existing config bindings, `resource_group_ids` replacing all
   bindings, and legacy `resource_group_id: null` clearing the bindings.
 - Workflow and image-session tests cover missing, unauthorized, disabled, archived, and valid group selection.
+- Workflow generation-config tests cover manual text config for copy/tail nodes, manual image config for image nodes,
+  wrong purpose, wrong group binding, and tail-plan-created image node config preservation.
 - Serializer/filter tests cover inspiration list/history, workflow status/detail, image-session list/detail/status, and
   gallery group tags, including omitted-filter all rows and default-filter legacy null rows.
 - Serializer tests cover `resource_group.blur_images_by_default` on generated result tags.
@@ -655,7 +679,9 @@ return GenerationResourceGroupTag(
 
 - Account login is required for private workspace routes; runtime settings can no longer disable this boundary.
 - Backend route access is controlled by API permission codes, not by frontend-only menu hiding.
-- Frontend route visibility is controlled by RBAC menu codes from `GET /api/auth/session`.
+- Frontend route visibility is usually controlled by RBAC menu codes from `GET /api/auth/session`.
+- Authenticated-default personal routes are the explicit exception. Resource library navigation and route access are based
+  on login state, not a `resource_library` RBAC menu code or `resource_library:*` API permission.
 - Full settings reads require `settings:read`; settings mutations require `settings:write`.
 - Status APIs require `status:read`. Non-secret generation runtime selectors require a matching workbench/image-chat
   read permission or `settings:read`.
@@ -675,11 +701,14 @@ return GenerationResourceGroupTag(
 
 ### 5. Good/Base/Bad Cases
 
-- Good: default member roles can use inspiration/image-chat/status APIs but cannot read settings or manage RBAC.
+- Good: default member roles can use inspiration/image-chat/status APIs, and can use resource library through login state
+  without a resource-library RBAC grant, but cannot read settings or manage RBAC.
 - Base: the seeded `libow` admin role has every menu and API permission.
 - Bad: storing `ADMIN_ACCESS_KEY` in DB settings; it is an env-only secret.
 - Bad: adding `admin_access_required` back to runtime config, settings UI, or export/import payloads.
 - Bad: relying on frontend navigation hiding while backend endpoints accept any authenticated user.
+- Bad: adding resource library back to RBAC menu/API catalogs; it is a personal default capability, not a grantable
+  workspace permission.
 - Bad: letting runtime config endpoints bypass RBAC because they return only non-secret data.
 
 ### 6. Tests Required

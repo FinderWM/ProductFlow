@@ -86,6 +86,7 @@ def test_user_ui_preferences_default_to_masking_and_persist(configured_env: Path
 
     assert initial.status_code == 200
     payload = initial.json()
+    assert payload["ui_layout_scheme"] == "classic"
     assert payload["mask_sensitive_images_in_inspirations"] is True
     assert payload["mask_sensitive_images_in_image_chat"] is True
 
@@ -93,6 +94,7 @@ def test_user_ui_preferences_default_to_masking_and_persist(configured_env: Path
     try:
         preferences = session.get(UserUiPreference, payload["user_id"])
         assert preferences is not None
+        assert preferences.ui_layout_scheme == "classic"
         assert preferences.mask_sensitive_images_in_inspirations is True
         assert preferences.mask_sensitive_images_in_image_chat is True
     finally:
@@ -123,13 +125,42 @@ def test_user_ui_preferences_patch_updates_only_submitted_fields(configured_env:
 
     assert updated_image_chat.status_code == 200
     image_chat_payload = updated_image_chat.json()
+    assert image_chat_payload["ui_layout_scheme"] == "classic"
     assert image_chat_payload["mask_sensitive_images_in_inspirations"] is False
     assert image_chat_payload["mask_sensitive_images_in_image_chat"] is False
 
+    updated_layout = client.patch(
+        "/api/settings/ui-preferences",
+        json={"ui_layout_scheme": "workspace"},
+    )
+
+    assert updated_layout.status_code == 200
+    layout_payload = updated_layout.json()
+    assert layout_payload["ui_layout_scheme"] == "workspace"
+    assert layout_payload["mask_sensitive_images_in_inspirations"] is False
+    assert layout_payload["mask_sensitive_images_in_image_chat"] is False
+
     reloaded = client.get("/api/settings/ui-preferences")
     assert reloaded.status_code == 200
+    assert reloaded.json()["ui_layout_scheme"] == "workspace"
     assert reloaded.json()["mask_sensitive_images_in_inspirations"] is False
     assert reloaded.json()["mask_sensitive_images_in_image_chat"] is False
+
+
+def test_user_ui_preferences_reject_invalid_layout_scheme(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.patch(
+        "/api/settings/ui-preferences",
+        json={"ui_layout_scheme": "future"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "不支持的 UI 布局方案"
 
 
 def test_auth_session_survives_small_wall_clock_rollback(

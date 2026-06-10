@@ -452,38 +452,71 @@ def test_generation_config_options_use_runtime_rbac_without_settings_permission(
     assert {item["purpose"] for item in payload} == {"text", "image"}
     assert all(
         set(item)
-        == {"id", "resource_group_id", "purpose", "name", "provider_kind", "enabled", "priority", "frozen_until"}
+        == {
+            "id",
+            "resource_group_id",
+            "resource_group_ids",
+            "purpose",
+            "name",
+            "provider_kind",
+            "enabled",
+            "priority",
+            "frozen_until",
+        }
         for item in payload
     )
 
 
-def test_prompt_polish_uses_text_generation_config_and_updates_stats(configured_env: Path) -> None:
+def test_prompt_polish_uses_manual_text_generation_config_and_updates_stats(
+    configured_env: Path,
+    db_session,
+) -> None:
+    from inspiration_one_backend.infrastructure.provider_config import (
+        TEXT_PURPOSE,
+        add_generation_config,
+        ensure_provider_config_bootstrapped,
+    )
     from inspiration_one_backend.presentation.api import create_app
 
+    ensure_provider_config_bootstrapped(db_session)
+    manual_config = add_generation_config(
+        db_session,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        name="手动润色文案配置",
+        purpose=TEXT_PURPOSE,
+        provider_kind="mock",
+        provider_profile_id=None,
+        model_settings={"brief_model": "manual-brief", "copy_model": "manual-copy"},
+        config={},
+        priority=1,
+        max_concurrency=1,
+        enabled=True,
+        availability_window_minutes=5,
+        failure_threshold=3,
+        cooldown_minutes=5,
+    )
     app = create_app()
     client = TestClient(app)
     _login(client)
-
-    options = client.get("/api/settings/generation-config-options")
-    assert options.status_code == 200
-    text_config_id = next(item["id"] for item in options.json() if item["purpose"] == "text")
 
     response = client.post(
         "/api/image-sessions/prompt-polish",
         json={
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "generation_config_mode": "manual",
+            "generation_config_id": manual_config.id,
             "prompt": "一张白底护手霜主图",
         },
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["generation_config_id"] == text_config_id
+    assert payload["generation_config_id"] == manual_config.id
     assert "一张白底护手霜主图" in payload["prompt"]
 
     session = get_session_factory()()
     try:
         stat = session.scalar(
-            select(GenerationConfigDailyStat).where(GenerationConfigDailyStat.generation_config_id == text_config_id)
+            select(GenerationConfigDailyStat).where(GenerationConfigDailyStat.generation_config_id == manual_config.id)
         )
         assert stat is not None
         assert stat.attempt_count == 1
@@ -491,6 +524,37 @@ def test_prompt_polish_uses_text_generation_config_and_updates_stats(configured_
         assert stat.generated_unit_count == 1
     finally:
         session.close()
+
+
+def test_prompt_polish_rejects_manual_non_text_config(
+    configured_env: Path,
+    db_session,
+) -> None:
+    from inspiration_one_backend.infrastructure.provider_config import (
+        IMAGE_PURPOSE,
+        ensure_provider_config_bootstrapped,
+    )
+    from inspiration_one_backend.presentation.api import create_app
+
+    ensure_provider_config_bootstrapped(db_session)
+    image_config_id = db_session.scalar(select(GenerationConfig.id).where(GenerationConfig.purpose == IMAGE_PURPOSE))
+    assert image_config_id is not None
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.post(
+        "/api/image-sessions/prompt-polish",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "generation_config_mode": "manual",
+            "generation_config_id": image_config_id,
+            "prompt": "一张白底护手霜主图",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "文案润色只能使用文案生成配置"
 
 
 def test_image_session_generation_task_rejects_manual_non_image_config(
@@ -508,7 +572,7 @@ def test_image_session_generation_task_rejects_manual_non_image_config(
     assert text_config_id is not None
     image_session = create_image_session(db_session, inspiration_id=None, title="手动配置校验")
 
-    with pytest.raises(BusinessValidationError, match="生成入口只能选择供应商生成分组"):
+    with pytest.raises(BusinessValidationError, match="生图任务只能使用图片生成配置"):
         create_image_session_generation_task(
             db_session,
             image_session_id=image_session.id,
@@ -517,6 +581,40 @@ def test_image_session_generation_task_rejects_manual_non_image_config(
             resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             generation_config_mode="manual",
             generation_config_id=text_config_id,
+        )
+
+
+def test_image_session_generation_task_rejects_manual_config_outside_resource_group(
+    configured_env: Path,
+    db_session,
+) -> None:
+    from inspiration_one_backend.application.image_sessions import (
+        create_image_session,
+        create_image_session_generation_task,
+    )
+    from inspiration_one_backend.infrastructure.provider_config import (
+        IMAGE_PURPOSE,
+        ensure_provider_config_bootstrapped,
+    )
+
+    ensure_provider_config_bootstrapped(db_session)
+    image_config_id = db_session.scalar(select(GenerationConfig.id).where(GenerationConfig.purpose == IMAGE_PURPOSE))
+    assert image_config_id is not None
+    premium_group = GenerationResourceGroup(key="manual-config-other-group", name="手动配置其它分组", sort_order=40)
+    db_session.add(premium_group)
+    db_session.commit()
+    image_session = create_image_session(db_session, inspiration_id=None, title="手动配置分组校验")
+
+    with pytest.raises(BusinessValidationError, match="手动指定的生成配置不属于当前供应商生成分组"):
+        create_image_session_generation_task(
+            db_session,
+            image_session_id=image_session.id,
+            prompt="白底产品图",
+            size="1024x1024",
+            resource_group_id=premium_group.id,
+            generation_config_mode="manual",
+            generation_config_id=image_config_id,
+            actor_is_admin=True,
         )
 
 
@@ -536,6 +634,9 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     app = create_app()
     client = TestClient(app)
     _login(client)
+    options = client.get("/api/settings/generation-config-options")
+    assert options.status_code == 200
+    image_config_id = next(item["id"] for item in options.json() if item["purpose"] == "image")
 
     created = client.post("/api/image-sessions", json={"title": "异步提交"})
     assert created.status_code == 201
@@ -545,6 +646,8 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             "prompt": "只创建任务，不等待 provider",
             "size": "1024x1024",
+            "generation_config_mode": "manual",
+            "generation_config_id": image_config_id,
         },
     )
 
@@ -555,6 +658,8 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     task = payload["generation_tasks"][0]
     assert task["status"] == "queued"
     assert task["prompt"] == "只创建任务，不等待 provider"
+    assert task["generation_config_mode"] == "manual"
+    assert task["requested_generation_config_id"] == image_config_id
     assert task["completed_candidates"] == 0
     assert task["active_candidate_index"] is None
     assert task["progress_phase"] is None
@@ -2367,6 +2472,22 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
     first_asset_id = first.rounds[-1].generated_asset_id
     assert first_asset_id is not None
 
+    base_only_prompt = "只延续第一张但不选择参考图"
+    base_only = generate_image_session_round(
+        db_session,
+        image_session_id=image_session.id,
+        prompt=base_only_prompt,
+        size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        base_asset_id=first_asset_id,
+        selected_reference_asset_ids=[],
+        generation_count=1,
+    )
+    base_only_round = next(round_item for round_item in base_only.rounds if round_item.prompt == base_only_prompt)
+    assert base_only_round.provider_name == "openai-images"
+    assert base_only_round.base_asset_id == first_asset_id
+    assert base_only_round.selected_reference_asset_ids == []
+
     updated = add_image_session_reference_images(
         db_session,
         image_session_id=image_session.id,
@@ -2395,11 +2516,16 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
     assert branch_round.selected_reference_asset_ids == [reference_ids[1]]
 
     assert calls[0]["method"] == "generate"
-    assert calls[1]["method"] == "edit"
-    assert [image.name for image in calls[1]["image"]] == ["base.png", "reference-1.png"]
-    assert "previous_response_id" not in calls[1]
+    assert calls[1]["method"] == "generate"
+    assert "image" not in calls[1]
+    assert calls[2]["method"] == "edit"
+    assert [image.name for image in calls[2]["image"]] == ["base.png", "reference-1.png"]
+    assert "previous_response_id" not in calls[2]
 
     db_session.expire_all()
+    persisted_base_only = db_session.get(ImageSessionRound, base_only_round.id)
+    assert persisted_base_only is not None
+    assert "image_count" not in persisted_base_only.provider_request_json
     persisted = db_session.get(ImageSessionRound, branch_round.id)
     assert persisted is not None
     assert persisted.provider_request_json["image_count"] == 2

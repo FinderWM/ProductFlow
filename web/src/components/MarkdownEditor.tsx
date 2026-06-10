@@ -1,10 +1,11 @@
 import { Children, isValidElement, memo, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Columns2, Eye, FileText, Maximize2, PencilLine, X } from "lucide-react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { isMermaidCodeLanguage, markdownHasVisibleContent } from "../lib/markdown";
+import { api } from "../lib/api";
+import { isMermaidCodeLanguage, markdownHasVisibleContent, markdownImageResourceUrl } from "../lib/markdown";
 import { useI18n, usePreferences } from "../lib/preferences";
 
 type MarkdownViewMode = "edit" | "preview";
@@ -69,6 +70,48 @@ function safeMermaidId(id: string): string {
 function isExternalUrl(value: string | undefined): boolean {
   return Boolean(value && /^(https?:)?\/\//i.test(value));
 }
+
+function markdownPreviewImageSrc(value: string | null | undefined): string | null {
+  const src = value?.trim();
+  if (!src) {
+    return null;
+  }
+  if (src.startsWith("/") && !src.startsWith("//")) {
+    return api.toApiUrl(src);
+  }
+  return src;
+}
+
+function MarkdownImage({
+  src,
+  alt,
+  title,
+}: {
+  src?: string | null;
+  alt?: string | null;
+  title?: string | null;
+}) {
+  const imageSrc = markdownPreviewImageSrc(src);
+  if (!imageSrc) {
+    return null;
+  }
+  return (
+    <img
+      src={imageSrc}
+      alt={alt ?? ""}
+      title={title ?? undefined}
+      loading="lazy"
+      className="my-3 block max-h-[560px] max-w-full rounded-xl border border-slate-200 bg-white object-contain shadow-sm dark:border-slate-700 dark:bg-slate-950"
+    />
+  );
+}
+
+const markdownUrlTransform: UrlTransform = (url, key, node) => {
+  if ((key === "src" && node.tagName === "img") || (key === "href" && node.tagName === "a")) {
+    return markdownImageResourceUrl(url) ?? defaultUrlTransform(url);
+  }
+  return defaultUrlTransform(url);
+};
 
 function hasMermaidDiagramChild(children: ReactNode): boolean {
   return Children.toArray(children).some((child) => isValidElement(child) && child.type === MermaidDiagram);
@@ -238,16 +281,20 @@ const MarkdownPreview = memo(function MarkdownPreview({ value }: { value: string
         {children}
       </blockquote>
     ),
-    a: ({ children, href }) => (
-      <a
-        href={href}
-        target={isExternalUrl(href) ? "_blank" : undefined}
-        rel={isExternalUrl(href) ? "noreferrer noopener" : undefined}
-        className="font-medium text-indigo-600 underline-offset-4 hover:underline dark:text-violet-300"
-      >
-        {children}
-      </a>
-    ),
+    a: ({ children, href, title }) =>
+      !textFromChildren(children).trim() && markdownImageResourceUrl(href) ? (
+        <MarkdownImage src={href} alt="" title={typeof title === "string" ? title : null} />
+      ) : (
+        <a
+          href={href}
+          target={isExternalUrl(href) ? "_blank" : undefined}
+          rel={isExternalUrl(href) ? "noreferrer noopener" : undefined}
+          className="font-medium text-indigo-600 underline-offset-4 hover:underline dark:text-violet-300"
+        >
+          {children}
+        </a>
+      ),
+    img: ({ src, alt, title }) => <MarkdownImage src={src} alt={alt} title={title} />,
     code: ({ children, className, ...props }) => {
       const codeText = textFromChildren(children).replace(/\n$/, "");
       if (isMermaidCodeLanguage(className)) {
@@ -286,7 +333,7 @@ const MarkdownPreview = memo(function MarkdownPreview({ value }: { value: string
 
   return (
     <div className="min-w-0 break-words">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={components} urlTransform={markdownUrlTransform}>
         {value}
       </ReactMarkdown>
     </div>
@@ -389,7 +436,10 @@ export function MarkdownEditor({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [dialogOpen]);
 
-  const preview = <MarkdownPreview value={value} />;
+  const inlinePreviewVisible = !dialogOpen && viewMode === "preview";
+  const dialogPreviewVisible = dialogOpen && dialogMode !== "edit";
+  const inlinePreview = inlinePreviewVisible ? <MarkdownPreview value={value} /> : null;
+  const dialogPreview = dialogPreviewVisible ? <MarkdownPreview value={value} /> : null;
   const sourceView = readOnly ? (
     <MarkdownSourceViewer
       id={inlineTextareaId}
@@ -443,7 +493,7 @@ export function MarkdownEditor({
       </div>
       <div className={INLINE_PANEL_CLASS_NAME}>
         <div className={viewMode === "edit" ? "block" : "hidden"}>{sourceView}</div>
-        <div className={viewMode === "preview" ? "max-h-96 overflow-auto p-3" : "hidden"}>{preview}</div>
+        <div className={viewMode === "preview" ? "max-h-96 overflow-auto p-3" : "hidden"}>{inlinePreview}</div>
       </div>
       <div className="flex items-start justify-between gap-3 text-xs text-zinc-400 dark:text-slate-500">
         {helpText ? <span>{helpText}</span> : <span>{t("markdown.markdownHelp")}</span>}
@@ -529,7 +579,7 @@ export function MarkdownEditor({
                 <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
                   {t("markdown.renderedPreview")}
                 </div>
-                {preview}
+                {dialogPreview}
               </section>
             </div>
             {characterCount ? (

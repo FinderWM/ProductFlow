@@ -19,6 +19,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     ImageSessionAsset,
     Inspiration,
     PosterVariant,
+    ResourceLibraryAsset,
     SourceAsset,
 )
 
@@ -109,6 +110,8 @@ def _resource_type_for_instance(resource: Any) -> ResourceType:
         return "image_session_asset"
     if isinstance(resource, ImageGalleryEntry):
         return "image_gallery_entry"
+    if isinstance(resource, ResourceLibraryAsset):
+        return "resource_library_asset"
     if isinstance(resource, CanvasTemplate):
         return "canvas_template"
     if isinstance(resource, CanvasTemplateCategory):

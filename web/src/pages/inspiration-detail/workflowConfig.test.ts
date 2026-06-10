@@ -85,7 +85,7 @@ describe("draftFromNode", () => {
     expect(defaultTitleForType("image_generation", 1)).toBe("生图触发器节点 1");
   });
 
-  it("round-trips resource group selection and forces auto scheduling on generative nodes", () => {
+  it("round-trips manual generation config selection on copy nodes", () => {
     const node = {
       ...baseNode,
       config_json: {
@@ -98,10 +98,55 @@ describe("draftFromNode", () => {
     const draft = draftFromNode(node, inspiration);
 
     expect(draft.resourceGroupId).toBe("group-text");
+    expect(draft.generationConfigMode).toBe("manual");
+    expect(draft.generationConfigId).toBe("config-text");
     expect(nodeConfigFromDraft(node, draft)).toMatchObject({
       resource_group_id: "group-text",
-      generation_config_mode: "auto",
-      generation_config_id: null,
+      generation_config_mode: "manual",
+      generation_config_id: "config-text",
+    });
+  });
+
+  it("round-trips manual generation config selection on image and tail nodes", () => {
+    const imageNode: WorkflowNode = {
+      ...baseNode,
+      id: "image-node",
+      node_type: "image_generation",
+      config_json: {
+        instruction: "生成图片",
+        resource_group_id: "group-image",
+        generation_config_mode: "manual",
+        generation_config_id: "config-image",
+      },
+      output_json: null,
+    };
+    const tailNode: WorkflowNode = {
+      ...baseNode,
+      id: "tail-node",
+      node_type: "tail_splitter",
+      config_json: {
+        source_text: "方向集合",
+        description: "拆成生图方向",
+        max_items: 4,
+        resource_group_id: "group-text",
+        generation_config_mode: "manual",
+        generation_config_id: "config-text",
+      },
+      output_json: null,
+    };
+
+    const imageDraft = draftFromNode(imageNode, inspiration);
+    const tailDraft = draftFromNode(tailNode, inspiration);
+
+    expect(nodeConfigFromDraft(imageNode, imageDraft)).toMatchObject({
+      resource_group_id: "group-image",
+      generation_config_mode: "manual",
+      generation_config_id: "config-image",
+    });
+    expect(nodeConfigFromDraft(tailNode, tailDraft)).toMatchObject({
+      resource_group_id: "group-text",
+      generation_config_mode: "manual",
+      generation_config_id: "config-text",
     });
   });
 

@@ -36,7 +36,12 @@ function metadataRows(entry: GalleryEntry, locale: ReturnType<typeof useI18n>["l
   return rows;
 }
 
-export function GalleryPage() {
+interface GalleryPageProps {
+  mode?: "auto" | "manage";
+}
+
+export function GalleryPage(props: GalleryPageProps = {}) {
+  void props.mode;
   const { locale, t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -130,6 +135,29 @@ export function GalleryPage() {
     },
   });
 
+  const previewDialog = previewEntry ? (
+    <GalleryImagePreviewDialog
+      ariaLabel={t("gallery.previewLabel")}
+      imageUrl={api.toApiUrl(previewEntry.image.preview_url)}
+      imageAlt={previewEntry.prompt ?? previewEntry.image.original_filename}
+      title={t("gallery.prompt")}
+      subtitle={previewEntry.image.original_filename}
+      body={
+        <div className="space-y-3">
+          <ResourceBlockedNotice resource={previewEntry} />
+          <div>{previewEntry.prompt ?? t("gallery.noPrompt")}</div>
+        </div>
+      }
+      metadataRows={metadataRows(previewEntry, locale, t).map(([label, value]) => ({ label: t(label), value }))}
+      providerNotes={previewEntry.provider_notes}
+      providerNotesTitle={t("gallery.providerNotes")}
+      downloadUrl={previewEntry.image.download_url}
+      downloadLabel={t("gallery.download")}
+      closeLabel={t("gallery.closePreview")}
+      onClose={() => setPreviewEntry(null)}
+    />
+  ) : null;
+
   return (
     <div className="pf-app min-h-screen text-slate-950">
       <TopNav breadcrumbs={t("gallery.title")} onHome={() => navigate("/inspirations")} onLogout={() => logoutMutation.mutate()} />
@@ -157,7 +185,9 @@ export function GalleryPage() {
               <div className="absolute left-4 top-16 hidden h-64 flex-col items-center gap-4 text-[#1d4cff] sm:left-6 sm:flex lg:left-8">
                 <span className="h-2 w-2 rounded-full bg-[#1d4cff]" />
                 <span className="h-28 w-px bg-[#1d4cff]/30" />
-                <span className="[writing-mode:vertical-rl] text-xs font-black uppercase tracking-[0.18em]">Gallery</span>
+                <span className="rounded-full border border-[#1d4cff]/20 bg-[#f4eddf]/70 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em]">
+                  Gallery
+                </span>
                 <span className="h-2 w-2 rounded-full border-2 border-[#1d4cff]" />
               </div>
 
@@ -250,28 +280,7 @@ export function GalleryPage() {
         )}
       </main>
 
-      {previewEntry ? (
-        <GalleryImagePreviewDialog
-          ariaLabel={t("gallery.previewLabel")}
-          imageUrl={api.toApiUrl(previewEntry.image.preview_url)}
-          imageAlt={previewEntry.prompt ?? previewEntry.image.original_filename}
-          title={t("gallery.prompt")}
-          subtitle={previewEntry.image.original_filename}
-          body={
-            <div className="space-y-3">
-              <ResourceBlockedNotice resource={previewEntry} />
-              <div>{previewEntry.prompt ?? t("gallery.noPrompt")}</div>
-            </div>
-          }
-          metadataRows={metadataRows(previewEntry, locale, t).map(([label, value]) => ({ label: t(label), value }))}
-          providerNotes={previewEntry.provider_notes}
-          providerNotesTitle={t("gallery.providerNotes")}
-          downloadUrl={previewEntry.image.download_url}
-          downloadLabel={t("gallery.download")}
-          closeLabel={t("gallery.closePreview")}
-          onClose={() => setPreviewEntry(null)}
-        />
-      ) : null}
+      {previewDialog}
     </div>
   );
 }

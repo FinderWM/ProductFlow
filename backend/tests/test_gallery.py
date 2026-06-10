@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,67 @@ def test_gallery_list_filters_by_selected_resource_group(configured_env: Path, d
     all_list = client.get("/api/gallery")
     assert all_list.status_code == 200
     assert {item["id"] for item in all_list.json()["items"]} == {default_entry.id, premium_entry.id}
+    assert all_list.json()["has_more"] is False
+    assert all_list.json()["next_offset"] is None
+
+
+def test_gallery_list_supports_limit_offset(configured_env: Path, db_session) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    image_session = ImageSession(title="图库分页会话")
+    db_session.add(image_session)
+    db_session.flush()
+
+    base_time = datetime(2026, 1, 1, tzinfo=UTC)
+    entries: list[ImageGalleryEntry] = []
+    for index in range(3):
+        asset = ImageSessionAsset(
+            session_id=image_session.id,
+            kind=ImageSessionAssetKind.GENERATED_IMAGE,
+            original_filename=f"page-{index}.png",
+            mime_type="image/png",
+            storage_path=f"image-sessions/page-{index}.png",
+        )
+        db_session.add(asset)
+        db_session.flush()
+        round_item = ImageSessionRound(
+            session_id=image_session.id,
+            prompt=f"图库分页 {index}",
+            assistant_message="ok",
+            size="1024x1024",
+            model_name="mock",
+            provider_name="mock",
+            prompt_version="v1",
+            generated_asset_id=asset.id,
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        )
+        db_session.add(round_item)
+        db_session.flush()
+        entry = ImageGalleryEntry(
+            image_session_asset_id=asset.id,
+            image_session_round_id=round_item.id,
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            created_at=base_time + timedelta(minutes=index),
+        )
+        db_session.add(entry)
+        entries.append(entry)
+    db_session.commit()
+
+    first_page = client.get("/api/gallery", params={"limit": 2, "offset": 0})
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert [item["id"] for item in first_payload["items"]] == [entries[2].id, entries[1].id]
+    assert first_payload["has_more"] is True
+    assert first_payload["next_offset"] == 2
+
+    second_page = client.get("/api/gallery", params={"limit": 2, "offset": first_payload["next_offset"]})
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert [item["id"] for item in second_payload["items"]] == [entries[0].id]
+    assert second_payload["has_more"] is False
+    assert second_payload["next_offset"] is None
 
 
 def test_gallery_list_rejects_ungranted_resource_group_for_member(configured_env: Path) -> None:

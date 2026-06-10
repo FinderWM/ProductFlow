@@ -53,6 +53,11 @@ import type {
   InspirationListResponse,
   ReviewUserTemplateGroupInput,
   RuntimeConfig,
+  ResourceLibraryAsset,
+  ResourceLibraryAssetListResponse,
+  ResourceLibraryGroup,
+  ResourceLibraryGroupListResponse,
+  ResourceLibrarySourceStatusListResponse,
   RbacPermissionCatalog,
   RbacRole,
   RbacRolePermissions,
@@ -61,6 +66,7 @@ import type {
   SettingsExportPayload,
   SettingsImportCommitResponse,
   SettingsImportPreviewResponse,
+  SaveResourceLibraryAssetInput,
   SessionState,
   TextGenerationConfigTestRequest,
   TextGenerationConfigTestResponse,
@@ -772,10 +778,90 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
-  listGalleryEntries(input?: { resource_group_id?: string | null }): Promise<GalleryEntryListResponse> {
+  listResourceLibraryGroups(): Promise<ResourceLibraryGroupListResponse> {
+    return request("/api/resource-library/groups");
+  },
+  createResourceLibraryGroup(input: { name: string; sort_order?: number }): Promise<ResourceLibraryGroup> {
+    return request("/api/resource-library/groups", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updateResourceLibraryGroup(
+    groupId: string,
+    input: { name?: string; sort_order?: number },
+  ): Promise<ResourceLibraryGroup> {
+    return request(`/api/resource-library/groups/${encodeURIComponent(groupId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  archiveResourceLibraryGroup(groupId: string): Promise<void> {
+    return request(`/api/resource-library/groups/${encodeURIComponent(groupId)}`, { method: "DELETE" });
+  },
+  listResourceLibraryAssets(input?: { group_id?: string | null }): Promise<ResourceLibraryAssetListResponse> {
+    const params = new URLSearchParams();
+    if (input?.group_id) {
+      params.set("group_id", input.group_id);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/resource-library/assets${suffix}`);
+  },
+  listResourceLibrarySourceStatus(input: {
+    source_type: SaveResourceLibraryAssetInput["source_type"];
+    source_ids: string[];
+  }): Promise<ResourceLibrarySourceStatusListResponse> {
+    const params = new URLSearchParams();
+    params.set("source_type", input.source_type);
+    for (const sourceId of input.source_ids) {
+      params.append("source_ids", sourceId);
+    }
+    return request(`/api/resource-library/source-status?${params.toString()}`);
+  },
+  saveResourceLibraryAsset(input: SaveResourceLibraryAssetInput): Promise<ResourceLibraryAsset> {
+    return request("/api/resource-library/assets/save", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  updateResourceLibraryAssetGroups(assetId: string, input: { group_ids: string[] }): Promise<ResourceLibraryAsset> {
+    return request(`/api/resource-library/assets/${encodeURIComponent(assetId)}/groups`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  archiveResourceLibraryAsset(assetId: string): Promise<void> {
+    return request(`/api/resource-library/assets/${encodeURIComponent(assetId)}`, { method: "DELETE" });
+  },
+  loadResourceLibraryAssetToWorkflowNode(assetId: string, input: { node_id: string }): Promise<InspirationWorkflow> {
+    return request(`/api/resource-library/assets/${encodeURIComponent(assetId)}/load-to-workflow-node`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  loadResourceLibraryAssetToImageSession(
+    assetId: string,
+    input: { image_session_id: string },
+  ): Promise<ImageSessionDetail> {
+    return request(`/api/resource-library/assets/${encodeURIComponent(assetId)}/load-to-image-session`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  listGalleryEntries(input?: {
+    resource_group_id?: string | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<GalleryEntryListResponse> {
     const params = new URLSearchParams();
     if (input?.resource_group_id) {
       params.set("resource_group_id", input.resource_group_id);
+    }
+    if (input?.limit !== undefined) {
+      params.set("limit", `${input.limit}`);
+    }
+    if (input?.offset !== undefined) {
+      params.set("offset", `${input.offset}`);
     }
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/gallery${suffix}`);

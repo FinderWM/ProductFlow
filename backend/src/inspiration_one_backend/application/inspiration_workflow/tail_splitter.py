@@ -464,10 +464,12 @@ def _image_node_base_config(
             config["resource_group_id"] = image_generation_config.resource_group_id.strip() or None
         mode = (image_generation_config.generation_config_mode or config["generation_config_mode"]).strip().lower()
         generation_config_id = (image_generation_config.generation_config_id or "").strip() or None
-        if mode == "manual" or generation_config_id is not None:
-            raise BusinessValidationError("生成入口只能选择供应商生成分组")
-        if mode != "auto":
-            raise BusinessValidationError("生图生成配置模式必须是 auto")
+        if mode not in {"auto", "manual"}:
+            raise BusinessValidationError("生图生成配置模式必须是 auto 或 manual")
+        if mode == "manual" and generation_config_id is None:
+            raise BusinessValidationError("手动指定生成配置时必须选择配置")
+        config["generation_config_mode"] = mode
+        config["generation_config_id"] = generation_config_id if mode == "manual" else None
         if image_generation_config.tool_options is not None:
             config["tool_options"] = image_generation_config.tool_options
     try:

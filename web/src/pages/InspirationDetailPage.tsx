@@ -21,10 +21,12 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Save,
   Settings2,
   Sparkles,
   X,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import { Drawer } from "vaul";
 
@@ -35,8 +37,14 @@ import {
   ResourceBlockedNotice,
   ResourceMetaBadges,
 } from "../components/ResourceGovernance";
+import { ResourceLibraryModal } from "../components/resource-library/ResourceLibraryModal";
+import {
+  SaveToResourceLibraryDialog,
+  type ResourceLibrarySaveSource,
+} from "../components/resource-library/SaveToResourceLibraryDialog";
 import { SelectField } from "../components/SelectField";
 import { TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS, TopNav } from "../components/TopNav";
+import { ZoomableImage } from "../components/ZoomableImage";
 import { api, ApiError } from "../lib/api";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
@@ -56,9 +64,14 @@ import type {
   CanvasTemplateSummary,
   CanvasTemplateScope,
   CanvasTemplateCategory,
+  GenerationConfigOption,
+  GenerationConfigSelectionMode,
   GenerationResourceGroup,
   InspirationWorkflow,
   InspirationWorkflowStatus,
+  PosterVariant,
+  ResourceLibraryAsset,
+  SourceAsset,
   TailSplitPlan,
   WorkflowNode,
   WorkflowNodeType,
@@ -67,11 +80,12 @@ import type {
 import {
   ADD_NODE_OPTIONS,
   DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS,
+  IMAGE_PREVIEW_SURFACE_CLASS_NAME,
   MAX_INSPECTOR_WIDTH,
   MIN_INSPECTOR_WIDTH,
   NODE_WIDTH,
 } from "./inspiration-detail/constants";
-import { ImagePreviewModal } from "./inspiration-detail/ImagePreviewModal";
+import { DownloadLink } from "./inspiration-detail/ImageDownloadComponents";
 import { ImagesPanel } from "./inspiration-detail/ImagesPanel";
 import { InspectorPanel } from "./inspiration-detail/InspectorPanel";
 import { RunsPanel } from "./inspiration-detail/RunsPanel";
@@ -84,7 +98,11 @@ import {
   buildPosterSourceAssetMap,
   getVisibleReferenceAssets,
 } from "./inspiration-detail/galleryImages";
-import { getNodeImageDownload, getSourceImageDownload } from "./inspiration-detail/imageDownloads";
+import {
+  getNodeImageDownload,
+  getSourceImageDownload,
+  type DownloadableImageWithResourceLibrarySource,
+} from "./inspiration-detail/imageDownloads";
 import {
   clearSelectedNodeGroup,
   deleteNodeFromSelection,
@@ -156,10 +174,28 @@ type PendingHistoryAction = {
   step: WorkflowHistoryStep;
 };
 
+function resourceLibrarySourceFromPreviewImage(image: DownloadableImage): ResourceLibrarySaveSource | null {
+  const source = (image as DownloadableImageWithResourceLibrarySource).resourceLibrarySource;
+  return source
+    ? {
+        source_type: source.source_type,
+        source_id: source.source_id,
+        title: source.title,
+        thumbnail_url: source.thumbnail_url,
+      }
+    : null;
+}
+
 const RESOURCE_GROUP_REQUIRED_NODE_TYPES = new Set<WorkflowNodeType>([
   "copy_generation",
   "image_generation",
   "tail_splitter",
+]);
+const RESOURCE_LIBRARY_SOURCE_ASSET_IMAGE_KINDS = new Set<SourceAsset["kind"]>([
+  "original_image",
+  "reference_image",
+  "processed_inspiration_image",
+  "context_image",
 ]);
 
 function workflowNodeResourceGroupId(node: WorkflowNode): string | null {
@@ -169,6 +205,25 @@ function workflowNodeResourceGroupId(node: WorkflowNode): string | null {
 
 function workflowNodeRequiresResourceGroup(node: WorkflowNode): boolean {
   return RESOURCE_GROUP_REQUIRED_NODE_TYPES.has(node.node_type);
+}
+
+function workflowNodeGenerationConfigMode(node: WorkflowNode): GenerationConfigSelectionMode {
+  return node.config_json.generation_config_mode === "manual" ? "manual" : "auto";
+}
+
+function workflowNodeGenerationConfigId(node: WorkflowNode): string | null {
+  const value = node.config_json.generation_config_id;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function workflowNodeMissingManualGenerationConfig(node: WorkflowNode, selectedNode: WorkflowNode | null, draft: NodeConfigDraft): boolean {
+  if (!workflowNodeRequiresResourceGroup(node)) {
+    return false;
+  }
+  if (selectedNode?.id === node.id) {
+    return draft.generationConfigMode === "manual" && !draft.generationConfigId;
+  }
+  return workflowNodeGenerationConfigMode(node) === "manual" && !workflowNodeGenerationConfigId(node);
 }
 
 type WorkflowClipboard = {
@@ -338,11 +393,16 @@ export function InspirationDetailPage() {
   const [previewImage, setPreviewImage] = useState<DownloadableImage | null>(
     null,
   );
+  const [previewResourceLibrarySource, setPreviewResourceLibrarySource] = useState<ResourceLibrarySaveSource | null>(
+    null,
+  );
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [resourceLibraryOpen, setResourceLibraryOpen] = useState(false);
+  const [resourceLibrarySaveSource, setResourceLibrarySaveSource] = useState<ResourceLibrarySaveSource | null>(null);
   const [pendingDeleteAction, setPendingDeleteAction] =
     useState<PendingDeleteAction | null>(null);
   const [pendingHistoryAction, setPendingHistoryAction] = useState<PendingHistoryAction | null>(null);
   const [tailPlanDialogOpen, setTailPlanDialogOpen] = useState(false);
-  const [selectedHistoryResourceGroupId, setSelectedHistoryResourceGroupId] = useState("");
   const [historyActionBusy, setHistoryActionBusy] = useState(false);
   const [error, setError] = useState("");
   const normalizedTemplateSearch = templateSearch.trim();
@@ -375,6 +435,7 @@ export function InspirationDetailPage() {
   const inspirationGenerateBlockedTitle =
     inspirationMutationBlockedTitle ||
     (canGenerateInspirationWorkflow ? "" : t("detail.permission.inspirationsGenerateRequired"));
+  const resourceLibraryWriteBlockedTitle = inspirationMutationBlockedTitle;
   const inspirationWriteBlocked = inspirationMutationBlocked || !canWriteInspirationWorkflow;
   const inspirationGenerateBlocked = inspirationMutationBlocked || !canGenerateInspirationWorkflow;
   const showInspirationWriteBlockedError = useCallback(() => {
@@ -449,6 +510,10 @@ export function InspirationDetailPage() {
     queryKey: ["my-generation-resource-groups"],
     queryFn: api.listMyGenerationResourceGroups,
   });
+  const generationConfigOptionsQuery = useQuery({
+    queryKey: ["generation-config-options"],
+    queryFn: api.listGenerationConfigOptions,
+  });
   const queueOverviewQuery = useQuery({
     queryKey: ["generation-queue"],
     queryFn: api.getGenerationQueueOverview,
@@ -468,30 +533,22 @@ export function InspirationDetailPage() {
     () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
-  useEffect(() => {
-    if (!workflowResourceGroups.length) {
-      if (selectedHistoryResourceGroupId) {
-        setSelectedHistoryResourceGroupId("");
-      }
-      return;
-    }
-    if (!selectedHistoryResourceGroupId || !workflowResourceGroups.some((group) => group.id === selectedHistoryResourceGroupId)) {
-      setSelectedHistoryResourceGroupId(workflowResourceGroups[0].id);
-    }
-  }, [selectedHistoryResourceGroupId, workflowResourceGroups]);
-
+  const generationConfigOptions: GenerationConfigOption[] = generationConfigOptionsQuery.data ?? [];
   const historyQuery = useQuery({
-    queryKey: ["inspiration-history", inspirationId, selectedHistoryResourceGroupId],
-    queryFn: () =>
-      api.getInspirationHistory(inspirationId, {
-        resource_group_id: selectedHistoryResourceGroupId,
-      }),
-    enabled: Boolean(inspirationId && selectedHistoryResourceGroupId),
+    queryKey: ["inspiration-history", inspirationId],
+    queryFn: () => api.getInspirationHistory(inspirationId),
+    enabled: Boolean(inspirationId),
   });
 
   const selectedNode = selectedNodeId
     ? workflow?.nodes.find((node) => node.id === selectedNodeId) ?? null
     : null;
+  const selectedReferenceNode =
+    selectedNode?.node_type === "reference_image" ? selectedNode : null;
+  const resourceLibrarySelectDisabledTitle =
+    resourceLibraryWriteBlockedTitle ||
+    (inspirationWriteBlocked ? inspirationWriteBlockedTitle : "") ||
+    (!selectedReferenceNode ? t("detail.selectImageNodeFirst") : "");
   const selectedTailPendingPlan = pendingTailSplitPlan(selectedNode);
   const selectedTailPublicReuseAvailability = useMemo(
     () => ({
@@ -639,6 +696,7 @@ export function InspirationDetailPage() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setPreviewImage(null);
+        setPreviewResourceLibrarySource(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -1924,6 +1982,33 @@ export function InspirationDetailPage() {
     },
   });
 
+  const loadResourceLibraryAssetMutation = useMutation({
+    mutationFn: (assetId: string) => {
+      assertInspirationWritable();
+      if (!selectedReferenceNode) {
+        throw new Error(t("detail.error.selectImageNode"));
+      }
+      return api.loadResourceLibraryAssetToWorkflowNode(assetId, {
+        node_id: selectedReferenceNode.id,
+      });
+    },
+    onSuccess: async (nextWorkflow) => {
+      setError("");
+      setNotice(t("resourceLibrary.loadToCurrentNode"));
+      queryClient.setQueryData(["inspiration-workflow", inspirationId], nextWorkflow);
+      setSelectedNodeIds(clearSelectedNodeGroup(selectedNodeId));
+      setResourceLibraryOpen(false);
+      await refreshInspirationArtifacts();
+    },
+    onError: (mutationError) => {
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.detail
+          : t("resourceLibrary.loadFailedAction"),
+      );
+    },
+  });
+
   const clearNodeImageMutation = useMutation({
     mutationFn: () => {
       assertInspirationWritable();
@@ -1951,6 +2036,93 @@ export function InspirationDetailPage() {
       selectedNode.output_json &&
       outputText(selectedNode.output_json, "copy_set_id"),
   );
+
+  function handleOpenResourceLibrary() {
+    setResourceLibraryOpen(true);
+  }
+
+  function handlePreviewImage(image: DownloadableImage) {
+    setPreviewImage(image);
+    setPreviewResourceLibrarySource(resourceLibrarySourceFromPreviewImage(image));
+  }
+
+  function closePreviewImage() {
+    setPreviewImage(null);
+    setPreviewResourceLibrarySource(null);
+  }
+
+  function getResourceLibrarySourceDisabledTitle(source: ResourceLibrarySaveSource | null): string {
+    if (!source) {
+      return "";
+    }
+    if (resourceLibraryWriteBlockedTitle) {
+      return resourceLibraryWriteBlockedTitle;
+    }
+    const sourceResource =
+      source.source_type === "poster_variant"
+        ? posters.find((poster) => poster.id === source.source_id)
+        : resourceLibraryStatusInspiration?.source_assets.find((asset) => asset.id === source.source_id) ?? null;
+    return sourceResource ? getResourceBlockedActionTitle(sourceResource, t("resource.blockedAction")) : "";
+  }
+
+  function handleSavePreviewImageToResourceLibrary() {
+    if (!previewResourceLibrarySource) {
+      return;
+    }
+    const disabledTitle = getResourceLibrarySourceDisabledTitle(previewResourceLibrarySource);
+    if (disabledTitle) {
+      setNotice("");
+      setError(disabledTitle);
+      return;
+    }
+    setResourceLibrarySaveSource(previewResourceLibrarySource);
+  }
+
+  function handleSavePosterToResourceLibrary(poster: PosterVariant) {
+    if (resourceLibraryWriteBlockedTitle) {
+      setNotice("");
+      setError(resourceLibraryWriteBlockedTitle);
+      return;
+    }
+    setResourceLibrarySaveSource({
+      source_type: "poster_variant",
+      source_id: poster.id,
+      title: poster.kind === "main_image" ? t("detail.mainImage") : t("detail.promoImage"),
+      thumbnail_url: poster.thumbnail_url,
+    });
+  }
+
+  function handleSaveSourceAssetToResourceLibrary(asset: SourceAsset) {
+    if (resourceLibraryWriteBlockedTitle) {
+      setNotice("");
+      setError(resourceLibraryWriteBlockedTitle);
+      return;
+    }
+    setResourceLibrarySaveSource({
+      source_type: "source_asset",
+      source_id: asset.id,
+      title: asset.kind === "original_image" ? t("detail.mainImage") : t("detail.referenceImage"),
+      thumbnail_url: asset.thumbnail_url,
+    });
+  }
+
+  function handleResourceLibraryAssetSelect(asset: ResourceLibraryAsset) {
+    if (resourceLibraryWriteBlockedTitle) {
+      setNotice("");
+      setError(resourceLibraryWriteBlockedTitle);
+      return;
+    }
+    if (inspirationWriteBlocked) {
+      showInspirationWriteBlockedError();
+      return;
+    }
+    if (!selectedReferenceNode) {
+      setNotice("");
+      setError(t("detail.error.selectImageNode"));
+      return;
+    }
+    loadResourceLibraryAssetMutation.mutate(asset.id);
+  }
 
   const flushSelectedDraft = async () => {
     if (!selectedNode || !draftDirty) {
@@ -2002,6 +2174,10 @@ export function InspirationDetailPage() {
     });
     if (missingResourceGroup) {
       setError(t("detail.inspector.resourceGroupRequired"));
+      return;
+    }
+    if (targetNodes.some((node) => workflowNodeMissingManualGenerationConfig(node, selectedNode, draft))) {
+      setError(t("detail.inspector.generationConfigRequired"));
       return;
     }
     try {
@@ -2086,6 +2262,10 @@ export function InspirationDetailPage() {
   };
 
   const openSidebarTab = (tab: SidebarTab) => {
+    if (tab === "images") {
+      setGalleryOpen(true);
+      return;
+    }
     setActiveSidebarTab(tab);
     setSidebarCollapsed(false);
   };
@@ -2117,7 +2297,6 @@ export function InspirationDetailPage() {
     applyTailSplitPlanMutation.isPending ||
     duplicateNodeGroupMutation.isPending ||
     historyActionBusy ||
-    updateNodeConfigMutation.isPending ||
     createEdgeMutation.isPending ||
     deleteEdgeMutation.isPending ||
     deleteNodeMutation.isPending ||
@@ -2125,9 +2304,10 @@ export function InspirationDetailPage() {
     uploadNodeImageMutation.isPending ||
     uploadNodeDocumentMutation.isPending ||
     bindNodeImageMutation.isPending ||
+    loadResourceLibraryAssetMutation.isPending ||
     clearNodeImageMutation.isPending ||
-    createUserCanvasTemplateMutation.isPending ||
-    updateNodeCopyMutation.isPending;
+    createUserCanvasTemplateMutation.isPending;
+  const inspectorBusy = layoutMutationBusy || inspirationWriteBlocked;
   const structureBusy = layoutMutationBusy || workflowActive || inspirationWriteBlocked;
   const runSubmissionPending =
     runWorkflowMutation.isPending || retryWorkflowRunMutation.isPending || retryFailedWorkflowNodesMutation.isPending;
@@ -2196,17 +2376,17 @@ export function InspirationDetailPage() {
       }
     : null;
 
-  const workflowActionPrimaryNode = (target: WorkflowCanvasActionTarget) => {
+  const workflowActionPrimaryNode = useCallback((target: WorkflowCanvasActionTarget) => {
     const primaryNodeId = target.kind === "single" ? target.nodeId : target.primaryNodeId;
     return workflow?.nodes.find((node) => node.id === primaryNodeId) ?? null;
-  };
+  }, [workflow]);
 
-  const workflowActionTargetNodes = (target: WorkflowCanvasActionTarget) => {
+  const workflowActionTargetNodes = useCallback((target: WorkflowCanvasActionTarget) => {
     const targetNodeIds = new Set(getWorkflowCanvasActionTargetNodeIds(target));
     return workflow?.nodes.filter((node) => targetNodeIds.has(node.id)) ?? [];
-  };
+  }, [workflow]);
 
-  const workflowActionItems = (target: WorkflowCanvasActionTarget): WorkflowCanvasActionItem[] => {
+  const workflowActionItems = useCallback((target: WorkflowCanvasActionTarget): WorkflowCanvasActionItem[] => {
     const primaryNode = workflowActionPrimaryNode(target);
     const runActionState = primaryNode
       ? getWorkflowNodeRunActionState(primaryNode, {
@@ -2237,7 +2417,20 @@ export function InspirationDetailPage() {
         title: item.title ?? label,
       };
     });
-  };
+  }, [
+    createUserTemplateGroupMutation.isPending,
+    deleteNodeMutation.isPending,
+    deleteSelectedNodesMutation.isPending,
+    duplicateNodeGroupMutation.isPending,
+    inspirationGenerateBlocked,
+    inspirationGenerateBlockedTitle,
+    pendingStartNodeId,
+    runSubmissionPending,
+    structureBusy,
+    t,
+    workflowActionPrimaryNode,
+    workflowActionTargetNodes,
+  ]);
 
   const executeWorkflowCanvasAction = (actionId: WorkflowCanvasActionId, target: WorkflowCanvasActionTarget) => {
     const nodeIds = getWorkflowCanvasActionTargetNodeIds(target);
@@ -2301,14 +2494,14 @@ export function InspirationDetailPage() {
     }
   };
 
-  const getWorkflowNodeActionToolbar = (nodeId: string): WorkflowCanvasActionToolbar | null => {
+  const getWorkflowNodeActionToolbar = useCallback((nodeId: string): WorkflowCanvasActionToolbar | null => {
     const target = getWorkflowCanvasActionTargetForNodeToolbar(nodeId, selectedNodeId, selectedNodeIds);
     if (!target) {
       return null;
     }
     const items = workflowActionItems(target);
     return items.length ? { target, items } : null;
-  };
+  }, [selectedNodeId, selectedNodeIds, workflowActionItems]);
 
   const commitNodePosition = (input: NodePositionCommitInput) => {
     if (inspirationWriteBlocked) {
@@ -2467,6 +2660,152 @@ export function InspirationDetailPage() {
     });
   }, [mobileCanvasControlsActive, inspirationId, selectedNode, workflow?.nodes]);
 
+  const resourceLibraryStatusInspiration = inspirationQuery.data ?? null;
+  const resourceLibraryPosterItems =
+    historyQuery.data?.poster_variants ?? resourceLibraryStatusInspiration?.poster_variants ?? [];
+  const resourceLibraryPosterSourceAssetIds = useMemo(() => {
+    if (!resourceLibraryStatusInspiration) {
+      return new Map<string, string>();
+    }
+    return buildPosterSourceAssetMap({
+      inspiration: resourceLibraryStatusInspiration,
+      workflow,
+      posters: resourceLibraryPosterItems,
+    });
+  }, [resourceLibraryPosterItems, resourceLibraryStatusInspiration, workflow]);
+  const resourceLibraryReferenceAssets = useMemo(() => {
+    if (!resourceLibraryStatusInspiration) {
+      return [];
+    }
+    return getVisibleReferenceAssets({
+      inspiration: resourceLibraryStatusInspiration,
+      posterSourceAssetIds: resourceLibraryPosterSourceAssetIds,
+      posters: resourceLibraryPosterItems,
+    });
+  }, [resourceLibraryPosterItems, resourceLibraryPosterSourceAssetIds, resourceLibraryStatusInspiration]);
+  const resourceLibraryPosterIds = useMemo(
+    () => resourceLibraryPosterItems.map((poster) => poster.id),
+    [resourceLibraryPosterItems],
+  );
+  const resourceLibraryReferenceAssetIds = useMemo(
+    () => {
+      const assetIds = new Set(resourceLibraryReferenceAssets.map((asset) => asset.id));
+      for (const asset of resourceLibraryStatusInspiration?.source_assets ?? []) {
+        if (RESOURCE_LIBRARY_SOURCE_ASSET_IMAGE_KINDS.has(asset.kind)) {
+          assetIds.add(asset.id);
+        }
+      }
+      return [...assetIds];
+    },
+    [resourceLibraryReferenceAssets, resourceLibraryStatusInspiration?.source_assets],
+  );
+  const posterResourceLibraryStatusQuery = useQuery({
+    queryKey: ["resource-library-source-status", "poster_variant", resourceLibraryPosterIds],
+    queryFn: () =>
+      api.listResourceLibrarySourceStatus({
+        source_type: "poster_variant",
+        source_ids: resourceLibraryPosterIds,
+      }),
+    enabled: resourceLibraryPosterIds.length > 0,
+  });
+  const sourceAssetResourceLibraryStatusQuery = useQuery({
+    queryKey: ["resource-library-source-status", "source_asset", resourceLibraryReferenceAssetIds],
+    queryFn: () =>
+      api.listResourceLibrarySourceStatus({
+        source_type: "source_asset",
+        source_ids: resourceLibraryReferenceAssetIds,
+      }),
+    enabled: resourceLibraryReferenceAssetIds.length > 0,
+  });
+  const savedPosterIds = useMemo(
+    () =>
+      new Set(
+        (posterResourceLibraryStatusQuery.data?.items ?? [])
+          .filter((item) => item.saved)
+          .map((item) => item.source_id),
+      ),
+    [posterResourceLibraryStatusQuery.data?.items],
+  );
+  const savedSourceAssetIds = useMemo(
+    () =>
+      new Set(
+        (sourceAssetResourceLibraryStatusQuery.data?.items ?? [])
+          .filter((item) => item.saved)
+          .map((item) => item.source_id),
+      ),
+    [sourceAssetResourceLibraryStatusQuery.data?.items],
+  );
+
+  const workflowCanvasSelectNodeRef = useRef(selectNodeFromPointer);
+  workflowCanvasSelectNodeRef.current = selectNodeFromPointer;
+  const handleWorkflowCanvasSelectNode = useCallback((nodeId: string, event: ReactMouseEvent<Element>) => {
+    workflowCanvasSelectNodeRef.current(nodeId, event);
+  }, []);
+
+  const workflowCanvasDragCompleteSelectRef = useRef(selectNodeForDragStart);
+  workflowCanvasDragCompleteSelectRef.current = selectNodeForDragStart;
+  const handleWorkflowCanvasDragCompleteSelect = useCallback((nodeId: string) => {
+    workflowCanvasDragCompleteSelectRef.current(nodeId);
+  }, []);
+
+  const workflowCanvasSelectionBoxCompleteRef = useRef(replaceSelectionFromBox);
+  workflowCanvasSelectionBoxCompleteRef.current = replaceSelectionFromBox;
+  const handleWorkflowCanvasSelectionBoxComplete = useCallback((nodeIds: string[]) => {
+    workflowCanvasSelectionBoxCompleteRef.current(nodeIds);
+  }, []);
+
+  const workflowCanvasNodePositionCommitRef = useRef(commitNodePosition);
+  workflowCanvasNodePositionCommitRef.current = commitNodePosition;
+  const handleWorkflowCanvasNodePositionCommit = useCallback((input: NodePositionCommitInput) => {
+    workflowCanvasNodePositionCommitRef.current(input);
+  }, []);
+
+  const workflowCanvasNodeActionRef = useRef(executeWorkflowCanvasAction);
+  workflowCanvasNodeActionRef.current = executeWorkflowCanvasAction;
+  const handleWorkflowCanvasNodeAction = useCallback(
+    (actionId: WorkflowCanvasActionId, target: WorkflowCanvasActionTarget) => {
+      workflowCanvasNodeActionRef.current(actionId, target);
+    },
+    [],
+  );
+
+  const workflowCanvasClearSelectionRef = useRef(clearCanvasSelection);
+  workflowCanvasClearSelectionRef.current = clearCanvasSelection;
+  const handleWorkflowCanvasClearSelection = useCallback(() => {
+    workflowCanvasClearSelectionRef.current();
+  }, []);
+
+  const workflowCanvasPreviewImageRef = useRef(handlePreviewImage);
+  workflowCanvasPreviewImageRef.current = handlePreviewImage;
+  const handleWorkflowCanvasPreviewImage = useCallback((image: DownloadableImage) => {
+    workflowCanvasPreviewImageRef.current(image);
+  }, []);
+
+  const handleWorkflowCanvasNodeDragGroup = useCallback(
+    (nodeId: string) => (selectedNodeIds.includes(nodeId) ? selectedNodeIds : [nodeId]),
+    [selectedNodeIds],
+  );
+  const createEdgeMutationRef = useRef(createEdgeMutation);
+  createEdgeMutationRef.current = createEdgeMutation;
+  const handleWorkflowCanvasConnectionCreate = useCallback((input: { sourceNodeId: string; targetNodeId: string }) => {
+    createEdgeMutationRef.current.mutate(input);
+  }, []);
+  const deleteEdgeMutationRef = useRef(deleteEdgeMutation);
+  deleteEdgeMutationRef.current = deleteEdgeMutation;
+  const handleWorkflowCanvasDeleteEdge = useCallback((edgeId: string) => {
+    deleteEdgeMutationRef.current.mutate(edgeId);
+  }, []);
+  const handleWorkflowCanvasToggleSnapToGrid = useCallback(() => {
+    setSnapToGrid((prev) => !prev);
+  }, []);
+  const handleWorkflowCanvasAutoLayout = useCallback(() => {
+    workflowCanvasRef.current?.triggerAutoLayout();
+  }, []);
+  const getWorkflowCanvasNodeImage = useCallback(
+    (node: WorkflowNode) => (inspirationQuery.data ? getNodeImageDownload(node, inspirationQuery.data, t) : null),
+    [inspirationQuery.data, t],
+  );
+
   if (inspirationQuery.isLoading) {
     return (
       <div className="pf-workspace flex min-h-[100dvh] items-center justify-center text-zinc-400 dark:text-slate-400">
@@ -2503,20 +2842,22 @@ export function InspirationDetailPage() {
     retryFailedWorkflowNodesMutation.isPending ||
     failedWorkflowNodes.length === 0 ||
     retryableFailedWorkflowNodes.length !== failedWorkflowNodes.length;
-  const posters = historyQuery.data?.poster_variants ?? inspiration.poster_variants;
-  const posterSourceAssetIds = buildPosterSourceAssetMap({
-    inspiration,
-    workflow,
-    posters,
-  });
-  const referenceAssets = getVisibleReferenceAssets({
-    inspiration,
-    posterSourceAssetIds,
-    posters,
-  });
+  const posters = resourceLibraryPosterItems;
+  const posterSourceAssetIds = resourceLibraryPosterSourceAssetIds;
+  const referenceAssets = resourceLibraryReferenceAssets;
   const artifactCount = posters.length + referenceAssets.length;
-  const selectedReferenceNode =
-    selectedNode?.node_type === "reference_image" ? selectedNode : null;
+  const previewResourceLibrarySaved =
+    previewResourceLibrarySource?.source_type === "poster_variant"
+      ? savedPosterIds.has(previewResourceLibrarySource.source_id)
+      : previewResourceLibrarySource?.source_type === "source_asset"
+        ? savedSourceAssetIds.has(previewResourceLibrarySource.source_id)
+        : false;
+  const previewResourceLibrarySaving = Boolean(
+    previewResourceLibrarySource &&
+      resourceLibrarySaveSource?.source_type === previewResourceLibrarySource.source_type &&
+      resourceLibrarySaveSource.source_id === previewResourceLibrarySource.source_id,
+  );
+  const previewResourceLibraryDisabledTitle = getResourceLibrarySourceDisabledTitle(previewResourceLibrarySource);
   const selectedGroupCount = selectedNodeIds.length;
   const workflowCanvasKeyboardShortcutsActive =
     !previewImage &&
@@ -2759,9 +3100,49 @@ export function InspirationDetailPage() {
   ];
 
   const openMobileSidebarTab = (tab: SidebarTab) => {
+    if (tab === "images") {
+      setGalleryOpen(true);
+      setMobileDetailsSheetOpen(false);
+      return;
+    }
     setActiveSidebarTab(tab);
     setMobileDetailsSheetOpen(true);
   };
+
+  const selectedNodeBaseRunActionState = selectedNode
+    ? getWorkflowNodeRunActionState(selectedNode, {
+        runSubmissionPending,
+        pendingStartNodeId,
+      })
+    : null;
+  const selectedNodeRunActionState =
+    selectedNode && selectedNodeBaseRunActionState && inspirationGenerateBlocked
+      ? {
+          ...selectedNodeBaseRunActionState,
+          disabled: true,
+          pending: false,
+          title: inspirationGenerateBlockedTitle,
+        }
+      : selectedNode &&
+          selectedNodeBaseRunActionState &&
+          workflowNodeRequiresResourceGroup(selectedNode) &&
+          !draft.resourceGroupId
+        ? {
+            ...selectedNodeBaseRunActionState,
+            disabled: true,
+            pending: false,
+            title: t("detail.inspector.resourceGroupRequired"),
+          }
+        : selectedNode &&
+            selectedNodeBaseRunActionState &&
+            workflowNodeMissingManualGenerationConfig(selectedNode, selectedNode, draft)
+          ? {
+              ...selectedNodeBaseRunActionState,
+              disabled: true,
+              pending: false,
+              title: t("detail.inspector.generationConfigRequired"),
+            }
+          : selectedNodeBaseRunActionState;
 
   const renderDetailsPanelContent = () =>
     selectedNode ? (
@@ -2796,7 +3177,8 @@ export function InspirationDetailPage() {
           imageToolAllowedFields={imageToolAllowedFields}
           tailSplitterMaxItems={tailSplitterMaxItems}
           resourceGroups={workflowResourceGroups}
-          onPreviewImage={setPreviewImage}
+          generationConfigOptions={generationConfigOptions}
+          onPreviewImage={handlePreviewImage}
           onDraftChange={handleGuardedDraftChange}
           onRun={() => void handleRunWorkflow(selectedNode.id)}
           onCancelRun={
@@ -2808,34 +3190,21 @@ export function InspirationDetailPage() {
           onUploadImage={(file) => uploadNodeImageMutation.mutate(file)}
           onUploadDocument={(file) => uploadNodeDocumentMutation.mutate(file)}
           onClearImage={() => clearNodeImageMutation.mutate()}
+          onOpenResourceLibrary={handleOpenResourceLibrary}
+          resourceLibraryDisabledTitle={resourceLibrarySelectDisabledTitle || null}
+          onSaveSourceAssetToResourceLibrary={handleSaveSourceAssetToResourceLibrary}
+          resourceLibrarySaveDisabledTitle={resourceLibraryWriteBlockedTitle || null}
+          savedResourceLibrarySourceAssetIds={savedSourceAssetIds}
+          savingResourceLibrarySourceId={resourceLibrarySaveSource?.source_id ?? null}
           onDelete={() => handleDeleteNode(selectedNode)}
-          busy={structureBusy}
+          busy={inspectorBusy}
           cancelBusy={cancelWorkflowRunMutation.isPending || inspirationGenerateBlocked}
           runActionState={
-            inspirationGenerateBlocked
-              ? {
-                  ...getWorkflowNodeRunActionState(selectedNode, {
-                    runSubmissionPending,
-                    pendingStartNodeId,
-                  }),
-                  disabled: true,
-                  pending: false,
-                  title: inspirationGenerateBlockedTitle,
-                }
-              : workflowNodeRequiresResourceGroup(selectedNode) && !draft.resourceGroupId
-                ? {
-                    ...getWorkflowNodeRunActionState(selectedNode, {
-                      runSubmissionPending,
-                      pendingStartNodeId,
-                    }),
-                    disabled: true,
-                    pending: false,
-                    title: t("detail.inspector.resourceGroupRequired"),
-                  }
-              : getWorkflowNodeRunActionState(selectedNode, {
-                  runSubmissionPending,
-                  pendingStartNodeId,
-                })
+            selectedNodeRunActionState ??
+            getWorkflowNodeRunActionState(selectedNode, {
+              runSubmissionPending,
+              pendingStartNodeId,
+            })
           }
         />
       </div>
@@ -2862,32 +3231,6 @@ export function InspirationDetailPage() {
           mutationBlockedTitle={inspirationGenerateBlocked ? inspirationGenerateBlockedTitle : null}
           onRetryRun={handleRetryWorkflowRun}
           onRetryFailedNodes={() => void handleRetryFailedWorkflowNodes()}
-        />
-      ) : null}
-      {activeSidebarTab === "images" ? (
-        <ImagesPanel
-          inspiration={inspiration}
-          posters={posters}
-          referenceAssets={referenceAssets}
-          artifactCount={artifactCount}
-          resourceGroups={workflowResourceGroups}
-          selectedResourceGroupId={selectedHistoryResourceGroupId}
-          onResourceGroupChange={setSelectedHistoryResourceGroupId}
-          selectedReferenceNode={selectedReferenceNode}
-          posterSourceAssetIds={posterSourceAssetIds}
-          onPreviewImage={setPreviewImage}
-          onFillFromSourceAsset={(sourceAssetId) =>
-            bindNodeImageMutation.mutate({
-              source_asset_id: sourceAssetId,
-            })
-          }
-          onFillFromPoster={(posterId) =>
-            bindNodeImageMutation.mutate({
-              poster_variant_id: posterId,
-            })
-          }
-          fillReferenceBusy={fillReferenceBusy}
-          fillBlockedTitle={inspirationWriteBlocked ? inspirationWriteBlockedTitle : null}
         />
       ) : null}
       {activeSidebarTab === "templates" ? (
@@ -3051,22 +3394,22 @@ export function InspirationDetailPage() {
               snapToGridLabel={t("detail.snapToGrid")}
               autoLayoutLabel={t("detail.autoLayout")}
               snapToGrid={snapToGrid}
-              onToggleSnapToGrid={() => setSnapToGrid((prev) => !prev)}
-              onAutoLayout={() => workflowCanvasRef.current?.triggerAutoLayout()}
+              onToggleSnapToGrid={handleWorkflowCanvasToggleSnapToGrid}
+              onAutoLayout={handleWorkflowCanvasAutoLayout}
               onBlankClick={handleCanvasBlankClick}
-              onSelectNode={selectNodeFromPointer}
-              onNodeDragCompleteSelect={selectNodeForDragStart}
-              getNodeDragGroup={(nodeId) => (selectedNodeIds.includes(nodeId) ? selectedNodeIds : [nodeId])}
-              onSelectionBoxComplete={replaceSelectionFromBox}
-              onNodePositionCommit={commitNodePosition}
-              onConnectionCreate={(input) => createEdgeMutation.mutate(input)}
-              onDeleteEdge={(edgeId) => deleteEdgeMutation.mutate(edgeId)}
+              onSelectNode={handleWorkflowCanvasSelectNode}
+              onNodeDragCompleteSelect={handleWorkflowCanvasDragCompleteSelect}
+              getNodeDragGroup={handleWorkflowCanvasNodeDragGroup}
+              onSelectionBoxComplete={handleWorkflowCanvasSelectionBoxComplete}
+              onNodePositionCommit={handleWorkflowCanvasNodePositionCommit}
+              onConnectionCreate={handleWorkflowCanvasConnectionCreate}
+              onDeleteEdge={handleWorkflowCanvasDeleteEdge}
               getNodeActionToolbar={getWorkflowNodeActionToolbar}
-              onNodeAction={executeWorkflowCanvasAction}
+              onNodeAction={handleWorkflowCanvasNodeAction}
               keyboardShortcutsActive={workflowCanvasKeyboardShortcutsActive}
-              onClearSelection={clearCanvasSelection}
-              getNodeImage={(node) => getNodeImageDownload(node, inspiration, t)}
-              onPreviewImage={setPreviewImage}
+              onClearSelection={handleWorkflowCanvasClearSelection}
+              getNodeImage={getWorkflowCanvasNodeImage}
+              onPreviewImage={handleWorkflowCanvasPreviewImage}
             />
             {selectedGroupCount > 1 ? (
               <div data-canvas-control className="pointer-events-none absolute bottom-[calc(12.75rem+env(safe-area-inset-bottom))] left-3 right-3 z-30 lg:bottom-auto lg:left-1/2 lg:right-auto lg:top-4 lg:-translate-x-1/2">
@@ -3202,7 +3545,7 @@ export function InspirationDetailPage() {
                 onClick={() => openSidebarTab("runs")}
               />
               <SidebarTabButton
-                active={activeSidebarTab === "images"}
+                active={false}
                 label={t("detail.tabImages")}
                 title={t("detail.tabImages")}
                 icon={<ImageIcon size={17} />}
@@ -3314,7 +3657,7 @@ export function InspirationDetailPage() {
                 type="button"
                 onClick={() => openMobileSidebarTab(item.key)}
                 className={`inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl border px-1 text-[10px] font-semibold leading-[1.05] text-slate-600 transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400 ${
-                  activeSidebarTab === item.key
+                  activeSidebarTab === item.key && item.key !== "images"
                     ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/55 dark:bg-violet-500/18 dark:text-violet-100"
                     : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
                 }`}
@@ -3377,11 +3720,64 @@ export function InspirationDetailPage() {
       </Drawer.Root>
 
       {previewImage ? (
-        <ImagePreviewModal
+        <InspirationImagePreviewModal
           image={previewImage}
-          onClose={() => setPreviewImage(null)}
+          resourceLibrarySource={previewResourceLibrarySource}
+          resourceLibrarySaved={previewResourceLibrarySaved}
+          resourceLibrarySaving={previewResourceLibrarySaving}
+          resourceLibraryDisabledTitle={previewResourceLibraryDisabledTitle}
+          onSaveToResourceLibrary={handleSavePreviewImageToResourceLibrary}
+          onClose={closePreviewImage}
         />
       ) : null}
+      <ImagesPanel
+        open={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        inspiration={inspiration}
+        posters={posters}
+        referenceAssets={referenceAssets}
+        artifactCount={artifactCount}
+        selectedReferenceNode={selectedReferenceNode}
+        posterSourceAssetIds={posterSourceAssetIds}
+        onPreviewImage={handlePreviewImage}
+        onFillFromSourceAsset={(sourceAssetId) =>
+          bindNodeImageMutation.mutate({
+            source_asset_id: sourceAssetId,
+          })
+        }
+        onFillFromPoster={(posterId) =>
+          bindNodeImageMutation.mutate({
+            poster_variant_id: posterId,
+          })
+        }
+        onSavePosterToResourceLibrary={handleSavePosterToResourceLibrary}
+        onSaveSourceAssetToResourceLibrary={handleSaveSourceAssetToResourceLibrary}
+        savedPosterIds={savedPosterIds}
+        savedSourceAssetIds={savedSourceAssetIds}
+        fillReferenceBusy={fillReferenceBusy}
+        fillBlockedTitle={inspirationWriteBlocked ? inspirationWriteBlockedTitle : null}
+        resourceLibraryWriteDisabledTitle={resourceLibraryWriteBlockedTitle}
+        savingResourceLibrarySourceId={resourceLibrarySaveSource?.source_id ?? null}
+      />
+      <ResourceLibraryModal
+        open={resourceLibraryOpen}
+        onClose={() => setResourceLibraryOpen(false)}
+        canRead
+        onSelectAsset={handleResourceLibraryAssetSelect}
+        selectLabel={t("resourceLibrary.loadToCurrentNode")}
+        selectDisabled={Boolean(resourceLibrarySelectDisabledTitle)}
+        selectDisabledTitle={resourceLibrarySelectDisabledTitle || null}
+        selectingAssetId={loadResourceLibraryAssetMutation.variables ?? null}
+      />
+      <SaveToResourceLibraryDialog
+        source={resourceLibrarySaveSource}
+        canWrite={!resourceLibraryWriteBlockedTitle}
+        onClose={() => setResourceLibrarySaveSource(null)}
+        onSaved={() => {
+          setNotice(t("resourceLibrary.saved"));
+          setError("");
+        }}
+      />
       <TailSplitPlanDialog
         open={tailPlanDialogOpen && Boolean(selectedTailPendingPlan) && selectedNode?.node_type === "tail_splitter"}
         nodeTitle={selectedNode?.title ?? ""}
@@ -3391,6 +3787,7 @@ export function InspirationDetailPage() {
         imageGenerationMaxDimension={imageGenerationMaxDimension}
         imageToolAllowedFields={imageToolAllowedFields}
         resourceGroups={workflowResourceGroups}
+        generationConfigOptions={generationConfigOptions}
         canReusePublicCopyNode={selectedTailPublicReuseAvailability.canReusePublicCopyNode}
         canReusePublicReferenceNode={selectedTailPublicReuseAvailability.canReusePublicReferenceNode}
         onClose={() => setTailPlanDialogOpen(false)}
@@ -3536,4 +3933,88 @@ export function InspirationDetailPage() {
       />
     </div>
   );
+}
+
+function InspirationImagePreviewModal({
+  image,
+  resourceLibrarySource,
+  resourceLibrarySaved,
+  resourceLibrarySaving,
+  resourceLibraryDisabledTitle,
+  onSaveToResourceLibrary,
+  onClose,
+}: {
+  image: DownloadableImage;
+  resourceLibrarySource: ResourceLibrarySaveSource | null;
+  resourceLibrarySaved: boolean;
+  resourceLibrarySaving: boolean;
+  resourceLibraryDisabledTitle: string;
+  onSaveToResourceLibrary: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const hasResourceLibraryAction = Boolean(resourceLibrarySource);
+  const resourceLibraryLabel = resourceLibrarySaved
+    ? t("resourceLibrary.alreadyInLibrary")
+    : t("resourceLibrary.saveToLibrary");
+  const resourceLibraryTitle = resourceLibraryDisabledTitle || resourceLibraryLabel;
+
+  const modal = (
+    <div
+      className="pointer-events-auto fixed inset-0 z-[80] flex items-center justify-center bg-zinc-950/70 p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label={image.alt}
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#0f1726]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-slate-800">
+          <div className="min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-slate-100">{image.alt}</div>
+          <div className="flex shrink-0 items-center gap-2">
+            <DownloadLink image={image} />
+            {hasResourceLibraryAction ? (
+              <button
+                type="button"
+                onClick={onSaveToResourceLibrary}
+                disabled={Boolean(resourceLibraryDisabledTitle) || resourceLibrarySaving}
+                title={resourceLibraryTitle}
+                aria-label={resourceLibraryTitle}
+                className="inline-flex min-h-8 items-center rounded border border-zinc-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-zinc-700 transition-colors hover:border-indigo-200 hover:bg-zinc-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/12 dark:hover:text-violet-100"
+              >
+                {resourceLibrarySaving ? (
+                  <Loader2 size={12} className="mr-1.5 animate-spin" />
+                ) : resourceLibrarySaved ? (
+                  <Check size={12} className="mr-1.5" />
+                ) : (
+                  <Save size={12} className="mr-1.5" />
+                )}
+                <span className="max-w-28 truncate">{resourceLibraryLabel}</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+              aria-label={t("detail.preview.close")}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        <ZoomableImage
+          src={image.previewUrl}
+          alt={image.alt}
+          zoomOutLabel={t("imagePreview.zoomOut")}
+          zoomInLabel={t("imagePreview.zoomIn")}
+          resetLabel={t("imagePreview.reset")}
+          className={`h-[calc(100vh-11rem)] p-4 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
+        />
+      </div>
+    </div>
+  );
+
+  return typeof document === "undefined" ? modal : createPortal(modal, document.body);
 }

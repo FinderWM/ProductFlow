@@ -36,6 +36,7 @@ from inspiration_one_backend.domain.rbac import (
     API_SETTINGS_WRITE,
     API_STATUS_READ,
 )
+from inspiration_one_backend.domain.ui_layout import is_supported_ui_layout_scheme, resolve_ui_layout_scheme
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
@@ -310,6 +311,7 @@ def _get_or_create_user_ui_preferences(session: Session, user_id: str, *, commit
 def _serialize_user_ui_preferences(preferences: UserUiPreference) -> UserUiPreferencesResponse:
     return UserUiPreferencesResponse(
         user_id=preferences.user_id,
+        ui_layout_scheme=resolve_ui_layout_scheme(preferences.ui_layout_scheme),
         mask_sensitive_images_in_inspirations=preferences.mask_sensitive_images_in_inspirations,
         mask_sensitive_images_in_image_chat=preferences.mask_sensitive_images_in_image_chat,
         created_at=preferences.created_at.isoformat(),
@@ -1439,6 +1441,10 @@ def update_user_ui_preferences_endpoint(
     session: Session = Depends(get_session),
 ) -> UserUiPreferencesResponse:
     preferences = _get_or_create_user_ui_preferences(session, current_user.id, commit=False)
+    if payload.ui_layout_scheme is not None:
+        if not is_supported_ui_layout_scheme(payload.ui_layout_scheme):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的 UI 布局方案")
+        preferences.ui_layout_scheme = payload.ui_layout_scheme
     if payload.mask_sensitive_images_in_inspirations is not None:
         preferences.mask_sensitive_images_in_inspirations = payload.mask_sensitive_images_in_inspirations
     if payload.mask_sensitive_images_in_image_chat is not None:

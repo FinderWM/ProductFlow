@@ -57,6 +57,8 @@ class GalleryEntryResponse(ResourceModerationFields):
 
 class GalleryEntryListResponse(BaseModel):
     items: list[GalleryEntryResponse]
+    has_more: bool = False
+    next_offset: int | None = None
 
 
 def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:

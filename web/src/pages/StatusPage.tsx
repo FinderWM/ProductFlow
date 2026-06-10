@@ -183,7 +183,12 @@ function ConfigStatusRow({ config }: { config: GenerationConfigStatusConfig }) {
   );
 }
 
-export function StatusPage() {
+interface StatusPageProps {
+  mode?: "auto" | "detail";
+}
+
+export function StatusPage(props: StatusPageProps = {}) {
+  void props.mode;
   const { t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -269,6 +274,8 @@ export function StatusPage() {
                   <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                     {t("statusPage.startDate")}
                     <input
+                      id="status-page-start-date"
+                      name="status-page-start-date"
                       type="date"
                       value={range.start_date}
                       onChange={(event) => {
@@ -281,6 +288,8 @@ export function StatusPage() {
                   <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                     {t("statusPage.endDate")}
                     <input
+                      id="status-page-end-date"
+                      name="status-page-end-date"
                       type="date"
                       value={range.end_date}
                       onChange={(event) => {

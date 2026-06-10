@@ -37,6 +37,7 @@ from inspiration_one_backend.presentation.routes.inspiration_workflows import ro
 from inspiration_one_backend.presentation.routes.inspirations import router as inspirations_router
 from inspiration_one_backend.presentation.routes.moderation import router as moderation_router
 from inspiration_one_backend.presentation.routes.rbac import router as rbac_router
+from inspiration_one_backend.presentation.routes.resource_library import router as resource_library_router
 from inspiration_one_backend.presentation.routes.resource_moderation import router as resource_moderation_router
 from inspiration_one_backend.presentation.routes.settings import router as settings_router
 from inspiration_one_backend.presentation.routes.usage_stats import router as usage_stats_router
@@ -90,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(inspirations_router)
     app.include_router(inspiration_workflows_router)
     app.include_router(image_sessions_router)
+    app.include_router(resource_library_router)
     app.include_router(moderation_router)
     app.include_router(resource_moderation_router)
     app.include_router(settings_router)

@@ -12,7 +12,7 @@ function item(
 }
 
 describe("getDesktopNavLayout", () => {
-  it("keeps every desktop nav item visible when the measured row fits", () => {
+  it("keeps secondary desktop nav items in overflow even when the measured row fits", () => {
     const layout = getDesktopNavLayout({
       items: [
         item("inspirations", 80),
@@ -25,8 +25,8 @@ describe("getDesktopNavLayout", () => {
       gap: 0,
     });
 
-    expect(layout.visibleKeys).toEqual(["inspirations", "gallery", "usage", "help"]);
-    expect(layout.overflowKeys).toEqual([]);
+    expect(layout.visibleKeys).toEqual(["inspirations", "gallery"]);
+    expect(layout.overflowKeys).toEqual(["usage", "help"]);
   });
 
   it("moves rightmost secondary items into overflow before primary items", () => {
@@ -65,7 +65,7 @@ describe("getDesktopNavLayout", () => {
     expect(layout.overflowKeys).toEqual(["usage", "help"]);
   });
 
-  it("keeps an active secondary item until inactive secondary items are collapsed", () => {
+  it("keeps active secondary items in overflow", () => {
     const layout = getDesktopNavLayout({
       items: [
         item("inspirations", 100),
@@ -77,7 +77,7 @@ describe("getDesktopNavLayout", () => {
       gap: 0,
     });
 
-    expect(layout.visibleKeys).toEqual(["inspirations", "usage"]);
-    expect(layout.overflowKeys).toEqual(["help"]);
+    expect(layout.visibleKeys).toEqual(["inspirations"]);
+    expect(layout.overflowKeys).toEqual(["usage", "help"]);
   });
 });

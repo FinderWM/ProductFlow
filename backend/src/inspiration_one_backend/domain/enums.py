@@ -20,6 +20,23 @@ class ImageSessionAssetKind(StrEnum):
     GENERATED_IMAGE = "generated_image"
 
 
+class ResourceLibraryAssetKind(StrEnum):
+    """个人资源库文件类型。本期只允许图片，保留扩展到文档/其它文件的契约。"""
+
+    IMAGE = "image"
+    DOCUMENT = "document"
+    OTHER = "other"
+
+
+class ResourceLibrarySourceType(StrEnum):
+    """个人资源库资源来源。"""
+
+    SOURCE_ASSET = "source_asset"
+    POSTER_VARIANT = "poster_variant"
+    IMAGE_SESSION_ASSET = "image_session_asset"
+    UPLOAD = "upload"
+
+
 class JobStatus(StrEnum):
     """连续生图任务状态：排队 -> 运行中 -> 成功/失败/取消。"""
 

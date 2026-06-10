@@ -66,7 +66,12 @@ from inspiration_one_backend.infrastructure.db.session import get_session_factor
 from inspiration_one_backend.infrastructure.image.base import infer_extension
 from inspiration_one_backend.infrastructure.image.chat_service import ImageChatService
 from inspiration_one_backend.infrastructure.image.responses_provider import PROVIDER_TEXT_OUTPUT_MESSAGE
-from inspiration_one_backend.infrastructure.provider_config import IMAGE_PURPOSE, ensure_provider_config_bootstrapped
+from inspiration_one_backend.infrastructure.provider_config import (
+    IMAGE_PURPOSE,
+    TEXT_PURPOSE,
+    ensure_provider_config_bootstrapped,
+    generation_config_resource_group_ids,
+)
 from inspiration_one_backend.infrastructure.queue import (
     enqueue_image_session_generation_task,
     enqueue_image_session_generation_task_later,
@@ -233,20 +238,31 @@ def _generation_config_selection(
 ) -> GenerationConfigSelection:
     normalized_mode = (mode or "auto").strip().lower()
     normalized_id = (generation_config_id or "").strip() or None
-    if normalized_mode == "manual" or normalized_id is not None:
-        raise BusinessValidationError("生成入口只能选择供应商生成分组")
+    if normalized_mode not in {"auto", "manual"}:
+        raise BusinessValidationError("生成配置选择模式无效")
     normalized_group_id = (resource_group_id or "").strip()
     if not normalized_group_id:
         raise BusinessValidationError("请选择供应商生成分组")
-    return GenerationConfigSelection(mode="auto", generation_config_id=None, resource_group_id=normalized_group_id)
+    if normalized_mode != "manual":
+        return GenerationConfigSelection(mode="auto", generation_config_id=None, resource_group_id=normalized_group_id)
+    return GenerationConfigSelection(
+        mode="manual",
+        generation_config_id=normalized_id,
+        resource_group_id=normalized_group_id,
+    )
 
 
-def _validate_manual_image_generation_config_selection(
+def _validate_manual_generation_config_selection(
     session: Session,
     selection: GenerationConfigSelection,
+    *,
+    purpose: str,
+    purpose_error_message: str,
 ) -> None:
-    if selection.mode != "manual" or selection.generation_config_id is None:
+    if selection.mode != "manual":
         return
+    if selection.generation_config_id is None:
+        raise BusinessValidationError("手动指定生成配置时必须选择配置")
     generation_config = session.scalar(
         select(GenerationConfig).where(
             GenerationConfig.id == selection.generation_config_id,
@@ -255,8 +271,10 @@ def _validate_manual_image_generation_config_selection(
     )
     if generation_config is None:
         raise BusinessValidationError("生成配置不存在")
-    if generation_config.purpose != IMAGE_PURPOSE:
-        raise BusinessValidationError("生图任务只能使用图片生成配置")
+    if generation_config.purpose != purpose:
+        raise BusinessValidationError(purpose_error_message)
+    if selection.resource_group_id not in generation_config_resource_group_ids(generation_config):
+        raise BusinessValidationError("手动指定的生成配置不属于当前供应商生成分组")
 
 
 def _authorized_image_generation_config_selection(
@@ -280,11 +298,18 @@ def _authorized_image_generation_config_selection(
         is_admin=group_actor_is_admin,
         resource_group_id=selection.resource_group_id,
     )
-    return GenerationConfigSelection(
+    selection = GenerationConfigSelection(
         mode=selection.mode,
         generation_config_id=selection.generation_config_id,
         resource_group_id=group.id,
     )
+    _validate_manual_generation_config_selection(
+        session,
+        selection,
+        purpose=IMAGE_PURPOSE,
+        purpose_error_message="生图任务只能使用图片生成配置",
+    )
+    return selection
 
 
 def _image_generation_task_event_at(task: ImageSessionGenerationTask) -> datetime:
@@ -345,7 +370,17 @@ def polish_image_session_prompt(
         is_admin=user_is_admin,
         resource_group_id=generation_config_selection.resource_group_id,
     )
-    generation_config_selection = GenerationConfigSelection(resource_group_id=group.id)
+    generation_config_selection = GenerationConfigSelection(
+        mode=generation_config_selection.mode,
+        generation_config_id=generation_config_selection.generation_config_id,
+        resource_group_id=group.id,
+    )
+    _validate_manual_generation_config_selection(
+        session,
+        generation_config_selection,
+        purpose=TEXT_PURPOSE,
+        purpose_error_message="文案润色只能使用文案生成配置",
+    )
     try:
         runtime_claim = claim_runtime_generation_config(purpose="text", selection=generation_config_selection)
     except (GenerationConfigWaitError, ValueError) as exc:
@@ -740,6 +775,11 @@ def _execute_image_session_round_generation(
     except BaseException:
         release_runtime_generation_config(runtime_claim, success=False, record_result=False)
         raise
+    provider_manual_references = _provider_manual_references_for_session_generation(
+        provider_kind=service.provider_kind,
+        manual_references=manual_references,
+        selected_reference_ids=normalized_reference_ids,
+    )
     if generation_task is not None:
         generation_task.used_generation_config_id = runtime_claim.generation_config_id
         generation_task.resource_group_id = runtime_claim.resource_group_id
@@ -810,7 +850,7 @@ def _execute_image_session_round_generation(
                         prompt=prompt,
                         size=normalized_size,
                         history=history,
-                        manual_reference_images=manual_references,
+                        manual_reference_images=provider_manual_references,
                         candidate_count=batch_count,
                         tool_options=normalized_tool_options,
                     )
@@ -821,7 +861,7 @@ def _execute_image_session_round_generation(
                         prompt=prompt,
                         size=normalized_size,
                         history=history,
-                        manual_reference_images=manual_references,
+                        manual_reference_images=provider_manual_references,
                         previous_response_id=previous_response_id,
                         tool_options=normalized_tool_options,
                         progress_callback=_provider_progress_callback(
@@ -968,6 +1008,17 @@ def _execute_image_session_round_generation(
         image_session=_get_image_session_or_raise(session, image_session.id),
         generation_group_id=generation_group_id,
     )
+
+
+def _provider_manual_references_for_session_generation(
+    *,
+    provider_kind: str,
+    manual_references: list[str],
+    selected_reference_ids: list[str],
+) -> list[str]:
+    if provider_kind == "openai_images" and not selected_reference_ids:
+        return []
+    return manual_references
 
 
 def generate_image_session_round(

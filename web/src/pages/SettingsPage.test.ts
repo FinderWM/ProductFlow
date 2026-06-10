@@ -5,6 +5,7 @@ import {
   configValuesFromChangedDrafts,
   draftsFromConfig,
   filterProviderModels,
+  filterProviderProfiles,
   type GenerationConfigDraft,
   generationConfigResourceGroupIds,
   generationConfigPayloadFromDraft,
@@ -339,6 +340,29 @@ describe("SettingsPage provider profile helpers", () => {
     ]);
     expect(filterProviderModels(models, "opus").map((model) => model.id)).toEqual(["anthropic/claude-opus-4"]);
     expect(filterProviderModels(models, "dall-e")).toEqual([]);
+  });
+
+  it("filters provider profiles by name, id, base URL, or provider type", () => {
+    const profiles = [
+      providerProfile({ id: "openrouter-main", name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" }),
+      providerProfile({
+        id: "gemini-image",
+        name: "Gemini Image",
+        provider_type: "google_gemini",
+        base_url: null,
+        capabilities: ["image_google_gemini"],
+      }),
+      providerProfile({ id: "backup", name: "Backup Gateway", base_url: "https://gateway.example/v1" }),
+    ];
+
+    expect(filterProviderProfiles(profiles, "").map((profile) => profile.id)).toEqual([
+      "openrouter-main",
+      "gemini-image",
+      "backup",
+    ]);
+    expect(filterProviderProfiles(profiles, " ROUTER ").map((profile) => profile.id)).toEqual(["openrouter-main"]);
+    expect(filterProviderProfiles(profiles, "google").map((profile) => profile.id)).toEqual(["gemini-image"]);
+    expect(filterProviderProfiles(profiles, "gateway.example").map((profile) => profile.id)).toEqual(["backup"]);
   });
 
   it("opens the drawer in create mode with a clean provider form", () => {

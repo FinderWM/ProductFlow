@@ -25,6 +25,13 @@ class GallerySaveResult:
     created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class GalleryEntryListResult:
+    items: list[ImageGalleryEntry]
+    has_more: bool
+    next_offset: int | None
+
+
 def _gallery_entry_query():
     return (
         select(ImageGalleryEntry)
@@ -48,7 +55,9 @@ def list_gallery_entries(
     resource_group_id: str | None = None,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
-) -> list[ImageGalleryEntry]:
+    limit: int | None = None,
+    offset: int = 0,
+) -> GalleryEntryListResult:
     statement = _gallery_entry_query()
     normalized_group_id = (resource_group_id or "").strip() or None
     if normalized_group_id is not None:
@@ -62,13 +71,23 @@ def list_gallery_entries(
         else:
             statement = statement.where(ImageGalleryEntry.resource_group_id == normalized_group_id)
     entries = list(session.scalars(statement).all())
-    if actor_is_admin or actor_user_id is None:
-        return entries
-    return [
-        entry
-        for entry in entries
-        if entry.owner_user_id == actor_user_id or moderation_state_for_resource(entry).effective_enabled
-    ]
+    if not actor_is_admin and actor_user_id is not None:
+        entries = [
+            entry
+            for entry in entries
+            if entry.owner_user_id == actor_user_id or moderation_state_for_resource(entry).effective_enabled
+        ]
+
+    start = max(offset, 0)
+    if limit is None:
+        return GalleryEntryListResult(items=entries[start:], has_more=False, next_offset=None)
+
+    end = start + limit
+    return GalleryEntryListResult(
+        items=entries[start:end],
+        has_more=len(entries) > end,
+        next_offset=end if len(entries) > end else None,
+    )
 
 
 def _get_gallery_entry_by_asset_id(session: Session, image_session_asset_id: str) -> ImageGalleryEntry | None:

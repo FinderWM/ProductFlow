@@ -33,10 +33,19 @@ import {
   ResourceBlockedNotice,
   ResourceMetaBadges,
 } from "../components/ResourceGovernance";
+import { ResourceLibraryModal } from "../components/resource-library/ResourceLibraryModal";
+import {
+  SaveToResourceLibraryDialog,
+  type ResourceLibrarySaveSource,
+} from "../components/resource-library/SaveToResourceLibraryDialog";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
+import {
+  generationConfigOptionLabel,
+  generationConfigOptionsForPurpose,
+} from "../lib/generationConfigs";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { useI18n } from "../lib/preferences";
 import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
@@ -96,6 +105,9 @@ import type {
   ImageGenerationSubmitPayload,
 } from "./image-chat/branching";
 import type {
+  GenerationConfigOption,
+  GenerationConfigSelectionMode,
+  GenerationResourceGroup,
   ImageSessionDetail,
   ImageSessionAsset,
   ImageSessionRound,
@@ -103,9 +115,8 @@ import type {
   ImageSessionListResponse,
   ImageSessionStatus,
   ImageToolOptions,
-  GenerationConfigSelectionMode,
-  GenerationResourceGroup,
   ModerationFields,
+  ResourceLibraryAsset,
   SessionUser,
   SourceAsset,
 } from "../lib/types";
@@ -217,7 +228,16 @@ function imageRoundGenerationGroupId(round: ImageSessionRound): string {
   return round.generation_group_id ?? round.id;
 }
 
-export function ImageChatPage() {
+interface ImageChatPageProps {
+  mode?: "auto" | "workbench";
+}
+
+export function ImageChatPage(props: ImageChatPageProps = {}) {
+  void props.mode;
+  return <ImageChatWorkbenchPage />;
+}
+
+function ImageChatWorkbenchPage() {
   const { t } = useI18n();
   const sessionState = useSessionState();
   const navigate = useNavigate();
@@ -260,6 +280,8 @@ export function ImageChatPage() {
   const [settingsTab, setSettingsTab] = useState<ImageGenerationSettingsTab>(
     () => readImageChatRouteState(routeStateScope)?.settingsTab ?? "basic",
   );
+  const [promptPolishConfigMode, setPromptPolishConfigMode] = useState<GenerationConfigSelectionMode>("auto");
+  const [promptPolishConfigId, setPromptPolishConfigId] = useState<string | null>(null);
   const [generationConfigMode, setGenerationConfigMode] = useState<GenerationConfigSelectionMode>("auto");
   const [generationConfigId, setGenerationConfigId] = useState<string | null>(null);
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(
@@ -290,6 +312,8 @@ export function ImageChatPage() {
   const [polishedPrompt, setPolishedPrompt] = useState("");
   const [previewRound, setPreviewRound] = useState<ImageSessionRound | null>(null);
   const [referencePreview, setReferencePreview] = useState<ReferenceImagePreview | null>(null);
+  const [resourceLibraryOpen, setResourceLibraryOpen] = useState(false);
+  const [resourceLibrarySaveSource, setResourceLibrarySaveSource] = useState<ResourceLibrarySaveSource | null>(null);
   const [pendingDeleteAction, setPendingDeleteAction] =
     useState<PendingDeleteAction | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -442,6 +466,11 @@ export function ImageChatPage() {
     queryFn: api.listMyGenerationResourceGroups,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
+  const generationConfigOptionsQuery = useQuery({
+    queryKey: ["generation-config-options"],
+    queryFn: api.listGenerationConfigOptions,
+    staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
+  });
   const rbacUsersQuery = useQuery({
     queryKey: ["rbac-users", "image-session-owner-filter", deferredSessionOwnerSearch],
     queryFn: () => api.listRbacUsers({ page_size: 30, query: deferredSessionOwnerSearch || undefined }),
@@ -463,6 +492,15 @@ export function ImageChatPage() {
   const resourceGroups = useMemo(
     () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
+  );
+  const generationConfigOptions = generationConfigOptionsQuery.data ?? [];
+  const promptPolishConfigOptions = useMemo(
+    () => generationConfigOptionsForPurpose(generationConfigOptions, "text", selectedResourceGroupId),
+    [generationConfigOptions, selectedResourceGroupId],
+  );
+  const imageGenerationConfigOptions = useMemo(
+    () => generationConfigOptionsForPurpose(generationConfigOptions, "image", selectedResourceGroupId),
+    [generationConfigOptions, selectedResourceGroupId],
   );
   const currentInspiration = isInspirationMode
     ? (inspirationQuery.data ?? null)
@@ -518,6 +556,48 @@ export function ImageChatPage() {
     selectedSessionResourceGroupId,
   ]);
 
+  useEffect(() => {
+    if (promptPolishConfigMode !== "manual") {
+      if (promptPolishConfigId) {
+        setPromptPolishConfigId(null);
+      }
+      return;
+    }
+    if (!generationConfigOptionsQuery.isFetched || !promptPolishConfigId) {
+      return;
+    }
+    if (!promptPolishConfigOptions.some((config) => config.id === promptPolishConfigId)) {
+      setPromptPolishConfigMode("auto");
+      setPromptPolishConfigId(null);
+    }
+  }, [
+    generationConfigOptionsQuery.isFetched,
+    promptPolishConfigId,
+    promptPolishConfigMode,
+    promptPolishConfigOptions,
+  ]);
+
+  useEffect(() => {
+    if (generationConfigMode !== "manual") {
+      if (generationConfigId) {
+        setGenerationConfigId(null);
+      }
+      return;
+    }
+    if (!generationConfigOptionsQuery.isFetched || !generationConfigId) {
+      return;
+    }
+    if (!imageGenerationConfigOptions.some((config) => config.id === generationConfigId)) {
+      setGenerationConfigMode("auto");
+      setGenerationConfigId(null);
+    }
+  }, [
+    generationConfigId,
+    generationConfigMode,
+    generationConfigOptionsQuery.isFetched,
+    imageGenerationConfigOptions,
+  ]);
+
   function resetImageSessionSelection() {
     setSelectedGeneratedAssetId(null);
     setSelectedTaskPlaceholderId(null);
@@ -525,14 +605,14 @@ export function ImageChatPage() {
     setSelectedReferenceAssetIds([]);
     setGenerationDraftMode(null);
     setRetryGenerationTaskId(null);
+    setPromptPolishConfigMode("auto");
+    setPromptPolishConfigId(null);
     setGenerationConfigMode("auto");
     setGenerationConfigId(null);
   }
 
   function handleGenerationResourceGroupChange(value: string) {
     setSelectedResourceGroupId(value || null);
-    setGenerationConfigMode("auto");
-    setGenerationConfigId(null);
   }
 
   function handleSelectSession(sessionId: string) {
@@ -791,6 +871,18 @@ export function ImageChatPage() {
     () => findImageHistoryPlaceholder(historyBranches, selectedTaskPlaceholderId),
     [historyBranches, selectedTaskPlaceholderId],
   );
+  const selectedGeneratedResourceStatusQuery = useQuery({
+    queryKey: ["resource-library-source-status", "image_session_asset", selectedRound?.generated_asset.id ?? ""],
+    queryFn: () =>
+      api.listResourceLibrarySourceStatus({
+        source_type: "image_session_asset",
+        source_ids: [selectedRound!.generated_asset.id],
+      }),
+    enabled: Boolean(selectedRound?.generated_asset.id),
+  });
+  const selectedGeneratedSavedToResourceLibrary = Boolean(
+    selectedGeneratedResourceStatusQuery.data?.items[0]?.saved,
+  );
   const activePreviewRound =
     previewRound && imageSession?.rounds.some((round) => round.id === previewRound.id) ? previewRound : null;
 
@@ -884,6 +976,15 @@ export function ImageChatPage() {
     : selectedResultAdminReadonly
       ? adminReadonlyActionTitle
       : galleryWritePermissionTitle;
+  const resourceLibrarySaveGeneratedBlockedTitle = selectedResultResourceBlockedTitle
+    ? selectedResultResourceBlockedTitle
+    : selectedResultAdminReadonly
+      ? adminReadonlyActionTitle
+      : null;
+  const resourceLibraryLoadReferenceBlockedTitle =
+    !selectedSessionId
+      ? t("chat.noSessions")
+      : sessionEditBlockedTitle;
   const inspirationAttachBlockedTitle = inspirationAttachBlockedResource
     ? blockedActionMessage(inspirationAttachBlockedResource)
     : inspirationAttachAdminReadonly
@@ -1094,8 +1195,8 @@ export function ImageChatPage() {
       return api.polishImageSessionPrompt({
         prompt,
         resource_group_id: selectedResourceGroupId ?? "",
-        generation_config_mode: "auto",
-        generation_config_id: null,
+        generation_config_mode: promptPolishConfigMode,
+        generation_config_id: promptPolishConfigMode === "manual" ? promptPolishConfigId : null,
       });
     },
     onSuccess: (response) => {
@@ -1125,6 +1226,15 @@ export function ImageChatPage() {
     },
   });
 
+  const promptPolishConfigRequirementMessage =
+    promptPolishConfigMode === "manual" && !promptPolishConfigId ? t("chat.promptPolishConfigRequired") : null;
+  const imageGenerationConfigRequirementMessage =
+    generationConfigMode === "manual" && !generationConfigId ? t("chat.imageGenerationConfigRequired") : null;
+  const generationSubmitRequirementMessage =
+    generationDraftGateMessage ||
+    baseRequirementMessage ||
+    resourceGroupRequirementMessage ||
+    imageGenerationConfigRequirementMessage;
   const generateDisabled =
     !selectedSessionId ||
     !imageSession ||
@@ -1132,7 +1242,7 @@ export function ImageChatPage() {
     !draft.trim() ||
     generateMutation.isPending ||
     Boolean(generationBlockedTitle) ||
-    Boolean(generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage);
+    Boolean(generationSubmitRequirementMessage);
 
   const attachMutation = useMutation({
     mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; inspirationId?: string }) => {
@@ -1168,6 +1278,38 @@ export function ImageChatPage() {
     },
   });
 
+  const loadResourceLibraryReferenceMutation = useMutation({
+    mutationFn: (assetId: string) => {
+      assertImageChatActionAllowed(resourceLibraryLoadReferenceBlockedTitle);
+      return api.loadResourceLibraryAssetToImageSession(assetId, {
+        image_session_id: selectedSessionId!,
+      });
+    },
+    onSuccess: (updated) => {
+      const previousReferenceIds = new Set(sessionReferenceAssets.map((asset) => asset.id));
+      const loadedReferenceIds = updated.assets
+        .filter((asset) => asset.kind === "reference_upload" && !previousReferenceIds.has(asset.id))
+        .map((asset) => asset.id);
+      queryClient.setQueryData(["image-session", updated.id], updated);
+      void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
+      if (updated.id === selectedSessionId && loadedReferenceIds.length) {
+        setSelectedReferenceAssetIds((current) =>
+          pruneSelectedReferenceIds(
+            [...current, ...loadedReferenceIds],
+            getSessionReferenceAssets(updated).map((asset) => asset.id),
+            maxSelectedReferenceCount,
+          ),
+        );
+      }
+      setResourceLibraryOpen(false);
+      setSuccessMessage(t("resourceLibrary.loadToImageSession"));
+      setErrorMessage("");
+    },
+    onError: (error) => {
+      setErrorMessage(error instanceof ApiError ? error.detail : t("resourceLibrary.loadFailedAction"));
+    },
+  });
+
   const deleteInspirationReferenceMutation = useMutation({
     mutationFn: (assetId: string) => {
       assertImageChatActionAllowed(inspirationReferenceEditBlockedTitle);
@@ -1199,6 +1341,7 @@ export function ImageChatPage() {
     !resourceGroups.length;
   const renameSessionDisabled = !selectedSessionId || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle);
   const saveSelectedGalleryDisabled = saveGalleryMutation.isPending || Boolean(selectedResultBlockedTitle);
+  const saveSelectedResourceLibraryDisabled = Boolean(resourceLibrarySaveGeneratedBlockedTitle);
   const sessionDeletionEnabled = deletionEnabled;
 
   function handleGenerate() {
@@ -1220,6 +1363,10 @@ export function ImageChatPage() {
     }
     if (resourceGroupRequirementMessage) {
       setErrorMessage(resourceGroupRequirementMessage);
+      return;
+    }
+    if (imageGenerationConfigRequirementMessage) {
+      setErrorMessage(imageGenerationConfigRequirementMessage);
       return;
     }
     if (generationDraftMode === "retry" && !retryGenerationTaskId) {
@@ -1272,6 +1419,10 @@ export function ImageChatPage() {
     }
     if (resourceGroupRequirementMessage) {
       setErrorMessage(resourceGroupRequirementMessage);
+      return;
+    }
+    if (promptPolishConfigRequirementMessage) {
+      setErrorMessage(promptPolishConfigRequirementMessage);
       return;
     }
     polishPromptMutation.mutate(prompt);
@@ -1456,6 +1607,34 @@ export function ImageChatPage() {
       return;
     }
     saveGalleryMutation.mutate(selectedRound.generated_asset.id);
+  }
+
+  function handleOpenResourceLibrary() {
+    setResourceLibraryOpen(true);
+  }
+
+  function handleSaveSelectedToResourceLibrary() {
+    if (!selectedRound) {
+      return;
+    }
+    if (resourceLibrarySaveGeneratedBlockedTitle) {
+      setErrorMessage(resourceLibrarySaveGeneratedBlockedTitle);
+      return;
+    }
+    setResourceLibrarySaveSource({
+      source_type: "image_session_asset",
+      source_id: selectedRound.generated_asset.id,
+      title: selectedRound.generated_asset.original_filename,
+      thumbnail_url: selectedRound.generated_asset.thumbnail_url,
+    });
+  }
+
+  function handleResourceLibraryAssetSelect(asset: ResourceLibraryAsset) {
+    if (resourceLibraryLoadReferenceBlockedTitle) {
+      setErrorMessage(resourceLibraryLoadReferenceBlockedTitle);
+      return;
+    }
+    loadResourceLibraryReferenceMutation.mutate(asset.id);
   }
 
   function handleSelectHistoryRound(assetId: string) {
@@ -1752,6 +1931,73 @@ export function ImageChatPage() {
     );
   }
 
+  function renderGenerationConfigSelector({
+    label,
+    helpKey,
+    mode,
+    configId,
+    options,
+    onModeChange,
+    onConfigIdChange,
+    disabled = false,
+  }: {
+    label: string;
+    helpKey: "imageChatPromptPolishConfig" | "imageGenerationConfig";
+    mode: GenerationConfigSelectionMode;
+    configId: string | null;
+    options: GenerationConfigOption[];
+    onModeChange: (mode: GenerationConfigSelectionMode) => void;
+    onConfigIdChange: (configId: string | null) => void;
+    disabled?: boolean;
+  }) {
+    const configOptions = [
+      {
+        value: "",
+        label: options.length ? t("chat.selectGenerationConfig") : t("chat.noGenerationConfigs"),
+        disabled: true,
+      },
+      ...options.map((config) => ({
+        value: config.id,
+        label: generationConfigOptionLabel(
+          config,
+          t("chat.generationConfigDisabled"),
+          t("chat.generationConfigFrozen"),
+        ),
+        disabled: !config.enabled,
+      })),
+    ];
+    return (
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+        <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+          <ParameterHelpLabel label={label} helpKey={helpKey} uiType="imageChat" />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <SelectField
+            value={mode}
+            options={[
+              { value: "auto", label: t("chat.generationConfigAuto") },
+              { value: "manual", label: t("chat.generationConfigManual") },
+            ]}
+            onChange={(value) => onModeChange(value === "manual" ? "manual" : "auto")}
+            ariaLabel={label}
+            radius="lg"
+            visualSize="sm"
+            disabled={disabled}
+          />
+          <SelectField
+            value={mode === "manual" ? (configId ?? "") : ""}
+            options={configOptions}
+            onChange={(value) => onConfigIdChange(value || null)}
+            ariaLabel={label}
+            radius="lg"
+            visualSize="sm"
+            disabled={disabled || mode !== "manual"}
+          />
+        </div>
+      </div>
+    );
+  }
+
   function renderSessionResourceGroupFilter() {
     const selectedSessionResourceGroup = resourceGroups.find((group) => group.id === selectedSessionResourceGroupId);
     const showSensitiveImageMaskPreference = shouldShowSensitiveImageMaskPreference(
@@ -1907,7 +2153,9 @@ export function ImageChatPage() {
               }
               disabled={!selectedSessionId || Boolean(sessionEditBlockedTitle)}
               selectionDisabled={Boolean(generationSettingsBlockedTitle)}
+              resourceLibraryDisabledTitle={resourceLibraryLoadReferenceBlockedTitle}
               onFiles={handleUploadReferenceFiles}
+              onOpenResourceLibrary={handleOpenResourceLibrary}
               onToggle={handleReferenceToggle}
               onDelete={handleDeleteSessionReference}
               onPreview={(asset) => setReferencePreview({ asset, title: t("chat.sessionReferences") })}
@@ -1915,6 +2163,16 @@ export function ImageChatPage() {
             />
 
             {renderResourceGroupSelector({ disabled: Boolean(generationSettingsBlockedTitle) })}
+            {renderGenerationConfigSelector({
+              label: t("chat.imageGenerationConfig"),
+              helpKey: "imageGenerationConfig",
+              mode: generationConfigMode,
+              configId: generationConfigId,
+              options: imageGenerationConfigOptions,
+              onModeChange: setGenerationConfigMode,
+              onConfigIdChange: setGenerationConfigId,
+              disabled: Boolean(generationSettingsBlockedTitle),
+            })}
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-950 dark:text-white" htmlFor={promptId}>
@@ -1934,15 +2192,34 @@ export function ImageChatPage() {
                 className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
               />
               <div className="mt-2 grid gap-2">
+                {renderGenerationConfigSelector({
+                  label: t("chat.promptPolishConfig"),
+                  helpKey: "imageChatPromptPolishConfig",
+                  mode: promptPolishConfigMode,
+                  configId: promptPolishConfigId,
+                  options: promptPolishConfigOptions,
+                  onModeChange: setPromptPolishConfigMode,
+                  onConfigIdChange: setPromptPolishConfigId,
+                  disabled: Boolean(generationSettingsBlockedTitle),
+                })}
                 <button
                   type="button"
                   onClick={handlePolishPrompt}
                   disabled={
                     !draft.trim() ||
                     polishPromptMutation.isPending ||
-                    Boolean(generationSettingsBlockedTitle || resourceGroupRequirementMessage)
+                    Boolean(
+                      generationSettingsBlockedTitle ||
+                      resourceGroupRequirementMessage ||
+                      promptPolishConfigRequirementMessage,
+                    )
                   }
-                  title={generationSettingsBlockedTitle ?? t("chat.polishPrompt")}
+                  title={
+                    generationSettingsBlockedTitle ??
+                    resourceGroupRequirementMessage ??
+                    promptPolishConfigRequirementMessage ??
+                    t("chat.polishPrompt")
+                  }
                   className="inline-flex w-full items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25"
                 >
                   {polishPromptMutation.isPending ? (
@@ -2280,6 +2557,19 @@ export function ImageChatPage() {
                       )}
                       {t("chat.sendGallery")}
                     </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveSelectedToResourceLibrary}
+                      disabled={saveSelectedResourceLibraryDisabled}
+                      title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
+                      aria-label={t("chat.resourceLibrary.saveGenerated")}
+                      className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100"
+                    >
+                      <Save size={16} className="mr-2" />
+                      {selectedGeneratedSavedToResourceLibrary
+                        ? t("resourceLibrary.alreadyInLibrary")
+                        : t("chat.resourceLibrary.saveGenerated")}
+                    </button>
                   </>
                 ) : selectedPlaceholder ? (
                   <span className={`rounded-full border px-3 py-1.5 text-xs font-medium shadow-sm ${placeholderStatusClass(selectedPlaceholder)}`}>
@@ -2424,16 +2714,16 @@ export function ImageChatPage() {
             {generationBlockedResource ? (
               <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
             ) : null}
-            {generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage ? (
+            {generationSubmitRequirementMessage ? (
               <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                {generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage}
+                {generationSubmitRequirementMessage}
               </div>
             ) : null}
             <button
               type="button"
               onClick={handleGenerate}
               disabled={generateDisabled}
-              title={generationBlockedTitle ?? (generationDraftGateMessage || t("chat.startGenerate"))}
+              title={generationBlockedTitle ?? (generationSubmitRequirementMessage || t("chat.startGenerate"))}
               className="inline-flex w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
             >
               {generateMutation.isPending ? (
@@ -2606,6 +2896,21 @@ export function ImageChatPage() {
                 {saveGalleryMutation.isPending ? <Loader2 size={15} className="shrink-0 animate-spin" /> : <GalleryHorizontalEnd size={15} className="shrink-0" />}
                 <span>{t("chat.sendGalleryShort")}</span>
               </button>
+              <button
+                type="button"
+                onClick={handleSaveSelectedToResourceLibrary}
+                disabled={saveSelectedResourceLibraryDisabled}
+                title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
+                aria-label={t("chat.resourceLibrary.saveGenerated")}
+                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+              >
+                <Save size={15} className="shrink-0" />
+                <span>
+                  {selectedGeneratedSavedToResourceLibrary
+                    ? t("resourceLibrary.alreadyInLibrary")
+                    : t("resourceLibrary.title")}
+                </span>
+              </button>
             </div>
           ) : null}
           <button
@@ -2672,16 +2977,16 @@ export function ImageChatPage() {
               {generationBlockedResource ? (
                 <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
               ) : null}
-              {generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage ? (
+              {generationSubmitRequirementMessage ? (
                 <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                  {generationDraftGateMessage || baseRequirementMessage || resourceGroupRequirementMessage}
+                  {generationSubmitRequirementMessage}
                 </div>
               ) : null}
               <button
                 type="button"
                 onClick={handleGenerate}
                 disabled={generateDisabled}
-                title={generationBlockedTitle ?? (generationDraftGateMessage || t("chat.startGenerate"))}
+                title={generationBlockedTitle ?? (generationSubmitRequirementMessage || t("chat.startGenerate"))}
                 className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
               >
                 {generateMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Sparkles size={15} className="mr-2" />}
@@ -2752,6 +3057,25 @@ export function ImageChatPage() {
           onClose={() => setReferencePreview(null)}
         />
       ) : null}
+      <ResourceLibraryModal
+        open={resourceLibraryOpen}
+        onClose={() => setResourceLibraryOpen(false)}
+        canRead
+        onSelectAsset={handleResourceLibraryAssetSelect}
+        selectLabel={t("resourceLibrary.loadToImageSession")}
+        selectDisabled={Boolean(resourceLibraryLoadReferenceBlockedTitle)}
+        selectDisabledTitle={resourceLibraryLoadReferenceBlockedTitle}
+        selectingAssetId={loadResourceLibraryReferenceMutation.variables ?? null}
+      />
+      <SaveToResourceLibraryDialog
+        source={resourceLibrarySaveSource}
+        canWrite={!resourceLibrarySaveGeneratedBlockedTitle}
+        onClose={() => setResourceLibrarySaveSource(null)}
+        onSaved={() => {
+          setSuccessMessage(t("resourceLibrary.saved"));
+          setErrorMessage("");
+        }}
+      />
       {createSessionDialogOpen ? (
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"

@@ -50,6 +50,7 @@ class ConfigUpdateRequest(BaseModel):
 
 class UserUiPreferencesResponse(BaseModel):
     user_id: str
+    ui_layout_scheme: str = "classic"
     mask_sensitive_images_in_inspirations: bool = True
     mask_sensitive_images_in_image_chat: bool = True
     created_at: str
@@ -57,6 +58,7 @@ class UserUiPreferencesResponse(BaseModel):
 
 
 class UserUiPreferencesUpdateRequest(BaseModel):
+    ui_layout_scheme: str | None = None
     mask_sensitive_images_in_inspirations: bool | None = None
     mask_sensitive_images_in_image_chat: bool | None = None
 

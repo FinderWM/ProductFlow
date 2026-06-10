@@ -6,12 +6,14 @@ import {
   Eye,
   EyeOff,
   FileText,
+  FolderOpen,
   Image as ImageIcon,
   ImagePlus,
   Loader2,
   OctagonX,
   Play,
   Plus,
+  Save,
   Trash2,
   Upload,
   XCircle,
@@ -27,6 +29,10 @@ import { ParameterHelpButton } from "../../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
 import { SelectField } from "../../components/SelectField";
 import type { DownloadableImage } from "../../lib/image-downloads";
+import {
+  generationConfigOptionLabel,
+  generationConfigOptionsForPurpose,
+} from "../../lib/generationConfigs";
 import type { ImageSizeOption } from "../../lib/imageSizes";
 import { formatDateTime, formatPrice } from "../../lib/format";
 import type { TranslationKey, TranslationParams } from "../../lib/i18n";
@@ -37,16 +43,18 @@ import type {
   CopyBlock,
   CopyPayloadV2,
   CopySection,
+  GenerationConfigOption,
   GenerationResourceGroup,
   ImageToolOptionKey,
   InspirationDetail,
   InspirationInitialWorkflowEntry,
   InspirationWorkflow,
+  SourceAsset,
   WorkflowNode,
 } from "../../lib/types";
 import { IMAGE_PREVIEW_SURFACE_CLASS_NAME } from "./constants";
 import { DownloadLink } from "./ImageDownloadComponents";
-import { getNodeImageDownload } from "./imageDownloads";
+import { getNodeImageDownload, getNodeImageSourceAsset } from "./imageDownloads";
 import { workflowNodeDisplayLabel, workflowNodeDisplayTitle } from "./nodeDisplay";
 import type { NodeConfigDraft, SaveStatus } from "./types";
 import {
@@ -200,6 +208,7 @@ interface InspectorPanelProps {
   imageToolAllowedFields: readonly ImageToolOptionKey[];
   tailSplitterMaxItems: number;
   resourceGroups: GenerationResourceGroup[];
+  generationConfigOptions: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   onPreviewImage: (image: DownloadableImage) => void;
   onRun: () => void;
@@ -207,6 +216,12 @@ interface InspectorPanelProps {
   onUploadImage: (file: File) => void;
   onUploadDocument: (file: File) => void;
   onClearImage: () => void;
+  onOpenResourceLibrary?: () => void;
+  resourceLibraryDisabledTitle?: string | null;
+  onSaveSourceAssetToResourceLibrary?: (asset: SourceAsset) => void;
+  resourceLibrarySaveDisabledTitle?: string | null;
+  savedResourceLibrarySourceAssetIds?: ReadonlySet<string>;
+  savingResourceLibrarySourceId?: string | null;
   onDelete: () => void;
   busy: boolean;
   cancelBusy: boolean;
@@ -225,6 +240,7 @@ export function InspectorPanel({
   imageToolAllowedFields,
   tailSplitterMaxItems,
   resourceGroups,
+  generationConfigOptions,
   onDraftChange,
   onPreviewImage,
   onRun,
@@ -232,6 +248,12 @@ export function InspectorPanel({
   onUploadImage,
   onUploadDocument,
   onClearImage,
+  onOpenResourceLibrary,
+  resourceLibraryDisabledTitle = null,
+  onSaveSourceAssetToResourceLibrary,
+  resourceLibrarySaveDisabledTitle = null,
+  savedResourceLibrarySourceAssetIds,
+  savingResourceLibrarySourceId = null,
   onDelete,
   busy,
   cancelBusy,
@@ -276,11 +298,31 @@ export function InspectorPanel({
       node.output_json.source_asset_ids.length,
   );
   const referenceImage = node.node_type === "reference_image" ? getNodeImageDownload(node, inspiration, t) : null;
+  const nodeImageSourceAsset = getNodeImageSourceAsset(node, inspiration);
+  const nodeImageSavedToResourceLibrary = nodeImageSourceAsset
+    ? (savedResourceLibrarySourceAssetIds?.has(nodeImageSourceAsset.id) ?? false)
+    : false;
+  const nodeImageSaveBusy = Boolean(nodeImageSourceAsset && savingResourceLibrarySourceId === nodeImageSourceAsset.id);
   const activeRunContext = getWorkflowNodeActiveRunContext(workflow, node);
   const activeRunQueueText = activeRunContext ? workflowRunQueueText(activeRunContext.run, t) : "";
   const activeRunNodeText = workflowNodeActivityText(
     { ...node, status: activeRunContext?.nodeRun.status ?? node.status },
     t,
+  );
+  const showActiveRunIndicator =
+    showRunAction &&
+    runActionState.disabled &&
+    runActionState.pending &&
+    (node.status === "queued" || node.status === "running");
+  const textGenerationConfigOptions = generationConfigOptionsForPurpose(
+    generationConfigOptions,
+    "text",
+    draft.resourceGroupId,
+  );
+  const imageGenerationConfigOptions = generationConfigOptionsForPurpose(
+    generationConfigOptions,
+    "image",
+    draft.resourceGroupId,
   );
 
   return (
@@ -334,24 +376,34 @@ export function InspectorPanel({
         </div>
 
         {activeRunContext ? (
-          <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2.5 text-xs leading-5 text-indigo-700 dark:border-violet-400/30 dark:bg-violet-500/10 dark:text-violet-100">
-            <div className="flex items-start gap-2">
-              <Loader2 size={14} className="mt-0.5 shrink-0 animate-spin" />
-              <div className="min-w-0">
-                <div className="font-semibold">
-                  {activeRunContext.nodeRun.status === "queued"
-                    ? t("detail.inspector.activeRunQueued")
-                    : t("detail.inspector.activeRunRunning")}
+          <div className="mt-4 overflow-hidden rounded-2xl border border-blue-300/70 bg-blue-50/95 text-blue-950 shadow-[0_14px_28px_rgba(37,99,235,0.12)] dark:border-sky-300/45 dark:bg-sky-400/15 dark:text-white dark:shadow-[0_18px_36px_rgba(56,189,248,0.12)]">
+            <div className="h-1 bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-600" />
+            <div className="flex items-start gap-3 px-3 py-3">
+              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-500/25 dark:bg-sky-300 dark:text-slate-950 dark:shadow-sky-300/20">
+                <Loader2 size={15} className="animate-spin" />
+              </span>
+              <div className="min-w-0 flex-1 text-xs leading-5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-sm font-semibold">
+                    {activeRunContext.nodeRun.status === "queued"
+                      ? t("detail.inspector.activeRunQueued")
+                      : t("detail.inspector.activeRunRunning")}
+                  </div>
+                  <span className="rounded-full border border-blue-300/70 bg-white/75 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:border-sky-200/35 dark:bg-white/10 dark:text-sky-100">
+                    {workflowNodeStatusLabel(
+                      { ...node, status: activeRunContext.nodeRun.status },
+                      t,
+                    )}
+                  </span>
                 </div>
                 {activeRunNodeText ? (
-                  <div className="mt-0.5 text-indigo-600/85 dark:text-violet-100/80">{activeRunNodeText}</div>
+                  <div className="mt-1 text-blue-800/85 dark:text-sky-50/80">{activeRunNodeText}</div>
                 ) : null}
                 {activeRunQueueText ? (
-                  <div className="mt-1 text-indigo-600/75 dark:text-violet-100/70">{activeRunQueueText}</div>
+                  <div className="mt-1 text-blue-700/75 dark:text-sky-100/70">{activeRunQueueText}</div>
                 ) : null}
-                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-indigo-600/70 dark:text-violet-100/60">
+                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-blue-700/65 dark:text-sky-100/60">
                   <span>{t("detail.nodeRunStarted", { time: formatDateTime(activeRunContext.nodeRun.started_at) })}</span>
-                  {activeRunContext.run.is_cancelable ? <span>{t("detail.runCancelable")}</span> : null}
                 </div>
               </div>
             </div>
@@ -360,7 +412,17 @@ export function InspectorPanel({
 
         {showActionRow ? (
           <div className={`mt-4 grid gap-2 ${actionGridColumns}`}>
-            {showRunAction ? (
+            {showActiveRunIndicator ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-300/70 bg-blue-50 px-3 py-2.5 text-xs font-semibold text-blue-700 shadow-sm dark:border-sky-300/40 dark:bg-sky-400/15 dark:text-sky-100"
+                title={runActionState.title}
+              >
+                <Loader2 size={13} className="mr-1.5 animate-spin" />
+                {runActionState.label}
+              </div>
+            ) : showRunAction ? (
               <button
                 type="button"
                 onClick={onRun}
@@ -397,7 +459,9 @@ export function InspectorPanel({
                 type="button"
                 onClick={onDelete}
                 disabled={busy}
-                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
+                className={`inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring ${
+                  showActiveRunIndicator && onCancelRun ? "col-span-2" : ""
+                }`}
               >
                 <Trash2 size={13} className="mr-1.5" /> {t("detail.delete")}
               </button>
@@ -442,6 +506,11 @@ export function InspectorPanel({
             onPreviewImage={onPreviewImage}
             onUploadImage={onUploadImage}
             onUploadDocument={onUploadDocument}
+            sourceAsset={nodeImageSourceAsset}
+            onSaveSourceAssetToResourceLibrary={onSaveSourceAssetToResourceLibrary}
+            resourceLibrarySaveDisabledTitle={resourceLibrarySaveDisabledTitle}
+            savedToResourceLibrary={nodeImageSavedToResourceLibrary}
+            savingToResourceLibrary={nodeImageSaveBusy}
             busy={busy}
             t={t}
           />
@@ -452,9 +521,16 @@ export function InspectorPanel({
             onDraftChange={onDraftChange}
             onUploadImage={onUploadImage}
             onClearImage={onClearImage}
+            onOpenResourceLibrary={onOpenResourceLibrary}
+            resourceLibraryDisabledTitle={resourceLibraryDisabledTitle}
             busy={busy}
             hasImage={hasReferenceImage}
             image={referenceImage}
+            sourceAsset={nodeImageSourceAsset}
+            onSaveSourceAssetToResourceLibrary={onSaveSourceAssetToResourceLibrary}
+            resourceLibrarySaveDisabledTitle={resourceLibrarySaveDisabledTitle}
+            savedToResourceLibrary={nodeImageSavedToResourceLibrary}
+            savingToResourceLibrary={nodeImageSaveBusy}
             onPreviewImage={onPreviewImage}
             t={t}
           />
@@ -464,6 +540,7 @@ export function InspectorPanel({
             node={node}
             draft={draft}
             resourceGroups={resourceGroups}
+            generationConfigOptions={textGenerationConfigOptions}
             onDraftChange={onDraftChange}
             t={t}
           />
@@ -473,6 +550,7 @@ export function InspectorPanel({
             draft={draft}
             tailSplitterMaxItems={tailSplitterMaxItems}
             resourceGroups={resourceGroups}
+            generationConfigOptions={textGenerationConfigOptions}
             onDraftChange={onDraftChange}
             t={t}
           />
@@ -485,6 +563,7 @@ export function InspectorPanel({
             imageGenerationMaxDimension={imageGenerationMaxDimension}
             imageToolAllowedFields={imageToolAllowedFields}
             resourceGroups={resourceGroups}
+            generationConfigOptions={imageGenerationConfigOptions}
             onDraftChange={onDraftChange}
             downstreamReferenceCount={downstreamReferenceCount}
             onPreviewPrompt={setPromptPreview}
@@ -541,6 +620,11 @@ function InspirationContextInspector({
   onPreviewImage,
   onUploadImage,
   onUploadDocument,
+  sourceAsset,
+  onSaveSourceAssetToResourceLibrary,
+  resourceLibrarySaveDisabledTitle = null,
+  savedToResourceLibrary,
+  savingToResourceLibrary,
   busy,
   t,
 }: {
@@ -551,6 +635,11 @@ function InspirationContextInspector({
   onPreviewImage: (image: DownloadableImage) => void;
   onUploadImage: (file: File) => void;
   onUploadDocument: (file: File) => void;
+  sourceAsset: SourceAsset | null;
+  onSaveSourceAssetToResourceLibrary?: (asset: SourceAsset) => void;
+  resourceLibrarySaveDisabledTitle?: string | null;
+  savedToResourceLibrary: boolean;
+  savingToResourceLibrary: boolean;
   busy: boolean;
   t: TFunction;
 }) {
@@ -615,6 +704,14 @@ function InspirationContextInspector({
           <div className="text-xs text-zinc-400 dark:text-slate-500">{t("detail.inspector.noSourceImage")}</div>
         )}
       </div>
+      <SaveCurrentImageToResourceLibraryButton
+        sourceAsset={sourceAsset}
+        onSaveSourceAssetToResourceLibrary={onSaveSourceAssetToResourceLibrary}
+        disabledTitle={resourceLibrarySaveDisabledTitle}
+        saved={savedToResourceLibrary}
+        busy={savingToResourceLibrary}
+        t={t}
+      />
       <ImageDropZone
         ariaLabel={sourceImage ? t("detail.inspector.replaceContextImage") : t("detail.inspector.uploadContextImage")}
         disabled={busy}
@@ -859,6 +956,13 @@ function ReferenceImageInspector({
   onDraftChange,
   onUploadImage,
   onClearImage,
+  onOpenResourceLibrary,
+  resourceLibraryDisabledTitle = null,
+  sourceAsset,
+  onSaveSourceAssetToResourceLibrary,
+  resourceLibrarySaveDisabledTitle = null,
+  savedToResourceLibrary,
+  savingToResourceLibrary,
   busy,
   hasImage,
   image,
@@ -869,6 +973,13 @@ function ReferenceImageInspector({
   onDraftChange: (draft: NodeConfigDraft) => void;
   onUploadImage: (file: File) => void;
   onClearImage: () => void;
+  onOpenResourceLibrary?: () => void;
+  resourceLibraryDisabledTitle?: string | null;
+  sourceAsset: SourceAsset | null;
+  onSaveSourceAssetToResourceLibrary?: (asset: SourceAsset) => void;
+  resourceLibrarySaveDisabledTitle?: string | null;
+  savedToResourceLibrary: boolean;
+  savingToResourceLibrary: boolean;
   busy: boolean;
   hasImage: boolean;
   image: DownloadableImage | null;
@@ -912,6 +1023,14 @@ function ReferenceImageInspector({
           </div>
         </div>
       ) : null}
+      <SaveCurrentImageToResourceLibraryButton
+        sourceAsset={sourceAsset}
+        onSaveSourceAssetToResourceLibrary={onSaveSourceAssetToResourceLibrary}
+        disabledTitle={resourceLibrarySaveDisabledTitle}
+        saved={savedToResourceLibrary}
+        busy={savingToResourceLibrary}
+        t={t}
+      />
       <div className="block">
         <FieldLabel label={t("detail.inspector.role")} helpKey="referenceRole" />
         <div className="space-y-2">
@@ -980,7 +1099,52 @@ function ReferenceImageInspector({
           </div>
         )}
       </ImageDropZone>
+      {onOpenResourceLibrary ? (
+        <button
+          type="button"
+          onClick={onOpenResourceLibrary}
+          disabled={busy || Boolean(resourceLibraryDisabledTitle)}
+          title={resourceLibraryDisabledTitle ?? t("resourceLibrary.open")}
+          className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-slate-900 dark:hover:text-white"
+        >
+          <FolderOpen size={14} className="mr-2" />
+          {t("resourceLibrary.open")}
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+function SaveCurrentImageToResourceLibraryButton({
+  sourceAsset,
+  onSaveSourceAssetToResourceLibrary,
+  disabledTitle,
+  saved,
+  busy,
+  t,
+}: {
+  sourceAsset: SourceAsset | null;
+  onSaveSourceAssetToResourceLibrary?: (asset: SourceAsset) => void;
+  disabledTitle: string | null;
+  saved: boolean;
+  busy: boolean;
+  t: TFunction;
+}) {
+  if (!sourceAsset || !onSaveSourceAssetToResourceLibrary) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSaveSourceAssetToResourceLibrary(sourceAsset)}
+      disabled={busy || Boolean(disabledTitle)}
+      title={disabledTitle ?? t("resourceLibrary.saveToLibrary")}
+      className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-indigo-200 hover:bg-slate-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-slate-900 dark:hover:text-violet-100"
+    >
+      {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
+      {saved ? t("resourceLibrary.alreadyInLibrary") : t("resourceLibrary.saveToLibrary")}
+    </button>
   );
 }
 
@@ -1033,16 +1197,90 @@ function ResourceGroupSelector({
   );
 }
 
+function GenerationConfigSelector({
+  label,
+  helpKey,
+  draft,
+  options,
+  onDraftChange,
+  t,
+}: {
+  label: string;
+  helpKey: ParameterHelpKey;
+  draft: NodeConfigDraft;
+  options: GenerationConfigOption[];
+  onDraftChange: (draft: NodeConfigDraft) => void;
+  t: TFunction;
+}) {
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+      <FieldLabel
+        label={label}
+        helpKey={helpKey}
+        className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+      />
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        <SelectField
+          value={draft.generationConfigMode}
+          options={[
+            { value: "auto", label: t("detail.inspector.generationConfigAuto") },
+            { value: "manual", label: t("detail.inspector.generationConfigManual") },
+          ]}
+          onChange={(value) => {
+            const mode = value === "manual" ? "manual" : "auto";
+            onDraftChange({
+              ...draft,
+              generationConfigMode: mode,
+              generationConfigId: mode === "manual" ? draft.generationConfigId : null,
+            });
+          }}
+          ariaLabel={label}
+          radius="lg"
+          visualSize="sm"
+        />
+        <SelectField
+          value={draft.generationConfigMode === "manual" ? (draft.generationConfigId ?? "") : ""}
+          options={[
+            {
+              value: "",
+              label: options.length
+                ? t("detail.inspector.selectGenerationConfig")
+                : t("detail.inspector.noGenerationConfigs"),
+              disabled: true,
+            },
+            ...options.map((config) => ({
+              value: config.id,
+              label: generationConfigOptionLabel(
+                config,
+                t("detail.inspector.generationConfigDisabled"),
+                t("detail.inspector.generationConfigFrozen"),
+              ),
+              disabled: !config.enabled,
+            })),
+          ]}
+          onChange={(value) => onDraftChange({ ...draft, generationConfigId: value || null })}
+          ariaLabel={label}
+          radius="lg"
+          visualSize="sm"
+          disabled={draft.generationConfigMode !== "manual"}
+        />
+      </div>
+    </div>
+  );
+}
+
 function CopyNodeInspector({
   node,
   draft,
   resourceGroups,
+  generationConfigOptions,
   onDraftChange,
   t,
 }: {
   node: WorkflowNode;
   draft: NodeConfigDraft;
   resourceGroups: GenerationResourceGroup[];
+  generationConfigOptions: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   t: TFunction;
 }) {
@@ -1062,6 +1300,14 @@ function CopyNodeInspector({
         label={t("detail.inspector.resourceGroup")}
         draft={draft}
         resourceGroups={resourceGroups}
+        onDraftChange={onDraftChange}
+        t={t}
+      />
+      <GenerationConfigSelector
+        label={t("detail.inspector.textGenerationConfig")}
+        helpKey="copyTextGenerationConfig"
+        draft={draft}
+        options={generationConfigOptions}
         onDraftChange={onDraftChange}
         t={t}
       />
@@ -1110,12 +1356,14 @@ function TailSplitterInspector({
   draft,
   tailSplitterMaxItems,
   resourceGroups,
+  generationConfigOptions,
   onDraftChange,
   t,
 }: {
   draft: NodeConfigDraft;
   tailSplitterMaxItems: number;
   resourceGroups: GenerationResourceGroup[];
+  generationConfigOptions: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   t: TFunction;
 }) {
@@ -1155,6 +1403,14 @@ function TailSplitterInspector({
         label={t("detail.inspector.resourceGroup")}
         draft={draft}
         resourceGroups={resourceGroups}
+        onDraftChange={onDraftChange}
+        t={t}
+      />
+      <GenerationConfigSelector
+        label={t("detail.inspector.textGenerationConfig")}
+        helpKey="copyTextGenerationConfig"
+        draft={draft}
+        options={generationConfigOptions}
         onDraftChange={onDraftChange}
         t={t}
       />
@@ -1599,6 +1855,7 @@ function ImageGenerationInspector({
   imageGenerationMaxDimension,
   imageToolAllowedFields,
   resourceGroups,
+  generationConfigOptions,
   onDraftChange,
   downstreamReferenceCount,
   onPreviewPrompt,
@@ -1610,6 +1867,7 @@ function ImageGenerationInspector({
   imageGenerationMaxDimension: number;
   imageToolAllowedFields: readonly ImageToolOptionKey[];
   resourceGroups: GenerationResourceGroup[];
+  generationConfigOptions: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   downstreamReferenceCount: number;
   onPreviewPrompt: (preview: PromptPreview) => void;
@@ -1655,6 +1913,14 @@ function ImageGenerationInspector({
               label={t("detail.inspector.resourceGroup")}
               draft={draft}
               resourceGroups={resourceGroups}
+              onDraftChange={onDraftChange}
+              t={t}
+            />
+            <GenerationConfigSelector
+              label={t("detail.inspector.imageGenerationConfig")}
+              helpKey="imageGenerationConfig"
+              draft={draft}
+              options={generationConfigOptions}
               onDraftChange={onDraftChange}
               t={t}
             />

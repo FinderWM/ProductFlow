@@ -16,6 +16,7 @@ import {
   CloudSun,
   Flower2,
   Languages,
+  LayoutDashboard,
   Leaf,
   Loader2,
   LogOut,
@@ -27,17 +28,20 @@ import {
   Settings,
   ShieldCheck,
   Sun,
+  Trees,
   UserRound,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
+import { FloatingSurface } from "./FloatingSurface";
 import { useCurrentWeather, weatherGeocodingLanguage } from "../lib/currentWeather";
 import { LOCALES, type Locale, type TranslationKey } from "../lib/i18n";
 import { usePreferences } from "../lib/preferences";
 import {
   API_GALLERY_READ,
+  API_GLOBAL_TEMPLATES_MANAGE,
   API_IMAGE_CHAT_READ,
   API_INSPIRATIONS_READ,
   API_SETTINGS_READ,
@@ -46,9 +50,17 @@ import {
   hasRbacManagementAccess,
   hasSessionMenuApiPermission,
 } from "../lib/rbac";
+import { useSessionActions } from "../lib/sessionActions";
 import { useSessionState } from "../lib/session";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
+import { UI_LAYOUT_SCHEME_METADATA, type UiLayoutScheme } from "../lib/uiLayoutScheme";
 import type { CurrentWeather, CurrentWeatherCondition, SessionState, SessionUser } from "../lib/types";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
+import {
+  WORKSPACE_APPEARANCE_METADATA,
+  type WorkspaceAppearance,
+  workspaceAppearanceResolvedTheme,
+} from "../lib/workspaceAppearance";
 import {
   isBadWeatherCondition,
   isExtremeWeather,
@@ -58,6 +70,7 @@ import {
 import { searchWeatherLocations, weatherSources } from "../lib/weatherSources";
 
 interface TopNavProps {
+  /** Kept for page compatibility; global top nav no longer renders repeated page titles. */
   breadcrumbs?: string;
   onHome?: () => void;
   onLogout?: () => void;
@@ -94,13 +107,21 @@ export interface DesktopNavLayout {
 }
 
 const DESKTOP_NAV_GAP_PX = 4;
-const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 10;
+const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 36;
 const NAV_AUTO_HIDE_DELAY_MS = 5_000;
 const CURTAIN_EASING = "cubic-bezier(0.18, 0.9, 0.2, 1.12)";
 export const TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS = "h-[4.5rem] md:h-[4.65rem]";
 const TOP_CHROME_OPEN_HEIGHT_CLASS = "h-[4.75rem] md:h-[4.65rem]";
 
 const navItems: TopNavItem[] = [
+  {
+    labelKey: "nav.resourceLibrary",
+    to: "/resource-library",
+    menuCode: null,
+    priority: "primary",
+    icon: Trees,
+    match: (pathname: string) => pathname.startsWith("/resource-library"),
+  },
   {
     labelKey: "nav.inspirations",
     to: "/inspirations",
@@ -109,6 +130,15 @@ const navItems: TopNavItem[] = [
     priority: "primary",
     icon: Flower2,
     match: (pathname: string) => pathname.startsWith("/inspirations") && !pathname.endsWith("/image-chat"),
+  },
+  {
+    labelKey: "nav.templates",
+    to: "/workflow/templates",
+    menuCode: "inspirations",
+    requiredPermission: API_INSPIRATIONS_READ,
+    priority: "secondary",
+    icon: LayoutDashboard,
+    match: (pathname: string) => pathname.startsWith("/workflow/templates"),
   },
   {
     labelKey: "nav.imageChat",
@@ -153,7 +183,16 @@ const navItems: TopNavItem[] = [
     requiredPermission: API_SETTINGS_READ,
     priority: "primary",
     icon: Settings,
-    match: (pathname: string) => pathname.startsWith("/settings"),
+    match: (pathname: string) => pathname === "/settings",
+  },
+  {
+    labelKey: "nav.globalTemplates",
+    to: "/settings/global-templates",
+    menuCode: "settings",
+    requiredPermission: API_GLOBAL_TEMPLATES_MANAGE,
+    priority: "secondary",
+    icon: Monitor,
+    match: (pathname: string) => pathname.startsWith("/settings/global-templates"),
   },
   {
     labelKey: "nav.rbac",
@@ -201,12 +240,16 @@ export function getDesktopNavLayout({
   gap?: number;
 }): DesktopNavLayout {
   const itemByKey = new Map(items.map((item) => [item.key, item]));
-  const overflowKeys = new Set<string>();
-  let visibleKeys = items.map((item) => item.key);
+  const secondaryKeys = new Set(items.filter((item) => item.priority === "secondary").map((item) => item.key));
+  const overflowKeys = new Set<string>(secondaryKeys);
+  let visibleKeys = items.filter((item) => !secondaryKeys.has(item.key)).map((item) => item.key);
   const usableWidth = safeWidth(availableWidth);
 
   if (items.length === 0 || usableWidth <= 0) {
-    return { visibleKeys, overflowKeys: [] };
+    return {
+      visibleKeys,
+      overflowKeys: items.map((item) => item.key).filter((key) => overflowKeys.has(key)),
+    };
   }
 
   const getVisibleWidth = () => {
@@ -258,6 +301,12 @@ const themeIcons: Record<ThemePreference, typeof Sun> = {
   system: Monitor,
 };
 
+const workspaceAppearanceIcons: Record<WorkspaceAppearance, typeof Sun> = {
+  mist: Sun,
+  sage: Leaf,
+  dusk: Moon,
+};
+
 const weatherConditionIcons: Record<CurrentWeatherCondition, LucideIcon> = {
   clear: Sun,
   partly_cloudy: CloudSun,
@@ -296,7 +345,7 @@ const localeMarkers: Record<Locale, string> = {
 
 function navItemClassName(active: boolean) {
   return [
-    "inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition-colors",
+    "pf-shell-nav-item inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition-colors",
     active
       ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-white dark:ring-slate-700"
       : "text-slate-500 hover:bg-white/70 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/80 dark:hover:text-slate-100",
@@ -305,10 +354,10 @@ function navItemClassName(active: boolean) {
 
 function menuItemClassName(active: boolean) {
   return [
-    "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold transition-colors",
+    "pf-shell-menu-item flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold transition-colors",
     active
       ? "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
-      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white",
+      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white",
   ].join(" ");
 }
 
@@ -317,50 +366,54 @@ function mobileNavItemClassName(active: boolean) {
     "flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl px-0.5 text-[10px] font-semibold transition-colors active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400",
     active
       ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950"
-      : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100",
+      : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-900 dark:hover:text-white",
+  ].join(" ");
+}
+
+function mobileMoreMenuItemClassName(active: boolean) {
+  return [
+    "pf-shell-mobile-menu-item flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm font-semibold transition-colors",
+    active
+      ? "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
+      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white",
+  ].join(" ");
+}
+
+function mobilePreferenceOptionClassName(active: boolean) {
+  return [
+    "pf-shell-mobile-preference-option flex min-h-10 w-full items-center justify-center gap-1.5 rounded-lg px-2 text-center text-xs font-semibold transition-colors active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400",
+    active
+      ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950"
+      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white",
   ].join(" ");
 }
 
 function preferenceTriggerClassName(hasMarker: boolean) {
   return [
-    "inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white/80 text-sm font-semibold text-slate-600 shadow-sm shadow-slate-950/[0.03] transition-colors active:scale-[0.98] hover:border-slate-300 hover:bg-white hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-300 dark:shadow-black/20 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-slate-100",
+    "pf-shell-preference-trigger inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white/80 text-sm font-semibold text-slate-600 shadow-sm shadow-slate-950/[0.03] transition-colors active:scale-[0.98] hover:border-slate-300 hover:bg-white hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-300 dark:shadow-black/20 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-slate-100",
     hasMarker ? "min-w-16 gap-1.5 px-2" : "w-9 px-0",
   ].join(" ");
 }
 
-function preferenceMenuClassName(open: boolean) {
-  return [
-    "absolute right-0 top-11 z-50 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
-    open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
-  ].join(" ");
+function preferenceMenuClassName() {
+  return "pf-shell-menu-surface w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-950/10 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30";
 }
 
-function accountMenuClassName(open: boolean) {
-  return [
-    "absolute right-0 top-11 z-50 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
-    open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
-  ].join(" ");
+function accountMenuClassName() {
+  return "pf-shell-account-surface w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-950/10 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30";
 }
 
-function weatherMenuClassName(open: boolean) {
-  return [
-    "absolute left-0 top-11 z-50 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
-    open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
-  ].join(" ");
+function weatherMenuClassName() {
+  return "pf-shell-weather-surface w-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-950/10 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30";
 }
 
-function weatherInfoClassName(open: boolean) {
-  return [
-    "absolute left-0 top-9 z-[60] w-80 select-text rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
-    open
-      ? "hidden"
-      : "invisible translate-y-1 opacity-0 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100",
-  ].join(" ");
+function weatherInfoClassName() {
+  return "pf-shell-weather-surface w-80 overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-950/10 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30";
 }
 
 function weatherTriggerClassName(emphasis: "default" | "warning" | "danger") {
   return [
-    "inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 !bg-white !text-black shadow-sm shadow-slate-950/[0.06] transition-colors hover:!bg-white hover:border-slate-300 hover:!text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:!bg-white dark:!text-black dark:shadow-black/20 dark:hover:!bg-white dark:hover:border-slate-500 dark:hover:!text-black dark:focus-visible:ring-violet-400",
+    "pf-shell-weather-trigger inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 !bg-white !text-black shadow-sm shadow-slate-950/[0.06] transition-colors hover:!bg-white hover:border-slate-300 hover:!text-black focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:!bg-white dark:!text-black dark:shadow-black/20 dark:hover:!bg-white dark:hover:border-slate-500 dark:hover:!text-black dark:focus-visible:ring-violet-400",
     emphasis === "danger"
       ? "border-red-300 ring-2 ring-red-100 hover:border-red-400 dark:border-red-300 dark:ring-red-200"
       : emphasis === "warning"
@@ -379,11 +432,8 @@ function weatherEmphasisTextClassName(emphasis: "default" | "warning" | "danger"
   return "text-slate-950 dark:text-white";
 }
 
-function desktopMoreMenuClassName(open: boolean) {
-  return [
-    "absolute right-0 top-10 z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-950/10 transition dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30",
-    open ? "visible translate-y-0 opacity-100" : "invisible translate-y-1 opacity-0",
-  ].join(" ");
+function desktopMoreMenuClassName() {
+  return "pf-shell-menu-surface w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-950/10 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/30";
 }
 
 function curtainShellClassName(open: boolean) {
@@ -395,7 +445,7 @@ function curtainShellClassName(open: boolean) {
 
 function curtainPanelClassName(open: boolean) {
   return [
-    "absolute inset-x-0 top-0 border-b border-slate-200 bg-white/94 px-3 py-3 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl transition-[transform,opacity,filter] duration-700 will-change-transform dark:border-slate-800 dark:bg-[#070b13]/94 sm:px-4 lg:px-5",
+    "pf-shell-curtain-panel absolute inset-x-0 top-0 border-b border-slate-200 bg-white/94 px-3 py-3 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl transition-[transform,opacity,filter] duration-700 will-change-transform dark:border-slate-800 dark:bg-[#070b13]/94 sm:px-4 lg:px-5",
     open
       ? "pointer-events-auto translate-y-0 opacity-100 blur-0"
       : "pointer-events-none -translate-y-[calc(100%-0.7rem)] opacity-0 blur-[1px]",
@@ -404,7 +454,7 @@ function curtainPanelClassName(open: boolean) {
 
 function curtainHandleClassName(open: boolean) {
   return [
-    "absolute left-1/2 z-[55] inline-flex h-7 w-16 -translate-x-1/2 items-center justify-center rounded-b-xl border border-t-0 border-slate-200 bg-white/95 text-slate-500 shadow-lg shadow-slate-950/10 backdrop-blur transition-[transform,opacity] duration-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-[#070b13]/95 dark:text-slate-300 dark:shadow-black/30 dark:focus-visible:ring-violet-400",
+    "pf-shell-curtain-handle absolute left-1/2 z-[55] inline-flex h-7 w-16 -translate-x-1/2 items-center justify-center rounded-b-xl border border-t-0 border-slate-200 bg-white/95 text-slate-500 shadow-lg shadow-slate-950/10 backdrop-blur transition-[transform,opacity] duration-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-[#070b13]/95 dark:text-slate-300 dark:shadow-black/30 dark:focus-visible:ring-violet-400",
     open ? "pointer-events-none top-0 -translate-y-3 opacity-0" : "top-0 translate-y-0 opacity-100",
   ].join(" ");
 }
@@ -414,6 +464,19 @@ function mobileBottomNavClassName(open: boolean) {
     "fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/96 px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.4rem)] shadow-[0_-10px_30px_rgba(15,23,42,0.12)] backdrop-blur transition-[transform,opacity] duration-700 dark:border-slate-800 dark:bg-slate-950/94 dark:shadow-[0_-18px_40px_rgba(0,0,0,0.35)] md:hidden",
     open ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-[calc(100%-0.7rem)] opacity-0",
   ].join(" ");
+}
+
+function mobileOperationBallClassName(open: boolean) {
+  return [
+    "pf-shell-operation-ball fixed bottom-[calc(env(safe-area-inset-bottom)+1rem)] right-4 z-50 inline-flex h-14 w-14 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-900 shadow-2xl shadow-slate-950/20 transition-[transform,background-color,border-color] duration-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-[#111827] dark:text-slate-100 dark:shadow-black/45 dark:focus-visible:ring-violet-400 md:hidden",
+    open
+      ? "scale-95 border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/45 dark:bg-violet-500/18 dark:text-violet-100"
+      : "active:scale-95 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 dark:hover:border-slate-500 dark:hover:bg-slate-900",
+  ].join(" ");
+}
+
+function mobileOperationPanelClassName() {
+  return "pf-shell-operation-panel w-[calc(100vw-1.5rem)] max-w-[22rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/45";
 }
 
 function weatherTemperatureLabel(weather: CurrentWeather): string | null {
@@ -486,7 +549,7 @@ function weatherTitle({
 
 function preferenceMenuItemClassName(active: boolean) {
   return [
-    "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-semibold transition-colors",
+    "pf-shell-menu-item flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-semibold transition-colors",
     active
       ? "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
       : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white",
@@ -495,7 +558,7 @@ function preferenceMenuItemClassName(active: boolean) {
 
 function preferenceBadgeClassName(active: boolean) {
   return [
-    "inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md border px-1.5 text-[11px] font-bold leading-none",
+    "pf-shell-badge inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md border px-1.5 text-[11px] font-bold leading-none",
     active
       ? "border-slate-300 bg-white text-slate-950 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
       : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
@@ -515,6 +578,56 @@ type PreferenceOption<T extends string> = {
   marker?: string;
 };
 
+function MobilePreferenceGroup<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Array<PreferenceOption<T>>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="pf-shell-control-group border-t border-slate-200 pt-1.5 dark:border-slate-800">
+      <div className="pf-shell-section-label px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
+        {label}
+      </div>
+      <div
+        className="grid gap-1"
+        style={{ gridTemplateColumns: `repeat(${Math.max(1, Math.min(options.length, 3))}, minmax(0, 1fr))` }}
+      >
+        {options.map((option) => {
+          const active = option.value === value;
+          const Icon = option.icon;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={active}
+              className={mobilePreferenceOptionClassName(active)}
+              onClick={() => onChange(option.value)}
+            >
+              {Icon ? (
+                <Icon size={16} aria-hidden="true" />
+              ) : (
+                <span className={preferenceBadgeClassName(active)}>{option.marker}</span>
+              )}
+              <span className="min-w-0 truncate">{option.label}</span>
+              <Check
+                size={14}
+                aria-hidden="true"
+                className={active ? "shrink-0 text-current" : "hidden"}
+              />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PreferenceMenu<T extends string>({
   label,
   currentLabel,
@@ -533,16 +646,11 @@ function PreferenceMenu<T extends string>({
   triggerMarker?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   return (
     <div
       className="relative"
-      onBlur={(event) => {
-        const nextTarget = event.relatedTarget;
-        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-          setOpen(false);
-        }
-      }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           setOpen(false);
@@ -550,6 +658,7 @@ function PreferenceMenu<T extends string>({
       }}
     >
       <button
+        ref={triggerRef}
         type="button"
         aria-label={`${label}: ${currentLabel}`}
         aria-haspopup="menu"
@@ -561,8 +670,17 @@ function PreferenceMenu<T extends string>({
         {TriggerIcon ? <TriggerIcon size={15} aria-hidden="true" /> : null}
         {triggerMarker ? <span className={preferenceBadgeClassName(true)}>{triggerMarker}</span> : null}
       </button>
-      <div role="menu" aria-label={label} className={preferenceMenuClassName(open)}>
-        <div className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
+      <FloatingSurface
+        open={open}
+        triggerRef={triggerRef}
+        preferredPlacement="bottom-end"
+        layer="modal"
+        matchTriggerWidth={false}
+        onOpenChange={setOpen}
+        className={preferenceMenuClassName()}
+      >
+      <div role="menu" aria-label={label}>
+        <div className="pf-shell-section-label px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
           {label}
         </div>
         {options.map((option) => {
@@ -591,51 +709,28 @@ function PreferenceMenu<T extends string>({
               <Check
                 size={14}
                 aria-hidden="true"
-                className={active ? "text-indigo-600 dark:text-violet-300" : "text-transparent"}
+                className={active ? "pf-shell-check text-indigo-600 dark:text-violet-300" : "text-transparent"}
               />
             </button>
           );
         })}
       </div>
+      </FloatingSurface>
     </div>
   );
 }
 
 function AccountMenu({ identity, onLogout }: { identity: AccountIdentity; onLogout: () => void }) {
   const { t } = usePreferences();
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const accountLabel = identity.username
     ? `${identity.displayName} · ${identity.username}`
     : identity.displayName;
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && menuRef.current?.contains(target)) {
-        return;
-      }
-      setOpen(false);
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [open]);
-
   return (
     <div
-      ref={menuRef}
       className="relative"
-      onBlur={(event) => {
-        const nextTarget = event.relatedTarget;
-        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-          setOpen(false);
-        }
-      }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           setOpen(false);
@@ -643,23 +738,24 @@ function AccountMenu({ identity, onLogout }: { identity: AccountIdentity; onLogo
       }}
     >
       <button
+        ref={triggerRef}
         type="button"
         aria-label={`${t("nav.accountMenu")}: ${accountLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
         title={accountLabel}
-        className="inline-flex h-10 max-w-[220px] items-center gap-2 rounded-lg border border-slate-200 bg-white/85 px-2 text-left text-sm shadow-sm shadow-slate-950/[0.03] transition-colors hover:border-slate-300 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/70 dark:shadow-black/20 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:focus-visible:ring-violet-400 xl:max-w-[260px]"
+        className="pf-shell-preference-trigger inline-flex h-10 max-w-[220px] items-center gap-2 rounded-lg border border-slate-200 bg-white/85 px-2 text-left text-sm shadow-sm shadow-slate-950/[0.03] transition-colors hover:border-slate-300 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/70 dark:shadow-black/20 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:focus-visible:ring-violet-400 xl:max-w-[260px]"
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+        <span className="pf-shell-trigger-icon inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
           <UserRound size={15} aria-hidden="true" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
+          <span className="pf-shell-trigger-title block truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
             {identity.displayName}
           </span>
           {identity.username ? (
-            <span className="block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
+            <span className="pf-shell-trigger-subtitle block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
               {identity.username}
             </span>
           ) : null}
@@ -667,20 +763,29 @@ function AccountMenu({ identity, onLogout }: { identity: AccountIdentity; onLogo
         <ChevronDown
           size={14}
           aria-hidden="true"
-          className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`pf-shell-trigger-chevron shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
 
-      <div role="menu" aria-label={t("nav.accountMenu")} className={accountMenuClassName(open)}>
-        <div role="presentation" className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
-          <div className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+      <FloatingSurface
+        open={open}
+        triggerRef={triggerRef}
+        preferredPlacement="bottom-end"
+        layer="modal"
+        matchTriggerWidth={false}
+        onOpenChange={setOpen}
+        className={accountMenuClassName()}
+      >
+      <div role="menu" aria-label={t("nav.accountMenu")}>
+        <div role="presentation" className="pf-shell-account-summary rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
+          <div className="pf-shell-section-label text-[11px] font-semibold text-slate-400 dark:text-slate-500">
             {t("nav.currentAccount")}
           </div>
-          <div className="mt-1 truncate text-sm font-semibold text-slate-950 dark:text-white">
+          <div className="pf-shell-value mt-1 truncate text-sm font-semibold text-slate-950 dark:text-white">
             {identity.displayName}
           </div>
           {identity.username ? (
-            <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{identity.username}</div>
+            <div className="pf-shell-muted mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{identity.username}</div>
           ) : null}
         </div>
         <button
@@ -696,6 +801,7 @@ function AccountMenu({ identity, onLogout }: { identity: AccountIdentity; onLogo
           <span className="truncate">{t("nav.logout")}</span>
         </button>
       </div>
+      </FloatingSurface>
     </div>
   );
 }
@@ -703,11 +809,13 @@ function AccountMenu({ identity, onLogout }: { identity: AccountIdentity; onLogo
 function WeatherControl() {
   const { locale, t } = usePreferences();
   const weatherState = useCurrentWeather();
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [draftLocation, setDraftLocation] = useState(weatherState.savedLocationQuery);
   const [searchQuery, setSearchQuery] = useState("");
   const [localErrorKey, setLocalErrorKey] = useState<TranslationKey | null>(null);
+  const infoCloseTimerRef = useRef<number | null>(null);
   const locationName = weatherLocationDisplayName(weatherState.resolvedLocation) || weatherState.savedLocationQuery;
   const locationSearchResult = useQuery({
     queryKey: [
@@ -765,49 +873,61 @@ function WeatherControl() {
     ? Math.max(0, Math.ceil((weatherState.nextWeatherRefreshAt - Date.now()) / 60_000))
     : weatherState.weatherRefreshMinutes;
 
+  const clearInfoCloseTimer = useCallback(() => {
+    if (infoCloseTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(infoCloseTimerRef.current);
+    infoCloseTimerRef.current = null;
+  }, []);
+
+  const showInfo = useCallback(() => {
+    clearInfoCloseTimer();
+    setInfoOpen(true);
+  }, [clearInfoCloseTimer]);
+
+  const scheduleInfoClose = useCallback(() => {
+    clearInfoCloseTimer();
+    infoCloseTimerRef.current = window.setTimeout(() => {
+      setInfoOpen(false);
+      infoCloseTimerRef.current = null;
+    }, 120);
+  }, [clearInfoCloseTimer]);
+
+  useEffect(() => () => clearInfoCloseTimer(), [clearInfoCloseTimer]);
+
   useEffect(() => {
     if (!open) {
       return;
     }
+    setInfoOpen(false);
     setDraftLocation(weatherState.savedLocationQuery);
     setSearchQuery("");
     setLocalErrorKey(null);
   }, [open, weatherState.savedLocationQuery]);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && menuRef.current?.contains(target)) {
-        return;
-      }
-      setOpen(false);
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [open]);
-
   return (
     <div
-      ref={menuRef}
       className="group relative shrink-0"
+      onPointerEnter={showInfo}
+      onPointerLeave={scheduleInfoClose}
+      onFocus={showInfo}
       onBlur={(event) => {
-        const nextTarget = event.relatedTarget;
-        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-          setOpen(false);
+        const relatedTarget = event.relatedTarget;
+        if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {
+          return;
         }
+        scheduleInfoClose();
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
+          setInfoOpen(false);
           setOpen(false);
         }
       }}
     >
       <button
+        ref={triggerRef}
         type="button"
         aria-label={triggerLabel}
         aria-haspopup="dialog"
@@ -821,10 +941,26 @@ function WeatherControl() {
           className={TriggerIcon === Loader2 ? "animate-spin" : undefined}
         />
       </button>
-      <div role="tooltip" className={weatherInfoClassName(open)}>
+      <FloatingSurface
+        open={infoOpen && !open}
+        triggerRef={triggerRef}
+        preferredPlacement="bottom-start"
+        layer="popover"
+        matchTriggerWidth={false}
+        margin={8}
+        onOpenChange={setInfoOpen}
+        className={weatherInfoClassName()}
+      >
+      <div
+        role="tooltip"
+        onPointerEnter={showInfo}
+        onPointerLeave={scheduleInfoClose}
+        onFocus={showInfo}
+        onBlur={scheduleInfoClose}
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
+            <div className="pf-shell-section-label text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
               {t("weather.infoTitle")}
             </div>
             <div
@@ -839,7 +975,7 @@ function WeatherControl() {
           <button
             type="button"
             disabled={!weatherState.resolvedLocation || weatherState.isRefreshingWeather}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-white"
+            className="pf-shell-secondary-action inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-white"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -855,48 +991,58 @@ function WeatherControl() {
           </button>
         </div>
         <dl className="mt-3 grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoCondition")}</dt>
+          <dt className="pf-shell-section-label text-slate-400 dark:text-slate-500">{t("weather.infoCondition")}</dt>
           <dd
             className={[
               "font-medium",
               weatherEmphasis === "default"
-                ? "text-slate-700 dark:text-slate-200"
+                ? "pf-shell-value text-slate-700 dark:text-slate-200"
                 : weatherEmphasisTextClassName(weatherEmphasis),
             ].join(" ")}
           >
             {weatherConditionLabel ?? "--"}
           </dd>
-          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoTemperature")}</dt>
-          <dd className="font-medium text-slate-700 dark:text-slate-200">
+          <dt className="pf-shell-section-label text-slate-400 dark:text-slate-500">{t("weather.infoTemperature")}</dt>
+          <dd className="pf-shell-value font-medium text-slate-700 dark:text-slate-200">
             {weatherState.weather ? weatherTemperatureValue(weatherState.weather) : "--"}
           </dd>
           {humidityValue ? (
             <>
-              <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoHumidity")}</dt>
-              <dd className="font-medium text-slate-700 dark:text-slate-200">{humidityValue}</dd>
+              <dt className="pf-shell-section-label text-slate-400 dark:text-slate-500">{t("weather.infoHumidity")}</dt>
+              <dd className="pf-shell-value font-medium text-slate-700 dark:text-slate-200">{humidityValue}</dd>
             </>
           ) : null}
           {pressureValue ? (
             <>
-              <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoPressure")}</dt>
-              <dd className="font-medium text-slate-700 dark:text-slate-200">{pressureValue}</dd>
+              <dt className="pf-shell-section-label text-slate-400 dark:text-slate-500">{t("weather.infoPressure")}</dt>
+              <dd className="pf-shell-value font-medium text-slate-700 dark:text-slate-200">{pressureValue}</dd>
             </>
           ) : null}
-          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoObservedAt")}</dt>
-          <dd className="font-medium text-slate-700 dark:text-slate-200">
+          <dt className="pf-shell-section-label text-slate-400 dark:text-slate-500">{t("weather.infoObservedAt")}</dt>
+          <dd className="pf-shell-value font-medium text-slate-700 dark:text-slate-200">
             {formatWeatherTimestamp(weatherState.weather?.observed_at, locale)}
           </dd>
-          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoSource")}</dt>
-          <dd className="font-medium text-slate-700 dark:text-slate-200">
+          <dt className="pf-shell-section-label text-slate-400 dark:text-slate-500">{t("weather.infoSource")}</dt>
+          <dd className="pf-shell-value font-medium text-slate-700 dark:text-slate-200">
             {t(weatherSources[weatherState.weatherSourceId].labelKey)}
           </dd>
-          <dt className="text-slate-400 dark:text-slate-500">{t("weather.infoNextRefresh")}</dt>
-          <dd className="font-medium text-slate-700 dark:text-slate-200">
+          <dt className="pf-shell-section-label text-slate-400 dark:text-slate-500">{t("weather.infoNextRefresh")}</dt>
+          <dd className="pf-shell-value font-medium text-slate-700 dark:text-slate-200">
             {t("weather.nextRefreshIn", { minutes: nextRefreshMinutes })}
           </dd>
         </dl>
       </div>
-      <div role="dialog" aria-label={t("weather.location")} aria-hidden={!open} className={weatherMenuClassName(open)}>
+      </FloatingSurface>
+      <FloatingSurface
+        open={open}
+        triggerRef={triggerRef}
+        preferredPlacement="bottom-start"
+        layer="modal"
+        matchTriggerWidth={false}
+        onOpenChange={setOpen}
+        className={weatherMenuClassName()}
+      >
+      <div role="dialog" aria-label={t("weather.location")}>
         <form
           className="space-y-2"
           onSubmit={(event) => {
@@ -910,7 +1056,7 @@ function WeatherControl() {
             setLocalErrorKey(null);
           }}
         >
-          <label htmlFor="weather-location-input" className="block text-xs font-semibold text-slate-500 dark:text-slate-400">
+          <label htmlFor="weather-location-input" className="pf-shell-section-label block text-xs font-semibold text-slate-500 dark:text-slate-400">
             {t("weather.locationLabel")}
           </label>
           <div className="flex gap-2">
@@ -923,34 +1069,34 @@ function WeatherControl() {
                 setLocalErrorKey(null);
               }}
               placeholder={t("weather.locationPlaceholder")}
-              className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+              className="pf-shell-input h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
             />
             <button
               type="submit"
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:focus-visible:ring-violet-400"
+              className="pf-shell-primary-action inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:focus-visible:ring-violet-400"
             >
               {locationSearchResult.isLoading ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
               {t("weather.searchLocation")}
             </button>
           </div>
           {locationSearchResult.data?.length ? (
-            <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-950">
+            <div className="pf-shell-soft-surface max-h-56 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-950">
               {locationSearchResult.data.map((location) => {
                 const label = weatherLocationDisplayName(location);
                 return (
                   <button
                     key={`${location.latitude}:${location.longitude}:${label}`}
                     type="button"
-                    className="flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-sm transition hover:bg-white hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-900 dark:hover:text-white dark:focus-visible:ring-violet-400"
+                    className="pf-shell-list-option flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-sm transition hover:bg-white hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-900 dark:hover:text-white dark:focus-visible:ring-violet-400"
                     onClick={() => {
                       weatherState.setWeatherLocation(location, searchQuery || draftLocation);
                       setOpen(false);
                     }}
                   >
-                    <span className="min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-slate-200">
+                    <span className="pf-shell-value min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-slate-200">
                       {label}
                     </span>
-                    <span className="shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                    <span className="pf-shell-muted shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500">
                       {location.latitude.toFixed(2)}, {location.longitude.toFixed(2)}
                     </span>
                   </button>
@@ -962,14 +1108,14 @@ function WeatherControl() {
             <p
               className={[
                 "min-w-0 flex-1 truncate text-xs font-medium",
-                statusErrorKey ? "text-red-600 dark:text-red-300" : "text-slate-500 dark:text-slate-400",
+                statusErrorKey ? "text-red-600 dark:text-red-300" : "pf-shell-muted text-slate-500 dark:text-slate-400",
               ].join(" ")}
             >
               {statusText}
             </p>
             <button
               type="button"
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:ring-violet-400"
+              className="pf-shell-secondary-action inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:ring-violet-400"
               onClick={() => {
                 weatherState.clearWeatherLocation();
                 setDraftLocation("");
@@ -982,6 +1128,7 @@ function WeatherControl() {
           </div>
         </form>
       </div>
+      </FloatingSurface>
     </div>
   );
 }
@@ -993,7 +1140,7 @@ export function GlobalBrandMark({ to }: { to: string }) {
       <Link
         to={to}
         aria-label="Inspiration One"
-        className="min-w-0 truncate text-left text-[15px] font-semibold text-slate-950 transition-colors hover:text-indigo-700 focus:outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-100 dark:hover:text-indigo-300 dark:focus-visible:ring-violet-400 sm:text-base"
+        className="pf-shell-brand-link min-w-0 truncate text-left text-[15px] font-semibold text-slate-950 transition-colors hover:text-indigo-700 focus:outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-100 dark:hover:text-indigo-300 dark:focus-visible:ring-violet-400 sm:text-base"
       >
         Inspiration One
       </Link>
@@ -1001,13 +1148,16 @@ export function GlobalBrandMark({ to }: { to: string }) {
   );
 }
 
-export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
+export function TopNav({ onLogout }: TopNavProps) {
+  const { activeScheme, setActiveScheme } = useUiLayoutScheme();
   const desktopNavAreaRef = useRef<HTMLDivElement | null>(null);
   const desktopMeasureRowRef = useRef<HTMLDivElement | null>(null);
   const desktopMeasureItemRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const desktopMoreMeasureRef = useRef<HTMLSpanElement | null>(null);
-  const desktopMoreMenuRef = useRef<HTMLDivElement | null>(null);
+  const desktopMoreButtonRef = useRef<HTMLButtonElement | null>(null);
   const desktopMoreCloseTimerRef = useRef<number | null>(null);
+  const mobileMoreButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileMorePanelRef = useRef<HTMLDivElement | null>(null);
   const curtainRef = useRef<HTMLDivElement | null>(null);
   const curtainAutoHideTimerRef = useRef<number | null>(null);
   const [desktopOverflowKeys, setDesktopOverflowKeys] = useState<string[]>([]);
@@ -1015,8 +1165,18 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [curtainOpen, setCurtainOpen] = useState(true);
   const location = useLocation();
-  const { locale, setLocale, t, themePreference, setThemePreference } = usePreferences();
+  const {
+    locale,
+    setLocale,
+    t,
+    themePreference,
+    setThemePreference,
+    workspaceAppearance,
+    setWorkspaceAppearance,
+  } = usePreferences();
   const session = useSessionState();
+  const sessionActions = useSessionActions();
+  const logoutAction = onLogout ?? sessionActions.logout;
   const visibleNavItems = useMemo(
     () =>
       navItems.filter((item) => {
@@ -1032,11 +1192,24 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
       }),
     [session],
   );
-  const CurrentThemeIcon = themeIcons[themePreference];
+  const shellScheme = activeScheme === "workspace" ? "workspace" : "classic";
+  const CurrentThemeIcon = shellScheme === "workspace" ? workspaceAppearanceIcons[workspaceAppearance] : themeIcons[themePreference];
   const themeOptions = THEME_PREFERENCES.map((theme) => ({
     value: theme,
     label: t(`theme.${theme}`),
     icon: themeIcons[theme],
+  }));
+  const workspaceAppearanceOptions = WORKSPACE_APPEARANCE_METADATA.map((appearance) => ({
+    value: appearance.id,
+    label: t(appearance.labelKey),
+    icon: workspaceAppearanceIcons[appearance.id],
+  }));
+  const layoutSchemeOptions: Array<PreferenceOption<UiLayoutScheme>> = UI_LAYOUT_SCHEME_METADATA.filter(
+    (scheme) => scheme.supported,
+  ).map((scheme) => ({
+    value: scheme.id,
+    label: t(scheme.labelKey),
+    icon: scheme.id === "workspace" ? LayoutDashboard : Monitor,
   }));
   const localeOptions = LOCALES.map((availableLocale) => ({
     value: availableLocale,
@@ -1046,13 +1219,37 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
   const primaryNavItems = visibleNavItems.filter((item) => item.priority === "primary");
   const secondaryNavItems = visibleNavItems.filter((item) => item.priority === "secondary");
   const secondaryActive = secondaryNavItems.some((item) => item.match(location.pathname));
-  const hasOverflowNav = secondaryNavItems.length > 0 || Boolean(onLogout);
+  const hasOverflowNav = secondaryNavItems.length > 0 || Boolean(logoutAction);
   const mobileNavColumnCount = primaryNavItems.length + (hasOverflowNav ? 1 : 0);
   const desktopOverflowKeySet = useMemo(() => new Set(desktopOverflowKeys), [desktopOverflowKeys]);
   const desktopVisibleNavItems = visibleNavItems.filter((item) => !desktopOverflowKeySet.has(item.to));
   const desktopOverflowNavItems = visibleNavItems.filter((item) => desktopOverflowKeySet.has(item.to));
   const desktopOverflowActive = desktopOverflowNavItems.some((item) => item.match(location.pathname));
   const account = accountIdentity(session?.user, t("nav.account"));
+  const currentWorkspaceAppearanceLabel = t(
+    WORKSPACE_APPEARANCE_METADATA.find((appearance) => appearance.id === workspaceAppearance)?.labelKey
+      ?? "workspaceAppearance.mist.label",
+  );
+  const activeThemeOptions = shellScheme === "workspace" ? workspaceAppearanceOptions : themeOptions;
+  const activeThemeValue = shellScheme === "workspace" ? workspaceAppearance : themePreference;
+  const activeThemeLabel = shellScheme === "workspace" ? currentWorkspaceAppearanceLabel : t(`theme.${themePreference}`);
+
+  function handleThemeControlChange(value: ThemePreference | WorkspaceAppearance) {
+    if (shellScheme === "workspace") {
+      const nextAppearance = value as WorkspaceAppearance;
+      setWorkspaceAppearance(nextAppearance);
+      setThemePreference(workspaceAppearanceResolvedTheme(nextAppearance));
+      return;
+    }
+    setThemePreference(value as ThemePreference);
+  }
+
+  function handleLayoutSchemeChange(value: UiLayoutScheme) {
+    setActiveScheme(value);
+    if (value === "workspace") {
+      setThemePreference(workspaceAppearanceResolvedTheme(workspaceAppearance));
+    }
+  }
 
   const clearCurtainAutoHideTimer = useCallback(() => {
     if (curtainAutoHideTimerRef.current !== null) {
@@ -1132,6 +1329,8 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
   );
 
   useEffect(() => {
+    setDesktopMoreOpen(false);
+    setMobileMoreOpen(false);
     scheduleCurtainAutoHide();
   }, [location.pathname, scheduleCurtainAutoHide]);
 
@@ -1176,22 +1375,33 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
   }, [desktopOverflowNavItems.length]);
 
   useEffect(() => {
-    if (!desktopMoreOpen) {
+    if (!mobileMoreOpen || shellScheme === "workspace") {
       return;
     }
 
-    const handlePointerDown = (event: PointerEvent) => {
+    const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target;
-      if (target instanceof Node && desktopMoreMenuRef.current?.contains(target)) {
+      if (!(target instanceof Node)) {
         return;
       }
-      clearDesktopMoreCloseTimer();
-      setDesktopMoreOpen(false);
+      if (mobileMorePanelRef.current?.contains(target) || mobileMoreButtonRef.current?.contains(target)) {
+        return;
+      }
+      setMobileMoreOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileMoreOpen(false);
+      }
     };
 
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [clearDesktopMoreCloseTimer, desktopMoreOpen]);
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      document.removeEventListener("keydown", closeOnEscape, true);
+    };
+  }, [mobileMoreOpen, shellScheme]);
 
   const renderPreferenceControls = () => (
     <>
@@ -1205,11 +1415,19 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
         triggerMarker={localeMarkers[locale]}
       />
       <PreferenceMenu
+        label={t("nav.layoutScheme")}
+        currentLabel={t(UI_LAYOUT_SCHEME_METADATA.find((scheme) => scheme.id === activeScheme)?.labelKey ?? "layout.scheme.classic.label")}
+        options={layoutSchemeOptions}
+        value={activeScheme}
+        onChange={handleLayoutSchemeChange}
+        triggerIcon={LayoutDashboard}
+      />
+      <PreferenceMenu
         label={t("nav.theme")}
-        currentLabel={t(`theme.${themePreference}`)}
-        options={themeOptions}
-        value={themePreference}
-        onChange={setThemePreference}
+        currentLabel={activeThemeLabel}
+        options={activeThemeOptions}
+        value={activeThemeValue}
+        onChange={handleThemeControlChange}
         triggerIcon={CurrentThemeIcon}
       />
     </>
@@ -1251,10 +1469,31 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
     );
   };
 
+  const renderMobileMenuItems = (itemClassName: (active: boolean) => string) =>
+    visibleNavItems.map((item) => {
+      const Icon = item.icon;
+      const active = item.match(location.pathname);
+      const label = t(item.labelKey);
+      return (
+        <Link
+          key={item.to}
+          to={item.to}
+          role="menuitem"
+          aria-current={active ? "page" : undefined}
+          className={itemClassName(active)}
+          onClick={() => setMobileMoreOpen(false)}
+        >
+          <Icon size={17} aria-hidden="true" />
+          <span className="min-w-0 truncate">{label}</span>
+        </Link>
+      );
+    });
+
   return (
     <>
       <div
         ref={curtainRef}
+        data-ui-layout-scheme={shellScheme}
         className={curtainShellClassName(curtainOpen)}
         style={{ transitionTimingFunction: CURTAIN_EASING }}
         onPointerDown={keepCurtainOpen}
@@ -1266,23 +1505,17 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
           className={curtainPanelClassName(curtainOpen)}
           style={{ transitionTimingFunction: CURTAIN_EASING }}
         >
-          <div className="mx-auto flex w-full max-w-[1500px] items-center justify-between gap-3 pl-[12.75rem] sm:pl-[14rem] lg:pl-[15rem]">
-            <div className="hidden min-w-0 items-center gap-2 text-sm 2xl:flex 2xl:w-64">
-              {breadcrumbs ? (
-                <>
-                  <span className="text-slate-300 dark:text-slate-700">/</span>
-                  <span className="truncate font-medium text-slate-600 dark:text-slate-400">{breadcrumbs}</span>
-                </>
-              ) : null}
-            </div>
-
-            <div ref={desktopNavAreaRef} className="hidden min-w-0 flex-1 justify-center md:flex">
-              <div className="relative flex max-w-full min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/70 p-1 shadow-inner shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-none">
+          <div className="relative mx-auto flex w-full max-w-[1500px] items-center md:gap-3">
+            <div aria-hidden="true" className="hidden w-52 shrink-0 md:block lg:w-56" />
+            <div
+              ref={desktopNavAreaRef}
+              className="hidden min-w-0 flex-1 overflow-hidden justify-center md:flex"
+            >
+              <div className="pf-shell-nav-frame relative flex max-w-full min-w-0 items-center gap-1 rounded-xl border border-slate-200 bg-slate-100/70 p-1 shadow-inner shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-none">
                 <div className="flex min-w-0 items-center gap-1">
                   {desktopVisibleNavItems.map((item) => renderDesktopNavItem(item))}
                   {desktopOverflowNavItems.length ? (
                     <div
-                      ref={desktopMoreMenuRef}
                       className="relative"
                       onPointerEnter={() => {
                         clearDesktopMoreCloseTimer();
@@ -1305,6 +1538,7 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
                       }}
                     >
                       <button
+                        ref={desktopMoreButtonRef}
                         type="button"
                         aria-label={t("nav.more")}
                         aria-haspopup="menu"
@@ -1318,11 +1552,25 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
                       >
                         <MoreHorizontal size={16} aria-hidden="true" />
                       </button>
+                      <FloatingSurface
+                        open={desktopMoreOpen}
+                        triggerRef={desktopMoreButtonRef}
+                        preferredPlacement="bottom-end"
+                        layer="modal"
+                        matchTriggerWidth={false}
+                        onOpenChange={(nextOpen) => {
+                          if (!nextOpen) {
+                            clearDesktopMoreCloseTimer();
+                          }
+                          setDesktopMoreOpen(nextOpen);
+                        }}
+                        className={desktopMoreMenuClassName()}
+                      >
                       <div
                         role="menu"
                         aria-label={t("nav.more")}
-                        aria-hidden={!desktopMoreOpen}
-                        className={desktopMoreMenuClassName(desktopMoreOpen)}
+                        onPointerEnter={clearDesktopMoreCloseTimer}
+                        onPointerLeave={scheduleDesktopMoreClose}
                       >
                         {desktopOverflowNavItems.map((item) => {
                           const Icon = item.icon;
@@ -1346,6 +1594,7 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
                           );
                         })}
                       </div>
+                      </FloatingSurface>
                     </div>
                   ) : null}
                 </div>
@@ -1362,13 +1611,9 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1 md:hidden">
+            <div className="hidden w-52 shrink-0 items-center justify-end gap-1.5 md:flex lg:w-56">
               {renderPreferenceControls()}
-            </div>
-
-            <div className="hidden shrink-0 items-center justify-end gap-1.5 md:flex">
-              {renderPreferenceControls()}
-              {onLogout ? <AccountMenu identity={account} onLogout={onLogout} /> : null}
+              {logoutAction ? <AccountMenu identity={account} onLogout={logoutAction} /> : null}
             </div>
           </div>
         </nav>
@@ -1384,44 +1629,44 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
         </button>
       </div>
 
-      {mobileMoreOpen ? (
-        <div className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+5.25rem)] z-50 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/15 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/40 md:hidden">
+      {mobileMoreOpen && shellScheme === "classic" ? (
+        <div
+          ref={mobileMorePanelRef}
+          className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+5.25rem)] z-50 max-h-[calc(100dvh-9rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/15 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/40 md:hidden"
+        >
           <div className="grid gap-1">
-            {onLogout ? (
-              <div className="mb-1 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900">
-                <div className="truncate text-sm font-semibold text-slate-950 dark:text-white">
+            {logoutAction ? (
+              <div className="pf-shell-account-summary mb-1 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900">
+                <div className="pf-shell-value truncate text-sm font-semibold text-slate-950 dark:text-white">
                   {account.displayName}
                 </div>
                 {account.username ? (
-                  <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{account.username}</div>
+                  <div className="pf-shell-muted mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{account.username}</div>
                 ) : null}
               </div>
             ) : null}
-            {secondaryNavItems.map((item) => {
-              const Icon = item.icon;
-              const active = item.match(location.pathname);
-              const label = t(item.labelKey);
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  aria-current={active ? "page" : undefined}
-                  className={menuItemClassName(active)}
-                  onClick={() => setMobileMoreOpen(false)}
-                >
-                  <Icon size={17} />
-                  <span>{label}</span>
-                </Link>
-              );
-            })}
-            {onLogout ? (
+            {renderMobileMenuItems(mobileMoreMenuItemClassName)}
+            <MobilePreferenceGroup label={t("nav.language")} options={localeOptions} value={locale} onChange={setLocale} />
+            <MobilePreferenceGroup
+              label={t("nav.layoutScheme")}
+              options={layoutSchemeOptions}
+              value={activeScheme}
+              onChange={handleLayoutSchemeChange}
+            />
+            <MobilePreferenceGroup
+              label={t("nav.theme")}
+              options={activeThemeOptions}
+              value={activeThemeValue}
+              onChange={handleThemeControlChange}
+            />
+            {logoutAction ? (
               <button
                 type="button"
                 onClick={() => {
                   setMobileMoreOpen(false);
-                  onLogout();
+                  logoutAction();
                 }}
-                className={menuItemClassName(false)}
+                className={mobileMoreMenuItemClassName(false)}
               >
                 <LogOut size={17} />
                 <span>{t("nav.logout")}</span>
@@ -1431,47 +1676,117 @@ export function TopNav({ breadcrumbs, onLogout }: TopNavProps) {
         </div>
       ) : null}
 
-      <div
-        aria-label={t("nav.mobile")}
-        className={mobileBottomNavClassName(curtainOpen)}
-        style={{ transitionTimingFunction: CURTAIN_EASING }}
-        onPointerDown={keepCurtainOpen}
-      >
+      {shellScheme === "workspace" ? (
+        <>
+          <FloatingSurface
+            open={mobileMoreOpen}
+            triggerRef={mobileMoreButtonRef}
+            preferredPlacement="top-end"
+            layer="modal"
+            matchTriggerWidth={false}
+            minWidth={280}
+            margin={12}
+            offset={10}
+            onOpenChange={setMobileMoreOpen}
+            className={mobileOperationPanelClassName()}
+          >
+            <div role="menu" aria-label={t("nav.mobile")} className="grid gap-1">
+              {logoutAction ? (
+                <div className="pf-shell-account-summary mb-1 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900">
+                  <div className="pf-shell-value truncate text-sm font-semibold text-slate-950 dark:text-white">
+                    {account.displayName}
+                  </div>
+                  {account.username ? (
+                    <div className="pf-shell-muted mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{account.username}</div>
+                  ) : null}
+                </div>
+              ) : null}
+              {renderMobileMenuItems(mobileMoreMenuItemClassName)}
+              <MobilePreferenceGroup label={t("nav.language")} options={localeOptions} value={locale} onChange={setLocale} />
+              <MobilePreferenceGroup
+                label={t("nav.layoutScheme")}
+                options={layoutSchemeOptions}
+                value={activeScheme}
+                onChange={handleLayoutSchemeChange}
+              />
+              <MobilePreferenceGroup
+                label={t("nav.theme")}
+                options={activeThemeOptions}
+                value={activeThemeValue}
+                onChange={handleThemeControlChange}
+              />
+              {logoutAction ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMoreOpen(false);
+                    logoutAction();
+                  }}
+                  className={mobileMoreMenuItemClassName(false)}
+                >
+                  <LogOut size={17} aria-hidden="true" />
+                  <span>{t("nav.logout")}</span>
+                </button>
+              ) : null}
+            </div>
+          </FloatingSurface>
+          <button
+            ref={mobileMoreButtonRef}
+            type="button"
+            aria-label={t("nav.more")}
+            aria-haspopup="menu"
+            aria-expanded={mobileMoreOpen}
+            className={mobileOperationBallClassName(mobileMoreOpen)}
+            onClick={() => setMobileMoreOpen((current) => !current)}
+          >
+            <MoreHorizontal size={23} aria-hidden="true" />
+          </button>
+        </>
+      ) : (
         <div
-          className="mx-auto grid w-full max-w-lg gap-1"
-          style={{ gridTemplateColumns: `repeat(${Math.max(1, mobileNavColumnCount)}, minmax(0, 1fr))` }}
+          aria-label={t("nav.mobile")}
+          data-ui-layout-scheme={shellScheme}
+          className={mobileBottomNavClassName(curtainOpen)}
+          style={{ transitionTimingFunction: CURTAIN_EASING }}
+          onPointerDown={keepCurtainOpen}
         >
-          {primaryNavItems.map((item) => {
-            const Icon = item.icon;
-            const active = item.match(location.pathname);
-            const label = t(item.labelKey);
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                aria-current={active ? "page" : undefined}
-                aria-label={label}
-                className={mobileNavItemClassName(active)}
+          <div
+            className="mx-auto grid w-full max-w-lg gap-1"
+            style={{ gridTemplateColumns: `repeat(${Math.max(1, mobileNavColumnCount)}, minmax(0, 1fr))` }}
+          >
+            {primaryNavItems.map((item) => {
+              const Icon = item.icon;
+              const active = item.match(location.pathname);
+              const label = t(item.labelKey);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  aria-current={active ? "page" : undefined}
+                  aria-label={label}
+                  className={mobileNavItemClassName(active)}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  <span className="mt-0.5 truncate">{label}</span>
+                </Link>
+              );
+            })}
+            {hasOverflowNav ? (
+              <button
+                ref={mobileMoreButtonRef}
+                type="button"
+                onClick={() => setMobileMoreOpen((current) => !current)}
+                aria-expanded={mobileMoreOpen}
+                aria-label={t("nav.more")}
+                className={mobileNavItemClassName(secondaryActive || mobileMoreOpen)}
               >
-                <Icon size={18} aria-hidden="true" />
-                <span className="mt-0.5 truncate">{label}</span>
-              </Link>
-            );
-          })}
-          {hasOverflowNav ? (
-            <button
-              type="button"
-              onClick={() => setMobileMoreOpen((current) => !current)}
-              aria-expanded={mobileMoreOpen}
-              aria-label={t("nav.more")}
-              className={mobileNavItemClassName(secondaryActive || mobileMoreOpen)}
-            >
-              <MoreHorizontal size={18} aria-hidden="true" />
-              <span className="mt-0.5 truncate">{t("nav.more")}</span>
-            </button>
-          ) : null}
+                <MoreHorizontal size={18} aria-hidden="true" />
+                <span className="mt-0.5 truncate">{t("nav.more")}</span>
+              </button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

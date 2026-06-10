@@ -321,6 +321,18 @@ class StorageService:
         self._warm_image_variants(relative.as_posix())
         return relative.as_posix()
 
+    def save_resource_library_asset(
+        self,
+        owner_user_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        suffix = Path(filename).suffix.lower() or ".bin"
+        relative = Path("resource_library") / owner_user_id / "images" / f"{uuid4()}{suffix}"
+        self._write_relative(relative, content)
+        self._warm_image_variants(relative.as_posix())
+        return relative.as_posix()
+
     def resolve(self, relative_path: str) -> Path:
         """相对路径转可读的本地路径，防路径穿越攻击。"""
 

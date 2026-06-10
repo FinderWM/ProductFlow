@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./api";
 import type { UserUiPreferences, UserUiPreferencesUpdateRequest } from "./types";
+import { DEFAULT_UI_LAYOUT_SCHEME } from "./uiLayoutScheme";
 
 export type SensitiveImageMaskPreferenceScope = "inspirations" | "image-chat";
 
@@ -39,6 +40,7 @@ export function sensitiveImageMaskPreferenceUpdate(
 function defaultUserUiPreferences(): UserUiPreferences {
   return {
     user_id: "",
+    ui_layout_scheme: DEFAULT_UI_LAYOUT_SCHEME,
     mask_sensitive_images_in_inspirations: DEFAULT_SENSITIVE_IMAGE_MASK_ENABLED,
     mask_sensitive_images_in_image_chat: DEFAULT_SENSITIVE_IMAGE_MASK_ENABLED,
     created_at: "",
@@ -62,6 +64,7 @@ export function useSensitiveImageMaskPreference(
       const next = previous ?? defaultUserUiPreferences();
       queryClient.setQueryData<UserUiPreferences>(USER_UI_PREFERENCES_QUERY_KEY, {
         ...next,
+        ui_layout_scheme: payload.ui_layout_scheme ?? next.ui_layout_scheme,
         mask_sensitive_images_in_inspirations:
           payload.mask_sensitive_images_in_inspirations ?? next.mask_sensitive_images_in_inspirations,
         mask_sensitive_images_in_image_chat:

@@ -5,8 +5,15 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login
+from sqlalchemy import select
 
-from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID, AuthUser
+from inspiration_one_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    AuthRole,
+    AuthUser,
+    RbacMenu,
+    RoleMenuPermission,
+)
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
 
 
@@ -199,10 +206,16 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
         "status",
         "usage_stats",
     }
+    assert "resource_library:read" not in payload["api_permissions"]
+    assert "resource_library:write" not in payload["api_permissions"]
     assert "settings:read" not in payload["api_permissions"]
     assert "settings:provider_write" not in payload["api_permissions"]
     assert "settings:migrate" not in payload["api_permissions"]
     assert "rbac:manage" not in payload["api_permissions"]
+
+    resource_library_groups = user_client.get("/api/resource-library/groups")
+    assert resource_library_groups.status_code == 200
+    assert resource_library_groups.json()["items"][0]["name"] == "默认分组"
 
     inspirations = user_client.get(
         "/api/inspirations", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID}
@@ -233,6 +246,34 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     rbac_users = user_client.get("/api/rbac/users")
     assert rbac_users.status_code == 403
     assert rbac_users.json()["detail"] == "需要管理员权限"
+
+
+def test_resource_library_is_not_rbac_menu_even_when_legacy_row_exists(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    with get_session_factory()() as session:
+        default_role = session.scalar(select(AuthRole).where(AuthRole.code == "member"))
+        assert default_role is not None
+        session.add(RbacMenu(code="resource_library", title="资源库", sort_order=35, enabled=True))
+        session.add(RoleMenuPermission(role_id=default_role.id, menu_code="resource_library"))
+        session.commit()
+
+    catalog = admin_client.get("/api/rbac/permissions")
+    assert catalog.status_code == 200
+    assert "resource_library" not in {menu["code"] for menu in catalog.json()["menus"]}
+
+    session_state = admin_client.get("/api/auth/session")
+    assert session_state.status_code == 200
+    assert "resource_library" not in {menu["code"] for menu in session_state.json()["menus"]}
+
+    with get_session_factory()() as session:
+        legacy_menu = session.get(RbacMenu, "resource_library")
+        assert legacy_menu is not None
+        assert legacy_menu.enabled is False
 
 
 def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path) -> None:

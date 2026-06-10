@@ -14,6 +14,7 @@ import {
   Link2,
   Layers3,
   BellRing,
+  Palette,
   Pencil,
   Plus,
   Loader2,
@@ -34,12 +35,14 @@ import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { FloatingSurface } from "../components/FloatingSurface";
 import {
   ParameterHelpLabel,
   type ParameterHelpContentOverride,
 } from "../components/ParameterHelp";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
+import { UiLayoutSchemeSettingsControl } from "../components/UiLayoutSchemeSettingsControl";
 import { api, ApiError } from "../lib/api";
 import type { TranslationKey } from "../lib/i18n";
 import {
@@ -106,6 +109,7 @@ export type SettingsSectionId =
   | "upload"
   | "queue"
   | "globalTemplates"
+  | "layoutAppearance"
   | "weather"
   | "notifications"
   | "security"
@@ -300,6 +304,13 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     descriptionKey: "settings.section.globalTemplatesDescription",
     groupKey: "settings.groupWorkflow",
     icon: Layers3,
+  },
+  {
+    id: "layoutAppearance",
+    labelKey: "settings.section.layoutAppearance",
+    descriptionKey: "settings.section.layoutAppearanceDescription",
+    groupKey: "settings.groupExperience",
+    icon: Palette,
   },
   {
     id: "weather",
@@ -1235,6 +1246,18 @@ export function filterProviderModels(models: ProviderModel[], query: string): Pr
   });
 }
 
+export function filterProviderProfiles(profiles: ProviderProfile[], query: string): ProviderProfile[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return profiles;
+  }
+  return profiles.filter((profile) =>
+    [profile.name, profile.id, profile.base_url ?? "", profile.provider_type].some((value) =>
+      value.toLowerCase().includes(normalizedQuery),
+    ),
+  );
+}
+
 interface ProviderModelInputProps {
   idPrefix: string;
   label: string;
@@ -1262,7 +1285,7 @@ function ProviderModelInput({
   const reactId = useId();
   const inputId = `${idPrefix}-${reactId}`;
   const listboxId = `${inputId}-models`;
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  const modelTriggerRef = useRef<HTMLDivElement | null>(null);
   const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [open, setOpen] = useState(false);
   const [activeModelId, setActiveModelId] = useState(value);
@@ -1293,17 +1316,7 @@ function ProviderModelInput({
   useEffect(() => {
     if (!open) {
       setActiveModelId(value);
-      return undefined;
     }
-
-    function handlePointerDown(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-
-    window.addEventListener("pointerdown", handlePointerDown);
-    return () => window.removeEventListener("pointerdown", handlePointerDown);
   }, [open, value]);
 
   useEffect(() => {
@@ -1339,12 +1352,12 @@ function ProviderModelInput({
   }
 
   return (
-    <div ref={rootRef} className="relative space-y-2">
+    <div className="space-y-2">
       <label htmlFor={inputId} className="block text-xs font-medium text-slate-600 dark:text-slate-300">
         {helpKey ? <ParameterHelpLabel label={label} helpKey={helpKey} uiType="settings" /> : label}
       </label>
       <div className="flex gap-2">
-        <div className="relative min-w-0 flex-1">
+        <div ref={modelTriggerRef} className="relative min-w-0 flex-1">
           <input
             id={inputId}
             role="combobox"
@@ -1421,12 +1434,20 @@ function ProviderModelInput({
           </button>
         ) : null}
       </div>
-      {modelOptionsOpen ? (
+      <FloatingSurface
+        open={modelOptionsOpen}
+        triggerRef={modelTriggerRef}
+        preferredPlacement="bottom-start"
+        layer="modal"
+        matchTriggerWidth
+        onOpenChange={setOpen}
+        className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10"
+      >
         <div
           id={listboxId}
           role="listbox"
           aria-labelledby={inputId}
-          className="absolute left-0 right-[3.25rem] z-[95] max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10"
+          className="min-h-0 flex-1 overflow-y-auto"
         >
           {filteredModels.map((model) => (
             <button
@@ -1451,7 +1472,7 @@ function ProviderModelInput({
             </button>
           ))}
         </div>
-      ) : null}
+      </FloatingSurface>
       {statusText ? <p className={`min-h-4 text-xs leading-5 ${statusClassName}`}>{statusText}</p> : null}
     </div>
   );
@@ -2340,7 +2361,7 @@ function ProviderProfileDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/55 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[80] flex justify-end bg-slate-950/55 backdrop-blur-sm">
       <div
         className="absolute inset-0 h-full w-full cursor-default"
         aria-hidden="true"
@@ -2813,6 +2834,7 @@ function GenerationConfigCard({
   testError = "",
 }: GenerationConfigCardProps) {
   const { t } = useI18n();
+  const [providerProfileSearch, setProviderProfileSearch] = useState("");
   const isNew = !config;
   const providerKindOptions =
     draft.purpose === "text"
@@ -2829,6 +2851,12 @@ function GenerationConfigCard({
         ];
   const busy = pending;
   const controlsDisabled = busy || !canWrite;
+  const filteredProfiles = filterProviderProfiles(profiles, providerProfileSearch);
+  const selectedProfile = profiles.find((profile) => profile.id === draft.provider_profile_id);
+  const selectableProfiles =
+    selectedProfile && !filteredProfiles.some((profile) => profile.id === selectedProfile.id)
+      ? [selectedProfile, ...filteredProfiles]
+      : filteredProfiles;
 
   return (
     <div className={`${PANEL_CLASS} space-y-5`}>
@@ -2959,44 +2987,17 @@ function GenerationConfigCard({
           />
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.resourceGroups")}>
-          <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-[#111b2d]">
-            {resourceGroups.length ? (
-              resourceGroups.map((group) => {
-                const checked = draft.resource_group_ids.includes(group.id);
-                const disabled = controlsDisabled || !group.enabled;
-                return (
-                  <label
-                    key={group.id}
-                    className={`flex min-h-10 items-center gap-3 rounded-md border px-3 py-2 text-sm transition ${
-                      checked
-                        ? "border-indigo-200 bg-white text-slate-950 shadow-sm dark:border-violet-400/40 dark:bg-slate-900 dark:text-white"
-                        : "border-transparent text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
-                    } ${disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={disabled}
-                      onChange={(event) => {
-                        const nextIds = event.target.checked
-                          ? [...draft.resource_group_ids, group.id]
-                          : draft.resource_group_ids.filter((resourceGroupId) => resourceGroupId !== group.id);
-                        onChange({ ...draft, resource_group_ids: nextIds });
-                      }}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:focus:ring-violet-400"
-                    />
-                    <span className="min-w-0 flex-1 truncate">
-                      {group.enabled ? group.name : `${group.name} (${t("settings.resourceGroup.disabled")})`}
-                    </span>
-                  </label>
-                );
-              })
-            ) : (
-              <span className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
-                {t("settings.generation.noResourceGroups")}
-              </span>
-            )}
-          </div>
+          <GenerationResourceGroupMultiSelect
+            resourceGroups={resourceGroups}
+            selectedIds={draft.resource_group_ids}
+            disabled={controlsDisabled}
+            disabledGroupLabel={t("settings.resourceGroup.disabled")}
+            noGroupsLabel={t("settings.generation.noResourceGroups")}
+            noSelectionLabel={t("settings.generation.noSelectedResourceGroups")}
+            selectedCountLabel={(count) => t("settings.generation.selectedResourceGroupsCount", { count })}
+            ariaLabel={t("settings.generation.resourceGroups")}
+            onChange={(resource_group_ids) => onChange({ ...draft, resource_group_ids })}
+          />
         </SettingsFormField>
         <SettingsFormField label={t("settings.provider.apiInterfaceLabel")} helpKey="settingsProviderApiInterface">
           <SelectField
@@ -3031,9 +3032,16 @@ function GenerationConfigCard({
             value={draft.provider_profile_id}
             options={[
               { value: "", label: t("settings.provider.selectProfile") },
-              ...profiles.map((profile) => ({ value: profile.id, label: profile.name })),
+              ...selectableProfiles.map((profile) => ({ value: profile.id, label: profile.name })),
             ]}
-            onChange={(value) => onChange({ ...draft, provider_profile_id: value })}
+            onChange={(value) => {
+              onChange({ ...draft, provider_profile_id: value });
+              setProviderProfileSearch("");
+            }}
+            searchValue={providerProfileSearch}
+            onSearchChange={setProviderProfileSearch}
+            searchPlaceholder={t("settings.provider.profileSearchPlaceholder")}
+            searchAriaLabel={t("settings.provider.profileSearch")}
             disabled={controlsDisabled}
             radius="lg"
           />
@@ -3114,6 +3122,147 @@ function GenerationConfigCard({
       </div>
     </div>
   );
+}
+
+function GenerationResourceGroupMultiSelect({
+  resourceGroups,
+  selectedIds,
+  disabled,
+  disabledGroupLabel,
+  noGroupsLabel,
+  noSelectionLabel,
+  selectedCountLabel,
+  ariaLabel,
+  onChange,
+}: {
+  resourceGroups: GenerationResourceGroup[];
+  selectedIds: string[];
+  disabled: boolean;
+  disabledGroupLabel: string;
+  noGroupsLabel: string;
+  noSelectionLabel: string;
+  selectedCountLabel: (count: number) => string;
+  ariaLabel: string;
+  onChange: (selectedIds: string[]) => void;
+}) {
+  const generatedId = useId();
+  const listboxId = `${generatedId}-listbox`;
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const selectedGroups = selectedIds
+    .map((selectedId) => resourceGroups.find((group) => group.id === selectedId))
+    .filter((group): group is GenerationResourceGroup => Boolean(group));
+  const selectedLabel =
+    selectedGroups.length === 0
+      ? noSelectionLabel
+      : selectedGroups.length === 1
+        ? resourceGroupDisplayLabel(selectedGroups[0], disabledGroupLabel)
+        : selectedCountLabel(selectedGroups.length);
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
+
+  function toggleResourceGroup(group: GenerationResourceGroup) {
+    if (disabled || !group.enabled) {
+      return;
+    }
+    const nextIds = selectedIds.includes(group.id)
+      ? selectedIds.filter((resourceGroupId) => resourceGroupId !== group.id)
+      : [...selectedIds, group.id];
+    onChange(nextIds);
+  }
+
+  return (
+    <div className="relative w-full">
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-label={ariaLabel}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        className="relative h-11 w-full rounded-lg border border-slate-300 bg-slate-50/90 pl-3 pr-10 text-left text-sm font-medium text-slate-900 shadow-sm shadow-slate-200/45 outline-none ring-1 ring-white/70 transition-colors hover:border-slate-400 hover:bg-white focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/25 dark:ring-slate-800 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:focus:border-violet-400 dark:focus:bg-[#111b2d] dark:focus:ring-violet-400/20 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+      >
+        <span className="block truncate">{selectedLabel}</span>
+        <span className="pointer-events-none absolute right-8 top-1/2 h-5 -translate-y-1/2 border-l border-slate-300 dark:border-slate-700" />
+        <ChevronDown
+          size={16}
+          className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition-transform dark:text-slate-300 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      <FloatingSurface
+        open={open && !disabled}
+        triggerRef={buttonRef}
+        preferredPlacement="bottom-start"
+        layer="modal"
+        matchTriggerWidth
+        onOpenChange={setOpen}
+        className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10"
+      >
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-multiselectable="true"
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
+          {resourceGroups.length ? (
+            resourceGroups.map((group) => {
+              const selected = selectedIds.includes(group.id);
+              const groupDisabled = !group.enabled;
+              return (
+                <button
+                  key={group.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  disabled={groupDisabled}
+                  onClick={() => toggleResourceGroup(group)}
+                  className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                    selected
+                      ? "bg-indigo-50 text-indigo-700 dark:bg-violet-500/18 dark:text-violet-100"
+                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                  }`}
+                >
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      selected
+                        ? "border-indigo-500 bg-indigo-600 text-white dark:border-violet-400 dark:bg-violet-500"
+                        : "border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-950"
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {selected ? <Check size={12} /> : null}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {resourceGroupDisplayLabel(group, disabledGroupLabel)}
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <div className="px-2.5 py-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+              {noGroupsLabel}
+            </div>
+          )}
+        </div>
+      </FloatingSurface>
+    </div>
+  );
+}
+
+function resourceGroupDisplayLabel(group: GenerationResourceGroup, disabledLabel: string): string {
+  return group.enabled ? group.name : `${group.name} (${disabledLabel})`;
 }
 
 function GenerationConfigImageFields({
@@ -3733,9 +3882,14 @@ export function SettingsPage() {
                     </span>
                     {t("settings.title")}
                   </div>
-                  <label className="mt-6 flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-400 shadow-sm shadow-slate-200/30 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-500 dark:shadow-black/20">
+                  <label
+                    htmlFor="settings-section-search"
+                    className="mt-6 flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-400 shadow-sm shadow-slate-200/30 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-500 dark:shadow-black/20"
+                  >
                     <Search size={16} />
                     <input
+                      id="settings-section-search"
+                      name="settings_section_search"
                       value={sectionSearch}
                       onChange={(event) => setSectionSearch(event.target.value)}
                       placeholder={t("settings.searchPlaceholder")}
@@ -3867,13 +4021,16 @@ export function SettingsPage() {
                       </button>
                     </div>
                   ) : null}
+                  {activeSection === "layoutAppearance" ? <UiLayoutSchemeSettingsControl /> : null}
                   {activeSection === "weather" ? (
-                    <WeatherSettingsPanel
-                      onSaved={() => {
-                        setError("");
-                        setSavedMessage(t("settings.weather.saved"));
-                      }}
-                    />
+                    <div className="space-y-5">
+                      <WeatherSettingsPanel
+                        onSaved={() => {
+                          setError("");
+                          setSavedMessage(t("settings.weather.saved"));
+                        }}
+                      />
+                    </div>
                   ) : null}
                   {activeSection === "notifications" ? (
                     <NotificationSettingsPanel

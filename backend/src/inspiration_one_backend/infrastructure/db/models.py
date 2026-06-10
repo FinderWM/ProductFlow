@@ -25,6 +25,8 @@ from inspiration_one_backend.domain.enums import (
     ImageSessionAssetKind,
     JobStatus,
     PosterKind,
+    ResourceLibraryAssetKind,
+    ResourceLibrarySourceType,
     SourceAssetKind,
     WorkflowNodeStatus,
     WorkflowNodeType,
@@ -156,6 +158,7 @@ class UserUiPreference(Base, TimestampMixin):
     __tablename__ = "user_ui_preferences"
 
     user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    ui_layout_scheme: Mapped[str] = mapped_column(String(32), default="classic")
     mask_sensitive_images_in_inspirations: Mapped[bool] = mapped_column(Boolean, default=True)
     mask_sensitive_images_in_image_chat: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -309,7 +312,10 @@ class GenerationConfigResourceGroup(Base):
         foreign_keys=lambda: [GenerationConfigResourceGroup.generation_config_id],
     )
     resource_group: Mapped[GenerationResourceGroup | None] = relationship(
-        primaryjoin=lambda: child_parent_join(GenerationConfigResourceGroup.resource_group_id, GenerationResourceGroup.id),
+        primaryjoin=lambda: child_parent_join(
+            GenerationConfigResourceGroup.resource_group_id,
+            GenerationResourceGroup.id,
+        ),
         foreign_keys=lambda: [GenerationConfigResourceGroup.resource_group_id],
     )
 
@@ -630,6 +636,116 @@ class UserCanvasTemplate(Base, TimestampMixin):
     schema_version: Mapped[int] = mapped_column(Integer, default=1)
     template_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ResourceLibraryGroup(Base, TimestampMixin):
+    """用户个人资源库分组。"""
+
+    __tablename__ = "resource_library_groups"
+    __table_args__ = (
+        Index("ix_resource_library_groups_owner_user_id", "owner_user_id"),
+        Index("ix_resource_library_groups_owner_archived", "owner_user_id", "archived_at"),
+        Index(
+            "uq_resource_library_groups_owner_name_active",
+            "owner_user_id",
+            "name",
+            unique=True,
+            postgresql_where=text("archived_at IS NULL"),
+            sqlite_where=text("archived_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str] = mapped_column(String(36), default=ADMIN_USER_ID)
+    name: Mapped[str] = mapped_column(String(120))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    owner: Mapped[AuthUser] = relationship(
+        primaryjoin=lambda: child_parent_join(ResourceLibraryGroup.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [ResourceLibraryGroup.owner_user_id],
+    )
+    asset_links: Mapped[list[ResourceLibraryAssetGroup]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(ResourceLibraryGroup.id, ResourceLibraryAssetGroup.group_id),
+        foreign_keys=lambda: [ResourceLibraryAssetGroup.group_id],
+    )
+
+
+class ResourceLibraryAsset(Base, TimestampMixin):
+    """用户个人资源库资产。"""
+
+    __tablename__ = "resource_library_assets"
+    __table_args__ = (
+        Index("ix_resource_library_assets_owner_user_id", "owner_user_id"),
+        Index("ix_resource_library_assets_kind", "kind"),
+        Index("ix_resource_library_assets_enabled", "enabled"),
+        Index("ix_resource_library_assets_owner_archived", "owner_user_id", "archived_at"),
+        Index(
+            "uq_resource_library_assets_owner_source",
+            "owner_user_id",
+            "source_type",
+            "source_resource_id",
+            unique=True,
+            postgresql_where=text("source_resource_id IS NOT NULL AND archived_at IS NULL"),
+            sqlite_where=text("source_resource_id IS NOT NULL AND archived_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str] = mapped_column(String(36), default=ADMIN_USER_ID)
+    kind: Mapped[ResourceLibraryAssetKind] = mapped_column(enum_value_column(ResourceLibraryAssetKind))
+    original_filename: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(100))
+    storage_path: Mapped[str] = mapped_column(String(500))
+    storage_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    storage_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    storage_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_type: Mapped[ResourceLibrarySourceType] = mapped_column(enum_value_column(ResourceLibrarySourceType))
+    source_resource_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    disabled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    owner: Mapped[AuthUser] = relationship(
+        primaryjoin=lambda: child_parent_join(ResourceLibraryAsset.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [ResourceLibraryAsset.owner_user_id],
+    )
+    disabled_by: Mapped[AuthUser | None] = relationship(
+        primaryjoin=lambda: child_parent_join(ResourceLibraryAsset.disabled_by_user_id, AuthUser.id),
+        foreign_keys=lambda: [ResourceLibraryAsset.disabled_by_user_id],
+    )
+    group_links: Mapped[list[ResourceLibraryAssetGroup]] = relationship(
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(ResourceLibraryAsset.id, ResourceLibraryAssetGroup.asset_id),
+        foreign_keys=lambda: [ResourceLibraryAssetGroup.asset_id],
+    )
+
+
+class ResourceLibraryAssetGroup(Base):
+    """个人资源库资产与分组的多对多关系。"""
+
+    __tablename__ = "resource_library_asset_groups"
+    __table_args__ = (Index("ix_resource_library_asset_groups_group", "group_id"),)
+
+    asset_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    group_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    asset: Mapped[ResourceLibraryAsset] = relationship(
+        back_populates="group_links",
+        primaryjoin=lambda: child_parent_join(ResourceLibraryAssetGroup.asset_id, ResourceLibraryAsset.id),
+        foreign_keys=lambda: [ResourceLibraryAssetGroup.asset_id],
+    )
+    group: Mapped[ResourceLibraryGroup] = relationship(
+        back_populates="asset_links",
+        primaryjoin=lambda: child_parent_join(ResourceLibraryAssetGroup.group_id, ResourceLibraryGroup.id),
+        foreign_keys=lambda: [ResourceLibraryAssetGroup.group_id],
+    )
 
 
 class Inspiration(Base, TimestampMixin):

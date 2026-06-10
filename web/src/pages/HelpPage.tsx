@@ -15,9 +15,10 @@ import {
   TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { FloatingSurface } from "../components/FloatingSurface";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import type { Locale } from "../lib/i18n";
@@ -2462,6 +2463,7 @@ export function HelpPage() {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const searchTriggerRef = useRef<HTMLDivElement | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const docPages = getHelpDocsForLocale(locale);
   const navGroups = getHelpNavGroupsForLocale(locale);
@@ -2495,7 +2497,7 @@ export function HelpPage() {
               <BookOpen size={18} className="text-indigo-600 dark:text-violet-300" />
               {t("help.title")}
             </button>
-            <div className="relative mt-4">
+            <div ref={searchTriggerRef} className="relative mt-4">
               <label htmlFor="help-search" className="sr-only">
                 {t("help.search")}
               </label>
@@ -2508,10 +2510,21 @@ export function HelpPage() {
                 placeholder={t("help.search")}
                 className="h-9 w-full rounded-lg border border-slate-200 bg-white px-9 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
               />
-              {normalizedSearchQuery ? (
-                <div className="absolute left-0 right-0 top-11 z-20 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700/80 dark:bg-[#151f33] dark:shadow-black/30">
+              <FloatingSurface
+                open={Boolean(normalizedSearchQuery)}
+                triggerRef={searchTriggerRef}
+                preferredPlacement="bottom-start"
+                layer="modal"
+                matchTriggerWidth
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setSearchQuery("");
+                  }
+                }}
+                className="flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700/80 dark:bg-[#151f33] dark:shadow-black/30"
+              >
                   {searchResults.length > 0 ? (
-                    <div className="max-h-[360px] overflow-y-auto py-1">
+                    <div className="min-h-0 flex-1 overflow-y-auto py-1">
                       {searchResults.map((result) => (
                         <button
                           key={result.page.slug}
@@ -2537,8 +2550,7 @@ export function HelpPage() {
                   ) : (
                     <div className="px-3 py-3 text-sm text-slate-500 dark:text-slate-400">{t("help.noSearchResults")}</div>
                   )}
-                </div>
-              ) : null}
+              </FloatingSurface>
             </div>
           </div>
 

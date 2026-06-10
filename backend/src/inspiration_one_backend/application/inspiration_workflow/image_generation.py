@@ -5,6 +5,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from pathlib import Path
+from typing import Any
 
 from dramatiq.middleware.time_limit import TimeLimitExceeded
 from sqlalchemy.orm import Session
@@ -51,6 +52,7 @@ from inspiration_one_backend.domain.enums import PosterKind, SourceAssetKind
 from inspiration_one_backend.domain.errors import BusinessValidationError
 from inspiration_one_backend.infrastructure.db.models import (
     CopySet,
+    GenerationConfig,
     InspirationWorkflow,
     PosterVariant,
     SourceAsset,
@@ -58,6 +60,8 @@ from inspiration_one_backend.infrastructure.db.models import (
 )
 from inspiration_one_backend.infrastructure.image.base import ImageProvider, infer_extension
 from inspiration_one_backend.infrastructure.provider_config import (
+    IMAGE_PURPOSE,
+    generation_config_resource_group_ids,
     is_real_image_provider_kind,
     resolve_image_provider_config,
 )
@@ -67,6 +71,11 @@ logger = logging.getLogger(__name__)
 
 WORKFLOW_IMAGE_GENERATION_FAILURE = "图片生成失败，请稍后重试"
 WORKFLOW_IMAGE_GENERATION_TIMEOUT_FAILURE = "图片生成超时，请稍后重试"
+TAIL_SPLIT_PROMPT_SOURCE_LIMITS = {
+    "public": (4, 1600),
+    "manual": (6, 1400),
+    "auxiliary": (4, 700),
+}
 
 
 class WorkflowImageGenerationTimeoutError(WorkflowSafeExecutionError):
@@ -129,6 +138,151 @@ def _is_workflow_context_copy_set(copy_set: CopySet) -> bool:
     return isinstance(payload, dict) and payload.get("purpose") == "workflow_context"
 
 
+def _generated_by(config_json: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(config_json, dict):
+        return {}
+    generated_by = config_json.get("generated_by")
+    return generated_by if isinstance(generated_by, dict) else {}
+
+
+def _tail_generated_image_trigger(node: WorkflowNode) -> dict[str, Any] | None:
+    generated_by = _generated_by(node.config_json)
+    if generated_by.get("role") != "image_trigger":
+        return None
+    tail_node_id = generated_by.get("tail_node_id")
+    return generated_by if isinstance(tail_node_id, str) and tail_node_id else None
+
+
+def _direct_source_nodes(workflow: InspirationWorkflow, target_node_id: str) -> list[WorkflowNode]:
+    ordered_edges = sorted(
+        [edge for edge in workflow.edges if edge.target_node_id == target_node_id],
+        key=lambda item: (item.created_at, item.id),
+    )
+    source_ids = list(dict.fromkeys(edge.source_node_id for edge in ordered_edges))
+    nodes_by_id = {node.id: node for node in workflow.nodes}
+    return [nodes_by_id[source_id] for source_id in source_ids if source_id in nodes_by_id]
+
+
+def _tail_public_source_role(source_node: WorkflowNode, *, tail_node_id: str) -> str | None:
+    generated_by = _generated_by(source_node.config_json)
+    if generated_by.get("tail_node_id") != tail_node_id:
+        return None
+    role = generated_by.get("role")
+    return role if role in {"public_copy", "public_reference"} else None
+
+
+def _compact_prompt_text(text: str, *, max_chars: int) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[:max_chars].rstrip()}..."
+
+
+def _format_prompt_sources(
+    sources: list[dict[str, str]],
+    *,
+    max_sources: int,
+    max_chars: int,
+) -> str:
+    lines: list[str] = []
+    for source in sources[:max_sources]:
+        node_title = source.get("node_title") or "上游节点"
+        label = source.get("label") or "上下文"
+        text = _compact_prompt_text(source.get("text", ""), max_chars=max_chars)
+        if text:
+            lines.append(f"- [{node_title} / {label}] {text}")
+    return "\n".join(lines)
+
+
+def _tail_split_image_instruction(
+    *,
+    workflow: InspirationWorkflow,
+    node: WorkflowNode,
+    incoming_text_sources: list[dict[str, str]],
+) -> str | None:
+    tail_generated = _tail_generated_image_trigger(node)
+    if tail_generated is None:
+        return image_instruction_with_context(node, [source["text"] for source in incoming_text_sources])
+
+    instruction = optional_config_text(node.config_json, "instruction") or ""
+    tail_node_id = str(tail_generated["tail_node_id"])
+    direct_sources = _direct_source_nodes(workflow, node.id)
+
+    public_node_ids: set[str] = set()
+    generated_helper_node_ids: set[str] = set()
+    for source_node in direct_sources:
+        public_role = _tail_public_source_role(source_node, tail_node_id=tail_node_id)
+        if public_role is None:
+            continue
+        generated_helper_node_ids.add(source_node.id)
+        public_node_ids.add(source_node.id)
+
+    manual_direct_node_ids = {
+        source_node.id
+        for source_node in direct_sources
+        if source_node.id != tail_node_id and source_node.id not in generated_helper_node_ids
+    }
+    public_sources: list[dict[str, str]] = []
+    manual_sources: list[dict[str, str]] = []
+    auxiliary_sources: list[dict[str, str]] = []
+    for source in incoming_text_sources:
+        node_id = source.get("node_id")
+        if node_id in public_node_ids:
+            public_sources.append(source)
+        elif node_id in manual_direct_node_ids:
+            manual_sources.append(source)
+        else:
+            auxiliary_sources.append(source)
+
+    public_max_sources, public_max_chars = TAIL_SPLIT_PROMPT_SOURCE_LIMITS["public"]
+    manual_max_sources, manual_max_chars = TAIL_SPLIT_PROMPT_SOURCE_LIMITS["manual"]
+    auxiliary_max_sources, auxiliary_max_chars = TAIL_SPLIT_PROMPT_SOURCE_LIMITS["auxiliary"]
+
+    sections = [
+        (
+            "优先级规则（必须遵守）：\n"
+            "P0 当前生图节点描述是这张 PPT 图片的唯一内容边界。\n"
+            "P1 公共约束只控制整批图片的风格、版式、禁忌和一致性，不能新增 P0 没有要求展示的业务内容。\n"
+            "P2 用户手动直连的辅助节点可用于当前图片的信息提取、局部复用或贴图，但仍不能突破 P0 的内容边界。\n"
+            "P3 自动上游/全局资料只用于理解术语和核对事实，不指导构图、文字密度、流程节点、表格字段或画面元素。"
+        ),
+        f"P0 当前生图节点描述：\n{instruction or '未提供当前页画面描述。'}",
+    ]
+
+    formatted_public = _format_prompt_sources(
+        public_sources,
+        max_sources=public_max_sources,
+        max_chars=public_max_chars,
+    )
+    if formatted_public:
+        sections.append(f"P1 公共约束：\n{formatted_public}")
+
+    formatted_manual = _format_prompt_sources(
+        manual_sources,
+        max_sources=manual_max_sources,
+        max_chars=manual_max_chars,
+    )
+    if formatted_manual:
+        sections.append(f"P2 用户手动直连辅助信息：\n{formatted_manual}")
+
+    formatted_auxiliary = _format_prompt_sources(
+        auxiliary_sources,
+        max_sources=auxiliary_max_sources,
+        max_chars=auxiliary_max_chars,
+    )
+    if formatted_auxiliary:
+        sections.append(
+            "P3 自动上游/全局资料（仅用于术语理解和事实核对，禁止直接画入）：\n"
+            f"{formatted_auxiliary}"
+        )
+
+    sections.append(
+        "执行要求：生成单张 PPT 辅助图；只呈现 P0 要求的主要简化信息；"
+        "讲述人负责展开细节，图片不要补充 P0 未要求的流程、字段、表格、标题或业务分支。"
+    )
+    return "\n\n".join(sections)
+
+
 def _workflow_image_generation_config_selection_for_execution(
     session: Session,
     *,
@@ -136,16 +290,16 @@ def _workflow_image_generation_config_selection_for_execution(
     node: WorkflowNode,
 ) -> GenerationConfigSelection:
     selection = generation_config_selection_from_config(node.config_json)
-    if selection.mode == "manual" or selection.generation_config_id is not None:
+    if not selection.resource_group_id:
         raise WorkflowSafeExecutionError(
-            "生成入口只能选择供应商生成分组",
+            "请选择供应商生成分组",
             retryable=False,
             retry_hint="revise_input",
             failure_category="invalid_node_config",
         )
-    if not selection.resource_group_id:
+    if selection.mode == "manual" and not selection.generation_config_id:
         raise WorkflowSafeExecutionError(
-            "请选择供应商生成分组",
+            "手动指定生成配置时必须选择配置",
             retryable=False,
             retry_hint="revise_input",
             failure_category="invalid_node_config",
@@ -165,7 +319,51 @@ def _workflow_image_generation_config_selection_for_execution(
             retry_hint="check_settings",
             failure_category="invalid_node_config",
         ) from exc
-    return GenerationConfigSelection(resource_group_id=group.id)
+    authorized_selection = GenerationConfigSelection(
+        mode=selection.mode,
+        generation_config_id=selection.generation_config_id,
+        resource_group_id=group.id,
+    )
+    _validate_manual_image_generation_config_selection(session, selection=authorized_selection)
+    return authorized_selection
+
+
+def _validate_manual_image_generation_config_selection(
+    session: Session,
+    *,
+    selection: GenerationConfigSelection,
+) -> None:
+    if selection.mode != "manual":
+        return
+    if not selection.generation_config_id:
+        raise WorkflowSafeExecutionError(
+            "手动指定生成配置时必须选择配置",
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_config",
+        )
+    generation_config = session.get(GenerationConfig, selection.generation_config_id)
+    if generation_config is None or generation_config.archived_at is not None:
+        raise WorkflowSafeExecutionError(
+            "生成配置不存在",
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_config",
+        )
+    if generation_config.purpose != IMAGE_PURPOSE:
+        raise WorkflowSafeExecutionError(
+            "生图节点只能使用图片生成配置",
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_config",
+        )
+    if selection.resource_group_id not in generation_config_resource_group_ids(generation_config):
+        raise WorkflowSafeExecutionError(
+            "手动指定的生成配置不属于当前供应商生成分组",
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_config",
+        )
 
 
 def execute_workflow_image_generation(
@@ -243,13 +441,19 @@ def execute_workflow_image_generation(
             reference_assets,
             resolve_storage_path=storage.resolve,
         )
+        instruction = _tail_split_image_instruction(
+            workflow=workflow,
+            node=node,
+            incoming_text_sources=incoming_context.text_sources,
+        )
+        source_note = None if _tail_generated_image_trigger(node) is not None else inspiration_context["source_note"]
         render_input = PosterGenerationInput(
             copy_prompt_mode="copy" if structured_copy_context else "image_edit",
             inspiration_name=inspiration_context["name"] or "",
             category=inspiration_context["category"],
             price=inspiration_context["price"],
-            source_note=inspiration_context["source_note"],
-            instruction=image_instruction_with_context(node, incoming_context.text_contexts),
+            source_note=source_note,
+            instruction=instruction,
             image_size=image_size_from_config(node.config_json),
             tool_options=image_tool_options_from_config(node.config_json),
             structured_copy_context=structured_copy_context,

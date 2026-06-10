@@ -18,6 +18,13 @@ import {
   resolveTheme,
   resolveThemePreference,
 } from "./theme";
+import {
+  DEFAULT_WORKSPACE_APPEARANCE,
+  WORKSPACE_APPEARANCE_STORAGE_KEY,
+  type WorkspaceAppearance,
+  applyWorkspaceAppearanceToRoot,
+  resolveWorkspaceAppearance,
+} from "./workspaceAppearance";
 
 export type TranslateFunction = ((key: TranslationKey, params?: TranslationParams) => string) & { locale?: Locale };
 
@@ -28,6 +35,8 @@ interface PreferencesContextValue {
   themePreference: ThemePreference;
   setThemePreference: (theme: ThemePreference) => void;
   resolvedTheme: ResolvedTheme;
+  workspaceAppearance: WorkspaceAppearance;
+  setWorkspaceAppearance: (appearance: WorkspaceAppearance) => void;
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null);
@@ -50,6 +59,9 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(() => resolveLocale(readStorage(LOCALE_STORAGE_KEY)));
   const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() =>
     resolveThemePreference(readStorage(THEME_STORAGE_KEY)),
+  );
+  const [workspaceAppearance, setWorkspaceAppearanceState] = useState<WorkspaceAppearance>(() =>
+    resolveWorkspaceAppearance(readStorage(WORKSPACE_APPEARANCE_STORAGE_KEY)),
   );
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
 
@@ -76,6 +88,11 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);
   }, [resolvedTheme, themePreference]);
 
+  useEffect(() => {
+    applyWorkspaceAppearanceToRoot(document.documentElement, workspaceAppearance);
+    window.localStorage.setItem(WORKSPACE_APPEARANCE_STORAGE_KEY, workspaceAppearance);
+  }, [workspaceAppearance]);
+
   const value = useMemo<PreferencesContextValue>(
     () => {
       const t: TranslateFunction = (key, params) => translate(locale, key, params);
@@ -87,9 +104,11 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
         themePreference,
         setThemePreference: (nextTheme) => setThemePreferenceState(resolveThemePreference(nextTheme)),
         resolvedTheme,
+        workspaceAppearance,
+        setWorkspaceAppearance: (nextAppearance) => setWorkspaceAppearanceState(resolveWorkspaceAppearance(nextAppearance)),
       };
     },
-    [locale, resolvedTheme, themePreference],
+    [locale, resolvedTheme, themePreference, workspaceAppearance],
   );
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
@@ -107,6 +126,8 @@ export function usePreferences(): PreferencesContextValue {
       themePreference: DEFAULT_THEME_PREFERENCE,
       setThemePreference: () => undefined,
       resolvedTheme: resolveTheme(DEFAULT_THEME_PREFERENCE, false),
+      workspaceAppearance: DEFAULT_WORKSPACE_APPEARANCE,
+      setWorkspaceAppearance: () => undefined,
     };
   }
   return context;
