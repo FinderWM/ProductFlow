@@ -1,6 +1,6 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Image as ImageIcon, Loader2 } from "lucide-react";
+import { Ban, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
@@ -13,6 +13,7 @@ import { useI18n } from "../lib/preferences";
 import type { GalleryEntry } from "../lib/types";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import { galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
+import { galleryAdminRemovedLabel } from "./gallery/moderation";
 
 function metadataRows(
   entry: GalleryEntry,
@@ -217,6 +218,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
               >
                 {entries.map((entry, index) => {
                   const tileLayout = galleryTileLayout(entry, index, gridContentWidth ?? undefined);
+                  const adminRemovedLabel = galleryAdminRemovedLabel(entry, t);
                   const tileStyle: CSSProperties = {
                     aspectRatio: tileLayout.aspectRatio,
                     ...(isDesktopGrid ? { gridRowEnd: `span ${tileLayout.rowSpan}` } : {}),
@@ -235,8 +237,17 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                           alt={entry.prompt ?? entry.image.original_filename}
                           loading="lazy"
                           decoding="async"
-                          className="h-full w-full object-contain transition duration-300"
+                          className={`h-full w-full object-contain transition duration-300 ${adminRemovedLabel ? "opacity-55 grayscale" : ""}`}
                         />
+                        {adminRemovedLabel ? (
+                          <div
+                            className="absolute left-3 top-3 z-10 inline-flex max-w-[calc(100%-1.5rem)] items-center rounded-md border border-red-200 bg-red-50/95 px-2 py-1 text-[11px] font-semibold text-red-700 shadow-sm dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-100"
+                            title={adminRemovedLabel}
+                          >
+                            <Ban size={12} className="mr-1.5 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{adminRemovedLabel}</span>
+                          </div>
+                        ) : null}
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/82 via-slate-950/10 to-transparent opacity-80 transition-opacity group-hover:opacity-95" />
                         <div className="absolute inset-x-0 bottom-0 p-4 text-white">
                           <div className="line-clamp-2 text-sm font-semibold leading-5">
@@ -247,7 +258,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                             {showGenerationResourceGroup ? <span>{entry.resource_group.name}</span> : null}
                             <span>{formatDateTime(entry.created_at)}</span>
                           </div>
-                          <ResourceMetaBadges resource={entry} className="mt-2" />
+                          <ResourceMetaBadges resource={entry} className="mt-2" showReason={Boolean(adminRemovedLabel)} />
                         </div>
                       </div>
                     </button>

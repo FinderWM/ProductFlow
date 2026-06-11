@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
+  Ban,
   Image as ImageIcon,
   Loader2,
   MessageSquareText,
@@ -37,6 +38,7 @@ import type {
   UserUsageStatsSummary,
 } from "../../lib/types";
 import { galleryEntrySizeLabel } from "../gallery/helpers";
+import { galleryAdminRemovedLabel } from "../gallery/moderation";
 import { inspirationKeyInfo, inspirationMainThumbnailUrl } from "../InspirationListPage.helpers";
 
 const WORKSPACE_MUTED_CARD_CLASS = "pf-workspace-card-soft rounded-lg";
@@ -767,19 +769,29 @@ function GalleryStripItem({
   locale: ReturnType<typeof useI18n>["locale"];
   showGenerationResourceGroup: boolean;
 }) {
+  const { t } = useI18n();
   const label = entry.prompt ?? entry.image.original_filename;
+  const adminRemovedLabel = galleryAdminRemovedLabel(entry, t);
+  const title = adminRemovedLabel ? `${label} / ${adminRemovedLabel}` : label;
   const metadata = showGenerationResourceGroup
     ? `${galleryEntrySizeLabel(entry, locale)} / ${entry.resource_group.name}`
     : galleryEntrySizeLabel(entry, locale);
   return (
-    <article className="pf-workspace-gallery-strip-card" title={label}>
-      <div className="pf-workspace-gallery-strip-core">
+    <article className="pf-workspace-gallery-strip-card" title={title} aria-label={title}>
+      <div className="pf-workspace-gallery-strip-core relative">
         <img
           src={api.toApiUrl(galleryEntryWorkspaceImageUrl(entry))}
           alt={label}
           loading="lazy"
           decoding="async"
+          className={adminRemovedLabel ? "opacity-55 grayscale" : undefined}
         />
+        {adminRemovedLabel ? (
+          <span className="absolute left-3 top-3 inline-flex max-w-[calc(100%-1.5rem)] items-center rounded-md border border-red-200 bg-red-50/95 px-2 py-1 text-[11px] font-semibold text-red-700 shadow-sm dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-100">
+            <Ban size={12} className="mr-1.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{adminRemovedLabel}</span>
+          </span>
+        ) : null}
       </div>
       <span className="pf-workspace-muted mt-2 block truncate px-1 text-xs">
         {metadata}
