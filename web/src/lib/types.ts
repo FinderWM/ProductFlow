@@ -74,6 +74,31 @@ export interface ModerationFields {
   deleted_by_user_id?: string | null;
 }
 
+export type ResourceModerationType =
+  | "inspiration"
+  | "source_asset"
+  | "poster_variant"
+  | "image_session"
+  | "image_session_asset"
+  | "image_gallery_entry"
+  | "resource_library_asset"
+  | "canvas_template"
+  | "canvas_template_category";
+
+export interface ResourceModerationUpdateInput {
+  enabled: boolean;
+  reason?: string | null;
+}
+
+export interface ResourceModerationResponse extends ModerationFields {
+  resource_type: ResourceModerationType;
+  resource_id: string;
+  owner_user_id: string | null;
+  owner_username: string | null;
+  enabled: boolean;
+  effective_enabled: boolean;
+}
+
 export interface SessionState {
   authenticated: boolean;
   access_required: boolean;
@@ -1039,7 +1064,14 @@ export interface GalleryEntry extends ModerationFields {
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
   provider_notes: string[];
+  view_count: number;
   created_at: string;
+}
+
+export interface GalleryEntryViewResponse {
+  id: string;
+  view_count: number;
+  counted: boolean;
 }
 
 export interface GalleryEntryListResponse {

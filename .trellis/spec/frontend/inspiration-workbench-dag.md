@@ -984,7 +984,7 @@ does not start generated nodes automatically.
 - `api.listProducts({ page, page_size })` drives paginated inspiration lists and returns thumbnail URLs.
 - `api.runInspirationWorkflow(inspirationId, { start_node_id })` may target an image node whose only required upstream is inspiration
   context.
-- Local UI persistence keys: `productflow.workflow.zoom` and `productflow.workflow.inspectorWidth`.
+- Local UI persistence keys: `inspiration-one.workflow.zoom` and `inspiration-one.workflow.inspectorWidth`.
 
 ### 3. Contracts
 - The add-node toolbar must not expose `inspiration_context`; one inspiration context exists per active workflow.
@@ -996,7 +996,7 @@ does not start generated nodes automatically.
 - ReactFlow viewport zoom transforms visual coordinates, while drag persistence must keep backend positions in unscaled
   workflow coordinates.
 - Mouse wheel and pinch events inside the canvas viewport should zoom the ReactFlow canvas within shared zoom bounds and
-  persist the value under `productflow.workflow.zoom`. Controls/forms/buttons should not trigger unexpected zoom.
+  persist the value under `inspiration-one.workflow.zoom`. Controls/forms/buttons should not trigger unexpected zoom.
 - The shared minimum zoom must be low enough for mobile all-nodes overview. Do not set a floor such as 50% that prevents
   ReactFlow `fitView` from fitting the current workflow into a narrow mobile viewport.
 - Canvas zoom controls must be a floating overlay anchored inside the ReactFlow canvas viewport through ReactFlow `Panel`

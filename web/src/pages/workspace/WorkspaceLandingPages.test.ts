@@ -5,11 +5,13 @@ import {
   galleryEntryWorkspaceImageUrl,
   isWorkspacePublicResourceGroup,
   nextWorkspaceGalleryLoopOffset,
-  workspaceImageChatWorkbenchPath,
   workspaceArtImageOrientationFromSize,
   workspaceFirstPreviewImageUrl,
   workspaceGalleryArtImageUrl,
   workspaceGalleryRetainedOffsets,
+  workspaceHomeAnchorPath,
+  workspaceHomeVisibleAnchorIds,
+  workspaceImageChatWorkbenchPath,
   workspaceImageSessionArtImageUrl,
   workspaceImageSessionListThumbnailUrl,
   workspaceInspirationArtImageUrl,
@@ -129,7 +131,7 @@ describe("workspace landing privacy filters", () => {
 
   it("carries workspace image-chat list filters into the workbench route", () => {
     expect(workspaceImageChatWorkbenchPath({ ownerUserId: "user-1" })).toBe(
-      "/image-chat/workbench?resource_group_id=&owner_user_id=user-1",
+      "/image-chat/workbench?owner_user_id=user-1",
     );
     expect(
       workspaceImageChatWorkbenchPath({
@@ -139,6 +141,27 @@ describe("workspace landing privacy filters", () => {
       }),
     ).toBe("/image-chat/workbench?resource_group_id=group-1&owner_user_id=user-1&session_id=session-1");
     expect(workspaceImageChatWorkbenchPath({ ownerUserId: null })).toBe("/image-chat/workbench");
+    expect(workspaceImageChatWorkbenchPath({ ownerUserId: "user-1", createSession: true })).toBe(
+      "/image-chat/workbench?owner_user_id=user-1&create_session=1",
+    );
+  });
+
+  it("keeps home anchor targets for the workspace quick nav", () => {
+    expect(workspaceHomeAnchorPath("chat")).toBe("/inspirations#chat");
+    expect(workspaceHomeAnchorPath("resource-library")).toBe("/inspirations#resource-library");
+  });
+
+  it("filters workspace home quick nav anchors by visible section access", () => {
+    expect(
+      workspaceHomeVisibleAnchorIds({
+        resourceLibrary: true,
+        inspirations: false,
+        imageChat: true,
+        gallery: false,
+        status: true,
+        usageStats: false,
+      }),
+    ).toEqual(["resource-library", "chat", "status"]);
   });
 
   it("uses thumbnail images for the workspace gallery strip before heavier previews or downloads", () => {

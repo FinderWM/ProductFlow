@@ -44,8 +44,8 @@ export function ImageChatSessionList({
 }: ImageChatSessionListProps) {
   const containerClassName =
     variant === "desktop"
-      ? "flex gap-3 overflow-x-auto p-3 lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-2 lg:overflow-x-visible lg:overflow-y-auto lg:px-8"
-      : "min-h-0 flex-1 space-y-2 overflow-y-auto p-3";
+      ? "pf-image-chat-session-list flex gap-3 overflow-x-auto p-3 lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-2 lg:overflow-x-visible lg:overflow-y-auto lg:px-8"
+      : "pf-image-chat-session-list min-h-0 flex-1 space-y-2 overflow-y-auto p-3";
 
   return (
     <div className={containerClassName}>
@@ -54,11 +54,11 @@ export function ImageChatSessionList({
           {[1, 2, 3].map((i) => (
             <div
               key={i}
-              className={`flex shrink-0 items-center gap-3 rounded-2xl border border-slate-100 bg-white p-2.5 shadow-sm dark:border-slate-800/80 dark:bg-[#151f33] ${
+              className={`pf-image-chat-session-card flex shrink-0 items-center gap-3 rounded-2xl border border-slate-100 bg-white p-2.5 shadow-sm dark:border-slate-800/80 dark:bg-[#151f33] ${
                 variant === "desktop" ? "w-64 lg:w-auto" : "w-full"
               }`}
             >
-              <div className="h-16 w-16 shrink-0 rounded-xl bg-slate-200 dark:bg-[#0a1020] animate-shimmer" />
+              <div className="pf-image-chat-session-thumb h-16 w-16 shrink-0 rounded-xl bg-slate-200 dark:bg-[#0a1020] animate-shimmer" />
               <div className="flex-1 space-y-2">
                 <div className="h-4 w-3/4 rounded bg-slate-100 dark:bg-slate-800/60 animate-shimmer" />
                 <div className="h-3 w-1/2 rounded bg-slate-100 dark:bg-slate-800/60 animate-shimmer" />
@@ -85,7 +85,7 @@ export function ImageChatSessionList({
           />
         ))
       ) : (
-        <div className="rounded-2xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+        <div className="pf-image-chat-session-empty pf-workspace-card-soft pf-workspace-muted rounded-2xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
           {t("chat.noSessions")}
         </div>
       )}
@@ -120,7 +120,8 @@ function ImageChatSessionCard({
   onDeleteSession,
   t,
 }: ImageChatSessionCardProps) {
-  const cardClassName = `group relative overflow-hidden rounded-2xl border transition-all ${
+  const cardStateClassName = active ? "pf-image-chat-session-card--active" : "pf-image-chat-session-card--idle";
+  const cardClassName = `pf-image-chat-session-card ${cardStateClassName} group relative overflow-hidden rounded-2xl border transition-all ${
     variant === "desktop" ? "w-64 shrink-0 lg:w-auto " : ""
   }${
     active
@@ -129,12 +130,12 @@ function ImageChatSessionCard({
   }`;
   const selectClassName =
     variant === "desktop"
-      ? "flex w-full items-center gap-3 p-2.5 pr-10 text-left"
-      : "flex min-h-20 w-full items-center gap-3 p-2.5 pr-12 text-left active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400";
+      ? "pf-image-chat-session-card-button flex w-full items-center gap-3 p-2.5 pr-10 text-left"
+      : "pf-image-chat-session-card-button flex min-h-20 w-full items-center gap-3 p-2.5 pr-12 text-left active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400";
   const deleteClassName =
     variant === "desktop"
-      ? "absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/95 text-slate-400 opacity-100 shadow-sm ring-1 ring-slate-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/88 dark:text-slate-400 dark:ring-slate-700 dark:hover:text-red-300 md:opacity-0 md:group-hover:opacity-100"
-      : "absolute right-2 top-2 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-white/95 text-slate-400 shadow-sm ring-1 ring-slate-200 transition-colors active:scale-[0.98] hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/88 dark:text-slate-400 dark:ring-slate-700 dark:hover:text-red-300";
+      ? "pf-image-chat-session-delete absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/95 text-slate-400 opacity-100 shadow-sm ring-1 ring-slate-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/88 dark:text-slate-400 dark:ring-slate-700 dark:hover:text-red-300 md:opacity-0 md:group-hover:opacity-100"
+      : "pf-image-chat-session-delete absolute right-2 top-2 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-white/95 text-slate-400 shadow-sm ring-1 ring-slate-200 transition-colors active:scale-[0.98] hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/88 dark:text-slate-400 dark:ring-slate-700 dark:hover:text-red-300";
   const blocked = isResourceBlocked(item);
   const deleted = isResourceDeleted(item);
   const blockedTitle = getResourceBlockedActionTitle(item, t("resource.blockedAction"));
@@ -145,7 +146,7 @@ function ImageChatSessionCard({
   return (
     <div className={cardClassName}>
       <button type="button" onClick={() => onSelectSession(item.id)} className={selectClassName}>
-        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400 ring-1 ring-slate-200 dark:bg-[#0a1020] dark:text-slate-400 dark:ring-slate-600/80">
+        <div className="pf-image-chat-session-thumb relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400 ring-1 ring-slate-200 dark:bg-[#0a1020] dark:text-slate-400 dark:ring-slate-600/80">
           {item.latest_generated_asset ? (
             <img
               src={api.toApiUrl(item.latest_generated_asset.thumbnail_url)}
@@ -162,20 +163,22 @@ function ImageChatSessionCard({
           ) : null}
           {active ? <div className="absolute inset-0 ring-2 ring-inset ring-indigo-500/60 dark:ring-violet-400/80" /> : null}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className={`truncate text-sm font-semibold ${active ? "text-indigo-950 dark:text-white" : "text-slate-900 dark:text-slate-100"}`}>
+        <div className="pf-workspace-latest-copy min-w-0 flex-1">
+          <div className={`pf-image-chat-session-title truncate text-sm font-semibold ${active ? "text-indigo-950 dark:text-white" : "text-slate-900 dark:text-slate-100"}`}>
             {item.title}
           </div>
-          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
+          <div className="pf-image-chat-session-meta pf-workspace-muted mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
             <History size={11} />
             <span>{t("chat.roundCount", { count: item.rounds_count })}</span>
           </div>
           {item.latest_resource_group ? (
-            <div className="mt-1 inline-flex max-w-full rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:border-violet-400/30 dark:bg-violet-500/12 dark:text-violet-100">
+            <div className="pf-image-chat-session-tag pf-workspace-chip mt-1 inline-flex max-w-full rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:border-violet-400/30 dark:bg-violet-500/12 dark:text-violet-100">
               <span className="truncate">{item.latest_resource_group.name}</span>
             </div>
           ) : null}
-          <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500">{formatDateTime(item.updated_at)}</div>
+          <div className="pf-image-chat-session-time pf-workspace-subtle mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500">
+            {formatDateTime(item.updated_at)}
+          </div>
           <ResourceMetaBadges resource={item} className="mt-1" />
         </div>
       </button>

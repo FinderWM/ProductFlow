@@ -88,7 +88,7 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
         40,
     ),
     ApiPermissionDefinition(API_RBAC_MANAGE, MENU_RBAC, "管理权限", "管理用户、角色和授权", 10),
-    ApiPermissionDefinition(API_RESOURCES_MODERATE, MENU_RBAC, "治理资源", "屏蔽或恢复用户资源", 20),
+    ApiPermissionDefinition(API_RESOURCES_MODERATE, MENU_RBAC, "查看与治理资源", "查看、屏蔽或恢复用户资源", 20),
     ApiPermissionDefinition(
         API_GLOBAL_TEMPLATES_MANAGE,
         MENU_SETTINGS,

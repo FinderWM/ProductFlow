@@ -188,6 +188,10 @@ function writeImageChatRouteState(scope: string, state: ImageChatRouteState) {
   });
 }
 
+function isDesktopImageChatLayout(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(DESKTOP_RESIZABLE_LAYOUT_QUERY).matches;
+}
+
 function getSessionReferenceAssets(imageSession: ImageSessionDetail | undefined): ImageSessionAsset[] {
   return imageSession?.assets.filter((asset) => asset.kind === "reference_upload") ?? [];
 }
@@ -249,7 +253,7 @@ function ImageChatWorkbenchPage() {
   const { t } = useI18n();
   const sessionState = useSessionState();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { inspirationId } = useParams();
   const isInspirationMode = Boolean(inspirationId);
@@ -267,6 +271,7 @@ function ImageChatWorkbenchPage() {
   }, [routeStateScope, searchParams]);
   const pendingGeneratedRoundCountRef = useRef<number | null>(null);
   const duplicateSubmitGuardRef = useRef<ImageGenerationSubmitGuard | null>(null);
+  const createSessionRouteIntentConsumedRef = useRef(false);
   const mobileSessionButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileHistoryButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileSettingsButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -440,6 +445,21 @@ function ImageChatWorkbenchPage() {
     window.addEventListener("resize", clampPanelSizesToViewport);
     return () => window.removeEventListener("resize", clampPanelSizesToViewport);
   }, [historyPanelHeight, leftPanelWidth, rightPanelWidth]);
+
+  useEffect(() => {
+    const desktopLayoutQuery = window.matchMedia(DESKTOP_RESIZABLE_LAYOUT_QUERY);
+    const closeMobileSurfacesOnDesktop = () => {
+      if (!desktopLayoutQuery.matches) {
+        return;
+      }
+      setMobileSessionDrawerOpen(false);
+      setMobileHistoryDrawerOpen(false);
+      setMobileGenerationSheetOpen(false);
+    };
+    closeMobileSurfacesOnDesktop();
+    desktopLayoutQuery.addEventListener("change", closeMobileSurfacesOnDesktop);
+    return () => desktopLayoutQuery.removeEventListener("change", closeMobileSurfacesOnDesktop);
+  }, []);
 
   const deferredSessionOwnerSearch = useDeferredValue(selectedSessionOwnerSearch.trim());
   const sessionListScope = inspirationId ?? "standalone";
@@ -701,6 +721,20 @@ function ImageChatWorkbenchPage() {
     setSuccessMessage("");
     setErrorMessage("");
   }
+
+  useEffect(() => {
+    if (createSessionRouteIntentConsumedRef.current || searchParams.get("create_session") !== "1") {
+      return;
+    }
+    if (!generationResourceGroupsQuery.isFetched) {
+      return;
+    }
+    createSessionRouteIntentConsumedRef.current = true;
+    openCreateSessionDialog();
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("create_session");
+    setSearchParams(nextSearchParams, { replace: true });
+  }, [generationResourceGroupsQuery.isFetched, searchParams, setSearchParams]);
 
   const createSessionMutation = useMutation({
     mutationFn: ({ resourceGroupId }: { resourceGroupId: string }) => {
@@ -1498,6 +1532,10 @@ function ImageChatWorkbenchPage() {
     setRetryGenerationTaskId(mode === "retry" ? task.id : null);
   }
 
+  function openMobileGenerationSheetOnCompactLayout() {
+    setMobileGenerationSheetOpen(!isDesktopImageChatLayout());
+  }
+
   function handleRetryGenerationTask(task: ImageSessionGenerationTask) {
     if (!selectedSessionId || !imageSession || !isImageSessionGenerationTaskRetryable(task)) {
       return;
@@ -1513,7 +1551,7 @@ function ImageChatWorkbenchPage() {
     restoreGenerationTaskDraft(task, "retry");
     setSuccessMessage(t("chat.retrySettingsRestored"));
     setErrorMessage("");
-    setMobileGenerationSheetOpen(true);
+    openMobileGenerationSheetOnCompactLayout();
   }
 
   function handleCancelGenerationTask(task: ImageSessionGenerationTask) {
@@ -1589,7 +1627,7 @@ function ImageChatWorkbenchPage() {
     setGenerationDraftMode("new_round");
     setSuccessMessage(t("chat.newRoundReady"));
     setErrorMessage("");
-    setMobileGenerationSheetOpen(true);
+    openMobileGenerationSheetOnCompactLayout();
   }
 
   function handleRename() {
@@ -2146,25 +2184,25 @@ function ImageChatWorkbenchPage() {
       .join(" · ");
 
     return (
-      <div className="rounded-xl border border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-950/40">
+      <div className="pf-image-chat-filter rounded-xl border border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-950/40">
         <button
           type="button"
           onClick={() => setSessionFiltersExpanded((expanded) => !expanded)}
           aria-expanded={sessionFiltersExpanded}
           aria-label={sessionFiltersExpanded ? t("chat.sessionFiltersCollapse") : t("chat.sessionFiltersExpand")}
-          className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-900/70 dark:focus-visible:ring-violet-400"
+          className="pf-image-chat-filter-toggle flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-900/70 dark:focus-visible:ring-violet-400"
         >
           <span className="min-w-0">
             <span className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">{t("chat.sessionFilters")}</span>
+              <span className="pf-workspace-title text-xs font-semibold text-slate-700 dark:text-slate-200">{t("chat.sessionFilters")}</span>
               {activeFilterCount ? (
-                <span className="rounded-full border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:border-violet-400/30 dark:bg-violet-500/12 dark:text-violet-100">
+                <span className="pf-workspace-chip rounded-full border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:border-violet-400/30 dark:bg-violet-500/12 dark:text-violet-100">
                   {t("chat.sessionFiltersActiveCount", { count: activeFilterCount })}
                 </span>
               ) : null}
             </span>
             {!sessionFiltersExpanded ? (
-              <span className="mt-1 block truncate text-[11px] text-slate-500 dark:text-slate-400">
+              <span className="pf-workspace-muted mt-1 block truncate text-[11px] text-slate-500 dark:text-slate-400">
                 {collapsedSummary || t("chat.sessionFiltersCollapsedHint")}
               </span>
             ) : null}
@@ -2175,9 +2213,9 @@ function ImageChatWorkbenchPage() {
           />
         </button>
         {sessionFiltersExpanded ? (
-          <div className="space-y-2 border-t border-slate-200 px-3 py-3 dark:border-slate-700">
+          <div className="pf-image-chat-filter-body space-y-2 border-t border-slate-200 px-3 py-3 dark:border-slate-700">
             <label className="block">
-              <span className="mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              <span className="pf-workspace-muted mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                 {t("chat.sessionResourceGroupFilter")}
               </span>
               <SelectField
@@ -2198,7 +2236,7 @@ function ImageChatWorkbenchPage() {
               />
             </label>
             {showSensitiveImageMaskPreference ? (
-              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+              <label className="pf-image-chat-filter-check flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
                 <input
                   type="checkbox"
                   checked={maskSensitiveImages}
@@ -2211,7 +2249,7 @@ function ImageChatWorkbenchPage() {
             {isAdmin ? (
               <>
                 <label className="block">
-                  <span className="mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  <span className="pf-workspace-muted mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                     {t("chat.sessionOwnerFilter")}
                   </span>
                   <SelectField
@@ -2229,7 +2267,7 @@ function ImageChatWorkbenchPage() {
                     visualSize="sm"
                   />
                 </label>
-                <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                <label className="pf-image-chat-filter-check flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
                   <input
                     type="checkbox"
                     checked={onlyDeletedSessions}
@@ -2474,7 +2512,7 @@ function ImageChatWorkbenchPage() {
         onPointerDown={handleMobileEdgeSwipeStart}
       >
         <aside
-          className="pf-workspace-tool-rail relative hidden w-full shrink-0 flex-col border-b border-slate-200 bg-white/95 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[12px_0_36px_rgba(0,0,0,0.24)] dark:backdrop-blur-xl lg:flex lg:w-[var(--image-chat-left-panel-width)] lg:border-b-0 lg:border-r"
+          className="pf-workspace-tool-rail pf-image-chat-session-rail relative hidden w-full shrink-0 flex-col border-b border-slate-200 bg-white/95 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[12px_0_36px_rgba(0,0,0,0.24)] dark:backdrop-blur-xl lg:flex lg:w-[var(--image-chat-left-panel-width)] lg:border-b-0 lg:border-r"
           style={leftPanelStyle}
         >
           <button
@@ -2486,18 +2524,18 @@ function ImageChatWorkbenchPage() {
           >
             <span className="h-12 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
           </button>
-          <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800 lg:px-8">
+          <div className="pf-image-chat-session-header border-b border-slate-200 px-4 py-4 dark:border-slate-800 lg:px-8">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
+                <div className="pf-workspace-title text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
+                <div className="pf-workspace-muted mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
               </div>
               <button
                 type="button"
                 onClick={openCreateSessionDialog}
                 disabled={createSessionDisabled}
                 title={createSessionButtonTitle}
-                className="inline-flex h-11 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
+                className="pf-workspace-action-primary inline-flex h-11 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                 aria-label={t("chat.newSession")}
               >
                 {createSessionMutation.isPending ? (
@@ -2769,7 +2807,7 @@ function ImageChatWorkbenchPage() {
           >
             <span className="h-12 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
           </button>
-          <div className="min-h-0 flex-1 space-y-6 px-4 py-5 lg:overflow-y-auto lg:px-5">
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-y-contain px-4 py-5 lg:px-5">
             <div>
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
@@ -2868,14 +2906,14 @@ function ImageChatWorkbenchPage() {
           <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden" />
           <Drawer.Content
             onPointerDown={handleMobileSessionDrawerSwipeBackStart}
-            className="pf-workspace-tool-drawer fixed inset-y-0 left-0 z-[71] flex w-[min(86vw,360px)] flex-col border-r border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden"
+            className="pf-workspace-tool-drawer pf-image-chat-session-drawer fixed inset-y-0 left-0 z-[71] flex w-[min(86vw,360px)] flex-col border-r border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden"
           >
             <Drawer.Title className="sr-only">{t("chat.mobileSessionDrawer")}</Drawer.Title>
-            <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
+            <div className="pf-image-chat-session-header border-b border-slate-200 px-4 py-4 dark:border-slate-800">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
+                  <div className="pf-workspace-title text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
+                  <div className="pf-workspace-muted mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -2883,7 +2921,7 @@ function ImageChatWorkbenchPage() {
                     onClick={openCreateSessionDialog}
                     disabled={createSessionDisabled}
                     title={createSessionButtonTitle}
-                    className="inline-flex h-11 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
+                    className="pf-workspace-action-primary inline-flex h-11 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                     aria-label={t("chat.newSession")}
                   >
                     {createSessionMutation.isPending ? (
@@ -3073,7 +3111,7 @@ function ImageChatWorkbenchPage() {
             <Drawer.Handle className="mx-auto mt-2 flex h-7 w-24 items-center justify-center rounded-full text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-500 dark:focus-visible:ring-violet-400">
               <span className="h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
             </Drawer.Handle>
-            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4 pt-2">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-y-contain px-4 pb-4 pt-2">
               {renderActionSections("image-chat-prompt-mobile")}
 
               <div className="mt-4 space-y-3">

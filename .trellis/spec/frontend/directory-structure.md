@@ -31,15 +31,13 @@ web/
 ├── vite.config.ts                   # React/Tailwind plugins, API proxy, ports/hosts
 └── src/
     ├── main.tsx                     # ReactDOM entrypoint
-    ├── App.tsx                      # QueryClientProvider, BrowserRouter, auth-gated routes
-    ├── index.css                    # Tailwind import and global base CSS
-    ├── components/
-    │   ├── StatusPill.tsx           # shared status badge
-    │   └── TopNav.tsx               # shared top navigation, including the first-level Status route
-    ├── lib/
-    │   ├── api.ts                   # fetch wrapper, ApiError, typed API methods
-    │   ├── format.ts                # date/price/job formatting helpers
-    │   └── types.ts                 # frontend DTOs mirroring backend responses
+    ├── App.tsx                      # QueryClientProvider, BrowserRouter, lazy-loaded auth-gated routes
+    ├── index.css                    # Tailwind import, global base CSS, pf-* shell/workspace variables
+    ├── components/                  # shared presentational components (TopNav, StatusPill, ImageSizePicker,
+    │                                #   ImageGenerationSettings*, SensitiveImageMask, FloatingSurface, etc.)
+    ├── lib/                         # api.ts, types.ts, format.ts, i18n.ts, plus focused helpers
+    │                                #   (resourceGroups, generationConfigs, imageSizes, sensitiveImages,
+    │                                #   notifications, taskNotifications, preferences, theme, rbac, ...)
     └── pages/
         ├── LoginPage.tsx
         ├── InspirationListPage.tsx
@@ -47,8 +45,18 @@ web/
         ├── InspirationDetailPage.tsx
         ├── inspiration-detail/              # page-local inspiration workflow constants/types/utils/components
         ├── ImageChatPage.tsx
+        ├── image-chat/                      # page-local image-chat panels and pure helpers
+        ├── GalleryPage.tsx
+        ├── gallery/                         # page-local gallery helpers/moderation
         ├── SettingsPage.tsx
-        └── StatusPage.tsx
+        ├── settings/                        # page-local settings import/export helper
+        ├── StatusPage.tsx
+        ├── UsageStatsPage.tsx
+        ├── RbacPage.tsx
+        ├── ResourceLibraryPage.tsx
+        ├── TemplateManagementPage.tsx
+        ├── HelpPage.tsx
+        └── workspace/                       # workspace-scheme landing pages
 ```
 
 There is no `hooks/` directory and no global state store today. Stateful logic currently lives in pages unless it is a
@@ -58,20 +66,31 @@ shared API/type/format helper.
 
 ## Route Organization
 
-Routes are centralized in `web/src/App.tsx` inside `AppRoutes()`:
+Routes are centralized in `web/src/App.tsx` inside `AppRoutes()` and pages are lazy-loaded with `lazy(...)`. Current
+routes include:
 
-- `/login` -> `LoginPage`
-- `/inspirations` -> `InspirationListPage`
+- `/login` -> `LoginPage` (the only public page)
+- `/inspirations`, `/inspirations/list`, `/inspirations/all` -> `InspirationListPage`
 - `/inspirations/new` -> `InspirationCreatePage`
 - `/inspirations/:inspirationId` -> `InspirationDetailPage`
-- `/image-chat` -> standalone `ImageChatPage`
+- `/image-chat`, `/image-chat/workbench` -> standalone `ImageChatPage`
 - `/inspirations/:inspirationId/image-chat` -> inspiration-scoped `ImageChatPage`
+- `/gallery`, `/gallery/browse`, `/gallery/manage` -> `GalleryPage`
+- `/status`, `/status/detail` -> `StatusPage`
+- `/usage-stats`, `/usage-stats/detail` -> `UsageStatsPage`
+- `/rbac` -> `RbacPage`
+- `/resource-library`, `/resource-library/manage` -> `ResourceLibraryPage`
+- `/settings`, `/settings/global-templates` -> `SettingsPage`
+- `/workflow/templates` -> `TemplateManagementPage`
 - `/help` -> `HelpPage`
-- `/settings` -> `SettingsPage`
-- `/status` -> `StatusPage`
+- `*` -> not-found fallback
+
+When the `workspace` layout scheme is active, several entries resolve to workspace-scheme landing variants
+(`WorkspaceHomePage`, `WorkspaceImageChatPage`, `WorkspaceGalleryPage`, `WorkspaceStatusPage`) under
+`web/src/pages/workspace/`.
 
 Auth gating is also in `AppRoutes()`: it loads `api.getSessionState` with query key `['session']` and redirects
-unauthenticated users to `/login`.
+unauthenticated users to `/login`. Menu/route visibility is further gated by RBAC menu codes from the session payload.
 
 ---
 
@@ -111,6 +130,14 @@ until another page actually reuses them.
   `formatPrice`.
 - `web/src/lib/image-downloads.ts` contains reusable image URL, filename sanitization, timestamp suffix, and extension
   helpers. Page-specific mapping from inspiration/poster records to downloadable images should stay page-local.
+- `web/src/lib/` has grown beyond the original four files. It also holds cross-page concerns such as i18n (`i18n.ts`),
+  durable preferences and providers (`preferences.tsx`, `theme.ts`, `sensitiveImagePreferences.ts`,
+  `uiLayoutScheme*.ts(x)`, `workspaceAppearance.ts`, `workspaceMotion.ts`), session context/actions (`session.tsx`,
+  `sessionActions.tsx`), RBAC helpers (`rbac.ts`), generation/resource-group helpers (`generationConfigs.ts`,
+  `resourceGroups.ts`), image tooling (`imageSizes.ts`, `imageToolOptions.ts`), canvas template localization
+  (`canvasTemplateLocalization.ts`), task notifications (`taskNotifications.tsx`), dynamic fields (`dynamicFields.ts`),
+  markdown (`markdown.ts`), and parameter help (`parameterHelp.ts`). Most modules ship a colocated `*.test.ts`.
+- New cross-page behavior belongs in a focused `web/src/lib/` module with tests, not inlined into a page.
 
 Do not scatter raw `fetch(...)` calls or duplicate DTO interfaces inside pages.
 

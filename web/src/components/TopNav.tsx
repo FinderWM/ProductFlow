@@ -82,6 +82,7 @@ type NavPriority = "primary" | "secondary";
 interface TopNavItem {
   labelKey: TranslationKey;
   to: string;
+  workspaceTo?: string;
   menuCode: string | null;
   requiredPermission?: string;
   hasAccess?: (session: SessionState | null) => boolean;
@@ -120,6 +121,13 @@ export interface WorkspaceNavLayoutInput {
   width: number;
 }
 
+export interface WorkspaceNavAvailableWidthInput {
+  viewportWidth: number;
+  brandWidth: number;
+  horizontalChrome?: number;
+  brandGap?: number;
+}
+
 export interface WorkspaceThemeDockRect {
   left: number;
   right: number;
@@ -127,8 +135,15 @@ export interface WorkspaceThemeDockRect {
   bottom: number;
 }
 
+export interface WorkspaceTopNavTargetInput {
+  to: string;
+  workspaceTo?: string;
+}
+
 const DESKTOP_NAV_GAP_PX = 4;
 const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 36;
+const WORKSPACE_NAV_HORIZONTAL_CHROME_PX = 36;
+const WORKSPACE_BRAND_NAV_GAP_PX = 14;
 const NAV_AUTO_HIDE_DELAY_MS = 5_000;
 const WORKSPACE_THEME_DOCK_REVEAL_MARGIN_PX = 16;
 const CURTAIN_EASING = "cubic-bezier(0.18, 0.9, 0.2, 1.12)";
@@ -147,6 +162,7 @@ const navItems: TopNavItem[] = [
   {
     labelKey: "nav.inspirations",
     to: "/inspirations",
+    workspaceTo: "/inspirations/list",
     menuCode: "inspirations",
     requiredPermission: API_INSPIRATIONS_READ,
     priority: "primary",
@@ -165,6 +181,7 @@ const navItems: TopNavItem[] = [
   {
     labelKey: "nav.imageChat",
     to: "/image-chat",
+    workspaceTo: "/image-chat/workbench",
     menuCode: "image_chat",
     requiredPermission: API_IMAGE_CHAT_READ,
     priority: "primary",
@@ -174,6 +191,7 @@ const navItems: TopNavItem[] = [
   {
     labelKey: "nav.gallery",
     to: "/gallery",
+    workspaceTo: "/gallery/manage",
     menuCode: "gallery",
     requiredPermission: API_GALLERY_READ,
     priority: "primary",
@@ -183,6 +201,7 @@ const navItems: TopNavItem[] = [
   {
     labelKey: "nav.status",
     to: "/status",
+    workspaceTo: "/status/detail",
     menuCode: "status",
     requiredPermission: API_STATUS_READ,
     priority: "primary",
@@ -304,6 +323,16 @@ export function getDesktopNavAvailableWidth({
 }: DesktopNavAvailableWidthInput): number {
   const rightControlsOverflowWidth = Math.max(0, safeWidth(rightControlsWidth) - safeWidth(rightSlotWidth));
   return Math.max(0, safeWidth(navAreaWidth) - safeWidth(horizontalChrome) - rightControlsOverflowWidth);
+}
+
+export function getWorkspaceNavAvailableWidth({
+  viewportWidth,
+  brandWidth,
+  horizontalChrome = WORKSPACE_NAV_HORIZONTAL_CHROME_PX,
+  brandGap = WORKSPACE_BRAND_NAV_GAP_PX,
+}: WorkspaceNavAvailableWidthInput): number {
+  const reservedBrandWidth = safeWidth(brandWidth) > 0 ? safeWidth(brandWidth) + safeWidth(brandGap) : 0;
+  return Math.max(0, safeWidth(viewportWidth) - safeWidth(horizontalChrome) - reservedBrandWidth);
 }
 
 export function getDesktopNavLayout({
@@ -487,15 +516,6 @@ const workspaceMoreOrder: TranslationKey[] = [
 
 const WORKSPACE_HOME_PATH = "/inspirations";
 
-const workspaceAnchorByLabelKey = new Map<TranslationKey, string>([
-  ["nav.resourceLibrary", "resource-library"],
-  ["nav.inspirations", "workspace"],
-  ["nav.imageChat", "chat"],
-  ["nav.gallery", "gallery"],
-  ["nav.status", "status"],
-  ["nav.usageStats", "usage-stats"],
-]);
-
 function workspaceActionLabel(locale: Locale): string {
   if (locale === "en-US") {
     return "Actions";
@@ -515,16 +535,11 @@ function workspaceOrderedItems(items: TopNavItem[]): TopNavItem[] {
   });
 }
 
-function workspaceNavTarget(item: TopNavItem): string {
-  const anchor = workspaceAnchorByLabelKey.get(item.labelKey);
-  return anchor ? `${WORKSPACE_HOME_PATH}#${anchor}` : item.to;
+export function workspaceTopNavTarget(item: WorkspaceTopNavTargetInput): string {
+  return item.workspaceTo ?? item.to;
 }
 
-function isWorkspaceNavItemActive(item: TopNavItem, pathname: string, hash: string): boolean {
-  const anchor = workspaceAnchorByLabelKey.get(item.labelKey);
-  if (anchor && pathname === WORKSPACE_HOME_PATH) {
-    return hash ? hash === `#${anchor}` : item.labelKey === "nav.inspirations";
-  }
+function isWorkspaceNavItemActive(item: TopNavItem, pathname: string): boolean {
   return item.match(pathname);
 }
 
@@ -1512,7 +1527,6 @@ export function TopNav({ onLogout }: TopNavProps) {
   }));
   const primaryNavItems = visibleNavItems.filter((item) => item.priority === "primary");
   const secondaryNavItems = visibleNavItems.filter((item) => item.priority === "secondary");
-  const workspaceHomeAvailable = visibleNavItems.some((item) => item.labelKey === "nav.inspirations");
   const workspaceOverflowKeySet = useMemo(() => new Set(workspaceOverflowKeys), [workspaceOverflowKeys]);
   const workspaceVisiblePrimaryNavItems = primaryNavItems.filter((item) => !workspaceOverflowKeySet.has(item.to));
   const workspaceCollapsedPrimaryNavItems = primaryNavItems.filter((item) => workspaceOverflowKeySet.has(item.to));
@@ -1674,12 +1688,18 @@ export function TopNav({ onLogout }: TopNavProps) {
 
     const navStyle = window.getComputedStyle(nav);
     const horizontalPadding = (Number.parseFloat(navStyle.paddingLeft) || 0) + (Number.parseFloat(navStyle.paddingRight) || 0);
-    const maxNavWidth = Math.max(0, Math.min(window.innerWidth - 32, nav.parentElement?.clientWidth ?? window.innerWidth));
+    const brandWidth = workspaceBrandRef.current?.getBoundingClientRect().width ?? 0;
+    const maxNavWidth = getWorkspaceNavAvailableWidth({
+      viewportWidth: Math.min(window.innerWidth, nav.parentElement?.clientWidth ?? window.innerWidth),
+      brandWidth,
+    });
     const moreButtonWidth = moreMeasure.getBoundingClientRect().width;
-    const fixedControlWidths = [
-      workspaceBrandRef.current?.getBoundingClientRect().width ?? 0,
+    const requiredControlWidths = [
       workspaceRuntimeRef.current?.getBoundingClientRect().width ?? 0,
       workspaceLocaleRef.current?.getBoundingClientRect().width ?? 0,
+    ];
+    const fixedControlWidths = [
+      ...requiredControlWidths,
       workspaceProfileRef.current?.getBoundingClientRect().width ?? 0,
     ];
 
@@ -1688,7 +1708,12 @@ export function TopNav({ onLogout }: TopNavProps) {
       priority: item.priority,
       width: workspaceMeasureItemRefs.current[item.to]?.getBoundingClientRect().width ?? 0,
     }));
-    if (layoutItems.some((item) => item.width <= 0) || moreButtonWidth <= 0 || fixedControlWidths.slice(0, 3).some((width) => width <= 0)) {
+    if (
+      layoutItems.some((item) => item.width <= 0) ||
+      moreButtonWidth <= 0 ||
+      brandWidth <= 0 ||
+      requiredControlWidths.some((width) => width <= 0)
+    ) {
       return;
     }
 
@@ -2011,12 +2036,12 @@ export function TopNav({ onLogout }: TopNavProps) {
     });
 
   const renderWorkspaceNavItem = (item: TopNavItem) => {
-    const active = isWorkspaceNavItemActive(item, location.pathname, location.hash);
+    const active = isWorkspaceNavItemActive(item, location.pathname);
     const label = t(item.labelKey);
     return (
       <Link
         key={item.to}
-        to={workspaceHomeAvailable ? workspaceNavTarget(item) : item.to}
+        to={workspaceTopNavTarget(item)}
         aria-current={active ? "page" : undefined}
         className="pf-shell-concept-link"
       >
@@ -2041,12 +2066,12 @@ export function TopNav({ onLogout }: TopNavProps) {
   };
 
   const renderWorkspaceMoreItem = (item: TopNavItem) => {
-    const active = isWorkspaceNavItemActive(item, location.pathname, location.hash);
+    const active = isWorkspaceNavItemActive(item, location.pathname);
     const label = t(item.labelKey);
     return (
       <Link
         key={item.to}
-        to={workspaceHomeAvailable ? workspaceNavTarget(item) : item.to}
+        to={workspaceTopNavTarget(item)}
         role="menuitem"
         aria-current={active ? "page" : undefined}
         className="pf-shell-more-item"
@@ -2062,12 +2087,12 @@ export function TopNav({ onLogout }: TopNavProps) {
   };
 
   const renderWorkspaceCompactLink = (item: TopNavItem, className: string) => {
-    const active = isWorkspaceNavItemActive(item, location.pathname, location.hash);
+    const active = isWorkspaceNavItemActive(item, location.pathname);
     const label = t(item.labelKey);
     return (
       <Link
         key={item.to}
-        to={workspaceHomeAvailable ? workspaceNavTarget(item) : item.to}
+        to={workspaceTopNavTarget(item)}
         aria-current={active ? "page" : undefined}
         className={className}
         onClick={() => setMobileMoreOpen(false)}
@@ -2125,7 +2150,7 @@ export function TopNav({ onLogout }: TopNavProps) {
   const renderWorkspaceBrandChip = (containerRef?: Ref<HTMLDivElement>) => (
     <div ref={containerRef} className="pf-shell-brand-chip">
       <WeatherControl />
-      <Link to={`${WORKSPACE_HOME_PATH}#top`} aria-label="Inspiration One">
+      <Link to={WORKSPACE_HOME_PATH} aria-label="Inspiration One">
         <span>
           Inspiration One
           <small>{workspaceBrandWeatherSummary}</small>
@@ -2145,7 +2170,7 @@ export function TopNav({ onLogout }: TopNavProps) {
           onFocusCapture={keepCurtainOpen}
           onKeyDownCapture={keepCurtainOpen}
         >
-          <div className="pf-shell-compact-brand-mark">{renderWorkspaceBrandChip()}</div>
+          <div className="pf-shell-compact-brand-mark">{renderWorkspaceBrandChip(workspaceBrandRef)}</div>
           <nav
             ref={workspaceNavRef}
             aria-hidden={!curtainOpen}
@@ -2153,8 +2178,6 @@ export function TopNav({ onLogout }: TopNavProps) {
             aria-label={t("nav.mobile")}
             style={{ transitionTimingFunction: CURTAIN_EASING }}
           >
-            {renderWorkspaceBrandChip(workspaceBrandRef)}
-
             <div ref={workspaceRuntimeRef} className="pf-shell-runtime-switch" aria-label={t("nav.layoutScheme")}>
               {layoutSchemeOptions.map((option) => (
                 <button

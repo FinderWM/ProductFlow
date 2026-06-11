@@ -9,15 +9,15 @@
 ProductFlow uses SQLAlchemy 2.x typed declarative models, Alembic migrations, PostgreSQL in normal development/runtime,
 and SQLite in tests. The main database files are:
 
-- `backend/src/productflow_backend/infrastructure/db/models.py`
-- `backend/src/productflow_backend/infrastructure/db/session.py`
+- `backend/src/inspiration_one_backend/infrastructure/db/models.py`
+- `backend/src/inspiration_one_backend/infrastructure/db/session.py`
 - `backend/alembic/env.py`
 - `backend/alembic/versions/*.py`
 - `backend/tests/conftest.py`
 - `backend/tests/test_migrations_database_constraints.py`
 
 The runtime `Settings.database_url` comes from environment variables; common business/runtime settings can be overridden
-through the `app_settings` table and loaded by `get_runtime_settings()` in `backend/src/productflow_backend/config.py`.
+through the `app_settings` table and loaded by `get_runtime_settings()` in `backend/src/inspiration_one_backend/config.py`.
 
 ---
 
@@ -68,7 +68,7 @@ def enum_value_column(enum_cls: type) -> SqlEnum:
 
 When changing an enum, update:
 
-- `backend/src/productflow_backend/domain/enums.py`
+- `backend/src/inspiration_one_backend/domain/enums.py`
 - `web/src/lib/types.ts`
 - tests that assert enum database values and user-facing validation
 
@@ -309,6 +309,7 @@ ConfigDefinition(
   - `GET /api/settings/generation-config-options`
   - `POST /api/settings/generation-configs`
   - `PATCH /api/settings/generation-configs/{generation_config_id}`
+  - `POST /api/settings/generation-configs/{generation_config_id}/unfreeze`
   - `DELETE /api/settings/generation-configs/{generation_config_id}`
   - `POST /api/settings/generation-configs/reorder`
   - `GET /api/settings/generation-config-status`
@@ -317,6 +318,7 @@ ConfigDefinition(
   - `resolve_image_provider_config(generation_config_id: str | None = None) -> ResolvedImageProviderConfig`
   - `claim_generation_config(session, purpose, resource_group_id=None, generation_config_id=None) -> GenerationConfigClaim | None`
   - `release_generation_config_claim(session, generation_config_id, success=..., ...) -> None`
+  - `unfreeze_generation_config(session, generation_config_id, commit=True) -> GenerationConfig`
 
 ### 3. Contracts
 
@@ -369,6 +371,10 @@ ConfigDefinition(
   automatic claims.
 - Manual scheduling targets the supplied config id but still respects selected-group membership, enabled state, profile
   availability, freeze state, and max concurrency. Capacity/freeze exhaustion returns `None` to keep durable tasks queued.
+- Manual unfreeze is a settings/provider-write operation, not a scheduler bypass. It clears
+  `generation_config_states.frozen_until`, `failure_window_started_at`, and `failure_count_in_window`, while preserving
+  `last_failure_reason` for operator diagnosis. It does not modify `generation_configs.cooldown_minutes`,
+  `failure_threshold`, or other policy fields.
 - Only real provider execution outcomes update `generation_config_daily_stats` and failure windows. Queue wait,
   validation errors, user cancellation, and missing inspiration/workflow references must not count as provider failures.
 - Daily stats use the running machine's local calendar date. Do not add a separate env-only timezone setting for stats.
@@ -393,6 +399,9 @@ ConfigDefinition(
 - Archiving a provider profile still used by an active config -> `400`, active config detail.
 - Manual config id missing while `generation_config_mode == "manual"` -> route/use case validation error.
 - Manual config over capacity or frozen -> durable task remains queued for retry, not a provider failure.
+- `POST /api/settings/generation-configs/{id}/unfreeze` for a missing/archived config -> `400`, generation config missing
+  detail.
+- Manual unfreeze for an already-unfrozen config -> `200`, idempotent response with `state.frozen_until = null`.
 - Missing provider config tables during very early startup -> settings defaults may still load, but real provider
   resolution must fail clearly rather than using old URL/key fallback.
 - Missing text/image model settings in both config and profile defaults -> resolver fails clearly and asks the operator to
@@ -420,6 +429,8 @@ ConfigDefinition(
   `image_google_gemini`, and the image config stores `provider_kind="google_gemini_image"` plus Gemini-specific config.
 - Good: one image generation config can bind to `campaign` and `seasonal`; automatic claims for either group can select it
   while claims for other groups cannot.
+- Good: an operator manually unfreezes a config after confirming the provider has recovered; the next automatic or manual
+  claim can use it if enabled, group-authorized, profile-available, and below concurrency.
 - Base: default local development has mock text/image configs and no real provider profile.
 - Base: status pages read `generation_config_states` plus today's stats row; they do not scan historical usage events.
 - Bad: showing `text_api_key` or `image_api_key` in `/api/settings`.
@@ -428,6 +439,8 @@ ConfigDefinition(
 - Bad: letting a failed task remain running because release/update stats raised on naive-vs-aware datetime comparison.
 - Bad: filtering runtime candidates only by the compatibility `generation_configs.resource_group_id` field after
   multi-group bindings exist.
+- Bad: treating frontend label removal or a shortened cooldown value as manual unfreeze while
+  `generation_config_states.frozen_until` still blocks scheduler claims.
 
 ### 6. Tests Required
 
@@ -438,6 +451,7 @@ ConfigDefinition(
 - Generation config validation test for required capabilities and active profile constraints.
 - Scheduler tests for priority selection, max concurrency, manual disabled/frozen/full config behavior, failure window,
   freeze count, stats counters, and SQLite naive datetime handling.
+- Scheduler/API tests for manual unfreeze clearing `frozen_until` plus the failure window and allowing a later claim.
 - Scheduler tests cover one config bound to multiple resource groups and prove unbound configs are not automatic
   group-scoped candidates.
 - Profile update test that active configs prevent removing required capabilities and disabling the profile.
@@ -457,6 +471,19 @@ ConfigDefinition(
   with `resource_group_ids`, and import/export compatibility with both old and new fields.
 
 ### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+# Updating the policy does not clear an active runtime freeze.
+update_generation_config(session, config_id, cooldown_minutes=1)
+```
+
+Correct:
+
+```python
+unfreeze_generation_config(session, config_id)
+```
 
 Wrong:
 
@@ -964,7 +991,7 @@ def delete_inspiration_endpoint(...):
 - Oversized `size` -> normalize through the shared image-size validator before generation; do not treat custom size as an
   allowlist lookup.
 - Provider returns image bytes whose real dimensions differ from requested `size` -> keep `size` as the normalized request,
-  store the measured bytes dimensions as provider `_productflow.actual_image_size`, and expose a provider note rather than
+  store the measured bytes dimensions as provider `_inspiration_one.actual_image_size`, and expose a provider note rather than
   silently presenting the request as the actual output.
 
 ### 5. Good/Base/Bad Cases
@@ -1176,6 +1203,91 @@ The gallery keeps a curated pointer to the generated asset and reuses existing d
 
 ---
 
+## Scenario: Gallery entry view counting with dedup window
+
+### 1. Scope / Trigger
+
+- Trigger: changing how gallery click/view counts are recorded, deduplicated, aggregated, or exposed in gallery
+  responses, or changing the admin-tunable dedup window.
+- View counting records how many distinct viewers opened a gallery entry. Repeated opens by the same viewer inside a
+  configurable window count once.
+
+### 2. Signatures
+
+- DB table: `image_gallery_entry_view_events(id, gallery_entry_id, viewer_key, viewed_at)`. Each row is one counted view
+  (one viewer inside one dedup window), not one raw click. Counts are aggregated with `COUNT(*)` per entry, never stored
+  as a denormalized counter column on `image_gallery_entries`.
+- Indexes: `ix_image_gallery_entry_view_events_entry_id` on `gallery_entry_id`; composite
+  `ix_image_gallery_entry_view_events_dedup` on `(gallery_entry_id, viewer_key, viewed_at)` for the in-window lookup.
+- Runtime setting: `gallery_view_dedup_window_minutes` (default 60, range 1 .. 7*24*60), in the 界面与外观 category, so
+  admins tune it through `/api/settings` without redeploy.
+- API:
+  - `POST /api/gallery/{gallery_entry_id}/views` -> `GalleryEntryViewResponse {id, view_count, counted}`.
+  - `GET /api/gallery` `GalleryEntryResponse` carries aggregated `view_count`.
+- `viewer_key` is currently the authenticated user id. The column is a generic `String(128)` so the same dedup logic can
+  switch to an IP or anonymous-cookie key if the gallery is ever opened to anonymous visitors, without a schema change.
+
+### 3. Contracts
+
+- A view is counted (`counted=true`, new row inserted) only when no row exists for the same `(gallery_entry_id,
+  viewer_key)` with `viewed_at >= now - gallery_view_dedup_window_minutes`. Otherwise the API returns the current
+  aggregate with `counted=false` and inserts nothing.
+- The dedup window is read from `get_runtime_settings().gallery_view_dedup_window_minutes` at record time, so shortening
+  the window can let a previously-deduped viewer be counted again on the next open.
+- `view_count` in list and view responses is always the live `COUNT(*)` aggregate, so the value is correct even after
+  events are backfilled or expire out of the dedup window (expired events still count toward the total; they only stop
+  blocking new counts).
+- Recording a view requires `API_GALLERY_READ`; it must not require a write/moderation permission.
+
+### 4. Validation & Error Matrix
+
+- Missing gallery entry -> `404`, `{"detail": "画廊条目不存在"}`.
+- Blocked/unusable gallery entry -> the same moderation guard as other gallery reads (`ensure_resource_usable`).
+- Repeated view inside the window -> `200`, unchanged `view_count`, `counted=false`, no new row.
+
+### 5. Good/Base/Bad Cases
+
+- Good: same viewer opening an entry five times inside the window produces one event and `view_count` increments by one.
+- Base: the same viewer opening the entry again after the window expires inserts a second event and `view_count` becomes
+  two.
+- Bad: storing a mutable `view_count` integer column on `image_gallery_entries` and incrementing it on every click (loses
+  dedup history and races under concurrency).
+- Bad: hardcoding the dedup window as a constant instead of routing it through `CONFIG_DEFINITIONS` so admins can tune it.
+
+### 6. Tests Required
+
+- Backend route test: first view counts, immediate repeat does not, list response reflects the aggregate, and a view
+  after the (backfilled) window expiry counts again.
+- Backend route test: shrinking `gallery_view_dedup_window_minutes` through `/api/settings` lets a prior viewer be
+  counted again.
+- Backend route test: viewing an unknown entry returns `404`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+entry.view_count += 1  # denormalized counter, no dedup, races under concurrency
+session.commit()
+```
+
+#### Correct
+
+```python
+if not _recent_view_exists(session, gallery_entry_id, viewer_key, window_start):
+    session.add(ImageGalleryEntryViewEvent(gallery_entry_id=gallery_entry_id, viewer_key=viewer_key))
+    session.commit()
+view_count = session.scalar(
+    select(func.count(ImageGalleryEntryViewEvent.id)).where(
+        ImageGalleryEntryViewEvent.gallery_entry_id == gallery_entry_id
+    )
+)
+```
+
+The event table preserves dedup history and derives the count by aggregation, and the window comes from runtime config.
+
+---
+
 ## Migrations
 
 Alembic revisions live in `backend/alembic/versions/` and use revision IDs with date and sequence, for example:
@@ -1217,7 +1329,7 @@ class AppSetting(Base, TimestampMixin):
     value: Mapped[str] = mapped_column(Text)
 ```
 
-`backend/src/productflow_backend/config.py` keeps infrastructure secrets and bootstrap settings env-only
+`backend/src/inspiration_one_backend/config.py` keeps infrastructure secrets and bootstrap settings env-only
 (`DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `ADMIN_ACCESS_KEY`) while allowing business settings listed in
 `CONFIG_DEFINITIONS` to be overridden from `app_settings`. Settings API access is controlled by RBAC permissions.
 
@@ -1725,7 +1837,7 @@ with op.batch_alter_table("inspirations") as batch_op:
 - Trigger: changing admin resource governance, disabled/enabled columns, effective availability checks, or serializers for
   user-generated inspiration/image/gallery resources.
 - Applies to `inspirations`, `source_assets`, `poster_variants`, `image_sessions`, `image_session_assets`,
-  `image_gallery_entries`, moderation APIs, download/use actions, and API DTOs.
+  `image_gallery_entries`, `resource_library_assets`, moderation APIs, download/use actions, and API DTOs.
 
 ### 2. Signatures
 
@@ -1739,8 +1851,11 @@ with op.batch_alter_table("inspirations") as batch_op:
   - `POST /api/resources/{resource_type}/{resource_id}/restore`
   - `GET /api/resource-moderation/{resource_type}/{resource_id}`
   - `PATCH /api/resource-moderation/{resource_type}/{resource_id}`
+- Gallery list API:
+  - `GET /api/gallery?include_disabled=true` requests disabled gallery entries, but the backend honors it only when the
+    current user has `resources:moderate`; admin users satisfy this permission check through RBAC.
 - Resource type values use backend model/resource names such as `inspiration`, `source_asset`, `poster_variant`,
-  `image_session`, `image_session_asset`, and `image_gallery_entry`.
+  `image_session`, `image_session_asset`, `image_gallery_entry`, and `resource_library_asset`.
 
 ### 3. Contracts
 
@@ -1750,27 +1865,94 @@ with op.batch_alter_table("inspirations") as batch_op:
   - Image sessions follow their optional inspiration.
   - Image-session assets follow their session and inspiration.
   - Gallery entries follow their asset, session, and inspiration.
+  - Resource-library assets first follow their own moderation state, then inherit from `source_type` /
+    `source_resource_id` when the source is `source_asset`, `poster_variant`, or `image_session_asset`.
 - Parent disablement must not bulk-update child rows. Runtime checks compute `effective_enabled` from the chain.
+- Historical resource-library rows with no source id or a missing source must only use their own moderation state, so old
+  data is not blocked by an unresolvable reference.
 - Download, generation, save-to-gallery, writeback, copy edits, workflow mutation, and image binding must check effective
   availability before using the resource.
-- Admin users can read all disabled resources and see `disabled_by_username`; ordinary users can see their own disabled
-  resources, while global gallery hides disabled entries from non-owners.
+- Admin cross-user reads are governance-only: saving another user's generated image to gallery/resource library, editing,
+  deleting, uploading, or writing back to another user's resource remains rejected by ownership mutation guards.
+- Saving generated images to gallery stores the original `image_session_asset_id`; resource-library saves preserve
+  `source_type` / `source_resource_id` and source storage metadata. These save paths must not copy image files into new
+  image-session assets.
+- Admin users can read all disabled resources and see `disabled_by_username` through detail/governance views; ordinary
+  owners can read their own disabled non-gallery resources when the owning detail API supports that state.
+- Gallery list visibility is stricter than owner visibility: disabled gallery entries are hidden by default for every
+  account and every UI layout, including owners and admins. Only callers with `resources:moderate` may receive disabled
+  gallery entries, and only when the list request sets `include_disabled=true`. Workspace home gallery previews must not
+  set that flag; they fetch only effectively enabled entries for every account.
 
 ### 4. Validation & Error Matrix
 
-- Owner reads a disabled inspiration/session/gallery entry -> `200` with `enabled=false` and `effective_enabled=false`.
+- Owner reads a disabled inspiration/session detail -> `200` with `enabled=false` and `effective_enabled=false`.
+- Owner lists gallery after their gallery entry is disabled -> `200`, disabled entry omitted, even if
+  `include_disabled=true` is supplied without `resources:moderate`.
+- Admin or non-admin account with `resources:moderate` lists gallery with `include_disabled=true` -> disabled entries are
+  included with moderation fields.
+- Any account lists gallery without `include_disabled=true` -> only effectively enabled gallery entries are returned.
 - Owner tries to download or continue using a disabled resource -> `400`, `资源已被管理员屏蔽，暂不可使用`.
 - Admin disables/restores a supported resource type -> `200` with moderation state.
 - Ordinary user calls moderation endpoints -> `403`, `需要管理员权限`.
 - Existing gallery entry disabled -> repeated save must not bypass the disabled entry through idempotency.
+- Admin tries to save another user's generated image to gallery or resource library -> `400`,
+  `管理员不能直接编辑其他用户资源`.
+- Resource-library asset inherits a disabled source -> list/detail shows `effective_enabled=false`; loading it into a
+  workflow node or image session -> `400`, `资源已被管理员屏蔽，暂不可使用`.
+- Resource-library asset source is missing or empty -> only the asset's own `enabled` state decides availability.
 
-### 5. Tests Required
+### 5. Good/Base/Bad Cases
+
+- Good: disabling an inspiration makes its source assets, poster variants, image-session assets, gallery entries, and
+  resource-library assets effectively unavailable without updating child rows.
+- Good: a gallery subpage requests `include_disabled=true` only for sessions with `resources:moderate`; a workspace home
+  gallery preview omits the flag so disabled images are not fetched for admins, owners, or regular users.
+- Good: restoring a parent resource makes child resources usable again when they are not directly disabled.
+- Base: a resource-library upload with `source_type=upload` is governed only by its own moderation state.
+- Bad: copying a generated file while saving to gallery or resource library, because moderation and ownership should follow
+  the original generated asset/source reference.
+- Bad: letting admin cross-user gallery/resource-library save bypass `ensure_actor_can_mutate_owner(...)`.
+- Bad: filtering disabled gallery entries only in React after fetching them for the workspace home; the backend list
+  request itself must omit `include_disabled`.
+
+### 6. Tests Required
 
 - API regression for inspiration disable/restore, parent cascade to source asset, and blocked download/mutation.
 - API regression for image-session asset disable, blocked gallery save, gallery-entry disable, owner visibility, and
-  non-owner gallery hiding.
+  default gallery hiding plus `resources:moderate` gallery visibility.
+- API regression for resource-library assets inheriting `source_asset`, `poster_variant`, and `image_session_asset`
+  effective disabled state, plus restore behavior.
+- API regression that admin cannot save another user's generated image to gallery or resource library.
 - Migration/model regression proving moderation columns and indexes exist.
 - Full backend gate plus frontend build when moderation fields are added to DTOs.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+return ResourceModerationState(enabled=resource_library_asset.enabled)
+```
+
+Correct:
+
+```python
+state = _direct_resource_disabled_source(resource_library_asset)
+return state or _resource_library_source_disabled_source(session, resource_library_asset)
+```
+
+Wrong:
+
+```python
+gallery_entry = ImageGalleryEntry(image_session_asset_id=copy_generated_image(asset).id)
+```
+
+Correct:
+
+```python
+gallery_entry = ImageGalleryEntry(image_session_asset_id=asset.id)
+```
 
 ## Scenario: Database-backed canvas template catalog
 
@@ -2200,7 +2382,8 @@ provider = dependencies.text_provider(runtime_claim.generation_config_id, sessio
   historical/archive metadata.
 - DB: `image_gallery_entries.resource_group_id: String(36) | null` records the gallery/list archive group.
 - API: `GET /api/image-sessions` returns all visible sessions; `?resource_group_id=<id>` filters by one group.
-- API: `GET /api/gallery` returns all visible gallery entries; `?resource_group_id=<id>` filters by one group.
+- API: `GET /api/gallery` returns visible, effectively enabled gallery entries by default; `?resource_group_id=<id>`
+  filters by one group, and `?include_disabled=true` includes disabled entries only for `resources:moderate` callers.
 
 ### 3. Contracts
 
@@ -2222,7 +2405,7 @@ provider = dependencies.text_provider(runtime_claim.generation_config_id, sessio
 ### 4. Validation & Error Matrix
 
 - Missing `resource_group_id` on `GET /api/image-sessions` -> all visible sessions for the current scope.
-- Missing `resource_group_id` on `GET /api/gallery` -> all visible gallery entries.
+- Missing `resource_group_id` on `GET /api/gallery` -> all visible, effectively enabled gallery entries.
 - Disabled, archived, or unauthorized group id -> `require_generation_resource_group_for_user(...)` rejects the request.
 - Session has no task/round -> returned only when `ImageSession.resource_group_id` matches the selected group.
 - Session has historical rounds/tasks in multiple groups -> returned only in the session's current group filter.

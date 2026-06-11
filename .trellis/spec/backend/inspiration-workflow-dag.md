@@ -15,7 +15,7 @@
 
 ### 2. Signatures
 
-- Backend module: `productflow_backend.application.canvas_templates`.
+- Backend module: `inspiration_one_backend.application.canvas_templates`.
 - Template models:
   - `CanvasTemplate`
   - `CanvasTemplateNodeSpec`

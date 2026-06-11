@@ -11,14 +11,14 @@ API error details are currently Chinese strings because the private workspace UI
 
 Key files:
 
-- `backend/src/productflow_backend/application/use_cases.py`
-- `backend/src/productflow_backend/application/image_sessions.py`
-- `backend/src/productflow_backend/presentation/errors.py`
-- `backend/src/productflow_backend/presentation/routes/inspirations.py`
-- `backend/src/productflow_backend/presentation/routes/image_sessions.py`
-- `backend/src/productflow_backend/presentation/routes/settings.py`
-- `backend/src/productflow_backend/presentation/upload_validation.py`
-- `backend/src/productflow_backend/presentation/routes/auth.py`
+- `backend/src/inspiration_one_backend/application/use_cases.py`
+- `backend/src/inspiration_one_backend/application/image_sessions.py`
+- `backend/src/inspiration_one_backend/presentation/errors.py`
+- `backend/src/inspiration_one_backend/presentation/routes/inspirations.py`
+- `backend/src/inspiration_one_backend/presentation/routes/image_sessions.py`
+- `backend/src/inspiration_one_backend/presentation/routes/settings.py`
+- `backend/src/inspiration_one_backend/presentation/upload_validation.py`
+- `backend/src/inspiration_one_backend/presentation/routes/auth.py`
 
 ---
 
@@ -29,7 +29,7 @@ semantics. Keep the error classes below the presentation layer and map them to H
 
 Key class home:
 
-- `backend/src/productflow_backend/domain/errors.py`
+- `backend/src/inspiration_one_backend/domain/errors.py`
 
 Current typed errors:
 
@@ -310,7 +310,7 @@ Application submit use cases create durable work first, then enqueue through `in
 - All submit use cases raise `QueueUnavailableError("任务队列暂不可用，请稍后重试")` after marking persisted state failed.
   The typed business error handler preserves status `503` plus the stable FastAPI error shape
   `{"detail": "任务队列暂不可用，请稍后重试"}`.
-- Worker actors in `backend/src/productflow_backend/workers.py` use `@dramatiq.actor(max_retries=0)` and rely on
+- Worker actors in `backend/src/inspiration_one_backend/workers.py` use `@dramatiq.actor(max_retries=0)` and rely on
   application execution entrypoints to persist failure/retry state.
 
 Keep queue send failures visible to the API caller; do not leave a `QUEUED` durable task silently unenqueued. Route

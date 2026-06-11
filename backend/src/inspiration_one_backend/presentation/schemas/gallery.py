@@ -54,6 +54,7 @@ class GalleryEntryResponse(ResourceModerationFields):
     base_asset_id: str | None = None
     selected_reference_asset_ids: list[str]
     provider_notes: list[str]
+    view_count: int = 0
     created_at: datetime
 
 
@@ -64,7 +65,13 @@ class GalleryEntryListResponse(BaseModel):
     next_offset: int | None = None
 
 
-def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:
+class GalleryEntryViewResponse(BaseModel):
+    id: str
+    view_count: int
+    counted: bool
+
+
+def serialize_gallery_entry(entry: ImageGalleryEntry, *, view_count: int = 0) -> GalleryEntryResponse:
     round_item = entry.round
     image_session = entry.asset.session
     inspiration = image_session.inspiration
@@ -101,6 +108,7 @@ def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:
         base_asset_id=round_item.base_asset_id if round_item else None,
         selected_reference_asset_ids=round_item.selected_reference_asset_ids or [] if round_item else [],
         provider_notes=extract_provider_notes(round_item.provider_output_json) if round_item else [],
+        view_count=view_count,
         **serialize_moderation_fields(entry).model_dump(),
         created_at=entry.created_at,
     )

@@ -82,6 +82,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     normalize_provider_binding_model_settings,
     normalize_provider_binding_runtime_config,
     resolve_text_provider_config_from_draft,
+    unfreeze_generation_config,
     update_generation_config,
     update_generation_resource_group,
     update_provider_binding,
@@ -1718,6 +1719,27 @@ def update_generation_config_endpoint(
         )
         if generation_config.purpose == "image" and is_real_image_provider_kind(generation_config.provider_kind):
             _upsert_app_setting(session, key="poster_generation_mode", value="generated")
+        session.commit()
+        session.refresh(generation_config)
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    today_stats = _today_generation_config_stats(session)
+    return _serialize_generation_config(generation_config, today_stats=today_stats)
+
+
+@router.post(
+    "/generation-configs/{generation_config_id}/unfreeze",
+    response_model=GenerationConfigResponse,
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
+)
+def unfreeze_generation_config_endpoint(
+    generation_config_id: str,
+    session: Session = Depends(get_session),
+) -> GenerationConfigResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        generation_config = unfreeze_generation_config(session, generation_config_id, commit=False)
         session.commit()
         session.refresh(generation_config)
     except ValueError as exc:

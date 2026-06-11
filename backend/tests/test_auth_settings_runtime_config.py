@@ -23,6 +23,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationConfig,
     GenerationConfigDailyStat,
     GenerationConfigResourceGroup,
+    GenerationConfigState,
     GenerationResourceGroup,
     ProviderBinding,
     ProviderProfile,
@@ -1014,6 +1015,43 @@ def test_generation_config_status_filters_date_range_and_splits_purpose_stats(co
     )
     assert invalid.status_code == 400
     assert invalid.json()["detail"] == "日期范围无效"
+
+
+def test_generation_config_unfreeze_endpoint_clears_runtime_freeze(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    provider_config = client.get("/api/settings/provider-config")
+    assert provider_config.status_code == 200
+    config_id = next(item["id"] for item in provider_config.json()["generation_configs"] if item["purpose"] == "image")
+
+    session = get_session_factory()()
+    try:
+        state = session.get(GenerationConfigState, config_id)
+        assert state is not None
+        state.frozen_until = datetime.now().astimezone() + timedelta(minutes=10)
+        state.failure_window_started_at = datetime.now().astimezone()
+        state.failure_count_in_window = 2
+        session.commit()
+    finally:
+        session.close()
+
+    frozen_status = client.get("/api/settings/generation-config-status")
+    assert frozen_status.status_code == 200
+    assert frozen_status.json()["frozen_count"] == 1
+
+    unfrozen = client.post(f"/api/settings/generation-configs/{config_id}/unfreeze")
+    assert unfrozen.status_code == 200
+    assert unfrozen.json()["state"]["frozen_until"] is None
+    assert unfrozen.json()["state"]["failure_window_started_at"] is None
+    assert unfrozen.json()["state"]["failure_count_in_window"] == 0
+
+    restored_status = client.get("/api/settings/generation-config-status")
+    assert restored_status.status_code == 200
+    assert restored_status.json()["frozen_count"] == 0
 
 
 def test_generation_config_api_accepts_multiple_resource_groups(configured_env: Path) -> None:

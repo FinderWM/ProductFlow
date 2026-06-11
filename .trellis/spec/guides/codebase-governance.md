@@ -64,7 +64,7 @@ Known contract:
 
 When adding an API permission, update all of these together:
 
-- `backend/src/productflow_backend/domain/rbac.py`
+- `backend/src/inspiration_one_backend/domain/rbac.py`
 - route dependency
 - frontend route/nav/action gate
 - frontend helper tests when the condition is composite

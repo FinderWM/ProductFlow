@@ -16,10 +16,13 @@ from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_
 RESOURCE_DISABLED_MESSAGE = "资源已被管理员屏蔽，暂不可使用"
 
 
-def _create_user_client(app, admin_client: TestClient, username: str) -> TestClient:
+def _create_user_client(app, admin_client: TestClient, username: str, *, role_id: str | None = None) -> TestClient:
+    payload = {"username": username, "display_name": username.title()}
+    if role_id is not None:
+        payload["role_id"] = role_id
     created_user = admin_client.post(
         "/api/rbac/users",
-        json={"username": username, "display_name": username.title()},
+        json=payload,
     )
     assert created_user.status_code == 201
     grant = admin_client.put(
@@ -199,6 +202,21 @@ def test_image_session_owner_isolation_and_gallery_owner(configured_env: Path) -
     assert admin_detail.status_code == 200
     assert admin_detail.json()["owner_username"] == "alice"
 
+    admin_save_other_gallery = admin_client.post("/api/gallery", json={"image_session_asset_id": asset_id})
+    assert admin_save_other_gallery.status_code == 400
+    assert admin_save_other_gallery.json()["detail"] == "管理员不能直接编辑其他用户资源"
+
+    admin_save_other_resource_library = admin_client.post(
+        "/api/resource-library/assets/save",
+        json={
+            "source_type": "image_session_asset",
+            "source_id": asset_id,
+            "group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID],
+        },
+    )
+    assert admin_save_other_resource_library.status_code == 400
+    assert admin_save_other_resource_library.json()["detail"] == "管理员不能直接编辑其他用户资源"
+
     admin_generate_other = admin_client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
@@ -267,14 +285,31 @@ def test_inspiration_moderation_blocks_effective_use_and_restores(configured_env
     assert restored_download.status_code == 200
 
 
-def test_gallery_moderation_keeps_owner_visibility_and_hides_from_others(configured_env: Path) -> None:
+def test_gallery_moderation_visibility_requires_resource_moderation_permission(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     admin_client = TestClient(app)
     _login(admin_client)
+    moderator_role = admin_client.post("/api/rbac/roles", json={"code": "resource_moderator", "name": "资源治理"})
+    assert moderator_role.status_code == 201
+    moderator_permissions = admin_client.put(
+        f"/api/rbac/roles/{moderator_role.json()['id']}/permissions",
+        json={
+            "menu_codes": ["gallery"],
+            "api_permission_codes": ["gallery:read", "resources:moderate"],
+        },
+    )
+    assert moderator_permissions.status_code == 200
+
     alice_client = _create_user_client(app, admin_client, "alice")
     bob_client = _create_user_client(app, admin_client, "bob")
+    moderator_client = _create_user_client(
+        app,
+        admin_client,
+        "moderator",
+        role_id=moderator_role.json()["id"],
+    )
 
     created_session = alice_client.post("/api/image-sessions", json={"title": "Alice 会话"})
     assert created_session.status_code == 201
@@ -303,16 +338,41 @@ def test_gallery_moderation_keeps_owner_visibility_and_hides_from_others(configu
 
     owner_gallery = alice_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert owner_gallery.status_code == 200
-    assert [item["id"] for item in owner_gallery.json()["items"]] == [entry_id]
-    assert owner_gallery.json()["items"][0]["effective_enabled"] is False
+    assert owner_gallery.json()["items"] == []
+
+    owner_include_disabled = alice_client.get(
+        "/api/gallery",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "include_disabled": True},
+    )
+    assert owner_include_disabled.status_code == 200
+    assert owner_include_disabled.json()["items"] == []
 
     other_gallery = bob_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert other_gallery.status_code == 200
     assert all(item["id"] != entry_id for item in other_gallery.json()["items"])
 
-    admin_gallery = admin_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
+    admin_home_gallery = admin_client.get(
+        "/api/gallery",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+    )
+    assert admin_home_gallery.status_code == 200
+    assert admin_home_gallery.json()["items"] == []
+
+    admin_gallery = admin_client.get(
+        "/api/gallery",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "include_disabled": True},
+    )
     assert admin_gallery.status_code == 200
     assert any(item["id"] == entry_id for item in admin_gallery.json()["items"])
+    admin_item = next(item for item in admin_gallery.json()["items"] if item["id"] == entry_id)
+    assert admin_item["effective_enabled"] is False
+
+    moderator_gallery = moderator_client.get(
+        "/api/gallery",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "include_disabled": True},
+    )
+    assert moderator_gallery.status_code == 200
+    assert any(item["id"] == entry_id for item in moderator_gallery.json()["items"])
 
     saved_again = alice_client.post("/api/gallery", json={"image_session_asset_id": asset_id})
     assert saved_again.status_code == 400
@@ -455,12 +515,19 @@ def test_image_session_and_gallery_moderation_blocks_usage(configured_env: Path)
 
     alice_gallery = alice_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert alice_gallery.status_code == 200
-    assert alice_gallery.json()["items"][0]["id"] == gallery_entry_id
-    assert alice_gallery.json()["items"][0]["enabled"] is False
+    assert alice_gallery.json()["items"] == []
 
     bob_gallery = bob_client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert bob_gallery.status_code == 200
     assert bob_gallery.json()["items"] == []
+
+    admin_gallery = admin_client.get(
+        "/api/gallery",
+        params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "include_disabled": True},
+    )
+    assert admin_gallery.status_code == 200
+    assert admin_gallery.json()["items"][0]["id"] == gallery_entry_id
+    assert admin_gallery.json()["items"][0]["enabled"] is False
 
     disabled_session = admin_client.post(
         f"/api/resources/image_session/{session_id}/disable",

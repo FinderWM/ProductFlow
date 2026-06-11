@@ -12,22 +12,22 @@ persisted durable task state.
 
 Current observability files and mechanisms:
 
-- `backend/src/productflow_backend/infrastructure/logging.py` configures stdout plus rotating file logs and deletes expired
+- `backend/src/inspiration_one_backend/infrastructure/logging.py` configures stdout plus rotating file logs and deletes expired
   log files.
-- `backend/src/productflow_backend/infrastructure/logging.py` also owns the process-local log context backed by
+- `backend/src/inspiration_one_backend/infrastructure/logging.py` also owns the process-local log context backed by
   `contextvars`: `request_id`, `workflow_run_id`, `workflow_node_run_id`, and
   `image_session_generation_task_id`.
-- `backend/src/productflow_backend/presentation/api.py` sets API request context from `X-Request-ID` or a generated id and
+- `backend/src/inspiration_one_backend/presentation/api.py` sets API request context from `X-Request-ID` or a generated id and
   returns the same value in the response header.
-- `backend/src/productflow_backend/workers.py` sets worker context at the Dramatiq actor boundary for inspiration workflow
+- `backend/src/inspiration_one_backend/workers.py` sets worker context at the Dramatiq actor boundary for inspiration workflow
   run schedulers, inspiration workflow node runs, and continuous image-session generation tasks, then clears it when the actor
   returns or raises.
-- `backend/src/productflow_backend/workers.py` persists async workflow and continuous image generation state through
+- `backend/src/inspiration_one_backend/workers.py` persists async workflow and continuous image generation state through
   application use cases rather than logging retry state only.
-- `backend/src/productflow_backend/application/inspiration_workflow/execution.py` and
-  `backend/src/productflow_backend/application/inspiration_workflow/run_state.py` update `WorkflowRun` /
+- `backend/src/inspiration_one_backend/application/inspiration_workflow/execution.py` and
+  `backend/src/inspiration_one_backend/application/inspiration_workflow/run_state.py` update `WorkflowRun` /
   `WorkflowNodeRun` status and failure fields.
-- `backend/src/productflow_backend/application/image_sessions.py` updates `ImageSessionGenerationTask` status,
+- `backend/src/inspiration_one_backend/application/image_sessions.py` updates `ImageSessionGenerationTask` status,
   failure, attempt, queue, and result fields.
 - `backend/tests/test_queue_recovery.py`, `backend/tests/test_inspiration_workflow_queue_recovery.py`, and
   `backend/tests/test_logging_behavior.py` assert workflow/image-session retry, recovery, and logging behavior through
@@ -42,9 +42,9 @@ logging is needed, add it deliberately and consistently through `logging.getLogg
 
 ### Server and worker logs
 
-- `just backend-run` runs Uvicorn through `uv run --directory backend uvicorn productflow_backend.main:app --reload ...`.
+- `just backend-run` runs Uvicorn through `uv run --directory backend uvicorn inspiration_one_backend.main:app --reload ...`.
 - `just backend-worker` runs Dramatiq through `uv run --directory backend dramatiq --processes 2 --threads 4
-  productflow_backend.workers`.
+  inspiration_one_backend.workers`.
 
 Those tools provide process-level logs. ProductFlow configures the root Python logger once per process so application logs
 continue to reach stdout/stderr and are mirrored into a rotating file handler.
@@ -219,7 +219,7 @@ Record the metrics decision in the observability task/spec, then implement only 
 
 Never log secrets or full request payloads that may contain secrets:
 
-- `Settings.admin_access_key` and `Settings.session_secret` from `backend/src/productflow_backend/config.py`.
+- `Settings.admin_access_key` and `Settings.session_secret` from `backend/src/inspiration_one_backend/config.py`.
 - Provider keys such as `text_api_key` and `image_api_key`.
 - Uploaded image bytes or data URLs built in `application/image_sessions.py::_session_data_url`.
 - Session cookies or `request.session` contents.
@@ -272,7 +272,7 @@ Use logs to aid diagnosis, not as the only source of truth for behavior.
   queue recovery.
 - Dramatiq worker import calls `configure_logging()`, and the Dramatiq CLI startup path calls `cleanup_old_logs()` before
   job/workflow recovery.
-- Default log path is the repository backend storage log file (`backend/storage/logs/productflow.log`, resolved from
+- Default log path is the repository backend storage log file (`backend/storage/logs/inspiration-one.log`, resolved from
   the backend package location rather than the process working directory); storage/log files are ignored by git. `LOG_DIR`
   may still override the directory explicitly.
 - File logs use `RotatingFileHandler` with configured max bytes and backup count. Stdout/stderr logging remains available

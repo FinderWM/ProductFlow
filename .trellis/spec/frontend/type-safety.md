@@ -43,7 +43,7 @@ export type InspirationWorkflowState = "draft" | "copy_ready" | "poster_ready" |
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 ```
 
-If backend enum values in `backend/src/productflow_backend/domain/enums.py` change, update these unions and all UI maps
+If backend enum values in `backend/src/inspiration_one_backend/domain/enums.py` change, update these unions and all UI maps
 such as `StatusPill.tsx::CONFIG`.
 
 Workflow run DTOs mirror backend run action metadata. When the backend adds `is_retryable`, `is_cancelable`, or queue
@@ -324,6 +324,7 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   - `api.exportSettings(): Promise<SettingsExportDocument>`
   - `api.previewSettingsImport(payload: SettingsExportDocument): Promise<SettingsImportPreview>`
   - `api.importSettings(payload: SettingsExportDocument): Promise<SettingsImportCommitResponse>`
+  - `api.unfreezeGenerationConfig(configId: string): Promise<GenerationConfig>`
 - Frontend DTOs live in `web/src/lib/types.ts` and mirror backend field names:
   - `SettingsExportDocument`
   - `SettingsExportMetadata`
@@ -362,10 +363,16 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
 - `GET /api/settings/generation-config-options` requires backend RBAC and intentionally returns only non-secret selection
   fields: `id`, `resource_group_id`, `resource_group_ids`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`,
   `frozen_until`.
+- `frozen_until` is a timestamp, not a durable boolean. UI labels and badges should show frozen state only when
+  `Date.parse(frozen_until) > Date.now()`. Expired timestamps may remain in API payloads because backend auto-unfreezes by
+  scheduler comparison instead of clearing the column.
 - `GET /api/settings/generation-config-status` requires `status:read` and accepts optional `start_date` / `end_date`
   query parameters in backend `YYYY-MM-DD` stat-date format. Keep `today_*` fields as today's local stat bucket, use
   `range_*` fields for the selected date range, and render per-config `range_stat` instead of recalculating stats from
   frontend history.
+- `POST /api/settings/generation-configs/{id}/unfreeze` clears runtime freeze state and returns a refreshed
+  `GenerationConfig`. SettingsPage must invalidate `["provider-config"]`, `["generation-config-options"]`, and
+  `["generation-config-status"]` after success.
 - Workflow and image-chat request DTOs preserve backend snake_case fields. User-facing generation submits
   `resource_group_id`; ImageChat prompt polish/image generation and workflow generation-capable node config may submit either
   `generation_config_mode: "auto", generation_config_id: null` or
@@ -385,6 +392,9 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   the config as legacy/unbound according to backend rules; frontend current exports must include `resource_group_ids`.
 - `resource_group_ids: []` in generation config rows -> render as unbound in SettingsPage and preserve an empty list when
   saving.
+- Expired `frozen_until` in generation config option rows -> keep the option selectable and do not append a frozen label.
+- Active `frozen_until` in SettingsPage card rows -> show an unfreeze action only when the user has provider settings write
+  permission.
 
 #### 5. Good/Base/Bad Cases
 - Good: export downloads exactly the typed backend payload, including `generation_resource_groups` and
@@ -397,6 +407,8 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   `resource_group_ids: ["default-id", "campaign-id"]` plus compatibility `resource_group_id: "default-id"`.
 - Good: reading a legacy config with only `resource_group_id: "default-id"` derives `resource_group_ids: ["default-id"]`
   for the draft.
+- Good: SettingsPage unfreezes an active frozen config through the API and refreshes config/status caches instead of
+  editing cooldown policy fields.
 - Base: import file contains `mock` generation configs and no provider API keys.
 - Bad: adding `admin_access_required` back to `RuntimeConfig` or SettingsPage security controls.
 - Bad: frontend reads `preview.metadata.summary` when backend returns flat preview fields.
@@ -408,6 +420,7 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   resource group that does not include that config's `resource_group_ids`.
 - Bad: using only `resource_group_id` in SettingsPage filters or save payloads after multi-group config bindings are
   supported.
+- Bad: treating non-null `frozen_until` as frozen without checking whether the timestamp is still in the future.
 
 #### 6. Tests Required
 - SettingsPage tests for export confirmation and generated JSON download path.
@@ -417,6 +430,7 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   id for ImageChat and workflow nodes.
 - SettingsPage helper tests prove `resource_group_ids` payload construction, multi-group tab filtering/counting, unbound
   empty-list handling, and legacy `resource_group_id` fallback.
+- Generation config helper tests prove expired `frozen_until` values do not render frozen markers.
 - `pnpm --dir web build` after any settings migration DTO change.
 
 #### 7. Wrong vs Correct
@@ -431,6 +445,18 @@ Correct:
 
 ```ts
 const keyCount = preview.provider_profiles_with_api_key_count;
+```
+
+Wrong:
+
+```ts
+const frozen = Boolean(option.frozen_until);
+```
+
+Correct:
+
+```ts
+const frozen = Date.parse(option.frozen_until ?? "") > Date.now();
 ```
 
 Keep frontend reads aligned with the backend response shape.

@@ -1531,3 +1531,23 @@ class ImageGalleryEntry(Base):
         primaryjoin=lambda: child_parent_join(ImageGalleryEntry.resource_group_id, GenerationResourceGroup.id),
         foreign_keys=lambda: [ImageGalleryEntry.resource_group_id],
     )
+
+
+class ImageGalleryEntryViewEvent(Base):
+    """画廊条目点击事件去重记录：同一访问者在去重窗口内只产生一条记录。"""
+
+    __tablename__ = "image_gallery_entry_view_events"
+    __table_args__ = (
+        Index("ix_image_gallery_entry_view_events_entry_id", "gallery_entry_id"),
+        Index(
+            "ix_image_gallery_entry_view_events_dedup",
+            "gallery_entry_id",
+            "viewer_key",
+            "viewed_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    gallery_entry_id: Mapped[str] = mapped_column(String(36))
+    viewer_key: Mapped[str] = mapped_column(String(128))
+    viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

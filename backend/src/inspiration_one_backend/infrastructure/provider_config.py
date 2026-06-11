@@ -1015,6 +1015,25 @@ def release_generation_config_claim(
     )
 
 
+def unfreeze_generation_config(
+    session: Session,
+    generation_config_id: str,
+    *,
+    commit: bool = True,
+) -> GenerationConfig:
+    generation_config = _require_generation_config(session, generation_config_id)
+    state = _ensure_generation_config_state(session, generation_config_id)
+    state.frozen_until = None
+    state.failure_window_started_at = None
+    state.failure_count_in_window = 0
+    if commit:
+        session.commit()
+        session.refresh(generation_config)
+    else:
+        session.flush()
+    return generation_config
+
+
 def record_generation_config_result(
     session: Session,
     generation_config_id: str,

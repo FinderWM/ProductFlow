@@ -52,6 +52,7 @@ function entry(overrides: Partial<GalleryEntry>): GalleryEntry {
     base_asset_id: null,
     selected_reference_asset_ids: [],
     provider_notes: [],
+    view_count: 0,
     created_at: createdAt,
     ...overrides,
   };

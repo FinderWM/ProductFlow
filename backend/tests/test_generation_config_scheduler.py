@@ -26,6 +26,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     list_generation_configs,
     list_generation_resource_groups,
     release_generation_config_claim,
+    unfreeze_generation_config,
     update_generation_config,
 )
 
@@ -298,6 +299,25 @@ def test_release_updates_stats_and_freeze_window(db_session: Session) -> None:
     assert state.failure_count_in_window == 0
     assert stat.failure_count == 3
     assert stat.freeze_count == 1
+
+
+def test_unfreeze_generation_config_clears_frozen_state_and_allows_claim(db_session: Session) -> None:
+    config = _add_mock_config(db_session, purpose=IMAGE_PURPOSE, name="手动恢复图片")
+    state = db_session.get(GenerationConfigState, config.id)
+    assert state is not None
+    state.frozen_until = datetime.now(UTC) + timedelta(minutes=10)
+    state.failure_window_started_at = datetime.now(UTC)
+    state.failure_count_in_window = 2
+    db_session.commit()
+
+    restored = unfreeze_generation_config(db_session, config.id)
+    db_session.refresh(state)
+
+    assert restored.id == config.id
+    assert state.frozen_until is None
+    assert state.failure_window_started_at is None
+    assert state.failure_count_in_window == 0
+    assert claim_generation_config(db_session, purpose=IMAGE_PURPOSE, generation_config_id=config.id) is not None
 
 
 def test_release_generation_config_claim_decrements_from_database_value(db_session: Session) -> None:

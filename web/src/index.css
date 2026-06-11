@@ -350,6 +350,80 @@ textarea {
   --tw-shadow-color: rgb(0 0 0 / 0.35);
 }
 
+/*
+ * Dusk workspace appearance resolves to the `.dark` theme, so the cold
+ * slate/zinc utility remaps above (`:root.dark .bg-white` etc.) would otherwise
+ * paint dusk surfaces in blue-grey and clash with the warm olive token palette.
+ * Re-map the same Tailwind utilities to dusk tokens. Specificity here is (0,4,0)
+ * — two attribute selectors plus a class — which outranks `:root.dark`'s (0,3,0),
+ * so these win regardless of source order.
+ */
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-white {
+  background-color: var(--pf-panel);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-white\/95 {
+  background-color: color-mix(in srgb, var(--pf-panel) 95%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-white\/90 {
+  background-color: color-mix(in srgb, var(--pf-panel) 90%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-white\/80,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-white\/70 {
+  background-color: color-mix(in srgb, var(--pf-panel-soft) 78%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-zinc-50,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-slate-50,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-slate-50\/70,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-slate-50\/80,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-zinc-50\/40,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-zinc-50\/60,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-zinc-50\/70,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-slate-100,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-zinc-100 {
+  background-color: var(--pf-panel-soft);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-slate-100\/80,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .bg-zinc-100\/80 {
+  background-color: color-mix(in srgb, var(--pf-panel-soft) 80%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .border-slate-100,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .border-slate-200,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .border-zinc-100,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .border-zinc-200,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .border-zinc-300 {
+  border-color: var(--pf-line-strong);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-slate-950,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-zinc-950,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-slate-900,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-zinc-900,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-slate-800,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-zinc-800,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-slate-700,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-zinc-700 {
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-slate-600,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-zinc-600,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-slate-500,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-zinc-500 {
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-slate-400,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-zinc-400,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .text-zinc-300 {
+  color: var(--pf-subtle);
+}
+
 .pf-app {
   min-height: 100vh;
   background:
@@ -636,6 +710,90 @@ textarea {
   padding: 64px 0 132px;
 }
 
+.pf-workspace-quick-nav {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  z-index: 64;
+  width: 168px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.pf-workspace-quick-nav-list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  max-height: min(540px, calc(100vh - 160px));
+  overflow: visible;
+  pointer-events: none;
+}
+
+.pf-workspace-quick-nav-item {
+  display: grid;
+  width: 168px;
+  height: 38px;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--pf-line);
+  border-left: 0;
+  border-radius: 0 14px 14px 0;
+  padding: 0 7px 0 9px;
+  background: color-mix(in srgb, var(--pf-panel) 90%, transparent);
+  box-shadow: 0 8px 22px rgb(37 43 46 / 0.1);
+  color: var(--pf-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  transform: translateX(calc(-100% + 40px));
+  white-space: nowrap;
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+  transition: background 420ms var(--pf-motion-standard), color 420ms var(--pf-motion-standard),
+    box-shadow 420ms var(--pf-motion-standard), transform 420ms var(--pf-motion-standard);
+}
+
+.pf-workspace-quick-nav-item:hover,
+.pf-workspace-quick-nav-item:focus-visible {
+  background: color-mix(in srgb, var(--pf-panel) 96%, transparent);
+  color: var(--pf-text);
+  outline: 2px solid color-mix(in srgb, var(--pf-accent) 34%, transparent);
+  outline-offset: -2px;
+  transform: translateX(0);
+}
+
+.pf-workspace-quick-nav-item.is-active,
+.pf-workspace-quick-nav-item[aria-current="location"] {
+  background: color-mix(in srgb, var(--pf-accent) 16%, transparent);
+  color: var(--pf-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 28%, transparent);
+}
+
+.pf-workspace-quick-nav-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pf-workspace-quick-nav-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pf-accent) 14%, transparent);
+  color: var(--pf-accent);
+}
+
+.pf-workspace-quick-nav-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
 .pf-workspace-home-top-anchor {
   display: block;
   height: 1px;
@@ -910,6 +1068,233 @@ textarea {
   :is(.pf-panel, .pf-table-panel, section[class*="bg-white"], [role="tablist"]) {
   background: rgb(32 35 29 / 0.88);
   box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc) {
+  gap: clamp(10px, 1.2vw, 16px);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-rail, .pf-side-content, .pf-side-toc) {
+  border: 0;
+  border-radius: 24px;
+  background: rgb(255 255 255 / 0.54);
+  color: var(--pf-text);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail {
+  overflow: hidden auto;
+  scrollbar-color: color-mix(in srgb, var(--pf-accent) 22%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail::-webkit-scrollbar {
+  width: 8px;
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pf-accent) 24%, transparent);
+  background-clip: content-box;
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail
+  > div:first-child {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel) 26%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-rail, .pf-side-content, .pf-side-toc)
+  :is(h1, h2, h3, [class*="text-slate-950"], [class*="text-zinc-900"], [class*="text-white"]) {
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is([class*="text-slate-700"], [class*="text-slate-600"], [class*="text-slate-500"], [class*="text-slate-400"]) {
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is([class*="text-indigo"]:not([aria-pressed]), [class*="text-violet"]:not([aria-pressed])) {
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail
+  nav
+  button {
+  color: var(--pf-muted);
+  transition: transform 680ms var(--pf-motion-standard), background 680ms var(--pf-motion-standard),
+    color 680ms var(--pf-motion-standard), box-shadow 680ms var(--pf-motion-standard);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail
+  nav
+  button:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--pf-deep) 7%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail
+  nav
+  button:is([aria-current="page"], [class*="bg-indigo"], [class*="bg-white"]) {
+  background: color-mix(in srgb, var(--pf-accent) 13%, transparent);
+  color: var(--pf-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 28%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail
+  nav
+  button
+  svg {
+  color: currentColor;
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="text"],
+    input[type="url"],
+    textarea,
+    button[aria-haspopup="listbox"]
+  ) {
+  border-color: var(--pf-line-strong);
+  background-color: color-mix(in srgb, var(--pf-panel) 58%, transparent);
+  color: var(--pf-text);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.36);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="text"],
+    input[type="url"],
+    textarea,
+    button[aria-haspopup="listbox"]
+  ):focus {
+  border-color: color-mix(in srgb, var(--pf-accent) 46%, transparent);
+  background-color: color-mix(in srgb, var(--pf-panel) 76%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  ::placeholder {
+  color: var(--pf-subtle);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-content
+  :is(.grid, .grid > *, .flex > *) {
+  min-width: 0;
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-content, .pf-side-toc)
+  :is(.rounded-xl.border, .rounded-lg.border, [role="tablist"]):not([aria-pressed]) {
+  border-color: transparent;
+  background: rgb(255 255 255 / 0.54);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-content
+  :is(table, thead, tbody, tr, th, td) {
+  border-color: var(--pf-line);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-content
+  thead {
+  background: color-mix(in srgb, var(--pf-panel-soft) 82%, transparent);
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-content
+  tbody {
+  background: color-mix(in srgb, var(--pf-panel) 42%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-content, .pf-side-toc)
+  :is(button[class*="bg-indigo"], button[class*="bg-slate-950"], button[class*="bg-violet"]):not([aria-pressed]) {
+  border-color: transparent;
+  background: var(--pf-deep);
+  color: var(--pf-bg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-content, .pf-side-toc)
+  :is(button[class*="bg-indigo"], button[class*="bg-slate-950"], button[class*="bg-violet"]):not([aria-pressed]):hover {
+  background: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-content, .pf-side-toc)
+  button[class*="border-slate"] {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 44%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-toc
+  a {
+  border-color: var(--pf-line);
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-toc
+  a:hover {
+  border-color: var(--pf-accent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-rail, .pf-side-content, .pf-side-toc, .rounded-xl.border, .rounded-lg.border, [role="tablist"]) {
+  background: rgb(32 35 29 / 0.88);
+  box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail
+  > div:first-child {
+  background: rgb(244 232 206 / 0.06);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail
+  nav
+  button:is([aria-current="page"], [class*="bg-indigo"], [class*="bg-white"]) {
+  background: color-mix(in srgb, var(--pf-accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 30%, transparent);
 }
 
 .pf-workspace-gallery-feed-header {
@@ -1521,6 +1906,7 @@ textarea {
   .pf-workspace-subpage-frame,
   .pf-workspace-subpage-frame > .pf-page-header:first-child,
   .pf-workspace-subpage-header,
+  .pf-workspace-subpage .pf-side-shell,
   .pf-workspace-subpage :is(.pf-panel, .pf-table-panel),
   .pf-workspace-frame,
   .pf-workspace-menu-summary,
@@ -1882,6 +2268,44 @@ textarea {
 .pf-shell-compact-brand-mark {
   display: none;
   pointer-events: auto;
+}
+
+@media (min-width: 981px) {
+  :root[data-ui-layout-scheme="workspace"] .pf-shell-workspace-shell {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 14px;
+    align-items: flex-start;
+    justify-content: stretch;
+    padding: 18px 18px 0;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] .pf-shell-workspace-shell.is-collapsed {
+    height: 78px;
+    padding-top: 18px;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] .pf-shell-compact-brand-mark {
+    display: flex;
+    min-width: 0;
+    max-width: min(260px, 30vw);
+    justify-self: start;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] .pf-shell-compact-brand-mark .pf-shell-brand-chip {
+    max-width: 100%;
+    padding: 9px 15px 9px 9px;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] .pf-shell-compact-brand-mark .pf-shell-brand-chip small {
+    display: none;
+  }
+
+  :root[data-ui-layout-scheme="workspace"] .pf-shell-concept-nav {
+    grid-column: 2;
+    max-width: 100%;
+    justify-self: center;
+  }
 }
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-concept-nav {
@@ -2837,6 +3261,28 @@ textarea {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--pf-accent) 18%, transparent);
 }
 
+/* 工作台布局下，未套用 .pf-shell-input/.input-premium 的原生表单控件，
+   改用暖色令牌，避免沿用 :root.dark input 的冷蓝灰与 dusk 主题撞色。
+   排除 checkbox/radio/range/color/file —— 它们依赖 accent-color，不应套 panel 底。 */
+:root[data-ui-layout-scheme="workspace"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+:root[data-ui-layout-scheme="workspace"] textarea,
+:root[data-ui-layout-scheme="workspace"] select {
+  background-color: color-mix(in srgb, var(--pf-panel) 82%, transparent);
+  color: var(--pf-text);
+  border-color: var(--pf-line-strong);
+}
+
+:root[data-ui-layout-scheme="workspace"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):focus,
+:root[data-ui-layout-scheme="workspace"] textarea:focus,
+:root[data-ui-layout-scheme="workspace"] select:focus {
+  border-color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] input::placeholder,
+:root[data-ui-layout-scheme="workspace"] textarea::placeholder {
+  color: var(--pf-subtle);
+}
+
 :root[data-ui-layout-scheme="workspace"] .pf-shell-primary-action {
   background: var(--pf-deep);
   color: var(--pf-bg);
@@ -3593,6 +4039,111 @@ textarea {
   color: var(--pf-bg);
 }
 
+/*
+ * Hover/focus VARIANT remaps. The base remaps above use `:is(.bg-slate-100)`
+ * class lists which never match Tailwind's variant classes (`.hover\:bg-slate-100:hover`
+ * is a distinct selector), so without these the cold slate/zinc/indigo colours
+ * repaint over the dusk tokens on hover/focus. Mirror the base token mapping,
+ * qualified by the actual pseudo-class so it only applies during the state.
+ */
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-slate-50:hover,
+  .hover\:bg-slate-100:hover,
+  .hover\:bg-slate-200\/70:hover,
+  .hover\:bg-zinc-50:hover,
+  .hover\:bg-zinc-100:hover,
+  .hover\:bg-zinc-300:hover
+) {
+  background-color: var(--pf-panel-soft);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-slate-700:hover,
+  .hover\:bg-slate-800:hover,
+  .hover\:bg-slate-800\/60:hover,
+  .hover\:bg-slate-900:hover,
+  .hover\:bg-slate-900\/70:hover,
+  .hover\:bg-zinc-800:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-deep) 92%, var(--pf-text));
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-indigo-50:hover,
+  .hover\:bg-indigo-100:hover,
+  .hover\:bg-indigo-50\/70:hover,
+  .hover\:bg-indigo-50\/40:hover,
+  .hover\:bg-indigo-50\/30:hover,
+  .hover\:bg-indigo-50\/20:hover,
+  .hover\:bg-indigo-500\/10:hover,
+  .hover\:bg-blue-50\/40:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:text-slate-950:hover,
+  .hover\:text-slate-900:hover,
+  .hover\:text-slate-800:hover,
+  .hover\:text-slate-700:hover,
+  .hover\:text-slate-200:hover,
+  .hover\:text-slate-100:hover,
+  .hover\:text-zinc-900:hover,
+  .hover\:text-zinc-800:hover
+) {
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:text-indigo-700:hover,
+  .hover\:text-indigo-600:hover,
+  .hover\:text-indigo-200:hover,
+  .hover\:text-indigo-100:hover
+) {
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:border-slate-200:hover,
+  .hover\:border-slate-300:hover,
+  .hover\:border-slate-400:hover,
+  .hover\:border-slate-400\/85:hover,
+  .hover\:border-slate-500:hover,
+  .hover\:border-slate-600:hover,
+  .hover\:border-zinc-300:hover
+) {
+  border-color: var(--pf-line-strong);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:border-indigo-200:hover,
+  .hover\:border-indigo-300:hover,
+  .hover\:border-indigo-400:hover,
+  .hover\:border-indigo-500:hover,
+  .hover\:border-indigo-500\/30:hover,
+  .hover\:border-indigo-500\/40:hover,
+  .hover\:border-blue-300:hover
+) {
+  border-color: color-mix(in srgb, var(--pf-accent) 45%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .focus\:border-indigo-300:focus,
+  .focus\:border-indigo-400:focus,
+  .focus\:border-indigo-500:focus,
+  .focus\:border-blue-500:focus,
+  .focus\:border-slate-900:focus,
+  .focus\:border-zinc-900:focus
+) {
+  border-color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-slate"],
+:root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-zinc"] {
+  --tw-ring-color: color-mix(in srgb, var(--pf-accent) 34%, transparent);
+}
+
 :root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-indigo"],
 :root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-blue"],
 :root[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="ring-sky"],
@@ -3652,6 +4203,13 @@ textarea {
   background-color: var(--pf-line-strong);
 }
 
+/*
+ * Cool/neutral families used as cards & panels → neutral dusk panel surface.
+ * Primary-accent families (violet/indigo/fuchsia/purple) are deliberately
+ * EXCLUDED here — they mark selected/active surfaces and are handled by the
+ * accent-aware rules just below so the selection stays visible instead of
+ * flattening to the same neutral panel as the unselected siblings.
+ */
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-[#"],
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-slate"],
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-zinc"],
@@ -3660,12 +4218,46 @@ textarea {
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-cyan"],
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-teal"],
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-emerald"],
-:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-green"],
-:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-violet"],
-:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-indigo"],
-:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-fuchsia"],
-:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-purple"] {
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-green"] {
   background-color: color-mix(in srgb, var(--pf-panel) 86%, transparent);
+}
+
+/*
+ * Accent-family TRANSLUCENT tints (`dark:bg-violet-500/12` etc.) mark a
+ * selected/active surface. Keep them as an accent-tinted background — paired
+ * with the bright foreground text rule below this reads as a clear selection.
+ * The trailing slash in the substring isolates opacity variants; the bare
+ * solid 500/600 fills fall through to the solid rule beneath.
+ */
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-violet-500/"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-fuchsia-500/"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-indigo-500/"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-purple-500/"],
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:bg-violet-100,
+  .dark\:bg-violet-200,
+  .dark\:bg-fuchsia-100,
+  .dark\:bg-indigo-100
+) {
+  background-color: color-mix(in srgb, var(--pf-accent) 15%, transparent);
+}
+
+/*
+ * Accent-family SOLID fills (checkbox squares, dots, swatches) → solid accent.
+ * `/85` and `/90` are effectively opaque so they belong here too.
+ */
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:bg-violet-500,
+  .dark\:bg-violet-600,
+  .dark\:bg-violet-500\/85,
+  .dark\:bg-violet-500\/90,
+  .dark\:bg-fuchsia-500,
+  .dark\:bg-indigo-500,
+  .dark\:bg-indigo-600,
+  .dark\:bg-purple-500,
+  .dark\:bg-purple-600
+) {
+  background-color: var(--pf-accent);
 }
 
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-amber"],
@@ -3746,6 +4338,37 @@ textarea {
   color: var(--pf-accent);
 }
 
+/*
+ * Accent-family BRIGHT FOREGROUND shades (50/100/200). These are never an
+ * accent colour used decoratively — they are light text sitting on a dark
+ * accent-tint surface (the selected-toggle pattern: dark:bg-violet-500/12 +
+ * dark:text-violet-50). The blanket [class*="dark:text-violet"] rule above
+ * crushed them to mid-tone accent, leaving the label illegible on the tint.
+ * Re-capture the light shades and lift them to the bright foreground token.
+ * Same specificity as the accent rule, so source order wins.
+ */
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:text-violet-50,
+  .dark\:text-violet-100,
+  .dark\:text-violet-200,
+  .dark\:text-indigo-100,
+  .dark\:text-indigo-200,
+  .dark\:text-fuchsia-100,
+  .dark\:text-fuchsia-200,
+  .dark\:text-purple-100,
+  .dark\:text-purple-200,
+  .dark\:text-blue-100,
+  .dark\:text-blue-200,
+  .dark\:text-sky-50,
+  .dark\:text-sky-100,
+  .dark\:text-sky-200,
+  .dark\:text-emerald-50,
+  .dark\:text-emerald-100,
+  .dark\:text-emerald-200
+) {
+  color: var(--pf-text);
+}
+
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-amber"],
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-orange"] {
   color: var(--pf-accent-2);
@@ -3754,6 +4377,280 @@ textarea {
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-red"],
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:text-rose"] {
   color: var(--pf-danger);
+}
+
+/*
+ * dark:-scoped hover/focus VARIANT remaps. Dusk resolves to `.dark`, so
+ * `dark:hover:bg-violet-400` etc. apply — but the base `[class*="dark:bg-…"]`
+ * substring rules above don't match the `dark:hover:bg-…` / `dark:focus:bg-…`
+ * substrings, so the bright slate/violet/indigo colours repaint over dusk
+ * tokens on hover/focus. Mirror the base dark remap, qualified by the state.
+ */
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:hover\:bg-slate-700:hover,
+  .dark\:hover\:bg-slate-800:hover,
+  .dark\:hover\:bg-slate-800\/60:hover,
+  .dark\:hover\:bg-slate-800\/80:hover,
+  .dark\:hover\:bg-slate-900:hover,
+  .dark\:hover\:bg-slate-900\/70:hover,
+  .dark\:focus\:bg-slate-950:focus
+) {
+  background-color: color-mix(in srgb, var(--pf-panel) 92%, var(--pf-text));
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:hover\:bg-violet-400:hover,
+  .dark\:hover\:bg-violet-500:hover,
+  .dark\:hover\:bg-violet-500\/10:hover,
+  .dark\:hover\:bg-violet-500\/12:hover,
+  .dark\:hover\:bg-violet-500\/14:hover,
+  .dark\:hover\:bg-violet-500\/15:hover,
+  .dark\:hover\:bg-violet-500\/16:hover,
+  .dark\:hover\:bg-violet-500\/20:hover,
+  .dark\:hover\:bg-violet-500\/25:hover,
+  .dark\:hover\:bg-violet-500\/5:hover,
+  .dark\:hover\:bg-indigo-500:hover,
+  .dark\:hover\:bg-fuchsia-500:hover,
+  .dark\:focus\:bg-violet-500\/10:focus,
+  .dark\:focus-visible\:bg-violet-500\/12:focus-visible
+) {
+  background-color: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+  color: var(--pf-bg);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:hover\:bg-red-400:hover,
+  .dark\:hover\:bg-red-500\/10:hover,
+  .dark\:hover\:bg-red-500\/12:hover,
+  .dark\:hover\:bg-red-500\/16:hover,
+  .dark\:hover\:bg-red-500\/18:hover,
+  .dark\:hover\:bg-red-950\/30:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-danger) 18%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:hover\:bg-amber-500:hover,
+  .dark\:hover\:bg-amber-500\/10:hover,
+  .dark\:hover\:bg-amber-500\/20:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-accent-2) 18%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:hover\:bg-white:hover,
+  .dark\:hover\:bg-white\/5:hover,
+  .dark\:hover\:bg-white\/10:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-text) 8%, transparent);
+}
+
+/*
+ * dark:-scoped hover/focus BORDER + TEXT variant remaps. Same substring problem:
+ * `dark:hover:border-violet-400` doesn't contain `dark:border-violet`, so the base
+ * dark border/text rules miss it and bright violet/slate/indigo edges flash on
+ * hover/focus. Substring selectors catch every opacity suffix in one rule.
+ */
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-slate"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-zinc"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-violet"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-indigo"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-blue"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-fuchsia"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-purple"]:hover {
+  border-color: var(--pf-line-strong);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-amber"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-orange"]:hover {
+  border-color: color-mix(in srgb, var(--pf-accent-2) 45%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-red"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:border-rose"]:hover {
+  border-color: color-mix(in srgb, var(--pf-danger) 45%, transparent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:focus:border-violet"]:focus,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:focus:border-indigo"]:focus,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:focus:border-blue"]:focus,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:focus:border-fuchsia"]:focus,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:focus:border-sky"]:focus {
+  border-color: var(--pf-accent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-slate"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-zinc"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-white"]:hover {
+  color: var(--pf-text);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-violet"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-indigo"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-blue"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-sky"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-fuchsia"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-purple"]:hover {
+  color: var(--pf-accent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-amber"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-orange"]:hover {
+  color: var(--pf-accent-2);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-red"]:hover,
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:hover:text-rose"]:hover {
+  color: var(--pf-danger);
+}
+
+/*
+ * Plain (non-dark) hover BORDER/TEXT + focus/focus-visible bg variants the base
+ * `:is()` lists don't catch — `focus:bg-white` on inputs would flash a white
+ * field in dusk; `focus:border-indigo` is the active-input edge.
+ */
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .focus\:border-indigo-300:focus,
+  .focus\:border-indigo-400:focus,
+  .focus\:border-indigo-500:focus,
+  .focus\:border-blue-500:focus,
+  .focus\:border-slate-900:focus,
+  .focus\:border-zinc-900:focus
+) {
+  border-color: var(--pf-accent);
+}
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .focus\:bg-white:focus
+) {
+  background-color: var(--pf-panel);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .focus\:bg-indigo-50\/70:focus,
+  .focus-visible\:bg-indigo-50\/45:focus-visible
+) {
+  background-color: color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+/*
+ * Final straggler variants: opacity-suffix tints and rare families that the
+ * enumerated `:is()` lists above missed (fuchsia/violet tints, plain
+ * focus:border-fuchsia, dark:hover indigo tint). Same state-qualified pattern.
+ */
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-fuchsia-100:hover,
+  .hover\:bg-fuchsia-500\/10:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-fuchsia-500:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:text-violet-200:hover
+) {
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .focus\:border-fuchsia-300:focus,
+  .focus\:border-fuchsia-400:focus
+) {
+  border-color: var(--pf-accent);
+}
+
+:root.dark[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .dark\:hover\:bg-indigo-500\/10:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+/*
+ * Plain (non-dark) SEMANTIC-colour hover/focus variants. The earlier plain
+ * hover/focus blocks only handled cold slate/zinc/indigo/blue; the semantic
+ * red/amber/emerald families were left to flash bright Tailwind colours on
+ * hover/focus over the dusk-mapped base. Map red→danger, amber→accent-2,
+ * emerald→accent. Bare 500/600 solids get filled treatment; tints get a soft mix.
+ */
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-red-50:hover,
+  .hover\:bg-red-100:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-danger) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-red-500:hover
+) {
+  background-color: var(--pf-danger);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-amber-50:hover,
+  .hover\:bg-amber-100:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-accent-2) 18%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-amber-600:hover
+) {
+  background-color: var(--pf-accent-2);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-emerald-100:hover
+) {
+  background-color: color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:bg-emerald-500:hover
+) {
+  background-color: var(--pf-accent);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:text-red-600:hover,
+  .hover\:text-red-700:hover
+) {
+  color: var(--pf-danger);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:text-amber-700:hover
+) {
+  color: var(--pf-accent-2);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:border-red-200:hover,
+  .hover\:border-red-300:hover,
+  .hover\:border-red-400:hover
+) {
+  border-color: color-mix(in srgb, var(--pf-danger) 45%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:border-amber-200:hover,
+  .hover\:border-amber-400:hover,
+  .focus\:border-amber-400:focus
+) {
+  border-color: color-mix(in srgb, var(--pf-accent-2) 45%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] :where(body, body *):is(
+  .hover\:border-emerald-300:hover
+) {
+  border-color: color-mix(in srgb, var(--pf-accent) 45%, transparent);
 }
 
 :root[data-ui-layout-scheme="workspace"] .btn-primary-spring {
@@ -3979,6 +4876,108 @@ textarea {
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-status-strip {
   background: rgb(32 35 29 / 0.88);
   box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-header {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel) 28%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-filter {
+  border-color: transparent;
+  background: rgb(18 21 18 / 0.045);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-filter-toggle:hover {
+  background: color-mix(in srgb, var(--pf-deep) 5%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-filter-body,
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-filter-check {
+  border-color: var(--pf-line);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-filter-check {
+  background: color-mix(in srgb, var(--pf-panel) 46%, transparent);
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-list {
+  scrollbar-color: color-mix(in srgb, var(--pf-accent) 24%, transparent) transparent;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-card {
+  border-color: transparent;
+  background: rgb(18 21 18 / 0.045);
+  color: var(--pf-text);
+  box-shadow: none;
+  transition: transform 680ms var(--pf-motion-standard), background 680ms var(--pf-motion-standard),
+    box-shadow 680ms var(--pf-motion-standard);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-card--idle:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--pf-deep) 7%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-card--active {
+  background: color-mix(in srgb, var(--pf-accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 24%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-card-button:focus-visible {
+  border-radius: 22px;
+  outline: 2px solid color-mix(in srgb, var(--pf-accent) 42%, transparent);
+  outline-offset: -2px;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-thumb {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 18%, transparent), transparent 52%),
+    rgb(18 21 18 / 0.08);
+  color: var(--pf-accent);
+  --tw-ring-color: color-mix(in srgb, var(--pf-line-strong) 82%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-card--active .pf-image-chat-session-thumb {
+  --tw-ring-color: color-mix(in srgb, var(--pf-accent) 38%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-title {
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-tag {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-accent) 11%, transparent);
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-delete {
+  background: color-mix(in srgb, var(--pf-panel) 76%, transparent);
+  color: var(--pf-muted);
+  --tw-ring-color: var(--pf-line);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-delete:hover {
+  color: #b84036;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-empty {
+  border-color: var(--pf-line);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-image-chat-filter,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-image-chat-filter-check,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-image-chat-session-card,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-image-chat-session-empty {
+  background: rgb(244 232 206 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-image-chat-session-card--active {
+  background: color-mix(in srgb, var(--pf-accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 30%, transparent);
 }
 
 .pf-gallery-feed {

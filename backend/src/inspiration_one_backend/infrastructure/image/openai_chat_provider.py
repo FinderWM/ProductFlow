@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
-from base64 import b64decode, urlsafe_b64decode
+from base64 import b64decode, b64encode, urlsafe_b64decode
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -31,7 +31,6 @@ from inspiration_one_backend.infrastructure.image.responses_provider import (
 )
 from inspiration_one_backend.infrastructure.openai_client import (
     OPENAI_COMPATIBLE_DEFAULT_HEADERS,
-    OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
 )
 from inspiration_one_backend.infrastructure.prompts import render_prompt_template
 from inspiration_one_backend.infrastructure.provider_config import (
@@ -213,6 +212,7 @@ class OpenAIChatImageClient:
         self.base_url = resolved_config.base_url
         self.model = resolved_config.model
         self.endpoint_url = _normalize_chat_completions_url(self.base_url)
+        self.request_timeout_seconds = float(get_runtime_settings().workflow_image_generation_provider_timeout_seconds)
 
     def generate_image(
         self,
@@ -274,14 +274,18 @@ class OpenAIChatImageClient:
         reference_images: list[ImagesReferenceImage],
         model: str,
     ) -> dict[str, Any]:
-        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-        content.extend(
-            {
-                "type": "image_url",
-                "image_url": {"url": _image_data_url_from_reference(reference)},
-            }
-            for reference in reference_images
-        )
+        content: str | list[dict[str, Any]]
+        if reference_images:
+            content = [{"type": "text", "text": prompt}]
+            content.extend(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _image_data_url_from_reference(reference)},
+                }
+                for reference in reference_images
+            )
+        else:
+            content = prompt
         return {
             "model": model,
             "messages": [{"role": "user", "content": content}],
@@ -294,13 +298,48 @@ class OpenAIChatImageClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        with httpx.Client(timeout=OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS, headers=headers) as client:
+        with httpx.Client(timeout=self.request_timeout_seconds, headers=headers) as client:
             response = client.post(self.endpoint_url, json=payload)
             response.raise_for_status()
-            response_json = response.json()
-        if not isinstance(response_json, dict):
-            raise RuntimeError(PROVIDER_MISSING_OUTPUT_MESSAGE)
-        return response_json
+            return self._parse_chat_image_response(response)
+
+    def _parse_chat_image_response(self, response: httpx.Response) -> dict[str, Any]:
+        try:
+            response_payload = response.json()
+        except ValueError as exc:
+            non_json_payload = self._parse_non_json_image_response(response)
+            if non_json_payload is None:
+                raise RuntimeError(PROVIDER_MISSING_OUTPUT_MESSAGE) from exc
+            return non_json_payload
+        if isinstance(response_payload, dict):
+            return response_payload
+        return {"data": response_payload}
+
+    def _parse_non_json_image_response(self, response: httpx.Response) -> dict[str, Any] | None:
+        content = bytes(response.content or b"")
+        if not content:
+            return None
+        content_type = response.headers.get("content-type", "").split(";", maxsplit=1)[0].strip().lower()
+        if content_type.startswith("image/") or _is_image_bytes(content):
+            mime_type = content_type if content_type.startswith("image/") else _mime_type_from_image_bytes(content)
+            return {
+                "data": [{"b64_json": b64encode(content).decode("utf-8")}],
+                "_inspiration_one_non_json": {
+                    "response_format": "raw_image",
+                    "content_type": mime_type,
+                },
+            }
+
+        text = content.decode("utf-8", errors="ignore").strip()
+        if not text or not _source_from_string(text):
+            return None
+        return {
+            "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
+            "_inspiration_one_non_json": {
+                "response_format": "text_image_reference",
+                "content_type": content_type or None,
+            },
+        }
 
     def _load_image_source(self, source: ChatImageSource) -> tuple[bytes, str, ChatImageSource]:
         if source.kind == "data_url":
@@ -313,7 +352,7 @@ class OpenAIChatImageClient:
             return image_bytes, _mime_type_from_image_bytes(image_bytes), source
         if source.kind == "url":
             headers = {"User-Agent": OPENAI_COMPATIBLE_DEFAULT_HEADERS["User-Agent"], "Accept": "image/*"}
-            with httpx.Client(timeout=OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS, headers=headers) as client:
+            with httpx.Client(timeout=self.request_timeout_seconds, headers=headers) as client:
                 response = client.get(source.value)
                 response.raise_for_status()
                 image_bytes = response.content
@@ -335,6 +374,7 @@ class OpenAIChatImageClient:
             "model": model,
             "size": size,
             "stream": False,
+            "message_content_format": "parts" if reference_images else "string",
             "message_count": 1,
             "prompt_character_count": len(prompt),
             "reference_image_count": len(reference_images),
@@ -370,6 +410,14 @@ class OpenAIChatImageClient:
         output_json["choices_count"] = len(choices)
         if finish_reasons:
             output_json["finish_reasons"] = finish_reasons
+        non_json_metadata = response_json.get("_inspiration_one_non_json")
+        if isinstance(non_json_metadata, dict):
+            response_format = non_json_metadata.get("response_format")
+            content_type = non_json_metadata.get("content_type")
+            if response_format:
+                output_json["response_format"] = str(response_format)
+            if content_type:
+                output_json["content_type"] = str(content_type)
         output_json["_inspiration_one"] = {
             "endpoint": CHAT_COMPLETIONS_ENDPOINT_FAMILY,
             "stream": False,

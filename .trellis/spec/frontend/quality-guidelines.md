@@ -85,6 +85,8 @@ when that keeps runtime behavior unchanged.
 - Locale-aware pure helper changes -> test both `zh-CN` and `en-US`, including fallback behavior for legacy system labels
   when old records store default Chinese titles.
 - DTO/API behavior changes still require `just web-build`; frontend unit tests do not replace backend contract tests.
+- UI/CSS browser verification -> use an independent browser window or isolated browser profile/context. Do not reuse the
+  user's main browser window or existing DevTools page for screenshots, viewport emulation, or visual inspection.
 
 ### 7. Wrong vs Correct
 
@@ -103,6 +105,22 @@ pnpm --dir web test:run
 ```
 
 Use the deterministic run mode for CI-style verification and keep `test` for local watch mode.
+
+#### Wrong
+
+```text
+Reuse an already-open user browser tab, resize it, or enable mobile emulation there for UI review.
+```
+
+This changes the user's active browser state and can leave the main window in the wrong viewport or emulation mode.
+
+#### Correct
+
+```text
+Open a separate Chrome window/profile or isolated browser context for UI review, then close that verification context when done.
+```
+
+Keep screenshots, viewport changes, storage overrides, and console inspection inside that independent verification surface.
 
 ---
 
@@ -156,12 +174,41 @@ single-theme mock copied into both modes.
   text, and visible but restrained borders.
 - Dark mode may use deep navy/slate surfaces and violet/indigo accents, but every explicit light background, border,
   placeholder, muted text, hover state, and alert state needs a matching `dark:*` variant.
+- The workspace shell brand (`logo + Inspiration One`) is system chrome. Do not place it inside the auto-hiding menu
+  budget; when changing workspace nav layout, reserve the measured brand width before deciding which menu items move into
+  More, and verify desktop resize widths near the `980px` breakpoint.
+- Workspace top navigation remains business-page navigation even on the workspace home page. Do not map top menu items to
+  `/inspirations#...`, and do not send them to workspace overview routes that only extract home sections. Use the existing
+  real page routes such as `/inspirations/list`, `/image-chat/workbench`, `/gallery/manage`, and `/status/detail`. Home
+  section anchors belong to the workspace home quick navigation only. The workspace brand link must point to `/inspirations`
+  without a hash so it clears any current anchor and returns to the home top.
 - Every new visible UI label, placeholder, button, section heading, status message, and aria label must use
   `web/src/lib/i18n.ts` keys for both `zh-CN` and `en-US`.
 - Provider names, model IDs, API keys, URLs, filenames, backend `ApiError.detail`, and operator-authored content stay as
   source data and should not be translated.
 - Configuration pages should keep app-style density: fixed or sticky navigation, one active working panel, explicit field
   labels, and save/error feedback near the changed section.
+
+### Workspace home navigation contract
+
+Wrong:
+
+```tsx
+<Link to="/inspirations#chat">{t("nav.imageChat")}</Link>
+```
+
+Correct:
+
+```tsx
+<Link to="/image-chat/workbench">{t("nav.imageChat")}</Link>
+<Link to="/inspirations#chat">{t("workspaceHome.quickNav")}</Link>
+```
+
+TopNav owns first-level page movement; the workspace home quick nav owns in-page anchor movement. The quick nav should use
+independent left-edge bookmark drawers for each anchor, stacked vertically, with each collapsed bookmark showing only its
+icon in a clear click target and keeping the label off-canvas until hover/focus. Do not group all anchors into one
+hover-open menu panel. Keep pure helper coverage for quick-nav anchor path generation and permission-filtered anchor
+visibility.
 
 ### Keep desktop-only layout state bounded
 
@@ -172,6 +219,9 @@ When adding resizable panels to a desktop-only layout:
   minimum useful size.
 - Gate desktop-only clamping with the same breakpoint that controls the desktop layout. Do not shrink hidden panel state
   while the page is in a mobile stacked layout, or the user may return to desktop with unexpectedly collapsed panels.
+- Close mobile-only modal surfaces such as Vaul `Drawer` / bottom sheets when entering the desktop breakpoint. Do not rely
+  on `lg:hidden` alone while leaving `open=true`; a hidden modal can still lock body input or intercept wheel events over
+  the visible desktop panel.
 - Cover clamp helpers with deterministic Vitest tests instead of relying only on manual drag checks.
 
 ---

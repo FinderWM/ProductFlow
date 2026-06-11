@@ -932,6 +932,14 @@ describe("image chat branching helpers", () => {
       selectedSessionOwnerUserId: "user-1",
       onlyDeletedSessions: true,
     });
+    expect(
+      imageChatSessionFilterRouteStateFromSearchParams(new URLSearchParams("resource_group_id=&owner_user_id=user-1")),
+    ).toEqual({
+      selectedSessionId: null,
+      selectedSessionResourceGroupId: null,
+      selectedSessionOwnerUserId: "user-1",
+      onlyDeletedSessions: false,
+    });
     expect(imageChatSessionFilterRouteStateFromSearchParams(new URLSearchParams(""))).toBeNull();
   });
 

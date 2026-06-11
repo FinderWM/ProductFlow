@@ -33,12 +33,23 @@ export function generationConfigOptionsForPurpose(
     .sort((left, right) => right.priority - left.priority || left.name.localeCompare(right.name));
 }
 
+export function isGenerationConfigFrozenUntilActive(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+}
+
 export function generationConfigOptionLabel(
   config: GenerationConfigOption,
   disabledLabel: string,
   frozenLabel: string,
 ): string {
-  const markers = [!config.enabled ? disabledLabel : "", config.frozen_until ? frozenLabel : ""].filter(Boolean);
+  const markers = [
+    !config.enabled ? disabledLabel : "",
+    isGenerationConfigFrozenUntilActive(config.frozen_until) ? frozenLabel : "",
+  ].filter(Boolean);
   const suffix = markers.length ? ` (${markers.join(" · ")})` : "";
   return `${config.name} · ${config.provider_kind}${suffix}`;
 }

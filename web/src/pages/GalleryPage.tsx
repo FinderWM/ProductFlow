@@ -1,16 +1,18 @@
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Ban, Image as ImageIcon, Loader2, RotateCcw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { ResourceBlockedNotice, ResourceMetaBadges } from "../components/ResourceGovernance";
 import { TopNav } from "../components/TopNav";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
-import type { GalleryEntry } from "../lib/types";
+import { API_RESOURCES_MODERATE, hasSessionAdminApiPermission, hasSessionApiPermission } from "../lib/rbac";
+import { useSessionState } from "../lib/session";
+import type { GalleryEntry, GalleryEntryListResponse, ResourceModerationResponse } from "../lib/types";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import { galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
 import { galleryAdminRemovedLabel } from "./gallery/moderation";
@@ -41,8 +43,24 @@ function metadataRows(
         : t("common.unknown"),
     ],
     ["gallery.meta.savedAt", formatDateTime(entry.created_at)],
+    ["gallery.meta.views", `${entry.view_count ?? 0}`],
   );
   return rows;
+}
+
+function applyGalleryModeration(entry: GalleryEntry, moderation: ResourceModerationResponse): GalleryEntry {
+  return {
+    ...entry,
+    enabled: moderation.enabled,
+    disabled_at: moderation.disabled_at,
+    disabled_by_user_id: moderation.disabled_by_user_id,
+    disabled_by_username: moderation.disabled_by_username,
+    disabled_reason: moderation.disabled_reason,
+    effective_enabled: moderation.effective_enabled,
+    effective_disabled_resource_type: moderation.effective_disabled_resource_type,
+    effective_disabled_resource_id: moderation.effective_disabled_resource_id,
+    effective_disabled_reason: moderation.effective_disabled_reason,
+  };
 }
 
 interface GalleryPageProps {
@@ -54,10 +72,15 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const session = useSessionState();
   const [previewEntry, setPreviewEntry] = useState<GalleryEntry | null>(null);
+  const [moderationError, setModerationError] = useState("");
   const [gridContentWidth, setGridContentWidth] = useState<number | null>(null);
   const [isDesktopGrid, setIsDesktopGrid] = useState(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const canViewDisabledGallery = hasSessionApiPermission(session, API_RESOURCES_MODERATE);
+  const canModerateGallery = hasSessionAdminApiPermission(session, API_RESOURCES_MODERATE);
+  const galleryQueryKey = ["gallery", canViewDisabledGallery] as const;
 
   const runtimeConfigQuery = useQuery({
     queryKey: ["runtime-config"],
@@ -65,8 +88,8 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   });
   const showGenerationResourceGroup = runtimeConfigQuery.data?.gallery_show_generation_resource_group ?? true;
   const galleryQuery = useQuery({
-    queryKey: ["gallery"],
-    queryFn: () => api.listGalleryEntries(),
+    queryKey: galleryQueryKey,
+    queryFn: () => api.listGalleryEntries({ include_disabled: canViewDisabledGallery }),
   });
   const entries = galleryQuery.data?.items ?? [];
   const galleryTotal = galleryQuery.data?.total ?? entries.length;
@@ -102,6 +125,61 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       navigate("/login", { replace: true });
     },
   });
+
+  const moderationMutation = useMutation({
+    mutationFn: ({ enabled, entry }: { enabled: boolean; entry: GalleryEntry }) =>
+      api.updateResourceModeration("image_gallery_entry", entry.id, { enabled }),
+    onSuccess: async (moderation, variables) => {
+      queryClient.setQueryData<GalleryEntryListResponse | undefined>(galleryQueryKey, (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === variables.entry.id ? applyGalleryModeration(item, moderation) : item,
+              ),
+            }
+          : current,
+      );
+      setPreviewEntry((current) =>
+        current?.id === variables.entry.id ? applyGalleryModeration(current, moderation) : current,
+      );
+      setModerationError("");
+      await queryClient.invalidateQueries({ queryKey: ["gallery"] });
+    },
+    onError: (error, variables) => {
+      setModerationError(
+        error instanceof ApiError
+          ? error.detail
+          : variables.enabled
+            ? t("gallery.restoreEntryFailed")
+            : t("gallery.removeEntryFailed"),
+      );
+    },
+  });
+
+  const viewMutation = useMutation({
+    mutationFn: (entry: GalleryEntry) => api.recordGalleryEntryView(entry.id),
+    onSuccess: (result) => {
+      queryClient.setQueryData<GalleryEntryListResponse | undefined>(galleryQueryKey, (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === result.id ? { ...item, view_count: result.view_count } : item,
+              ),
+            }
+          : current,
+      );
+      setPreviewEntry((current) =>
+        current?.id === result.id ? { ...current, view_count: result.view_count } : current,
+      );
+    },
+  });
+
+  const handleEntryClick = (entry: GalleryEntry) => {
+    setPreviewEntry(entry);
+    viewMutation.mutate(entry);
+  };
 
   const previewDialog = previewEntry ? (
     <GalleryImagePreviewDialog
@@ -211,6 +289,11 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                 </div>
               </div>
               ) : null}
+              {moderationError ? (
+                <div className="mx-auto mb-4 max-w-7xl rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-400/30 dark:bg-red-500/15 dark:text-red-100">
+                  {moderationError}
+                </div>
+              ) : null}
 
               <div
                 ref={gridRef}
@@ -219,49 +302,79 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                 {entries.map((entry, index) => {
                   const tileLayout = galleryTileLayout(entry, index, gridContentWidth ?? undefined);
                   const adminRemovedLabel = galleryAdminRemovedLabel(entry, t);
+                  const moderationEnabled = entry.enabled !== false;
+                  const moderationActionLabel = moderationEnabled ? t("gallery.removeEntry") : t("gallery.restoreEntry");
+                  const isModeratingEntry = moderationMutation.isPending && moderationMutation.variables?.entry.id === entry.id;
                   const tileStyle: CSSProperties = {
                     aspectRatio: tileLayout.aspectRatio,
                     ...(isDesktopGrid ? { gridRowEnd: `span ${tileLayout.rowSpan}` } : {}),
                   };
+                  const handleModerationClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+                    event.stopPropagation();
+                    moderationMutation.mutate({ enabled: !moderationEnabled, entry });
+                  };
                   return (
-                    <button
+                    <article
                       key={entry.id}
-                      type="button"
-                      onClick={() => setPreviewEntry(entry)}
                       className={`group relative min-w-0 overflow-hidden rounded-md bg-slate-900 text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-[#0b4eea]/20 ${tileLayout.className}`}
                       style={tileStyle}
                     >
-                      <div className="relative h-full overflow-hidden bg-slate-900">
-                        <img
-                          src={api.toApiUrl(entry.image.thumbnail_url)}
-                          alt={entry.prompt ?? entry.image.original_filename}
-                          loading="lazy"
-                          decoding="async"
-                          className={`h-full w-full object-contain transition duration-300 ${adminRemovedLabel ? "opacity-55 grayscale" : ""}`}
-                        />
-                        {adminRemovedLabel ? (
-                          <div
-                            className="absolute left-3 top-3 z-10 inline-flex max-w-[calc(100%-1.5rem)] items-center rounded-md border border-red-200 bg-red-50/95 px-2 py-1 text-[11px] font-semibold text-red-700 shadow-sm dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-100"
-                            title={adminRemovedLabel}
-                          >
-                            <Ban size={12} className="mr-1.5 shrink-0" aria-hidden="true" />
-                            <span className="truncate">{adminRemovedLabel}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleEntryClick(entry)}
+                        className="block h-full w-full text-left"
+                      >
+                        <div className="relative h-full overflow-hidden bg-slate-900">
+                          <img
+                            src={api.toApiUrl(entry.image.thumbnail_url)}
+                            alt={entry.prompt ?? entry.image.original_filename}
+                            loading="lazy"
+                            decoding="async"
+                            className={`h-full w-full object-contain transition duration-300 ${adminRemovedLabel ? "opacity-55 grayscale" : ""}`}
+                          />
+                          {adminRemovedLabel ? (
+                            <div
+                              className="absolute left-3 top-3 z-10 inline-flex max-w-[calc(100%-1.5rem)] items-center rounded-md border border-red-200 bg-red-50/95 px-2 py-1 text-[11px] font-semibold text-red-700 shadow-sm dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-100"
+                              title={adminRemovedLabel}
+                            >
+                              <Ban size={12} className="mr-1.5 shrink-0" aria-hidden="true" />
+                              <span className="truncate">{adminRemovedLabel}</span>
+                            </div>
+                          ) : null}
+                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/82 via-slate-950/10 to-transparent opacity-80 transition-opacity group-hover:opacity-95" />
+                          <div className="absolute inset-x-0 bottom-0 p-4 text-white">
+                            <div className="line-clamp-2 text-sm font-semibold leading-5">
+                              {entry.prompt ?? entry.image.original_filename}
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/70">
+                              <span>{galleryEntrySizeLabel(entry, locale)}</span>
+                              {showGenerationResourceGroup ? <span>{entry.resource_group.name}</span> : null}
+                              <span>{formatDateTime(entry.created_at)}</span>
+                              <span>{t("gallery.views", { count: entry.view_count })}</span>
+                            </div>
+                            <ResourceMetaBadges resource={entry} className="mt-2" showReason={Boolean(adminRemovedLabel)} />
                           </div>
-                        ) : null}
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/82 via-slate-950/10 to-transparent opacity-80 transition-opacity group-hover:opacity-95" />
-                        <div className="absolute inset-x-0 bottom-0 p-4 text-white">
-                          <div className="line-clamp-2 text-sm font-semibold leading-5">
-                            {entry.prompt ?? entry.image.original_filename}
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/70">
-                            <span>{galleryEntrySizeLabel(entry, locale)}</span>
-                            {showGenerationResourceGroup ? <span>{entry.resource_group.name}</span> : null}
-                            <span>{formatDateTime(entry.created_at)}</span>
-                          </div>
-                          <ResourceMetaBadges resource={entry} className="mt-2" showReason={Boolean(adminRemovedLabel)} />
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      {canModerateGallery ? (
+                        <button
+                          type="button"
+                          aria-label={moderationActionLabel}
+                          title={moderationActionLabel}
+                          onClick={handleModerationClick}
+                          disabled={isModeratingEntry}
+                          className="absolute right-3 top-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/20 bg-slate-950/82 text-white shadow-sm backdrop-blur transition-colors hover:bg-slate-800 disabled:opacity-60 dark:border-white/15"
+                        >
+                          {isModeratingEntry ? (
+                            <Loader2 size={15} className="animate-spin" />
+                          ) : moderationEnabled ? (
+                            <Ban size={15} />
+                          ) : (
+                            <RotateCcw size={15} />
+                          )}
+                        </button>
+                      ) : null}
+                    </article>
                   );
                 })}
               </div>

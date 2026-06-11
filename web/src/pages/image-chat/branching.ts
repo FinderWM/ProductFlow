@@ -149,7 +149,7 @@ export function imageChatSessionFilterRouteStateFromSearchParams(
   return {
     selectedSessionId: hasSelectedSession ? (searchParams.get("session_id") ?? "").trim() || null : null,
     selectedSessionResourceGroupId: hasSessionResourceGroup
-      ? (searchParams.get("resource_group_id") ?? "").trim()
+      ? (searchParams.get("resource_group_id") ?? "").trim() || null
       : null,
     selectedSessionOwnerUserId: hasSessionOwner ? (searchParams.get("owner_user_id") ?? "").trim() : "",
     onlyDeletedSessions: hasOnlyDeleted && searchParams.get("only_deleted") === "true",

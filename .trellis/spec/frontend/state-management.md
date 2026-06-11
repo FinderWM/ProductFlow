@@ -77,8 +77,8 @@ The durable browser-local UI preferences currently supported are locale/theme an
 mask toggles are account server state:
 
 - Provider: `PreferencesProvider` in `web/src/lib/preferences.tsx`, mounted once in `App.tsx` inside `BrowserRouter`.
-- Locale storage key: `productflow.locale`; default locale is `zh-CN`.
-- Theme storage key: `productflow.theme`; default preference is `system`.
+- Locale storage key: `inspiration-one.locale`; default locale is `zh-CN`.
+- Theme storage key: `inspiration-one.theme`; default preference is `system`.
 - Supported theme preferences are `light`, `dark`, and `system`; `system` resolves from `prefers-color-scheme`.
 - The provider updates `document.documentElement.lang`, root `class="dark"` when the resolved theme is dark, and root
   `data-theme` / `data-theme-preference` attributes.
@@ -117,7 +117,7 @@ return <button type="button">{t("nav.settings")}</button>;
 Bad:
 
 ```tsx
-const [locale] = useState(window.localStorage.getItem("productflow.locale"));
+const [locale] = useState(window.localStorage.getItem("inspiration-one.locale"));
 return <button type="button">{locale === "en-US" ? "Settings" : "配置"}</button>;
 ```
 

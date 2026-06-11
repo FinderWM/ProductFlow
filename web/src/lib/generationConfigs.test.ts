@@ -49,10 +49,20 @@ describe("generation config helpers", () => {
   it("adds disabled and frozen markers to labels", () => {
     expect(
       generationConfigOptionLabel(
-        option({ id: "frozen", name: "冻结配置", enabled: false, frozen_until: "2026-06-10T00:00:00Z" }),
+        option({ id: "frozen", name: "冻结配置", enabled: false, frozen_until: "2999-06-10T00:00:00Z" }),
         "停用",
         "冻结",
       ),
     ).toBe("冻结配置 · mock (停用 · 冻结)");
+  });
+
+  it("does not add frozen marker after frozen_until expires", () => {
+    expect(
+      generationConfigOptionLabel(
+        option({ id: "expired-frozen", name: "已过期冻结", frozen_until: "2000-01-01T00:00:00Z" }),
+        "停用",
+        "冻结",
+      ),
+    ).toBe("已过期冻结 · mock");
   });
 });

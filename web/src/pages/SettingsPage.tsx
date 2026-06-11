@@ -1261,6 +1261,22 @@ export function filterProviderProfiles(profiles: ProviderProfile[], query: strin
   );
 }
 
+export function filterProviderProfilesByName(profiles: ProviderProfile[], query: string): ProviderProfile[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return profiles;
+  }
+  return profiles.filter((profile) => profile.name.toLowerCase().includes(normalizedQuery));
+}
+
+export function filterGenerationConfigsByName(configs: GenerationConfig[], query: string): GenerationConfig[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return configs;
+  }
+  return configs.filter((config) => config.name.toLowerCase().includes(normalizedQuery));
+}
+
 interface ProviderModelInputProps {
   idPrefix: string;
   label: string;
@@ -1690,7 +1706,9 @@ function ProvidersSection({
   onToggleProfileEnabled,
 }: ProvidersSectionProps) {
   const { t } = useI18n();
+  const [profileSearch, setProfileSearch] = useState("");
   const profiles = (data?.profiles ?? []).filter((profile) => !profile.archived_at);
+  const filteredProfiles = filterProviderProfilesByName(profiles, profileSearch);
   const editingProfile = editingProfileId
     ? profiles.find((profile) => profile.id === editingProfileId)
     : undefined;
@@ -1718,8 +1736,27 @@ function ProvidersSection({
       </div>
 
       {profiles.length ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {profiles.map((profile) => {
+        <label className="relative block max-w-md">
+          <span className="sr-only">{t("settings.provider.listSearch")}</span>
+          <Search
+            size={16}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+          />
+          <input
+            type="search"
+            value={profileSearch}
+            onChange={(event) => setProfileSearch(event.target.value)}
+            className={`${INPUT_CLASS} pl-10`}
+            placeholder={t("settings.provider.listSearchPlaceholder")}
+            aria-label={t("settings.provider.listSearch")}
+          />
+        </label>
+      ) : null}
+
+      {profiles.length ? (
+        filteredProfiles.length ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            {filteredProfiles.map((profile) => {
             const usage = providerUsageFromGenerationConfigs(data?.generation_configs ?? [], profile.id);
             return (
               <ProviderProfileCard
@@ -1734,8 +1771,13 @@ function ProvidersSection({
                 onToggleEnabled={(enabled) => onToggleProfileEnabled(profile.id, enabled)}
               />
             );
-          })}
-        </div>
+            })}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm font-medium text-slate-500 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-400 dark:shadow-black/25">
+            {t("settings.provider.searchEmpty")}
+          </div>
+        )
       ) : (
         <div className="flex min-h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-6 text-center shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/25">
           <Box size={42} className="text-slate-500" />
@@ -2090,18 +2132,21 @@ function ProviderProfileCard({
           </span>
         </span>
 
-        <span className="flex flex-wrap gap-1.5">
-          <span className="rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700 dark:bg-violet-500/12 dark:text-violet-100">
+        <span className="grid grid-cols-[max-content_1px_minmax(0,1fr)] items-start gap-3">
+          <span className="whitespace-nowrap rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700 dark:bg-violet-500/12 dark:text-violet-100">
             {t(providerTypeLabelKey(profile.provider_type))}
           </span>
-          {profile.capabilities.map((capability) => (
-            <span
-              key={`${profile.id}-${capability}`}
-              className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-            >
-              {t(providerCapabilityLabelKey(capability))}
-            </span>
-          ))}
+          <span aria-hidden="true" className="w-px self-stretch bg-slate-200 dark:bg-slate-700" />
+          <span className="flex min-w-0 flex-col items-start gap-1.5">
+            {profile.capabilities.map((capability) => (
+              <span
+                key={`${profile.id}-${capability}`}
+                className="max-w-full rounded-md bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+              >
+                {t(providerCapabilityLabelKey(capability))}
+              </span>
+            ))}
+          </span>
         </span>
 
         <span className="flex flex-wrap gap-2">
@@ -2520,9 +2565,11 @@ interface GenerationConfigPoolSectionProps {
   onChange: (key: string, next: GenerationConfigDraft) => void;
   onSave: (draft: GenerationConfigDraft) => void;
   onArchive: (configId: string) => void;
+  onUnfreeze: (configId: string) => void;
   onTextTestDraftChange?: (draft: TextConfigTestDraft) => void;
   onTestTextConfig?: (key: string, draft: GenerationConfigDraft) => void;
   onRefreshSort: () => void;
+  unfreezingConfigId: string | null;
 }
 
 function providerProfilesForGenerationConfig(
@@ -2695,15 +2742,18 @@ function GenerationConfigPoolSection({
   onChange,
   onSave,
   onArchive,
+  onUnfreeze,
   onTextTestDraftChange,
   onTestTextConfig,
   onRefreshSort,
+  unfreezingConfigId,
 }: GenerationConfigPoolSectionProps) {
   const { t } = useI18n();
   const profiles = data?.profiles ?? [];
   const resourceGroups = settingsGenerationResourceGroupsInApiOrder(data?.generation_resource_groups);
   const firstEnabledGroupId = resourceGroups.find((group) => group.enabled)?.id ?? "";
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
+  const [configSearch, setConfigSearch] = useState("");
   const activeResourceGroupId = selectedResourceGroupId ?? firstEnabledGroupId;
   useEffect(() => {
     if (selectedResourceGroupId === null || selectedResourceGroupId === "") {
@@ -2713,11 +2763,13 @@ function GenerationConfigPoolSection({
       setSelectedResourceGroupId(firstEnabledGroupId || "");
     }
   }, [firstEnabledGroupId, resourceGroups, selectedResourceGroupId]);
-  const configs = generationConfigsForPurpose(data, purpose).filter((config) =>
+  const configsInActiveGroup = generationConfigsForPurpose(data, purpose).filter((config) =>
     activeResourceGroupId
       ? generationConfigResourceGroupIds(config).includes(activeResourceGroupId)
       : generationConfigResourceGroupIds(config).length === 0,
   );
+  const configs = filterGenerationConfigsByName(configsInActiveGroup, configSearch);
+  const showNewDraftCard = !configSearch.trim();
   const newDraftKey = `new-${purpose}-${activeResourceGroupId || "unbound"}`;
   const newDraft =
     drafts[newDraftKey] ??
@@ -2732,7 +2784,7 @@ function GenerationConfigPoolSection({
       config,
       draft: drafts[config.id] ?? generationConfigDraft(config),
     })),
-    { key: newDraftKey, draftKey: newDraftKey, config: null, draft: newDraft },
+    ...(showNewDraftCard ? [{ key: newDraftKey, draftKey: newDraftKey, config: null, draft: newDraft }] : []),
   ];
 
   return (
@@ -2740,7 +2792,7 @@ function GenerationConfigPoolSection({
       {purpose === "text" && textTestState && onTextTestDraftChange ? (
         <TextConfigTestPanel state={textTestState} onDraftChange={onTextTestDraftChange} />
       ) : null}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-3">
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">
             {purpose === "text" ? t("settings.generation.textPoolTitle") : t("settings.generation.imagePoolTitle")}
@@ -2749,14 +2801,31 @@ function GenerationConfigPoolSection({
             {t("settings.generation.poolDescription")}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onRefreshSort}
-          className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:hover:bg-slate-800"
-        >
-          <RefreshCw size={14} className="mr-2" />
-          {t("settings.generation.refreshSort")}
-        </button>
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <label className="relative block w-full sm:max-w-md">
+            <span className="sr-only">{t("settings.generation.search")}</span>
+            <Search
+              size={16}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+            />
+            <input
+              type="search"
+              value={configSearch}
+              onChange={(event) => setConfigSearch(event.target.value)}
+              className={`${INPUT_CLASS} pl-10`}
+              placeholder={t("settings.generation.searchPlaceholder")}
+              aria-label={t("settings.generation.search")}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={onRefreshSort}
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:hover:bg-slate-800"
+          >
+            <RefreshCw size={14} className="mr-2" />
+            {t("settings.generation.refreshSort")}
+          </button>
+        </div>
       </div>
       <div className="flex flex-wrap gap-2">
         {resourceGroups.map((group) => {
@@ -2780,27 +2849,35 @@ function GenerationConfigPoolSection({
           {t("settings.generation.unboundResourceGroup")}
         </button>
       </div>
-      {cards.map(({ key, draftKey, config, draft }) => {
-        const testRecord = textConfigTestRecordForKey(textTestState, key);
-        return (
-          <GenerationConfigCard
-            key={key}
-            config={config}
-            draft={draft}
-            resourceGroups={resourceGroups}
-            profiles={providerProfilesForGenerationConfig(profiles, draft)}
-            pending={pending || archivingConfigId === config?.id}
-            canWrite={canWrite}
-            onChange={(next) => onChange(draftKey, next)}
-            onSave={() => onSave(draft)}
-            onArchive={config ? () => onArchive(config.id) : undefined}
-            onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(key, draft) : undefined}
-            testing={Boolean(testRecord?.testing)}
-            testResult={testRecord?.result ?? null}
-            testError={testRecord?.error ?? ""}
-          />
-        );
-      })}
+      {cards.length ? (
+        cards.map(({ key, draftKey, config, draft }) => {
+          const testRecord = textConfigTestRecordForKey(textTestState, key);
+          return (
+            <GenerationConfigCard
+              key={key}
+              config={config}
+              draft={draft}
+              resourceGroups={resourceGroups}
+              profiles={providerProfilesForGenerationConfig(profiles, draft)}
+              pending={pending || archivingConfigId === config?.id}
+              canWrite={canWrite}
+              onChange={(next) => onChange(draftKey, next)}
+              onSave={() => onSave(draft)}
+              onArchive={config ? () => onArchive(config.id) : undefined}
+              onUnfreeze={config ? () => onUnfreeze(config.id) : undefined}
+              unfreezing={unfreezingConfigId === config?.id}
+              onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(key, draft) : undefined}
+              testing={Boolean(testRecord?.testing)}
+              testResult={testRecord?.result ?? null}
+              testError={testRecord?.error ?? ""}
+            />
+          );
+        })
+      ) : (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm font-medium text-slate-500 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-400 dark:shadow-black/25">
+          {t("settings.generation.searchEmpty")}
+        </div>
+      )}
     </div>
   );
 }
@@ -2815,7 +2892,9 @@ interface GenerationConfigCardProps {
   onChange: (next: GenerationConfigDraft) => void;
   onSave: () => void;
   onArchive?: () => void;
+  onUnfreeze?: () => void;
   onTest?: () => void;
+  unfreezing?: boolean;
   testing?: boolean;
   testResult?: TextGenerationConfigTestResponse | null;
   testError?: string;
@@ -2831,7 +2910,9 @@ function GenerationConfigCard({
   onChange,
   onSave,
   onArchive,
+  onUnfreeze,
   onTest,
+  unfreezing = false,
   testing = false,
   testResult = null,
   testError = "",
@@ -2852,7 +2933,8 @@ function GenerationConfigCard({
           { value: "openai_chat_image", label: t("settings.provider.interface.openaiChatImage") },
           { value: "google_gemini_image", label: t("settings.provider.interface.googleGeminiImage") },
         ];
-  const busy = pending;
+  const activeFrozen = isActiveFrozenUntil(config?.state?.frozen_until);
+  const busy = pending || unfreezing;
   const controlsDisabled = busy || !canWrite;
   const filteredProfiles = filterProviderProfiles(profiles, providerProfileSearch);
   const selectedProfile = profiles.find((profile) => profile.id === draft.provider_profile_id);
@@ -2878,7 +2960,7 @@ function GenerationConfigCard({
             >
               {draft.enabled ? t("settings.provider.enabled") : t("settings.provider.disabled")}
             </span>
-            {isActiveFrozenUntil(config?.state?.frozen_until) ? (
+            {activeFrozen ? (
               <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200">
                 {t("settings.generation.frozen")}
               </span>
@@ -2905,6 +2987,17 @@ function GenerationConfigCard({
             >
               {testing ? <Loader2 size={14} className="mr-2 animate-spin" /> : <MessageSquareText size={14} className="mr-2" />}
               {t("settings.generation.test")}
+            </button>
+          ) : null}
+          {activeFrozen && onUnfreeze ? (
+            <button
+              type="button"
+              onClick={onUnfreeze}
+              disabled={controlsDisabled}
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-100 dark:hover:bg-amber-500/20"
+            >
+              {unfreezing ? <Loader2 size={14} className="mr-2 animate-spin" /> : <RotateCcw size={14} className="mr-2" />}
+              {t("settings.generation.unfreeze")}
             </button>
           ) : null}
           {onArchive ? (
@@ -3394,6 +3487,7 @@ export function SettingsPage() {
   const [togglingProviderProfileId, setTogglingProviderProfileId] = useState<string | null>(null);
   const [generationConfigDrafts, setGenerationConfigDrafts] = useState<Record<string, GenerationConfigDraft>>({});
   const [archivingGenerationConfigId, setArchivingGenerationConfigId] = useState<string | null>(null);
+  const [unfreezingGenerationConfigId, setUnfreezingGenerationConfigId] = useState<string | null>(null);
   const [generationResourceGroupDrafts, setGenerationResourceGroupDrafts] = useState<
     Record<string, GenerationResourceGroupDraft>
   >({});
@@ -3737,6 +3831,27 @@ export function SettingsPage() {
       setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.archiveFailed"));
     },
     onSettled: () => setArchivingGenerationConfigId(null),
+  });
+
+  const unfreezeGenerationConfigMutation = useMutation({
+    mutationFn: (configId: string) => api.unfreezeGenerationConfig(configId),
+    onMutate: (configId) => {
+      setUnfreezingGenerationConfigId(configId);
+      setError("");
+      setSavedMessage("");
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
+      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
+      setError("");
+      setSavedMessage(t("settings.generation.unfrozen"));
+    },
+    onError: (mutationError) => {
+      setSavedMessage("");
+      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.unfreezeFailed"));
+    },
+    onSettled: () => setUnfreezingGenerationConfigId(null),
   });
 
   const saveGenerationResourceGroupMutation = useMutation({
@@ -4180,6 +4295,12 @@ export function SettingsPage() {
                           }
                           archiveGenerationConfigMutation.mutate(configId);
                         }}
+                        onUnfreeze={(configId) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
+                          unfreezeGenerationConfigMutation.mutate(configId);
+                        }}
                         onTextTestDraftChange={(draft) => {
                           setTextConfigTestState((current) => ({ ...current, draft }));
                         }}
@@ -4195,6 +4316,7 @@ export function SettingsPage() {
                         onRefreshSort={() => {
                           void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
                         }}
+                        unfreezingConfigId={unfreezingGenerationConfigId}
                       />
                     ) : null}
 
@@ -4225,9 +4347,16 @@ export function SettingsPage() {
                           }
                           archiveGenerationConfigMutation.mutate(configId);
                         }}
+                        onUnfreeze={(configId) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
+                          unfreezeGenerationConfigMutation.mutate(configId);
+                        }}
                         onRefreshSort={() => {
                           void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
                         }}
+                        unfreezingConfigId={unfreezingGenerationConfigId}
                       />
                     ) : null}
 

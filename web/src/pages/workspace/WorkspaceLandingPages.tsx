@@ -1,20 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   ArrowRight,
+  BarChart3,
   Ban,
+  Flower2,
   Image as ImageIcon,
+  Leaf,
   Loader2,
   MessageSquareText,
   Sparkles,
+  Trees,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { TopNav } from "../../components/TopNav";
 import { api, ApiError } from "../../lib/api";
 import { formatDateTime, formatDateTimeSeconds } from "../../lib/format";
 import { parseImageSizeValue } from "../../lib/imageSizes";
+import type { TranslationKey } from "../../lib/i18n";
 import { useI18n } from "../../lib/preferences";
 import {
   API_GALLERY_READ,
@@ -50,12 +56,76 @@ const GALLERY_STRIP_STATIC_PAGE_DWELL_MS = 1400;
 const GALLERY_STRIP_QUERY_GC_MS = 10_000;
 const EMPTY_RESOURCE_LIBRARY_GROUPS: ResourceLibraryGroup[] = [];
 const EMPTY_RESOURCE_LIBRARY_ASSETS: ResourceLibraryAsset[] = [];
+const WORKSPACE_HOME_PATH = "/inspirations";
 const RESOURCE_LIBRARY_SOURCE_TYPES: ResourceLibrarySourceType[] = [
   "source_asset",
   "poster_variant",
   "image_session_asset",
   "upload",
 ];
+const WORKSPACE_HOME_ANCHORS = [
+  { id: "resource-library", labelKey: "nav.resourceLibrary" },
+  { id: "workspace", labelKey: "nav.inspirations" },
+  { id: "chat", labelKey: "nav.imageChat" },
+  { id: "gallery", labelKey: "nav.gallery" },
+  { id: "status", labelKey: "nav.status" },
+  { id: "usage-stats", labelKey: "nav.usageStats" },
+] as const satisfies readonly { id: string; labelKey: TranslationKey }[];
+
+export type WorkspaceHomeAnchorId = (typeof WORKSPACE_HOME_ANCHORS)[number]["id"];
+
+export interface WorkspaceHomeAccess {
+  resourceLibrary: boolean;
+  inspirations: boolean;
+  imageChat: boolean;
+  gallery: boolean;
+  status: boolean;
+  usageStats: boolean;
+}
+
+const WORKSPACE_HOME_ANCHOR_ACCESS_KEYS: Record<WorkspaceHomeAnchorId, keyof WorkspaceHomeAccess> = {
+  "resource-library": "resourceLibrary",
+  workspace: "inspirations",
+  chat: "imageChat",
+  gallery: "gallery",
+  status: "status",
+  "usage-stats": "usageStats",
+};
+
+const WORKSPACE_HOME_ANCHOR_ICONS: Record<WorkspaceHomeAnchorId, LucideIcon> = {
+  "resource-library": Trees,
+  workspace: Flower2,
+  chat: Leaf,
+  gallery: ImageIcon,
+  status: Activity,
+  "usage-stats": BarChart3,
+};
+
+export function workspaceHomeAnchorPath(anchorId: WorkspaceHomeAnchorId): string {
+  return `${WORKSPACE_HOME_PATH}#${anchorId}`;
+}
+
+export function workspaceHomeVisibleAnchorIds(access: WorkspaceHomeAccess): WorkspaceHomeAnchorId[] {
+  return WORKSPACE_HOME_ANCHORS
+    .filter((anchor) => access[WORKSPACE_HOME_ANCHOR_ACCESS_KEYS[anchor.id]])
+    .map((anchor) => anchor.id);
+}
+
+function workspaceHomeAnchorIdFromHash(hash: string): WorkspaceHomeAnchorId | null {
+  if (!hash) {
+    return null;
+  }
+  const normalizedHash = hash.startsWith("#") ? hash.slice(1) : hash;
+  let decodedHash = normalizedHash;
+  try {
+    decodedHash = decodeURIComponent(normalizedHash);
+  } catch {
+    decodedHash = normalizedHash;
+  }
+  return WORKSPACE_HOME_ANCHORS.some((anchor) => anchor.id === decodedHash)
+    ? (decodedHash as WorkspaceHomeAnchorId)
+    : null;
+}
 
 function workspaceHasMenuAccess(
   session: ReturnType<typeof useSessionState>,
@@ -124,21 +194,32 @@ export function workspaceImageChatWorkbenchPath({
   ownerUserId,
   resourceGroupId,
   sessionId,
+  createSession = false,
 }: {
   ownerUserId: string | null | undefined;
   resourceGroupId?: string | null;
   sessionId?: string | null;
+  createSession?: boolean;
 }): string {
-  if (!ownerUserId) {
-    return "/image-chat/workbench";
-  }
+  const path = "/image-chat/workbench";
   const params = new URLSearchParams();
-  params.set("resource_group_id", resourceGroupId ?? "");
-  params.set("owner_user_id", ownerUserId);
-  if (sessionId) {
-    params.set("session_id", sessionId);
+  const normalizedResourceGroupId = (resourceGroupId ?? "").trim();
+  const normalizedOwnerUserId = (ownerUserId ?? "").trim();
+  const normalizedSessionId = (sessionId ?? "").trim();
+  if (normalizedResourceGroupId) {
+    params.set("resource_group_id", normalizedResourceGroupId);
   }
-  return `/image-chat/workbench?${params.toString()}`;
+  if (normalizedOwnerUserId) {
+    params.set("owner_user_id", normalizedOwnerUserId);
+  }
+  if (normalizedSessionId) {
+    params.set("session_id", normalizedSessionId);
+  }
+  if (createSession) {
+    params.set("create_session", "1");
+  }
+  const suffix = params.toString();
+  return suffix ? `${path}?${suffix}` : path;
 }
 
 export function galleryEntryWorkspaceImageUrl(entry: Pick<GalleryEntry, "image">): string {
@@ -687,6 +768,7 @@ function WorkspaceImageChatContent({ subpage = false }: { subpage?: boolean } = 
   const session = useSessionState();
   const ownerUserId = session?.user?.id;
   const workbenchPath = workspaceImageChatWorkbenchPath({ ownerUserId });
+  const createSessionPath = workspaceImageChatWorkbenchPath({ ownerUserId, createSession: true });
   const sessionsQuery = useQuery({
     queryKey: ["workspace-image-sessions-latest", ownerUserId],
     queryFn: () => api.listImageSessions(undefined, { owner_user_id: ownerUserId }),
@@ -736,7 +818,7 @@ function WorkspaceImageChatContent({ subpage = false }: { subpage?: boolean } = 
             <WorkspaceHandoffButton onClick={() => navigate(workbenchPath)}>
               {t("chat.workspace.more")}
             </WorkspaceHandoffButton>
-            <WorkspaceHandoffButton onClick={() => navigate(workbenchPath)}>
+            <WorkspaceHandoffButton onClick={() => navigate(createSessionPath)}>
               {t("chat.workspace.create")}
             </WorkspaceHandoffButton>
           </div>
@@ -817,9 +899,10 @@ function WorkspaceGalleryContent() {
     queryKey: ["workspace-gallery-latest", galleryOffset],
     queryFn: () =>
       api.listGalleryEntries({
+        include_disabled: false,
         limit: GALLERY_STRIP_PAGE_SIZE,
         offset: galleryOffset,
-    }),
+      }),
     staleTime: 60_000,
     gcTime: GALLERY_STRIP_QUERY_GC_MS,
   });
@@ -892,6 +975,7 @@ function WorkspaceGalleryContent() {
       queryKey: ["workspace-gallery-latest", galleryLoopTargetOffset],
       queryFn: () =>
         api.listGalleryEntries({
+          include_disabled: false,
           limit: GALLERY_STRIP_PAGE_SIZE,
           offset: galleryLoopTargetOffset,
         }),
@@ -1349,6 +1433,46 @@ function WorkspaceHomeSection({
   );
 }
 
+function WorkspaceHomeQuickNav({ anchorIds }: { anchorIds: WorkspaceHomeAnchorId[] }) {
+  const { t } = useI18n();
+  const location = useLocation();
+  const activeAnchorId = workspaceHomeAnchorIdFromHash(location.hash);
+
+  if (!anchorIds.length) {
+    return null;
+  }
+
+  return (
+    <nav className="pf-workspace-quick-nav" aria-label={t("workspaceHome.quickNav")}>
+      <div className="pf-workspace-quick-nav-list">
+        {anchorIds.map((anchorId) => {
+          const anchor = WORKSPACE_HOME_ANCHORS.find((item) => item.id === anchorId);
+          if (!anchor) {
+            return null;
+          }
+          const Icon = WORKSPACE_HOME_ANCHOR_ICONS[anchorId];
+          const label = t(anchor.labelKey);
+          const active = activeAnchorId === anchorId;
+          return (
+            <Link
+              key={anchorId}
+              to={workspaceHomeAnchorPath(anchorId)}
+              aria-current={active ? "location" : undefined}
+              className={`pf-workspace-quick-nav-item${active ? " is-active" : ""}`}
+              title={label}
+            >
+              <span className="pf-workspace-quick-nav-text">{label}</span>
+              <span className="pf-workspace-quick-nav-icon" aria-hidden="true">
+                <Icon size={16} />
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
 function useWorkspaceHomeHashScroll() {
   const location = useLocation();
 
@@ -1375,11 +1499,20 @@ export function WorkspaceHomePage() {
   const canReadGallery = workspaceHasMenuAccess(session, "gallery", API_GALLERY_READ);
   const canReadStatus = workspaceHasMenuAccess(session, "status", API_STATUS_READ);
   const canReadUsageStats = workspaceHasMenuAccess(session, "usage_stats", API_USAGE_STATS_READ);
+  const quickNavAnchorIds = workspaceHomeVisibleAnchorIds({
+    resourceLibrary: canUseResourceLibrary,
+    inspirations: canReadInspirations,
+    imageChat: canReadImageChat,
+    gallery: canReadGallery,
+    status: canReadStatus,
+    usageStats: canReadUsageStats,
+  });
 
   return (
     <div className="pf-workspace min-h-screen">
       <TopNav />
       <main className="pf-workspace-home-page">
+        <WorkspaceHomeQuickNav anchorIds={quickNavAnchorIds} />
         <span id="top" className="pf-workspace-home-top-anchor" aria-hidden="true" />
 
         {canUseResourceLibrary ? (

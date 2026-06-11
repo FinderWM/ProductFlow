@@ -13,6 +13,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     GenerationResourceGroup,
     ImageGalleryEntry,
+    ImageGalleryEntryViewEvent,
     ImageSession,
     ImageSessionAsset,
     ImageSessionRound,
@@ -373,3 +374,105 @@ def test_gallery_save_handles_integrity_race(
         race_session.close()
 
     assert db_session.query(ImageGalleryEntry).count() == 1
+
+
+def _seed_gallery_entry(db_session, *, prompt: str = "点击计数图") -> str:
+    image_session = ImageSession(title="点击计数会话")
+    db_session.add(image_session)
+    db_session.flush()
+    asset = ImageSessionAsset(
+        session_id=image_session.id,
+        kind=ImageSessionAssetKind.GENERATED_IMAGE,
+        original_filename="views.png",
+        mime_type="image/png",
+        storage_path="image-sessions/views.png",
+    )
+    db_session.add(asset)
+    db_session.flush()
+    round_item = ImageSessionRound(
+        session_id=image_session.id,
+        prompt=prompt,
+        assistant_message="ok",
+        size="1024x1024",
+        model_name="mock",
+        provider_name="mock",
+        prompt_version="v1",
+        generated_asset_id=asset.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    )
+    db_session.add(round_item)
+    db_session.flush()
+    entry = ImageGalleryEntry(
+        image_session_asset_id=asset.id,
+        image_session_round_id=round_item.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    )
+    db_session.add(entry)
+    db_session.commit()
+    return entry.id
+
+
+def test_gallery_view_dedups_within_window_and_counts_after_window(configured_env: Path, db_session) -> None:
+    entry_id = _seed_gallery_entry(db_session)
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    first = client.post(f"/api/gallery/{entry_id}/views")
+    assert first.status_code == 200
+    assert first.json() == {"id": entry_id, "view_count": 1, "counted": True}
+
+    repeat = client.post(f"/api/gallery/{entry_id}/views")
+    assert repeat.status_code == 200
+    assert repeat.json() == {"id": entry_id, "view_count": 1, "counted": False}
+
+    # 列表返回聚合点击量
+    listed = client.get("/api/gallery")
+    assert listed.status_code == 200
+    item = next(item for item in listed.json()["items"] if item["id"] == entry_id)
+    assert item["view_count"] == 1
+
+    # 把窗口外的历史点击改造为过期，再次点击应重新计数
+    window_minutes = 60
+    expired_at = datetime.now(UTC) - timedelta(minutes=window_minutes + 1)
+    event = db_session.query(ImageGalleryEntryViewEvent).filter_by(gallery_entry_id=entry_id).one()
+    event.viewed_at = expired_at
+    db_session.commit()
+
+    after_window = client.post(f"/api/gallery/{entry_id}/views")
+    assert after_window.status_code == 200
+    assert after_window.json() == {"id": entry_id, "view_count": 2, "counted": True}
+
+
+def test_gallery_view_window_is_admin_configurable(configured_env: Path, db_session) -> None:
+    entry_id = _seed_gallery_entry(db_session)
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    # 缩小去重窗口到 1 分钟
+    updated = client.patch("/api/settings", json={"values": {"gallery_view_dedup_window_minutes": 1}})
+    assert updated.status_code == 200
+
+    first = client.post(f"/api/gallery/{entry_id}/views")
+    assert first.json()["counted"] is True
+
+    # 把唯一点击事件改造成 2 分钟前，窗口缩短后应重新计数
+    event = db_session.query(ImageGalleryEntryViewEvent).filter_by(gallery_entry_id=entry_id).one()
+    event.viewed_at = datetime.now(UTC) - timedelta(minutes=2)
+    db_session.commit()
+
+    after = client.post(f"/api/gallery/{entry_id}/views")
+    assert after.json()["counted"] is True
+    assert after.json()["view_count"] == 2
+
+
+def test_gallery_view_rejects_unknown_entry(configured_env: Path) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    missing = client.post("/api/gallery/00000000-0000-0000-0000-000000009999/views")
+    assert missing.status_code == 404

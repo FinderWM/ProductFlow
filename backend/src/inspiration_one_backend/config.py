@@ -39,6 +39,9 @@ DEFAULT_WORKFLOW_IMAGE_GENERATION_PROVIDER_TIMEOUT_SECONDS = 15 * 60
 DEFAULT_GENERATION_CONFIG_AVAILABILITY_WINDOW_MINUTES = 5
 DEFAULT_GENERATION_CONFIG_FAILURE_THRESHOLD = 3
 DEFAULT_GENERATION_CONFIG_COOLDOWN_MINUTES = 10
+DEFAULT_GALLERY_VIEW_DEDUP_WINDOW_MINUTES = 60
+GALLERY_VIEW_DEDUP_WINDOW_MIN_MINUTES = 1
+GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES = 7 * 24 * 60
 DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS = 36
 DEFAULT_WORKFLOW_NODE_MAX_RETRY_COUNT = 10
 DEFAULT_WORKFLOW_NODE_RETRY_DELAY_MS = 2000
@@ -266,6 +269,11 @@ class Settings(BaseSettings):
     )
     ui_layout_scheme: str = DEFAULT_UI_LAYOUT_SCHEME
     gallery_show_generation_resource_group: bool = True
+    gallery_view_dedup_window_minutes: int = Field(
+        default=DEFAULT_GALLERY_VIEW_DEDUP_WINDOW_MINUTES,
+        ge=GALLERY_VIEW_DEDUP_WINDOW_MIN_MINUTES,
+        le=GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES,
+    )
     admin_access_required: bool = True
     deletion_enabled: bool = False
 
@@ -732,6 +740,15 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         category="界面与外观",
         input_type="boolean",
         description="控制画廊卡片、预览弹窗和工作台画廊条是否展示生成分组溯源信息。",
+    ),
+    ConfigDefinition(
+        key="gallery_view_dedup_window_minutes",
+        label="画廊浏览去重窗口（分钟）",
+        category="界面与外观",
+        input_type="number",
+        description="同一用户在该时间窗口内多次点击同一画廊作品只计一次浏览；超过窗口再次点击重新计数。",
+        minimum=GALLERY_VIEW_DEDUP_WINDOW_MIN_MINUTES,
+        maximum=GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES,
     ),
     ConfigDefinition(
         key="deletion_enabled",

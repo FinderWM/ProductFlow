@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import Any, Literal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from inspiration_one_backend.application.time import now_utc
+from inspiration_one_backend.domain.enums import ResourceLibrarySourceType
 from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
 from inspiration_one_backend.infrastructure.db.models import (
     CanvasTemplate,
@@ -233,9 +234,9 @@ def effective_disabled_source_for(resource_type: ResourceType, resource: Any) ->
     if resource_type == "inspiration":
         return _own_disabled_source("inspiration", resource)
     if resource_type == "source_asset":
-        return _own_disabled_source("source_asset", resource) or _inspiration_disabled_source(resource.inspiration)
+        return _source_asset_disabled_source(resource)
     if resource_type == "poster_variant":
-        return _own_disabled_source("poster_variant", resource) or _inspiration_disabled_source(resource.inspiration)
+        return _poster_variant_disabled_source(resource)
     if resource_type == "image_session":
         return _own_disabled_source("image_session", resource) or _inspiration_disabled_source(resource.inspiration)
     if resource_type == "image_session_asset":
@@ -245,7 +246,9 @@ def effective_disabled_source_for(resource_type: ResourceType, resource: Any) ->
             resource.asset
         )
     if resource_type == "resource_library_asset":
-        return _own_disabled_source("resource_library_asset", resource)
+        return _own_disabled_source("resource_library_asset", resource) or _resource_library_source_disabled_source(
+            resource
+        )
     if resource_type == "canvas_template":
         return _own_disabled_source("canvas_template", resource) or _canvas_template_category_disabled_source(
             resource.category
@@ -257,6 +260,18 @@ def effective_disabled_source_for(resource_type: ResourceType, resource: Any) ->
 
 def _inspiration_disabled_source(inspiration: Inspiration | None) -> DisabledSource | None:
     return _own_disabled_source("inspiration", inspiration) if inspiration is not None else None
+
+
+def _source_asset_disabled_source(asset: SourceAsset | None) -> DisabledSource | None:
+    if asset is None:
+        return None
+    return _own_disabled_source("source_asset", asset) or _inspiration_disabled_source(asset.inspiration)
+
+
+def _poster_variant_disabled_source(poster: PosterVariant | None) -> DisabledSource | None:
+    if poster is None:
+        return None
+    return _own_disabled_source("poster_variant", poster) or _inspiration_disabled_source(poster.inspiration)
 
 
 def _image_session_disabled_source(image_session: ImageSession | None) -> DisabledSource | None:
@@ -271,6 +286,48 @@ def _image_session_asset_disabled_source(asset: ImageSessionAsset | None) -> Dis
     if asset is None:
         return None
     return _own_disabled_source("image_session_asset", asset) or _image_session_disabled_source(asset.session)
+
+
+def _resource_library_source_disabled_source(asset: ResourceLibraryAsset) -> DisabledSource | None:
+    if not asset.source_resource_id:
+        return None
+    session = object_session(asset)
+    if session is None:
+        return None
+    if asset.source_type == ResourceLibrarySourceType.SOURCE_ASSET:
+        source_asset = session.scalar(
+            select(SourceAsset)
+            .options(
+                selectinload(SourceAsset.disabled_by),
+                selectinload(SourceAsset.inspiration).selectinload(Inspiration.disabled_by),
+            )
+            .where(SourceAsset.id == asset.source_resource_id)
+        )
+        return _source_asset_disabled_source(source_asset)
+    if asset.source_type == ResourceLibrarySourceType.POSTER_VARIANT:
+        poster = session.scalar(
+            select(PosterVariant)
+            .options(
+                selectinload(PosterVariant.disabled_by),
+                selectinload(PosterVariant.inspiration).selectinload(Inspiration.disabled_by),
+            )
+            .where(PosterVariant.id == asset.source_resource_id)
+        )
+        return _poster_variant_disabled_source(poster)
+    if asset.source_type == ResourceLibrarySourceType.IMAGE_SESSION_ASSET:
+        image_asset = session.scalar(
+            select(ImageSessionAsset)
+            .options(
+                selectinload(ImageSessionAsset.disabled_by),
+                selectinload(ImageSessionAsset.session).selectinload(ImageSession.disabled_by),
+                selectinload(ImageSessionAsset.session)
+                .selectinload(ImageSession.inspiration)
+                .selectinload(Inspiration.disabled_by),
+            )
+            .where(ImageSessionAsset.id == asset.source_resource_id)
+        )
+        return _image_session_asset_disabled_source(image_asset)
+    return None
 
 
 def _canvas_template_category_disabled_source(

@@ -38,7 +38,7 @@ from inspiration_one_backend.application.use_cases import (
     create_inspiration,
     get_inspiration_detail,
 )
-from inspiration_one_backend.config import get_settings
+from inspiration_one_backend.config import DEFAULT_WORKFLOW_IMAGE_GENERATION_PROVIDER_TIMEOUT_SECONDS, get_settings
 from inspiration_one_backend.domain.enums import (
     PosterKind,
 )
@@ -1830,7 +1830,7 @@ def test_openai_chat_image_provider_factory_and_client_sends_non_stream_payload(
 
     assert client_kwargs == [
         {
-            "timeout": OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
+            "timeout": float(DEFAULT_WORKFLOW_IMAGE_GENERATION_PROVIDER_TIMEOUT_SECONDS),
             "headers": {
                 **OPENAI_COMPATIBLE_DEFAULT_HEADERS,
                 "Authorization": "Bearer demo-api-key",
@@ -1853,6 +1853,7 @@ def test_openai_chat_image_provider_factory_and_client_sends_non_stream_payload(
         "model": "gemini-3-pro-image-preview-16-9-4K",
         "size": "1024x1024",
         "stream": False,
+        "message_content_format": "parts",
         "message_count": 1,
         "prompt_character_count": 7,
         "reference_image_count": 1,
@@ -1892,6 +1893,7 @@ def test_openai_chat_image_client_parses_url_and_raw_base64_outputs(
             "choices": [{"message": {"content": encoded_result}}],
         },
     ]
+    calls: list[dict] = []
     get_urls: list[str] = []
 
     class DummyJSONResponse:
@@ -1925,6 +1927,7 @@ def test_openai_chat_image_client_parses_url_and_raw_base64_outputs(
             return None
 
         def post(self, url: str, *, json: dict):
+            calls.append({"url": url, "json": json})
             return DummyJSONResponse(post_responses.pop(0))
 
         def get(self, url: str):
@@ -1939,12 +1942,102 @@ def test_openai_chat_image_client_parses_url_and_raw_base64_outputs(
     url_result = OpenAIChatImageClient().generate_image(prompt="URL 输出", size="1024x1024")
     b64_result = OpenAIChatImageClient().generate_image(prompt="base64 输出", size="1024x1024")
 
+    assert calls[0]["json"]["messages"][0]["content"] == "URL 输出"
+    assert calls[1]["json"]["messages"][0]["content"] == "base64 输出"
     assert get_urls == ["https://cdn.example/generated.png"]
     assert url_result.provider_output_json["_inspiration_one"]["image_source"] == "url"
+    assert url_result.provider_request_json["message_content_format"] == "string"
     assert url_result.mime_type == "image/png"
     assert b64_result.provider_output_json["_inspiration_one"]["image_source"] == "base64"
+    assert b64_result.provider_request_json["message_content_format"] == "string"
     assert b64_result.mime_type == "image/png"
     assert b64_result.bytes_data == _make_demo_image_bytes()
+
+
+def test_openai_chat_image_client_parses_non_json_image_outputs(
+    configured_env: Path,
+    monkeypatch,
+) -> None:
+    session = get_session_factory()()
+    try:
+        session.merge(AppSetting(key="workflow_image_generation_provider_timeout_seconds", value="321"))
+        session.commit()
+    finally:
+        session.close()
+
+    monkeypatch.setenv("IMAGE_BASE_URL", "https://chat.example/v1")
+    monkeypatch.setenv("IMAGE_API_KEY", "demo-api-key")
+    monkeypatch.setenv("IMAGE_PROVIDER_KIND", "openai_chat_image")
+    monkeypatch.setenv("IMAGE_GENERATE_MODEL", "chat-image-model")
+    get_settings.cache_clear()
+
+    image_bytes = _make_demo_image_bytes()
+    post_responses = ["raw_image", "text_url"]
+    get_urls: list[str] = []
+
+    class DummyRawImageResponse:
+        content = image_bytes
+        headers = {"content-type": "image/png"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            raise ValueError("not json")
+
+    class DummyTextUrlResponse:
+        content = b"https://cdn.example/generated.png"
+        headers = {"content-type": "text/plain; charset=utf-8"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            raise ValueError("not json")
+
+    class DummyImageResponse:
+        content = image_bytes
+        headers = {"content-type": "image/png; charset=utf-8"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            assert kwargs["timeout"] == 321.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            response_kind = post_responses.pop(0)
+            if response_kind == "raw_image":
+                return DummyRawImageResponse()
+            return DummyTextUrlResponse()
+
+        def get(self, url: str):
+            get_urls.append(url)
+            return DummyImageResponse()
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.image.openai_chat_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    raw_result = OpenAIChatImageClient().generate_image(prompt="raw image", size="1024x1024")
+    text_url_result = OpenAIChatImageClient().generate_image(prompt="text url", size="1024x1024")
+
+    assert raw_result.bytes_data == image_bytes
+    assert raw_result.provider_output_json["response_format"] == "raw_image"
+    assert raw_result.provider_output_json["content_type"] == "image/png"
+    assert raw_result.provider_output_json["_inspiration_one"]["image_source"] == "base64"
+    assert text_url_result.bytes_data == image_bytes
+    assert text_url_result.provider_output_json["response_format"] == "text_image_reference"
+    assert text_url_result.provider_output_json["_inspiration_one"]["image_source"] == "url"
+    assert get_urls == ["https://cdn.example/generated.png"]
 
 
 def test_image_session_openai_chat_image_uses_explicit_references(
@@ -2006,6 +2099,7 @@ def test_image_session_openai_chat_image_uses_explicit_references(
     assert [part["type"] for part in content] == ["text", "image_url", "image_url", "image_url"]
     assert result.provider_name == "openai-chat-image"
     assert result.provider_response_id == "chatcmpl-session"
+    assert result.provider_request_json["message_content_format"] == "parts"
     assert result.provider_request_json["reference_image_count"] == 3
     assert result.provider_request_json["reference_images"] == [
         {"filename": "base.png", "mime_type": "image/png", "byte_count": len(_make_demo_image_bytes())},

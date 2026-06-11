@@ -20,6 +20,7 @@ import type {
   DuplicateWorkflowNodeGroupInput,
   GalleryEntry,
   GalleryEntryListResponse,
+  GalleryEntryViewResponse,
   GenerationConfig,
   GenerationConfigCreateRequest,
   GenerationConfigOption,
@@ -58,6 +59,9 @@ import type {
   ResourceLibraryGroup,
   ResourceLibraryGroupListResponse,
   ResourceLibrarySourceStatusListResponse,
+  ResourceModerationResponse,
+  ResourceModerationType,
+  ResourceModerationUpdateInput,
   RbacPermissionCatalog,
   RbacRole,
   RbacRolePermissions,
@@ -565,6 +569,9 @@ export const api = {
   archiveGenerationConfig(configId: string): Promise<GenerationConfig> {
     return request(`/api/settings/generation-configs/${encodeURIComponent(configId)}`, { method: "DELETE" });
   },
+  unfreezeGenerationConfig(configId: string): Promise<GenerationConfig> {
+    return request(`/api/settings/generation-configs/${encodeURIComponent(configId)}/unfreeze`, { method: "POST" });
+  },
   testTextGenerationConfig(payload: TextGenerationConfigTestRequest): Promise<TextGenerationConfigTestResponse> {
     return request("/api/settings/generation-configs/test-text", {
       method: "POST",
@@ -851,12 +858,16 @@ export const api = {
   },
   listGalleryEntries(input?: {
     resource_group_id?: string | null;
+    include_disabled?: boolean;
     limit?: number;
     offset?: number;
   }): Promise<GalleryEntryListResponse> {
     const params = new URLSearchParams();
     if (input?.resource_group_id) {
       params.set("resource_group_id", input.resource_group_id);
+    }
+    if (input?.include_disabled) {
+      params.set("include_disabled", "true");
     }
     if (input?.limit !== undefined) {
       params.set("limit", `${input.limit}`);
@@ -872,6 +883,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ image_session_asset_id: imageSessionAssetId }),
     });
+  },
+  recordGalleryEntryView(galleryEntryId: string): Promise<GalleryEntryViewResponse> {
+    return request(`/api/gallery/${galleryEntryId}/views`, {
+      method: "POST",
+    });
+  },
+  updateResourceModeration(
+    resourceType: ResourceModerationType,
+    resourceId: string,
+    input: ResourceModerationUpdateInput,
+  ): Promise<ResourceModerationResponse> {
+    return request(
+      `/api/resource-moderation/${encodeURIComponent(resourceType)}/${encodeURIComponent(resourceId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      },
+    );
   },
   getInspirationWorkflow(inspirationId: string): Promise<InspirationWorkflow> {
     return request(`/api/inspirations/${inspirationId}/workflow`);

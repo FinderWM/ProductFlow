@@ -8,7 +8,7 @@
 
 These files document the backend conventions that are actually present in this repository. They are based on
 `AGENTS.md`, `backend/pyproject.toml`, `justfile`, `docs/ARCHITECTURE.md`, and the current code under
-`backend/src/productflow_backend/` and `backend/tests/`.
+`backend/src/inspiration_one_backend/` and `backend/tests/`.
 
 ---
 

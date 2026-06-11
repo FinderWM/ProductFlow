@@ -138,12 +138,16 @@ function MetricCard({
 function ConfigStatusRow({ config }: { config: GenerationConfigStatusConfig }) {
   const { t } = useI18n();
   const activeFrozen = isActiveFrozenUntil(config.state?.frozen_until);
-  const statusText = activeFrozen && config.state?.frozen_until
+  const frozenUntilText = activeFrozen && config.state?.frozen_until
     ? t("statusPage.table.frozenUntil", { time: formatDateTime(config.state.frozen_until) })
+    : null;
+  const statusText = activeFrozen
+    ? t("settings.generation.frozen")
     : config.enabled
       ? t("settings.generation.healthy")
       : t("settings.provider.disabled");
-  const failureText = config.state?.last_failure_reason ?? statusText;
+  const detailText = frozenUntilText ?? config.state?.last_failure_reason ?? statusText;
+  const secondaryText = frozenUntilText ? config.state?.last_failure_reason : null;
 
   return (
     <div className="grid gap-3 px-5 py-4 text-sm md:grid-cols-[1.35fr_0.75fr_0.8fr_0.9fr_1fr]">
@@ -178,7 +182,10 @@ function ConfigStatusRow({ config }: { config: GenerationConfigStatusConfig }) {
             {statusText}
           </span>
         </div>
-        <div className="truncate text-xs text-slate-500 dark:text-slate-400">{failureText}</div>
+        <div className="truncate text-xs text-slate-500 dark:text-slate-400">{detailText}</div>
+        {secondaryText ? (
+          <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{secondaryText}</div>
+        ) : null}
       </div>
     </div>
   );

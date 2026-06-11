@@ -6,7 +6,7 @@
 
 ## Overview
 
-The backend is a Python 3.12 FastAPI application under `backend/src/productflow_backend/`.
+The backend is a Python 3.12 FastAPI application under `backend/src/inspiration_one_backend/`.
 It follows the four-layer structure already described in `AGENTS.md` and `docs/ARCHITECTURE.md`:
 
 - `presentation/` owns FastAPI routing, request dependencies, upload validation, and Pydantic response/request schemas.
@@ -14,7 +14,7 @@ It follows the four-layer structure already described in `AGENTS.md` and `docs/A
 - `domain/` owns shared enum values and small domain concepts.
 - `infrastructure/` owns database, local storage, queues, provider implementations, and poster rendering.
 
-`backend/src/productflow_backend/main.py` intentionally stays tiny and only exposes `app = create_app()` from
+`backend/src/inspiration_one_backend/main.py` intentionally stays tiny and only exposes `app = create_app()` from
 `presentation/api.py`.
 
 ---
@@ -27,7 +27,7 @@ backend/
 ├── alembic/
 │   ├── env.py                           # Reads Settings.database_url and Base.metadata
 │   └── versions/                        # Manual Alembic revisions, e.g. 20260424_0006_add_app_settings.py
-├── src/productflow_backend/
+├── src/inspiration_one_backend/
 │   ├── main.py                          # ASGI app entrypoint
 │   ├── config.py                        # env settings + runtime database overrides
 │   ├── workers.py                       # Dramatiq actors
@@ -87,7 +87,7 @@ backend/
 
 ### Presentation layer
 
-Put HTTP concerns in `backend/src/productflow_backend/presentation/`:
+Put HTTP concerns in `backend/src/inspiration_one_backend/presentation/`:
 
 - App assembly and middleware belong in `presentation/api.py`.
 - Authentication/session dependencies belong in `presentation/deps.py` and `presentation/routes/auth.py`.
@@ -107,7 +107,7 @@ application functions such as `create_inspiration(...)`, `submit_inspiration_wor
 
 ### Application layer
 
-Put workflow rules and orchestration in `backend/src/productflow_backend/application/`:
+Put workflow rules and orchestration in `backend/src/inspiration_one_backend/application/`:
 
 - `application/use_cases.py` owns the core inspiration flow:
   inspiration creation, reference images, copy/copy-confirmation edits, inspiration deletion, and history reads.
@@ -167,15 +167,15 @@ node IDs, image-session round IDs, HTTP schemas, queue delivery, or concrete pro
 
 ### Domain layer
 
-`backend/src/productflow_backend/domain/enums.py` is the shared home for enum values such as `InspirationWorkflowState`,
+`backend/src/inspiration_one_backend/domain/enums.py` is the shared home for enum values such as `InspirationWorkflowState`,
 `SourceAssetKind`, `CopyStatus`, `JobStatus`, `PosterKind`, and `ImageSessionAssetKind`. The same string
 values are mirrored in `web/src/lib/types.ts`, so enum changes are cross-layer changes.
 
-`backend/src/productflow_backend/domain/errors.py` is the shared home for typed business errors such as `BusinessError`,
+`backend/src/inspiration_one_backend/domain/errors.py` is the shared home for typed business errors such as `BusinessError`,
 `BusinessValidationError`, and `NotFoundError`. Application use cases may raise these errors, while HTTP status conversion
 still belongs in `presentation/errors.py`.
 
-`backend/src/productflow_backend/domain/workflow_rules.py` owns DB-free workflow graph business rules such as topological
+`backend/src/inspiration_one_backend/domain/workflow_rules.py` owns DB-free workflow graph business rules such as topological
 ordering, selected-node execution planning, and missing-upstream decisions. `domain/durable_generation_tasks.py` owns the
 DB-free durable generation task contract shared by application submit/execution code, infrastructure queue recovery,
 presentation status serializers, and worker actor assertions. Application modules adapt ORM rows into the small domain
@@ -183,7 +183,7 @@ rule/contract shapes before applying those rules; SQLAlchemy artifact existence 
 
 ### Infrastructure layer
 
-Put adapter code under `backend/src/productflow_backend/infrastructure/`:
+Put adapter code under `backend/src/inspiration_one_backend/infrastructure/`:
 
 - Database models/session setup: `infrastructure/db/models.py`, `infrastructure/db/session.py`.
 - Local file storage and image variants: `infrastructure/storage.py`.
@@ -220,18 +220,18 @@ and the runtime config definitions in `config.py`, then update tests and fronten
 
 ## Examples to Copy
 
-- App creation: `backend/src/productflow_backend/presentation/api.py` registers CORS, session middleware, `/healthz`,
+- App creation: `backend/src/inspiration_one_backend/presentation/api.py` registers CORS, session middleware, `/healthz`,
   and routers in one place.
-- Inspiration route shape: `backend/src/productflow_backend/presentation/routes/inspirations.py` accepts FastAPI inputs,
+- Inspiration route shape: `backend/src/inspiration_one_backend/presentation/routes/inspirations.py` accepts FastAPI inputs,
   delegates to `application/use_cases.py`, and serializes with `presentation/schemas/inspirations.py`.
 - Business error mapping: application use cases raise typed `BusinessError` subclasses, and
   `presentation/errors.py` registers the FastAPI handler that preserves the `{"detail": "..."}` response shape. Do not
   add route-local raw `ValueError` adapters for expected business failures.
-- Continuous image sessions: `backend/src/productflow_backend/presentation/routes/image_sessions.py` delegates to
+- Continuous image sessions: `backend/src/inspiration_one_backend/presentation/routes/image_sessions.py` delegates to
   `application/image_sessions.py`, which delegates provider-specific chat generation to
   `infrastructure/image/chat_service.py`, and keeps download handling in the route.
-- Provider selection: `backend/src/productflow_backend/infrastructure/text/factory.py` and
-  `backend/src/productflow_backend/infrastructure/image/factory.py` choose implementations from runtime settings.
+- Provider selection: `backend/src/inspiration_one_backend/infrastructure/text/factory.py` and
+  `backend/src/inspiration_one_backend/infrastructure/image/factory.py` choose implementations from runtime settings.
 - Tests: `backend/tests/test_*.py` are split by behavior area. Keep shared image/client/workflow helpers in
   `backend/tests/helpers.py`, and put regressions near their owning theme: auth/settings/runtime config, error handling,
   inspiration CRUD, inspiration workflow DAG/mutations/queue recovery, image sessions, storage/upload validation,

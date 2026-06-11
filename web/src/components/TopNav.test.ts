@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   getDesktopNavAvailableWidth,
   getDesktopNavLayout,
+  getWorkspaceNavAvailableWidth,
   getWorkspaceNavLayout,
   isPointerInWorkspaceThemeDockRevealZone,
+  workspaceTopNavTarget,
   type DesktopNavLayoutInput,
   type WorkspaceThemeDockRect,
   type WorkspaceNavLayoutInput,
@@ -137,6 +139,17 @@ describe("getDesktopNavLayout", () => {
 });
 
 describe("getWorkspaceNavLayout", () => {
+  it("subtracts the independent workspace brand from the nav budget", () => {
+    expect(
+      getWorkspaceNavAvailableWidth({
+        viewportWidth: 1180,
+        brandWidth: 238,
+        horizontalChrome: 36,
+        brandGap: 14,
+      }),
+    ).toBe(892);
+  });
+
   it("keeps secondary workspace nav items in More without hiding primary items when the row fits", () => {
     const layout = getWorkspaceNavLayout({
       items: [
@@ -175,6 +188,19 @@ describe("getWorkspaceNavLayout", () => {
 
     expect(layout.visibleKeys).toEqual(["resource-library", "inspirations", "image-chat"]);
     expect(layout.overflowKeys).toEqual(["gallery", "status", "usage", "settings", "help"]);
+  });
+});
+
+describe("workspaceTopNavTarget", () => {
+  it("uses the workspace-specific business route when provided", () => {
+    expect(workspaceTopNavTarget({ to: "/image-chat", workspaceTo: "/image-chat/workbench" })).toBe(
+      "/image-chat/workbench",
+    );
+    expect(workspaceTopNavTarget({ to: "/gallery", workspaceTo: "/gallery/manage" })).toBe("/gallery/manage");
+  });
+
+  it("falls back to the normal top-level route without a workspace override", () => {
+    expect(workspaceTopNavTarget({ to: "/resource-library" })).toBe("/resource-library");
   });
 });
 

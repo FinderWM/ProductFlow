@@ -252,6 +252,57 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
         source_id=generated_asset_id,
     )
 
+    disabled_inspiration = client.post(
+        f"/api/resources/inspiration/{inspiration_id}/disable",
+        json={"reason": "源灵感风险"},
+    )
+    assert disabled_inspiration.status_code == 200
+
+    listed_after_inspiration_disable = client.get("/api/resource-library/assets")
+    assert listed_after_inspiration_disable.status_code == 200
+    disabled_items = {item["id"]: item for item in listed_after_inspiration_disable.json()["items"]}
+    assert disabled_items[source_resource_id]["effective_enabled"] is False
+    assert disabled_items[source_resource_id]["effective_disabled_resource_type"] == "inspiration"
+    assert disabled_items[saved_poster.json()["id"]]["effective_enabled"] is False
+    assert disabled_items[saved_poster.json()["id"]]["effective_disabled_resource_type"] == "inspiration"
+
+    blocked_load = client.post(
+        f"/api/resource-library/assets/{source_resource_id}/load-to-workflow-node",
+        json={"node_id": "missing-node"},
+    )
+    assert blocked_load.status_code == 400
+    assert blocked_load.json()["detail"] == "资源已被管理员屏蔽，暂不可使用"
+
+    restored_inspiration = client.post(f"/api/resources/inspiration/{inspiration_id}/restore")
+    assert restored_inspiration.status_code == 200
+    listed_after_inspiration_restore = client.get("/api/resource-library/assets")
+    assert listed_after_inspiration_restore.status_code == 200
+    restored_items = {item["id"]: item for item in listed_after_inspiration_restore.json()["items"]}
+    assert restored_items[source_resource_id]["effective_enabled"] is True
+    assert restored_items[saved_poster.json()["id"]]["effective_enabled"] is True
+
+    disabled_generated_asset = client.post(
+        f"/api/resources/image_session_asset/{generated_asset_id}/disable",
+        json={"reason": "生成图风险"},
+    )
+    assert disabled_generated_asset.status_code == 200
+
+    listed_after_generated_disable = client.get("/api/resource-library/assets")
+    assert listed_after_generated_disable.status_code == 200
+    generated_disabled_items = {item["id"]: item for item in listed_after_generated_disable.json()["items"]}
+    assert generated_disabled_items[saved_generated.json()["id"]]["effective_enabled"] is False
+    assert (
+        generated_disabled_items[saved_generated.json()["id"]]["effective_disabled_resource_type"]
+        == "image_session_asset"
+    )
+
+    restored_generated_asset = client.post(f"/api/resources/image_session_asset/{generated_asset_id}/restore")
+    assert restored_generated_asset.status_code == 200
+    listed_after_generated_restore = client.get("/api/resource-library/assets")
+    assert listed_after_generated_restore.status_code == 200
+    generated_restored_items = {item["id"]: item for item in listed_after_generated_restore.json()["items"]}
+    assert generated_restored_items[saved_generated.json()["id"]]["effective_enabled"] is True
+
     group_a_items = client.get("/api/resource-library/assets", params={"group_id": first_group})
     assert group_a_items.status_code == 200
     assert {item["id"] for item in group_a_items.json()["items"]} == {

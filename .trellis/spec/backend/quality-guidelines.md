@@ -38,13 +38,13 @@ Use the root `justfile` where possible so local env loading and ports match the 
 
 - One-click application start: `docker compose up -d --build`.
 - Shared middleware containers: PostgreSQL `libowpg`, Redis `libowredis`.
-- Manual migration path: `docker compose run --rm productflow-backend alembic upgrade head`.
+- Manual migration path: `docker compose run --rm inspiration-one-backend alembic upgrade head`.
 - Direct API health: `GET /healthz` returns `{"status":"ok"}`.
 - Web proxy smoke path: `GET /api/healthz` through nginx proxies to backend `GET /healthz`.
 
 #### 3. Contracts
 
-- `productflow-backend` and `productflow-worker` must read runtime dependencies from `.env`:
+- `inspiration-one-backend` and `inspiration-one-worker` must read runtime dependencies from `.env`:
   - `DATABASE_URL=postgresql+psycopg://productflow:<password>@host.docker.internal:15432/inspiration_flow`
   - `REDIS_URL=redis://host.docker.internal:16379/0`
 - Local host development uses `.env.dev` with `localhost:15432/inspiration_flow` and `localhost:16379/0`.
@@ -52,7 +52,7 @@ Use the root `justfile` where possible so local env loading and ports match the 
   projects.
 - Container storage must use a shared in-container path `STORAGE_ROOT=/app/storage`.
 - `STORAGE_HOST_PATH` is host-only Compose interpolation for production bind mounts. When unset, `/app/storage` is backed
-  by the named volume `productflow-storage`; when set, it may point at an existing host directory such as
+  by the named volume `inspiration-one-storage`; when set, it may point at an existing host directory such as
   `/home/cot/ProductFlow-release/shared/storage` for old systemd production storage reuse.
 - Local hot-reload development must stay isolated on `.env.dev` / `STORAGE_ROOT=./backend/storage-dev`; do not depend on
   shell-sourcing production `.env` for development commands.
@@ -89,7 +89,7 @@ Use the root `justfile` where possible so local env loading and ports match the 
 - Run `docker compose config --quiet` after Compose/env edits.
 - For storage-related Compose changes, render config with `STORAGE_HOST_PATH` both unset and set; assert backend/worker
   mount `/app/storage`, keep `STORAGE_ROOT=/app/storage`, and do not expose `STORAGE_HOST_PATH` in container env.
-- Build container images with `docker compose build productflow-backend productflow-web` or a full `docker compose up -d --build` smoke.
+- Build container images with `docker compose build inspiration-one-backend inspiration-one-web` or a full `docker compose up -d --build` smoke.
 - Smoke a disposable or safe project with direct API health, web health, and web `/api/healthz` proxy checks when practical.
 - Keep normal backend/frontend gates green when Dockerfiles or docs depend on package commands: backend tests/ruff and frontend lint/test/build.
 
@@ -113,7 +113,7 @@ Wrong:
 environment:
   STORAGE_ROOT: /home/cot/ProductFlow-release/shared/storage
 volumes:
-  - productflow-storage:/app/storage
+  - inspiration-one-storage:/app/storage
 ```
 
 Correct:
@@ -122,7 +122,7 @@ Correct:
 environment:
   STORAGE_ROOT: /app/storage
 volumes:
-  - ${STORAGE_HOST_PATH:-productflow-storage}:/app/storage
+  - ${STORAGE_HOST_PATH:-inspiration-one-storage}:/app/storage
 ```
 
 ### Scenario: Keep Compose release and open-source examples clean
@@ -140,7 +140,7 @@ volumes:
   symlinks, or delete volumes.
 - The actual release path validates Compose config, stops legacy user-level systemd services when present, runs
   `docker compose up -d --build --remove-orphans`, and performs HTTP health checks.
-- Legacy services are `productflow-backend.service`, `productflow-worker.service`, and `productflow-web.service`.
+- Legacy services are `inspiration-one-backend.service`, `inspiration-one-worker.service`, and `inspiration-one-web.service`.
 - Supported override: `LEGACY_SYSTEMD_ACTION=skip` skips the legacy service stop step after the operator has handled port
   ownership manually.
 
@@ -175,7 +175,7 @@ volumes:
 - Good: `just release` stops legacy services, recreates Compose services, passes backend and web `/api/healthz` checks, and leaves volumes intact.
 - Base: `.env.dev.example` uses local service ports and mock providers while allowing contributors to opt into real
   providers by setting their own untracked env file.
-- Bad: release script creates tar snapshots, flips a `.release/current` symlink, or restarts `productflow-*.service` after
+- Bad: release script creates tar snapshots, flips a `.release/current` symlink, or restarts `inspiration-one-*.service` after
   Compose has become the production runtime.
 
 #### 6. Tests Required
@@ -194,13 +194,13 @@ volumes:
 Wrong:
 
 ```bash
-systemctl --user restart productflow-backend.service productflow-worker.service productflow-web.service
+systemctl --user restart inspiration-one-backend.service inspiration-one-worker.service inspiration-one-web.service
 ```
 
 Correct:
 
 ```bash
-systemctl --user stop productflow-backend.service productflow-worker.service productflow-web.service || true
+systemctl --user stop inspiration-one-backend.service inspiration-one-worker.service inspiration-one-web.service || true
 docker compose up -d --build --remove-orphans
 ```
 
@@ -234,6 +234,8 @@ the infrastructure provider factories. Tests and future composition code that ne
 - Provider kind: `openai_chat_image`.
 - Required provider capability: `image_chat`.
 - Backend client: `OpenAIChatImageClient.generate_image(prompt, size, reference_images=None, model=None)`.
+- Timeout source: `Settings.workflow_image_generation_provider_timeout_seconds`, not the generic OpenAI-compatible text
+  client timeout.
 - Poster provider: `OpenAIChatImageProvider.generate_poster_image(...)` and `generate_poster_images(...)`.
 - Continuous image chat: `ImageChatService.generate(...)` dispatches `provider_kind="openai_chat_image"`.
 - Frontend mirror: `ProviderCapability` includes `image_chat`; settings image provider kind includes
@@ -244,13 +246,18 @@ the infrastructure provider factories. Tests and future composition code that ne
   `/chat/completions`.
 - Request payload includes:
   - `model`
-  - `messages=[{"role":"user","content":[{"type":"text","text": prompt}, image_url parts...]}]`
+  - `messages=[{"role":"user","content": prompt}]` when no reference images are present.
+  - `messages=[{"role":"user","content":[{"type":"text","text": prompt}, image_url parts...]}]` when reference images are present.
   - `stream=false`
 - Reference images are sent as Chat Completions `image_url` parts containing data URLs.
 - Persisted provider request JSON records endpoint family, model, size, `stream=false`, prompt character count, and
-  reference-image metadata only.
+  reference-image metadata only. It may record the sanitized `message_content_format` (`string` or `parts`), but never the
+  prompt body or image data URLs.
 - Persisted provider output JSON records response metadata and `_inspiration_one` image source/mime/byte-count metadata
   only.
+- A `200 OK` response may be normal Chat Completions JSON, raw image bytes, plain text data URL / HTTP(S) URL, raw base64,
+  or non-object JSON containing one of those image references. Normalize supported non-JSON / non-object shapes into the
+  same image-source extraction path; do not treat this provider as text chat.
 - Do not persist or log prompt bodies, data URLs, raw base64, image bytes, API keys, or full provider responses.
 
 ##### 4. Validation & Error Matrix
@@ -258,12 +265,18 @@ the infrastructure provider factories. Tests and future composition code that ne
 - Profile missing `image_chat` -> settings validation error `"供应商档案不支持当前接口能力"`.
 - Provider returns no supported image source -> `RuntimeError("图片供应商没有返回图片结果，请稍后重试")`.
 - HTTP/client/parse failure -> `RuntimeError("图片供应商请求失败，请检查供应商配置后重试")`.
+- Non-JSON `image/*` response body -> decode/store generated image as a successful `base64` image source with
+  `provider_output_json.response_format="raw_image"`.
+- Non-JSON text response containing a supported image reference -> decode/download it as a successful image result with
+  `provider_output_json.response_format="text_image_reference"`.
 - Supported output shapes include `choices[].message.images[].image_url.url`, data URL text, plain HTTP(S) URL text, and
   raw base64 image text.
 
 ##### 5. Good/Base/Bad Cases
 - Good: Packy-style profile uses `base_url="https://www.packyapi.com"`, capability `image_chat`, and generation config
   kind `openai_chat_image`.
+- Good: chat-completions image generation calls can run for the same operator-tuned timeout as other AI image generation
+  calls.
 - Good: image-session branching sends only the explicitly selected base image plus selected reference images.
 - Base: existing `openai_images`, `openai_responses`, and `google_gemini_image` providers keep their current capabilities
   and routes.
@@ -272,9 +285,12 @@ the infrastructure provider factories. Tests and future composition code that ne
 - Bad: storing returned data URLs or raw base64 in `provider_request_json` or `provider_output_json`.
 
 ##### 6. Tests Required
-- Provider payload test asserts endpoint URL, `stream=false`, text plus `image_url` content parts, and sanitized persisted
-  request metadata.
-- Provider response tests cover data URL, HTTP(S) URL download, and raw base64 outputs.
+- Provider payload test asserts endpoint URL, `stream=false`, string content for text-only calls, text plus `image_url`
+  content parts for reference-image calls, and sanitized persisted request metadata.
+- Provider response tests cover data URL, HTTP(S) URL download, raw base64, raw `image/*` non-JSON response bytes, and
+  plain-text image references.
+- Provider timeout test asserts Chat Completions image calls use `workflow_image_generation_provider_timeout_seconds`,
+  including database runtime override.
 - Settings runtime test asserts `image_chat` capability accepts `openai_chat_image` and rejects mismatched image provider
   kinds.
 - Image-session test asserts selected base/reference images are passed as Chat Completions references.
@@ -347,7 +363,7 @@ provider = dependencies.image_provider()
 Wrong:
 
 ```python
-monkeypatch.setattr("productflow_backend.application.inspiration_workflows.get_image_provider", fake_factory)
+monkeypatch.setattr("inspiration_one_backend.application.inspiration_workflows.get_image_provider", fake_factory)
 ```
 
 Correct:
@@ -363,7 +379,7 @@ run_inspiration_workflow(session, inspiration_id=inspiration.id, dependencies=de
 - Upload MIME/size/pixel validation is centralized in `presentation/upload_validation.py`.
 - Business text/price normalization lives in `application/use_cases.py` helpers such as `_normalize_required_text(...)` and
   `_normalize_price(...)`.
-- Runtime settings normalization lives in `backend/src/productflow_backend/config.py`.
+- Runtime settings normalization lives in `backend/src/inspiration_one_backend/config.py`.
 
 Do not duplicate these checks in multiple pages/routes.
 
@@ -485,7 +501,7 @@ should own pure graph decisions.
 
 ### Keep storage safe
 
-Use `LocalStorage` from `backend/src/productflow_backend/infrastructure/storage.py` for storage paths. It resolves relative
+Use `LocalStorage` from `backend/src/inspiration_one_backend/infrastructure/storage.py` for storage paths. It resolves relative
 paths under the configured root and rejects absolute/path-traversal paths. Do not build download paths manually in routes.
 For image resource rows, persist storage metadata through `StorageService.metadata_for(...)` so `storage_path`,
 `storage_backend`, `storage_bucket`, and `storage_object_key` stay consistent. Do not persist full public URLs; derive

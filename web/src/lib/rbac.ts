@@ -15,6 +15,7 @@ export const API_SETTINGS_WRITE = "settings:write";
 export const API_SETTINGS_PROVIDER_WRITE = "settings:provider_write";
 export const API_SETTINGS_MIGRATE = "settings:migrate";
 export const API_GLOBAL_TEMPLATES_MANAGE = "templates:manage_global";
+export const API_RESOURCES_MODERATE = "resources:moderate";
 export const RBAC_MANAGE_PERMISSION = "rbac:manage";
 
 export function hasSessionMenu(session: SessionState | null, menuCode: string): boolean {
