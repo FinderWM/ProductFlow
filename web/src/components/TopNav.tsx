@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
+  ArrowUpRight,
   BarChart3,
   BookOpen,
   Check,
@@ -106,9 +107,30 @@ export interface DesktopNavLayout {
   overflowKeys: string[];
 }
 
+export interface DesktopNavAvailableWidthInput {
+  navAreaWidth: number;
+  rightSlotWidth: number;
+  rightControlsWidth: number;
+  horizontalChrome?: number;
+}
+
+export interface WorkspaceNavLayoutInput {
+  key: string;
+  priority: NavPriority;
+  width: number;
+}
+
+export interface WorkspaceThemeDockRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
 const DESKTOP_NAV_GAP_PX = 4;
 const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 36;
 const NAV_AUTO_HIDE_DELAY_MS = 5_000;
+const WORKSPACE_THEME_DOCK_REVEAL_MARGIN_PX = 16;
 const CURTAIN_EASING = "cubic-bezier(0.18, 0.9, 0.2, 1.12)";
 export const TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS = "h-[4.5rem] md:h-[4.65rem]";
 const TOP_CHROME_OPEN_HEIGHT_CLASS = "h-[4.75rem] md:h-[4.65rem]";
@@ -172,7 +194,7 @@ const navItems: TopNavItem[] = [
     to: "/usage-stats",
     menuCode: "usage_stats",
     requiredPermission: API_USAGE_STATS_READ,
-    priority: "secondary",
+    priority: "primary",
     icon: BarChart3,
     match: (pathname: string) => pathname.startsWith("/usage-stats"),
   },
@@ -226,6 +248,62 @@ function widthForControls(controlWidths: number[], gap: number) {
 
 function arraysEqual(left: readonly string[], right: readonly string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export function isPointerInWorkspaceThemeDockRevealZone({
+  clientX,
+  clientY,
+  margin = WORKSPACE_THEME_DOCK_REVEAL_MARGIN_PX,
+  rect,
+}: {
+  clientX: number;
+  clientY: number;
+  margin?: number;
+  rect: WorkspaceThemeDockRect | null;
+}): boolean {
+  if (!rect) {
+    return false;
+  }
+  return (
+    clientX >= rect.left - margin &&
+    clientX <= rect.right + margin &&
+    clientY >= rect.top - margin &&
+    clientY <= rect.bottom + margin
+  );
+}
+
+function isExternalInteractiveElement(element: Element, root: HTMLElement): boolean {
+  if (root.contains(element)) {
+    return false;
+  }
+  const interactiveElement = element.closest(
+    "button,a,input,textarea,select,[role='button'],[role='link'],[tabindex]:not([tabindex='-1'])",
+  );
+  return interactiveElement instanceof HTMLElement && !root.contains(interactiveElement);
+}
+
+function childrenVisualWidth(element: HTMLElement): number {
+  const childRects = Array.from(element.children)
+    .map((child) => child.getBoundingClientRect())
+    .filter((rect) => rect.width > 0);
+
+  if (childRects.length === 0) {
+    return element.scrollWidth;
+  }
+
+  const left = Math.min(...childRects.map((rect) => rect.left));
+  const right = Math.max(...childRects.map((rect) => rect.right));
+  return Math.max(0, right - left);
+}
+
+export function getDesktopNavAvailableWidth({
+  navAreaWidth,
+  rightSlotWidth,
+  rightControlsWidth,
+  horizontalChrome = DESKTOP_NAV_HORIZONTAL_CHROME_PX,
+}: DesktopNavAvailableWidthInput): number {
+  const rightControlsOverflowWidth = Math.max(0, safeWidth(rightControlsWidth) - safeWidth(rightSlotWidth));
+  return Math.max(0, safeWidth(navAreaWidth) - safeWidth(horizontalChrome) - rightControlsOverflowWidth);
 }
 
 export function getDesktopNavLayout({
@@ -295,6 +373,56 @@ export function getDesktopNavLayout({
   };
 }
 
+export function getWorkspaceNavLayout({
+  items,
+  availableWidth,
+  fixedControlWidths,
+  moreButtonWidth,
+  gap = 10,
+}: {
+  items: WorkspaceNavLayoutInput[];
+  availableWidth: number;
+  fixedControlWidths: number[];
+  moreButtonWidth: number;
+  gap?: number;
+}): DesktopNavLayout {
+  const itemByKey = new Map(items.map((item) => [item.key, item]));
+  const overflowKeys = new Set(items.filter((item) => item.priority === "secondary").map((item) => item.key));
+  let visibleKeys = items.filter((item) => item.priority !== "secondary").map((item) => item.key);
+  const usableWidth = safeWidth(availableWidth);
+
+  if (items.length === 0) {
+    return { visibleKeys: [], overflowKeys: [] };
+  }
+  if (usableWidth <= 0) {
+    return { visibleKeys: [], overflowKeys: items.map((item) => item.key) };
+  }
+
+  const getVisibleWidth = () => {
+    const visibleWidths = visibleKeys.map((key) => itemByKey.get(key)?.width ?? 0);
+    const controls = [
+      ...fixedControlWidths,
+      ...visibleWidths,
+      ...(overflowKeys.size > 0 ? [moreButtonWidth] : []),
+    ].filter((width) => safeWidth(width) > 0);
+    return widthForControls(controls, Math.max(0, gap));
+  };
+
+  while (visibleKeys.length > 0 && getVisibleWidth() > usableWidth) {
+    const nextOverflowKey = visibleKeys.at(-1);
+    if (!nextOverflowKey) {
+      break;
+    }
+    overflowKeys.add(nextOverflowKey);
+    visibleKeys = visibleKeys.slice(0, -1);
+  }
+
+  return {
+    visibleKeys,
+    overflowKeys: items.map((item) => item.key).filter((key) => overflowKeys.has(key)),
+  };
+}
+
 const themeIcons: Record<ThemePreference, typeof Sun> = {
   light: Sun,
   dark: Moon,
@@ -342,6 +470,63 @@ const localeMarkers: Record<Locale, string> = {
   "en-US": "en",
   "ja-JP": "ja",
 };
+
+const workspaceLocaleMarkers: Record<Locale, string> = {
+  "zh-CN": "简",
+  "en-US": "EN",
+  "ja-JP": "日",
+};
+
+const workspaceMoreOrder: TranslationKey[] = [
+  "nav.usageStats",
+  "nav.rbac",
+  "nav.help",
+  "nav.templates",
+  "nav.globalTemplates",
+];
+
+const WORKSPACE_HOME_PATH = "/inspirations";
+
+const workspaceAnchorByLabelKey = new Map<TranslationKey, string>([
+  ["nav.resourceLibrary", "resource-library"],
+  ["nav.inspirations", "workspace"],
+  ["nav.imageChat", "chat"],
+  ["nav.gallery", "gallery"],
+  ["nav.status", "status"],
+  ["nav.usageStats", "usage-stats"],
+]);
+
+function workspaceActionLabel(locale: Locale): string {
+  if (locale === "en-US") {
+    return "Actions";
+  }
+  if (locale === "ja-JP") {
+    return "操作";
+  }
+  return "操作";
+}
+
+function workspaceOrderedItems(items: TopNavItem[]): TopNavItem[] {
+  const order = new Map(workspaceMoreOrder.map((labelKey, index) => [labelKey, index]));
+  return [...items].sort((left, right) => {
+    const leftIndex = order.get(left.labelKey) ?? Number.MAX_SAFE_INTEGER;
+    const rightIndex = order.get(right.labelKey) ?? Number.MAX_SAFE_INTEGER;
+    return leftIndex - rightIndex;
+  });
+}
+
+function workspaceNavTarget(item: TopNavItem): string {
+  const anchor = workspaceAnchorByLabelKey.get(item.labelKey);
+  return anchor ? `${WORKSPACE_HOME_PATH}#${anchor}` : item.to;
+}
+
+function isWorkspaceNavItemActive(item: TopNavItem, pathname: string, hash: string): boolean {
+  const anchor = workspaceAnchorByLabelKey.get(item.labelKey);
+  if (anchor && pathname === WORKSPACE_HOME_PATH) {
+    return hash ? hash === `#${anchor}` : item.labelKey === "nav.inspirations";
+  }
+  return item.match(pathname);
+}
 
 function navItemClassName(active: boolean) {
   return [
@@ -466,19 +651,6 @@ function mobileBottomNavClassName(open: boolean) {
   ].join(" ");
 }
 
-function mobileOperationBallClassName(open: boolean) {
-  return [
-    "pf-shell-operation-ball fixed bottom-[calc(env(safe-area-inset-bottom)+1rem)] right-4 z-50 inline-flex h-14 w-14 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-900 shadow-2xl shadow-slate-950/20 transition-[transform,background-color,border-color] duration-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-[#111827] dark:text-slate-100 dark:shadow-black/45 dark:focus-visible:ring-violet-400 md:hidden",
-    open
-      ? "scale-95 border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/45 dark:bg-violet-500/18 dark:text-violet-100"
-      : "active:scale-95 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 dark:hover:border-slate-500 dark:hover:bg-slate-900",
-  ].join(" ");
-}
-
-function mobileOperationPanelClassName() {
-  return "pf-shell-operation-panel w-[calc(100vw-1.5rem)] max-w-[22rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#111827] dark:shadow-black/45";
-}
-
 function weatherTemperatureLabel(weather: CurrentWeather): string | null {
   return weather.temperature_celsius === null ? null : String(Math.round(weather.temperature_celsius));
 }
@@ -540,6 +712,36 @@ function weatherTitle({
     return temperature
       ? t("weather.current", { condition, temperature })
       : t("weather.currentNoTemperature", { condition });
+  }
+  if (hasSavedLocation) {
+    return t("weather.loading");
+  }
+  return t(fallbackIsDay ? "weather.defaultDay" : "weather.defaultNight");
+}
+
+function workspaceWeatherSummary({
+  fallbackIsDay,
+  hasSavedLocation,
+  locationName,
+  t,
+  weather,
+}: {
+  fallbackIsDay: boolean;
+  hasSavedLocation: boolean;
+  locationName: string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+  weather: CurrentWeather | null;
+}): string {
+  if (weather) {
+    const condition = t(weatherConditionTranslationKey(weather.condition));
+    const temperature = weatherTemperatureLabel(weather);
+    if (locationName) {
+      return temperature ? `${locationName} ${temperature}°C / ${condition}` : `${locationName} / ${condition}`;
+    }
+    return temperature ? `${temperature}°C / ${condition}` : condition;
+  }
+  if (locationName) {
+    return `${locationName} / ${hasSavedLocation ? t("weather.loading") : t(fallbackIsDay ? "weather.defaultDay" : "weather.defaultNight")}`;
   }
   if (hasSavedLocation) {
     return t("weather.loading");
@@ -801,6 +1003,81 @@ function AccountMenu({ identity, onLogout }: { identity: AccountIdentity; onLogo
           <span className="truncate">{t("nav.logout")}</span>
         </button>
       </div>
+      </FloatingSurface>
+    </div>
+  );
+}
+
+function WorkspaceAccountMenu({
+  containerRef,
+  identity,
+  onLogout,
+}: {
+  containerRef?: Ref<HTMLDivElement>;
+  identity: AccountIdentity;
+  onLogout: () => void;
+}) {
+  const { t } = usePreferences();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const accountLabel = identity.username
+    ? `${identity.displayName} · ${identity.username}`
+    : identity.displayName;
+
+  return (
+    <div
+      ref={containerRef}
+      className="pf-shell-profile-menu"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={`${t("nav.profile")}: ${accountLabel}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={accountLabel}
+        className="pf-shell-profile-button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <UserRound size={15} aria-hidden="true" />
+        <span className="pf-shell-profile-button-label">{identity.displayName}</span>
+      </button>
+      <FloatingSurface
+        open={open}
+        triggerRef={triggerRef}
+        preferredPlacement="bottom-end"
+        layer="modal"
+        matchTriggerWidth={false}
+        minWidth={230}
+        offset={12}
+        margin={12}
+        onOpenChange={setOpen}
+        className="pf-shell-profile-panel"
+      >
+        <div role="menu" aria-label={t("nav.profile")}>
+          <div className="pf-shell-profile-summary" role="presentation">
+            <span className="pf-shell-profile-label">{t("nav.currentAccount")}</span>
+            <strong>{identity.displayName}</strong>
+            {identity.username ? <small>{identity.username}</small> : null}
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            className="pf-shell-profile-logout"
+            onClick={() => {
+              setOpen(false);
+              onLogout();
+            }}
+          >
+            <LogOut size={14} aria-hidden="true" />
+            <span>{t("nav.logout")}</span>
+          </button>
+        </div>
       </FloatingSurface>
     </div>
   );
@@ -1135,7 +1412,7 @@ function WeatherControl() {
 
 export function GlobalBrandMark({ to }: { to: string }) {
   return (
-    <div className="fixed left-4 top-3 z-[70] flex max-w-[calc(100vw-2rem)] items-center gap-2 text-sm sm:left-6 sm:max-w-[calc(100vw-3rem)] lg:left-8 lg:max-w-[calc(100vw-4rem)]">
+    <div className="pf-global-brand fixed left-4 top-3 z-[70] flex max-w-[calc(100vw-2rem)] items-center gap-2 text-sm sm:left-6 sm:max-w-[calc(100vw-3rem)] lg:left-8 lg:max-w-[calc(100vw-4rem)]">
       <WeatherControl />
       <Link
         to={to}
@@ -1149,21 +1426,37 @@ export function GlobalBrandMark({ to }: { to: string }) {
 }
 
 export function TopNav({ onLogout }: TopNavProps) {
-  const { activeScheme, setActiveScheme } = useUiLayoutScheme();
+  const { activeScheme, saveDefaultScheme: saveUserLayoutScheme } = useUiLayoutScheme();
   const desktopNavAreaRef = useRef<HTMLDivElement | null>(null);
   const desktopMeasureRowRef = useRef<HTMLDivElement | null>(null);
   const desktopMeasureItemRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const desktopMoreMeasureRef = useRef<HTMLSpanElement | null>(null);
   const desktopMoreButtonRef = useRef<HTMLButtonElement | null>(null);
   const desktopMoreCloseTimerRef = useRef<number | null>(null);
+  const desktopMorePinnedRef = useRef(false);
+  const desktopRightControlsRef = useRef<HTMLDivElement | null>(null);
+  const workspaceNavRef = useRef<HTMLElement | null>(null);
+  const workspaceMeasureRowRef = useRef<HTMLDivElement | null>(null);
+  const workspaceMeasureItemRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const workspaceMoreMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const workspaceBrandRef = useRef<HTMLDivElement | null>(null);
+  const workspaceRuntimeRef = useRef<HTMLDivElement | null>(null);
+  const workspaceLocaleRef = useRef<HTMLDivElement | null>(null);
+  const workspaceProfileRef = useRef<HTMLDivElement | null>(null);
   const mobileMoreButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileMorePanelRef = useRef<HTMLDivElement | null>(null);
   const curtainRef = useRef<HTMLDivElement | null>(null);
   const curtainAutoHideTimerRef = useRef<number | null>(null);
+  const workspaceThemeDockRef = useRef<HTMLDivElement | null>(null);
+  const workspaceThemeDockRectRef = useRef<WorkspaceThemeDockRect | null>(null);
+  const workspaceThemeDockAutoHideTimerRef = useRef<number | null>(null);
   const [desktopOverflowKeys, setDesktopOverflowKeys] = useState<string[]>([]);
+  const [workspaceOverflowKeys, setWorkspaceOverflowKeys] = useState<string[]>([]);
   const [desktopMoreOpen, setDesktopMoreOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [curtainOpen, setCurtainOpen] = useState(true);
+  const [workspaceThemeDockOpen, setWorkspaceThemeDockOpen] = useState(true);
+  const [workspaceThemeDockPassThrough, setWorkspaceThemeDockPassThrough] = useState(false);
   const location = useLocation();
   const {
     locale,
@@ -1174,6 +1467,7 @@ export function TopNav({ onLogout }: TopNavProps) {
     workspaceAppearance,
     setWorkspaceAppearance,
   } = usePreferences();
+  const weatherState = useCurrentWeather();
   const session = useSessionState();
   const sessionActions = useSessionActions();
   const logoutAction = onLogout ?? sessionActions.logout;
@@ -1218,6 +1512,14 @@ export function TopNav({ onLogout }: TopNavProps) {
   }));
   const primaryNavItems = visibleNavItems.filter((item) => item.priority === "primary");
   const secondaryNavItems = visibleNavItems.filter((item) => item.priority === "secondary");
+  const workspaceHomeAvailable = visibleNavItems.some((item) => item.labelKey === "nav.inspirations");
+  const workspaceOverflowKeySet = useMemo(() => new Set(workspaceOverflowKeys), [workspaceOverflowKeys]);
+  const workspaceVisiblePrimaryNavItems = primaryNavItems.filter((item) => !workspaceOverflowKeySet.has(item.to));
+  const workspaceCollapsedPrimaryNavItems = primaryNavItems.filter((item) => workspaceOverflowKeySet.has(item.to));
+  const workspaceMoreNavItems = [
+    ...workspaceCollapsedPrimaryNavItems.slice().reverse(),
+    ...workspaceOrderedItems(secondaryNavItems),
+  ];
   const secondaryActive = secondaryNavItems.some((item) => item.match(location.pathname));
   const hasOverflowNav = secondaryNavItems.length > 0 || Boolean(logoutAction);
   const mobileNavColumnCount = primaryNavItems.length + (hasOverflowNav ? 1 : 0);
@@ -1226,6 +1528,15 @@ export function TopNav({ onLogout }: TopNavProps) {
   const desktopOverflowNavItems = visibleNavItems.filter((item) => desktopOverflowKeySet.has(item.to));
   const desktopOverflowActive = desktopOverflowNavItems.some((item) => item.match(location.pathname));
   const account = accountIdentity(session?.user, t("nav.account"));
+  const workspaceWeatherLocationName =
+    weatherLocationDisplayName(weatherState.resolvedLocation) || weatherState.savedLocationQuery;
+  const workspaceBrandWeatherSummary = workspaceWeatherSummary({
+    fallbackIsDay: weatherState.fallbackIsDay,
+    hasSavedLocation: weatherState.hasSavedLocation,
+    locationName: workspaceWeatherLocationName,
+    t,
+    weather: weatherState.weather,
+  });
   const currentWorkspaceAppearanceLabel = t(
     WORKSPACE_APPEARANCE_METADATA.find((appearance) => appearance.id === workspaceAppearance)?.labelKey
       ?? "workspaceAppearance.mist.label",
@@ -1245,7 +1556,7 @@ export function TopNav({ onLogout }: TopNavProps) {
   }
 
   function handleLayoutSchemeChange(value: UiLayoutScheme) {
-    setActiveScheme(value);
+    saveUserLayoutScheme(value);
     if (value === "workspace") {
       setThemePreference(workspaceAppearanceResolvedTheme(workspaceAppearance));
     }
@@ -1273,6 +1584,28 @@ export function TopNav({ onLogout }: TopNavProps) {
     scheduleCurtainAutoHide();
   }, [scheduleCurtainAutoHide]);
 
+  const clearWorkspaceThemeDockAutoHideTimer = useCallback(() => {
+    if (workspaceThemeDockAutoHideTimerRef.current !== null) {
+      window.clearTimeout(workspaceThemeDockAutoHideTimerRef.current);
+      workspaceThemeDockAutoHideTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleWorkspaceThemeDockAutoHide = useCallback(() => {
+    clearWorkspaceThemeDockAutoHideTimer();
+    workspaceThemeDockAutoHideTimerRef.current = window.setTimeout(() => {
+      setWorkspaceThemeDockOpen(false);
+      setWorkspaceThemeDockPassThrough(false);
+      workspaceThemeDockAutoHideTimerRef.current = null;
+    }, NAV_AUTO_HIDE_DELAY_MS);
+  }, [clearWorkspaceThemeDockAutoHideTimer]);
+
+  const keepWorkspaceThemeDockOpen = useCallback(() => {
+    clearWorkspaceThemeDockAutoHideTimer();
+    setWorkspaceThemeDockOpen(true);
+    setWorkspaceThemeDockPassThrough(false);
+  }, [clearWorkspaceThemeDockAutoHideTimer]);
+
   const clearDesktopMoreCloseTimer = useCallback(() => {
     if (desktopMoreCloseTimerRef.current !== null) {
       window.clearTimeout(desktopMoreCloseTimerRef.current);
@@ -1281,6 +1614,9 @@ export function TopNav({ onLogout }: TopNavProps) {
   }, []);
 
   const scheduleDesktopMoreClose = useCallback(() => {
+    if (desktopMorePinnedRef.current) {
+      return;
+    }
     clearDesktopMoreCloseTimer();
     desktopMoreCloseTimerRef.current = window.setTimeout(() => {
       setDesktopMoreOpen(false);
@@ -1302,6 +1638,11 @@ export function TopNav({ onLogout }: TopNavProps) {
       width: desktopMeasureItemRefs.current[item.to]?.getBoundingClientRect().width ?? 0,
     }));
     const moreButtonWidth = moreMeasure.getBoundingClientRect().width;
+    const rightControls = desktopRightControlsRef.current;
+    const rightSlotWidth = rightControls?.getBoundingClientRect().width ?? 0;
+    const rightControlsWidth = rightControls
+      ? Math.max(rightControls.scrollWidth, childrenVisualWidth(rightControls))
+      : rightSlotWidth;
 
     if (layoutItems.some((item) => item.width <= 0) || moreButtonWidth <= 0) {
       setDesktopOverflowKeys((current) => (current.length === 0 ? current : []));
@@ -1310,29 +1651,79 @@ export function TopNav({ onLogout }: TopNavProps) {
 
     const layout = getDesktopNavLayout({
       items: layoutItems,
-      availableWidth: navArea.clientWidth - DESKTOP_NAV_HORIZONTAL_CHROME_PX,
+      availableWidth: getDesktopNavAvailableWidth({
+        navAreaWidth: navArea.clientWidth,
+        rightSlotWidth,
+        rightControlsWidth,
+      }),
       moreButtonWidth,
     });
     setDesktopOverflowKeys((current) => (arraysEqual(current, layout.overflowKeys) ? current : layout.overflowKeys));
   }, [location.pathname, visibleNavItems]);
 
+  const updateWorkspaceNavLayout = useCallback(() => {
+    const nav = workspaceNavRef.current;
+    const moreMeasure = workspaceMoreMeasureRef.current;
+    if (shellScheme !== "workspace" || !nav || !moreMeasure || typeof window === "undefined") {
+      return;
+    }
+    if (window.matchMedia("(max-width: 980px)").matches || window.getComputedStyle(nav).display === "none") {
+      setWorkspaceOverflowKeys((current) => (current.length === 0 ? current : []));
+      return;
+    }
+
+    const navStyle = window.getComputedStyle(nav);
+    const horizontalPadding = (Number.parseFloat(navStyle.paddingLeft) || 0) + (Number.parseFloat(navStyle.paddingRight) || 0);
+    const maxNavWidth = Math.max(0, Math.min(window.innerWidth - 32, nav.parentElement?.clientWidth ?? window.innerWidth));
+    const moreButtonWidth = moreMeasure.getBoundingClientRect().width;
+    const fixedControlWidths = [
+      workspaceBrandRef.current?.getBoundingClientRect().width ?? 0,
+      workspaceRuntimeRef.current?.getBoundingClientRect().width ?? 0,
+      workspaceLocaleRef.current?.getBoundingClientRect().width ?? 0,
+      workspaceProfileRef.current?.getBoundingClientRect().width ?? 0,
+    ];
+
+    const layoutItems = visibleNavItems.map((item) => ({
+      key: item.to,
+      priority: item.priority,
+      width: workspaceMeasureItemRefs.current[item.to]?.getBoundingClientRect().width ?? 0,
+    }));
+    if (layoutItems.some((item) => item.width <= 0) || moreButtonWidth <= 0 || fixedControlWidths.slice(0, 3).some((width) => width <= 0)) {
+      return;
+    }
+
+    const layout = getWorkspaceNavLayout({
+      items: layoutItems,
+      availableWidth: Math.max(0, maxNavWidth - horizontalPadding),
+      fixedControlWidths,
+      moreButtonWidth,
+    });
+    setWorkspaceOverflowKeys((current) => (arraysEqual(current, layout.overflowKeys) ? current : layout.overflowKeys));
+  }, [shellScheme, visibleNavItems]);
+
   useLayoutEffect(() => {
     updateDesktopNavLayout();
-  }, [locale, updateDesktopNavLayout]);
+    updateWorkspaceNavLayout();
+  }, [locale, updateDesktopNavLayout, updateWorkspaceNavLayout, workspaceBrandWeatherSummary]);
 
   useEffect(
     () => () => {
       clearDesktopMoreCloseTimer();
       clearCurtainAutoHideTimer();
+      clearWorkspaceThemeDockAutoHideTimer();
     },
-    [clearCurtainAutoHideTimer, clearDesktopMoreCloseTimer],
+    [clearCurtainAutoHideTimer, clearDesktopMoreCloseTimer, clearWorkspaceThemeDockAutoHideTimer],
   );
 
   useEffect(() => {
     setDesktopMoreOpen(false);
+    desktopMorePinnedRef.current = false;
     setMobileMoreOpen(false);
     scheduleCurtainAutoHide();
-  }, [location.pathname, scheduleCurtainAutoHide]);
+    setWorkspaceThemeDockOpen(true);
+    setWorkspaceThemeDockPassThrough(false);
+    scheduleWorkspaceThemeDockAutoHide();
+  }, [location.pathname, scheduleCurtainAutoHide, scheduleWorkspaceThemeDockAutoHide]);
 
   useEffect(() => {
     const handlePageActivity = () => {
@@ -1354,6 +1745,84 @@ export function TopNav({ onLogout }: TopNavProps) {
   }, [curtainOpen, scheduleCurtainAutoHide]);
 
   useEffect(() => {
+    if (shellScheme !== "workspace" || typeof window === "undefined") {
+      clearWorkspaceThemeDockAutoHideTimer();
+      return;
+    }
+
+    const updateDockRect = () => {
+      const dock = workspaceThemeDockRef.current;
+      if (!dock) {
+        return;
+      }
+      const rect = dock.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return;
+      }
+      workspaceThemeDockRectRef.current = {
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+      };
+    };
+
+    updateDockRect();
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const dock = workspaceThemeDockRef.current;
+      if (!dock) {
+        return;
+      }
+
+      if (workspaceThemeDockOpen) {
+        updateDockRect();
+      }
+
+      const inRevealZone = isPointerInWorkspaceThemeDockRevealZone({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        rect: workspaceThemeDockRectRef.current,
+      });
+
+      if (!workspaceThemeDockOpen) {
+        if (inRevealZone) {
+          clearWorkspaceThemeDockAutoHideTimer();
+          setWorkspaceThemeDockOpen(true);
+          setWorkspaceThemeDockPassThrough(false);
+        }
+        return;
+      }
+
+      if (!inRevealZone) {
+        setWorkspaceThemeDockPassThrough(false);
+        if (workspaceThemeDockAutoHideTimerRef.current === null) {
+          scheduleWorkspaceThemeDockAutoHide();
+        }
+        return;
+      }
+
+      clearWorkspaceThemeDockAutoHideTimer();
+      const shouldPassThrough = document
+        .elementsFromPoint(event.clientX, event.clientY)
+        .some((element) => isExternalInteractiveElement(element, dock));
+      setWorkspaceThemeDockPassThrough(shouldPassThrough);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("resize", updateDockRect);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("resize", updateDockRect);
+    };
+  }, [
+    clearWorkspaceThemeDockAutoHideTimer,
+    scheduleWorkspaceThemeDockAutoHide,
+    shellScheme,
+    workspaceThemeDockOpen,
+  ]);
+
+  useEffect(() => {
     const navArea = desktopNavAreaRef.current;
     if (!navArea || typeof ResizeObserver === "undefined") {
       return;
@@ -1364,18 +1833,70 @@ export function TopNav({ onLogout }: TopNavProps) {
     if (desktopMeasureRowRef.current) {
       observer.observe(desktopMeasureRowRef.current);
     }
+    if (desktopRightControlsRef.current) {
+      observer.observe(desktopRightControlsRef.current);
+    }
     updateDesktopNavLayout();
     return () => observer.disconnect();
   }, [updateDesktopNavLayout]);
 
   useEffect(() => {
+    if (shellScheme !== "workspace" || typeof window === "undefined") {
+      return;
+    }
+
+    const observedElements = [
+      workspaceNavRef.current,
+      workspaceMeasureRowRef.current,
+      workspaceBrandRef.current,
+      workspaceRuntimeRef.current,
+      workspaceLocaleRef.current,
+      workspaceProfileRef.current,
+    ].filter((element): element is HTMLElement => Boolean(element));
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateWorkspaceNavLayout);
+    observedElements.forEach((element) => observer?.observe(element));
+    window.addEventListener("resize", updateWorkspaceNavLayout);
+    updateWorkspaceNavLayout();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateWorkspaceNavLayout);
+    };
+  }, [shellScheme, updateWorkspaceNavLayout]);
+
+  useEffect(() => {
     if (desktopOverflowNavItems.length === 0) {
+      desktopMorePinnedRef.current = false;
       setDesktopMoreOpen(false);
     }
   }, [desktopOverflowNavItems.length]);
 
   useEffect(() => {
-    if (!mobileMoreOpen || shellScheme === "workspace") {
+    if (shellScheme === "workspace" && workspaceMoreNavItems.length === 0) {
+      setDesktopMoreOpen(false);
+    }
+  }, [shellScheme, workspaceMoreNavItems.length]);
+
+  useEffect(() => {
+    if (!desktopMoreOpen || typeof window === "undefined") {
+      return;
+    }
+
+    const closeDesktopMoreInCompactMode = () => {
+      const compactQuery = shellScheme === "workspace" ? "(max-width: 980px)" : "(max-width: 767.98px)";
+      if (window.matchMedia(compactQuery).matches) {
+        clearDesktopMoreCloseTimer();
+        desktopMorePinnedRef.current = false;
+        setDesktopMoreOpen(false);
+      }
+    };
+
+    closeDesktopMoreInCompactMode();
+    window.addEventListener("resize", closeDesktopMoreInCompactMode);
+    return () => window.removeEventListener("resize", closeDesktopMoreInCompactMode);
+  }, [clearDesktopMoreCloseTimer, desktopMoreOpen, shellScheme]);
+
+  useEffect(() => {
+    if (!mobileMoreOpen) {
       return;
     }
 
@@ -1401,7 +1922,7 @@ export function TopNav({ onLogout }: TopNavProps) {
       document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
       document.removeEventListener("keydown", closeOnEscape, true);
     };
-  }, [mobileMoreOpen, shellScheme]);
+  }, [mobileMoreOpen]);
 
   const renderPreferenceControls = () => (
     <>
@@ -1489,6 +2010,385 @@ export function TopNav({ onLogout }: TopNavProps) {
       );
     });
 
+  const renderWorkspaceNavItem = (item: TopNavItem) => {
+    const active = isWorkspaceNavItemActive(item, location.pathname, location.hash);
+    const label = t(item.labelKey);
+    return (
+      <Link
+        key={item.to}
+        to={workspaceHomeAvailable ? workspaceNavTarget(item) : item.to}
+        aria-current={active ? "page" : undefined}
+        className="pf-shell-concept-link"
+      >
+        {label}
+      </Link>
+    );
+  };
+
+  const renderWorkspaceNavMeasurementItem = (item: TopNavItem) => {
+    const label = t(item.labelKey);
+    return (
+      <span
+        key={item.to}
+        ref={(node) => {
+          workspaceMeasureItemRefs.current[item.to] = node;
+        }}
+        className="pf-shell-concept-link"
+      >
+        {label}
+      </span>
+    );
+  };
+
+  const renderWorkspaceMoreItem = (item: TopNavItem) => {
+    const active = isWorkspaceNavItemActive(item, location.pathname, location.hash);
+    const label = t(item.labelKey);
+    return (
+      <Link
+        key={item.to}
+        to={workspaceHomeAvailable ? workspaceNavTarget(item) : item.to}
+        role="menuitem"
+        aria-current={active ? "page" : undefined}
+        className="pf-shell-more-item"
+        onClick={() => {
+          clearDesktopMoreCloseTimer();
+          setDesktopMoreOpen(false);
+        }}
+      >
+        <span>{label}</span>
+        <ArrowUpRight size={14} aria-hidden="true" />
+      </Link>
+    );
+  };
+
+  const renderWorkspaceCompactLink = (item: TopNavItem, className: string) => {
+    const active = isWorkspaceNavItemActive(item, location.pathname, location.hash);
+    const label = t(item.labelKey);
+    return (
+      <Link
+        key={item.to}
+        to={workspaceHomeAvailable ? workspaceNavTarget(item) : item.to}
+        aria-current={active ? "page" : undefined}
+        className={className}
+        onClick={() => setMobileMoreOpen(false)}
+      >
+        {label}
+      </Link>
+    );
+  };
+
+  const renderWorkspaceThemeDock = () => {
+    const interactive = workspaceThemeDockOpen && !workspaceThemeDockPassThrough;
+    return (
+      <div
+        ref={workspaceThemeDockRef}
+        aria-hidden={!workspaceThemeDockOpen}
+        aria-label={t("nav.theme")}
+        className={[
+          "pf-shell-theme-dock",
+          workspaceThemeDockOpen ? "is-open" : "is-collapsed",
+          workspaceThemeDockPassThrough ? "is-pass-through" : "",
+        ].filter(Boolean).join(" ")}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            scheduleWorkspaceThemeDockAutoHide();
+          }
+        }}
+        onFocusCapture={keepWorkspaceThemeDockOpen}
+        onPointerEnter={keepWorkspaceThemeDockOpen}
+        onPointerLeave={scheduleWorkspaceThemeDockAutoHide}
+      >
+        {WORKSPACE_APPEARANCE_METADATA.map((appearance) => {
+          const active = appearance.id === workspaceAppearance;
+          return (
+            <button
+              key={appearance.id}
+              type="button"
+              aria-pressed={active}
+              className="pf-shell-theme-option"
+              disabled={!interactive}
+              style={{ "--pf-shell-theme-swatch": appearance.swatch } as CSSProperties}
+              tabIndex={interactive ? undefined : -1}
+              onClick={() => {
+                handleThemeControlChange(appearance.id);
+                scheduleWorkspaceThemeDockAutoHide();
+              }}
+            >
+              {t(appearance.labelKey)}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderWorkspaceBrandChip = (containerRef?: Ref<HTMLDivElement>) => (
+    <div ref={containerRef} className="pf-shell-brand-chip">
+      <WeatherControl />
+      <Link to={`${WORKSPACE_HOME_PATH}#top`} aria-label="Inspiration One">
+        <span>
+          Inspiration One
+          <small>{workspaceBrandWeatherSummary}</small>
+        </span>
+      </Link>
+    </div>
+  );
+
+  if (shellScheme === "workspace") {
+    return (
+      <>
+        <div
+          data-ui-layout-scheme="workspace"
+          className={`pf-shell-workspace-shell ${curtainOpen ? "is-open" : "is-collapsed"}`}
+          style={{ transitionTimingFunction: CURTAIN_EASING }}
+          onPointerDown={keepCurtainOpen}
+          onFocusCapture={keepCurtainOpen}
+          onKeyDownCapture={keepCurtainOpen}
+        >
+          <div className="pf-shell-compact-brand-mark">{renderWorkspaceBrandChip()}</div>
+          <nav
+            ref={workspaceNavRef}
+            aria-hidden={!curtainOpen}
+            className="pf-shell-concept-nav"
+            aria-label={t("nav.mobile")}
+            style={{ transitionTimingFunction: CURTAIN_EASING }}
+          >
+            {renderWorkspaceBrandChip(workspaceBrandRef)}
+
+            <div ref={workspaceRuntimeRef} className="pf-shell-runtime-switch" aria-label={t("nav.layoutScheme")}>
+              {layoutSchemeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={option.value === activeScheme}
+                  className="pf-shell-runtime-option"
+                  onClick={() => handleLayoutSchemeChange(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {workspaceVisiblePrimaryNavItems.map((item) => renderWorkspaceNavItem(item))}
+
+            {workspaceMoreNavItems.length ? (
+              <div
+                className="pf-shell-nav-more"
+                onPointerEnter={() => {
+                  clearDesktopMoreCloseTimer();
+                  keepCurtainOpen();
+                  setDesktopMoreOpen(true);
+                }}
+                onPointerLeave={scheduleDesktopMoreClose}
+                onBlur={(event) => {
+                  const nextTarget = event.relatedTarget;
+                  if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                    clearDesktopMoreCloseTimer();
+                    setDesktopMoreOpen(false);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    clearDesktopMoreCloseTimer();
+                    setDesktopMoreOpen(false);
+                  }
+                }}
+              >
+                <button
+                  ref={desktopMoreButtonRef}
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={desktopMoreOpen}
+                  className="pf-shell-concept-link pf-shell-nav-more-button"
+                  onClick={() => {
+                    clearDesktopMoreCloseTimer();
+                    keepCurtainOpen();
+                    setDesktopMoreOpen((current) => !current);
+                  }}
+                >
+                  {t("nav.more")}
+                </button>
+                <FloatingSurface
+                  open={desktopMoreOpen}
+                  triggerRef={desktopMoreButtonRef}
+                  preferredPlacement="bottom-end"
+                  layer="modal"
+                  matchTriggerWidth={false}
+                  minWidth={218}
+                  offset={12}
+                  margin={12}
+                  onOpenChange={(nextOpen) => {
+                    if (!nextOpen) {
+                      clearDesktopMoreCloseTimer();
+                    }
+                    setDesktopMoreOpen(nextOpen);
+                  }}
+                  className="pf-shell-more-panel"
+                >
+                  <div
+                    role="menu"
+                    aria-label={t("nav.more")}
+                    onPointerEnter={clearDesktopMoreCloseTimer}
+                    onPointerLeave={scheduleDesktopMoreClose}
+                  >
+                    {workspaceMoreNavItems.map((item) => renderWorkspaceMoreItem(item))}
+                  </div>
+                </FloatingSurface>
+              </div>
+            ) : null}
+
+            <div ref={workspaceLocaleRef} className="pf-shell-locale-switch" aria-label={t("nav.language")}>
+              {localeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={option.value === locale}
+                  className="pf-shell-locale-option"
+                  title={option.label}
+                  onClick={() => setLocale(option.value)}
+                >
+                  {workspaceLocaleMarkers[option.value]}
+                </button>
+              ))}
+            </div>
+
+            {logoutAction ? <WorkspaceAccountMenu containerRef={workspaceProfileRef} identity={account} onLogout={logoutAction} /> : null}
+            <div ref={workspaceMeasureRowRef} aria-hidden="true" className="pf-shell-workspace-measure-row">
+              {visibleNavItems.map((item) => renderWorkspaceNavMeasurementItem(item))}
+              <span ref={workspaceMoreMeasureRef} className="pf-shell-concept-link pf-shell-nav-more-button">
+                {t("nav.more")}
+              </span>
+            </div>
+          </nav>
+          <button
+            type="button"
+            aria-label={t("nav.more")}
+            aria-expanded={curtainOpen}
+            className="pf-shell-workspace-handle"
+            style={{ transitionTimingFunction: CURTAIN_EASING }}
+            onClick={keepCurtainOpen}
+          >
+            <ChevronDown size={17} aria-hidden="true" />
+          </button>
+        </div>
+
+        {renderWorkspaceThemeDock()}
+
+        <div className="pf-shell-compact-action-dock" aria-label={t("nav.mobile")}>
+          <button
+            ref={mobileMoreButtonRef}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={mobileMoreOpen}
+            className="pf-shell-action-ball"
+            onClick={() => {
+              clearDesktopMoreCloseTimer();
+              setDesktopMoreOpen(false);
+              setMobileMoreOpen((current) => !current);
+            }}
+          >
+            {workspaceActionLabel(locale)}
+          </button>
+
+          {mobileMoreOpen ? (
+            <div ref={mobileMorePanelRef} className="pf-shell-compact-action-panel" role="menu" aria-label={t("nav.mobile")}>
+              <div className="pf-shell-compact-quick-row" aria-label={t("nav.mobile")}>
+                {primaryNavItems
+                  .filter((item) => item.labelKey !== "nav.settings")
+                  .map((item, index) =>
+                    renderWorkspaceCompactLink(
+                      item,
+                      index < 3 ? "pf-shell-compact-quick primary" : "pf-shell-compact-quick",
+                    ),
+                  )}
+              </div>
+
+              <div className="pf-shell-compact-more-row" aria-label={t("nav.more")}>
+                {workspaceMoreNavItems.map((item) => renderWorkspaceCompactLink(item, "pf-shell-compact-secondary"))}
+                {primaryNavItems
+                  .filter((item) => item.labelKey === "nav.settings")
+                  .map((item) => renderWorkspaceCompactLink(item, "pf-shell-compact-secondary"))}
+              </div>
+
+              {logoutAction ? (
+                <div className="pf-shell-compact-profile-row" aria-label={account.displayName}>
+                  <div className="pf-shell-compact-profile-summary">
+                    <strong>{account.displayName}</strong>
+                    {account.username ? <small>{account.username}</small> : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="pf-shell-compact-profile-logout"
+                    onClick={() => {
+                      setMobileMoreOpen(false);
+                      logoutAction();
+                    }}
+                  >
+                    <LogOut size={14} aria-hidden="true" />
+                    {t("nav.logout")}
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="pf-shell-compact-system-row" aria-label={t("nav.layoutScheme")}>
+                <div className="pf-shell-compact-control-block">
+                  <span className="pf-shell-compact-control-label">{t("nav.language")}</span>
+                  <div className="pf-shell-compact-system-group" aria-label={t("nav.language")}>
+                    {localeOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={option.value === locale}
+                        className="pf-shell-compact-system pf-shell-compact-layout-option"
+                        onClick={() => setLocale(option.value)}
+                      >
+                        {workspaceLocaleMarkers[option.value]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pf-shell-compact-control-block">
+                  <span className="pf-shell-compact-control-label">{t("nav.layoutScheme")}</span>
+                  <div className="pf-shell-compact-layout-switch" aria-label={t("nav.layoutScheme")}>
+                    {layoutSchemeOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={option.value === activeScheme}
+                        className="pf-shell-compact-system pf-shell-compact-layout-option"
+                        onClick={() => handleLayoutSchemeChange(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pf-shell-compact-control-block">
+                  <span className="pf-shell-compact-control-label">{t("nav.theme")}</span>
+                  <div className="pf-shell-compact-system-group" aria-label={t("nav.theme")}>
+                    {workspaceAppearanceOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={option.value === workspaceAppearance}
+                        className="pf-shell-compact-system pf-shell-compact-layout-option"
+                        onClick={() => handleThemeControlChange(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <div
@@ -1527,12 +2427,14 @@ export function TopNav({ onLogout }: TopNavProps) {
                         const nextTarget = event.relatedTarget;
                         if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
                           clearDesktopMoreCloseTimer();
+                          desktopMorePinnedRef.current = false;
                           setDesktopMoreOpen(false);
                         }
                       }}
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           clearDesktopMoreCloseTimer();
+                          desktopMorePinnedRef.current = false;
                           setDesktopMoreOpen(false);
                         }
                       }}
@@ -1547,7 +2449,14 @@ export function TopNav({ onLogout }: TopNavProps) {
                         onClick={() => {
                           clearDesktopMoreCloseTimer();
                           keepCurtainOpen();
-                          setDesktopMoreOpen(true);
+                          setDesktopMoreOpen((current) => {
+                            if (current && desktopMorePinnedRef.current) {
+                              desktopMorePinnedRef.current = false;
+                              return false;
+                            }
+                            desktopMorePinnedRef.current = true;
+                            return true;
+                          });
                         }}
                       >
                         <MoreHorizontal size={16} aria-hidden="true" />
@@ -1561,6 +2470,7 @@ export function TopNav({ onLogout }: TopNavProps) {
                         onOpenChange={(nextOpen) => {
                           if (!nextOpen) {
                             clearDesktopMoreCloseTimer();
+                            desktopMorePinnedRef.current = false;
                           }
                           setDesktopMoreOpen(nextOpen);
                         }}
@@ -1585,6 +2495,7 @@ export function TopNav({ onLogout }: TopNavProps) {
                               className={menuItemClassName(active)}
                               onClick={() => {
                                 clearDesktopMoreCloseTimer();
+                                desktopMorePinnedRef.current = false;
                                 setDesktopMoreOpen(false);
                               }}
                             >
@@ -1611,7 +2522,10 @@ export function TopNav({ onLogout }: TopNavProps) {
               </div>
             </div>
 
-            <div className="hidden w-52 shrink-0 items-center justify-end gap-1.5 md:flex lg:w-56">
+            <div
+              ref={desktopRightControlsRef}
+              className="hidden w-52 shrink-0 items-center justify-end gap-1.5 md:flex lg:w-56"
+            >
               {renderPreferenceControls()}
               {logoutAction ? <AccountMenu identity={account} onLogout={logoutAction} /> : null}
             </div>
@@ -1676,117 +2590,49 @@ export function TopNav({ onLogout }: TopNavProps) {
         </div>
       ) : null}
 
-      {shellScheme === "workspace" ? (
-        <>
-          <FloatingSurface
-            open={mobileMoreOpen}
-            triggerRef={mobileMoreButtonRef}
-            preferredPlacement="top-end"
-            layer="modal"
-            matchTriggerWidth={false}
-            minWidth={280}
-            margin={12}
-            offset={10}
-            onOpenChange={setMobileMoreOpen}
-            className={mobileOperationPanelClassName()}
-          >
-            <div role="menu" aria-label={t("nav.mobile")} className="grid gap-1">
-              {logoutAction ? (
-                <div className="pf-shell-account-summary mb-1 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900">
-                  <div className="pf-shell-value truncate text-sm font-semibold text-slate-950 dark:text-white">
-                    {account.displayName}
-                  </div>
-                  {account.username ? (
-                    <div className="pf-shell-muted mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{account.username}</div>
-                  ) : null}
-                </div>
-              ) : null}
-              {renderMobileMenuItems(mobileMoreMenuItemClassName)}
-              <MobilePreferenceGroup label={t("nav.language")} options={localeOptions} value={locale} onChange={setLocale} />
-              <MobilePreferenceGroup
-                label={t("nav.layoutScheme")}
-                options={layoutSchemeOptions}
-                value={activeScheme}
-                onChange={handleLayoutSchemeChange}
-              />
-              <MobilePreferenceGroup
-                label={t("nav.theme")}
-                options={activeThemeOptions}
-                value={activeThemeValue}
-                onChange={handleThemeControlChange}
-              />
-              {logoutAction ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileMoreOpen(false);
-                    logoutAction();
-                  }}
-                  className={mobileMoreMenuItemClassName(false)}
-                >
-                  <LogOut size={17} aria-hidden="true" />
-                  <span>{t("nav.logout")}</span>
-                </button>
-              ) : null}
-            </div>
-          </FloatingSurface>
-          <button
-            ref={mobileMoreButtonRef}
-            type="button"
-            aria-label={t("nav.more")}
-            aria-haspopup="menu"
-            aria-expanded={mobileMoreOpen}
-            className={mobileOperationBallClassName(mobileMoreOpen)}
-            onClick={() => setMobileMoreOpen((current) => !current)}
-          >
-            <MoreHorizontal size={23} aria-hidden="true" />
-          </button>
-        </>
-      ) : (
+      <div
+        aria-label={t("nav.mobile")}
+        data-ui-layout-scheme={shellScheme}
+        className={mobileBottomNavClassName(curtainOpen)}
+        style={{ transitionTimingFunction: CURTAIN_EASING }}
+        onPointerDown={keepCurtainOpen}
+      >
         <div
-          aria-label={t("nav.mobile")}
-          data-ui-layout-scheme={shellScheme}
-          className={mobileBottomNavClassName(curtainOpen)}
-          style={{ transitionTimingFunction: CURTAIN_EASING }}
-          onPointerDown={keepCurtainOpen}
+          className="mx-auto grid w-full max-w-lg gap-1"
+          style={{ gridTemplateColumns: `repeat(${Math.max(1, mobileNavColumnCount)}, minmax(0, 1fr))` }}
         >
-          <div
-            className="mx-auto grid w-full max-w-lg gap-1"
-            style={{ gridTemplateColumns: `repeat(${Math.max(1, mobileNavColumnCount)}, minmax(0, 1fr))` }}
-          >
-            {primaryNavItems.map((item) => {
-              const Icon = item.icon;
-              const active = item.match(location.pathname);
-              const label = t(item.labelKey);
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  aria-current={active ? "page" : undefined}
-                  aria-label={label}
-                  className={mobileNavItemClassName(active)}
-                >
-                  <Icon size={18} aria-hidden="true" />
-                  <span className="mt-0.5 truncate">{label}</span>
-                </Link>
-              );
-            })}
-            {hasOverflowNav ? (
-              <button
-                ref={mobileMoreButtonRef}
-                type="button"
-                onClick={() => setMobileMoreOpen((current) => !current)}
-                aria-expanded={mobileMoreOpen}
-                aria-label={t("nav.more")}
-                className={mobileNavItemClassName(secondaryActive || mobileMoreOpen)}
+          {primaryNavItems.map((item) => {
+            const Icon = item.icon;
+            const active = item.match(location.pathname);
+            const label = t(item.labelKey);
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                aria-current={active ? "page" : undefined}
+                aria-label={label}
+                className={mobileNavItemClassName(active)}
               >
-                <MoreHorizontal size={18} aria-hidden="true" />
-                <span className="mt-0.5 truncate">{t("nav.more")}</span>
-              </button>
-            ) : null}
-          </div>
+                <Icon size={18} aria-hidden="true" />
+                <span className="mt-0.5 truncate">{label}</span>
+              </Link>
+            );
+          })}
+          {hasOverflowNav ? (
+            <button
+              ref={mobileMoreButtonRef}
+              type="button"
+              onClick={() => setMobileMoreOpen((current) => !current)}
+              aria-expanded={mobileMoreOpen}
+              aria-label={t("nav.more")}
+              className={mobileNavItemClassName(secondaryActive || mobileMoreOpen)}
+            >
+              <MoreHorizontal size={18} aria-hidden="true" />
+              <span className="mt-0.5 truncate">{t("nav.more")}</span>
+            </button>
+          ) : null}
         </div>
-      )}
+      </div>
     </>
   );
 }

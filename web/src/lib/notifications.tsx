@@ -240,6 +240,55 @@ function NotificationDrawer({
   );
 }
 
+function WorkspaceNotificationPopover({
+  notifications,
+  onDismiss,
+  onClear,
+}: {
+  notifications: AppNotification[];
+  onDismiss: (notificationId: string) => void;
+  onClear: () => void;
+}) {
+  const { t } = useI18n();
+  const visibleNotifications = notifications.slice(0, NOTIFICATION_COLLAPSE_THRESHOLD);
+
+  if (notifications.length === 0) {
+    return null;
+  }
+
+  return (
+    <aside className="pf-shell-workspace-notification-popover" aria-label={t("notification.drawer")}>
+      <div className="pf-shell-workspace-notification-core">
+        <div className="pf-shell-workspace-notification-head">
+          <div className="min-w-0">
+            <strong>{t("notification.centerTitle")}</strong>
+            <span>{t("notification.workspaceLayerDescription")}</span>
+          </div>
+          <button
+            type="button"
+            className="pf-shell-workspace-notification-count"
+            onClick={onClear}
+            disabled={notifications.length === 0}
+            aria-label={t("notification.clearAll")}
+          >
+            {notifications.length}
+          </button>
+        </div>
+        <div className="mt-2 space-y-2">
+          {visibleNotifications.map((notification) => (
+            <NotificationCard
+              key={notification.id}
+              notification={notification}
+              compact
+              onDismiss={onDismiss}
+            />
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
@@ -293,7 +342,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   return (
     <NotificationContext.Provider value={value}>
       {children}
-      <div className="fixed right-3 top-20 z-[70] w-[min(360px,calc(100vw-1.5rem))] sm:right-5" aria-live="polite" aria-relevant="additions text">
+      <div className="pf-shell-notification-classic-region fixed right-3 top-20 z-[70] w-[min(360px,calc(100vw-1.5rem))] sm:right-5" aria-live="polite" aria-relevant="additions text">
         {notifications.length > NOTIFICATION_COLLAPSE_THRESHOLD ? (
           <NotificationDrawer notifications={notifications} onDismiss={dismiss} onClear={clear} />
         ) : (
@@ -304,6 +353,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           </div>
         )}
       </div>
+      <WorkspaceNotificationPopover notifications={notifications} onDismiss={dismiss} onClear={clear} />
     </NotificationContext.Provider>
   );
 }

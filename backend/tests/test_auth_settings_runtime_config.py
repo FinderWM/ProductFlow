@@ -101,6 +101,30 @@ def test_user_ui_preferences_default_to_masking_and_persist(configured_env: Path
         session.close()
 
 
+def test_user_ui_preferences_initial_layout_uses_global_default(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    updated_config = client.patch("/api/settings", json={"values": {"ui_layout_scheme": "workspace"}})
+    assert updated_config.status_code == 200
+
+    initial_preferences = client.get("/api/settings/ui-preferences")
+    assert initial_preferences.status_code == 200
+    payload = initial_preferences.json()
+    assert payload["ui_layout_scheme"] == "workspace"
+
+    session = get_session_factory()()
+    try:
+        preferences = session.get(UserUiPreference, payload["user_id"])
+        assert preferences is not None
+        assert preferences.ui_layout_scheme == "workspace"
+    finally:
+        session.close()
+
+
 def test_user_ui_preferences_patch_updates_only_submitted_fields(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
@@ -341,6 +365,10 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert initial_items["generation_tail_splitter_max_items"]["category"] == "全局生成配置 / 工作流生成"
     assert initial_items["generation_tail_splitter_max_items"]["minimum"] == 1
     assert initial_items["generation_tail_splitter_max_items"]["maximum"] == 100
+    assert initial_items["image_session_max_base_images"]["value"] == 6
+    assert initial_items["image_session_max_base_images"]["category"] == "全局生成配置 / 文/图生图"
+    assert initial_items["image_session_max_base_images"]["minimum"] == 0
+    assert initial_items["image_session_max_base_images"]["maximum"] == 20
     assert initial_items["workflow_node_max_retry_count"]["value"] == 10
     assert initial_items["workflow_node_max_retry_count"]["category"] == "全局生成配置 / 工作流生成"
     assert initial_items["workflow_node_max_retry_count"]["minimum"] == 0
@@ -360,6 +388,16 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     )
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["minimum"] == 1
     assert initial_items["workflow_image_generation_provider_timeout_seconds"]["maximum"] == 24 * 60 * 60
+    assert initial_items["ui_layout_scheme"]["value"] == "classic"
+    assert initial_items["ui_layout_scheme"]["category"] == "界面与外观"
+    assert initial_items["ui_layout_scheme"]["input_type"] == "select"
+    assert initial_items["ui_layout_scheme"]["options"] == [
+        {"value": "classic", "label": "经典"},
+        {"value": "workspace", "label": "工作台"},
+    ]
+    assert initial_items["gallery_show_generation_resource_group"]["value"] is True
+    assert initial_items["gallery_show_generation_resource_group"]["category"] == "界面与外观"
+    assert initial_items["gallery_show_generation_resource_group"]["input_type"] == "boolean"
     assert "admin_access_required" not in initial_items
     assert initial_items["deletion_enabled"]["value"] is False
     assert initial_items["deletion_enabled"]["category"] == "安全与运维"
@@ -370,10 +408,13 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
             "values": {
                 "generation_max_concurrent_tasks": 2,
                 "generation_tail_splitter_max_items": 48,
+                "image_session_max_base_images": 7,
                 "workflow_node_max_retry_count": 12,
                 "workflow_node_retry_delay_ms": 5000,
                 "image_session_stale_running_after_minutes": 75,
                 "workflow_image_generation_provider_timeout_seconds": 120,
+                "ui_layout_scheme": "workspace",
+                "gallery_show_generation_resource_group": False,
                 "deletion_enabled": True,
             }
         },
@@ -381,19 +422,25 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert updated.status_code == 200
     assert get_runtime_settings().generation_max_concurrent_tasks == 2
     assert get_runtime_settings().generation_tail_splitter_max_items == 48
+    assert get_runtime_settings().image_session_max_base_images == 7
     assert get_runtime_settings().workflow_node_max_retry_count == 12
     assert get_runtime_settings().workflow_node_retry_delay_ms == 5000
     assert get_runtime_settings().image_session_stale_running_after_minutes == 75
     assert get_runtime_settings().workflow_image_generation_provider_timeout_seconds == 120
+    assert get_runtime_settings().ui_layout_scheme == "workspace"
+    assert get_runtime_settings().gallery_show_generation_resource_group is False
     assert get_runtime_settings().deletion_enabled is True
 
     session = get_session_factory()()
     try:
         assert session.get(AppSetting, "generation_tail_splitter_max_items").value == "48"
+        assert session.get(AppSetting, "image_session_max_base_images").value == "7"
         assert session.get(AppSetting, "workflow_node_max_retry_count").value == "12"
         assert session.get(AppSetting, "workflow_node_retry_delay_ms").value == "5000"
         assert session.get(AppSetting, "image_session_stale_running_after_minutes").value == "75"
         assert session.get(AppSetting, "workflow_image_generation_provider_timeout_seconds").value == "120"
+        assert session.get(AppSetting, "ui_layout_scheme").value == "workspace"
+        assert session.get(AppSetting, "gallery_show_generation_resource_group").value == "false"
     finally:
         session.close()
 
@@ -403,6 +450,13 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     )
     assert invalid_timeout.status_code == 400
     assert "不能小于 1" in invalid_timeout.json()["detail"]
+
+    invalid_layout = client.patch(
+        "/api/settings",
+        json={"values": {"ui_layout_scheme": "future"}},
+    )
+    assert invalid_layout.status_code == 400
+    assert "默认 UI 布局 必须是以下之一" in invalid_layout.json()["detail"]
 
     invalid_workflow_timeout = client.patch(
         "/api/settings",
@@ -432,6 +486,13 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert invalid_node_retry_delay.status_code == 400
     assert "不能小于 0" in invalid_node_retry_delay.json()["detail"]
 
+    invalid_base_limit = client.patch(
+        "/api/settings",
+        json={"values": {"image_session_max_base_images": 21}},
+    )
+    assert invalid_base_limit.status_code == 400
+    assert "不能大于 20" in invalid_base_limit.json()["detail"]
+
     legacy_provider_update = client.patch("/api/settings", json={"values": {"image_provider_kind": "openai_images"}})
     assert legacy_provider_update.status_code == 400
     assert "未知配置项: image_provider_kind" in legacy_provider_update.json()["detail"]
@@ -448,7 +509,13 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
 
     updated = client.patch(
         "/api/settings",
-        json={"values": {"generation_max_concurrent_tasks": 2, "deletion_enabled": True}},
+        json={
+            "values": {
+                "generation_max_concurrent_tasks": 2,
+                "gallery_show_generation_resource_group": False,
+                "deletion_enabled": True,
+            }
+        },
     )
     assert updated.status_code == 200
 
@@ -486,6 +553,7 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
     assert payload["metadata"]["app"] == "Inspiration One"
     assert payload["metadata"]["app_version"]
     assert payload["runtime_config"]["generation_max_concurrent_tasks"] == 2
+    assert payload["runtime_config"]["gallery_show_generation_resource_group"] is False
     assert payload["runtime_config"]["deletion_enabled"] is True
     assert set(RUNTIME_CONFIG_KEYS).issubset(payload["runtime_config"])
     assert {
@@ -523,6 +591,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     document = exported.json()
     imported_profile_id = "11111111-1111-4111-8111-111111111111"
     document["runtime_config"]["generation_max_concurrent_tasks"] = 4
+    document["runtime_config"]["gallery_show_generation_resource_group"] = False
     document["runtime_config"]["deletion_enabled"] = True
     document["generation_resource_groups"][0]["blur_images_by_default"] = True
     document["provider_profiles"] = [
@@ -613,6 +682,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     response_payload = imported.json()
     imported_items = {item["key"]: item for item in response_payload["config"]["items"]}
     assert imported_items["generation_max_concurrent_tasks"]["value"] == 4
+    assert imported_items["gallery_show_generation_resource_group"]["value"] is False
     assert imported_items["deletion_enabled"]["value"] is True
     assert imported_items["poster_generation_mode"]["value"] == "generated"
     assert imported_items["poster_generation_mode"]["source"] == "database"
@@ -621,6 +691,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     session = get_session_factory()()
     try:
         assert session.get(AppSetting, "generation_max_concurrent_tasks").value == "4"
+        assert session.get(AppSetting, "gallery_show_generation_resource_group").value == "false"
         assert session.get(AppSetting, "deletion_enabled").value == "true"
         assert session.get(AppSetting, "poster_generation_mode").value == "generated"
         profiles = session.scalars(select(ProviderProfile)).all()
@@ -1995,7 +2066,9 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
     runtime = client.get("/api/settings/runtime")
     assert runtime.status_code == 200
     assert runtime.json() == {
+        "ui_layout_scheme": "classic",
         "image_generation_max_dimension": 3840,
+        "image_session_max_base_images": 6,
         "image_tool_allowed_fields": [
             "model",
             "quality",
@@ -2009,6 +2082,7 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
         "generation_tail_splitter_max_items": 36,
         "workflow_node_max_retry_count": 10,
         "workflow_node_retry_delay_ms": 2000,
+        "gallery_show_generation_resource_group": True,
         "deletion_enabled": False,
     }
 

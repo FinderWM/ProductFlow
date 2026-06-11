@@ -35,6 +35,10 @@ interface WorkflowCanvasActionOptions {
   deletePending?: boolean;
 }
 
+function isWorkflowNodeActive(node: WorkflowNode): boolean {
+  return node.status === "queued" || node.status === "running";
+}
+
 export function getWorkflowCanvasActionTargetNodeIds(target: WorkflowCanvasActionTarget): string[] {
   return target.kind === "single" ? [target.nodeId] : [...target.nodeIds];
 }
@@ -72,6 +76,7 @@ export function buildWorkflowCanvasActionItems(
   const targetHasReusableNodes = knownTargetNodes.length
     ? knownTargetNodes.some((node) => node.node_type !== "inspiration_context")
     : target.kind === "group" || !primaryIsInspirationContext;
+  const targetHasActiveNode = knownTargetNodes.some(isWorkflowNodeActive);
   const structureBusy = Boolean(options.structureBusy);
   const items: WorkflowCanvasActionItem[] = [];
 
@@ -134,7 +139,7 @@ export function buildWorkflowCanvasActionItems(
       icon: "delete",
       labelKey: "detail.delete",
       destructive: true,
-      disabled: structureBusy || Boolean(options.deletePending) || nodeIds.length === 0,
+      disabled: structureBusy || targetHasActiveNode || Boolean(options.deletePending) || nodeIds.length === 0,
       pending: Boolean(options.deletePending),
     });
   }

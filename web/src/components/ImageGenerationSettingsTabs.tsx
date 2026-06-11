@@ -4,6 +4,11 @@ import { useI18n } from "../lib/preferences";
 
 export type ImageGenerationSettingsTab = "basic" | "advanced";
 
+const ACTIVE_TAB_CLASS =
+  "border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] text-white shadow-sm shadow-[#56B3FE]/25";
+const INACTIVE_TAB_CLASS =
+  "border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900/70 dark:hover:text-slate-100";
+
 interface ImageGenerationSettingsTabsProps {
   value: ImageGenerationSettingsTab;
   onChange: (value: ImageGenerationSettingsTab) => void;
@@ -33,10 +38,8 @@ export function ImageGenerationSettingsTabs({
             key={tab}
             type="button"
             onClick={() => onChange(tab)}
-            className={`h-9 rounded-lg border text-sm font-semibold transition-colors ${
-              value === tab
-                ? "border-indigo-200 bg-white text-indigo-700 shadow-sm dark:border-violet-400/70 dark:bg-violet-500/18 dark:text-white dark:shadow-violet-950/25 dark:ring-1 dark:ring-violet-300/35"
-                : "border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900/70 dark:hover:text-slate-100"
+            className={`h-9 rounded-lg border text-sm font-semibold transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 ${
+              value === tab ? ACTIVE_TAB_CLASS : INACTIVE_TAB_CLASS
             }`}
           >
             {label}

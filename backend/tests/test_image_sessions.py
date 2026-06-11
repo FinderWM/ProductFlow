@@ -112,7 +112,7 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     upload_payload = upload.json()
     assert any(asset["kind"] == "reference_upload" for asset in upload_payload["assets"])
 
-    missing_base = client.post(
+    text_only_second = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -120,8 +120,11 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
             "size": "1024x1024",
         },
     )
-    assert missing_base.status_code == 400
-    assert missing_base.json()["detail"] == "后续生图必须选择一张本会话已生成图片作为基图"
+    assert text_only_second.status_code == 202
+    text_only_round = text_only_second.json()["rounds"][-1]
+    assert text_only_round["base_asset_ids"] == []
+    assert text_only_round["base_asset_id"] is None
+    assert text_only_round["selected_reference_asset_ids"] == []
 
     second = client.post(
         f"/api/image-sessions/{session_id}/generate",
@@ -134,10 +137,11 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     )
     assert second.status_code == 202
     second_payload = second.json()
-    assert len(second_payload["rounds"]) == 2
+    assert len(second_payload["rounds"]) == 3
     assert second_payload["rounds"][-1]["provider_name"] == "mock"
     assert second_payload["rounds"][-1]["assistant_message"].startswith("已按本轮选择的图片上下文")
     assert second_payload["rounds"][-1]["previous_response_id"] is None
+    assert second_payload["rounds"][-1]["base_asset_ids"] == [first_asset_id]
     assert second_payload["rounds"][-1]["base_asset_id"] == first_asset_id
     assert second_payload["rounds"][-1]["selected_reference_asset_ids"] == []
 
@@ -681,17 +685,24 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     assert persisted is not None
     assert persisted.status == "queued"
 
-    duplicate_without_base = client.post(
+    second_without_base = client.post(
         f"/api/image-sessions/{created.json()['id']}/generate",
         json={
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            "prompt": "第一张还没完成时不能再无基图提交",
+            "prompt": "第一张还没完成时继续无基图提交",
             "size": "1024x1024",
         },
     )
-    assert duplicate_without_base.status_code == 400
-    assert duplicate_without_base.json()["detail"] == "后续生图必须选择一张本会话已生成图片作为基图"
-    assert sent == [task["id"]]
+    assert second_without_base.status_code == 202
+    second_task = next(
+        item
+        for item in second_without_base.json()["generation_tasks"]
+        if item["prompt"] == "第一张还没完成时继续无基图提交"
+    )
+    assert second_task["base_asset_ids"] == []
+    assert second_task["base_asset_id"] is None
+    assert second_task["selected_reference_asset_ids"] == []
+    assert sent == [task["id"], second_task["id"]]
 
     persisted.status = JobStatus.FAILED
     persisted.failure_reason = "图片生成失败，请稍后重试"
@@ -709,9 +720,10 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     )
     assert new_round_after_failure.status_code == 202
     new_round_payload = new_round_after_failure.json()
-    assert len(new_round_payload["generation_tasks"]) == 2
+    assert len(new_round_payload["generation_tasks"]) == 3
     new_task = next(item for item in new_round_payload["generation_tasks"] if item["prompt"] == "失败后开启新一轮")
     assert new_task["id"] != task["id"]
+    assert new_task["base_asset_ids"] == []
     assert new_task["base_asset_id"] is None
     assert sent == [new_task["id"]]
 
@@ -2401,6 +2413,7 @@ def test_image_session_branch_uses_selected_base_and_references_only(configured_
         round_item for round_item in payload["rounds"] if round_item["prompt"] == "只从第一张和第二张参考图继续"
     )
     assert branch_round["base_asset_id"] == first_asset_id
+    assert branch_round["base_asset_ids"] == [first_asset_id, reference_ids[1]]
     assert branch_round["selected_reference_asset_ids"] == [reference_ids[1]]
     assert branch_round["previous_response_id"] is None
     assert branch_round["generation_group_id"]
@@ -2410,6 +2423,7 @@ def test_image_session_branch_uses_selected_base_and_references_only(configured_
     db_session.expire_all()
     persisted = db_session.get(ImageSessionRound, branch_round["id"])
     assert persisted is not None
+    assert persisted.base_asset_ids == [first_asset_id, reference_ids[1]]
     assert persisted.base_asset_id == first_asset_id
     assert persisted.selected_reference_asset_ids == [reference_ids[1]]
     assert persisted.provider_request_json == {
@@ -2485,6 +2499,7 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
     )
     base_only_round = next(round_item for round_item in base_only.rounds if round_item.prompt == base_only_prompt)
     assert base_only_round.provider_name == "openai-images"
+    assert base_only_round.base_asset_ids == [first_asset_id]
     assert base_only_round.base_asset_id == first_asset_id
     assert base_only_round.selected_reference_asset_ids == []
 
@@ -2512,22 +2527,28 @@ def test_image_session_openai_images_uses_selected_base_and_references_only(
     )
     branch_round = next(round_item for round_item in branched.rounds if round_item.prompt == branch_prompt)
     assert branch_round.provider_name == "openai-images"
+    assert branch_round.base_asset_ids == [first_asset_id, reference_ids[1]]
     assert branch_round.base_asset_id == first_asset_id
     assert branch_round.selected_reference_asset_ids == [reference_ids[1]]
 
     assert calls[0]["method"] == "generate"
-    assert calls[1]["method"] == "generate"
-    assert "image" not in calls[1]
+    assert calls[1]["method"] == "edit"
+    assert not isinstance(calls[1]["image"], list)
+    assert "previous_response_id" not in calls[1]
     assert calls[2]["method"] == "edit"
-    assert [image.name for image in calls[2]["image"]] == ["base.png", "reference-1.png"]
+    assert isinstance(calls[2]["image"], list)
+    assert len(calls[2]["image"]) == 2
     assert "previous_response_id" not in calls[2]
 
     db_session.expire_all()
     persisted_base_only = db_session.get(ImageSessionRound, base_only_round.id)
     assert persisted_base_only is not None
-    assert "image_count" not in persisted_base_only.provider_request_json
+    assert persisted_base_only.base_asset_ids == [first_asset_id]
+    assert persisted_base_only.provider_request_json["image_count"] == 1
+    assert persisted_base_only.provider_request_json["images"] == [{"filename": "base.png", "mime_type": "image/png"}]
     persisted = db_session.get(ImageSessionRound, branch_round.id)
     assert persisted is not None
+    assert persisted.base_asset_ids == [first_asset_id, reference_ids[1]]
     assert persisted.provider_request_json["image_count"] == 2
     assert persisted.provider_request_json["images"] == [
         {"filename": "base.png", "mime_type": "image/png"},
@@ -2637,6 +2658,7 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
     )
     branch_round = next(round_item for round_item in branched.rounds if round_item.prompt == branch_prompt)
     assert branch_round.provider_name == "google-gemini-image"
+    assert branch_round.base_asset_ids == [first_asset_id, reference_ids[1]]
     assert branch_round.base_asset_id == first_asset_id
     assert branch_round.selected_reference_asset_ids == [reference_ids[1]]
 
@@ -2647,6 +2669,7 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
     db_session.expire_all()
     persisted = db_session.get(ImageSessionRound, branch_round.id)
     assert persisted is not None
+    assert persisted.base_asset_ids == [first_asset_id, reference_ids[1]]
     assert persisted.provider_request_json["reference_image_count"] == 2
     assert persisted.provider_request_json["reference_images"] == [
         {"filename": "base.png", "mime_type": "image/png"},
@@ -2708,17 +2731,20 @@ def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Pat
     assert base_wrong_session.status_code == 404
     assert base_wrong_session.json()["detail"] == "会话图片不存在"
 
-    base_wrong_kind = client.post(
+    reference_base = client.post(
         f"/api/image-sessions/{session_id}/generate",
         json={
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            "prompt": "错类型基图",
+            "prompt": "参考图也可以作为基图",
             "size": "1024x1024",
-            "base_asset_id": reference_asset_id,
+            "base_asset_ids": [reference_asset_id],
         },
     )
-    assert base_wrong_kind.status_code == 400
-    assert base_wrong_kind.json()["detail"] == "只能从会话生成图继续"
+    assert reference_base.status_code == 202
+    reference_base_round = reference_base.json()["rounds"][-1]
+    assert reference_base_round["base_asset_ids"] == [reference_asset_id]
+    assert reference_base_round["base_asset_id"] == reference_asset_id
+    assert reference_base_round["selected_reference_asset_ids"] == [reference_asset_id]
 
     reference_wrong_session = client.post(
         f"/api/image-sessions/{session_id}/generate",
@@ -2765,7 +2791,26 @@ def test_image_session_branch_validates_asset_scope_and_kind(configured_env: Pat
         },
     )
     assert too_many.status_code == 400
-    assert too_many.json()["detail"] == "本轮最多选择 6 张图片上下文（含分支基图）"
+    assert too_many.json()["detail"] == "本轮最多选择 6 张图片上下文"
+
+    updated_limit = client.patch(
+        "/api/settings",
+        json={"values": {"image_session_max_base_images": 7}},
+    )
+    assert updated_limit.status_code == 200
+    accepted_configured_limit = client.post(
+        f"/api/image-sessions/{session_id}/generate",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "上下文配置允许七张",
+            "size": "1024x1024",
+            "base_asset_id": generated_asset_id,
+            "selected_reference_asset_ids": reference_ids,
+        },
+    )
+    assert accepted_configured_limit.status_code == 202
+    accepted_round = accepted_configured_limit.json()["rounds"][-1]
+    assert accepted_round["base_asset_ids"] == [generated_asset_id, *reference_ids]
 
     bad_count = client.post(
         f"/api/image-sessions/{session_id}/generate",

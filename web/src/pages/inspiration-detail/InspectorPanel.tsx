@@ -223,6 +223,8 @@ interface InspectorPanelProps {
   savedResourceLibrarySourceAssetIds?: ReadonlySet<string>;
   savingResourceLibrarySourceId?: string | null;
   onDelete: () => void;
+  deleteDisabled?: boolean;
+  deleteTitle?: string;
   busy: boolean;
   cancelBusy: boolean;
   runActionState: WorkflowNodeRunActionState;
@@ -255,6 +257,8 @@ export function InspectorPanel({
   savedResourceLibrarySourceAssetIds,
   savingResourceLibrarySourceId = null,
   onDelete,
+  deleteDisabled = false,
+  deleteTitle,
   busy,
   cancelBusy,
   runActionState,
@@ -276,6 +280,11 @@ export function InspectorPanel({
   const showDeleteAction = node.node_type !== "inspiration_context";
   const showActionRow = showRunAction || Boolean(onCancelRun) || showDeleteAction;
   const actionGridColumns = showRunAction && onCancelRun ? "grid-cols-2" : "grid-cols-1";
+  const deleteActionDisabled = busy || deleteDisabled;
+  const deleteActionTitle = deleteTitle ?? t("detail.delete");
+  const deleteActionClassName = deleteActionDisabled
+    ? "border border-slate-200 bg-slate-100 text-slate-400 shadow-none disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-500"
+    : "btn-danger-spring";
   const downstreamReferenceCount =
     node.node_type === "image_generation"
       ? new Set(
@@ -458,8 +467,9 @@ export function InspectorPanel({
               <button
                 type="button"
                 onClick={onDelete}
-                disabled={busy}
-                className={`inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring ${
+                disabled={deleteActionDisabled}
+                title={deleteActionTitle}
+                className={`inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold ${deleteActionClassName} ${
                   showActiveRunIndicator && onCancelRun ? "col-span-2" : ""
                 }`}
               >
@@ -1140,7 +1150,7 @@ function SaveCurrentImageToResourceLibraryButton({
       onClick={() => onSaveSourceAssetToResourceLibrary(sourceAsset)}
       disabled={busy || Boolean(disabledTitle)}
       title={disabledTitle ?? t("resourceLibrary.saveToLibrary")}
-      className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-indigo-200 hover:bg-slate-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-slate-900 dark:hover:text-violet-100"
+      className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-3 text-xs font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
     >
       {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
       {saved ? t("resourceLibrary.alreadyInLibrary") : t("resourceLibrary.saveToLibrary")}

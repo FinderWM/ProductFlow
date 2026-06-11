@@ -1018,8 +1018,12 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
             "size": "1024x1024",
         },
     )
-    assert second_without_base.status_code == 400
-    assert second_without_base.json()["detail"] == "后续生图必须选择一张本会话已生成图片作为基图"
+    assert second_without_base.status_code == 202
+    text_only_round = second_without_base.json()["rounds"][-1]
+    assert text_only_round["provider_response_id"] == "resp_2"
+    assert text_only_round["base_asset_ids"] == []
+    assert text_only_round["base_asset_id"] is None
+    assert text_only_round["selected_reference_asset_ids"] == []
 
     branched = client.post(
         f"/api/image-sessions/{session_id}/generate",
@@ -1033,8 +1037,9 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
     )
     assert branched.status_code == 202
     branched_round = branched.json()["rounds"][-1]
-    assert branched_round["provider_response_id"] == "resp_2"
+    assert branched_round["provider_response_id"] == "resp_3"
     assert branched_round["previous_response_id"] is None
+    assert branched_round["base_asset_ids"] == [first_asset_id, reference_id]
     assert branched_round["base_asset_id"] == first_asset_id
     assert branched_round["selected_reference_asset_ids"] == [reference_id]
 
@@ -1048,8 +1053,10 @@ def test_image_session_openai_responses_uses_explicit_branch_context(
     assert calls[0]["tools"] == [{"type": "image_generation", "size": "1024x1024"}]
     assert "previous_response_id" not in calls[0]
     assert "previous_response_id" not in calls[1]
+    assert "previous_response_id" not in calls[2]
     assert isinstance(calls[0]["input"], str)
-    branch_content = calls[1]["input"][0]["content"]
+    assert isinstance(calls[1]["input"], str)
+    branch_content = calls[2]["input"][0]["content"]
     assert branch_content[0]["type"] == "input_text"
     branch_images = [item for item in branch_content if item["type"] == "input_image"]
     assert len(branch_images) == 2

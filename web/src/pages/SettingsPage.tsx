@@ -42,7 +42,6 @@ import {
 } from "../components/ParameterHelp";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
-import { UiLayoutSchemeSettingsControl } from "../components/UiLayoutSchemeSettingsControl";
 import { api, ApiError } from "../lib/api";
 import type { TranslationKey } from "../lib/i18n";
 import {
@@ -62,6 +61,7 @@ import {
   hasSessionApiPermission,
 } from "../lib/rbac";
 import { useSessionState } from "../lib/session";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import type {
   ConfigItem,
   ConfigResponse,
@@ -904,6 +904,9 @@ function itemsForSection(config: ConfigResponse | undefined, section: SettingsSe
         item.category === LEGACY_GENERATION_QUEUE_CATEGORY ||
         item.category.startsWith(GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX),
     );
+  }
+  if (section === "layoutAppearance") {
+    return items.filter((item) => item.category === "界面与外观");
   }
   if (section === "security") {
     return items.filter((item) => item.category === "安全与运维");
@@ -3371,6 +3374,7 @@ function GenerationConfigImageFields({
 
 export function SettingsPage() {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const session = useSessionState();
@@ -3840,40 +3844,42 @@ export function SettingsPage() {
     saveGenerationResourceGroupMutation.isPending || archiveGenerationResourceGroupMutation.isPending;
 
   const loadingMain = configQuery.isLoading || providerConfigQuery.isLoading;
-  const genericSection = ["prompts", "upload", "queue", "security"].includes(activeSection);
+  const genericSection = ["prompts", "upload", "queue", "layoutAppearance", "security"].includes(activeSection);
+  const isWorkspaceSubpage = activeScheme === "workspace";
 
   return (
-    <div className="pf-app flex flex-col dark:text-slate-100">
+    <div className={`${isWorkspaceSubpage ? "pf-workspace" : "pf-app"} flex flex-col dark:text-slate-100`}>
       <TopNav
         breadcrumbs={t("settings.breadcrumb")}
         onLogout={() => logoutMutation.mutate()}
       />
 
-      <main className="mx-auto flex w-full max-w-[1440px] flex-1">
-        <div className="w-full">
-          <div className="pf-page-header mx-auto mb-0 w-full max-w-[1440px] px-5 py-6 md:flex-row md:items-end md:justify-between lg:px-8 lg:py-8">
-            <div>
-              <div className="pf-eyebrow mb-2 gap-1.5">
-                <SettingsIcon size={13} className="mr-1.5" />
-                {t("settings.runtimeConfig")}
+      <main className={isWorkspaceSubpage ? "pf-workspace-subpage flex-1" : "mx-auto flex w-full max-w-[1440px] flex-1"}>
+        <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame-shell w-full" : "w-full"}>
+          <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame" : "w-full"}>
+            <div className={isWorkspaceSubpage ? "pf-page-header" : "pf-page-header mx-auto mb-0 w-full max-w-[1440px] px-5 py-6 md:flex-row md:items-end md:justify-between lg:px-8 lg:py-8"}>
+              <div>
+                <div className="pf-eyebrow mb-2 gap-1.5">
+                  <SettingsIcon size={13} className="mr-1.5" />
+                  {t("settings.runtimeConfig")}
+                </div>
+                <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
+                  {t("settings.title")}
+                </h1>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.description")}</p>
               </div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-                {t("settings.title")}
-              </h1>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.description")}</p>
             </div>
-          </div>
 
-          {loadingMain ? (
-            <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
-              <Loader2 size={22} className="animate-spin" />
-            </div>
-          ) : configQuery.isError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-              {configQuery.error instanceof ApiError ? configQuery.error.detail : t("settings.loadFailed")}
-            </div>
-          ) : (
-            <div className="pf-side-shell min-h-full">
+            {loadingMain ? (
+              <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
+                <Loader2 size={22} className="animate-spin" />
+              </div>
+            ) : configQuery.isError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+                {configQuery.error instanceof ApiError ? configQuery.error.detail : t("settings.loadFailed")}
+              </div>
+            ) : (
+              <div className="pf-side-shell min-h-full">
               <aside className="pf-side-rail">
                 <div className="border-b border-slate-200 px-5 py-7 dark:border-slate-800">
                   <div className="flex items-center gap-3 text-lg font-semibold text-slate-950 dark:text-white">
@@ -4021,7 +4027,6 @@ export function SettingsPage() {
                       </button>
                     </div>
                   ) : null}
-                  {activeSection === "layoutAppearance" ? <UiLayoutSchemeSettingsControl /> : null}
                   {activeSection === "weather" ? (
                     <div className="space-y-5">
                       <WeatherSettingsPanel
@@ -4348,6 +4353,7 @@ export function SettingsPage() {
             </div>
           )}
 
+          </div>
         </div>
         <ConfirmDialog
           open={exportConfirmOpen}

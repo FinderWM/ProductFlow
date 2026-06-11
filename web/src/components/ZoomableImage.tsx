@@ -1,6 +1,6 @@
 import { RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
@@ -25,6 +25,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function boundedOffsetForElement(element: HTMLElement | null, next: Point, nextScale: number): Point {
+  if (nextScale <= MIN_SCALE) {
+    return { x: 0, y: 0 };
+  }
+  const width = element?.clientWidth ?? 0;
+  const height = element?.clientHeight ?? 0;
+  const maxX = (width * (nextScale - 1)) / 2;
+  const maxY = (height * (nextScale - 1)) / 2;
+  return {
+    x: clamp(next.x, -maxX, maxX),
+    y: clamp(next.y, -maxY, maxY),
+  };
+}
+
 export function ZoomableImage({
   src,
   alt,
@@ -44,18 +58,30 @@ export function ZoomableImage({
     setOffset({ x: 0, y: 0 });
   }, [src]);
 
-  function boundedOffset(next: Point, nextScale = scale): Point {
-    if (nextScale <= MIN_SCALE) {
-      return { x: 0, y: 0 };
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
     }
-    const width = containerRef.current?.clientWidth ?? 0;
-    const height = containerRef.current?.clientHeight ?? 0;
-    const maxX = (width * (nextScale - 1)) / 2;
-    const maxY = (height * (nextScale - 1)) / 2;
-    return {
-      x: clamp(next.x, -maxX, maxX),
-      y: clamp(next.y, -maxY, maxY),
+
+    const handleNativeWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const direction = event.deltaY > 0 ? -1 : 1;
+      setScale((currentScale) => {
+        const nextScale = clamp(currentScale + direction * SCALE_STEP, MIN_SCALE, MAX_SCALE);
+        setOffset((currentOffset) => boundedOffsetForElement(container, currentOffset, nextScale));
+        return nextScale;
+      });
     };
+
+    container.addEventListener("wheel", handleNativeWheel, { capture: true, passive: false });
+    return () => container.removeEventListener("wheel", handleNativeWheel, { capture: true });
+  }, []);
+
+  function boundedOffset(next: Point, nextScale = scale): Point {
+    return boundedOffsetForElement(containerRef.current, next, nextScale);
   }
 
   function updateScale(nextScale: number) {
@@ -67,12 +93,6 @@ export function ZoomableImage({
   function resetImage() {
     setScale(MIN_SCALE);
     setOffset({ x: 0, y: 0 });
-  }
-
-  function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const direction = event.deltaY > 0 ? -1 : 1;
-    updateScale(scale + direction * SCALE_STEP);
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -107,12 +127,14 @@ export function ZoomableImage({
   }
 
   return (
-    <div ref={containerRef} className={`relative flex min-h-0 items-center justify-center overflow-hidden ${className}`}>
+    <div
+      ref={containerRef}
+      className={`relative flex min-h-0 items-center justify-center overflow-hidden overscroll-contain ${className}`}
+    >
       <div
         className={`flex h-full w-full items-center justify-center ${scale > MIN_SCALE ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`}
         style={{ touchAction: "none" }}
         onDoubleClick={scale > MIN_SCALE ? resetImage : () => updateScale(MIN_SCALE + SCALE_STEP * 4)}
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}

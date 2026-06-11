@@ -9,14 +9,13 @@ from inspiration_one_backend.application.image_generation_core import (
     unique_image_generation_ids,
 )
 from inspiration_one_backend.application.moderation import ensure_resource_usable
-from inspiration_one_backend.config import normalize_image_generation_size
-from inspiration_one_backend.domain.enums import ImageSessionAssetKind, JobStatus
+from inspiration_one_backend.config import get_runtime_settings, normalize_image_generation_size
+from inspiration_one_backend.domain.enums import ImageSessionAssetKind
 from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
 from inspiration_one_backend.infrastructure.db.models import ImageSession, ImageSessionAsset
 from inspiration_one_backend.infrastructure.image.chat_service import ImageChatTurn
 from inspiration_one_backend.infrastructure.storage import LocalStorage
 
-MAX_BRANCH_CONTEXT_IMAGES = 6
 IMAGE_SESSION_IMAGES_API_N_MAX_COUNT = 10
 
 
@@ -28,81 +27,68 @@ def validate_generation_request(
     image_session: ImageSession,
     *,
     size: str,
-    base_asset_id: str | None,
-    selected_reference_asset_ids: list[str] | None,
     generation_count: int,
-    current_generation_task_id: str | None = None,
     max_generation_count: int,
-) -> tuple[str, str | None, list[str]]:
+    base_asset_ids: list[str] | None = None,
+    base_asset_id: str | None = None,
+    selected_reference_asset_ids: list[str] | None = None,
+    current_generation_task_id: str | None = None,
+) -> tuple[str, list[str], str | None, list[str]]:
+    del current_generation_task_id
     if not 1 <= generation_count <= max_generation_count:
         raise BusinessValidationError(f"一次生成数量必须在 1-{max_generation_count} 张之间")
     normalized_size = normalize_image_generation_size(size)
-    selected_reference_ids = _unique_ids(selected_reference_asset_ids)
-    if (1 if base_asset_id else 0) + len(selected_reference_ids) > MAX_BRANCH_CONTEXT_IMAGES:
-        raise BusinessValidationError("本轮最多选择 6 张图片上下文（含分支基图）")
+    normalized_base_assets = _normalize_base_assets(
+        image_session,
+        base_asset_ids=base_asset_ids,
+        base_asset_id=base_asset_id,
+        selected_reference_asset_ids=selected_reference_asset_ids,
+    )
+    max_base_images = get_runtime_settings().image_session_max_base_images
+    if len(normalized_base_assets) > max_base_images:
+        raise BusinessValidationError(f"本轮最多选择 {max_base_images} 张图片上下文")
 
-    normalized_base_asset_id: str | None = None
-    if base_asset_id:
-        base_asset = _find_session_asset_or_raise(
-            image_session,
-            base_asset_id,
-            expected_kind=ImageSessionAssetKind.GENERATED_IMAGE,
-        )
-        normalized_base_asset_id = base_asset.id
-    elif _has_prior_generation_request(image_session, current_generation_task_id=current_generation_task_id):
-        raise BusinessValidationError("后续生图必须选择一张本会话已生成图片作为基图")
-
-    normalized_reference_ids: list[str] = []
-    for asset_id in selected_reference_ids:
-        reference_asset = _find_session_asset_or_raise(
-            image_session,
-            asset_id,
-            expected_kind=ImageSessionAssetKind.REFERENCE_UPLOAD,
-            missing_message="会话参考图不存在",
-        )
-        normalized_reference_ids.append(reference_asset.id)
-
-    return normalized_size, normalized_base_asset_id, normalized_reference_ids
+    return (
+        normalized_size,
+        [asset.id for asset in normalized_base_assets],
+        _legacy_base_asset_id(normalized_base_assets),
+        _legacy_selected_reference_asset_ids(normalized_base_assets),
+    )
 
 
 def build_branch_generation_context(
     image_session: ImageSession,
     storage: LocalStorage,
     *,
-    base_asset_id: str | None,
-    selected_reference_asset_ids: list[str] | None,
-) -> tuple[list[ImageChatTurn], list[str], str | None, str | None, list[str]]:
+    base_asset_ids: list[str] | None = None,
+    base_asset_id: str | None = None,
+    selected_reference_asset_ids: list[str] | None = None,
+) -> tuple[list[ImageChatTurn], list[str], str | None, list[str], str | None, list[str]]:
     """Build card-style branch context from the explicit base asset and selected references only."""
 
-    manual_references: list[str] = []
-    normalized_base_asset_id: str | None = None
-    selected_reference_ids = _unique_ids(selected_reference_asset_ids)
-    if (1 if base_asset_id else 0) + len(selected_reference_ids) > MAX_BRANCH_CONTEXT_IMAGES:
-        raise BusinessValidationError("本轮最多选择 6 张图片上下文（含分支基图）")
+    normalized_base_assets = _normalize_base_assets(
+        image_session,
+        base_asset_ids=base_asset_ids,
+        base_asset_id=base_asset_id,
+        selected_reference_asset_ids=selected_reference_asset_ids,
+    )
+    max_base_images = get_runtime_settings().image_session_max_base_images
+    if len(normalized_base_assets) > max_base_images:
+        raise BusinessValidationError(f"本轮最多选择 {max_base_images} 张图片上下文")
 
-    if base_asset_id:
-        base_asset = _find_session_asset_or_raise(
-            image_session,
-            base_asset_id,
-            expected_kind=ImageSessionAssetKind.GENERATED_IMAGE,
-        )
-        normalized_base_asset_id = base_asset.id
-        manual_references.append(_session_data_url(storage, storage.object_key_for(base_asset), base_asset.mime_type))
+    manual_references = [
+        _session_data_url(storage, storage.object_key_for(asset), asset.mime_type)
+        for asset in normalized_base_assets[:max_base_images]
+    ]
 
-    normalized_reference_ids: list[str] = []
-    for asset_id in selected_reference_ids:
-        reference_asset = _find_session_asset_or_raise(
-            image_session,
-            asset_id,
-            expected_kind=ImageSessionAssetKind.REFERENCE_UPLOAD,
-            missing_message="会话参考图不存在",
-        )
-        normalized_reference_ids.append(reference_asset.id)
-        manual_references.append(
-            _session_data_url(storage, storage.object_key_for(reference_asset), reference_asset.mime_type)
-        )
-
-    return [], manual_references[:6], None, normalized_base_asset_id, normalized_reference_ids
+    return (
+        [],
+        manual_references,
+        None,
+        [asset.id for asset in normalized_base_assets],
+        _legacy_base_asset_id(normalized_base_assets),
+        _legacy_selected_reference_asset_ids(normalized_base_assets),
+    )
 
 
 def images_api_batch_count(
@@ -156,24 +142,55 @@ def _unique_ids(ids: list[str] | None) -> list[str]:
     return unique_image_generation_ids(ids)
 
 
-def _has_prior_generation_request(
+def _normalize_base_assets(
     image_session: ImageSession,
     *,
-    current_generation_task_id: str | None = None,
-) -> bool:
-    blocking_statuses = {JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.SUCCEEDED}
-    if current_generation_task_id is not None:
-        tasks = sorted(image_session.generation_tasks, key=lambda task: (task.created_at, task.id))
-        for index, task in enumerate(tasks):
-            if task.id != current_generation_task_id:
-                continue
-            if index == 0:
-                return False
-            return any(item.status in blocking_statuses for item in tasks[:index]) or bool(image_session.rounds)
+    base_asset_ids: list[str] | None,
+    base_asset_id: str | None,
+    selected_reference_asset_ids: list[str] | None,
+) -> list[ImageSessionAsset]:
+    normalized: list[ImageSessionAsset] = []
+    seen: set[str] = set()
 
-    if image_session.rounds:
-        return True
-    return any(
-        task.id != current_generation_task_id and task.status in blocking_statuses
-        for task in image_session.generation_tasks
+    def append_base(asset: ImageSessionAsset) -> None:
+        if asset.id in seen:
+            return
+        seen.add(asset.id)
+        normalized.append(asset)
+
+    for asset_id in _unique_ids(base_asset_ids):
+        append_base(_find_base_asset_or_raise(image_session, asset_id))
+
+    if base_asset_id:
+        append_base(_find_base_asset_or_raise(image_session, base_asset_id))
+
+    for asset_id in _unique_ids(selected_reference_asset_ids):
+        append_base(
+            _find_session_asset_or_raise(
+                image_session,
+                asset_id,
+                expected_kind=ImageSessionAssetKind.REFERENCE_UPLOAD,
+                missing_message="会话参考图不存在",
+            )
+        )
+
+    return normalized
+
+
+def _find_base_asset_or_raise(image_session: ImageSession, asset_id: str) -> ImageSessionAsset:
+    asset = _find_session_asset_or_raise(image_session, asset_id)
+    if asset.kind not in {ImageSessionAssetKind.GENERATED_IMAGE, ImageSessionAssetKind.REFERENCE_UPLOAD}:
+        raise BusinessValidationError("只能选择会话生成图或参考图作为基图")
+    return asset
+
+
+def _legacy_base_asset_id(base_assets: list[ImageSessionAsset]) -> str | None:
+    generated_asset = next(
+        (asset for asset in base_assets if asset.kind == ImageSessionAssetKind.GENERATED_IMAGE),
+        None,
     )
+    return (generated_asset or base_assets[0]).id if base_assets else None
+
+
+def _legacy_selected_reference_asset_ids(base_assets: list[ImageSessionAsset]) -> list[str]:
+    return [asset.id for asset in base_assets if asset.kind == ImageSessionAssetKind.REFERENCE_UPLOAD]

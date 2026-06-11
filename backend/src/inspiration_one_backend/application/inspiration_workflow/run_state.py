@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.admission import generation_running_capacity_available
 from inspiration_one_backend.application.inspiration_workflow import graph as inspiration_workflow_graph
+from inspiration_one_backend.application.task_notifications import publish_workflow_run_notification_safely
 from inspiration_one_backend.application.time import now_utc
 from inspiration_one_backend.config import get_runtime_settings
 from inspiration_one_backend.domain.durable_generation_tasks import WORKFLOW_RUN_GENERATION_TASK_CONTRACT
@@ -349,6 +350,7 @@ def mark_workflow_run_failed(
     persisted_run.finished_at = now
     persisted_run.workflow.updated_at = now
     session.commit()
+    publish_workflow_run_notification_safely(persisted_run)
 
 
 def mark_workflow_run_cancelled(session: Session, *, run_id: str) -> None:
@@ -381,3 +383,4 @@ def mark_workflow_run_cancelled(session: Session, *, run_id: str) -> None:
     persisted_run.finished_at = now
     persisted_run.workflow.updated_at = now
     session.commit()
+    publish_workflow_run_notification_safely(persisted_run)

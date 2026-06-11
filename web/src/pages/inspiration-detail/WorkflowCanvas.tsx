@@ -72,6 +72,7 @@ import {
   workflowMiniMapNodeColor as workflowMiniMapWorkflowNodeColor,
   workflowMiniMapNodeStrokeColor as workflowMiniMapWorkflowNodeStrokeColor,
 } from "./workflowMiniMap";
+import { buildWorkflowEdgeTraceMap, type WorkflowEdgeTrace } from "./workflowEdgeHighlights";
 
 export interface NodePositionCommitInput {
   node: WorkflowNode;
@@ -109,6 +110,7 @@ interface WorkflowCanvasEdgeData extends InspirationOneEdgeData {
   disabled: boolean;
   laneOffset: number;
   obstacles: WorkflowEdgeObstacle[];
+  trace: WorkflowEdgeTrace | null;
   onDeleteEdge: (edgeId: string) => void;
 }
 
@@ -285,6 +287,11 @@ function WorkflowNodeToolbarActions({
         {items.map((item) => {
           const label = item.title ?? item.label ?? "";
           const destructive = Boolean(item.destructive);
+          const toneClassName = item.disabled
+            ? "border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-500"
+            : destructive
+              ? "border-red-200 bg-red-50 text-red-600 hover:border-red-300 hover:bg-red-100 hover:text-red-700 dark:border-red-400/45 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/70 dark:hover:bg-red-500/18"
+              : "border-transparent bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-[#111a2b] dark:text-slate-100 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/14 dark:hover:text-violet-100";
           return (
             <button
               key={item.id}
@@ -298,11 +305,7 @@ function WorkflowNodeToolbarActions({
                 }
               }}
               disabled={item.disabled}
-              className={`nodrag nopan nowheel inline-flex h-11 w-11 items-center justify-center rounded-lg border text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-45 lg:h-9 lg:w-9 ${
-                destructive
-                  ? "border-red-200 bg-red-50 text-red-600 hover:border-red-300 hover:bg-red-100 hover:text-red-700 dark:border-red-400/45 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/70 dark:hover:bg-red-500/18"
-                  : "border-transparent bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-[#111a2b] dark:text-slate-100 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/14 dark:hover:text-violet-100"
-              }`}
+              className={`nodrag nopan nowheel inline-flex h-11 w-11 items-center justify-center rounded-lg border text-sm transition-colors disabled:cursor-not-allowed lg:h-9 lg:w-9 ${toneClassName}`}
               aria-label={label}
               title={label}
             >
@@ -396,17 +399,24 @@ function InspirationOneCanvasEdge({
     obstacles: data?.obstacles ?? [],
   });
   const edgePath = edgeRoute.path;
+  const trace = data?.trace ?? null;
 
   const [isHovered, setIsHovered] = useState(false);
+  const edgeStroke = trace?.color ?? (selected ? "#4f46e5" : isHovered ? "#64748b" : "#94a3b8");
+  const edgeStrokeWidth = trace ? 2.8 : selected ? 2.2 : 1.7;
 
   return (
     <>
       <BaseEdge
         id={id}
         path={edgePath}
+        className={trace ? "workflow-canvas-edge-ant-line" : undefined}
         style={{
-          stroke: selected ? "#4f46e5" : isHovered ? "#64748b" : "#94a3b8",
-          strokeWidth: selected ? 2.2 : 1.7,
+          stroke: edgeStroke,
+          strokeWidth: edgeStrokeWidth,
+          strokeDasharray: trace ? "10 7" : undefined,
+          strokeLinecap: "round",
+          filter: trace ? `drop-shadow(0 0 4px ${trace.color}66)` : undefined,
           transition: "stroke 0.15s ease, stroke-width 0.15s ease",
         }}
       />
@@ -1029,6 +1039,16 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     () => (workflow ? buildWorkflowEdgeLaneOffsets(workflow.edges) : {}),
     [workflow],
   );
+  const edgeTraceMap = useMemo(
+    () =>
+      workflow
+        ? buildWorkflowEdgeTraceMap(workflow, {
+            selectedNodeId,
+            selectedNodeIds,
+          })
+        : {},
+    [selectedNodeId, selectedNodeIds, workflow],
+  );
 
   const edges = useMemo<WorkflowCanvasEdge[]>(() => {
     if (!workflow) {
@@ -1043,10 +1063,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         disabled: structureBusy,
         laneOffset: edgeLaneOffsets[edge.id] ?? 0,
         obstacles: edgeObstacles,
+        trace: edgeTraceMap[edge.id] ?? null,
         onDeleteEdge,
       },
     }));
-  }, [deleteEdgeLabel, edgeLaneOffsets, edgeObstacles, onDeleteEdge, structureBusy, workflow]);
+  }, [deleteEdgeLabel, edgeLaneOffsets, edgeObstacles, edgeTraceMap, onDeleteEdge, structureBusy, workflow]);
 
   useEffect(() => {
     const instance = flowInstanceRef.current;

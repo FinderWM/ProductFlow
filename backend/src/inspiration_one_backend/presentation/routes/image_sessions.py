@@ -270,6 +270,7 @@ def generate_image_session_round_endpoint(
         prompt=payload.prompt,
         size=payload.size,
         resource_group_id=payload.resource_group_id,
+        base_asset_ids=payload.base_asset_ids,
         base_asset_id=payload.base_asset_id,
         selected_reference_asset_ids=payload.selected_reference_asset_ids,
         generation_count=payload.generation_count,

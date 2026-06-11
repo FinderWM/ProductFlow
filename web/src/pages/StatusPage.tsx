@@ -19,6 +19,7 @@ import { formatDateTime } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import type { GenerationConfigStatAggregate, GenerationConfigStatusConfig } from "../lib/types";
 import { useI18n } from "../lib/preferences";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 
 type QuickRangeId = "today" | "last7" | "last30" | "month";
 
@@ -187,9 +188,9 @@ interface StatusPageProps {
   mode?: "auto" | "detail";
 }
 
-export function StatusPage(props: StatusPageProps = {}) {
-  void props.mode;
+export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [range, setRange] = useState<StatusDateRange>(() => quickDateRange("today"));
@@ -218,15 +219,18 @@ export function StatusPage(props: StatusPageProps = {}) {
     text: summary?.today_text_attempt_count ?? 0,
     image: summary?.today_image_attempt_count ?? 0,
   });
+  const isWorkspaceSubpage = activeScheme === "workspace" && mode === "detail";
 
   return (
-    <div className="pf-app flex flex-col">
+    <div className={`${isWorkspaceSubpage ? "pf-workspace" : "pf-app"} flex flex-col`}>
       <TopNav
         breadcrumbs={t("statusPage.breadcrumb")}
         onHome={() => navigate("/inspirations")}
         onLogout={() => logoutMutation.mutate()}
       />
-      <main className="pf-page pf-page-wide flex-1">
+      <main className={isWorkspaceSubpage ? "pf-workspace-subpage flex-1" : "pf-page pf-page-wide flex-1"}>
+        <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame-shell" : "contents"}>
+          <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame" : "contents"}>
         <div className="pf-page-header">
           <div>
             <div className="pf-eyebrow mb-2 gap-1.5">
@@ -400,6 +404,8 @@ export function StatusPage(props: StatusPageProps = {}) {
                 )}
               </div>
             </section>
+        </div>
+          </div>
         </div>
       </main>
     </div>

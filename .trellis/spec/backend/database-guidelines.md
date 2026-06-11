@@ -159,6 +159,83 @@ For runtime settings:
   project/content material, context, subject, visual content, and structured copy instead of ecommerce-only labels such as
   Taobao, inspiration detail page, main image copy, or selling points unless the setting is explicitly limited to that flow.
 
+### Scenario: Global UI runtime toggles
+
+#### 1. Scope / Trigger
+
+- Trigger: adding a project-wide UI behavior toggle that should apply consistently to every user and page, for example
+  showing or hiding a gallery metadata field.
+- This is a cross-layer runtime config contract because the value starts on `Settings`, may be overridden in
+  `app_settings`, is exposed through `GET /api/settings/runtime`, and is consumed by frontend pages.
+
+#### 2. Signatures
+
+- Backend default: `Settings.<toggle_key>: bool = <default>`.
+- Runtime registry: `CONFIG_DEFINITIONS` contains the same key with `input_type="boolean"`.
+- Runtime API: `RuntimeConfigResponse` includes the snake_case boolean field.
+- Frontend DTO: `web/src/lib/types.ts::RuntimeConfig` mirrors the same snake_case field.
+- Frontend query: pages read `api.getRuntimeConfig()` with query key `["runtime-config"]`.
+
+#### 3. Contracts
+
+- Global UI toggles belong in `app_settings` runtime config, not in `UserUiPreference`, when all users should see the same
+  behavior.
+- Defaults live in `Settings`; labels, category, description, and input type live in `CONFIG_DEFINITIONS`.
+- Settings save/reset and settings import/export must include the key automatically through `RUNTIME_CONFIG_KEYS`.
+- Frontend pages may default to the safe current behavior while `runtime-config` is loading, but must use the runtime value
+  once loaded.
+- Keep backend and frontend field names in snake_case to match the API DTO contract.
+
+#### 4. Validation & Error Matrix
+
+- Unknown key in settings update/import -> `400`, `"未知配置项: ..."` from the existing runtime config validation.
+- Non-boolean value for a boolean toggle -> `400`, `"<label> 必须是布尔值"`.
+- Missing runtime key in settings import -> `400`, `"配置文件缺少配置项: ..."`.
+- Runtime config fetch unavailable in a frontend page -> page should keep a conservative default and not block unrelated
+  data loading unless the toggle controls required behavior.
+
+#### 5. Good/Base/Bad Cases
+
+- Good: `gallery_show_generation_resource_group` controls only whether gallery UIs render generation-group metadata while
+  preserving gallery data and API response fields.
+- Base: a page reads `runtimeConfigQuery.data?.some_toggle ?? true` to preserve existing behavior during loading.
+- Bad: adding a global display toggle to `UserUiPreference`, because that makes behavior account-specific and bypasses
+  settings import/export.
+- Bad: adding a database migration or new table for a simple runtime boolean toggle.
+
+#### 6. Tests Required
+
+- Settings API test asserts default value, category/input type metadata, successful save, persisted `AppSetting`, export,
+  import, and `GET /api/settings/runtime` response.
+- Frontend build/type-check must pass after updating `RuntimeConfig`.
+- Feature behavior tests should cover the changed API or UI behavior, for example gallery read ignores legacy filter
+  parameters while still returning metadata fields.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+class UserUiPreference(Base, TimestampMixin):
+    gallery_show_generation_resource_group = mapped_column(Boolean, default=True)
+```
+
+Correct:
+
+```python
+class Settings(BaseSettings):
+    gallery_show_generation_resource_group: bool = True
+```
+
+```python
+ConfigDefinition(
+    key="gallery_show_generation_resource_group",
+    label="画廊展示生成分组",
+    category="界面与外观",
+    input_type="boolean",
+)
+```
+
 ## Scenario: Provider profile and generation config pool
 
 ### 1. Scope / Trigger

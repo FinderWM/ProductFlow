@@ -14,10 +14,11 @@ interface HistoryBranchStripProps {
   branch: ImageHistoryBranch;
   selectedGeneratedAssetId: string | null;
   selectedTaskPlaceholderId: string | null;
-  branchBaseAssetId: string | null;
+  selectedBaseAssetIds: string[];
   variant?: "desktop" | "mobileDrawer";
   maskSensitiveImages: boolean;
   onSelectRound: (assetId: string) => void;
+  onAddRoundToBase?: (assetId: string) => void;
   onSelectPlaceholder: (placeholderId: string) => void;
   onPreviewPrompt: (preview: PromptPreview) => void;
   t: ImageChatTranslate;
@@ -27,10 +28,11 @@ export function HistoryBranchStrip({
   branch,
   selectedGeneratedAssetId,
   selectedTaskPlaceholderId,
-  branchBaseAssetId,
+  selectedBaseAssetIds,
   variant = "desktop",
   maskSensitiveImages,
   onSelectRound,
+  onAddRoundToBase,
   onSelectPlaceholder,
   onPreviewPrompt,
   t,
@@ -59,10 +61,11 @@ export function HistoryBranchStrip({
               candidate={candidate}
               selectedGeneratedAssetId={selectedGeneratedAssetId}
               selectedTaskPlaceholderId={selectedTaskPlaceholderId}
-              branchBaseAssetId={branchBaseAssetId}
+              selectedBaseAssetIds={selectedBaseAssetIds}
               variant="mobileDrawer"
               maskSensitiveImages={maskSensitiveImages}
               onSelectRound={onSelectRound}
+              onAddRoundToBase={onAddRoundToBase}
               onSelectPlaceholder={onSelectPlaceholder}
               t={t}
             />
@@ -112,10 +115,11 @@ export function HistoryBranchStrip({
             candidate={candidate}
             selectedGeneratedAssetId={selectedGeneratedAssetId}
             selectedTaskPlaceholderId={selectedTaskPlaceholderId}
-            branchBaseAssetId={branchBaseAssetId}
+            selectedBaseAssetIds={selectedBaseAssetIds}
             variant={variant}
             maskSensitiveImages={maskSensitiveImages}
             onSelectRound={onSelectRound}
+            onAddRoundToBase={onAddRoundToBase}
             onSelectPlaceholder={onSelectPlaceholder}
             t={t}
           />
@@ -129,10 +133,11 @@ interface HistoryCandidateCardProps {
   candidate: ImageHistoryCandidate;
   selectedGeneratedAssetId: string | null;
   selectedTaskPlaceholderId: string | null;
-  branchBaseAssetId: string | null;
+  selectedBaseAssetIds: string[];
   variant?: "desktop" | "mobileDrawer";
   maskSensitiveImages: boolean;
   onSelectRound: (assetId: string) => void;
+  onAddRoundToBase?: (assetId: string) => void;
   onSelectPlaceholder: (placeholderId: string) => void;
   t: ImageChatTranslate;
 }
@@ -141,10 +146,11 @@ function HistoryCandidateCard({
   candidate,
   selectedGeneratedAssetId,
   selectedTaskPlaceholderId,
-  branchBaseAssetId,
+  selectedBaseAssetIds,
   variant = "desktop",
   maskSensitiveImages,
   onSelectRound,
+  onAddRoundToBase,
   onSelectPlaceholder,
   t,
 }: HistoryCandidateCardProps) {
@@ -191,13 +197,18 @@ function HistoryCandidateCard({
 
   const round = candidate.round;
   const active = round.generated_asset.id === selectedGeneratedAssetId;
-  const asBase = round.generated_asset.id === branchBaseAssetId;
+  const asBase = selectedBaseAssetIds.includes(round.generated_asset.id);
   const imageMasked = shouldMaskSensitiveImage(maskSensitiveImages, round.resource_group);
   const candidateLabel =
     round.candidate_count > 1 ? `${round.candidate_index}/${round.candidate_count}` : imageRoundSizeLabel(round, t);
   return (
     <div className={`${cardClassName(active, asBase)} ${asBase ? "" : "shadow-sm shadow-slate-200/60 dark:shadow-slate-950/30"}`}>
-      <button type="button" onClick={() => onSelectRound(round.generated_asset.id)} className="block h-full w-full text-left">
+      <button
+        type="button"
+        onClick={() => onSelectRound(round.generated_asset.id)}
+        onDoubleClick={() => onAddRoundToBase?.(round.generated_asset.id)}
+        className="block h-full w-full text-left"
+      >
         <img
           src={api.toApiUrl(round.generated_asset.thumbnail_url)}
           alt={variant === "mobileDrawer" ? candidateLabel : round.prompt}

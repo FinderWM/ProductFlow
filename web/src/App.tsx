@@ -65,8 +65,8 @@ const TemplateManagementPage = lazy(() =>
 const UsageStatsPage = lazy(() =>
   import("./pages/UsageStatsPage").then((module) => ({ default: module.UsageStatsPage })),
 );
-const WorkspaceInspirationsPage = lazy(() =>
-  import("./pages/workspace/WorkspaceLandingPages").then((module) => ({ default: module.WorkspaceInspirationsPage })),
+const WorkspaceHomePage = lazy(() =>
+  import("./pages/workspace/WorkspaceLandingPages").then((module) => ({ default: module.WorkspaceHomePage })),
 );
 const WorkspaceImageChatPage = lazy(() =>
   import("./pages/workspace/WorkspaceLandingPages").then((module) => ({ default: module.WorkspaceImageChatPage })),
@@ -191,7 +191,7 @@ function AppRoutes() {
                   path="/inspirations"
                   element={menuRoute(
                     "inspirations",
-                    <LayoutSchemeRoute classic={<InspirationListPage />} workspace={<WorkspaceInspirationsPage />} />,
+                    <LayoutSchemeRoute classic={<InspirationListPage />} workspace={<WorkspaceHomePage />} />,
                   )}
                 />
                 <Route path="/inspirations/list" element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />

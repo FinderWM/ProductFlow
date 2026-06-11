@@ -3,7 +3,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
-from inspiration_one_backend.application.auth import require_generation_resource_group_for_user
 from inspiration_one_backend.application.gallery import list_gallery_entries, save_generated_asset_to_gallery
 from inspiration_one_backend.domain.rbac import API_GALLERY_READ, API_GALLERY_WRITE
 from inspiration_one_backend.infrastructure.db.models import AuthUser
@@ -29,18 +28,8 @@ def list_gallery_entries_endpoint(
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_GALLERY_READ)),
 ) -> GalleryEntryListResponse:
-    normalized_group_id = (resource_group_id or "").strip() or None
-    if normalized_group_id is not None:
-        resource_group = require_generation_resource_group_for_user(
-            session,
-            user_id=current_user.id,
-            is_admin=current_user.is_admin,
-            resource_group_id=normalized_group_id,
-        )
-        normalized_group_id = resource_group.id
     result = list_gallery_entries(
         session,
-        resource_group_id=normalized_group_id,
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
         limit=limit,
@@ -48,6 +37,7 @@ def list_gallery_entries_endpoint(
     )
     return GalleryEntryListResponse(
         items=[serialize_gallery_entry(item) for item in result.items],
+        total=result.total,
         has_more=result.has_more,
         next_offset=result.next_offset,
     )

@@ -43,6 +43,7 @@ from inspiration_one_backend.application.inspiration_workflow.user_templates imp
     extract_reusable_node_config,
     get_canvas_template,
 )
+from inspiration_one_backend.application.task_notifications import publish_workflow_run_notification_safely
 from inspiration_one_backend.application.time import now_utc
 from inspiration_one_backend.application.use_cases import update_copy_set
 from inspiration_one_backend.domain.durable_generation_tasks import WORKFLOW_RUN_GENERATION_TASK_CONTRACT
@@ -854,13 +855,17 @@ def apply_tail_split_plan(
         reuse_public_copy_node=reuse_public_copy_node,
         reuse_public_reference_node=reuse_public_reference_node,
     )
-    _resolve_tail_confirmation_runs_after_apply(
+    completed_run_ids = _resolve_tail_confirmation_runs_after_apply(
         session,
         workflow_id=applied.workflow.id,
         tail_node_id=node.id,
         plan_id=plan_id,
     )
     session.commit()
+    for run_id in completed_run_ids:
+        run = session.get(WorkflowRun, run_id)
+        if run is not None:
+            publish_workflow_run_notification_safely(run)
     session.expire_all()
     return inspiration_workflow_graph.get_workflow_or_raise(session, applied.workflow.id)
 
@@ -871,7 +876,7 @@ def _resolve_tail_confirmation_runs_after_apply(
     workflow_id: str,
     tail_node_id: str,
     plan_id: str,
-) -> None:
+) -> list[str]:
     runs = list(
         session.scalars(
             select(WorkflowRun)
@@ -882,7 +887,7 @@ def _resolve_tail_confirmation_runs_after_apply(
             )
         )
     )
-    resumed_run_ids: list[str] = []
+    completed_run_ids: list[str] = []
     for run in runs:
         if not workflow_run_is_user_active(run.status):
             continue
@@ -895,15 +900,16 @@ def _resolve_tail_confirmation_runs_after_apply(
             run.status = WorkflowRunStatus.RUNNING
             run.failure_reason = None
             run.finished_at = None
-            resumed_run_ids.append(run.id)
         elif run_has_pending_tail_confirmations(run):
             run.status = WorkflowRunStatus.WAITING_CONFIRMATION
         else:
             run.status = WorkflowRunStatus.SUCCEEDED
             run.failure_reason = None
             run.finished_at = now
+            completed_run_ids.append(run.id)
         run.workflow.updated_at = now
     session.flush()
+    return completed_run_ids
 
 
 def _run_has_queued_or_running_node_runs(run: WorkflowRun) -> bool:

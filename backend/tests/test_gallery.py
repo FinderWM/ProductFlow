@@ -49,11 +49,17 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     assert generated.status_code == 202
     first_round = generated.json()["rounds"][0]
     asset_id = first_round["generated_asset"]["id"]
+    assert first_round["generated_asset"]["gallery_saved"] is False
+    assert first_round["generated_asset"]["gallery_entry_id"] is None
+    asset_count_before_save = db_session.query(ImageSessionAsset).count()
 
     saved = client.post("/api/gallery", json={"image_session_asset_id": asset_id})
     assert saved.status_code == 201
     payload = saved.json()
     assert payload["image_session_asset_id"] == asset_id
+    assert payload["image"]["id"] == asset_id
+    assert payload["image"]["gallery_saved"] is True
+    assert payload["image"]["gallery_entry_id"] == payload["id"]
     assert payload["image_session_round_id"] == first_round["id"]
     assert payload["image_session_id"] == session_id
     assert payload["image_session_title"] == "画廊会话"
@@ -70,7 +76,14 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     saved_again = client.post("/api/gallery", json={"image_session_asset_id": asset_id})
     assert saved_again.status_code == 200
     assert saved_again.json()["id"] == payload["id"]
+    assert db_session.query(ImageSessionAsset).count() == asset_count_before_save
     assert db_session.query(ImageGalleryEntry).count() == 1
+
+    session_detail = client.get(f"/api/image-sessions/{session_id}")
+    assert session_detail.status_code == 200
+    session_round = next(item for item in session_detail.json()["rounds"] if item["generated_asset"]["id"] == asset_id)
+    assert session_round["generated_asset"]["gallery_saved"] is True
+    assert session_round["generated_asset"]["gallery_entry_id"] == payload["id"]
 
     listed = client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert listed.status_code == 200
@@ -80,7 +93,10 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     assert items[0]["image"]["download_url"].startswith("/api/image-session-assets/")
 
 
-def test_gallery_list_filters_by_selected_resource_group(configured_env: Path, db_session) -> None:
+def test_gallery_list_ignores_resource_group_filter_and_keeps_group_metadata(
+    configured_env: Path,
+    db_session,
+) -> None:
     app = create_app()
     client = TestClient(app)
     _login(client)
@@ -146,13 +162,13 @@ def test_gallery_list_filters_by_selected_resource_group(configured_env: Path, d
 
     default_list = client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert default_list.status_code == 200
-    assert {item["id"] for item in default_list.json()["items"]} == {default_entry.id}
-    assert default_list.json()["items"][0]["resource_group"]["key"] == "default"
+    assert {item["id"] for item in default_list.json()["items"]} == {default_entry.id, premium_entry.id}
+    assert {item["resource_group"]["key"] for item in default_list.json()["items"]} == {"default", "premium-gallery"}
 
     premium_list = client.get("/api/gallery", params={"resource_group_id": premium_group.id})
     assert premium_list.status_code == 200
-    assert {item["id"] for item in premium_list.json()["items"]} == {premium_entry.id}
-    assert premium_list.json()["items"][0]["resource_group"]["key"] == "premium-gallery"
+    assert {item["id"] for item in premium_list.json()["items"]} == {default_entry.id, premium_entry.id}
+    assert {item["resource_group"]["key"] for item in premium_list.json()["items"]} == {"default", "premium-gallery"}
 
     all_list = client.get("/api/gallery")
     assert all_list.status_code == 200
@@ -209,6 +225,7 @@ def test_gallery_list_supports_limit_offset(configured_env: Path, db_session) ->
     assert first_page.status_code == 200
     first_payload = first_page.json()
     assert [item["id"] for item in first_payload["items"]] == [entries[2].id, entries[1].id]
+    assert first_payload["total"] == 3
     assert first_payload["has_more"] is True
     assert first_payload["next_offset"] == 2
 
@@ -216,11 +233,12 @@ def test_gallery_list_supports_limit_offset(configured_env: Path, db_session) ->
     assert second_page.status_code == 200
     second_payload = second_page.json()
     assert [item["id"] for item in second_payload["items"]] == [entries[0].id]
+    assert second_payload["total"] == 3
     assert second_payload["has_more"] is False
     assert second_payload["next_offset"] is None
 
 
-def test_gallery_list_rejects_ungranted_resource_group_for_member(configured_env: Path) -> None:
+def test_gallery_list_ignores_ungranted_resource_group_for_member(configured_env: Path) -> None:
     app = create_app()
     admin_client = TestClient(app)
     _login(admin_client)
@@ -247,9 +265,9 @@ def test_gallery_list_rejects_ungranted_resource_group_for_member(configured_env
     )
     assert set_password.status_code == 200
 
-    rejected = user_client.get("/api/gallery", params={"resource_group_id": created_group.json()["id"]})
-    assert rejected.status_code == 400
-    assert rejected.json()["detail"] == "账号未授权使用该供应商生成分组"
+    listed = user_client.get("/api/gallery", params={"resource_group_id": created_group.json()["id"]})
+    assert listed.status_code == 200
+    assert listed.json()["items"] == []
 
 
 def test_gallery_rejects_non_generated_session_assets(configured_env: Path) -> None:

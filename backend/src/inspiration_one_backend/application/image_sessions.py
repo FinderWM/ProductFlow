@@ -44,6 +44,9 @@ from inspiration_one_backend.application.image_session_generation_request import
 from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
 from inspiration_one_backend.application.queue_submission import enqueue_or_mark_failed
+from inspiration_one_backend.application.task_notifications import (
+    publish_image_session_generation_task_notification_safely,
+)
 from inspiration_one_backend.application.time import now_utc
 from inspiration_one_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
@@ -149,6 +152,10 @@ def _image_session_query():
         .options(
             selectinload(ImageSession.assets),
             selectinload(ImageSession.rounds).selectinload(ImageSessionRound.generated_asset),
+            selectinload(ImageSession.rounds)
+            .selectinload(ImageSessionRound.generated_asset)
+            .selectinload(ImageSessionAsset.gallery_entry),
+            selectinload(ImageSession.assets).selectinload(ImageSessionAsset.gallery_entry),
             selectinload(ImageSession.rounds).selectinload(ImageSessionRound.resource_group),
             selectinload(ImageSession.generation_tasks),
             selectinload(ImageSession.generation_tasks).selectinload(ImageSessionGenerationTask.resource_group),
@@ -699,6 +706,7 @@ def _execute_image_session_round_generation(
     image_session_id: str,
     prompt: str,
     size: str,
+    base_asset_ids: list[str] | None = None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
@@ -717,9 +725,15 @@ def _execute_image_session_round_generation(
     if generation_config_selection is None:
         raise BusinessValidationError("请选择供应商生成分组")
     normalized_tool_options = normalize_tool_options(tool_options)
-    normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
+    (
+        normalized_size,
+        normalized_base_asset_ids,
+        normalized_base_asset_id,
+        normalized_reference_ids,
+    ) = validate_generation_request(
         image_session,
         size=size,
+        base_asset_ids=base_asset_ids,
         base_asset_id=base_asset_id,
         selected_reference_asset_ids=selected_reference_asset_ids,
         generation_count=generation_count,
@@ -730,13 +744,15 @@ def _execute_image_session_round_generation(
         history,
         manual_references,
         previous_response_id,
+        _validated_base_asset_ids,
         _validated_base_asset_id,
         _validated_reference_ids,
     ) = build_branch_generation_context(
         image_session,
         storage,
+        base_asset_ids=normalized_base_asset_ids,
         base_asset_id=normalized_base_asset_id,
-        selected_reference_asset_ids=normalized_reference_ids,
+        selected_reference_asset_ids=[],
     )
 
     generation_group_id = generation_task.result_generation_group_id if generation_task else None
@@ -920,6 +936,7 @@ def _execute_image_session_round_generation(
                 generation_group_id=generation_group_id,
                 candidate_index=candidate_index,
                 candidate_count=generation_count,
+                base_asset_ids=normalized_base_asset_ids,
                 base_asset_id=normalized_base_asset_id,
                 selected_reference_asset_ids=normalized_reference_ids,
                 generated_asset_id=asset.id,
@@ -1016,7 +1033,8 @@ def _provider_manual_references_for_session_generation(
     manual_references: list[str],
     selected_reference_ids: list[str],
 ) -> list[str]:
-    if provider_kind == "openai_images" and not selected_reference_ids:
+    del selected_reference_ids
+    if provider_kind == "openai_images" and not manual_references:
         return []
     return manual_references
 
@@ -1028,6 +1046,7 @@ def generate_image_session_round(
     prompt: str,
     size: str,
     resource_group_id: str | None,
+    base_asset_ids: list[str] | None = None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
@@ -1042,6 +1061,7 @@ def generate_image_session_round(
         image_session_id=image_session_id,
         prompt=prompt,
         size=size,
+        base_asset_ids=base_asset_ids,
         base_asset_id=base_asset_id,
         selected_reference_asset_ids=selected_reference_asset_ids,
         generation_count=generation_count,
@@ -1062,6 +1082,7 @@ def create_image_session_generation_task(
     prompt: str,
     size: str,
     resource_group_id: str | None,
+    base_asset_ids: list[str] | None = None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
@@ -1096,9 +1117,15 @@ def create_image_session_generation_task(
         actor_user_id=actor_user_id,
         actor_is_admin=actor_is_admin,
     )
-    normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
+    (
+        normalized_size,
+        normalized_base_asset_ids,
+        normalized_base_asset_id,
+        normalized_reference_ids,
+    ) = validate_generation_request(
         image_session,
         size=size,
+        base_asset_ids=base_asset_ids,
         base_asset_id=base_asset_id,
         selected_reference_asset_ids=selected_reference_asset_ids,
         generation_count=generation_count,
@@ -1110,6 +1137,7 @@ def create_image_session_generation_task(
         status=JobStatus.QUEUED,
         prompt=prompt.strip(),
         size=normalized_size,
+        base_asset_ids=normalized_base_asset_ids,
         base_asset_id=normalized_base_asset_id,
         selected_reference_asset_ids=normalized_reference_ids,
         tool_options=normalized_tool_options,
@@ -1137,6 +1165,7 @@ def _reset_latest_failed_image_session_generation_task_from_submit(
     prompt: str,
     size: str,
     resource_group_id: str | None,
+    base_asset_ids: list[str] | None = None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
@@ -1180,9 +1209,15 @@ def _reset_latest_failed_image_session_generation_task_from_submit(
         actor_user_id=actor_user_id,
         actor_is_admin=actor_is_admin,
     )
-    normalized_size, normalized_base_asset_id, normalized_reference_ids = validate_generation_request(
+    (
+        normalized_size,
+        normalized_base_asset_ids,
+        normalized_base_asset_id,
+        normalized_reference_ids,
+    ) = validate_generation_request(
         image_session,
         size=size,
+        base_asset_ids=base_asset_ids,
         base_asset_id=base_asset_id,
         selected_reference_asset_ids=selected_reference_asset_ids,
         generation_count=generation_count,
@@ -1191,6 +1226,7 @@ def _reset_latest_failed_image_session_generation_task_from_submit(
     )
     task.prompt = prompt.strip()
     task.size = normalized_size
+    task.base_asset_ids = normalized_base_asset_ids
     task.base_asset_id = normalized_base_asset_id
     task.selected_reference_asset_ids = normalized_reference_ids
     task.tool_options = normalized_tool_options
@@ -1220,6 +1256,7 @@ def submit_image_session_generation_task(
     prompt: str,
     size: str,
     resource_group_id: str | None,
+    base_asset_ids: list[str] | None = None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
     generation_count: int = 1,
@@ -1238,6 +1275,7 @@ def submit_image_session_generation_task(
             retry_generation_task_id=retry_generation_task_id,
             prompt=prompt,
             size=size,
+            base_asset_ids=base_asset_ids,
             base_asset_id=base_asset_id,
             selected_reference_asset_ids=selected_reference_asset_ids,
             generation_count=generation_count,
@@ -1254,6 +1292,7 @@ def submit_image_session_generation_task(
             image_session_id=image_session_id,
             prompt=prompt,
             size=size,
+            base_asset_ids=base_asset_ids,
             base_asset_id=base_asset_id,
             selected_reference_asset_ids=selected_reference_asset_ids,
             generation_count=generation_count,
@@ -1414,6 +1453,7 @@ def mark_image_session_generation_task_enqueue_failed(session: Session, *, task_
     task.is_retryable = True
     _touch_image_session_if_present(session, task.session_id, now=now)
     session.commit()
+    publish_image_session_generation_task_notification_safely(task)
 
 
 def _touch_image_session_if_present(
@@ -1487,6 +1527,7 @@ def _finish_image_generation_task(
         task.progress_phase = "failed"
     _touch_image_session_if_present(session, task.session_id, now=now)
     session.commit()
+    publish_image_session_generation_task_notification_safely(task)
 
 
 def _update_image_generation_task_progress(
@@ -1791,6 +1832,7 @@ def execute_image_session_generation_task(task_id: str) -> None:
                 image_session_id=task.session_id,
                 prompt=task.prompt,
                 size=task.size,
+                base_asset_ids=task.base_asset_ids or [],
                 base_asset_id=task.base_asset_id,
                 selected_reference_asset_ids=task.selected_reference_asset_ids or [],
                 generation_count=task.generation_count,

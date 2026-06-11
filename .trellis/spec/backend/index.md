@@ -21,6 +21,7 @@ These files document the backend conventions that are actually present in this r
 | [Error Handling](./error-handling.md) | ValueError-to-HTTP mapping, upload errors, auth, queue/provider boundaries | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Ruff/pytest tooling, tests, required/forbidden backend patterns | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Current minimal logging reality and safe logging extension rules | Filled |
+| [Realtime Task Notifications](./realtime-task-notifications.md) | WebSocket + Redis pub/sub task-result notification contract | Filled |
 
 ---
 
@@ -34,6 +35,7 @@ Before backend changes, read:
    - database/schema/config: `./database-guidelines.md`
    - API/business failures/uploads: `./error-handling.md`
    - observability/logging: `./logging-guidelines.md`
+   - realtime task-result notifications: `./realtime-task-notifications.md`
    - inspiration workbench DAG: `./inspiration-workflow-dag.md`
 
 If a backend change affects frontend API contracts, also read `../frontend/type-safety.md` and

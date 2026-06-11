@@ -959,7 +959,7 @@ def restore_user_canvas_template(
 def _parse_legacy_template_payload(row: UserCanvasTemplate) -> UserCanvasTemplatePayload:
     if row.kind not in {"full_canvas", "node_group"} or row.schema_version != USER_TEMPLATE_SCHEMA_VERSION:
         raise BusinessValidationError("用户模板版本不支持")
-    payload = UserCanvasTemplatePayload.model_validate(row.template_json)
+    payload = UserCanvasTemplatePayload.model_validate(dict(row.template_json or {}))
     if payload.version != USER_TEMPLATE_SCHEMA_VERSION or payload.kind not in {"full_canvas", "node_group"}:
         raise BusinessValidationError("用户模板版本不支持")
     return payload

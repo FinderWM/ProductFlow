@@ -40,6 +40,12 @@ from inspiration_one_backend.presentation.routes.rbac import router as rbac_rout
 from inspiration_one_backend.presentation.routes.resource_library import router as resource_library_router
 from inspiration_one_backend.presentation.routes.resource_moderation import router as resource_moderation_router
 from inspiration_one_backend.presentation.routes.settings import router as settings_router
+from inspiration_one_backend.presentation.routes.task_notifications import (
+    router as task_notifications_router,
+)
+from inspiration_one_backend.presentation.routes.task_notifications import (
+    start_task_notification_listener,
+)
 from inspiration_one_backend.presentation.routes.usage_stats import router as usage_stats_router
 from inspiration_one_backend.presentation.session import ClockStableSessionMiddleware
 
@@ -62,7 +68,11 @@ def create_app() -> FastAPI:
             ensure_provider_config_bootstrapped()
         recover_unfinished_workflow_runs()
         recover_unfinished_image_session_generation_tasks()
-        yield
+        task_notification_listener = start_task_notification_listener()
+        try:
+            yield
+        finally:
+            await task_notification_listener.stop()
 
     app = FastAPI(title="Inspiration One API", version="0.1.0", lifespan=lifespan)
     register_exception_handlers(app)
@@ -97,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
     app.include_router(rbac_router)
     app.include_router(usage_stats_router)
+    app.include_router(task_notifications_router)
     return app
 
 

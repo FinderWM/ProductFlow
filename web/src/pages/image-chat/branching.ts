@@ -2,6 +2,7 @@ import type {
   ImageSessionDetail,
   ImageSessionGenerationTask,
   ImageSessionRound,
+  ImageSessionSummary,
   ImageSessionStatus,
   ImageToolOptions,
   GenerationConfigSelectionMode,
@@ -12,6 +13,7 @@ export { compactImageToolOptions, pruneSelectedReferenceIds };
 
 export interface ImageRoundGroup {
   id: string;
+  base_asset_ids: string[];
   base_asset_id: string | null;
   prompt: string;
   rounds: ImageSessionRound[];
@@ -29,6 +31,7 @@ export interface ImageHistoryRoundCandidate {
   round: ImageSessionRound;
   prompt: string;
   size: string;
+  base_asset_ids: string[];
   base_asset_id: string | null;
   provider_notes: string[];
   failure_reason: null;
@@ -47,6 +50,7 @@ export interface ImageHistoryPlaceholderCandidate {
   task: ImageSessionGenerationTask;
   prompt: string;
   size: string;
+  base_asset_ids: string[];
   base_asset_id: string | null;
   provider_notes: string[];
   failure_reason: string | null;
@@ -57,6 +61,7 @@ export type ImageHistoryCandidate = ImageHistoryRoundCandidate | ImageHistoryPla
 
 export interface ImageHistoryBranch {
   id: string;
+  base_asset_ids: string[];
   base_asset_id: string | null;
   parent_group_id: string | null;
   depth: number;
@@ -70,6 +75,7 @@ export interface ImageGenerationSubmitPayload {
   prompt: string;
   resource_group_id: string;
   size: string;
+  base_asset_ids: string[];
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
   generation_count: number;
@@ -93,6 +99,13 @@ export interface ImageGenerationRetryMetadata {
   max_attempts?: number;
 }
 
+export interface ImageChatSessionFilterRouteState {
+  selectedSessionId: string | null;
+  selectedSessionResourceGroupId: string | null;
+  selectedSessionOwnerUserId: string;
+  onlyDeletedSessions: boolean;
+}
+
 export type LatestImageSessionGenerationState =
   | { status: "empty"; round: null; task: null }
   | { status: "active"; round: null; task: ImageSessionGenerationTask }
@@ -104,8 +117,7 @@ export type LatestImageSessionGenerationState =
 export interface ImageSessionSelectionState {
   selectedGeneratedAssetId: string | null;
   selectedTaskPlaceholderId: string | null;
-  branchBaseAssetId: string | null;
-  selectedReferenceAssetIds: string[];
+  selectedBaseAssetIds: string[];
   pendingGeneratedRoundCount: number | null;
 }
 
@@ -113,8 +125,8 @@ export interface ImageSessionSelectionReconciliationInput extends ImageSessionSe
   rounds: ImageSessionRound[];
   generationTasks: ImageSessionGenerationTask[];
   historyBranches: ImageHistoryBranch[];
-  availableReferenceAssetIds: string[];
-  maxSelectedReferenceCount: number;
+  availableBaseAssetIds: string[];
+  maxSelectedBaseCount: number;
 }
 
 export interface ImageSessionSelectionReconciliation extends ImageSessionSelectionState {
@@ -123,6 +135,81 @@ export interface ImageSessionSelectionReconciliation extends ImageSessionSelecti
 
 const IMAGE_CHAT_GENERATION_COUNT_MAX = 10;
 const IMAGE_CHAT_TASK_CANDIDATE_COUNT_MAX = 10;
+
+export function imageChatSessionFilterRouteStateFromSearchParams(
+  searchParams: URLSearchParams,
+): ImageChatSessionFilterRouteState | null {
+  const hasSessionResourceGroup = searchParams.has("resource_group_id");
+  const hasSessionOwner = searchParams.has("owner_user_id");
+  const hasSelectedSession = searchParams.has("session_id");
+  const hasOnlyDeleted = searchParams.has("only_deleted");
+  if (!hasSessionResourceGroup && !hasSessionOwner && !hasSelectedSession && !hasOnlyDeleted) {
+    return null;
+  }
+  return {
+    selectedSessionId: hasSelectedSession ? (searchParams.get("session_id") ?? "").trim() || null : null,
+    selectedSessionResourceGroupId: hasSessionResourceGroup
+      ? (searchParams.get("resource_group_id") ?? "").trim()
+      : null,
+    selectedSessionOwnerUserId: hasSessionOwner ? (searchParams.get("owner_user_id") ?? "").trim() : "",
+    onlyDeletedSessions: hasOnlyDeleted && searchParams.get("only_deleted") === "true",
+  };
+}
+
+export function imageSessionNewRoundDefaultResourceGroupId({
+  sessionSummary,
+  imageSession,
+}: {
+  sessionSummary?: Pick<ImageSessionSummary, "latest_resource_group_id"> | null;
+  imageSession?: Pick<ImageSessionDetail, "rounds" | "generation_tasks"> | null;
+}): string | null {
+  return (
+    sessionSummary?.latest_resource_group_id ||
+    imageSession?.generation_tasks.find((task) => task.resource_group_id)?.resource_group_id ||
+    imageSession?.rounds.at(-1)?.resource_group_id ||
+    null
+  );
+}
+
+export function uniqueImageAssetIds(ids: readonly (string | null | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const id of ids) {
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    values.push(id);
+  }
+  return values;
+}
+
+export function addImageBaseAssetIds(
+  currentIds: readonly string[],
+  idsToAdd: readonly (string | null | undefined)[],
+  maxCount: number,
+): string[] {
+  return uniqueImageAssetIds([...currentIds, ...idsToAdd]).slice(0, maxCount);
+}
+
+export function removeImageBaseAssetId(currentIds: readonly string[], assetId: string): string[] {
+  return currentIds.filter((id) => id !== assetId);
+}
+
+export function imageGenerationBaseAssetIds(
+  source: Pick<
+    ImageSessionRound | ImageSessionGenerationTask,
+    "base_asset_ids" | "base_asset_id" | "selected_reference_asset_ids"
+  >,
+): string[] {
+  return source.base_asset_ids?.length
+    ? uniqueImageAssetIds(source.base_asset_ids)
+    : uniqueImageAssetIds([source.base_asset_id, ...source.selected_reference_asset_ids]);
+}
+
+export function legacyBaseAssetIdFromBaseAssetIds(baseAssetIds: readonly string[]): string | null {
+  return baseAssetIds[0] ?? null;
+}
 
 export function groupImageSessionRounds(rounds: ImageSessionRound[]): ImageRoundGroup[] {
   const groups = new Map<string, ImageRoundGroup>();
@@ -135,6 +222,7 @@ export function groupImageSessionRounds(rounds: ImageSessionRound[]): ImageRound
     }
     groups.set(groupId, {
       id: groupId,
+      base_asset_ids: imageGenerationBaseAssetIds(round),
       base_asset_id: round.base_asset_id,
       prompt: round.prompt,
       rounds: [round],
@@ -171,6 +259,7 @@ function taskMatchesSubmitPayload(task: ImageSessionGenerationTask, payload: Ima
     buildImageGenerationSubmitSignature({
       prompt: task.prompt,
       size: task.size,
+      base_asset_ids: imageGenerationBaseAssetIds(task),
       base_asset_id: task.base_asset_id,
       selected_reference_asset_ids: task.selected_reference_asset_ids,
       generation_count: task.generation_count,
@@ -195,6 +284,7 @@ export function imageGenerationTaskSubmitPayload(task: ImageSessionGenerationTas
   return {
     prompt: task.prompt,
     size: task.size,
+    base_asset_ids: imageGenerationBaseAssetIds(task),
     base_asset_id: task.base_asset_id,
     selected_reference_asset_ids: task.selected_reference_asset_ids,
     generation_count: clampGenerationCount(task.generation_count),
@@ -252,25 +342,6 @@ function sortCandidates(left: ImageHistoryCandidate, right: ImageHistoryCandidat
   return left.kind === "round" ? -1 : 1;
 }
 
-function calculateBranchDepth(
-  branchId: string,
-  branchesById: Map<
-    string,
-    Omit<ImageHistoryBranch, "depth" | "branch_index" | "candidates"> & { candidates: ImageHistoryCandidate[] }
-  >,
-  seen = new Set<string>(),
-): number {
-  if (seen.has(branchId)) {
-    return 0;
-  }
-  seen.add(branchId);
-  const branch = branchesById.get(branchId);
-  if (!branch?.parent_group_id) {
-    return 0;
-  }
-  return calculateBranchDepth(branch.parent_group_id, branchesById, seen) + 1;
-}
-
 function sortBranches(branches: ImageHistoryBranch[]): ImageHistoryBranch[] {
   const childrenByParent = new Map<string | null, ImageHistoryBranch[]>();
   for (const branch of branches) {
@@ -310,10 +381,9 @@ export function buildImageSessionHistoryTree(
     string,
     Omit<ImageHistoryBranch, "depth" | "branch_index" | "candidates"> & { candidates: ImageHistoryCandidate[] }
   >();
-  const assetGroupByAssetId = new Map<string, string>();
-
   const ensureBranch = (input: {
     id: string;
+    base_asset_ids: string[];
     base_asset_id: string | null;
     prompt: string;
     created_at: string;
@@ -322,11 +392,11 @@ export function buildImageSessionHistoryTree(
     if (existing) {
       return existing;
     }
-    const parentGroupId = input.base_asset_id ? (assetGroupByAssetId.get(input.base_asset_id) ?? null) : null;
     const branch = {
       id: input.id,
+      base_asset_ids: input.base_asset_ids,
       base_asset_id: input.base_asset_id,
-      parent_group_id: parentGroupId,
+      parent_group_id: null,
       prompt: input.prompt,
       created_at: input.created_at,
       candidates: [],
@@ -339,6 +409,7 @@ export function buildImageSessionHistoryTree(
     const groupId = getRoundGroupId(round);
     const branch = ensureBranch({
       id: groupId,
+      base_asset_ids: imageGenerationBaseAssetIds(round),
       base_asset_id: round.base_asset_id,
       prompt: round.prompt,
       created_at: round.created_at,
@@ -353,12 +424,12 @@ export function buildImageSessionHistoryTree(
       round,
       prompt: round.prompt,
       size: round.size,
+      base_asset_ids: imageGenerationBaseAssetIds(round),
       base_asset_id: round.base_asset_id,
       provider_notes: round.provider_notes,
       failure_reason: null,
       created_at: round.created_at,
     });
-    assetGroupByAssetId.set(round.generated_asset.id, groupId);
   }
 
   for (const task of [...tasks].sort((left, right) => compareCreatedAt(left.created_at, right.created_at))) {
@@ -368,6 +439,7 @@ export function buildImageSessionHistoryTree(
     const groupId = getTaskGroupId(task);
     const branch = ensureBranch({
       id: groupId,
+      base_asset_ids: imageGenerationBaseAssetIds(task),
       base_asset_id: task.base_asset_id,
       prompt: task.prompt,
       created_at: task.created_at,
@@ -394,6 +466,7 @@ export function buildImageSessionHistoryTree(
         task,
         prompt: task.prompt,
         size: task.size,
+        base_asset_ids: imageGenerationBaseAssetIds(task),
         base_asset_id: task.base_asset_id,
         provider_notes: task.provider_notes,
         failure_reason: task.failure_reason,
@@ -405,14 +478,14 @@ export function buildImageSessionHistoryTree(
   const branches = [...branchesById.entries()].map(([id, branch]) => ({
     ...branch,
     id,
-    depth: calculateBranchDepth(id, branchesById),
+    depth: 0,
     branch_index: null,
     candidates: [...branch.candidates].sort(sortCandidates),
   }));
   let nextBranchIndex = 1;
   return sortBranches(branches).map((branch, index) => ({
     ...branch,
-    branch_index: branch.base_asset_id || index > 0 ? nextBranchIndex++ : null,
+    branch_index: index > 0 ? nextBranchIndex++ : null,
   }));
 }
 
@@ -420,10 +493,9 @@ export function requiresImageSessionGenerationBase(
   rounds: ImageSessionRound[],
   tasks: ImageSessionGenerationTask[],
 ): boolean {
-  return (
-    rounds.length > 0 ||
-    tasks.some((task) => task.status === "queued" || task.status === "running" || task.status === "succeeded")
-  );
+  void rounds;
+  void tasks;
+  return false;
 }
 
 export function findImageHistoryPlaceholder(
@@ -497,10 +569,9 @@ export function reconcileImageSessionSelection({
   historyBranches,
   selectedGeneratedAssetId,
   selectedTaskPlaceholderId,
-  branchBaseAssetId,
-  selectedReferenceAssetIds,
-  availableReferenceAssetIds,
-  maxSelectedReferenceCount,
+  selectedBaseAssetIds,
+  availableBaseAssetIds,
+  maxSelectedBaseCount,
   pendingGeneratedRoundCount,
 }: ImageSessionSelectionReconciliationInput): ImageSessionSelectionReconciliation {
   const roundAssetIds = generatedAssetIds(rounds);
@@ -516,7 +587,6 @@ export function reconcileImageSessionSelection({
 
   let nextSelectedGeneratedAssetId = selectedGeneratedAssetId;
   let nextSelectedTaskPlaceholderId = selectedTaskPlaceholderId;
-  let nextBranchBaseAssetId = branchBaseAssetId;
   let nextPendingGeneratedRoundCount = pendingGeneratedRoundCount;
   let generatedRoundCompleted = false;
 
@@ -530,14 +600,10 @@ export function reconcileImageSessionSelection({
     nextSelectedGeneratedAssetId = latestAssetId;
   }
 
-  if (nextBranchBaseAssetId && !roundAssetIds.has(nextBranchBaseAssetId)) {
-    nextBranchBaseAssetId = null;
-  }
-  const prunedReferenceAssetIds = pruneSelectedReferenceIds(
-    selectedReferenceAssetIds,
-    availableReferenceAssetIds,
-    maxSelectedReferenceCount,
-  );
+  const availableBaseAssetIdSet = new Set(availableBaseAssetIds);
+  const prunedBaseAssetIds = uniqueImageAssetIds(selectedBaseAssetIds)
+    .filter((assetId) => availableBaseAssetIdSet.has(assetId))
+    .slice(0, maxSelectedBaseCount);
 
   if (pendingGeneratedRoundCount !== null && rounds.length > pendingGeneratedRoundCount) {
     nextPendingGeneratedRoundCount = null;
@@ -553,10 +619,9 @@ export function reconcileImageSessionSelection({
   return {
     selectedGeneratedAssetId: nextSelectedGeneratedAssetId,
     selectedTaskPlaceholderId: nextSelectedTaskPlaceholderId,
-    branchBaseAssetId: nextBranchBaseAssetId,
-    selectedReferenceAssetIds: sameStringList(selectedReferenceAssetIds, prunedReferenceAssetIds)
-      ? selectedReferenceAssetIds
-      : prunedReferenceAssetIds,
+    selectedBaseAssetIds: sameStringList(selectedBaseAssetIds, prunedBaseAssetIds)
+      ? selectedBaseAssetIds
+      : prunedBaseAssetIds,
     pendingGeneratedRoundCount: nextPendingGeneratedRoundCount,
     generatedRoundCompleted,
   };
@@ -733,6 +798,7 @@ export function buildImageGenerationSubmitSignature(payload: ImageGenerationSubm
   return JSON.stringify({
     prompt: payload.prompt.trim(),
     size: payload.size,
+    base_asset_ids: payload.base_asset_ids,
     base_asset_id: payload.base_asset_id ?? null,
     selected_reference_asset_ids: payload.selected_reference_asset_ids,
     generation_count: effectiveImageGenerationSubmitCount(payload.generation_count, payload.tool_options),

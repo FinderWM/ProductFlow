@@ -13,6 +13,7 @@ from inspiration_one_backend.presentation.schemas.image_sessions import (
     ImageSessionAssetResponse,
     extract_actual_image_size,
     extract_provider_notes,
+    image_session_base_asset_ids,
     serialize_image_session_asset,
 )
 from inspiration_one_backend.presentation.schemas.moderation import (
@@ -49,6 +50,7 @@ class GalleryEntryResponse(ResourceModerationFields):
     resource_group: GenerationResourceGroupTagResponse
     candidate_index: int | None = None
     candidate_count: int | None = None
+    base_asset_ids: list[str]
     base_asset_id: str | None = None
     selected_reference_asset_ids: list[str]
     provider_notes: list[str]
@@ -57,6 +59,7 @@ class GalleryEntryResponse(ResourceModerationFields):
 
 class GalleryEntryListResponse(BaseModel):
     items: list[GalleryEntryResponse]
+    total: int = 0
     has_more: bool = False
     next_offset: int | None = None
 
@@ -77,7 +80,7 @@ def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:
         image_session_title=image_session.title,
         inspiration_id=image_session.inspiration_id,
         inspiration_name=inspiration.name if inspiration else None,
-        image=serialize_image_session_asset(entry.asset),
+        image=serialize_image_session_asset(entry.asset, gallery_entry_id=entry.id),
         prompt=round_item.prompt if round_item else None,
         size=round_item.size if round_item else None,
         actual_size=extract_actual_image_size(round_item.provider_output_json) if round_item else None,
@@ -94,6 +97,7 @@ def serialize_gallery_entry(entry: ImageGalleryEntry) -> GalleryEntryResponse:
         ),
         candidate_index=round_item.candidate_index if round_item else None,
         candidate_count=round_item.candidate_count if round_item else None,
+        base_asset_ids=image_session_base_asset_ids(round_item) if round_item else [],
         base_asset_id=round_item.base_asset_id if round_item else None,
         selected_reference_asset_ids=round_item.selected_reference_asset_ids or [] if round_item else [],
         provider_notes=extract_provider_notes(round_item.provider_output_json) if round_item else [],

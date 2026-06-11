@@ -1,27 +1,38 @@
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image as ImageIcon, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { ResourceBlockedNotice, ResourceMetaBadges } from "../components/ResourceGovernance";
-import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
-import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import type { GalleryEntry } from "../lib/types";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import { galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
 
-function metadataRows(entry: GalleryEntry, locale: ReturnType<typeof useI18n>["locale"], t: ReturnType<typeof useI18n>["t"]) {
+function metadataRows(
+  entry: GalleryEntry,
+  locale: ReturnType<typeof useI18n>["locale"],
+  t: ReturnType<typeof useI18n>["t"],
+  showGenerationResourceGroup: boolean,
+) {
   const rows = [
     ["gallery.meta.size", galleryEntrySizeLabel(entry, locale)],
     ["gallery.meta.model", [entry.provider_name, entry.model_name].filter(Boolean).join(" / ") || t("common.unknown")],
     ["gallery.meta.session", entry.image_session_title],
     ["gallery.meta.inspiration", entry.inspiration_name ?? t("gallery.global")],
-    ["gallery.meta.resourceGroup", entry.resource_group.name],
+  ] as Array<readonly [TranslationKey, string]>;
+  if (entry.owner_username) {
+    rows.push(["gallery.meta.owner", entry.owner_username]);
+  }
+  if (showGenerationResourceGroup) {
+    rows.push(["gallery.meta.resourceGroup", entry.resource_group.name]);
+  }
+  rows.push(
     [
       "gallery.meta.candidate",
       entry.candidate_index != null && entry.candidate_count != null
@@ -29,10 +40,7 @@ function metadataRows(entry: GalleryEntry, locale: ReturnType<typeof useI18n>["l
         : t("common.unknown"),
     ],
     ["gallery.meta.savedAt", formatDateTime(entry.created_at)],
-  ] as Array<readonly [TranslationKey, string]>;
-  if (entry.owner_username) {
-    rows.splice(4, 0, ["gallery.meta.owner", entry.owner_username]);
-  }
+  );
   return rows;
 }
 
@@ -40,68 +48,27 @@ interface GalleryPageProps {
   mode?: "auto" | "manage";
 }
 
-export function GalleryPage(props: GalleryPageProps = {}) {
-  void props.mode;
+export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
+  const { activeScheme } = useUiLayoutScheme();
   const { locale, t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [previewEntry, setPreviewEntry] = useState<GalleryEntry | null>(null);
-  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
   const [gridContentWidth, setGridContentWidth] = useState<number | null>(null);
   const [isDesktopGrid, setIsDesktopGrid] = useState(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
 
-  const resourceGroupsQuery = useQuery({
-    queryKey: ["my-generation-resource-groups"],
-    queryFn: api.listMyGenerationResourceGroups,
+  const runtimeConfigQuery = useQuery({
+    queryKey: ["runtime-config"],
+    queryFn: api.getRuntimeConfig,
   });
-  const resourceGroups = useMemo(
-    () => activeGenerationResourceGroupsInApiOrder(resourceGroupsQuery.data),
-    [resourceGroupsQuery.data],
-  );
+  const showGenerationResourceGroup = runtimeConfigQuery.data?.gallery_show_generation_resource_group ?? true;
   const galleryQuery = useQuery({
-    queryKey: ["gallery", selectedResourceGroupId],
-    queryFn: () => api.listGalleryEntries({ resource_group_id: selectedResourceGroupId || null }),
-    enabled: selectedResourceGroupId !== null,
+    queryKey: ["gallery"],
+    queryFn: () => api.listGalleryEntries(),
   });
   const entries = galleryQuery.data?.items ?? [];
-
-  useEffect(() => {
-    if (!resourceGroupsQuery.isFetched) {
-      return;
-    }
-    if (!resourceGroups.length) {
-      if (selectedResourceGroupId === null) {
-        setSelectedResourceGroupId("");
-      }
-      return;
-    }
-    if (selectedResourceGroupId === null || (selectedResourceGroupId && !resourceGroups.some((group) => group.id === selectedResourceGroupId))) {
-      setSelectedResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
-    }
-  }, [resourceGroups, resourceGroupsQuery.isFetched, selectedResourceGroupId]);
-
-  const resourceGroupFilter = (
-    <label className="block min-w-[220px]">
-      <span className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
-        {t("gallery.resourceGroupFilter")}
-      </span>
-      <SelectField
-        value={selectedResourceGroupId ?? ""}
-        options={[
-          {
-            value: "",
-            label: t("gallery.allResourceGroups"),
-          },
-          ...resourceGroups.map((group) => ({ value: group.id, label: group.name })),
-        ]}
-        onChange={setSelectedResourceGroupId}
-        ariaLabel={t("gallery.resourceGroupFilter")}
-        radius="lg"
-        visualSize="sm"
-      />
-    </label>
-  );
+  const galleryTotal = galleryQuery.data?.total ?? entries.length;
 
   useEffect(() => {
     const updateGridMetrics = () => {
@@ -148,7 +115,10 @@ export function GalleryPage(props: GalleryPageProps = {}) {
           <div>{previewEntry.prompt ?? t("gallery.noPrompt")}</div>
         </div>
       }
-      metadataRows={metadataRows(previewEntry, locale, t).map(([label, value]) => ({ label: t(label), value }))}
+      metadataRows={metadataRows(previewEntry, locale, t, showGenerationResourceGroup).map(([label, value]) => ({
+        label: t(label),
+        value,
+      }))}
       providerNotes={previewEntry.provider_notes}
       providerNotesTitle={t("gallery.providerNotes")}
       downloadUrl={previewEntry.image.download_url}
@@ -157,12 +127,15 @@ export function GalleryPage(props: GalleryPageProps = {}) {
       onClose={() => setPreviewEntry(null)}
     />
   ) : null;
+  const isWorkspaceManage = activeScheme === "workspace" && mode === "manage";
 
   return (
-    <div className="pf-app min-h-screen text-slate-950">
+    <div className={`${isWorkspaceManage ? "pf-workspace" : "pf-app"} min-h-screen text-slate-950`}>
       <TopNav breadcrumbs={t("gallery.title")} onHome={() => navigate("/inspirations")} onLogout={() => logoutMutation.mutate()} />
 
-      <main className="w-full">
+      <main className={isWorkspaceManage ? "pf-workspace-subpage flex-1" : "w-full"}>
+        <div className={isWorkspaceManage ? "pf-workspace-subpage-frame-shell" : "contents"}>
+          <div className={isWorkspaceManage ? "pf-workspace-subpage-frame" : "contents"}>
         {galleryQuery.isLoading ? (
           <div className="flex min-h-[calc(100svh-80px)] items-center justify-center bg-[#f3eadc] text-slate-500">
             <Loader2 size={28} className="animate-spin" />
@@ -173,6 +146,18 @@ export function GalleryPage(props: GalleryPageProps = {}) {
           </div>
         ) : entries.length ? (
           <>
+            {isWorkspaceManage ? (
+              <section className="pf-workspace-subpage-header flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div className="pf-eyebrow mb-2">{t("gallery.feed")}</div>
+                  <h1 className="text-2xl font-semibold tracking-tight">{t("gallery.title")}</h1>
+                  <p className="mt-2 max-w-3xl text-sm leading-6">{t("gallery.description")}</p>
+                </div>
+                <div className="flex flex-col gap-3 sm:items-end">
+                  <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{t("gallery.count", { count: galleryTotal })}</div>
+                </div>
+              </section>
+            ) : (
             <section className="relative isolate min-h-[420px] overflow-hidden bg-[#f4eddf] sm:min-h-[480px] lg:min-h-[460px]">
               <img
                 src="/hero.png"
@@ -211,18 +196,20 @@ export function GalleryPage(props: GalleryPageProps = {}) {
                 <div className="hidden lg:block" />
               </div>
             </section>
+            )}
 
-            <section className="pf-gallery-feed px-4 py-8 sm:px-6 lg:px-10">
+            <section className={isWorkspaceManage ? "pf-gallery-feed p-0" : "pf-gallery-feed px-4 py-8 sm:px-6 lg:px-10"}>
+              {!isWorkspaceManage ? (
               <div className="mx-auto mb-6 flex max-w-7xl flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <div className="text-xs font-bold uppercase text-indigo-300">{t("gallery.feed")}</div>
                   <h2 className="mt-2 text-2xl font-black text-white">{t("gallery.works")}</h2>
                 </div>
                 <div className="flex flex-col gap-3 sm:items-end">
-                  <div className="text-sm font-medium text-white/55">{t("gallery.count", { count: entries.length })}</div>
-                  {resourceGroupFilter}
+                  <div className="text-sm font-medium text-white/55">{t("gallery.count", { count: galleryTotal })}</div>
                 </div>
               </div>
+              ) : null}
 
               <div
                 ref={gridRef}
@@ -257,7 +244,7 @@ export function GalleryPage(props: GalleryPageProps = {}) {
                           </div>
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/70">
                             <span>{galleryEntrySizeLabel(entry, locale)}</span>
-                            <span>{entry.resource_group.name}</span>
+                            {showGenerationResourceGroup ? <span>{entry.resource_group.name}</span> : null}
                             <span>{formatDateTime(entry.created_at)}</span>
                           </div>
                           <ResourceMetaBadges resource={entry} className="mt-2" />
@@ -271,13 +258,14 @@ export function GalleryPage(props: GalleryPageProps = {}) {
             </section>
           </>
         ) : (
-          <div className="flex min-h-[calc(100svh-80px)] flex-col items-center justify-center bg-[#f3eadc] px-6 text-sm text-slate-600">
-            <div className="mb-8 w-full max-w-xs">{resourceGroupFilter}</div>
+          <div className={isWorkspaceManage ? "flex min-h-[420px] flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-600 dark:border-slate-700 dark:bg-[#0f1726]" : "flex min-h-[calc(100svh-80px)] flex-col items-center justify-center bg-[#f3eadc] px-6 text-sm text-slate-600"}>
             <ImageIcon size={30} className="mb-4 text-indigo-500" />
-            <div className="text-5xl font-black text-slate-950">{t("gallery.title")}</div>
+            <div className={isWorkspaceManage ? "text-2xl font-semibold text-slate-950 dark:text-white" : "text-5xl font-black text-slate-950"}>{t("gallery.title")}</div>
             <div className="mt-4 text-center">{t("gallery.empty")}</div>
           </div>
         )}
+          </div>
+        </div>
       </main>
 
       {previewDialog}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowRight, Download, Eye, Loader2, Pencil, Plus, Save, Trees } from "lucide-react";
+import { Archive, Download, Eye, Loader2, Pencil, Plus, Save, Trees } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -13,6 +13,13 @@ import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup, ResourceLibrarySourceType } from "../lib/types";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
+import {
+  WorkspaceErrorState,
+  WorkspaceHandoffButton,
+  WorkspaceLatestItem,
+  WorkspaceLoadingState,
+  WorkspacePageFrame,
+} from "./workspace/WorkspaceLandingPages";
 
 type PendingArchive =
   | { kind: "asset"; id: string; name: string }
@@ -60,13 +67,6 @@ function resourceLibrarySourceLabelKey(sourceType: ResourceLibrarySourceType): T
 function ResourceLibraryWorkspaceLanding() {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const logoutMutation = useMutation({
-    mutationFn: api.destroySession,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["session"] });
-    },
-  });
   const groupsQuery = useQuery({
     queryKey: ["resource-library-groups"],
     queryFn: api.listResourceLibraryGroups,
@@ -106,166 +106,79 @@ function ResourceLibraryWorkspaceLanding() {
     [assets],
   );
 
+  const groupSummaryDetail = groupAssetCounts.length
+    ? groupAssetCounts
+        .slice(0, 2)
+        .map(({ group, count }) => `${group.name} ${count}`)
+        .join(" / ")
+    : t("resourceLibrary.noGroups");
+  const sourceSummaryDetail = sourceCounts
+    .filter((item) => item.count > 0)
+    .slice(0, 2)
+    .map((item) => `${t(resourceLibrarySourceLabelKey(item.sourceType))} ${item.count}`)
+    .join(" / ");
   const openManagePage = () => navigate("/resource-library/manage");
 
   return (
-    <div className="pf-workspace min-h-screen">
-      <TopNav
-        breadcrumbs={t("resourceLibrary.title")}
-        onHome={() => navigate("/inspirations")}
-        onLogout={() => logoutMutation.mutate()}
-      />
-      <main className="mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-6 lg:px-8">
-        <section className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="pf-workspace-card rounded-lg px-5 py-5">
-            <div className="pf-workspace-accent flex items-center gap-2 text-sm font-semibold">
-              <Trees size={18} />
-              <span>{t("resourceLibrary.title")}</span>
-            </div>
-            <h1 className="pf-workspace-title mt-3 text-2xl font-semibold tracking-normal">
-              {t("resourceLibrary.landingTitle")}
-            </h1>
-            <p className="pf-workspace-copy mt-2 max-w-2xl text-sm leading-6">
-              {t("resourceLibrary.landingSubtitle")}
-            </p>
+    <WorkspacePageFrame
+      eyebrow={t("resourceLibrary.title")}
+      title={t("resourceLibrary.title")}
+      description={t("resourceLibrary.landingSubtitle")}
+    >
+      <div className="pf-workspace-menu-landing">
+        <section className="pf-workspace-menu-summary">
+          <span className="pf-workspace-eyebrow">{t("resourceLibrary.latestResources")}</span>
+
+          <div className="pf-workspace-latest-list">
+            {failed ? (
+              <WorkspaceErrorState message={t("resourceLibrary.loadFailed")} />
+            ) : loading ? (
+              <WorkspaceLoadingState label={t("resourceLibrary.loading")} />
+            ) : latestAssets.length ? (
+              latestAssets.map((asset) => (
+                <WorkspaceLatestItem
+                  key={asset.id}
+                  title={asset.original_filename}
+                  detail={`${t(resourceLibrarySourceLabelKey(asset.source_type))} / ${formatDateTime(asset.created_at)}`}
+                  thumbnailUrl={asset.thumbnail_url}
+                  onOpen={openManagePage}
+                />
+              ))
+            ) : (
+              <WorkspaceLatestItem
+                title={t("resourceLibrary.empty")}
+                detail={t("resourceLibrary.landingSubtitle")}
+                icon={Trees}
+              />
+            )}
           </div>
 
-          <div className="pf-workspace-card grid grid-cols-3 gap-2 rounded-lg p-3">
+          <div className="pf-workspace-menu-summary-grid">
             {[
-              { label: t("resourceLibrary.groups"), value: groups.length },
-              { label: t("resourceLibrary.assets"), value: assets.length },
-              { label: t("resourceLibrary.reusableAssets"), value: latestAssets.length },
+              { label: t("resourceLibrary.groupSummary"), value: groups.length, detail: groupSummaryDetail },
+              {
+                label: t("resourceLibrary.sourceOverview"),
+                value: assets.length,
+                detail: sourceSummaryDetail || t("resourceLibrary.empty"),
+              },
             ].map((item) => (
-              <div key={item.label} className="pf-workspace-card-soft rounded-lg px-3 py-3">
-                <div className="pf-workspace-muted text-xs font-medium">{item.label}</div>
-                <div className="pf-workspace-title mt-2 text-xl font-semibold">{item.value}</div>
+              <div key={item.label} className="pf-workspace-menu-summary-card">
+                <span className="pf-workspace-eyebrow">{item.label}</span>
+                <h3>{item.value}</h3>
+                <p className="pf-workspace-caption">{item.detail}</p>
               </div>
             ))}
           </div>
-        </section>
 
-        {failed ? (
-          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-            {t("resourceLibrary.loadFailed")}
-          </div>
-        ) : null}
-
-        <section className="pf-workspace-card rounded-lg p-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="pf-workspace-title text-base font-semibold">
-                {t("resourceLibrary.latestResources")}
-              </h2>
-              <p className="pf-workspace-muted mt-1 text-sm">
-                {t("resourceLibrary.latestResourcesDescription")}
-              </p>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="pf-workspace-card-soft pf-workspace-muted mt-4 flex min-h-48 items-center justify-center rounded-lg">
-              <Loader2 size={22} className="animate-spin" />
-            </div>
-          ) : latestAssets.length ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              {latestAssets.map((asset) => (
-                <article
-                  key={asset.id}
-                  className="pf-workspace-card-soft overflow-hidden rounded-lg"
-                >
-                  <img
-                    src={api.toApiUrl(asset.thumbnail_url)}
-                    alt={asset.original_filename}
-                    loading="lazy"
-                    decoding="async"
-                    className="aspect-[4/3] w-full object-cover"
-                  />
-                  <div className="space-y-2 p-3">
-                    <div className="pf-workspace-title truncate text-sm font-semibold">
-                      {asset.original_filename}
-                    </div>
-                    <div className="pf-workspace-muted flex flex-wrap items-center gap-1.5 text-xs">
-                      <span className="pf-workspace-chip rounded-full px-2 py-0.5 font-medium">
-                        {t(resourceLibrarySourceLabelKey(asset.source_type))}
-                      </span>
-                      <span>{formatDateTime(asset.created_at)}</span>
-                    </div>
-                    <ResourceMetaBadges resource={asset} showReason />
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div className="pf-workspace-card-soft pf-workspace-muted mt-4 flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border-dashed px-6 py-10 text-center text-sm">
-              <Trees size={24} className="pf-workspace-accent" />
-              <div>{t("resourceLibrary.empty")}</div>
-            </div>
-          )}
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={openManagePage}
-              className="pf-workspace-action-primary inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition-colors"
-            >
-              {t("resourceLibrary.manageLibrary")}
-              <ArrowRight size={15} className="ml-2" />
-            </button>
-            <button
-              type="button"
-              onClick={openManagePage}
-              className="pf-workspace-action-secondary inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition-colors"
-            >
+          <div className="pf-workspace-section-actions">
+            <WorkspaceHandoffButton onClick={openManagePage}>
               {t("resourceLibrary.moreResources")}
-              <ArrowRight size={15} className="ml-2" />
-            </button>
+            </WorkspaceHandoffButton>
           </div>
         </section>
-
-        <section className="mt-4 grid gap-4 lg:grid-cols-2">
-          <div className="pf-workspace-card rounded-lg p-4">
-            <h2 className="pf-workspace-title text-base font-semibold">
-              {t("resourceLibrary.groupSummary")}
-            </h2>
-            <div className="mt-3 grid gap-2">
-              {groupAssetCounts.length ? (
-                groupAssetCounts.map(({ group, count }) => (
-                  <div
-                    key={group.id}
-                    className="pf-workspace-card-soft flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm"
-                  >
-                    <span className="pf-workspace-title min-w-0 truncate font-medium">{group.name}</span>
-                    <span className="pf-workspace-muted shrink-0 text-xs font-semibold">
-                      {t("resourceLibrary.assetCount", { count })}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="pf-workspace-card-soft pf-workspace-muted rounded-lg border-dashed px-3 py-4 text-sm">
-                  {t("resourceLibrary.noGroups")}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="pf-workspace-card rounded-lg p-4">
-            <h2 className="pf-workspace-title text-base font-semibold">
-              {t("resourceLibrary.sourceOverview")}
-            </h2>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {sourceCounts.map((item) => (
-                <div key={item.sourceType} className="pf-workspace-card-soft rounded-lg px-3 py-3">
-                  <div className="pf-workspace-muted text-xs font-medium">
-                    {t(resourceLibrarySourceLabelKey(item.sourceType))}
-                  </div>
-                  <div className="pf-workspace-title mt-2 text-lg font-semibold">{item.count}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      </main>
-    </div>
+        <aside className="pf-workspace-menu-summary-art" aria-hidden="true" />
+      </div>
+    </WorkspacePageFrame>
   );
 }
 
@@ -280,10 +193,16 @@ export function ResourceLibraryPage({ mode = "auto" }: ResourceLibraryPageProps)
     return <ResourceLibraryWorkspaceLanding />;
   }
 
-  return <ResourceLibraryManagePage subpage={mode === "manage"} />;
+  return <ResourceLibraryManagePage subpage={mode === "manage"} workspaceSubpage={activeScheme === "workspace" && mode === "manage"} />;
 }
 
-function ResourceLibraryManagePage({ subpage = false }: { subpage?: boolean }) {
+function ResourceLibraryManagePage({
+  subpage = false,
+  workspaceSubpage = false,
+}: {
+  subpage?: boolean;
+  workspaceSubpage?: boolean;
+}) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -479,14 +398,16 @@ function ResourceLibraryManagePage({ subpage = false }: { subpage?: boolean }) {
   }
 
   return (
-    <div className="pf-app min-h-screen text-slate-950 dark:text-slate-100">
+    <div className={`${workspaceSubpage ? "pf-workspace" : "pf-app"} min-h-screen text-slate-950 dark:text-slate-100`}>
       <TopNav
         breadcrumbs={subpage ? t("resourceLibrary.manageTitle") : t("resourceLibrary.title")}
         onHome={() => navigate("/inspirations")}
         onLogout={() => logoutMutation.mutate()}
       />
-      <main className="mx-auto max-w-7xl px-4 pb-10 pt-4 sm:px-6 lg:px-8">
-        <section className="mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm dark:border-slate-800 dark:bg-[#0f1726] sm:flex-row sm:items-center sm:justify-between">
+      <main className={workspaceSubpage ? "pf-workspace-subpage flex-1" : "mx-auto max-w-7xl px-4 pb-10 pt-4 sm:px-6 lg:px-8"}>
+        <div className={workspaceSubpage ? "pf-workspace-subpage-frame-shell" : "contents"}>
+          <div className={workspaceSubpage ? "pf-workspace-subpage-frame" : "contents"}>
+        <section className={workspaceSubpage ? "pf-workspace-subpage-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" : "mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm dark:border-slate-800 dark:bg-[#0f1726] sm:flex-row sm:items-center sm:justify-between"}>
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-lg font-semibold">
               <Trees size={20} className="text-emerald-600 dark:text-emerald-300" />
@@ -766,6 +687,8 @@ function ResourceLibraryManagePage({ subpage = false }: { subpage?: boolean }) {
               </div>
             )}
           </section>
+        </div>
+          </div>
         </div>
       </main>
 

@@ -45,7 +45,9 @@ import { useSensitiveImageMaskPreference } from "../lib/sensitiveImagePreference
 import { shouldMaskSensitiveImage, shouldShowSensitiveImageMaskPreference } from "../lib/sensitiveImages";
 import { useSessionState } from "../lib/session";
 import type { GenerationResourceGroup, InspirationSummary, RbacUser, SessionUser } from "../lib/types";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import { inspirationKeyInfo, inspirationMainThumbnailUrl } from "./InspirationListPage.helpers";
+import { WorkspaceSubpageFrame } from "./workspace/WorkspaceLandingPages";
 
 const PAGE_SIZE = 12;
 const INSPIRATION_LIST_STALE_TIME_MS = 60_000;
@@ -220,13 +222,13 @@ interface InspirationListPageProps {
   mode?: "auto" | "full";
 }
 
-export function InspirationListPage(props: InspirationListPageProps = {}) {
-  void props.mode;
-  return <InspirationFullListPage />;
+export function InspirationListPage({ mode = "auto" }: InspirationListPageProps = {}) {
+  return <InspirationFullListPage workspaceSubpage={mode === "full"} />;
 }
 
-function InspirationFullListPage() {
+function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boolean }) {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const session = useSessionState();
@@ -396,16 +398,29 @@ function InspirationFullListPage() {
     const range = quickInspirationDateRange(rangeId);
     setSearchDraft((current) => ({ ...current, ...range }));
   };
+  const isWorkspaceSubpage = activeScheme === "workspace" && workspaceSubpage;
+  const newInspirationButton = (
+    <button
+      type="button"
+      onClick={() => navigate("/inspirations/new")}
+      disabled={!canWriteInspirations}
+      title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
+      className="inline-flex h-10 items-center justify-center rounded-full bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+    >
+      <Plus size={16} className="mr-1.5" /> {t("inspirations.new")}
+    </button>
+  );
 
-  return (
-    <div className="pf-app flex flex-col">
-      <TopNav
-        onHome={() => navigate("/inspirations")}
-        onLogout={() => logoutMutation.mutate()}
-      />
-
-      <main className="pf-page flex flex-1">
-        <div className="w-full space-y-4 lg:space-y-6">
+  const listContent = (
+    <div className="w-full space-y-4 lg:space-y-6">
+      {isWorkspaceSubpage ? (
+        <div className="grid gap-2 md:grid-cols-3 xl:gap-3">
+          <MetricCard label={t("inspirations.totalMetric")} value={total} />
+          <MetricCard label={t("inspirations.copyReadyMetric")} value={copyReadyCount} />
+          <MetricCard label={t("inspirations.posterReadyMetric")} value={posterReadyCount} />
+        </div>
+      ) : (
+        <>
           <section className="pf-panel px-4 py-4 md:hidden">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -442,17 +457,7 @@ function InspirationFullListPage() {
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
                   {t("inspirations.description")}
                 </p>
-                <div className="mt-5 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => navigate("/inspirations/new")}
-                    disabled={!canWriteInspirations}
-                    title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
-                    className="inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
-                  >
-                    <Plus size={16} className="mr-1.5" /> {t("inspirations.new")}
-                  </button>
-                </div>
+                <div className="mt-5 flex flex-wrap items-center gap-3">{newInspirationButton}</div>
               </div>
               <div className="grid gap-2 self-end lg:grid-cols-3 xl:gap-3">
                 <MetricCard label={t("inspirations.totalMetric")} value={total} />
@@ -461,42 +466,44 @@ function InspirationFullListPage() {
               </div>
             </div>
           </section>
+        </>
+      )}
 
-          {deleteError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-              {deleteError}
-            </div>
-          ) : null}
+      {deleteError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+          {deleteError}
+        </div>
+      ) : null}
 
-          <InspirationSearchPanel
-            draft={searchDraft}
-            isAdmin={isAdmin}
-            currentUser={currentUser}
-            users={rbacUsers}
-            usersLoading={rbacUsersQuery.isFetching}
-            ownerSearch={ownerSearch}
-            onOwnerSearchChange={setOwnerSearch}
-            resourceGroups={resourceGroups}
-            resourceGroupsLoading={generationResourceGroupsQuery.isLoading}
-            selectedResourceGroupId={selectedResourceGroupId ?? ""}
-            maskSensitiveImages={maskSensitiveImages}
-            active={searchDraftActive || searchActive}
-            activeCount={searchFilterCount}
-            fetching={inspirationsQuery.isFetching}
-            mobileOpen={mobileSearchOpen}
-            onChange={setSearchDraft}
-            onClear={clearSearch}
-            onMobileToggle={() => setMobileSearchOpen((current) => !current)}
-            onResourceGroupChange={(value) => {
-              setSelectedResourceGroupId(value);
-              setPage(1);
-            }}
-            onMaskSensitiveImagesChange={setMaskSensitiveImages}
-            onQuickRange={applyQuickRange}
-            onSubmit={submitSearch}
-          />
+      <InspirationSearchPanel
+        draft={searchDraft}
+        isAdmin={isAdmin}
+        currentUser={currentUser}
+        users={rbacUsers}
+        usersLoading={rbacUsersQuery.isFetching}
+        ownerSearch={ownerSearch}
+        onOwnerSearchChange={setOwnerSearch}
+        resourceGroups={resourceGroups}
+        resourceGroupsLoading={generationResourceGroupsQuery.isLoading}
+        selectedResourceGroupId={selectedResourceGroupId ?? ""}
+        maskSensitiveImages={maskSensitiveImages}
+        active={searchDraftActive || searchActive}
+        activeCount={searchFilterCount}
+        fetching={inspirationsQuery.isFetching}
+        mobileOpen={mobileSearchOpen}
+        onChange={setSearchDraft}
+        onClear={clearSearch}
+        onMobileToggle={() => setMobileSearchOpen((current) => !current)}
+        onResourceGroupChange={(value) => {
+          setSelectedResourceGroupId(value);
+          setPage(1);
+        }}
+        onMaskSensitiveImagesChange={setMaskSensitiveImages}
+        onQuickRange={applyQuickRange}
+        onSubmit={submitSearch}
+      />
 
-          {generationResourceGroupsQuery.isLoading || inspirationsQuery.isLoading ? (
+      {generationResourceGroupsQuery.isLoading || inspirationsQuery.isLoading ? (
             <div className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2 lg:hidden">
                 {[1, 2, 3].map((i) => (
@@ -659,8 +666,30 @@ function InspirationFullListPage() {
               <Pagination page={page} totalPages={totalPages} onPageChange={setPage} disabled={inspirationsQuery.isFetching} />
             </div>
           ) : null}
-        </div>
-      </main>
+    </div>
+  );
+
+  return (
+    <div className={`${isWorkspaceSubpage ? "pf-workspace" : "pf-app"} flex flex-col`}>
+      <TopNav
+        onHome={() => navigate("/inspirations")}
+        onLogout={() => logoutMutation.mutate()}
+      />
+
+      {isWorkspaceSubpage ? (
+        <WorkspaceSubpageFrame
+          eyebrow={t("inspirations.heroEyebrow")}
+          title={t("inspirations.listTitle")}
+          description={t("inspirations.description")}
+          actions={newInspirationButton}
+        >
+          {listContent}
+        </WorkspaceSubpageFrame>
+      ) : (
+        <main className="pf-page flex flex-1">
+          {listContent}
+        </main>
+      )}
       {inspirations.length ? (
         <div className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 flex justify-center px-4 md:hidden">
           <Pagination page={page} totalPages={totalPages} onPageChange={setPage} disabled={inspirationsQuery.isFetching} floating />

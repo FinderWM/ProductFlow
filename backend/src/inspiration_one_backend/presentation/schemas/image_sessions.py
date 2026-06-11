@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from inspiration_one_backend.application.image_sessions import ImageSessionStatusSnapshot
+from inspiration_one_backend.config import IMAGE_SESSION_MAX_MAX_BASE_IMAGES
 from inspiration_one_backend.domain.durable_generation_tasks import IMAGE_SESSION_GENERATION_TASK_CONTRACT
 from inspiration_one_backend.domain.enums import ImageSessionAssetKind, JobStatus
 from inspiration_one_backend.infrastructure.db.models import (
@@ -36,6 +37,8 @@ class ImageSessionAssetResponse(ResourceModerationFields):
     download_url: str
     preview_url: str
     thumbnail_url: str
+    gallery_saved: bool = False
+    gallery_entry_id: str | None = None
     created_at: datetime
 
 
@@ -56,6 +59,7 @@ class ImageSessionRoundResponse(BaseModel):
     generation_group_id: str | None = None
     candidate_index: int = 1
     candidate_count: int = 1
+    base_asset_ids: list[str] = Field(default_factory=list)
     base_asset_id: str | None = None
     selected_reference_asset_ids: list[str] = Field(default_factory=list)
     actual_size: str | None = None
@@ -70,6 +74,7 @@ class ImageSessionGenerationTaskResponse(BaseModel):
     status: JobStatus
     prompt: str
     size: str
+    base_asset_ids: list[str] = Field(default_factory=list)
     base_asset_id: str | None = None
     selected_reference_asset_ids: list[str] = Field(default_factory=list)
     generation_config_mode: Literal["auto", "manual"] = "auto"
@@ -190,8 +195,9 @@ class GenerateImageSessionRoundRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
     resource_group_id: str = Field(min_length=1, max_length=36)
     size: str = Field(default="1024x1024")
+    base_asset_ids: list[str] = Field(default_factory=list, max_length=IMAGE_SESSION_MAX_MAX_BASE_IMAGES)
     base_asset_id: str | None = None
-    selected_reference_asset_ids: list[str] = Field(default_factory=list, max_length=6)
+    selected_reference_asset_ids: list[str] = Field(default_factory=list, max_length=IMAGE_SESSION_MAX_MAX_BASE_IMAGES)
     generation_count: int = Field(default=1, ge=1, le=10)
     tool_options: ImageToolOptionsRequest | None = None
     generation_config_mode: Literal["auto", "manual"] = "auto"
@@ -229,8 +235,14 @@ class InspirationWritebackResponse(BaseModel):
     message: str
 
 
-def serialize_image_session_asset(asset: ImageSessionAsset) -> ImageSessionAssetResponse:
+def serialize_image_session_asset(
+    asset: ImageSessionAsset,
+    *,
+    gallery_entry_id: str | None = None,
+) -> ImageSessionAssetResponse:
     urls = build_stored_image_urls(asset, f"/api/image-session-assets/{asset.id}/download")
+    gallery_entry = getattr(asset, "gallery_entry", None)
+    resolved_gallery_entry_id = gallery_entry_id or (gallery_entry.id if gallery_entry is not None else None)
     return ImageSessionAssetResponse(
         id=asset.id,
         owner_user_id=asset.owner_user_id,
@@ -239,6 +251,8 @@ def serialize_image_session_asset(asset: ImageSessionAsset) -> ImageSessionAsset
         mime_type=asset.mime_type,
         **serialize_moderation_fields(asset).model_dump(),
         **urls,
+        gallery_saved=resolved_gallery_entry_id is not None,
+        gallery_entry_id=resolved_gallery_entry_id,
         created_at=asset.created_at,
     )
 
@@ -274,6 +288,24 @@ def extract_actual_image_size(provider_output_json: dict | None) -> str | None:
     return None
 
 
+def image_session_base_asset_ids(source: ImageSessionRound | ImageSessionGenerationTask) -> list[str]:
+    base_asset_ids = getattr(source, "base_asset_ids", None)
+    if base_asset_ids:
+        return _unique_asset_ids(base_asset_ids)
+    return _unique_asset_ids([getattr(source, "base_asset_id", None), *(source.selected_reference_asset_ids or [])])
+
+
+def _unique_asset_ids(ids: list[str | None]) -> list[str]:
+    seen: set[str] = set()
+    values: list[str] = []
+    for asset_id in ids:
+        if not asset_id or asset_id in seen:
+            continue
+        seen.add(asset_id)
+        values.append(asset_id)
+    return values
+
+
 def serialize_image_session_round(round_item: ImageSessionRound) -> ImageSessionRoundResponse:
     return ImageSessionRoundResponse(
         id=round_item.id,
@@ -295,6 +327,7 @@ def serialize_image_session_round(round_item: ImageSessionRound) -> ImageSession
         generation_group_id=round_item.generation_group_id,
         candidate_index=round_item.candidate_index,
         candidate_count=round_item.candidate_count,
+        base_asset_ids=image_session_base_asset_ids(round_item),
         base_asset_id=round_item.base_asset_id,
         selected_reference_asset_ids=round_item.selected_reference_asset_ids or [],
         actual_size=extract_actual_image_size(round_item.provider_output_json),
@@ -317,6 +350,7 @@ def serialize_image_session_generation_task(
         status=task.status,
         prompt=task.prompt,
         size=task.size,
+        base_asset_ids=image_session_base_asset_ids(task),
         base_asset_id=task.base_asset_id,
         selected_reference_asset_ids=task.selected_reference_asset_ids or [],
         generation_config_mode="manual" if task.generation_config_mode == "manual" else "auto",

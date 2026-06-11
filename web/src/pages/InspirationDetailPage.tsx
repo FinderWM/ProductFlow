@@ -274,6 +274,10 @@ function latestActiveWorkflowRun(workflow: InspirationWorkflow | null | undefine
   return workflow?.runs.find((run) => run.status === "running" || run.status === "waiting_confirmation") ?? null;
 }
 
+function isWorkflowNodeDeleteLocked(node: WorkflowNode): boolean {
+  return node.status === "queued" || node.status === "running";
+}
+
 function mergeActiveRunNodeStatuses(workflow: InspirationWorkflow | null): InspirationWorkflow | null {
   const activeRun = latestActiveWorkflowRun(workflow);
   if (!workflow || !activeRun?.node_runs.length) {
@@ -1865,6 +1869,19 @@ export function InspirationDetailPage() {
       setError(t("detail.error.inspirationContextProtected"));
       return;
     }
+    if (isWorkflowNodeDeleteLocked(node)) {
+      setError(
+        getWorkflowNodeRunActionState(node, {
+          runSubmissionPending: false,
+          pendingStartNodeId: null,
+        }, t).title,
+      );
+      return;
+    }
+    if (workflowActive) {
+      setError(t("detail.running"));
+      return;
+    }
     setPendingDeleteAction({ kind: "node", node });
   };
 
@@ -2062,7 +2079,7 @@ export function InspirationDetailPage() {
       source.source_type === "poster_variant"
         ? posters.find((poster) => poster.id === source.source_id)
         : resourceLibraryStatusInspiration?.source_assets.find((asset) => asset.id === source.source_id) ?? null;
-    return sourceResource ? getResourceBlockedActionTitle(sourceResource, t("resource.blockedAction")) : "";
+    return isResourceBlocked(sourceResource) ? getResourceBlockedActionTitle(sourceResource, t("resource.blockedAction")) : "";
   }
 
   function handleSavePreviewImageToResourceLibrary() {
@@ -2601,13 +2618,28 @@ export function InspirationDetailPage() {
         if (!shortcutNodeIds.length) {
           return;
         }
-        if (workflowNodeIdsContainInspirationContext(shortcutNodeIds)) {
-          setError(t("detail.error.inspirationContextProtected"));
-          return;
-        }
-        if (shortcutNodeIds.length === 1) {
-          const node = workflow.nodes.find((workflowNode) => workflowNode.id === shortcutNodeIds[0]);
-          if (node) {
+      if (workflowNodeIdsContainInspirationContext(shortcutNodeIds)) {
+        setError(t("detail.error.inspirationContextProtected"));
+        return;
+      }
+      const shortcutNodes = workflow.nodes.filter((workflowNode) => shortcutNodeIds.includes(workflowNode.id));
+      const lockedShortcutNode = shortcutNodes.find(isWorkflowNodeDeleteLocked);
+      if (lockedShortcutNode) {
+        setError(
+          getWorkflowNodeRunActionState(lockedShortcutNode, {
+            runSubmissionPending: false,
+            pendingStartNodeId: null,
+          }, t).title,
+        );
+        return;
+      }
+      if (workflowActive) {
+        setError(t("detail.running"));
+        return;
+      }
+      if (shortcutNodeIds.length === 1) {
+        const node = workflow.nodes.find((workflowNode) => workflowNode.id === shortcutNodeIds[0]);
+        if (node) {
             setPendingDeleteAction({ kind: "node", node });
           }
           return;
@@ -3143,6 +3175,17 @@ export function InspirationDetailPage() {
               title: t("detail.inspector.generationConfigRequired"),
             }
           : selectedNodeBaseRunActionState;
+  const selectedNodeDeleteLocked = selectedNode ? isWorkflowNodeDeleteLocked(selectedNode) : false;
+  const selectedNodeDeleteDisabled = Boolean(selectedNode && (workflowActive || selectedNodeDeleteLocked));
+  const selectedNodeDeleteTitle =
+    selectedNode && selectedNodeDeleteLocked
+      ? getWorkflowNodeRunActionState(selectedNode, {
+          runSubmissionPending: false,
+          pendingStartNodeId: null,
+        }, t).title
+      : selectedNodeDeleteDisabled
+        ? t("detail.running")
+        : t("detail.delete");
 
   const renderDetailsPanelContent = () =>
     selectedNode ? (
@@ -3197,6 +3240,8 @@ export function InspirationDetailPage() {
           savedResourceLibrarySourceAssetIds={savedSourceAssetIds}
           savingResourceLibrarySourceId={resourceLibrarySaveSource?.source_id ?? null}
           onDelete={() => handleDeleteNode(selectedNode)}
+          deleteDisabled={selectedNodeDeleteDisabled}
+          deleteTitle={selectedNodeDeleteTitle}
           busy={inspectorBusy}
           cancelBusy={cancelWorkflowRunMutation.isPending || inspirationGenerateBlocked}
           runActionState={
@@ -3308,7 +3353,7 @@ export function InspirationDetailPage() {
         <div className={`${TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS} shrink-0`} />
       )}
 
-      <main className="flex min-h-0 flex-1 flex-col border-t border-slate-200 bg-transparent dark:border-slate-800">
+      <main className="pf-workspace-tool-main flex min-h-0 flex-1 flex-col border-t border-slate-200 bg-transparent dark:border-slate-800">
         {error ? (
           <div className="z-20 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200 sm:px-6 lg:px-8">
             <AlertCircle size={14} className="mr-2 inline" /> {error}
@@ -3322,7 +3367,7 @@ export function InspirationDetailPage() {
         <ResourceMetaBadges
           resource={inspiration}
           showReason
-          className="z-20 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-[#0b1220] sm:px-6 lg:px-8"
+          className="pf-workspace-status-strip z-20 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-[#0b1220] sm:px-6 lg:px-8"
         />
         <ResourceBlockedNotice resource={inspiration} className="z-20 rounded-none border-x-0 border-t-0 px-4 py-2 sm:px-6 lg:px-8" />
         {activeWorkflowRun ? (
@@ -3350,7 +3395,7 @@ export function InspirationDetailPage() {
         ) : null}
 
         <div className="pf-workspace-stage relative flex min-h-0 flex-1 overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-white/60 via-transparent to-indigo-50/40 dark:from-[#060a12]/78 dark:via-transparent dark:to-[#151f33]/70" />
+          <div className="pf-workspace-canvas-wash absolute inset-0 bg-gradient-to-br from-white/60 via-transparent to-indigo-50/40 dark:from-[#060a12]/78 dark:via-transparent dark:to-[#151f33]/70" />
           <section
             className="relative z-10 min-w-0 flex-1 overflow-hidden transition-[padding] duration-300 ease-out"
             style={{
@@ -3982,7 +4027,7 @@ function InspirationImagePreviewModal({
                 disabled={Boolean(resourceLibraryDisabledTitle) || resourceLibrarySaving}
                 title={resourceLibraryTitle}
                 aria-label={resourceLibraryTitle}
-                className="inline-flex min-h-8 items-center rounded border border-zinc-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-zinc-700 transition-colors hover:border-indigo-200 hover:bg-zinc-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/12 dark:hover:text-violet-100"
+                className="inline-flex min-h-8 items-center rounded border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
               >
                 {resourceLibrarySaving ? (
                   <Loader2 size={12} className="mr-1.5 animate-spin" />

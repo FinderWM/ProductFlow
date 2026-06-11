@@ -1345,6 +1345,12 @@ class ImageSessionAsset(Base):
         primaryjoin=lambda: parent_child_join(ImageSessionAsset.id, ImageSessionRound.generated_asset_id),
         foreign_keys=lambda: [ImageSessionRound.generated_asset_id],
     )
+    gallery_entry: Mapped[ImageGalleryEntry | None] = relationship(
+        back_populates="asset",
+        primaryjoin=lambda: parent_child_join(ImageSessionAsset.id, ImageGalleryEntry.image_session_asset_id),
+        foreign_keys=lambda: [ImageGalleryEntry.image_session_asset_id],
+        uselist=False,
+    )
 
 
 class ImageSessionRound(Base):
@@ -1381,6 +1387,7 @@ class ImageSessionRound(Base):
         String(36),
         nullable=True,
     )
+    base_asset_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     selected_reference_asset_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     generated_asset_id: Mapped[str] = mapped_column(
         String(36),
@@ -1426,6 +1433,7 @@ class ImageSessionGenerationTask(Base):
         String(36),
         nullable=True,
     )
+    base_asset_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     selected_reference_asset_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     tool_options: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     generation_config_mode: Mapped[str] = mapped_column(String(20), default="auto")
@@ -1511,6 +1519,7 @@ class ImageGalleryEntry(Base):
         foreign_keys=lambda: [ImageGalleryEntry.disabled_by_user_id],
     )
     asset: Mapped[ImageSessionAsset] = relationship(
+        back_populates="gallery_entry",
         primaryjoin=lambda: child_parent_join(ImageGalleryEntry.image_session_asset_id, ImageSessionAsset.id),
         foreign_keys=lambda: [ImageGalleryEntry.image_session_asset_id],
     )

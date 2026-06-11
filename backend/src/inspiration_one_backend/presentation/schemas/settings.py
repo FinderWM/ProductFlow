@@ -35,11 +35,14 @@ class ConfigResponse(BaseModel):
 
 
 class RuntimeConfigResponse(BaseModel):
+    ui_layout_scheme: str = "classic"
     image_generation_max_dimension: int
+    image_session_max_base_images: int
     image_tool_allowed_fields: list[str]
     generation_tail_splitter_max_items: int
     workflow_node_max_retry_count: int
     workflow_node_retry_delay_ms: int
+    gallery_show_generation_resource_group: bool
     deletion_enabled: bool
 
 

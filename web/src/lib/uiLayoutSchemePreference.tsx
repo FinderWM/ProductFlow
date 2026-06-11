@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./api";
@@ -54,6 +54,46 @@ export function mergeUiLayoutSchemePreference(
   };
 }
 
+export function resolveActiveSchemeFromDefaultLoad({
+  enabled,
+  initializedFromDefault,
+  hasPreferencesData,
+  activeScheme,
+  defaultScheme,
+}: {
+  enabled: boolean;
+  initializedFromDefault: boolean;
+  hasPreferencesData: boolean;
+  activeScheme: UiLayoutScheme;
+  defaultScheme: UiLayoutScheme;
+}): { activeScheme: UiLayoutScheme; initializedFromDefault: boolean } {
+  if (!enabled) {
+    return {
+      activeScheme: DEFAULT_UI_LAYOUT_SCHEME,
+      initializedFromDefault: false,
+    };
+  }
+  if (initializedFromDefault || !hasPreferencesData) {
+    return { activeScheme, initializedFromDefault };
+  }
+  return {
+    activeScheme: defaultScheme,
+    initializedFromDefault: true,
+  };
+}
+
+export function resolveActiveSchemeAfterDefaultSaveError({
+  currentScheme,
+  attemptedScheme,
+  previousActiveScheme,
+}: {
+  currentScheme: UiLayoutScheme;
+  attemptedScheme: UiLayoutScheme;
+  previousActiveScheme: UiLayoutScheme;
+}): UiLayoutScheme {
+  return currentScheme === attemptedScheme ? previousActiveScheme : currentScheme;
+}
+
 function workspacePointerViewport(): { width: number; height: number; offsetLeft: number; offsetTop: number } {
   const viewport = window.visualViewport;
   return {
@@ -80,6 +120,7 @@ export function UiLayoutSchemeProvider({
   const { setThemePreference, workspaceAppearance } = usePreferences();
   const [initializedFromDefault, setInitializedFromDefault] = useState(false);
   const [activeScheme, setActiveSchemeState] = useState<UiLayoutScheme>(DEFAULT_UI_LAYOUT_SCHEME);
+  const activeSchemeRef = useRef<UiLayoutScheme>(DEFAULT_UI_LAYOUT_SCHEME);
 
   const preferencesQuery = useQuery({
     queryKey: USER_UI_PREFERENCES_QUERY_KEY,
@@ -90,17 +131,21 @@ export function UiLayoutSchemeProvider({
   const defaultScheme = resolveUiLayoutSchemePreference(preferencesQuery.data);
 
   useEffect(() => {
-    if (!enabled) {
-      setActiveSchemeState(DEFAULT_UI_LAYOUT_SCHEME);
-      setInitializedFromDefault(false);
-      return;
+    const nextState = resolveActiveSchemeFromDefaultLoad({
+      enabled,
+      initializedFromDefault,
+      hasPreferencesData: Boolean(preferencesQuery.data),
+      activeScheme,
+      defaultScheme,
+    });
+    if (nextState.activeScheme !== activeScheme) {
+      activeSchemeRef.current = nextState.activeScheme;
+      setActiveSchemeState(nextState.activeScheme);
     }
-    if (initializedFromDefault || !preferencesQuery.data) {
-      return;
+    if (nextState.initializedFromDefault !== initializedFromDefault) {
+      setInitializedFromDefault(nextState.initializedFromDefault);
     }
-    setActiveSchemeState(defaultScheme);
-    setInitializedFromDefault(true);
-  }, [defaultScheme, enabled, initializedFromDefault, preferencesQuery.data]);
+  }, [activeScheme, defaultScheme, enabled, initializedFromDefault, preferencesQuery.data]);
 
   useEffect(() => {
     if (typeof document === "undefined") {
@@ -197,29 +242,49 @@ export function UiLayoutSchemeProvider({
     onMutate: async (scheme: UiLayoutScheme) => {
       await queryClient.cancelQueries({ queryKey: USER_UI_PREFERENCES_QUERY_KEY });
       const previous = queryClient.getQueryData<UserUiPreferences>(USER_UI_PREFERENCES_QUERY_KEY);
+      const previousActiveScheme = activeSchemeRef.current;
       queryClient.setQueryData<UserUiPreferences>(
         USER_UI_PREFERENCES_QUERY_KEY,
         mergeUiLayoutSchemePreference(previous, scheme),
       );
-      return { previous };
+      activeSchemeRef.current = scheme;
+      setActiveSchemeState(scheme);
+      setInitializedFromDefault(true);
+      return { previous, previousActiveScheme, attemptedScheme: scheme };
     },
-    onError: (_error, _scheme, context) => {
+    onError: (_error, scheme, context) => {
       if (context?.previous) {
         queryClient.setQueryData(USER_UI_PREFERENCES_QUERY_KEY, context.previous);
       } else {
         queryClient.setQueryData(USER_UI_PREFERENCES_QUERY_KEY, fallbackUserUiPreferences());
       }
+      const attemptedScheme = context?.attemptedScheme ?? scheme;
+      const previousActiveScheme = context?.previousActiveScheme ?? DEFAULT_UI_LAYOUT_SCHEME;
+      setActiveSchemeState((currentScheme) => {
+        const nextScheme = resolveActiveSchemeAfterDefaultSaveError({
+          currentScheme,
+          attemptedScheme,
+          previousActiveScheme,
+        });
+        activeSchemeRef.current = nextScheme;
+        return nextScheme;
+      });
+      setInitializedFromDefault(true);
     },
     onSuccess: (data) => {
       const nextScheme = resolveUiLayoutSchemePreference(data);
       queryClient.setQueryData(USER_UI_PREFERENCES_QUERY_KEY, data);
+      activeSchemeRef.current = nextScheme;
       setActiveSchemeState(nextScheme);
       setInitializedFromDefault(true);
     },
   });
 
   const setActiveScheme = useCallback((scheme: UiLayoutScheme) => {
-    setActiveSchemeState(resolveUiLayoutScheme(scheme));
+    const nextScheme = resolveUiLayoutScheme(scheme);
+    activeSchemeRef.current = nextScheme;
+    setActiveSchemeState(nextScheme);
+    setInitializedFromDefault(true);
   }, []);
 
   const saveDefaultScheme = useCallback(

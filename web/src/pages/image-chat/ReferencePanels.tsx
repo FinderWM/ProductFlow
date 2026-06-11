@@ -13,6 +13,9 @@ import { formatImageSizeValue } from "../../lib/imageSizes";
 import type { ImageSessionAsset, ImageSessionRound, InspirationDetail, InspirationSummary, SourceAsset } from "../../lib/types";
 import type { ImageChatTranslate } from "./display";
 
+const IMAGE_CHAT_GRADIENT_ACTION_CLASS =
+  "inline-flex items-center justify-center rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500";
+
 interface SessionReferencePanelProps {
   assets: ImageSessionAsset[];
   selectedAssetIds: string[];
@@ -74,7 +77,7 @@ export function SessionReferencePanel({
           onClick={onOpenResourceLibrary}
           disabled={Boolean(resourceLibraryDisabledTitle)}
           title={resourceLibraryDisabledTitle ?? t("chat.resourceLibrary.addReference")}
-          className="mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+          className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} mt-3 min-h-10 w-full px-3 text-sm`}
         >
           <Library size={15} className="mr-2" />
           {t("chat.resourceLibrary.addReference")}
@@ -187,8 +190,9 @@ export function InspirationAssociationPanel({
   const inspirationBlocked = isResourceBlocked(inspiration);
   const inspirationBlockedTitle = getResourceBlockedActionTitle(inspiration, t("resource.blockedAction"));
   const saveDisabled = attachBusy || !selectedRound || (!isInspirationMode && !targetInspirationId) || Boolean(saveBlockedTitle);
+  const missingTargetTitle = inspirations.length ? t("chat.selectInspirationFirst") : t("chat.noInspirations");
   const saveDisabledTitle =
-    saveBlockedTitle ?? (!selectedRound ? t("chat.selectHistoryFirst") : !isInspirationMode && !targetInspirationId ? t("chat.selectInspirationFirst") : "");
+    saveBlockedTitle ?? (!selectedRound ? t("chat.selectHistoryFirst") : !isInspirationMode && !targetInspirationId ? missingTargetTitle : "");
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
@@ -286,7 +290,7 @@ export function InspirationAssociationPanel({
             onClick={() => onAttach("reference")}
             disabled={saveDisabled}
             title={saveDisabledTitle || t("chat.addReference")}
-            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+            className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} px-3 py-2 text-sm`}
           >
             {attachBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
             {isInspirationMode ? t("chat.addReference") : t("chat.saveAsReference")}
@@ -297,7 +301,7 @@ export function InspirationAssociationPanel({
               onClick={() => onAttach("main_source")}
               disabled={saveDisabled}
               title={saveDisabledTitle || t("chat.setMainSource")}
-              className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500/20 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/35 dark:hover:bg-violet-500/30"
+              className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} px-3 py-2 text-sm`}
             >
               {attachBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <ImageIcon size={14} className="mr-2" />}
               {t("chat.setMainSource")}

@@ -10,8 +10,10 @@ import {
   findImageGenerationTaskPlaceholderRound,
   findImageHistoryPlaceholder,
   groupImageSessionRounds,
+  imageChatSessionFilterRouteStateFromSearchParams,
   imageGenerationRetryMetadata,
   imageGenerationTaskSubmitPayload,
+  imageSessionNewRoundDefaultResourceGroupId,
   isImageSessionGenerationTaskActive,
   isImageSessionGenerationTaskAutoRetrying,
   isCurrentImageSessionGenerationTask,
@@ -39,6 +41,8 @@ function asset(id: string): ImageSessionAsset {
     download_url: `/download/${id}`,
     preview_url: `/preview/${id}`,
     thumbnail_url: `/thumb/${id}`,
+    gallery_saved: false,
+    gallery_entry_id: null,
     created_at: createdAt,
   };
 }
@@ -61,6 +65,7 @@ function round(overrides: Partial<ImageSessionRound>): ImageSessionRound {
     generation_group_id: null,
     candidate_index: 1,
     candidate_count: 1,
+    base_asset_ids: [],
     base_asset_id: null,
     selected_reference_asset_ids: [],
     actual_size: null,
@@ -78,6 +83,7 @@ function task(overrides: Partial<ImageSessionGenerationTask>): ImageSessionGener
     status: "succeeded",
     prompt: "prompt",
     size: "1024x1024",
+    base_asset_ids: [],
     base_asset_id: null,
     selected_reference_asset_ids: [],
     generation_config_mode: "auto",
@@ -165,7 +171,7 @@ describe("image chat branching helpers", () => {
     expect(effectiveImageGenerationSubmitCount(4, { n: 10 })).toBe(4);
   });
 
-  it("builds a lightweight branch tree with task-derived placeholders", () => {
+  it("builds lightweight history groups with task-derived placeholders", () => {
     const branches = buildImageSessionHistoryTree(
       [
         round({
@@ -192,7 +198,7 @@ describe("image chat branching helpers", () => {
     expect(branches).toHaveLength(2);
     expect(branches.map((branch) => [branch.id, branch.depth, branch.branch_index, branch.parent_group_id])).toEqual([
       ["root-group", 0, null, null],
-      ["task:task-branch", 1, 1, "root-group"],
+      ["task:task-branch", 0, 1, null],
     ]);
     expect(branches[1].candidates).toHaveLength(4);
     expect(branches[1].candidates.map((candidate) => candidate.status)).toEqual([
@@ -203,7 +209,7 @@ describe("image chat branching helpers", () => {
     ]);
   });
 
-  it("assigns visible branch indexes by history order instead of tree depth", () => {
+  it("keeps later groups at the same depth and assigns visible indexes by history order", () => {
     const branches = buildImageSessionHistoryTree(
       [
         round({
@@ -232,8 +238,8 @@ describe("image chat branching helpers", () => {
 
     expect(branches.map((branch) => [branch.id, branch.depth, branch.branch_index])).toEqual([
       ["root-group", 0, null],
-      ["branch-group-1", 1, 1],
-      ["branch-group-2", 1, 2],
+      ["branch-group-1", 0, 1],
+      ["branch-group-2", 0, 2],
     ]);
   });
 
@@ -288,7 +294,7 @@ describe("image chat branching helpers", () => {
     );
 
     const branch = branches.find((item) => item.id === "branch-group");
-    expect(branch?.depth).toBe(1);
+    expect(branch?.depth).toBe(0);
     expect(branch?.candidates.map((candidate) => [candidate.kind, candidate.candidate_index])).toEqual([
       ["round", 1],
       ["placeholder", 2],
@@ -323,7 +329,7 @@ describe("image chat branching helpers", () => {
     );
   });
 
-  it("requires a generated base after prior results or active generation tasks", () => {
+  it("does not require a generated base after prior results or active generation tasks", () => {
     expect(requiresImageSessionGenerationBase([], [])).toBe(false);
     expect(
       requiresImageSessionGenerationBase(
@@ -335,7 +341,7 @@ describe("image chat branching helpers", () => {
         ],
         [],
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       requiresImageSessionGenerationBase(
         [],
@@ -346,7 +352,7 @@ describe("image chat branching helpers", () => {
           }),
         ],
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       requiresImageSessionGenerationBase(
         [],
@@ -410,16 +416,15 @@ describe("image chat branching helpers", () => {
         historyBranches: buildImageSessionHistoryTree(rounds, tasks),
         selectedGeneratedAssetId: null,
         selectedTaskPlaceholderId: "task:task-branch:candidate:2",
-        branchBaseAssetId: null,
-        selectedReferenceAssetIds: [],
-        availableReferenceAssetIds: [],
-        maxSelectedReferenceCount: 6,
+        selectedBaseAssetIds: [],
+        availableBaseAssetIds: [],
+        maxSelectedBaseCount: 6,
         pendingGeneratedRoundCount: null,
       }),
     ).toMatchObject({
       selectedGeneratedAssetId: "branch-asset-2",
       selectedTaskPlaceholderId: null,
-      branchBaseAssetId: null,
+      selectedBaseAssetIds: [],
     });
   });
 
@@ -436,34 +441,32 @@ describe("image chat branching helpers", () => {
         historyBranches: buildImageSessionHistoryTree(rounds, []),
         selectedGeneratedAssetId: "gone",
         selectedTaskPlaceholderId: null,
-        branchBaseAssetId: "gone",
-        selectedReferenceAssetIds: [],
-        availableReferenceAssetIds: [],
-        maxSelectedReferenceCount: 6,
+        selectedBaseAssetIds: ["gone"],
+        availableBaseAssetIds: [],
+        maxSelectedBaseCount: 6,
         pendingGeneratedRoundCount: null,
       }),
     ).toMatchObject({
       selectedGeneratedAssetId: "asset-2",
       selectedTaskPlaceholderId: null,
-      branchBaseAssetId: null,
+      selectedBaseAssetIds: [],
     });
   });
 
-  it("prunes unavailable reference selections while preserving valid order", () => {
+  it("prunes unavailable base selections while preserving valid order", () => {
     const reconciled = reconcileImageSessionSelection({
       rounds: [],
       generationTasks: [],
       historyBranches: [],
       selectedGeneratedAssetId: null,
       selectedTaskPlaceholderId: null,
-      branchBaseAssetId: null,
-      selectedReferenceAssetIds: ["ref-1", "gone", "ref-2", "ref-1", "ref-3"],
-      availableReferenceAssetIds: ["ref-1", "ref-2", "ref-3"],
-      maxSelectedReferenceCount: 2,
+      selectedBaseAssetIds: ["ref-1", "gone", "ref-2", "ref-1", "ref-3"],
+      availableBaseAssetIds: ["ref-1", "ref-2", "ref-3"],
+      maxSelectedBaseCount: 2,
       pendingGeneratedRoundCount: null,
     });
 
-    expect(reconciled.selectedReferenceAssetIds).toEqual(["ref-1", "ref-2"]);
+    expect(reconciled.selectedBaseAssetIds).toEqual(["ref-1", "ref-2"]);
   });
 
   it("marks a pending generation complete when the round count increases", () => {
@@ -476,16 +479,15 @@ describe("image chat branching helpers", () => {
         historyBranches: buildImageSessionHistoryTree(rounds, []),
         selectedGeneratedAssetId: null,
         selectedTaskPlaceholderId: null,
-        branchBaseAssetId: null,
-        selectedReferenceAssetIds: [],
-        availableReferenceAssetIds: [],
-        maxSelectedReferenceCount: 6,
+        selectedBaseAssetIds: [],
+        availableBaseAssetIds: [],
+        maxSelectedBaseCount: 6,
         pendingGeneratedRoundCount: 0,
       }),
     ).toMatchObject({
       selectedGeneratedAssetId: "asset-1",
       selectedTaskPlaceholderId: null,
-      branchBaseAssetId: null,
+      selectedBaseAssetIds: [],
       pendingGeneratedRoundCount: null,
       generatedRoundCompleted: true,
     });
@@ -495,6 +497,7 @@ describe("image chat branching helpers", () => {
     const payload = {
       prompt: "prompt",
       size: "1024x1024",
+      base_asset_ids: ["base-1", "ref-1"],
       base_asset_id: "base-1",
       selected_reference_asset_ids: ["ref-1"],
       generation_count: 3,
@@ -514,6 +517,7 @@ describe("image chat branching helpers", () => {
         status: "running",
         prompt: "prompt",
         size: "1024x1024",
+        base_asset_ids: ["base-1", "ref-1"],
         base_asset_id: "base-1",
         selected_reference_asset_ids: ["ref-1"],
         generation_count: 3,
@@ -531,6 +535,7 @@ describe("image chat branching helpers", () => {
     const payload = {
       prompt: "prompt",
       size: "1024x1024",
+      base_asset_ids: [],
       base_asset_id: null,
       selected_reference_asset_ids: [],
       generation_count: 1,
@@ -558,6 +563,7 @@ describe("image chat branching helpers", () => {
     const payload = {
       prompt: "prompt",
       size: "1024x1024",
+      base_asset_ids: [],
       base_asset_id: null,
       selected_reference_asset_ids: [],
       generation_count: 10,
@@ -586,6 +592,7 @@ describe("image chat branching helpers", () => {
     const payload = {
       prompt: "missing",
       size: "1024x1024",
+      base_asset_ids: [],
       base_asset_id: null,
       selected_reference_asset_ids: [],
       generation_count: 1,
@@ -652,6 +659,7 @@ describe("image chat branching helpers", () => {
       status: "failed",
       prompt: "same prompt",
       size: "1536x1024",
+      base_asset_ids: ["base-1", "ref-1", "ref-2"],
       base_asset_id: "base-1",
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 3,
@@ -666,6 +674,7 @@ describe("image chat branching helpers", () => {
     expect(imageGenerationTaskSubmitPayload(failedTask)).toEqual({
       prompt: "same prompt",
       size: "1536x1024",
+      base_asset_ids: ["base-1", "ref-1", "ref-2"],
       base_asset_id: "base-1",
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 3,
@@ -848,6 +857,7 @@ describe("image chat branching helpers", () => {
     const payload = {
       prompt: "  prompt  ",
       size: "1024x1024",
+      base_asset_ids: ["base-1", "ref-1", "ref-2"],
       base_asset_id: "base-1",
       selected_reference_asset_ids: ["ref-1", "ref-2"],
       generation_count: 2,
@@ -871,7 +881,7 @@ describe("image chat branching helpers", () => {
     );
     expect(signature).not.toBe(buildImageGenerationSubmitSignature({ ...payload, prompt: "changed" }));
     expect(signature).not.toBe(buildImageGenerationSubmitSignature({ ...payload, size: "1536x1024" }));
-    expect(signature).not.toBe(buildImageGenerationSubmitSignature({ ...payload, base_asset_id: null }));
+    expect(signature).not.toBe(buildImageGenerationSubmitSignature({ ...payload, base_asset_ids: ["base-1"] }));
     expect(signature).not.toBe(
       buildImageGenerationSubmitSignature({ ...payload, selected_reference_asset_ids: ["ref-2", "ref-1"] }),
     );
@@ -896,6 +906,7 @@ describe("image chat branching helpers", () => {
     const signature = buildImageGenerationSubmitSignature({
       prompt: "prompt",
       size: "1024x1024",
+      base_asset_ids: [],
       base_asset_id: null,
       selected_reference_asset_ids: [],
       generation_count: 1,
@@ -908,5 +919,41 @@ describe("image chat branching helpers", () => {
     expect(shouldBlockDuplicateGenerationSubmit({ signature: "other", submittedAt: 1_000 }, signature, 1_200, 1_800)).toBe(
       false,
     );
+  });
+
+  it("parses image-chat session filters from workspace handoff search params", () => {
+    expect(
+      imageChatSessionFilterRouteStateFromSearchParams(
+        new URLSearchParams("resource_group_id=group-1&owner_user_id=user-1&session_id=session-1&only_deleted=true"),
+      ),
+    ).toEqual({
+      selectedSessionId: "session-1",
+      selectedSessionResourceGroupId: "group-1",
+      selectedSessionOwnerUserId: "user-1",
+      onlyDeletedSessions: true,
+    });
+    expect(imageChatSessionFilterRouteStateFromSearchParams(new URLSearchParams(""))).toBeNull();
+  });
+
+  it("uses the session group as the default resource group for a new round", () => {
+    expect(
+      imageSessionNewRoundDefaultResourceGroupId({
+        sessionSummary: { latest_resource_group_id: "session-group" },
+        imageSession: detail({
+          generation_tasks: [task({ resource_group_id: "task-group" })],
+          rounds: [round({ resource_group_id: "round-group" })],
+        }),
+      }),
+    ).toBe("session-group");
+
+    expect(
+      imageSessionNewRoundDefaultResourceGroupId({
+        sessionSummary: null,
+        imageSession: detail({
+          generation_tasks: [task({ resource_group_id: "task-group" })],
+          rounds: [round({ resource_group_id: "round-group" })],
+        }),
+      }),
+    ).toBe("task-group");
   });
 });

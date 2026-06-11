@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,13 @@ from inspiration_one_backend.application.auth import ensure_auth_bootstrapped
 from inspiration_one_backend.application.canvas_templates import get_builtin_canvas_template
 from inspiration_one_backend.domain.errors import BusinessValidationError
 from inspiration_one_backend.domain.rbac import ADMIN_USER_ID
-from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
+from inspiration_one_backend.infrastructure.db.models import (
+    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+)
+from inspiration_one_backend.infrastructure.db.models import (
+    CanvasTemplate as DbCanvasTemplate,
+)
+from inspiration_one_backend.infrastructure.db.session import get_session_factory
 
 
 def _create_user_client(app, admin_client: TestClient, username: str) -> TestClient:
@@ -192,6 +199,44 @@ def test_canvas_template_catalog_filters_by_initial_entry_mode(configured_env: P
     payload = blank_templates.json()["items"]
     assert "copy-entry-catalog-template" in {item["key"] for item in payload}
     assert {item["entry_mode"] for item in payload} >= {"image", "copy"}
+
+
+def test_global_template_management_loads_current_inspiration_context_templates(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    template = get_builtin_canvas_template("ecommerce-main-image-v1")
+    template_json = template.model_dump(mode="json")
+    assert any(node["node_type"] == "inspiration_context" for node in template_json["nodes"])
+
+    session = get_session_factory()()
+    try:
+        session.add(
+            DbCanvasTemplate(
+                id=str(uuid4()),
+                key="current-inspiration-context-global-template",
+                scope="global",
+                owner_user_id=None,
+                category_id=None,
+                title="当前模板",
+                description="当前节点类型测试",
+                kind="full_canvas",
+                entry_mode="image",
+                sort_order=777,
+                schema_version=1,
+                template_json=template_json,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    response = admin_client.get("/api/workflow/canvas-templates/manage", params={"search": "当前模板"})
+    assert response.status_code == 200
+    assert {item["key"] for item in response.json()["items"]} == {"current-inspiration-context-global-template"}
 
 
 def test_user_template_categories_and_templates_are_owner_scoped(configured_env: Path) -> None:

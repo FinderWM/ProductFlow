@@ -9,8 +9,10 @@ from inspiration_one_backend.domain.enums import PosterKind
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     CopySet,
+    ImageSessionAsset,
     PosterVariant,
     ResourceLibraryAsset,
+    SourceAsset,
 )
 from inspiration_one_backend.presentation.api import create_app
 
@@ -72,6 +74,24 @@ def _create_poster_variant(db_session, storage_root: Path, inspiration_id: str) 
     db_session.add(poster)
     db_session.commit()
     return poster.id
+
+
+def _assert_resource_asset_reuses_source_storage(
+    db_session,
+    *,
+    resource_asset_id: str,
+    source_model: type,
+    source_id: str,
+) -> None:
+    db_session.expire_all()
+    resource_asset = db_session.get(ResourceLibraryAsset, resource_asset_id)
+    source_object = db_session.get(source_model, source_id)
+    assert resource_asset is not None
+    assert source_object is not None
+    source_object_key = source_object.storage_object_key or source_object.storage_path
+    assert resource_asset.storage_path == source_object_key
+    assert resource_asset.storage_object_key == source_object_key
+    assert not resource_asset.storage_path.startswith("resource_library/")
 
 
 def test_resource_library_group_crud_and_default_group(configured_env: Path) -> None:
@@ -160,6 +180,12 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     assert saved_source.json()["source_type"] == "source_asset"
     assert saved_source.json()["group_ids"] == [first_group]
     assert saved_source.json()["thumbnail_url"].endswith("variant=thumbnail")
+    _assert_resource_asset_reuses_source_storage(
+        db_session,
+        resource_asset_id=source_resource_id,
+        source_model=SourceAsset,
+        source_id=source_asset_id,
+    )
 
     saved_source_again = client.post(
         "/api/resource-library/assets/save",
@@ -198,6 +224,12 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     )
     assert saved_poster.status_code == 201
     assert saved_poster.json()["source_type"] == "poster_variant"
+    _assert_resource_asset_reuses_source_storage(
+        db_session,
+        resource_asset_id=saved_poster.json()["id"],
+        source_model=PosterVariant,
+        source_id=poster_id,
+    )
 
     saved_generated = client.post(
         "/api/resource-library/assets/save",
@@ -213,6 +245,12 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     assert saved_generated.status_code == 201
     assert saved_generated.json()["source_type"] == "image_session_asset"
     assert saved_generated.json()["group_ids"] == [first_group]
+    _assert_resource_asset_reuses_source_storage(
+        db_session,
+        resource_asset_id=saved_generated.json()["id"],
+        source_model=ImageSessionAsset,
+        source_id=generated_asset_id,
+    )
 
     group_a_items = client.get("/api/resource-library/assets", params={"group_id": first_group})
     assert group_a_items.status_code == 200

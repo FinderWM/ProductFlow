@@ -76,6 +76,22 @@ describe("workflow canvas actions", () => {
     expect(items.map((item) => item.id)).toEqual(["run", "runAfter", "duplicate", "fitSelected", "delete"]);
   });
 
+  it("disables delete when the selected node is queued or running", () => {
+    for (const status of ["queued", "running"] as const) {
+      const items = buildWorkflowCanvasActionItems(
+        { kind: "single", nodeId: "copy" },
+        {
+          primaryNode: {
+            ...baseNode,
+            status,
+          },
+        },
+      );
+
+      expect(items.find((item) => item.id === "delete")).toMatchObject({ disabled: true });
+    }
+  });
+
   it("builds group actions with save-template and without single-node run", () => {
     const items = buildWorkflowCanvasActionItems({
       kind: "group",
@@ -84,6 +100,30 @@ describe("workflow canvas actions", () => {
     });
 
     expect(items.map((item) => item.id)).toEqual(["duplicate", "fitSelected", "saveTemplate", "delete"]);
+  });
+
+  it("disables group delete when any selected target node is queued or running", () => {
+    const items = buildWorkflowCanvasActionItems(
+      {
+        kind: "group",
+        primaryNodeId: "copy",
+        nodeIds: ["copy", "image"],
+      },
+      {
+        primaryNode: baseNode,
+        targetNodes: [
+          baseNode,
+          {
+            ...baseNode,
+            id: "image",
+            node_type: "image_generation",
+            status: "running",
+          },
+        ],
+      },
+    );
+
+    expect(items.find((item) => item.id === "delete")).toMatchObject({ disabled: true });
   });
 
   it("hides run actions for inspiration-context nodes", () => {

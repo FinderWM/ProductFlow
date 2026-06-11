@@ -82,6 +82,7 @@ class ImageChatService:
         )
         self.provider_kind = self.provider_config.provider_kind
         self.prompt_template = settings.prompt_image_chat_template
+        self.max_reference_images = settings.image_session_max_base_images
 
     def generate(
         self,
@@ -290,18 +291,24 @@ class ImageChatService:
     ) -> list[ResponsesReferenceImage]:
         references: list[ResponsesReferenceImage] = []
 
-        references.extend(build_responses_reference_images_from_data_urls(manual_reference_images, limit=6))
+        reference_limit = max(0, self.max_reference_images)
+        references.extend(
+            build_responses_reference_images_from_data_urls(manual_reference_images, limit=reference_limit)
+        )
+        if len(references) >= reference_limit:
+            return references[:reference_limit]
 
         history_references: list[ResponsesReferenceImage] = []
+        remaining_history_slots = max(0, reference_limit - len(references))
         for turn in reversed(history):
             if turn.role != "assistant" or not turn.image_data_url:
                 continue
             history_references.append(decode_reference_data_url(turn.image_data_url))
-            if len(history_references) >= 3:
+            if len(history_references) >= min(3, remaining_history_slots):
                 break
         history_references.reverse()
         references.extend(history_references)
-        return references[:6]
+        return references[:reference_limit]
 
     def _generate_openai_images(
         self,
@@ -458,6 +465,9 @@ class ImageChatService:
         manual_reference_images: list[str],
     ) -> list[ImagesReferenceImage]:
         references: list[ImagesReferenceImage] = []
+        reference_limit = max(0, self.max_reference_images)
+        if reference_limit <= 0:
+            return references
         has_base_image = False
         for turn in reversed(history):
             if turn.role == "assistant" and turn.image_data_url:
@@ -471,7 +481,7 @@ class ImageChatService:
                 )
                 has_base_image = True
                 break
-        manual_images = manual_reference_images[:5] if has_base_image else manual_reference_images[:6]
+        manual_images = manual_reference_images[: max(0, reference_limit - len(references))]
         reference_index = 1
         for index, data_url in enumerate(manual_images, start=1):
             ref = decode_reference_data_url(data_url)

@@ -24,6 +24,8 @@ export type CanvasTemplateEntryMode = Exclude<InspirationInitialWorkflowEntry, "
 export type WorkflowNodeStatus = "idle" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type WorkflowNodeRunStatusValue = WorkflowNodeStatus;
 export type WorkflowRunStatus = "running" | "waiting_confirmation" | "succeeded" | "failed" | "cancelled";
+export type TaskNotificationKind = "image_session_generation" | "inspiration_workflow";
+export type TaskNotificationStatus = "succeeded" | "failed" | "cancelled";
 export type WorkflowRunStartMode = "from_node" | "after_node";
 export type WorkflowRetryHint = "retry_later" | "revise_input" | "check_settings";
 export type CanvasTemplateKind = "full_canvas" | "node_group";
@@ -118,6 +120,19 @@ export interface CurrentWeather {
   is_day: boolean;
   observed_at?: string | null;
   timezone?: string | null;
+}
+
+export interface TaskNotificationEvent {
+  type: "task_notification";
+  event_id: string;
+  task_kind: TaskNotificationKind;
+  task_id: string;
+  owner_user_id: string;
+  status: TaskNotificationStatus;
+  title: string;
+  failure_reason: string | null;
+  finished_at: string | null;
+  resource_id: string;
 }
 
 export interface RbacUser {
@@ -801,6 +816,8 @@ export interface ImageSessionAsset extends ModerationFields {
   download_url: string;
   preview_url: string;
   thumbnail_url: string;
+  gallery_saved: boolean;
+  gallery_entry_id: string | null;
   created_at: string;
 }
 
@@ -821,6 +838,7 @@ export interface ImageSessionRound {
   generation_group_id: string | null;
   candidate_index: number;
   candidate_count: number;
+  base_asset_ids: string[];
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
   actual_size: string | null;
@@ -850,6 +868,7 @@ export interface ImageSessionGenerationTask {
   status: JobStatus;
   prompt: string;
   size: string;
+  base_asset_ids: string[];
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
   generation_config_mode: GenerationConfigSelectionMode;
@@ -1016,6 +1035,7 @@ export interface GalleryEntry extends ModerationFields {
   resource_group: GenerationResourceGroupTag;
   candidate_index: number | null;
   candidate_count: number | null;
+  base_asset_ids: string[];
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
   provider_notes: string[];
@@ -1024,6 +1044,7 @@ export interface GalleryEntry extends ModerationFields {
 
 export interface GalleryEntryListResponse {
   items: GalleryEntry[];
+  total: number;
   has_more: boolean;
   next_offset: number | null;
 }
@@ -1057,11 +1078,14 @@ export interface ConfigResponse {
 }
 
 export interface RuntimeConfig {
+  ui_layout_scheme: string;
   image_generation_max_dimension: number;
+  image_session_max_base_images: number;
   image_tool_allowed_fields: ImageToolOptionKey[];
   generation_tail_splitter_max_items: number;
   workflow_node_max_retry_count: number;
   workflow_node_retry_delay_ms: number;
+  gallery_show_generation_resource_group: boolean;
   deletion_enabled: boolean;
 }
 

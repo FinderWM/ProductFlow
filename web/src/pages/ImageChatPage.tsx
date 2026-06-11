@@ -8,6 +8,7 @@ import {
   Download,
   GalleryHorizontalEnd,
   History,
+  Image as ImageIcon,
   Layers3,
   Loader2,
   Menu,
@@ -18,7 +19,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
@@ -81,24 +82,28 @@ import {
 import {
   buildImageGenerationSubmitSignature,
   buildImageSessionHistoryTree,
+  addImageBaseAssetIds,
   clampGenerationCount,
   clampImageGenerationTaskCandidateCount,
   compactImageToolOptions,
   effectiveImageGenerationSubmitCount,
   findImageHistoryPlaceholder,
+  imageChatSessionFilterRouteStateFromSearchParams,
   imageGenerationTaskSubmitPayload,
+  imageSessionNewRoundDefaultResourceGroupId,
   isImageSessionGenerationTaskActive,
   isImageSessionGenerationTaskCancelable,
   isImageSessionGenerationTaskRegeneratable,
   isImageSessionGenerationTaskRetryable,
+  legacyBaseAssetIdFromBaseAssetIds,
   latestImageSessionGenerationState,
   mergeImageSessionStatusIntoDetail,
-  pruneSelectedReferenceIds,
+  removeImageBaseAssetId,
   reconcileImageSessionSelection,
-  requiresImageSessionGenerationBase,
   selectSubmittedImageGenerationTaskPlaceholderId,
   shouldBlockDuplicateGenerationSubmit,
   shouldRefreshImageSessionDetailFromStatus,
+  uniqueImageAssetIds,
 } from "./image-chat/branching";
 import type {
   ImageGenerationSubmitGuard,
@@ -113,6 +118,7 @@ import type {
   ImageSessionRound,
   ImageSessionGenerationTask,
   ImageSessionListResponse,
+  ImageSessionSummary,
   ImageSessionStatus,
   ImageToolOptions,
   ModerationFields,
@@ -122,12 +128,15 @@ import type {
 } from "../lib/types";
 
 const DUPLICATE_GENERATION_SUBMIT_WINDOW_MS = 1800;
-const MAX_BRANCH_CONTEXT_IMAGES = 6;
+const DEFAULT_IMAGE_SESSION_MAX_BASE_IMAGES = 6;
 const DESKTOP_RESIZABLE_LAYOUT_QUERY = "(min-width: 1024px)";
 const INSPIRATION_PICKER_LIST_STALE_TIME_MS = 60_000;
 const RUNTIME_CONFIG_STALE_TIME_MS = 5 * 60_000;
 const RBAC_USERS_STALE_TIME_MS = 5 * 60_000;
 const IMAGE_CHAT_GENERATION_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const IMAGE_CHAT_GRADIENT_ACTION_CLASS =
+  "inline-flex items-center justify-center rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500";
+const IMAGE_CHAT_GRADIENT_ICON_ACTION_CLASS = `${IMAGE_CHAT_GRADIENT_ACTION_CLASS} h-11 w-11 shrink-0`;
 
 type ImageChatResizeTarget = "left" | "right" | "history";
 type ImageChatGenerationDraftMode = "new_round" | "retry";
@@ -136,6 +145,7 @@ interface ImageChatRouteState {
   selectedSessionId: string | null;
   selectedGeneratedAssetId: string | null;
   selectedTaskPlaceholderId: string | null;
+  selectedBaseAssetIds: string[];
   branchBaseAssetId: string | null;
   selectedReferenceAssetIds: string[];
   generationCount: number;
@@ -163,6 +173,7 @@ function readImageChatRouteState(scope: string): ImageChatRouteState | undefined
   }
   return {
     ...cached,
+    selectedBaseAssetIds: [...(cached.selectedBaseAssetIds ?? [])],
     selectedReferenceAssetIds: [...cached.selectedReferenceAssetIds],
     toolOptions: { ...cached.toolOptions },
   };
@@ -171,6 +182,7 @@ function readImageChatRouteState(scope: string): ImageChatRouteState | undefined
 function writeImageChatRouteState(scope: string, state: ImageChatRouteState) {
   imageChatRouteStateCache.set(scope, {
     ...state,
+    selectedBaseAssetIds: [...state.selectedBaseAssetIds],
     selectedReferenceAssetIds: [...state.selectedReferenceAssetIds],
     toolOptions: { ...state.toolOptions },
   });
@@ -224,10 +236,6 @@ function assertImageChatActionAllowed(blockedTitle: string | null) {
   }
 }
 
-function imageRoundGenerationGroupId(round: ImageSessionRound): string {
-  return round.generation_group_id ?? round.id;
-}
-
 interface ImageChatPageProps {
   mode?: "auto" | "workbench";
 }
@@ -241,11 +249,22 @@ function ImageChatWorkbenchPage() {
   const { t } = useI18n();
   const sessionState = useSessionState();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { inspirationId } = useParams();
   const isInspirationMode = Boolean(inspirationId);
   const routeStateScope = getImageChatRouteStateScope(inspirationId);
-  const initialRouteState = readImageChatRouteState(routeStateScope);
+  const initialRouteState = useMemo<Partial<ImageChatRouteState> | undefined>(() => {
+    const cached = readImageChatRouteState(routeStateScope);
+    const sessionFilterRouteState = imageChatSessionFilterRouteStateFromSearchParams(searchParams);
+    if (!sessionFilterRouteState) {
+      return cached;
+    }
+    return {
+      ...cached,
+      ...sessionFilterRouteState,
+    };
+  }, [routeStateScope, searchParams]);
   const pendingGeneratedRoundCountRef = useRef<number | null>(null);
   const duplicateSubmitGuardRef = useRef<ImageGenerationSubmitGuard | null>(null);
   const mobileSessionButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -255,40 +274,45 @@ function ImageChatWorkbenchPage() {
   const createSessionDialogDescriptionId = useId();
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
-    () => readImageChatRouteState(routeStateScope)?.selectedSessionId ?? null,
+    () => initialRouteState?.selectedSessionId ?? null,
   );
   const [selectedGeneratedAssetId, setSelectedGeneratedAssetId] = useState<string | null>(
-    () => readImageChatRouteState(routeStateScope)?.selectedGeneratedAssetId ?? null,
+    () => initialRouteState?.selectedGeneratedAssetId ?? null,
   );
   const [selectedTaskPlaceholderId, setSelectedTaskPlaceholderId] = useState<string | null>(
-    () => readImageChatRouteState(routeStateScope)?.selectedTaskPlaceholderId ?? null,
+    () => initialRouteState?.selectedTaskPlaceholderId ?? null,
   );
-  const [branchBaseAssetId, setBranchBaseAssetId] = useState<string | null>(
-    () => readImageChatRouteState(routeStateScope)?.branchBaseAssetId ?? null,
-  );
-  const [selectedReferenceAssetIds, setSelectedReferenceAssetIds] = useState<string[]>(
-    () => readImageChatRouteState(routeStateScope)?.selectedReferenceAssetIds ?? [],
+  const [selectedBaseAssetIds, setSelectedBaseAssetIds] = useState<string[]>(() => {
+    const cached = initialRouteState;
+    return uniqueImageAssetIds([
+      ...(cached?.selectedBaseAssetIds ?? []),
+      cached?.branchBaseAssetId,
+      ...(cached?.selectedReferenceAssetIds ?? []),
+    ]);
+  });
+  const [lastExplicitHistoryAssetId, setLastExplicitHistoryAssetId] = useState<string | null>(
+    () => initialRouteState?.selectedGeneratedAssetId ?? null,
   );
   const [generationCount, setGenerationCount] = useState(
-    () => readImageChatRouteState(routeStateScope)?.generationCount ?? 1,
+    () => initialRouteState?.generationCount ?? 1,
   );
-  const [draft, setDraft] = useState(() => readImageChatRouteState(routeStateScope)?.draft ?? "");
-  const [size, setSize] = useState(() => readImageChatRouteState(routeStateScope)?.size ?? "1024x1024");
+  const [draft, setDraft] = useState(() => initialRouteState?.draft ?? "");
+  const [size, setSize] = useState(() => initialRouteState?.size ?? "1024x1024");
   const [toolOptions, setToolOptions] = useState<ImageToolOptions>(
-    () => readImageChatRouteState(routeStateScope)?.toolOptions ?? {},
+    () => initialRouteState?.toolOptions ?? {},
   );
   const [settingsTab, setSettingsTab] = useState<ImageGenerationSettingsTab>(
-    () => readImageChatRouteState(routeStateScope)?.settingsTab ?? "basic",
+    () => initialRouteState?.settingsTab ?? "basic",
   );
   const [promptPolishConfigMode, setPromptPolishConfigMode] = useState<GenerationConfigSelectionMode>("auto");
   const [promptPolishConfigId, setPromptPolishConfigId] = useState<string | null>(null);
   const [generationConfigMode, setGenerationConfigMode] = useState<GenerationConfigSelectionMode>("auto");
   const [generationConfigId, setGenerationConfigId] = useState<string | null>(null);
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(
-    () => readImageChatRouteState(routeStateScope)?.selectedResourceGroupId ?? null,
+    () => initialRouteState?.selectedResourceGroupId ?? null,
   );
   const [selectedSessionResourceGroupId, setSelectedSessionResourceGroupId] = useState<string | null>(
-    () => readImageChatRouteState(routeStateScope)?.selectedSessionResourceGroupId ?? null,
+    () => initialRouteState?.selectedSessionResourceGroupId ?? null,
   );
   const [selectedSessionOwnerUserId, setSelectedSessionOwnerUserId] = useState(
     () => initialRouteState?.selectedSessionOwnerUserId ?? "",
@@ -298,7 +322,7 @@ function ImageChatWorkbenchPage() {
   );
   const [selectedSessionOwnerSearch, setSelectedSessionOwnerSearch] = useState("");
   const [onlyDeletedSessions, setOnlyDeletedSessions] = useState(
-    () => readImageChatRouteState(routeStateScope)?.onlyDeletedSessions ?? false,
+    () => initialRouteState?.onlyDeletedSessions ?? false,
   );
   const [sessionFiltersExpanded, setSessionFiltersExpanded] = useState(false);
   const [createSessionDialogOpen, setCreateSessionDialogOpen] = useState(false);
@@ -306,7 +330,7 @@ function ImageChatWorkbenchPage() {
   const [titleDraft, setTitleDraft] = useState("");
   const [renameEnabled, setRenameEnabled] = useState(false);
   const [targetInspirationId, setTargetInspirationId] = useState(
-    () => readImageChatRouteState(routeStateScope)?.targetInspirationId ?? "",
+    () => initialRouteState?.targetInspirationId ?? "",
   );
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const [polishedPrompt, setPolishedPrompt] = useState("");
@@ -353,8 +377,9 @@ function ImageChatWorkbenchPage() {
       selectedSessionId,
       selectedGeneratedAssetId,
       selectedTaskPlaceholderId,
-      branchBaseAssetId,
-      selectedReferenceAssetIds,
+      selectedBaseAssetIds,
+      branchBaseAssetId: legacyBaseAssetIdFromBaseAssetIds(selectedBaseAssetIds),
+      selectedReferenceAssetIds: selectedBaseAssetIds,
       generationCount,
       draft,
       size,
@@ -367,15 +392,14 @@ function ImageChatWorkbenchPage() {
       onlyDeletedSessions,
     });
   }, [
-    branchBaseAssetId,
     draft,
     generationCount,
     routeStateScope,
+    selectedBaseAssetIds,
     selectedGeneratedAssetId,
     selectedResourceGroupId,
     selectedSessionOwnerUserId,
     selectedSessionResourceGroupId,
-    selectedReferenceAssetIds,
     selectedSessionId,
     selectedTaskPlaceholderId,
     onlyDeletedSessions,
@@ -438,6 +462,10 @@ function ImageChatWorkbenchPage() {
   });
 
   const sessionItems = sessionsQuery.data?.items ?? [];
+  const selectedSessionSummary = useMemo<ImageSessionSummary | null>(
+    () => sessionItems.find((item) => item.id === selectedSessionId) ?? null,
+    [selectedSessionId, sessionItems],
+  );
 
   const inspirationQuery = useQuery({
     queryKey: ["inspiration", inspirationId],
@@ -483,6 +511,10 @@ function ImageChatWorkbenchPage() {
   const rbacUsers = rbacUsersQuery.data?.items ?? [];
   const imageGenerationMaxDimension =
     runtimeConfigQuery.data?.image_generation_max_dimension ?? DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
+  const maxSelectedBaseImageCount = Math.max(
+    0,
+    Math.round(runtimeConfigQuery.data?.image_session_max_base_images ?? DEFAULT_IMAGE_SESSION_MAX_BASE_IMAGES),
+  );
   const imageToolAllowedFields = runtimeConfigQuery.data?.image_tool_allowed_fields ?? DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS;
   const deletionEnabled = runtimeConfigQuery.data?.deletion_enabled ?? false;
   const sizeOptions = useMemo(
@@ -601,8 +633,8 @@ function ImageChatWorkbenchPage() {
   function resetImageSessionSelection() {
     setSelectedGeneratedAssetId(null);
     setSelectedTaskPlaceholderId(null);
-    setBranchBaseAssetId(null);
-    setSelectedReferenceAssetIds([]);
+    setSelectedBaseAssetIds([]);
+    setLastExplicitHistoryAssetId(null);
     setGenerationDraftMode(null);
     setRetryGenerationTaskId(null);
     setPromptPolishConfigMode("auto");
@@ -624,10 +656,19 @@ function ImageChatWorkbenchPage() {
   }
 
   useEffect(() => {
-    if (!isInspirationMode && inspirations.length && !targetInspirationId) {
+    if (isInspirationMode || !inspirationsQuery.isFetched) {
+      return;
+    }
+    if (!inspirations.length) {
+      if (targetInspirationId) {
+        setTargetInspirationId("");
+      }
+      return;
+    }
+    if (!targetInspirationId || !inspirations.some((inspiration) => inspiration.id === targetInspirationId)) {
       setTargetInspirationId(inspirations[0].id);
     }
-  }, [isInspirationMode, inspirations, targetInspirationId]);
+  }, [inspirations, inspirationsQuery.isFetched, isInspirationMode, targetInspirationId]);
 
   function defaultCreateSessionResourceGroupId(): string {
     if (selectedResourceGroupId && resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
@@ -751,28 +792,19 @@ function ImageChatWorkbenchPage() {
     () => latestImageSessionGenerationState(imageSession?.rounds ?? [], imageSession?.generation_tasks ?? []),
     [imageSession],
   );
-  const latestSucceededGenerationGroupId =
-    latestGenerationState.status === "succeeded" ? imageRoundGenerationGroupId(latestGenerationState.round) : null;
-  const latestSucceededRoundAssetIds = useMemo(() => {
-    if (!imageSession?.rounds.length || !latestSucceededGenerationGroupId) {
-      return new Set<string>();
-    }
-    return new Set(
-      imageSession.rounds
-        .filter((round) => imageRoundGenerationGroupId(round) === latestSucceededGenerationGroupId)
-        .map((round) => round.generated_asset.id),
-    );
-  }, [imageSession, latestSucceededGenerationGroupId]);
   const historyBranches = useMemo(
     () => buildImageSessionHistoryTree(imageSession?.rounds ?? [], imageSession?.generation_tasks ?? []),
     [imageSession],
   );
-  const requiresGenerationBase = requiresImageSessionGenerationBase(
-    imageSession?.rounds ?? [],
-    imageSession?.generation_tasks ?? [],
-  );
   const sessionReferenceAssets = useMemo(() => getSessionReferenceAssets(imageSession), [imageSession]);
-  const maxSelectedReferenceCount = branchBaseAssetId ? MAX_BRANCH_CONTEXT_IMAGES - 1 : MAX_BRANCH_CONTEXT_IMAGES;
+  const imageSessionAssetsById = useMemo(
+    () => new Map((imageSession?.assets ?? []).map((asset) => [asset.id, asset])),
+    [imageSession],
+  );
+  const selectedBaseAssets = selectedBaseAssetIds
+    .map((assetId) => imageSessionAssetsById.get(assetId))
+    .filter((asset): asset is ImageSessionAsset => Boolean(asset));
+  const maxSelectedReferenceCount = maxSelectedBaseImageCount;
   const compactedToolOptions = useMemo(
     () => compactImageToolOptions(toolOptions, imageToolAllowedFields),
     [imageToolAllowedFields, toolOptions],
@@ -817,10 +849,9 @@ function ImageChatWorkbenchPage() {
       historyBranches,
       selectedGeneratedAssetId,
       selectedTaskPlaceholderId,
-      branchBaseAssetId,
-      selectedReferenceAssetIds,
-      availableReferenceAssetIds: sessionReferenceAssets.map((asset) => asset.id),
-      maxSelectedReferenceCount,
+      selectedBaseAssetIds,
+      availableBaseAssetIds: imageSession.assets.map((asset) => asset.id),
+      maxSelectedBaseCount: maxSelectedBaseImageCount,
       pendingGeneratedRoundCount: pendingGeneratedRoundCountRef.current,
     });
 
@@ -830,11 +861,8 @@ function ImageChatWorkbenchPage() {
     if (reconciled.selectedTaskPlaceholderId !== selectedTaskPlaceholderId) {
       setSelectedTaskPlaceholderId(reconciled.selectedTaskPlaceholderId);
     }
-    if (reconciled.branchBaseAssetId !== branchBaseAssetId) {
-      setBranchBaseAssetId(reconciled.branchBaseAssetId);
-    }
-    if (reconciled.selectedReferenceAssetIds !== selectedReferenceAssetIds) {
-      setSelectedReferenceAssetIds(reconciled.selectedReferenceAssetIds);
+    if (reconciled.selectedBaseAssetIds !== selectedBaseAssetIds) {
+      setSelectedBaseAssetIds(reconciled.selectedBaseAssetIds);
     }
     pendingGeneratedRoundCountRef.current = reconciled.pendingGeneratedRoundCount;
 
@@ -845,13 +873,11 @@ function ImageChatWorkbenchPage() {
       setErrorMessage("");
     }
   }, [
-    branchBaseAssetId,
     historyBranches,
     imageSession,
-    maxSelectedReferenceCount,
-    selectedReferenceAssetIds,
+    maxSelectedBaseImageCount,
+    selectedBaseAssetIds,
     selectedGeneratedAssetId,
-    sessionReferenceAssets,
     selectedTaskPlaceholderId,
   ]);
 
@@ -883,18 +909,14 @@ function ImageChatWorkbenchPage() {
   const selectedGeneratedSavedToResourceLibrary = Boolean(
     selectedGeneratedResourceStatusQuery.data?.items[0]?.saved,
   );
+  const selectedGeneratedSavedToGallery = Boolean(selectedRound?.generated_asset.gallery_saved);
   const activePreviewRound =
     previewRound && imageSession?.rounds.some((round) => round.id === previewRound.id) ? previewRound : null;
 
-  const branchBaseRound = useMemo(() => {
-    if (!imageSession?.rounds.length || !branchBaseAssetId) {
-      return null;
-    }
-    return imageSession.rounds.find((round) => round.generated_asset.id === branchBaseAssetId) ?? null;
-  }, [branchBaseAssetId, imageSession]);
+  const selectedRoundIsBase = Boolean(
+    selectedRound && selectedBaseAssetIds.includes(selectedRound.generated_asset.id),
+  );
   const generationDraftOpen = latestGenerationState.status === "empty" || generationDraftMode !== null;
-  const generationDraftRequiresBase =
-    generationDraftMode === "retry" ? Boolean(branchBaseAssetId) : requiresGenerationBase;
   const generationDraftGateMessage =
     generationDraftOpen
       ? ""
@@ -905,8 +927,7 @@ function ImageChatWorkbenchPage() {
           : latestGenerationState.status === "active" || latestGenerationState.status === "refreshing"
             ? t("chat.currentRoundActive")
             : t("chat.newRoundUnavailable");
-  const baseRequirementMessage =
-    generationDraftOpen && generationDraftRequiresBase && !branchBaseRound ? t("chat.baseRequired") : "";
+  const baseRequirementMessage = "";
   const resourceGroupRequirementMessage =
     generationDraftOpen && !selectedResourceGroupId ? t("chat.resourceGroupRequired") : "";
 
@@ -919,21 +940,16 @@ function ImageChatWorkbenchPage() {
     () => inspirationQuery.data?.source_assets.filter((asset) => asset.kind === "reference_image") ?? [],
     [inspirationQuery.data],
   );
-  const selectedReferenceBlockedResource = firstBlockedResource(
-    sessionReferenceAssets.filter((asset) => selectedReferenceAssetIds.includes(asset.id)),
-  );
-  const selectedReferenceAssets = sessionReferenceAssets.filter((asset) => selectedReferenceAssetIds.includes(asset.id));
+  const selectedBaseBlockedResource = firstBlockedResource(selectedBaseAssets);
   const generationBlockedResource = firstBlockedResource([
     imageSession,
     isInspirationMode ? currentInspiration : null,
-    requiresGenerationBase ? branchBaseRound?.generated_asset : null,
-    selectedReferenceBlockedResource,
+    selectedBaseBlockedResource,
   ]);
   const generationAdminReadonly = hasAdminReadonlyResource(currentUser, [
     imageSession,
     isInspirationMode ? currentInspiration : null,
-    requiresGenerationBase ? branchBaseRound?.generated_asset : null,
-    ...selectedReferenceAssets,
+    ...selectedBaseAssets,
   ]);
   const selectedResultBlockedResource = firstBlockedResource([
     imageSession,
@@ -1000,19 +1016,12 @@ function ImageChatWorkbenchPage() {
     selectedPlaceholder && latestGenerationState.task?.id !== selectedPlaceholder.task_id
       ? t("chat.historyRoundLocked")
       : generationBlockedTitle;
-  const selectedRoundIsLatestSucceeded =
-    selectedRound !== null && latestSucceededRoundAssetIds.has(selectedRound.generated_asset.id);
-  const latestAvailableRound = imageSession?.rounds.at(-1) ?? null;
-  const newRoundBaseRound =
-    selectedRoundIsLatestSucceeded
-      ? selectedRound
-      : latestGenerationState.status === "succeeded"
-        ? latestGenerationState.round
-        : latestGenerationState.status === "failed"
-          ? latestAvailableRound
-          : null;
-  const canStartNewRoundWithoutBase =
-    latestGenerationState.status === "failed" && latestAvailableRound === null;
+  const explicitHistoryBaseAvailable = Boolean(
+    lastExplicitHistoryAssetId &&
+      imageSession?.rounds.some((round) => round.generated_asset.id === lastExplicitHistoryAssetId),
+  );
+  const canStartNewRound =
+    latestGenerationState.status === "succeeded" || latestGenerationState.status === "failed";
   const newRoundUnavailableTitle =
     latestGenerationState.status === "succeeded"
       ? ""
@@ -1025,8 +1034,7 @@ function ImageChatWorkbenchPage() {
             : t("chat.newRoundUnavailable");
   const newRoundBlockedTitle = generationSettingsBlockedTitle ?? newRoundUnavailableTitle;
   const newRoundDisabled =
-    !(newRoundBaseRound || canStartNewRoundWithoutBase) ||
-    Boolean(generationSettingsBlockedTitle || newRoundUnavailableTitle);
+    !canStartNewRound || Boolean(generationSettingsBlockedTitle || newRoundUnavailableTitle);
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -1069,12 +1077,8 @@ function ImageChatWorkbenchPage() {
       void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       const isCurrentSession = updated.id === selectedSessionId;
       if (isCurrentSession && uploadedReferenceIds.length) {
-        setSelectedReferenceAssetIds((current) =>
-          pruneSelectedReferenceIds(
-            [...current, ...uploadedReferenceIds],
-            getSessionReferenceAssets(updated).map((asset) => asset.id),
-            maxSelectedReferenceCount,
-          ),
+        setSelectedBaseAssetIds((current) =>
+          addImageBaseAssetIds(current, uploadedReferenceIds, maxSelectedBaseImageCount),
         );
       }
       if (isCurrentSession) {
@@ -1098,12 +1102,9 @@ function ImageChatWorkbenchPage() {
       setPendingDeleteAction(null);
       const isCurrentSession = updated.id === selectedSessionId;
       if (isCurrentSession) {
-        setSelectedReferenceAssetIds((current) =>
-          pruneSelectedReferenceIds(
-            current,
-            getSessionReferenceAssets(updated).map((asset) => asset.id),
-            maxSelectedReferenceCount,
-          ),
+        const availableIds = new Set(updated.assets.map((asset) => asset.id));
+        setSelectedBaseAssetIds((current) =>
+          uniqueImageAssetIds(current).filter((assetId) => availableIds.has(assetId)),
         );
         setSuccessMessage(t("chat.referenceDeleted"));
         setErrorMessage("");
@@ -1268,10 +1269,36 @@ function ImageChatWorkbenchPage() {
       assertImageChatActionAllowed(selectedResultBlockedTitle);
       return api.saveGalleryEntry(assetId);
     },
-    onSuccess: async () => {
+    onSuccess: async (entry, assetId) => {
+      queryClient.setQueryData<ImageSessionDetail>(["image-session", entry.image_session_id], (current) => {
+        if (!current) {
+          return current;
+        }
+        const markAssetSavedToGallery = (asset: ImageSessionAsset): ImageSessionAsset =>
+          asset.id === assetId
+            ? {
+                ...asset,
+                gallery_saved: true,
+                gallery_entry_id: entry.id,
+              }
+            : asset;
+        return {
+          ...current,
+          assets: current.assets.map(markAssetSavedToGallery),
+          rounds: current.rounds.map((round) =>
+            round.generated_asset.id === assetId
+              ? {
+                  ...round,
+                  generated_asset: markAssetSavedToGallery(round.generated_asset),
+                }
+              : round,
+          ),
+        };
+      });
       setSuccessMessage(t("chat.savedGallery"));
       setErrorMessage("");
       await queryClient.invalidateQueries({ queryKey: ["gallery"] });
+      await queryClient.invalidateQueries({ queryKey: ["image-session", entry.image_session_id] });
     },
     onError: (error) => {
       setErrorMessage(error instanceof ApiError ? error.detail : t("chat.saveGalleryFailed"));
@@ -1293,12 +1320,8 @@ function ImageChatWorkbenchPage() {
       queryClient.setQueryData(["image-session", updated.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
       if (updated.id === selectedSessionId && loadedReferenceIds.length) {
-        setSelectedReferenceAssetIds((current) =>
-          pruneSelectedReferenceIds(
-            [...current, ...loadedReferenceIds],
-            getSessionReferenceAssets(updated).map((asset) => asset.id),
-            maxSelectedReferenceCount,
-          ),
+        setSelectedBaseAssetIds((current) =>
+          addImageBaseAssetIds(current, loadedReferenceIds, maxSelectedBaseImageCount),
         );
       }
       setResourceLibraryOpen(false);
@@ -1340,7 +1363,11 @@ function ImageChatWorkbenchPage() {
     Boolean(createSessionBlockedTitle) ||
     !resourceGroups.length;
   const renameSessionDisabled = !selectedSessionId || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle);
-  const saveSelectedGalleryDisabled = saveGalleryMutation.isPending || Boolean(selectedResultBlockedTitle);
+  const saveSelectedGalleryDisabled =
+    saveGalleryMutation.isPending || selectedGeneratedSavedToGallery || Boolean(selectedResultBlockedTitle);
+  const saveSelectedGalleryTitle = selectedGeneratedSavedToGallery
+    ? t("chat.alreadyInGallery")
+    : selectedResultBlockedTitle ?? t("chat.saveSelectedGallery");
   const saveSelectedResourceLibraryDisabled = Boolean(resourceLibrarySaveGeneratedBlockedTitle);
   const sessionDeletionEnabled = deletionEnabled;
 
@@ -1373,15 +1400,18 @@ function ImageChatWorkbenchPage() {
       setErrorMessage(t("chat.retryCurrentFailedRoundRequired"));
       return;
     }
-    const selectedReferenceIds = pruneSelectedReferenceIds(
-      selectedReferenceAssetIds,
-      sessionReferenceAssets.map((asset) => asset.id),
-      maxSelectedReferenceCount,
+    const availableBaseAssetIds = new Set(imageSession.assets.map((asset) => asset.id));
+    const selectedBaseIds = uniqueImageAssetIds(selectedBaseAssetIds)
+      .filter((assetId) => availableBaseAssetIds.has(assetId))
+      .slice(0, maxSelectedBaseImageCount);
+    const selectedReferenceIds = selectedBaseIds.filter(
+      (assetId) => imageSessionAssetsById.get(assetId)?.kind === "reference_upload",
     );
     const payload: ImageGenerationSubmitPayload = {
       prompt,
       size,
-      base_asset_id: generationDraftRequiresBase ? branchBaseAssetId : null,
+      base_asset_ids: selectedBaseIds,
+      base_asset_id: legacyBaseAssetIdFromBaseAssetIds(selectedBaseIds),
       selected_reference_asset_ids: selectedReferenceIds,
       generation_count: clampGenerationCount(generationCount),
       tool_options: compactedToolOptions,
@@ -1444,8 +1474,6 @@ function ImageChatWorkbenchPage() {
 
   function restoreGenerationTaskDraft(task: ImageSessionGenerationTask, mode: ImageChatGenerationDraftMode) {
     const payload = imageGenerationTaskSubmitPayload(task);
-    const nextBranchBaseAssetId = payload.base_asset_id ?? null;
-    const nextMaxReferenceCount = nextBranchBaseAssetId ? MAX_BRANCH_CONTEXT_IMAGES - 1 : MAX_BRANCH_CONTEXT_IMAGES;
     setDraft(payload.prompt);
     setPolishedPrompt("");
     setSize(payload.size);
@@ -1456,13 +1484,8 @@ function ImageChatWorkbenchPage() {
     setGenerationConfigId(
       payload.generation_config_mode === "manual" ? (payload.generation_config_id ?? null) : null,
     );
-    setBranchBaseAssetId(nextBranchBaseAssetId);
-    setSelectedReferenceAssetIds(
-      pruneSelectedReferenceIds(
-        payload.selected_reference_asset_ids,
-        sessionReferenceAssets.map((asset) => asset.id),
-        nextMaxReferenceCount,
-      ),
+    setSelectedBaseAssetIds(
+      addImageBaseAssetIds([], payload.base_asset_ids, maxSelectedBaseImageCount),
     );
     setSelectedTaskPlaceholderId(
       selectedPlaceholder?.task_id === task.id
@@ -1545,15 +1568,18 @@ function ImageChatWorkbenchPage() {
       setErrorMessage(newRoundBlockedTitle);
       return;
     }
-    if (!newRoundBaseRound && !canStartNewRoundWithoutBase) {
-      setErrorMessage(t("chat.newRoundUnavailable"));
-      return;
+    const nextBaseAssetIds =
+      explicitHistoryBaseAvailable && lastExplicitHistoryAssetId ? [lastExplicitHistoryAssetId] : [];
+    const defaultResourceGroupId = imageSessionNewRoundDefaultResourceGroupId({
+      sessionSummary: selectedSessionSummary,
+      imageSession,
+    });
+    if (defaultResourceGroupId && resourceGroups.some((group) => group.id === defaultResourceGroupId)) {
+      setSelectedResourceGroupId(defaultResourceGroupId);
     }
-    const nextBaseAssetId = newRoundBaseRound?.generated_asset.id ?? null;
-    setSelectedGeneratedAssetId(nextBaseAssetId);
     setSelectedTaskPlaceholderId(null);
-    setBranchBaseAssetId(nextBaseAssetId);
-    setSelectedReferenceAssetIds([]);
+    setSelectedBaseAssetIds(nextBaseAssetIds);
+    setLastExplicitHistoryAssetId(null);
     setDraft("");
     setPolishedPrompt("");
     setSettingsTab("basic");
@@ -1602,6 +1628,11 @@ function ImageChatWorkbenchPage() {
     if (!selectedRound || saveGalleryMutation.isPending) {
       return;
     }
+    if (selectedRound.generated_asset.gallery_saved) {
+      setSuccessMessage(t("chat.alreadyInGallery"));
+      setErrorMessage("");
+      return;
+    }
     if (selectedResultBlockedTitle) {
       setErrorMessage(selectedResultBlockedTitle);
       return;
@@ -1640,11 +1671,29 @@ function ImageChatWorkbenchPage() {
   function handleSelectHistoryRound(assetId: string) {
     setSelectedGeneratedAssetId(assetId);
     setSelectedTaskPlaceholderId(null);
-    if (generationDraftMode === "new_round" && latestSucceededRoundAssetIds.has(assetId)) {
-      setBranchBaseAssetId(assetId);
+    if (generationDraftMode === null) {
+      setLastExplicitHistoryAssetId(assetId);
     }
     setSuccessMessage("");
     setErrorMessage("");
+  }
+
+  function handleAddHistoryRoundToBase(assetId: string) {
+    if (generationDraftMode !== "new_round") {
+      return;
+    }
+    if (!imageSession?.rounds.some((round) => round.generated_asset.id === assetId)) {
+      return;
+    }
+    setSelectedBaseAssetIds((current) => {
+      const next = addImageBaseAssetIds(current, [assetId], maxSelectedBaseImageCount);
+      if (next.length === current.length && !current.includes(assetId)) {
+        setErrorMessage(t("chat.baseLimitReached", { max: maxSelectedBaseImageCount }));
+      } else {
+        setErrorMessage("");
+      }
+      return next;
+    });
   }
 
   function handleSelectHistoryPlaceholder(placeholderId: string) {
@@ -1709,13 +1758,16 @@ function ImageChatWorkbenchPage() {
       setErrorMessage(adminReadonlyActionTitle);
       return;
     }
-    setSelectedReferenceAssetIds((current) => {
-      const next = checked ? [...current, assetId] : current.filter((id) => id !== assetId);
-      return pruneSelectedReferenceIds(
-        next,
-        sessionReferenceAssets.map((asset) => asset.id),
-        maxSelectedReferenceCount,
-      );
+    setSelectedBaseAssetIds((current) => {
+      const next = checked
+        ? addImageBaseAssetIds(current, [assetId], maxSelectedBaseImageCount)
+        : removeImageBaseAssetId(current, assetId);
+      if (checked && next.length === current.length && !current.includes(assetId)) {
+        setErrorMessage(t("chat.baseLimitReached", { max: maxSelectedBaseImageCount }));
+      } else {
+        setErrorMessage("");
+      }
+      return next;
     });
   }
 
@@ -1998,6 +2050,66 @@ function ImageChatWorkbenchPage() {
     );
   }
 
+  function renderSelectedBaseImagesPanel() {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
+            <Layers3 size={15} />
+            {t("chat.baseImages")}
+          </div>
+          <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
+            {t("chat.baseImageCount", { selected: selectedBaseAssetIds.length, max: maxSelectedBaseImageCount })}
+          </span>
+        </div>
+        {selectedBaseAssets.length ? (
+          <div className="grid grid-cols-4 gap-2">
+            {selectedBaseAssets.map((asset) => (
+              <div
+                key={asset.id}
+                className="group relative overflow-hidden rounded-xl border border-indigo-200 bg-slate-50 ring-2 ring-indigo-100 dark:border-violet-400/45 dark:bg-[#0b1220] dark:ring-violet-400/35"
+              >
+                <button
+                  type="button"
+                  onClick={() => setReferencePreview({ asset, title: t("chat.baseImages") })}
+                  className="block w-full"
+                  title={asset.original_filename}
+                  aria-label={t("detail.previewImage", { alt: asset.original_filename })}
+                >
+                  <img
+                    src={api.toApiUrl(asset.thumbnail_url)}
+                    alt={asset.original_filename}
+                    loading="lazy"
+                    decoding="async"
+                    className="h-20 w-full object-cover"
+                  />
+                </button>
+                <div className="absolute left-1 top-1 rounded-md bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm dark:bg-violet-500/90">
+                  {asset.kind === "generated_image" ? t("chat.historyImage") : t("chat.sessionReferenceShort")}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBaseAssetIds((current) => removeImageBaseAssetId(current, asset.id))}
+                  disabled={Boolean(generationSettingsBlockedTitle)}
+                  title={generationSettingsBlockedTitle ?? t("chat.removeBaseImage")}
+                  aria-label={t("chat.removeBaseImage")}
+                  className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/92 text-slate-500 shadow-sm ring-1 ring-slate-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/90 dark:text-slate-300 dark:ring-slate-700 dark:hover:text-red-300"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex min-h-20 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 text-center text-xs leading-5 text-slate-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
+            <ImageIcon size={16} className="mr-2 shrink-0" />
+            {t("chat.noBaseImages")}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function renderSessionResourceGroupFilter() {
     const selectedSessionResourceGroup = resourceGroups.find((group) => group.id === selectedSessionResourceGroupId);
     const showSensitiveImageMaskPreference = shouldShowSensitiveImageMaskPreference(
@@ -2141,9 +2253,11 @@ function ImageChatWorkbenchPage() {
         onChange={setSettingsTab}
         basic={
           <div className="space-y-4">
+            {renderSelectedBaseImagesPanel()}
+
             <SessionReferencePanel
               assets={sessionReferenceAssets}
-              selectedAssetIds={selectedReferenceAssetIds}
+              selectedAssetIds={selectedBaseAssetIds}
               maxSelectedCount={maxSelectedReferenceCount}
               uploadBusy={uploadReferenceMutation.isPending}
               deletingAssetId={
@@ -2348,7 +2462,7 @@ function ImageChatWorkbenchPage() {
     : null;
 
   return (
-    <div className="pf-workspace flex flex-col text-slate-900 dark:text-slate-100 lg:h-[100dvh] lg:overflow-hidden">
+    <div className="pf-workspace pf-image-chat-workspace flex flex-col text-slate-900 dark:text-slate-100 lg:h-[100dvh] lg:overflow-hidden">
       <TopNav
         breadcrumbs={isInspirationMode ? `${inspirationQuery.data?.name ?? t("chat.inspirationFallback")} / ${t("chat.breadcrumb")}` : t("chat.breadcrumb")}
         onHome={() => navigate(isInspirationMode && inspirationId ? `/inspirations/${inspirationId}` : "/inspirations")}
@@ -2356,11 +2470,11 @@ function ImageChatWorkbenchPage() {
       />
 
       <main
-        className="flex min-h-0 flex-1 flex-col pb-[calc(8.5rem+env(safe-area-inset-bottom))] lg:flex-row lg:overflow-hidden lg:pb-0"
+        className="pf-image-chat-workspace-main flex min-h-0 flex-1 flex-col pb-[calc(8.5rem+env(safe-area-inset-bottom))] lg:flex-row lg:overflow-hidden lg:pb-0"
         onPointerDown={handleMobileEdgeSwipeStart}
       >
         <aside
-          className="relative hidden w-full shrink-0 flex-col border-b border-slate-200 bg-white/95 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[12px_0_36px_rgba(0,0,0,0.24)] dark:backdrop-blur-xl lg:flex lg:w-[var(--image-chat-left-panel-width)] lg:border-b-0 lg:border-r"
+          className="pf-workspace-tool-rail relative hidden w-full shrink-0 flex-col border-b border-slate-200 bg-white/95 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[12px_0_36px_rgba(0,0,0,0.24)] dark:backdrop-blur-xl lg:flex lg:w-[var(--image-chat-left-panel-width)] lg:border-b-0 lg:border-r"
           style={leftPanelStyle}
         >
           <button
@@ -2465,7 +2579,7 @@ function ImageChatWorkbenchPage() {
                   disabled={renameSessionDisabled}
                   title={sessionEditBlockedTitle ?? (renameEnabled ? t("chat.saveSessionName") : t("chat.rename"))}
                   aria-label={renameEnabled ? t("chat.saveSessionName") : t("chat.rename")}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+                  className={`${IMAGE_CHAT_GRADIENT_ICON_ACTION_CLASS} rounded-2xl`}
                 >
                   {renameSessionMutation.isPending ? (
                     <Loader2 size={17} className="animate-spin" />
@@ -2492,7 +2606,7 @@ function ImageChatWorkbenchPage() {
                   <span className="inline-flex h-7 items-center rounded-full bg-white px-3 shadow-sm ring-1 ring-slate-200 dark:border dark:border-violet-400/30 dark:bg-slate-950/70 dark:text-violet-100 dark:ring-violet-400/20">
                     {t("chat.currentResult")}
                   </span>
-                  {branchBaseRound ? (
+                  {selectedRoundIsBase ? (
                     <span className="inline-flex h-7 items-center gap-1 rounded-full bg-indigo-600 px-3 text-white shadow-sm shadow-indigo-500/20 dark:bg-violet-500/20 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40">
                       <Layers3 size={12} /> {t("chat.baseSelected")}
                     </span>
@@ -2546,8 +2660,8 @@ function ImageChatWorkbenchPage() {
                       type="button"
                       onClick={handleSaveSelectedToGallery}
                       disabled={saveSelectedGalleryDisabled}
-                      title={selectedResultBlockedTitle ?? t("chat.saveSelectedGallery")}
-                      aria-label={t("chat.saveSelectedGallery")}
+                      title={saveSelectedGalleryTitle}
+                      aria-label={saveSelectedGalleryTitle}
                       className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 ring-1 ring-indigo-500 transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-violet-300/35"
                     >
                       {saveGalleryMutation.isPending ? (
@@ -2555,7 +2669,7 @@ function ImageChatWorkbenchPage() {
                       ) : (
                         <GalleryHorizontalEnd size={16} className="mr-2" />
                       )}
-                      {t("chat.sendGallery")}
+                      {selectedGeneratedSavedToGallery ? t("chat.alreadyInGallery") : t("chat.sendGallery")}
                     </button>
                     <button
                       type="button"
@@ -2563,7 +2677,7 @@ function ImageChatWorkbenchPage() {
                       disabled={saveSelectedResourceLibraryDisabled}
                       title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
                       aria-label={t("chat.resourceLibrary.saveGenerated")}
-                      className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100"
+                      className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} h-10 shrink-0 px-4 text-sm`}
                     >
                       <Save size={16} className="mr-2" />
                       {selectedGeneratedSavedToResourceLibrary
@@ -2585,7 +2699,7 @@ function ImageChatWorkbenchPage() {
             <ImageChatMainStage
               selectedRound={selectedRound}
               selectedPlaceholder={selectedPlaceholder}
-              branchBaseRound={branchBaseRound}
+              branchBaseRound={selectedRoundIsBase ? selectedRound : null}
               retryingTaskId={null}
               cancellingTaskId={cancelGenerationTaskMutation.isPending ? (cancelGenerationTaskMutation.variables?.taskId ?? null) : null}
               regenerating={generateMutation.isPending}
@@ -2626,11 +2740,11 @@ function ImageChatWorkbenchPage() {
             historyBranches={historyBranches}
             selectedGeneratedAssetId={selectedGeneratedAssetId}
             selectedTaskPlaceholderId={selectedTaskPlaceholderId}
-            branchBaseAssetId={branchBaseAssetId}
-            branchBaseSelected={Boolean(branchBaseRound)}
+            selectedBaseAssetIds={selectedBaseAssetIds}
             style={historyPanelStyle}
             onResizeStart={(event) => handlePanelResizeStart("history", event)}
             onSelectRound={handleSelectHistoryRound}
+            onAddRoundToBase={handleAddHistoryRoundToBase}
             onSelectPlaceholder={handleSelectHistoryPlaceholder}
             onStartNewRound={handleStartNewRound}
             newRoundDisabled={newRoundDisabled}
@@ -2643,7 +2757,7 @@ function ImageChatWorkbenchPage() {
         </section>
 
         <aside
-          className="relative hidden w-full shrink-0 flex-col border-t border-slate-200 bg-white dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[-12px_0_36px_rgba(0,0,0,0.24)] dark:backdrop-blur-xl lg:flex lg:w-[var(--image-chat-right-panel-width)] lg:border-l lg:border-t-0"
+          className="pf-workspace-tool-rail relative hidden w-full shrink-0 flex-col border-t border-slate-200 bg-white dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[-12px_0_36px_rgba(0,0,0,0.24)] dark:backdrop-blur-xl lg:flex lg:w-[var(--image-chat-right-panel-width)] lg:border-l lg:border-t-0"
           style={rightPanelStyle}
         >
           <button
@@ -2668,7 +2782,7 @@ function ImageChatWorkbenchPage() {
                   onClick={() => setRenameEnabled((current) => !current)}
                   disabled={renameSessionDisabled}
                   title={sessionEditBlockedTitle ?? t("chat.rename")}
-                  className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                  className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} h-8 rounded-lg px-2.5 text-xs`}
                 >
                   <Pencil size={12} className="mr-1.5" /> {t("chat.rename")}
                 </button>
@@ -2687,7 +2801,7 @@ function ImageChatWorkbenchPage() {
                     onClick={handleRename}
                     disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
                     title={sessionEditBlockedTitle ?? t("chat.saveSessionName")}
-                    className="inline-flex items-center rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                    className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} px-3 py-2 text-sm`}
                     aria-label={t("chat.saveSessionName")}
                   >
                     {renameSessionMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
@@ -2754,7 +2868,7 @@ function ImageChatWorkbenchPage() {
           <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden" />
           <Drawer.Content
             onPointerDown={handleMobileSessionDrawerSwipeBackStart}
-            className="fixed inset-y-0 left-0 z-[71] flex w-[min(86vw,360px)] flex-col border-r border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden"
+            className="pf-workspace-tool-drawer fixed inset-y-0 left-0 z-[71] flex w-[min(86vw,360px)] flex-col border-r border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden"
           >
             <Drawer.Title className="sr-only">{t("chat.mobileSessionDrawer")}</Drawer.Title>
             <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
@@ -2824,7 +2938,7 @@ function ImageChatWorkbenchPage() {
       >
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden" />
-          <Drawer.Content className="fixed inset-y-0 right-0 z-[71] flex w-[7.75rem] flex-col border-l border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden">
+          <Drawer.Content className="pf-workspace-tool-drawer fixed inset-y-0 right-0 z-[71] flex w-[7.75rem] flex-col border-l border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden">
             <Drawer.Title className="sr-only">{t("chat.mobileHistoryDrawer")}</Drawer.Title>
             <div className="flex items-center justify-between gap-1 border-b border-slate-200 px-2 py-3 dark:border-slate-800">
               <div className="min-w-0 px-1">
@@ -2846,10 +2960,10 @@ function ImageChatWorkbenchPage() {
               historyBranches={historyBranches}
               selectedGeneratedAssetId={selectedGeneratedAssetId}
               selectedTaskPlaceholderId={selectedTaskPlaceholderId}
-              branchBaseAssetId={branchBaseAssetId}
-              branchBaseSelected={Boolean(branchBaseRound)}
+              selectedBaseAssetIds={selectedBaseAssetIds}
               variant="mobileDrawer"
               onSelectRound={handleSelectHistoryRound}
+              onAddRoundToBase={handleAddHistoryRoundToBase}
               onSelectPlaceholder={handleSelectHistoryPlaceholder}
               onStartNewRound={handleStartNewRound}
               newRoundDisabled={newRoundDisabled}
@@ -2889,12 +3003,12 @@ function ImageChatWorkbenchPage() {
                 type="button"
                 onClick={handleSaveSelectedToGallery}
                 disabled={saveSelectedGalleryDisabled}
-                title={selectedResultBlockedTitle ?? t("chat.saveSelectedGallery")}
-                aria-label={t("chat.saveSelectedGallery")}
+                title={saveSelectedGalleryTitle}
+                aria-label={saveSelectedGalleryTitle}
                 className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-indigo-200 bg-indigo-50 px-2.5 text-xs font-semibold text-indigo-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-300 hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25 dark:focus-visible:ring-violet-400"
               >
                 {saveGalleryMutation.isPending ? <Loader2 size={15} className="shrink-0 animate-spin" /> : <GalleryHorizontalEnd size={15} className="shrink-0" />}
-                <span>{t("chat.sendGalleryShort")}</span>
+                <span>{selectedGeneratedSavedToGallery ? t("chat.alreadyInGalleryShort") : t("chat.sendGalleryShort")}</span>
               </button>
               <button
                 type="button"
@@ -2902,7 +3016,7 @@ function ImageChatWorkbenchPage() {
                 disabled={saveSelectedResourceLibraryDisabled}
                 title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
                 aria-label={t("chat.resourceLibrary.saveGenerated")}
-                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+                className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} min-h-11 min-w-11 shrink-0 gap-1.5 whitespace-nowrap px-2.5 text-xs`}
               >
                 <Save size={15} className="shrink-0" />
                 <span>
@@ -2925,9 +3039,9 @@ function ImageChatWorkbenchPage() {
             }}
             disabled={!generationDraftOpen && newRoundDisabled}
             title={generationDraftOpen ? t("chat.openGenerationSheet") : (newRoundBlockedTitle || t("chat.newRound"))}
-            className={`flex min-h-11 min-w-0 items-center rounded-xl bg-indigo-600 text-left text-white shadow-md shadow-indigo-600/16 transition-colors hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-violet-600 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35 dark:focus-visible:ring-violet-300 ${
+            className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} min-h-11 min-w-0 text-left ${
               selectedRound ? "flex-1 px-2.5" : "w-full px-3"
-            } disabled:opacity-60`}
+            }`}
             aria-label={generationDraftOpen ? t("chat.openGenerationSheet") : t("chat.newRound")}
           >
             <Sparkles size={17} className="mr-2 shrink-0" />
@@ -2954,7 +3068,7 @@ function ImageChatWorkbenchPage() {
       >
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/42 lg:hidden" />
-          <Drawer.Content className="mobile-generation-sheet fixed inset-x-0 bottom-0 z-[71] flex max-h-[80dvh] flex-col rounded-t-[1.5rem] border-t border-slate-200 bg-white shadow-[0_-12px_34px_rgba(15,23,42,0.16)] outline-none dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-[0_-18px_42px_rgba(0,0,0,0.34)] lg:hidden">
+          <Drawer.Content className="pf-workspace-tool-drawer mobile-generation-sheet fixed inset-x-0 bottom-0 z-[71] flex max-h-[80dvh] flex-col rounded-t-[1.5rem] border-t border-slate-200 bg-white shadow-[0_-12px_34px_rgba(15,23,42,0.16)] outline-none dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-[0_-18px_42px_rgba(0,0,0,0.34)] lg:hidden">
             <Drawer.Title className="sr-only">{t("chat.mobileGenerationSheet")}</Drawer.Title>
             <Drawer.Handle className="mx-auto mt-2 flex h-7 w-24 items-center justify-center rounded-full text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-500 dark:focus-visible:ring-violet-400">
               <span className="h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />

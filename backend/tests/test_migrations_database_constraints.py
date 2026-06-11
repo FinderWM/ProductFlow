@@ -685,6 +685,154 @@ def test_user_canvas_template_migration_schema_and_downgrade_support_sqlite(tmp_
     get_settings.cache_clear()
 
 
+def test_global_canvas_template_migration_normalizes_node_types_and_supports_downgrade_sqlite(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from inspiration_one_backend.application.canvas_templates import list_builtin_canvas_templates
+
+    database_path = tmp_path / "canvas-template-node-type-migration.db"
+    storage_root = tmp_path / "storage"
+    monkeypatch.setenv("ADMIN_ACCESS_KEY", "super-secret-admin-key")
+    monkeypatch.setenv("SESSION_SECRET", "super-secret-session-key-123")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/9")
+    monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    command.upgrade(config, "20260610_0054")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    builtin_templates = list_builtin_canvas_templates()
+    assert len(builtin_templates) == 17
+    with engine.begin() as connection:
+        for index, template in enumerate(builtin_templates, start=1):
+            template_json = template.model_dump(mode="json")
+            for node in template_json["nodes"]:
+                if node["node_type"] == "inspiration_context":
+                    node["node_type"] = "product_context"
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO canvas_templates (
+                        id,
+                        key,
+                        scope,
+                        owner_user_id,
+                        category_id,
+                        title,
+                        description,
+                        kind,
+                        entry_mode,
+                        sort_order,
+                        schema_version,
+                        template_json,
+                        enabled,
+                        archived_at,
+                        disabled_at,
+                        disabled_by_user_id,
+                        disabled_reason,
+                        review_status,
+                        review_note,
+                        review_submitted_at,
+                        reviewed_at,
+                        reviewed_by_user_id,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        :id,
+                        :key,
+                        :scope,
+                        :owner_user_id,
+                        :category_id,
+                        :title,
+                        :description,
+                        :kind,
+                        :entry_mode,
+                        :sort_order,
+                        :schema_version,
+                        :template_json,
+                        :enabled,
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        'none',
+                        NULL,
+                        NULL,
+                        NULL,
+                        NULL,
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP
+                    )
+                    """
+                ),
+                {
+                    "id": f"template-{index}",
+                    "key": template.key,
+                    "scope": "global",
+                    "owner_user_id": None,
+                    "category_id": None,
+                    "title": template.title,
+                    "description": template.description,
+                    "kind": template.kind,
+                    "entry_mode": template.entry_mode,
+                    "sort_order": template.sort_order,
+                    "schema_version": template.version,
+                    "template_json": json.dumps(template_json),
+                    "enabled": 1,
+                },
+            )
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            sa.text("SELECT key, template_json FROM canvas_templates ORDER BY key")
+        ).mappings().all()
+    assert len(rows) == 17
+    for row in rows:
+        template_json = row["template_json"]
+        nodes = template_json["nodes"] if isinstance(template_json, dict) else json.loads(template_json)["nodes"]
+        assert any(node["node_type"] == "product_context" for node in nodes)
+
+    command.upgrade(config, "head")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    with engine.connect() as connection:
+        rows = connection.execute(
+            sa.text("SELECT key, template_json FROM canvas_templates ORDER BY key")
+        ).mappings().all()
+    assert len(rows) == 17
+    for row in rows:
+        template_json = row["template_json"]
+        if isinstance(template_json, str):
+            template_json = json.loads(template_json)
+        nodes = template_json["nodes"]
+        assert not any(node["node_type"] == "product_context" for node in nodes)
+        assert any(node["node_type"] == "inspiration_context" for node in nodes)
+
+    engine.dispose()
+
+    command.downgrade(config, "20260610_0054")
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    with engine.connect() as connection:
+        rows = connection.execute(
+            sa.text("SELECT key, template_json FROM canvas_templates ORDER BY key")
+        ).mappings().all()
+    assert len(rows) == 17
+    for row in rows:
+        template_json = row["template_json"]
+        if isinstance(template_json, str):
+            template_json = json.loads(template_json)
+        nodes = template_json["nodes"]
+        assert any(node["node_type"] == "product_context" for node in nodes)
+
+    engine.dispose()
+    get_settings.cache_clear()
+
+
 def test_gallery_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, monkeypatch) -> None:
     database_path = tmp_path / "gallery-migration.db"
     storage_root = tmp_path / "storage"

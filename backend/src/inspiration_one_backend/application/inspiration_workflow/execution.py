@@ -74,6 +74,7 @@ from inspiration_one_backend.application.inspiration_workflow_dependencies impor
     default_workflow_execution_dependencies,
 )
 from inspiration_one_backend.application.queue_submission import enqueue_or_mark_failed
+from inspiration_one_backend.application.task_notifications import publish_workflow_run_notification_safely
 from inspiration_one_backend.application.time import now_utc
 from inspiration_one_backend.domain.durable_generation_tasks import WORKFLOW_RUN_GENERATION_TASK_CONTRACT
 from inspiration_one_backend.domain.enums import (
@@ -1017,6 +1018,7 @@ def _finalize_workflow_run_if_terminal(session: Session, *, run: WorkflowRun) ->
         run.workflow.updated_at = now
         logger.info("工作流运行成功: run_id=%s workflow_id=%s", run.id, run.workflow_id)
         session.commit()
+        publish_workflow_run_notification_safely(run)
         return True
     failed_node_run = next(
         (
@@ -1051,6 +1053,7 @@ def _finalize_workflow_run_if_terminal(session: Session, *, run: WorkflowRun) ->
     run.workflow.updated_at = now
     logger.warning("工作流运行失败: run_id=%s reason=%s", run.id, reason)
     session.commit()
+    publish_workflow_run_notification_safely(run)
     return True
 
 

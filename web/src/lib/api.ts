@@ -730,6 +730,7 @@ export const api = {
     input: {
       prompt: string;
       size: string;
+      base_asset_ids?: string[];
       base_asset_id?: string | null;
       selected_reference_asset_ids?: string[];
       generation_count?: number;

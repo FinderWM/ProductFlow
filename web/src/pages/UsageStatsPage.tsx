@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowRight,
   BarChart3,
   CalendarDays,
   CheckCircle2,
@@ -22,6 +21,10 @@ import { useI18n } from "../lib/preferences";
 import { useSessionState } from "../lib/session";
 import type { UserUsageStat, UserUsageStatsSummary } from "../lib/types";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
+import {
+  WorkspacePageFrame,
+  WorkspaceUsageStatsContent,
+} from "./workspace/WorkspaceLandingPages";
 
 type QuickRangeId = "today" | "last7" | "last30" | "month";
 
@@ -126,31 +129,6 @@ function MetricCard({
   );
 }
 
-function WorkspaceMetricCard({
-  label,
-  value,
-  detail,
-  icon: Icon,
-}: {
-  label: string;
-  value: number | string;
-  detail?: string;
-  icon: LucideIcon;
-}) {
-  return (
-    <div className="pf-workspace-card-soft rounded-lg p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="pf-workspace-muted min-w-0 text-xs font-medium">{label}</div>
-        <span className="pf-workspace-icon inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
-          <Icon size={15} />
-        </span>
-      </div>
-      <div className="pf-workspace-title mt-3 text-2xl font-semibold">{value}</div>
-      {detail ? <div className="pf-workspace-muted mt-1 truncate text-xs">{detail}</div> : null}
-    </div>
-  );
-}
-
 function UsageStatRow({ item, variant = "classic" }: { item: UserUsageStat; variant?: "classic" | "workspace" }) {
   const { t } = useI18n();
   const rate = item.attempt_count > 0 ? `${Math.round((item.success_count / item.attempt_count) * 100)}%` : "0%";
@@ -200,169 +178,17 @@ interface UsageStatsPageProps {
   mode?: "auto" | "detail";
 }
 
-function todayDateRange(): UsageDateRange {
-  return quickDateRange("today");
-}
-
 function UsageStatsWorkspaceLanding() {
   const { t } = useI18n();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const session = useSessionState();
-  const isAdmin = Boolean(session?.user?.is_admin);
-  const today = useMemo(todayDateRange, []);
-
-  const usageQuery = useQuery({
-    queryKey: ["usage-stats", "workspace-summary", today.start_date, today.end_date],
-    queryFn: () => api.getUsageStats(today),
-    retry: false,
-  });
-
-  const logoutMutation = useMutation({
-    mutationFn: api.destroySession,
-    onSuccess: async () => {
-      queryClient.removeQueries({ queryKey: ["usage-stats"] });
-      await queryClient.invalidateQueries({ queryKey: ["session"] });
-      navigate("/login", { replace: true });
-    },
-  });
-
-  const summary = usageQuery.data?.summary;
-  const items = (usageQuery.data?.items ?? []).slice(0, 3);
-  const splitDetail = t("usageStats.metric.split", {
-    text: summary?.text_attempt_count ?? 0,
-    image: summary?.image_attempt_count ?? 0,
-  });
-  const scopeDetail = t("usageStats.workspace.scope", {
-    start: usageQuery.data?.start_date ?? today.start_date,
-    scope: isAdmin ? t("usageStats.workspace.scopeAllUsers") : t("usageStats.workspace.scopeCurrentUser"),
-  });
-  const riskDetail = t("usageStats.workspace.risk", {
-    failure: summary?.failure_count ?? 0,
-    timeout: summary?.timeout_count ?? 0,
-    throttled: summary?.throttled_count ?? 0,
-  });
-  const lastSuccessDetail = t("usageStats.workspace.lastSuccess", {
-    time: formatDateTime(summary?.last_success_at),
-  });
-  const lastFailureDetail = t("usageStats.workspace.lastFailure", {
-    time: formatDateTime(summary?.last_failure_at),
-  });
 
   return (
-    <div className="pf-workspace min-h-screen">
-      <TopNav
-        breadcrumbs={t("usageStats.breadcrumb")}
-        onHome={() => navigate("/inspirations")}
-        onLogout={() => logoutMutation.mutate()}
-      />
-      <main className="mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-6 lg:px-8">
-        <section className="pf-workspace-card mb-6 rounded-lg px-5 py-5">
-          <div className="pf-workspace-accent flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
-            <BarChart3 size={14} />
-            {t("usageStats.workspace.eyebrow")}
-          </div>
-          <h1 className="pf-workspace-title mt-3 text-2xl font-semibold tracking-normal">
-            {t("usageStats.workspace.title")}
-          </h1>
-          <p className="pf-workspace-copy mt-2 max-w-3xl text-sm leading-6">
-            {t("usageStats.workspace.description")}
-          </p>
-        </section>
-
-        {usageQuery.isLoading ? (
-          <div className="pf-workspace-card pf-workspace-muted flex min-h-48 items-center justify-center rounded-lg">
-            <Loader2 size={22} className="animate-spin" />
-          </div>
-        ) : usageQuery.isError ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-            {usageQuery.error instanceof ApiError ? usageQuery.error.detail : t("usageStats.loadFailed")}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <WorkspaceMetricCard
-                label={t("usageStats.metric.total")}
-                value={summary?.attempt_count ?? 0}
-                detail={splitDetail}
-                icon={BarChart3}
-              />
-              <WorkspaceMetricCard
-                label={t("usageStats.metric.success")}
-                value={summary?.success_count ?? 0}
-                detail={t("usageStats.metric.successRate", { rate: successRate(summary) })}
-                icon={CheckCircle2}
-              />
-              <WorkspaceMetricCard
-                label={t("usageStats.metric.text")}
-                value={summary?.text_attempt_count ?? 0}
-                icon={MessageSquareText}
-              />
-              <WorkspaceMetricCard
-                label={t("usageStats.metric.image")}
-                value={summary?.image_attempt_count ?? 0}
-                icon={Image}
-              />
-              <WorkspaceMetricCard
-                label={t("usageStats.metric.avgLatency")}
-                value={`${averageLatencyMs(summary)} ms`}
-                icon={RefreshCw}
-              />
-            </div>
-
-            <section className="pf-workspace-card grid gap-3 rounded-lg p-4 text-sm md:grid-cols-[1fr_1.15fr_1.15fr]">
-              <div className="pf-workspace-copy flex items-center gap-2">
-                <User size={15} className="pf-workspace-accent" />
-                <span className="font-medium">{scopeDetail}</span>
-              </div>
-              <div className="pf-workspace-copy flex items-center gap-2">
-                <BarChart3 size={15} className="pf-workspace-accent-secondary" />
-                <span className="font-medium">{riskDetail}</span>
-              </div>
-              <div className="pf-workspace-muted flex flex-col gap-1 text-xs sm:flex-row sm:items-center sm:gap-3">
-                <span>{lastSuccessDetail}</span>
-                <span>{lastFailureDetail}</span>
-              </div>
-            </section>
-
-            <section className="pf-workspace-card rounded-lg p-4">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="pf-workspace-title text-base font-semibold">
-                    {t("usageStats.workspace.latestTitle")}
-                  </h2>
-                  <p className="pf-workspace-muted mt-1 text-sm">
-                    {t("usageStats.workspace.latestDescription")}
-                  </p>
-                </div>
-              </div>
-
-              <div className="pf-workspace-card-soft mt-4 divide-y rounded-lg">
-                {items.length ? (
-                  items.map((item) => <UsageStatRow key={item.id} item={item} variant="workspace" />)
-                ) : (
-                  <div className="pf-workspace-muted px-5 py-10 text-center text-sm">
-                    <User size={22} className="pf-workspace-subtle mx-auto mb-2" />
-                    {t("usageStats.empty")}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => navigate("/usage-stats/detail")}
-                  className="pf-workspace-action-primary inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition-colors"
-                >
-                  {t("usageStats.workspace.detail")}
-                  <ArrowRight size={15} className="ml-2" />
-                </button>
-              </div>
-            </section>
-          </div>
-        )}
-      </main>
-    </div>
+    <WorkspacePageFrame
+      eyebrow={t("usageStats.workspace.eyebrow")}
+      title={t("usageStats.workspace.title")}
+      description={t("usageStats.workspace.description")}
+    >
+      <WorkspaceUsageStatsContent />
+    </WorkspacePageFrame>
   );
 }
 
@@ -378,6 +204,7 @@ export function UsageStatsPage({ mode = "auto" }: UsageStatsPageProps) {
 
 function UsageStatsDetailPage() {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const session = useSessionState();
@@ -414,15 +241,18 @@ function UsageStatsDetailPage() {
     text: summary?.text_attempt_count ?? 0,
     image: summary?.image_attempt_count ?? 0,
   });
+  const isWorkspaceSubpage = activeScheme === "workspace";
 
   return (
-    <div className="pf-app flex flex-col">
+    <div className={`${isWorkspaceSubpage ? "pf-workspace" : "pf-app"} flex flex-col`}>
       <TopNav
         breadcrumbs={t("usageStats.breadcrumb")}
         onHome={() => navigate("/inspirations")}
         onLogout={() => logoutMutation.mutate()}
       />
-      <main className="pf-page pf-page-wide flex-1">
+      <main className={isWorkspaceSubpage ? "pf-workspace-subpage flex-1" : "pf-page pf-page-wide flex-1"}>
+        <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame-shell" : "contents"}>
+          <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame" : "contents"}>
         <div className="pf-page-header">
           <div>
             <div className="pf-eyebrow mb-2 gap-1.5">
@@ -603,6 +433,8 @@ function UsageStatsDetailPage() {
               )}
             </div>
           </section>
+        </div>
+          </div>
         </div>
       </main>
     </div>

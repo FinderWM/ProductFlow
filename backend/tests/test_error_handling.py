@@ -148,13 +148,14 @@ def test_image_session_route_uses_global_business_error_handler(configured_env) 
         f"/api/image-sessions/{session_id}/generate",
         json={
             "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            "prompt": "第二轮缺少基图",
+            "prompt": "基图不存在",
             "size": "1024x1024",
+            "base_asset_ids": ["missing-asset"],
         },
     )
 
-    assert invalid.status_code == 400
-    assert invalid.json() == {"detail": "后续生图必须选择一张本会话已生成图片作为基图"}
+    assert invalid.status_code == 404
+    assert invalid.json() == {"detail": "会话图片不存在"}
     assert "code" not in invalid.json()
 
 

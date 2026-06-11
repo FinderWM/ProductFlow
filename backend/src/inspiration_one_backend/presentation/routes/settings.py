@@ -300,7 +300,10 @@ def _get_or_create_user_ui_preferences(session: Session, user_id: str, *, commit
     if preferences is not None:
         return preferences
 
-    preferences = UserUiPreference(user_id=user_id)
+    preferences = UserUiPreference(
+        user_id=user_id,
+        ui_layout_scheme=resolve_ui_layout_scheme(get_runtime_settings().ui_layout_scheme),
+    )
     session.add(preferences)
     if commit:
         session.commit()
@@ -1918,11 +1921,14 @@ def update_provider_binding_endpoint(
 def get_runtime_config_endpoint() -> RuntimeConfigResponse:
     settings = get_runtime_settings()
     return RuntimeConfigResponse(
+        ui_layout_scheme=resolve_ui_layout_scheme(settings.ui_layout_scheme),
         image_generation_max_dimension=settings.image_generation_max_dimension,
+        image_session_max_base_images=settings.image_session_max_base_images,
         image_tool_allowed_fields=list(parse_image_tool_allowed_fields(settings.image_tool_allowed_fields)),
         generation_tail_splitter_max_items=settings.generation_tail_splitter_max_items,
         workflow_node_max_retry_count=settings.workflow_node_max_retry_count,
         workflow_node_retry_delay_ms=settings.workflow_node_retry_delay_ms,
+        gallery_show_generation_resource_group=settings.gallery_show_generation_resource_group,
         deletion_enabled=settings.deletion_enabled,
     )
 

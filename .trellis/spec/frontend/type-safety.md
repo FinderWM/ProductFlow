@@ -77,6 +77,73 @@ Form uploads build `FormData` in API methods such as `createProduct(...)`, `addR
 `addImageSessionReferenceImages(...)`. The fetch wrapper omits `Content-Type` for `FormData` so the browser can set the
 multipart boundary.
 
+### Scenario: Image-session generated asset gallery state
+
+#### 1. Scope / Trigger
+
+- Trigger: changing image chat "send to gallery" behavior, `/api/gallery` save responses, or image-session detail DTOs
+  consumed by `ImageChatPage`.
+- Goal: keep gallery-save state a response contract on the generated asset instead of deriving it from gallery pagination.
+
+#### 2. Signatures
+
+- Backend response: `ImageSessionAssetResponse.gallery_saved: bool = False`.
+- Backend response: `ImageSessionAssetResponse.gallery_entry_id: str | None = None`.
+- Frontend mirror: `ImageSessionAsset.gallery_saved: boolean` and `gallery_entry_id: string | null`.
+- Gallery save API: `api.saveGalleryEntry(imageSessionAssetId): Promise<GalleryEntry>` posts
+  `{ image_session_asset_id }` to `POST /api/gallery`.
+
+#### 3. Contracts
+
+- Gallery entries reference the original `image_session_asset_id`; saving to gallery must not create a second
+  `ImageSessionAsset` or copy image files.
+- Image-session detail and generated round responses must mark generated assets already present in gallery with
+  `gallery_saved=true` and the matching `gallery_entry_id`.
+- `GalleryEntry.image` must also serialize the same generated asset with `gallery_saved=true` and `gallery_entry_id`
+  equal to the entry id.
+- Image chat controls use `selectedRound.generated_asset.gallery_saved` as the source of truth for disabling
+  send-to-gallery actions in desktop and mobile layouts.
+
+#### 4. Validation & Error Matrix
+
+- Generated asset not saved to gallery -> `gallery_saved=false`, `gallery_entry_id=null`, action remains available if
+  permissions and moderation allow it.
+- Generated asset already saved -> button is disabled and displays an already-in-gallery label.
+- Repeated `POST /api/gallery` for the same asset -> returns existing entry with HTTP 200 and does not create another
+  `ImageGalleryEntry` or `ImageSessionAsset`.
+- Missing/non-generated/sessionless asset -> backend validation remains the source of truth through `ApiError.detail`.
+
+#### 5. Good/Base/Bad Cases
+
+- Good: after a gallery save succeeds, update the `["image-session", sessionId]` cache for the saved asset and invalidate
+  gallery queries.
+- Base: a freshly generated unsaved asset has `gallery_saved=false` until it is posted to `/api/gallery`.
+- Bad: listing `/api/gallery` in the image chat page just to infer whether the selected asset has been saved.
+- Bad: copying a generated image into a new image-session asset or local file when creating a gallery entry.
+
+#### 6. Tests Required
+
+- Backend gallery test asserts first generated asset response has `gallery_saved=false`.
+- Backend gallery save test asserts the returned gallery image uses the same asset id, has `gallery_saved=true`, and
+  `ImageSessionAsset` count is unchanged.
+- Backend session-detail test path asserts the saved generated asset later returns `gallery_saved=true` and the saved
+  `gallery_entry_id`.
+- Frontend build and tests must pass after any DTO field change.
+
+#### 7. Wrong vs Correct
+
+#### Wrong
+
+```tsx
+const saved = galleryEntries.some((entry) => entry.image_session_asset_id === selectedRound.generated_asset.id);
+```
+
+#### Correct
+
+```tsx
+const saved = selectedRound.generated_asset.gallery_saved;
+```
+
 ### Scenario: Create-inspiration API input typing
 
 #### 1. Scope / Trigger

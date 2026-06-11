@@ -31,7 +31,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     SourceAsset,
 )
 from inspiration_one_backend.infrastructure.image.base import infer_extension
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import LocalStorage, StorageObjectMetadata
 
 DEFAULT_RESOURCE_LIBRARY_GROUP_NAME = "默认分组"
 SOURCE_ASSET_IMAGE_KINDS = frozenset(
@@ -292,11 +292,9 @@ def save_resource_library_asset_from_source(
 
     storage = storage or LocalStorage()
     try:
-        content = storage.resolve(storage.object_key_for(source.storage_object)).read_bytes()
-    except (OSError, ValueError) as exc:
+        storage_metadata = _metadata_for_reused_storage_object(storage, source.storage_object)
+    except ValueError as exc:
         raise BusinessValidationError("资源文件不存在") from exc
-    relative_path = storage.save_resource_library_asset(actor_user_id, source.filename, content)
-    storage_metadata = storage.metadata_for(relative_path)
     asset = ResourceLibraryAsset(
         owner_user_id=actor_user_id,
         kind=ResourceLibraryAssetKind.IMAGE,
@@ -623,6 +621,21 @@ def _get_asset_by_source(
             ResourceLibraryAsset.source_resource_id == source_resource_id,
             ResourceLibraryAsset.archived_at.is_(None),
         )
+    )
+
+
+def _metadata_for_reused_storage_object(storage: LocalStorage, stored_object: object) -> StorageObjectMetadata:
+    object_key = storage.object_key_for(stored_object)
+    fallback_metadata = storage.metadata_for(object_key)
+    storage_backend = getattr(stored_object, "storage_backend", None) or fallback_metadata.storage_backend
+    storage_bucket = getattr(stored_object, "storage_bucket", None)
+    if not isinstance(storage_bucket, str) or not storage_bucket.strip():
+        storage_bucket = fallback_metadata.storage_bucket
+    return StorageObjectMetadata(
+        storage_path=fallback_metadata.storage_path,
+        storage_backend=storage_backend,
+        storage_bucket=storage_bucket,
+        storage_object_key=fallback_metadata.storage_object_key,
     )
 
 

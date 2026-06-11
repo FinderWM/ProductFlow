@@ -12,6 +12,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from inspiration_one_backend.domain.ui_layout import (
+    DEFAULT_UI_LAYOUT_SCHEME,
+    SUPPORTED_UI_LAYOUT_SCHEMES,
+    is_supported_ui_layout_scheme,
+)
+
 ConfigInputType = Literal["text", "password", "number", "boolean", "select", "multi_select", "textarea"]
 IMAGE_SIZE_PATTERN = re.compile(r"^\d+x\d+$")
 DEFAULT_IMAGE_GENERATION_MAX_DIMENSION = 3840
@@ -26,6 +32,9 @@ DEFAULT_IMAGE_SESSION_IDLE_TIMEOUT_MINUTES = 90
 IMAGE_SESSION_IDLE_TIMEOUT_MIN_MINUTES = 1
 IMAGE_SESSION_IDLE_TIMEOUT_MAX_MINUTES = 24 * 60
 DEFAULT_IMAGE_SESSION_WORKER_FAILSAFE_TIME_LIMIT_MINUTES = 24 * 60
+DEFAULT_IMAGE_SESSION_MAX_BASE_IMAGES = 6
+IMAGE_SESSION_MIN_MAX_BASE_IMAGES = 0
+IMAGE_SESSION_MAX_MAX_BASE_IMAGES = 20
 DEFAULT_WORKFLOW_IMAGE_GENERATION_PROVIDER_TIMEOUT_SECONDS = 15 * 60
 DEFAULT_GENERATION_CONFIG_AVAILABILITY_WINDOW_MINUTES = 5
 DEFAULT_GENERATION_CONFIG_FAILURE_THRESHOLD = 3
@@ -42,6 +51,7 @@ WORKFLOW_NODE_MAX_RETRY_DELAY_MS = 60 * 60 * 1000
 GLOBAL_GENERATION_QUEUE_CAPACITY_CATEGORY = "全局生成配置 / 队列容量"
 GLOBAL_GENERATION_SCHEDULER_DEFAULTS_CATEGORY = "全局生成配置 / 调度默认值"
 GLOBAL_GENERATION_RECOVERY_CATEGORY = "全局生成配置 / 任务恢复"
+GLOBAL_GENERATION_IMAGE_SESSION_CATEGORY = "全局生成配置 / 文/图生图"
 GLOBAL_GENERATION_WORKFLOW_CATEGORY = "全局生成配置 / 工作流生成"
 IMAGE_SIZE_CONFIG_KEYS = {"image_main_image_size", "image_promo_poster_size"}
 PROMPT_CONFIG_KEYS = {
@@ -195,6 +205,11 @@ class Settings(BaseSettings):
         ge=IMAGE_GENERATION_MIN_MAX_DIMENSION,
         le=IMAGE_GENERATION_MAX_MAX_DIMENSION,
     )
+    image_session_max_base_images: int = Field(
+        default=DEFAULT_IMAGE_SESSION_MAX_BASE_IMAGES,
+        ge=IMAGE_SESSION_MIN_MAX_BASE_IMAGES,
+        le=IMAGE_SESSION_MAX_MAX_BASE_IMAGES,
+    )
     image_main_image_size: str = "1024x1024"
     image_promo_poster_size: str = "1024x1536"
     poster_generation_mode: str = "template"
@@ -249,6 +264,8 @@ class Settings(BaseSettings):
         ge=1,
         le=24 * 60 * 60,
     )
+    ui_layout_scheme: str = DEFAULT_UI_LAYOUT_SCHEME
+    gallery_show_generation_resource_group: bool = True
     admin_access_required: bool = True
     deletion_enabled: bool = False
 
@@ -300,6 +317,15 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_storage_text(cls, value: Any) -> str:
         return "" if value is None else str(value).strip()
+
+    @field_validator("ui_layout_scheme", mode="before")
+    @classmethod
+    def _normalize_ui_layout_scheme(cls, value: Any) -> str:
+        normalized = DEFAULT_UI_LAYOUT_SCHEME if value is None else str(value).strip()
+        if is_supported_ui_layout_scheme(normalized):
+            return normalized
+        supported = ", ".join(SUPPORTED_UI_LAYOUT_SCHEMES)
+        raise ValueError(f"UI 布局方案必须是以下之一: {supported}")
 
     @field_validator("image_tool_allowed_fields", mode="before")
     @classmethod
@@ -468,6 +494,15 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         description="文/图生图和工作流生图的最大宽/高像素；总面积同时受 GPT Image 当前上限约束。",
         minimum=IMAGE_GENERATION_MIN_MAX_DIMENSION,
         maximum=IMAGE_GENERATION_MAX_MAX_DIMENSION,
+    ),
+    ConfigDefinition(
+        key="image_session_max_base_images",
+        label="文/图生图基图上限",
+        category=GLOBAL_GENERATION_IMAGE_SESSION_CATEGORY,
+        input_type="number",
+        description="单轮文/图生图允许选择的历史生成图和会话参考图总数；设为 0 表示不允许附带基图。",
+        minimum=IMAGE_SESSION_MIN_MAX_BASE_IMAGES,
+        maximum=IMAGE_SESSION_MAX_MAX_BASE_IMAGES,
     ),
     ConfigDefinition(
         key="image_main_image_size",
@@ -679,6 +714,24 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         description="工作流 AI 生图节点单次 provider 调用的项目级超时上界；超时后会安全失败并释放生成队列容量。",
         minimum=1,
         maximum=24 * 60 * 60,
+    ),
+    ConfigDefinition(
+        key="ui_layout_scheme",
+        label="默认 UI 布局",
+        category="界面与外观",
+        input_type="select",
+        options=(
+            ConfigOption("classic", "经典"),
+            ConfigOption("workspace", "工作台"),
+        ),
+        description="全局默认 UI 布局；用户在导航中主动切换后会保存为个人偏好。",
+    ),
+    ConfigDefinition(
+        key="gallery_show_generation_resource_group",
+        label="画廊展示生成分组",
+        category="界面与外观",
+        input_type="boolean",
+        description="控制画廊卡片、预览弹窗和工作台画廊条是否展示生成分组溯源信息。",
     ),
     ConfigDefinition(
         key="deletion_enabled",

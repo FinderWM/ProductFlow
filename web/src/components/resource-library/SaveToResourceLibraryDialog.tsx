@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Image as ImageIcon, Loader2, Save, X } from "lucide-react";
 
@@ -88,13 +89,15 @@ export function SaveToResourceLibraryDialog({
         group_ids: selectedGroupIds,
       });
     },
-    onSuccess: async (asset) => {
+    onSuccess: (asset) => {
       setError("");
-      await queryClient.invalidateQueries({ queryKey: ["resource-library-assets"] });
-      await queryClient.invalidateQueries({ queryKey: ["resource-library-groups"] });
-      await queryClient.invalidateQueries({ queryKey: ["resource-library-source-status"] });
       onSaved?.(asset);
       onClose();
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["resource-library-assets"] }),
+        queryClient.invalidateQueries({ queryKey: ["resource-library-groups"] }),
+        queryClient.invalidateQueries({ queryKey: ["resource-library-source-status"] }),
+      ]);
     },
     onError: (mutationError) => {
       setError(mutationError instanceof ApiError ? mutationError.detail : t("resourceLibrary.saveFailed"));
@@ -122,12 +125,12 @@ export function SaveToResourceLibraryDialog({
     return null;
   }
 
-  return (
+  const dialog = (
     <div
       role="dialog"
       aria-modal="true"
       aria-label={t("resourceLibrary.saveDialogTitle")}
-      className="fixed inset-0 z-[82] flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm"
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !saveMutation.isPending) {
           onClose();
@@ -257,7 +260,7 @@ export function SaveToResourceLibraryDialog({
               groupsQuery.isLoading ||
               sourceStatusQuery.isLoading
             }
-            className="inline-flex rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-violet-500/25 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40"
+            className="inline-flex rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
           >
             {saveMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Save size={15} className="mr-2" />}
             {t("resourceLibrary.saveToLibrary")}
@@ -266,4 +269,6 @@ export function SaveToResourceLibraryDialog({
       </div>
     </div>
   );
+
+  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
 }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -28,6 +28,7 @@ class GallerySaveResult:
 @dataclass(frozen=True, slots=True)
 class GalleryEntryListResult:
     items: list[ImageGalleryEntry]
+    total: int
     has_more: bool
     next_offset: int | None
 
@@ -52,24 +53,12 @@ def _gallery_entry_query():
 def list_gallery_entries(
     session: Session,
     *,
-    resource_group_id: str | None = None,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
     limit: int | None = None,
     offset: int = 0,
 ) -> GalleryEntryListResult:
     statement = _gallery_entry_query()
-    normalized_group_id = (resource_group_id or "").strip() or None
-    if normalized_group_id is not None:
-        if normalized_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
-            statement = statement.where(
-                or_(
-                    ImageGalleryEntry.resource_group_id == normalized_group_id,
-                    ImageGalleryEntry.resource_group_id.is_(None),
-                )
-            )
-        else:
-            statement = statement.where(ImageGalleryEntry.resource_group_id == normalized_group_id)
     entries = list(session.scalars(statement).all())
     if not actor_is_admin and actor_user_id is not None:
         entries = [
@@ -80,11 +69,12 @@ def list_gallery_entries(
 
     start = max(offset, 0)
     if limit is None:
-        return GalleryEntryListResult(items=entries[start:], has_more=False, next_offset=None)
+        return GalleryEntryListResult(items=entries[start:], total=len(entries), has_more=False, next_offset=None)
 
     end = start + limit
     return GalleryEntryListResult(
         items=entries[start:end],
+        total=len(entries),
         has_more=len(entries) > end,
         next_offset=end if len(entries) > end else None,
     )
