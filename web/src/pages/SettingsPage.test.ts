@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   configCategoryGroups,
+  configItemHelpContent,
   configValuesFromChangedDrafts,
   draftsFromConfig,
   filterProviderModels,
@@ -183,6 +184,62 @@ function textConfigTestResponse(model: string): TextGenerationConfigTestResponse
 }
 
 describe("SettingsPage draft helpers", () => {
+  it("documents every supported prompt placeholder in settings help", () => {
+    const t = (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) =>
+      translate("zh-CN", key, params);
+    const posterHelp = configItemHelpContent(
+      configItem({
+        key: "prompt_poster_image_template",
+        category: "提示词",
+        description: "template",
+        value: "",
+      }),
+      t,
+    );
+    const chatHelp = configItemHelpContent(
+      configItem({
+        key: "prompt_image_chat_template",
+        category: "提示词",
+        description: "template",
+        value: "",
+      }),
+      t,
+    );
+    const systemHelp = configItemHelpContent(
+      configItem({
+        key: "prompt_brief_system",
+        category: "提示词",
+        description: "system",
+        value: "",
+      }),
+      t,
+    );
+
+    expect(posterHelp?.examples).toBeDefined();
+    expect(chatHelp?.examples).toBeDefined();
+    expect(systemHelp?.examples).toBeDefined();
+
+    const posterExamples = posterHelp?.examples?.join("\n") ?? "";
+    const chatExamples = chatHelp?.examples?.join("\n") ?? "";
+    const systemExamples = systemHelp?.examples?.join("\n") ?? "";
+
+    expect(posterExamples).toContain("{inspiration_name}");
+    expect(posterExamples).toContain("{category}");
+    expect(posterExamples).toContain("{price}");
+    expect(posterExamples).toContain("{source_note}");
+    expect(posterExamples).toContain("{instruction}");
+    expect(posterExamples).toContain("{size}");
+    expect(posterExamples).toContain("{context_block}");
+    expect(posterExamples).toContain("{reference_policy}");
+    expect(posterExamples).toContain("{kind}");
+    expect(posterExamples).toContain("{kind_label}");
+    expect(posterExamples).toContain("{kind_requirements}");
+    expect(chatExamples).toContain("{prompt}");
+    expect(chatExamples).toContain("{size}");
+    expect(chatExamples).toContain("{history_block}");
+    expect(systemExamples).toContain("不会经过占位符渲染");
+  });
+
   it("only submits changed non-secret values instead of rewriting the whole config page", () => {
     const items = [
       configItem({ key: "deletion_enabled", input_type: "boolean", value: true }),
