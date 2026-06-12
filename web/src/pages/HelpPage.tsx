@@ -2572,10 +2572,10 @@ export function HelpPage() {
                         type="button"
                         onClick={() => openPage(item.slug)}
                         aria-current={active ? "page" : undefined}
-                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
+                        className={`pf-help-nav-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-all ${
                           active
-                            ? "bg-white font-semibold text-indigo-700 shadow-sm ring-1 ring-slate-200 dark:bg-violet-500/18 dark:text-violet-100 dark:ring-violet-400/35"
-                            : "text-slate-600 hover:bg-white hover:text-slate-950 dark:text-slate-300 dark:hover:bg-violet-500/12 dark:hover:text-white"
+                            ? "font-semibold text-indigo-700 dark:text-violet-100"
+                            : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
                         }`}
                       >
                         <Icon size={15} className={active ? "text-indigo-600 dark:text-violet-200" : "text-slate-400 dark:text-slate-500"} />

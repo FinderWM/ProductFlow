@@ -789,6 +789,10 @@ return GenerationResourceGroupTag(
 - Full settings reads require `settings:read`; settings mutations require `settings:write`.
 - Status APIs require `status:read`. Non-secret generation runtime selectors require a matching workbench/image-chat
   read permission or `settings:read`.
+- `GET /api/settings/generation-config-status` must filter `configs` and all summary counters/stat aggregates to the
+  current user's available generation resource groups. Admin users see all enabled, non-archived groups; regular users see
+  only `user_generation_resource_group_grants`. Do not expose all generation config status rows only because the caller has
+  `status:read`.
 - `DELETE /api/auth/session` clears the browser session and subsequent private route calls return `401` until login.
 - Settings import must ignore/drop a legacy `runtime_config.admin_access_required` value instead of reintroducing a
   database-controlled login bypass.
@@ -801,16 +805,21 @@ return GenerationResourceGroupTag(
 - Logged-in user without a route's API permission -> `403`, `{"detail": "没有接口权限"}`.
 - Logged-in non-admin user calling admin-only RBAC management -> `403`, `{"detail": "需要管理员权限"}`.
 - User with `status:read` can call status APIs but cannot call settings read/write APIs.
+- User with `status:read` but only one generation resource-group grant -> status response omits configs, counts, and
+  per-range/today stats from ungranted groups.
 - `PATCH /api/settings` with `admin_access_required` -> `400`, `{"detail": "未知配置项: admin_access_required"}`.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: default member roles can use inspiration/image-chat/status APIs, and can use resource library through login state
   without a resource-library RBAC grant, but cannot read settings or manage RBAC.
+- Good: a status-only operator can inspect provider health only for the generation groups granted to that account.
 - Base: the seeded `libow` admin role has every menu and API permission.
 - Bad: storing `ADMIN_ACCESS_KEY` in DB settings; it is an env-only secret.
 - Bad: adding `admin_access_required` back to runtime config, settings UI, or export/import payloads.
 - Bad: relying on frontend navigation hiding while backend endpoints accept any authenticated user.
+- Bad: filtering generation config status only in React while `/api/settings/generation-config-status` still returns
+  ungranted groups or aggregate counts.
 - Bad: adding resource library back to RBAC menu/API catalogs; it is a personal default capability, not a grantable
   workspace permission.
 - Bad: letting runtime config endpoints bypass RBAC because they return only non-secret data.
@@ -824,6 +833,8 @@ return GenerationResourceGroupTag(
 - Default member role can call status and non-secret generation runtime selector APIs.
 - A custom status-only role cannot call runtime selector APIs unless it has a matching workbench/image-chat/settings
   permission.
+- Status API test creates two generation groups/configs, grants a non-admin caller one group, and asserts the hidden group's
+  config id and aggregate counts are absent from `GET /api/settings/generation-config-status`.
 - Settings runtime/config/export tests assert `admin_access_required` is absent, while legacy import payloads containing it
   do not restore a configurable login bypass.
 
@@ -1144,10 +1155,14 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 
 ### 2. Signatures
 
-- DB table: `image_gallery_entries(id, image_session_asset_id, image_session_round_id, created_at)`.
+- DB table: `image_gallery_entries(id, owner_user_id, image_session_asset_id, image_session_round_id, resource_group_id,
+  enabled, disabled_at, disabled_by_user_id, disabled_reason, created_at)`.
 - Unique index: `uq_image_gallery_entries_asset_id` on `image_session_asset_id`.
+- List indexes: `ix_image_gallery_entries_enabled_created` on `(enabled, created_at)` and
+  `ix_image_gallery_entries_group_enabled_created` on `(resource_group_id, enabled, created_at)`.
 - API:
-  - `GET /api/gallery` -> `{items: GalleryEntryResponse[]}`.
+  - `GET /api/gallery?resource_group_id=<id>&include_disabled=<bool>&limit=<n>&offset=<n>` ->
+    `{items: GalleryEntryResponse[], total: int, has_more: bool, next_offset: int | null}`.
   - `POST /api/gallery` with `{image_session_asset_id: string}` -> `GalleryEntryResponse`.
 
 ### 3. Contracts
@@ -1158,8 +1173,14 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 - Gallery entries reference existing generated files through `/api/image-session-assets/{asset_id}/download` URLs; they
   must not duplicate image bytes into inspiration storage or a gallery-specific storage tree.
 - Repeated saves for the same generated asset are idempotent and return the existing gallery entry.
+- List queries apply availability, optional `resource_group_id`, pagination, and count in SQL. Default lists return only
+  effectively enabled entries; `include_disabled=true` is honored only for callers with `resources:moderate`.
+- A concrete `resource_group_id` matches `ImageGalleryEntry.resource_group_id`. Legacy rows with a null entry group may
+  fall back to `ImageSessionRound.resource_group_id`; never infer gallery group membership from `ImageSessionAsset`.
 - Response metadata should include prompt, requested size, actual size, provider/model, candidate metadata, session ID/title,
-  inspiration ID/name when available, and `created_at`.
+  inspiration ID/name when available, owner, resource group, moderation fields, `view_count`, and `created_at`.
+- The visual gallery remains image-led. Compact admin remove/restore controls are compatible with this contract when they
+  use `resources:moderate`; table-first management, bulk moderation, tags, and search belong to a separate workflow.
 
 ### 4. Validation & Error Matrix
 
@@ -1167,13 +1188,21 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 - Reference upload asset -> `400`, `{"detail": "只有生成结果可以保存到画廊"}`.
 - Generated asset without a generating round -> `404`, `{"detail": "生成记录不存在"}`.
 - Duplicate generated asset save -> existing gallery entry, no duplicate database row.
+- Missing `resource_group_id` on list -> all visible, effectively enabled gallery entries.
+- Concrete `resource_group_id` on list -> only entries in that generation group, with `total`, `has_more`, and
+  `next_offset` computed from the same filtered SQL query.
+- Disabled gallery entry in default list -> omitted before pagination/count.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: a continuous image candidate can be saved once, then repeated clicks keep one gallery row.
+- Good: default and premium generation groups each return only their matching gallery entries when a concrete group filter
+  is supplied.
+- Good: admin governance controls remove or restore one gallery entry while preserving the image-led browsing layout.
 - Base: inspiration-scoped and standalone image sessions both appear in the same global gallery list.
 - Bad: copying generated image bytes into `source_assets` or inspiration storage when the user only chose "save to gallery".
-- Bad: adding inspiration-level grouping, bulk management, tags, or search inside this global display-only gallery task.
+- Bad: implementing gallery list visibility by fetching all rows and filtering disabled/group state in Python or React.
+- Bad: adding table-first bulk management, inspiration-level grouping, tags, or search inside this global gallery task.
 
 ### 6. Tests Required
 
@@ -1181,6 +1210,8 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
   session, inspiration, and creation metadata.
 - Backend route test repeats the same save and asserts one database row.
 - Backend route test rejects reference-upload assets.
+- Backend route/list test covers omitted group, concrete group, disabled default hiding, `include_disabled` permissions,
+  pagination counts, and legacy null entry-group fallback.
 - Migration test path must keep Alembic upgrade-to-head green on SQLite and PostgreSQL-compatible schema definitions.
 
 ### 7. Wrong vs Correct
@@ -1881,8 +1912,9 @@ with op.batch_alter_table("inspirations") as batch_op:
   owners can read their own disabled non-gallery resources when the owning detail API supports that state.
 - Gallery list visibility is stricter than owner visibility: disabled gallery entries are hidden by default for every
   account and every UI layout, including owners and admins. Only callers with `resources:moderate` may receive disabled
-  gallery entries, and only when the list request sets `include_disabled=true`. Workspace home gallery previews must not
-  set that flag; they fetch only effectively enabled entries for every account.
+  gallery entries, and only when the list request sets `include_disabled=true`. The backend applies this filter before
+  pagination and count. Workspace home gallery previews must not set that flag; they fetch only effectively enabled
+  entries for every account.
 
 ### 4. Validation & Error Matrix
 
@@ -2397,7 +2429,8 @@ provider = dependencies.text_provider(runtime_claim.generation_config_id, sessio
 - List summary `rounds_count` is historical-tree count: successful round groups plus non-hidden task generation groups,
   deduplicated by generation group id. It is not filter-relative.
 - All-groups list projection uses the same session-owned tag and historical-tree count for each returned session.
-- Gallery filtering uses `ImageGalleryEntry.resource_group_id`; it must not infer ownership from `ImageSessionAsset`.
+- Gallery filtering uses `ImageGalleryEntry.resource_group_id`; legacy rows with a null entry group may fall back to the
+  generating `ImageSessionRound.resource_group_id`. It must not infer group membership from `ImageSessionAsset`.
 - Frontend list calls must keep an "all groups" option and omit `resource_group_id` for that option.
 - Concrete image-session group filtering must use `ImageSession.resource_group_id` so the query stays aligned with the
   single-owner contract.
@@ -2430,6 +2463,7 @@ provider = dependencies.text_provider(runtime_claim.generation_config_id, sessio
 ### 6. Tests Required
 
 - Backend route test: missing image-session/gallery group query returns all visible records.
+- Backend route test: concrete gallery group query returns only matching gallery entries and preserves filtered totals.
 - Backend list test: empty sessions only appear in their stored group.
 - Backend list test: mixed-group historical task/round sessions appear only in `ImageSession.resource_group_id`'s current
   group filter.

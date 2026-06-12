@@ -819,7 +819,7 @@ export function RbacPage() {
 
             {activeSection === "users" ? (
               <>
-            <section className="pf-table-panel">
+            <section className="pf-table-panel pf-governed-table-panel pf-rbac-user-table-panel">
               <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                   <div>
@@ -899,7 +899,7 @@ export function RbacPage() {
 	                      <th className="px-4 py-3 text-right">{t("inspirations.table.actions")}</th>
 	                    </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  <tbody className="pf-gradient-table-body">
                     {users.length ? (
                       users.map((user) => {
                         const disabled = !user.enabled;

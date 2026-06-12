@@ -197,6 +197,9 @@ describe("workspaceTopNavTarget", () => {
       "/image-chat/workbench",
     );
     expect(workspaceTopNavTarget({ to: "/gallery", workspaceTo: "/gallery/manage" })).toBe("/gallery/manage");
+    expect(workspaceTopNavTarget({ to: "/usage-stats", workspaceTo: "/usage-stats/detail" })).toBe(
+      "/usage-stats/detail",
+    );
   });
 
   it("falls back to the normal top-level route without a workspace override", () => {

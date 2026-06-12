@@ -233,8 +233,8 @@ const TEXTAREA_CLASS =
   "dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-violet-400";
 
 const PANEL_CLASS =
-  "rounded-xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/60 " +
-  "dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25";
+  "rounded-xl border border-slate-200 bg-white p-6 shadow-md shadow-slate-300/40 " +
+  "dark:border-slate-700/70 dark:bg-[#0f1726] dark:shadow-black/35";
 
 const SETTINGS_MAIN_ACTION_CLASS =
   "inline-flex h-11 items-center justify-center rounded-lg bg-indigo-600 px-5 text-sm font-semibold text-white " +
@@ -1664,25 +1664,9 @@ function ConfigField({
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/20">
         <div className="flex items-start justify-between gap-3">
-          <label htmlFor={item.key} className="min-w-0 text-sm font-semibold text-zinc-950 dark:text-white">
-            {helpKey ? (
-              <ParameterHelpLabel label={item.label} helpKey={helpKey} uiType="settings" content={helpContent ?? undefined} />
-            ) : (
-              item.label
-            )}
-          </label>
           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(item)}`}>
             {sourceLabel(item, t)}
           </span>
-        </div>
-        <div className="mt-3">{control}</div>
-        <div className="mt-2 flex min-h-5 items-start justify-between gap-3">
-          <div>
-            <div className="font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</div>
-            {item.secret && secretTouched ? (
-              <div className="mt-1 text-xs text-amber-600 dark:text-amber-300">{t("settings.writeNewSecret")}</div>
-            ) : null}
-          </div>
           {item.source === "database" ? (
             <button
               type="button"
@@ -1696,13 +1680,27 @@ function ConfigField({
             </button>
           ) : null}
         </div>
+        <div className="mt-3">{control}</div>
+        <div className="mt-2">
+          <label htmlFor={item.key} className="block text-sm font-semibold text-zinc-950 dark:text-white">
+            {helpKey ? (
+              <ParameterHelpLabel label={item.label} helpKey={helpKey} uiType="settings" content={helpContent ?? undefined} />
+            ) : (
+              item.label
+            )}
+          </label>
+          <div className="mt-1 font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</div>
+          {item.secret && secretTouched ? (
+            <div className="mt-1 text-xs text-amber-600 dark:text-amber-300">{t("settings.writeNewSecret")}</div>
+          ) : null}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="grid gap-3 border-t border-slate-100 py-5 first:border-t-0 dark:border-slate-800 md:grid-cols-[220px_minmax(0,1fr)]">
-      <div>
+    <div className="grid gap-3 border-t border-slate-100 py-5 first:border-t-0 dark:border-slate-800">
+      <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor={item.key} className="text-sm font-medium text-zinc-900 dark:text-white">
             {helpKey ? (
@@ -1715,9 +1713,7 @@ function ConfigField({
             {sourceLabel(item, t)}
           </span>
         </div>
-        <div className="mt-1 font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</div>
-      </div>
-      <div className="space-y-2">
+        <div className="font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</div>
         {control}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="min-h-4 text-xs leading-5 text-zinc-500 dark:text-slate-400">
@@ -1790,7 +1786,8 @@ function ProvidersSection({
     editingProfile && editingProfileUsage ? providerDisableBlocked(editingProfile, editingProfileUsage) : false;
 
   return (
-    <div className="space-y-5">
+    <section className={PANEL_CLASS}>
+      <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">
@@ -1877,6 +1874,7 @@ function ProvidersSection({
         onSubmit={onSubmitProfile}
       />
     </div>
+    </section>
   );
 }
 
@@ -1983,7 +1981,7 @@ function GenerationResourceGroupCard({
   const isNew = !group;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-[#0b1220] dark:shadow-black/20">
+    <div className="rounded-xl border border-slate-200/60 bg-white/80 p-4 shadow-md shadow-slate-200/50 backdrop-blur-sm dark:border-slate-700/40 dark:bg-[#0b1220]/80 dark:shadow-black/20">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -2175,7 +2173,7 @@ function ProviderProfileCard({
   const switchHelp = disableBlocked ? t("settings.provider.disableBlocked") : undefined;
 
   return (
-    <div className="group relative flex min-h-[230px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/60 transition hover:border-indigo-200 hover:shadow-md dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25 dark:hover:border-violet-400/45">
+    <div className="group relative flex min-h-[230px] flex-col justify-between rounded-xl border border-slate-200/60 bg-white/80 p-5 shadow-md shadow-slate-200/50 backdrop-blur-sm transition hover:border-indigo-200 hover:shadow-lg dark:border-slate-700/40 dark:bg-[#0f1726]/80 dark:shadow-black/20 dark:hover:border-violet-400/45">
       <button
         type="button"
         onClick={onEdit}
@@ -2859,11 +2857,12 @@ function GenerationConfigPoolSection({
   ];
 
   return (
-    <div className="space-y-4">
+    <section className="space-y-4">
       {purpose === "text" && textTestState && onTextTestDraftChange ? (
         <TextConfigTestPanel state={textTestState} onDraftChange={onTextTestDraftChange} />
       ) : null}
-      <div className="space-y-3">
+      <div className={`${PANEL_CLASS} space-y-5`}>
+        <div className="space-y-4">
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">
             {purpose === "text" ? t("settings.generation.textPoolTitle") : t("settings.generation.imagePoolTitle")}
@@ -2897,8 +2896,8 @@ function GenerationConfigPoolSection({
             {t("settings.generation.refreshSort")}
           </button>
         </div>
-      </div>
-      <div className="flex flex-wrap gap-2">
+        </div>
+        <div className="flex flex-wrap gap-2">
         {resourceGroups.map((group) => {
           const active = activeResourceGroupId === group.id;
           return (
@@ -2921,35 +2920,38 @@ function GenerationConfigPoolSection({
         </button>
       </div>
       {cards.length ? (
-        cards.map(({ key, draftKey, config, draft }) => {
-          const testRecord = textConfigTestRecordForKey(textTestState, key);
-          return (
-            <GenerationConfigCard
-              key={key}
-              config={config}
-              draft={draft}
-              resourceGroups={resourceGroups}
-              profiles={providerProfilesForGenerationConfig(profiles, draft)}
-              pending={pending || archivingConfigId === config?.id}
-              canWrite={canWrite}
-              onChange={(next) => onChange(draftKey, next)}
-              onSave={() => onSave(draft)}
-              onArchive={config ? () => onArchive(config.id) : undefined}
-              onUnfreeze={config ? () => onUnfreeze(config.id) : undefined}
-              unfreezing={unfreezingConfigId === config?.id}
-              onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(key, draft) : undefined}
-              testing={Boolean(testRecord?.testing)}
-              testResult={testRecord?.result ?? null}
-              testError={testRecord?.error ?? ""}
-            />
-          );
-        })
+        <div className="space-y-4">
+          {cards.map(({ key, draftKey, config, draft }) => {
+            const testRecord = textConfigTestRecordForKey(textTestState, key);
+            return (
+              <GenerationConfigCard
+                key={key}
+                config={config}
+                draft={draft}
+                resourceGroups={resourceGroups}
+                profiles={providerProfilesForGenerationConfig(profiles, draft)}
+                pending={pending || archivingConfigId === config?.id}
+                canWrite={canWrite}
+                onChange={(next) => onChange(draftKey, next)}
+                onSave={() => onSave(draft)}
+                onArchive={config ? () => onArchive(config.id) : undefined}
+                onUnfreeze={config ? () => onUnfreeze(config.id) : undefined}
+                unfreezing={unfreezingConfigId === config?.id}
+                onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(key, draft) : undefined}
+                testing={Boolean(testRecord?.testing)}
+                testResult={testRecord?.result ?? null}
+                testError={testRecord?.error ?? ""}
+              />
+            );
+          })}
+        </div>
       ) : (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm font-medium text-slate-500 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-400 dark:shadow-black/25">
           {t("settings.generation.searchEmpty")}
         </div>
       )}
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -3015,8 +3017,8 @@ function GenerationConfigCard({
       : filteredProfiles;
 
   return (
-    <div className={`${PANEL_CLASS} space-y-5`}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="rounded-xl border border-slate-200/60 bg-white/80 p-6 shadow-md shadow-slate-200/50 backdrop-blur-sm dark:border-slate-700/40 dark:bg-[#0f1726]/80 dark:shadow-black/20">
+      <div className="space-y-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-base font-semibold text-slate-950 dark:text-white">
@@ -4066,8 +4068,8 @@ export function SettingsPage() {
               </div>
             ) : (
               <div className="pf-side-shell min-h-full">
-              <aside className="pf-side-rail">
-                <div className="border-b border-slate-200 px-5 py-7 dark:border-slate-800">
+              <aside className="pf-side-rail backdrop-blur-sm bg-white/60 dark:bg-[#0a1018]/60">
+                <div className="border-b border-slate-200/60 px-5 py-7 dark:border-slate-700/40">
                   <div className="flex items-center gap-3 text-lg font-semibold text-slate-950 dark:text-white">
                     <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">
                       <SettingsIcon size={20} />
@@ -4076,7 +4078,7 @@ export function SettingsPage() {
                   </div>
                   <label
                     htmlFor="settings-section-search"
-                    className="mt-6 flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-400 shadow-sm shadow-slate-200/30 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-500 dark:shadow-black/20"
+                    className="mt-6 flex h-10 items-center gap-2 rounded-lg border border-slate-200/60 bg-slate-50/50 px-3 text-sm text-slate-400 shadow-sm shadow-slate-200/20 dark:border-slate-700/40 dark:bg-[#0b1220]/50 dark:text-slate-500 dark:shadow-black/10"
                   >
                     <Search size={16} />
                     <input
@@ -4089,7 +4091,7 @@ export function SettingsPage() {
                     />
                   </label>
                 </div>
-                <nav className="hidden space-y-6 px-3 py-5 lg:block" aria-label={t("settings.navLabel")}>
+                <nav className="hidden space-y-8 px-3 py-5 lg:block" aria-label={t("settings.navLabel")}>
                   {SETTINGS_GROUPS.map((group) => {
                     const sections = visibleSections.filter((section) => section.groupKey === group);
                     if (!sections.length) {
@@ -4100,7 +4102,7 @@ export function SettingsPage() {
                         <div className="px-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                           {t(group)}
                         </div>
-                        <div className="mt-2 space-y-1">
+                        <div className="mt-2 space-y-2">
                           {sections.map((section) => {
                             const Icon = section.icon;
                             const active = section.id === activeSection;
@@ -4108,11 +4110,12 @@ export function SettingsPage() {
                               <button
                                 key={section.id}
                                 type="button"
+                                aria-current={active ? "page" : undefined}
                                 onClick={() => handleActiveSectionChange(section.id)}
-                                className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors ${
+                                className={`pf-settings-nav-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-all ${
                                   active
-                                    ? "bg-indigo-50 font-semibold text-indigo-700 ring-1 ring-indigo-200 dark:bg-violet-500/18 dark:text-violet-100 dark:ring-violet-400/35"
-                                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-violet-500/12 dark:hover:text-white"
+                                    ? "font-semibold text-indigo-700 bg-[linear-gradient(90deg,rgba(99,102,241,0.22),rgba(99,102,241,0.03)_32%,rgba(99,102,241,0.03)_68%,rgba(99,102,241,0.22))] dark:text-violet-100 dark:bg-[linear-gradient(90deg,rgba(139,92,246,0.32),rgba(139,92,246,0.04)_32%,rgba(139,92,246,0.04)_68%,rgba(139,92,246,0.32))]"
+                                    : "text-slate-500 hover:text-slate-800 hover:bg-[linear-gradient(90deg,rgba(100,116,139,0.13),rgba(100,116,139,0.02)_32%,rgba(100,116,139,0.02)_68%,rgba(100,116,139,0.13))] dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-[linear-gradient(90deg,rgba(139,92,246,0.16),rgba(139,92,246,0.02)_32%,rgba(139,92,246,0.02)_68%,rgba(139,92,246,0.16))]"
                                 }`}
                               >
                                 <Icon size={15} className={active ? "shrink-0 text-indigo-600 dark:text-violet-200" : "shrink-0 text-slate-400 dark:text-slate-500"} />

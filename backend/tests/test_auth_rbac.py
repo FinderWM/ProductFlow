@@ -224,6 +224,10 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
 
     status_page_data = user_client.get("/api/settings/generation-config-status")
     assert status_page_data.status_code == 200
+    assert all(
+        item["resource_group_ids"] == [DEFAULT_GENERATION_RESOURCE_GROUP_ID]
+        for item in status_page_data.json()["configs"]
+    )
 
     runtime_config = user_client.get("/api/settings/runtime")
     assert runtime_config.status_code == 200
@@ -431,6 +435,50 @@ def test_runtime_and_generation_option_apis_require_matching_rbac_permission(con
     admin_client = TestClient(app)
     _login(admin_client)
 
+    visible_group = admin_client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "status-visible", "name": "状态可见分组", "sort_order": 30, "enabled": True},
+    )
+    assert visible_group.status_code == 200
+    hidden_group = admin_client.post(
+        "/api/settings/generation-resource-groups",
+        json={"key": "status-hidden", "name": "状态隐藏分组", "sort_order": 20, "enabled": True},
+    )
+    assert hidden_group.status_code == 200
+
+    visible_config = admin_client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_id": visible_group.json()["id"],
+            "name": "状态可见文案配置",
+            "purpose": "text",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+            "config": {},
+            "priority": 80,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert visible_config.status_code == 200
+    hidden_config = admin_client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_id": hidden_group.json()["id"],
+            "name": "状态隐藏图片配置",
+            "purpose": "image",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"model": "mock-image"},
+            "config": {},
+            "priority": 70,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert hidden_config.status_code == 200
+
     created_role = admin_client.post("/api/rbac/roles", json={"code": "status_reader", "name": "状态只读"})
     assert created_role.status_code == 201
     role_id = created_role.json()["id"]
@@ -446,6 +494,11 @@ def test_runtime_and_generation_option_apis_require_matching_rbac_permission(con
         json={"username": "status-only", "display_name": "Status Only", "role_id": role_id},
     )
     assert created_user.status_code == 201
+    grant = admin_client.put(
+        f"/api/rbac/users/{created_user.json()['id']}/generation-resource-groups",
+        json={"resource_group_ids": [visible_group.json()["id"]]},
+    )
+    assert grant.status_code == 200
 
     user_client = TestClient(app)
     set_password = _set_password(
@@ -458,6 +511,12 @@ def test_runtime_and_generation_option_apis_require_matching_rbac_permission(con
 
     status_page_data = user_client.get("/api/settings/generation-config-status")
     assert status_page_data.status_code == 200
+    status_payload = status_page_data.json()
+    status_config_ids = {item["id"] for item in status_payload["configs"]}
+    assert visible_config.json()["id"] in status_config_ids
+    assert hidden_config.json()["id"] not in status_config_ids
+    assert status_payload["total_count"] == len(status_payload["configs"])
+    assert all(item["resource_group_ids"] == [visible_group.json()["id"]] for item in status_payload["configs"])
 
     runtime_config = user_client.get("/api/settings/runtime")
     assert runtime_config.status_code == 403

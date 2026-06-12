@@ -88,11 +88,11 @@ InspirationWorkflow application 当前已经不是单文件承载全部职责。
 
 `README.md`、`docs/PRD.md`、`docs/ARCHITECTURE.md`、`docs/ROADMAP.md`、`docs/USER_GUIDE.md` 已经覆盖当前主线：
 
-- 单管理员自托管，而不是多租户 SaaS。
+- 单管理员自托管；多租户 SaaS 未实现。
 - Inspiration One workbench、连续生图、画廊、设置页和运行时配置。
 - 三类异步执行入口和轻量 status polling。
 - Docker Compose 自托管路径和本地开发路径。
-- 当前明确不包含多租户、支付、自动投放、对象存储、Helm 或发布版镜像。
+- 当前明确不包含多租户、支付、自动投放、Helm 或发布版镜像；存储已支持本地、MinIO 和 S3 兼容后端。
 
 历史后端审查清单和历史架构审查快照已经移除，避免旧行数、旧测试入口和旧问题表继续被当成当前事实。
 
@@ -168,15 +168,15 @@ Vitest 已经覆盖 helper 和部分 hook，但 InspirationDetail workbench 的�
 
 ### R4. 生产化边界仍需明确表达
 
-当前已有 Docker Compose 自托管路径，但仍不是完整生产平台：
+当前已有 Docker Compose 自托管路径，完整生产平台能力仍未覆盖：
 
-- 不是多用户或多租户系统。
-- 没有对象存储适配层，当前 storage 是本地文件系统。
-- 没有 SSE/WebSocket 推送，当前运行中状态依赖轮询。
+- 多用户或多租户系统未实现。
+- storage 已有 local/minio/s3 适配和对象 metadata；尚未提供跨区域复制、生命周期策略、配额和备份恢复控制面。
+- 运行中页面状态仍以轻量 status polling 为权威；已有 Redis pub/sub + WebSocket 任务结果通知，但尚未提供完整实时协作或事件流平台。
 - 没有 Helm chart 或发布版容器镜像，当前是仓库内 Compose 构建。
 - 没有审计后台、对象级权限、支付或托管账号体系。
 
-这些不是当前实现缺陷，但文档和 roadmap 必须持续把它们标为未实现或未来方向，避免误导部署预期。
+这些属于当前产品边界；文档和 roadmap 必须持续标为未实现或未来方向，避免误导部署预期。
 
 ### R5. Provider 错误分类和可观测性仍可继续加强
 
@@ -191,7 +191,7 @@ Provider 调用已经被隔离在 infrastructure 层，但真实 OpenAI-compatib
    每次新增后台任务都必须回答：DB 状态何时落地、enqueue 失败如何回写、worker 重复消息如何 no-op、API 启动恢复哪些状态、status endpoint 是否轻量。
 
 3. **保持 docs 的 current/future 分层**  
-   当前事实继续放在 README、PRD、ARCHITECTURE、USER_GUIDE 和本复审；对象存储、SSE/WebSocket、Helm、多租户等只放在 roadmap 的未来方向或暂不计划，不写成已实现能力。
+   当前事实继续放在 README、PRD、ARCHITECTURE、USER_GUIDE 和本复审；MinIO/S3 storage、任务结果 WebSocket 通知写为已实现能力，Helm、多租户、托管账号体系和完整实时协作平台继续标为未来方向或暂不计划。
 
 4. **继续按真实热点拆分，不做全局重写**  
    InspirationWorkflow 和 InspirationDetail 的拆分方向已经有效。后续拆分应跟着新增功能的真实修改热点走，避免为了架构完整性提前引入 repository、domain service 或复杂前端状态层。

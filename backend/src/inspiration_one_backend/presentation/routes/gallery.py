@@ -41,6 +41,7 @@ def list_gallery_entries_endpoint(
         actor_user_id=current_user.id,
         actor_is_admin=current_user.is_admin,
         include_disabled=can_include_disabled,
+        resource_group_id=resource_group_id,
         limit=limit,
         offset=offset,
     )

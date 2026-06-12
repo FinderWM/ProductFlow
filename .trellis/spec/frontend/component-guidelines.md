@@ -330,9 +330,12 @@ Pages provide data and mutations; the shared picker owns only presentational siz
 `web/src/components/TopNav.tsx` is the shared authenticated inspiration navigation bar, not just a page title strip.
 
 - Every primary authenticated page should render `TopNav` so the same frequent entries are always available:
-  `灵感产物/工作台`, `文/图生图`, `画廊`, `帮助`, and `配置`.
-- The entries link to `/inspirations`, `/image-chat`, `/gallery`, `/help`, and `/settings`; keep route declarations centralized in
-  `web/src/App.tsx`.
+  resource library, inspiration workspace/list, personal templates, image chat, gallery, status, usage stats, settings,
+  RBAC, help, and global-template administration when the current session can access those surfaces.
+- Classic-layout entry paths are `/resource-library`, `/inspirations`, `/workflow/templates`, `/image-chat`, `/gallery`,
+  `/status`, `/usage-stats`, `/settings`, `/rbac`, `/help`, and `/settings/global-templates`; workspace-layout primary
+  entries use `workspaceTo` for real subpages such as `/inspirations/list`, `/image-chat/workbench`, `/gallery/manage`,
+  `/status/detail`, and `/usage-stats/detail`. Keep route declarations centralized in `web/src/App.tsx`.
 - Page components may still pass `breadcrumbs`, `onHome`, and `onLogout`, but should not duplicate these global nav links
   in a separate header unless that page needs an additional hero call-to-action.
 - `TopNav` may use React Router primitives such as `NavLink` / `useLocation`, but must not fetch session or settings data
@@ -356,7 +359,7 @@ Correct:
 <TopNav breadcrumbs="配置" onHome={() => navigate("/inspirations")} onLogout={() => logoutMutation.mutate()} />
 ```
 
-The shared nav itself exposes the settings/image-chat/inspiration/gallery links; pages only add page-specific actions.
+The shared nav itself exposes the authenticated first-level links; pages only add page-specific actions.
 
 ### Global Shell and Navigation Density
 
@@ -398,26 +401,31 @@ Correct:
 
 - Trigger: editing `GalleryPage`, gallery route registration, gallery API DTO consumption, or continuous image-chat save
   to gallery affordances.
-- The gallery is a visual browsing surface for generated images, not a management dashboard.
+- The gallery is an image-led browsing surface for generated images. Admin governance actions stay compact and
+  per-entry/per-preview.
 
 ### 2. Signatures
 
 - Route: `/gallery` in `web/src/App.tsx`.
 - API client:
-  - `api.listGalleryEntries()`.
+  - `api.listGalleryEntries({ resource_group_id?, include_disabled?, limit?, offset? })`.
   - `api.saveGalleryEntry(imageSessionAssetId)`.
-- Query key: `['gallery']`.
+  - `api.updateResourceModeration("image_gallery_entry", entryId, { enabled })`.
+- Query key: `['gallery', canViewDisabledGallery]` for the page state; mutations invalidate the `['gallery']` prefix.
 - DTO: `GalleryEntry` in `web/src/lib/types.ts`.
 
 ### 3. Contracts
 
 - `GalleryPage` lists global gallery entries and uses `api.toApiUrl(...)` for `image.thumbnail_url`, `image.preview_url`,
   and `image.download_url`.
+- Gallery management surfaces may request disabled entries only with `include_disabled=true` when the session has
+  `resources:moderate`; workspace-home gallery previews omit that flag.
 - Continuous image chat saves only the selected generated candidate to the gallery; existing save-to-inspiration behavior must
   remain separate.
 - Successful save invalidates `['gallery']` so the global page refreshes without a hard reload.
 - The page should emphasize image-led browsing: a strong selected/hero image, a responsive visual grid, and compact prompt
-  and metadata context. Do not turn it into inspiration filters, bulk tools, or a table-first admin page.
+  and metadata context. Compact admin remove/restore icon buttons are allowed for `admin + resources:moderate`; keep
+  table-first bulk governance and inspiration-level management out of this page.
 - Gallery feed cards should preserve the full generated image instead of cropping it. Derive card aspect from
   `actual_size` first and `size` second, clamp extreme ratios, and use a stable id/index-based score for featured cards
   so the layout feels varied without changing on every render.
@@ -439,9 +447,11 @@ Correct:
 ### 5. Good/Base/Bad Cases
 
 - Good: the selected generated candidate appears in the gallery after saving and refreshes via `['gallery']`.
+- Good: an admin with `resources:moderate` can remove or restore one gallery entry from a compact per-card control without
+  opening the preview unintentionally.
 - Base: if a gallery image has no inspiration reference, show it as a global/standalone item without blocking preview.
 - Bad: raw `fetch('/api/gallery')` from a page.
-- Bad: adding gallery grouping/filtering/bulk controls under this display-only contract.
+- Bad: table-first bulk controls, inspiration-level grouping/search, or admin tooling that displaces the visual feed.
 
 ### 6. Tests Required
 

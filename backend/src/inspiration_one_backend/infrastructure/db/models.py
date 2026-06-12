@@ -1486,6 +1486,8 @@ class ImageGalleryEntry(Base):
         Index("ix_image_gallery_entries_round_id", "image_session_round_id"),
         Index("ix_image_gallery_entries_created_at", "created_at"),
         Index("ix_image_gallery_entries_enabled", "enabled"),
+        Index("ix_image_gallery_entries_enabled_created", "enabled", "created_at"),
+        Index("ix_image_gallery_entries_group_enabled_created", "resource_group_id", "enabled", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

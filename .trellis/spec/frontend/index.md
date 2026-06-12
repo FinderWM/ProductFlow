@@ -22,6 +22,28 @@ These files document the frontend conventions that are actually present in this 
 | [Quality Guidelines](./quality-guidelines.md) | TypeScript build gate, API centralization, UI review checklist | Filled |
 | [Type Safety](./type-safety.md) | Strict TS, DTO mirroring, ApiError, runtime validation reality | Filled |
 | [Inspiration Workbench DAG](./inspiration-workbench-dag.md) | Inspiration detail DAG workbench UI, API DTOs, and cache contracts | Filled |
+| [Resource Governance Guidelines](./resource-governance-guidelines.md) | Resource library, gallery governance, admin readonly, moderation UI contracts | Filled |
+| [UI Layout Guidelines](./ui-layout-guidelines.md) | Layout scheme, workspace appearance, navigation, shell, and verification contracts | Filled |
+
+---
+
+## Feature Coverage Map
+
+Use this map when the change is feature-driven rather than file-driven:
+
+- Resource library UI and authenticated-default API consumption: read `./resource-governance-guidelines.md`,
+  `./type-safety.md`, `./state-management.md`, and `../backend/error-handling.md`.
+- Gallery browsing, save-to-gallery state, and admin moderation controls: read `./resource-governance-guidelines.md`,
+  `./component-guidelines.md`, `./state-management.md`, `./type-safety.md`, and `../backend/database-guidelines.md`.
+- Workspace shell, top navigation, workspace home anchors, and appearance switching: read `./ui-layout-guidelines.md`,
+  `./component-guidelines.md`, and `./state-management.md`.
+- RBAC-gated navigation or protected actions: read `./type-safety.md`, `./state-management.md`,
+  and `../backend/error-handling.md`.
+- Image-chat handoff, generated asset gallery state, and resource-group URL state: read `./type-safety.md`,
+  `./state-management.md`, `./component-guidelines.md`, `./resource-governance-guidelines.md`, and
+  `../backend/database-guidelines.md`.
+
+If a feature is not represented here, update this map in the same change that adds or changes the feature contract.
 
 ---
 
@@ -37,6 +59,8 @@ Before frontend changes, read:
    - state/cache behavior: `./state-management.md`
    - API DTOs/types: `./type-safety.md`
    - inspiration workbench DAG: `./inspiration-workbench-dag.md`
+   - resource library, gallery governance, admin readonly, or moderation UI: `./resource-governance-guidelines.md`
+   - UI layout schemes, workspace appearances, navigation, or shell CSS: `./ui-layout-guidelines.md`
 
 If a frontend change consumes or changes backend API contracts, also read `../backend/error-handling.md`,
 `../backend/database-guidelines.md`, or `../backend/directory-structure.md` as relevant.

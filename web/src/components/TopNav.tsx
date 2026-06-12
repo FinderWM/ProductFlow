@@ -167,7 +167,11 @@ const navItems: TopNavItem[] = [
     requiredPermission: API_INSPIRATIONS_READ,
     priority: "primary",
     icon: Flower2,
-    match: (pathname: string) => pathname.startsWith("/inspirations") && !pathname.endsWith("/image-chat"),
+    match: (pathname: string) =>
+      pathname === "/inspirations/list" ||
+      pathname === "/inspirations/all" ||
+      pathname === "/inspirations/new" ||
+      (pathname.startsWith("/inspirations/") && !pathname.includes("/image-chat")),
   },
   {
     labelKey: "nav.templates",
@@ -211,6 +215,7 @@ const navItems: TopNavItem[] = [
   {
     labelKey: "nav.usageStats",
     to: "/usage-stats",
+    workspaceTo: "/usage-stats/detail",
     menuCode: "usage_stats",
     requiredPermission: API_USAGE_STATS_READ,
     priority: "primary",

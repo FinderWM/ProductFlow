@@ -73,7 +73,6 @@ from inspiration_one_backend.infrastructure.provider_config import (
     create_provider_profile,
     ensure_provider_config_bootstrapped,
     generation_config_resource_group_ids,
-    generation_config_status_summary,
     is_real_image_provider_kind,
     list_generation_configs,
     list_generation_resource_groups,
@@ -386,6 +385,16 @@ def _today_generation_config_stats(session: Session) -> dict[str, GenerationConf
     return {row.generation_config_id: row for row in rows}
 
 
+def _filter_generation_config_stats_by_ids(
+    stats: dict[str, GenerationConfigDailyStat],
+    *,
+    generation_config_ids: set[str] | None,
+) -> dict[str, GenerationConfigDailyStat]:
+    if generation_config_ids is None:
+        return stats
+    return {config_id: stat for config_id, stat in stats.items() if config_id in generation_config_ids}
+
+
 def _generation_config_stat_aggregates(
     session: Session,
     *,
@@ -418,6 +427,41 @@ def _generation_config_stat_aggregates(
         ):
             aggregate.last_failure_at = row.last_failure_at
     return stats
+
+
+def _filter_generation_config_stat_aggregates_by_ids(
+    stats: dict[str, _GenerationConfigStatAggregate],
+    *,
+    generation_config_ids: set[str] | None,
+) -> dict[str, _GenerationConfigStatAggregate]:
+    if generation_config_ids is None:
+        return stats
+    return {config_id: stat for config_id, stat in stats.items() if config_id in generation_config_ids}
+
+
+def _filter_generation_configs_for_user(
+    session: Session,
+    generation_configs: list[GenerationConfig],
+    *,
+    user: AuthUser | None,
+) -> list[GenerationConfig]:
+    if user is None:
+        return generation_configs
+    allowed_group_ids = {group.id for group in list_available_generation_resource_groups_for_user(session, user=user)}
+    return [
+        generation_config
+        for generation_config in generation_configs
+        if set(generation_config_resource_group_ids(generation_config)) & allowed_group_ids
+    ]
+
+
+def _active_generation_config_is_frozen(generation_config: GenerationConfig, *, now: datetime) -> bool:
+    frozen_until = generation_config.state.frozen_until if generation_config.state is not None else None
+    if frozen_until is None:
+        return False
+    if frozen_until.tzinfo is None:
+        frozen_until = frozen_until.replace(tzinfo=now.tzinfo)
+    return frozen_until > now
 
 
 def _serialize_generation_config(
@@ -497,35 +541,72 @@ def _serialize_generation_config_status_summary(
     start_date: date | None = None,
     end_date: date | None = None,
     include_configs: bool = True,
+    user: AuthUser | None = None,
 ) -> GenerationConfigStatusSummaryResponse:
-    today = datetime.now().astimezone().date()
+    now = now_utc()
+    today = now.date()
     range_start = start_date or end_date or today
     range_end = end_date or range_start
-    summary = generation_config_status_summary(session, start_date=range_start, end_date=range_end)
-    generation_configs = list_generation_configs(session) if include_configs else []
-    today_stats = _today_generation_config_stats(session) if include_configs else {}
+    generation_configs = _filter_generation_configs_for_user(
+        session,
+        list_generation_configs(session),
+        user=user,
+    )
+    generation_config_ids = {generation_config.id for generation_config in generation_configs}
+    config_purposes = {generation_config.id: generation_config.purpose for generation_config in generation_configs}
+    today_stats = (
+        _filter_generation_config_stats_by_ids(
+            _today_generation_config_stats(session),
+            generation_config_ids=generation_config_ids,
+        )
+    )
     range_stats = (
-        _generation_config_stat_aggregates(session, start_date=range_start, end_date=range_end)
-        if include_configs
-        else {}
+        _filter_generation_config_stat_aggregates_by_ids(
+            _generation_config_stat_aggregates(session, start_date=range_start, end_date=range_end),
+            generation_config_ids=generation_config_ids,
+        )
     )
     return GenerationConfigStatusSummaryResponse(
-        total_count=summary.total_count,
-        enabled_count=summary.enabled_count,
-        frozen_count=summary.frozen_count,
-        running_count=summary.running_count,
-        start_date=summary.start_date.isoformat(),
-        end_date=summary.end_date.isoformat(),
-        range_attempt_count=summary.range_attempt_count,
-        range_success_count=summary.range_success_count,
-        range_failure_count=summary.range_failure_count,
-        range_text_attempt_count=summary.range_text_attempt_count,
-        range_image_attempt_count=summary.range_image_attempt_count,
-        today_attempt_count=summary.today_attempt_count,
-        today_success_count=summary.today_success_count,
-        today_failure_count=summary.today_failure_count,
-        today_text_attempt_count=summary.today_text_attempt_count,
-        today_image_attempt_count=summary.today_image_attempt_count,
+        total_count=len(generation_configs),
+        enabled_count=sum(1 for generation_config in generation_configs if generation_config.enabled),
+        frozen_count=sum(
+            1
+            for generation_config in generation_configs
+            if _active_generation_config_is_frozen(generation_config, now=now)
+        ),
+        running_count=sum(
+            generation_config.state.current_concurrency
+            for generation_config in generation_configs
+            if generation_config.state is not None
+        ),
+        start_date=range_start.isoformat(),
+        end_date=range_end.isoformat(),
+        range_attempt_count=sum(stat.attempt_count for stat in range_stats.values()),
+        range_success_count=sum(stat.success_count for stat in range_stats.values()),
+        range_failure_count=sum(stat.failure_count for stat in range_stats.values()),
+        range_text_attempt_count=sum(
+            stat.attempt_count
+            for config_id, stat in range_stats.items()
+            if config_purposes.get(config_id) == "text"
+        ),
+        range_image_attempt_count=sum(
+            stat.attempt_count
+            for config_id, stat in range_stats.items()
+            if config_purposes.get(config_id) == "image"
+        ),
+        today_attempt_count=sum(stat.attempt_count for stat in today_stats.values()),
+        today_success_count=sum(stat.success_count for stat in today_stats.values()),
+        today_failure_count=sum(stat.failure_count for stat in today_stats.values()),
+        today_text_attempt_count=sum(
+            stat.attempt_count
+            for config_id, stat in today_stats.items()
+            if config_purposes.get(config_id) == "text"
+        ),
+        today_image_attempt_count=sum(
+            stat.attempt_count
+            for config_id, stat in today_stats.items()
+            if config_purposes.get(config_id) == "image"
+        ),
         configs=[
             _serialize_generation_config_status_config(
                 generation_config,
@@ -533,7 +614,9 @@ def _serialize_generation_config_status_summary(
                 range_stats=range_stats,
             )
             for generation_config in generation_configs
-        ],
+        ]
+        if include_configs
+        else [],
     )
 
 
@@ -1378,19 +1461,24 @@ def get_provider_config_endpoint(session: Session = Depends(get_session)) -> Pro
 @router.get(
     "/generation-config-status",
     response_model=GenerationConfigStatusSummaryResponse,
-    dependencies=[READ_STATUS_PERMISSION],
 )
 def get_generation_config_status_endpoint(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     session: Session = Depends(get_session),
+    current_user: AuthUser = READ_STATUS_PERMISSION,
 ) -> GenerationConfigStatusSummaryResponse:
     ensure_provider_config_bootstrapped(session)
     range_start = start_date or end_date
     range_end = end_date or range_start
     if range_start is not None and range_end is not None and range_end < range_start:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="日期范围无效")
-    return _serialize_generation_config_status_summary(session, start_date=range_start, end_date=range_end)
+    return _serialize_generation_config_status_summary(
+        session,
+        start_date=range_start,
+        end_date=range_end,
+        user=current_user,
+    )
 
 
 @router.get(

@@ -14,7 +14,7 @@ import { API_RESOURCES_MODERATE, hasSessionAdminApiPermission, hasSessionApiPerm
 import { useSessionState } from "../lib/session";
 import type { GalleryEntry, GalleryEntryListResponse, ResourceModerationResponse } from "../lib/types";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
-import { galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
+import { galleryEntryAspectRatio, galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
 import { galleryAdminRemovedLabel } from "./gallery/moderation";
 
 function metadataRows(
@@ -309,6 +309,12 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                     aspectRatio: tileLayout.aspectRatio,
                     ...(isDesktopGrid ? { gridRowEnd: `span ${tileLayout.rowSpan}` } : {}),
                   };
+                  const imageAspectRatio = galleryEntryAspectRatio(entry);
+                  const tileAspectRatio = Number(tileLayout.aspectRatio);
+                  const imageFrameStyle: CSSProperties = {
+                    aspectRatio: imageAspectRatio.toFixed(4),
+                    ...(imageAspectRatio >= tileAspectRatio ? { width: "100%" } : { height: "100%", width: "auto" }),
+                  };
                   const handleModerationClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
                     event.stopPropagation();
                     moderationMutation.mutate({ enabled: !moderationEnabled, entry });
@@ -316,7 +322,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                   return (
                     <article
                       key={entry.id}
-                      className={`group relative min-w-0 overflow-hidden rounded-md bg-slate-900 text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-[#0b4eea]/20 ${tileLayout.className}`}
+                      className={`group relative min-w-0 overflow-hidden rounded-md bg-transparent text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-[#0b4eea]/20 ${tileLayout.className}`}
                       style={tileStyle}
                     >
                       <button
@@ -324,35 +330,37 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                         onClick={() => handleEntryClick(entry)}
                         className="block h-full w-full text-left"
                       >
-                        <div className="relative h-full overflow-hidden bg-slate-900">
-                          <img
-                            src={api.toApiUrl(entry.image.thumbnail_url)}
-                            alt={entry.prompt ?? entry.image.original_filename}
-                            loading="lazy"
-                            decoding="async"
-                            className={`h-full w-full object-contain transition duration-300 ${adminRemovedLabel ? "opacity-55 grayscale" : ""}`}
-                          />
-                          {adminRemovedLabel ? (
-                            <div
-                              className="absolute left-3 top-3 z-10 inline-flex max-w-[calc(100%-1.5rem)] items-center rounded-md border border-red-200 bg-red-50/95 px-2 py-1 text-[11px] font-semibold text-red-700 shadow-sm dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-100"
-                              title={adminRemovedLabel}
-                            >
-                              <Ban size={12} className="mr-1.5 shrink-0" aria-hidden="true" />
-                              <span className="truncate">{adminRemovedLabel}</span>
+                        <div className="flex h-full w-full items-center justify-center overflow-hidden bg-transparent">
+                          <div className="relative max-h-full max-w-full overflow-hidden bg-transparent" style={imageFrameStyle}>
+                            <img
+                              src={api.toApiUrl(entry.image.thumbnail_url)}
+                              alt={entry.prompt ?? entry.image.original_filename}
+                              loading="lazy"
+                              decoding="async"
+                              className={`h-full w-full object-cover transition duration-300 ${adminRemovedLabel ? "opacity-55 grayscale" : ""}`}
+                            />
+                            {adminRemovedLabel ? (
+                              <div
+                                className="absolute left-3 top-3 z-10 inline-flex max-w-[calc(100%-1.5rem)] items-center rounded-md border border-red-200 bg-red-50/95 px-2 py-1 text-[11px] font-semibold text-red-700 shadow-sm dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-100"
+                                title={adminRemovedLabel}
+                              >
+                                <Ban size={12} className="mr-1.5 shrink-0" aria-hidden="true" />
+                                <span className="truncate">{adminRemovedLabel}</span>
+                              </div>
+                            ) : null}
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[56%] bg-gradient-to-t from-slate-950/82 via-slate-950/12 to-transparent opacity-80 transition-opacity group-hover:opacity-95" />
+                            <div className="absolute inset-x-0 bottom-0 p-4 text-white">
+                              <div className="line-clamp-2 text-sm font-semibold leading-5">
+                                {entry.prompt ?? entry.image.original_filename}
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/70">
+                                <span>{galleryEntrySizeLabel(entry, locale)}</span>
+                                {showGenerationResourceGroup ? <span>{entry.resource_group.name}</span> : null}
+                                <span>{formatDateTime(entry.created_at)}</span>
+                                <span>{t("gallery.views", { count: entry.view_count })}</span>
+                              </div>
+                              <ResourceMetaBadges resource={entry} className="mt-2" showReason={Boolean(adminRemovedLabel)} />
                             </div>
-                          ) : null}
-                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/82 via-slate-950/10 to-transparent opacity-80 transition-opacity group-hover:opacity-95" />
-                          <div className="absolute inset-x-0 bottom-0 p-4 text-white">
-                            <div className="line-clamp-2 text-sm font-semibold leading-5">
-                              {entry.prompt ?? entry.image.original_filename}
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/70">
-                              <span>{galleryEntrySizeLabel(entry, locale)}</span>
-                              {showGenerationResourceGroup ? <span>{entry.resource_group.name}</span> : null}
-                              <span>{formatDateTime(entry.created_at)}</span>
-                              <span>{t("gallery.views", { count: entry.view_count })}</span>
-                            </div>
-                            <ResourceMetaBadges resource={entry} className="mt-2" showReason={Boolean(adminRemovedLabel)} />
                           </div>
                         </div>
                       </button>

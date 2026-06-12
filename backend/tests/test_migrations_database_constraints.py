@@ -139,6 +139,8 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
         "ix_image_gallery_entries_round_id",
         "ix_image_gallery_entries_created_at",
         "ix_image_gallery_entries_enabled",
+        "ix_image_gallery_entries_enabled_created",
+        "ix_image_gallery_entries_group_enabled_created",
     }
     assert not table.foreign_keys
 
@@ -861,6 +863,12 @@ def test_gallery_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, m
     assert indexes["uq_image_gallery_entries_asset_id"]["column_names"] == ["image_session_asset_id"]
     assert indexes["ix_image_gallery_entries_round_id"]["column_names"] == ["image_session_round_id"]
     assert indexes["ix_image_gallery_entries_created_at"]["column_names"] == ["created_at"]
+    assert indexes["ix_image_gallery_entries_enabled_created"]["column_names"] == ["enabled", "created_at"]
+    assert indexes["ix_image_gallery_entries_group_enabled_created"]["column_names"] == [
+        "resource_group_id",
+        "enabled",
+        "created_at",
+    ]
     assert not inspector.get_foreign_keys("image_gallery_entries")
 
     engine.dispose()

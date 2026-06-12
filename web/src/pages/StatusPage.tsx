@@ -9,6 +9,7 @@ import {
   LockKeyhole,
   MessageSquareText,
   RefreshCw,
+  Search,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -122,7 +123,7 @@ function MetricCard({
   icon: LucideIcon;
 }) {
   return (
-    <div className={`${PANEL_CLASS} p-4`}>
+    <div className={`${PANEL_CLASS} pf-metric-card p-4`}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
         <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">
@@ -202,6 +203,7 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
   const queryClient = useQueryClient();
   const [range, setRange] = useState<StatusDateRange>(() => quickDateRange("today"));
   const [activeQuickRange, setActiveQuickRange] = useState<QuickRangeId | null>("today");
+  const [configSearch, setConfigSearch] = useState("");
   const rangeInvalid = range.start_date > range.end_date;
 
   const statusQuery = useQuery({
@@ -221,7 +223,14 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
   });
 
   const summary = statusQuery.data;
-  const configs = useMemo(() => summary?.configs ?? [], [summary]);
+  const normalizedConfigSearch = configSearch.trim().toLowerCase();
+  const configs = useMemo(() => {
+    const source = summary?.configs ?? [];
+    if (!normalizedConfigSearch) {
+      return source;
+    }
+    return source.filter((config) => config.name.toLowerCase().includes(normalizedConfigSearch));
+  }, [normalizedConfigSearch, summary]);
   const todaySplit = t("statusPage.todaySplit", {
     text: summary?.today_text_attempt_count ?? 0,
     image: summary?.today_image_attempt_count ?? 0,
@@ -380,8 +389,8 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
               />
             </div>
 
-            <section className={`${PANEL_CLASS} overflow-hidden`}>
-              <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+            <section className={`${PANEL_CLASS} pf-governed-list-panel overflow-hidden`}>
+              <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <h2 className="text-base font-semibold text-slate-950 dark:text-white">
                     {t("settings.generation.statusTitle")}
@@ -393,20 +402,37 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
                     })}
                   </p>
                 </div>
-                {statusQuery.isFetching ? (
-                  <span className="inline-flex items-center text-xs font-semibold text-slate-500 dark:text-slate-400">
-                    <Loader2 size={13} className="mr-1.5 animate-spin" />
-                    {t("app.loading")}
-                  </span>
-                ) : null}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                  <label className="relative min-w-0 sm:w-64">
+                    <span className="sr-only">{t("statusPage.configSearch")}</span>
+                    <Search
+                      size={15}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                      aria-hidden="true"
+                    />
+                    <input
+                      type="search"
+                      value={configSearch}
+                      onChange={(event) => setConfigSearch(event.target.value)}
+                      placeholder={t("statusPage.configSearchPlaceholder")}
+                      className={`${INPUT_CLASS} w-full pl-9`}
+                    />
+                  </label>
+                  {statusQuery.isFetching ? (
+                    <span className="inline-flex items-center text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <Loader2 size={13} className="mr-1.5 animate-spin" />
+                      {t("app.loading")}
+                    </span>
+                  ) : null}
+                </div>
               </div>
-              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              <div className="pf-gradient-divide">
                 {configs.length ? (
                   configs.map((config) => <ConfigStatusRow key={config.id} config={config} />)
                 ) : (
                   <div className="px-5 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
                     <CheckCircle2 size={22} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
-                    {t("settings.generation.emptyStatus")}
+                    {normalizedConfigSearch ? t("statusPage.configSearchEmpty") : t("settings.generation.emptyStatus")}
                   </div>
                 )}
               </div>

@@ -950,6 +950,101 @@ textarea {
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
 }
 
+.pf-workspace-subpage .pf-table-panel {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--pf-border) 98%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--pf-panel) 94%, transparent),
+      color-mix(in srgb, var(--pf-panel) 78%, var(--pf-bg))
+    ),
+    color-mix(in srgb, var(--pf-panel) 88%, transparent);
+  box-shadow:
+    0 28px 72px rgb(37 43 46 / 0.12),
+    0 8px 24px rgb(37 43 46 / 0.07),
+    inset 0 1px 1px rgb(255 255 255 / 0.88);
+  backdrop-filter: blur(18px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.45);
+  pointer-events: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel table {
+  position: relative;
+  z-index: 1;
+  border-collapse: separate;
+  border-spacing: 0 4px;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody {
+  background: transparent;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody tr[role="button"] {
+  transform: translateZ(0);
+  transition:
+    background-color 240ms var(--pf-motion-standard),
+    box-shadow 240ms var(--pf-motion-standard),
+    filter 240ms var(--pf-motion-standard),
+    transform 240ms var(--pf-motion-standard);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody tr[role="button"] > td:first-child {
+  border-radius: 16px 0 0 16px;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody tr[role="button"] > td:last-child {
+  border-radius: 0 16px 16px 0;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody tr[role="button"]:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody tr[role="button"]:focus-visible {
+  background-color: color-mix(in srgb, var(--pf-panel) 90%, var(--pf-accent) 10%) !important;
+  box-shadow:
+    0 16px 34px rgb(37 43 46 / 0.14),
+    inset 3px 0 0 color-mix(in srgb, var(--pf-accent) 72%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.58);
+  filter: saturate(1.04);
+  transform: translate3d(0, -1px, 0);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage article[role="button"] {
+  transition:
+    border-color 240ms var(--pf-motion-standard),
+    box-shadow 240ms var(--pf-motion-standard),
+    transform 240ms var(--pf-motion-standard);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage article[role="button"]:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage article[role="button"]:focus-visible {
+  border-color: color-mix(in srgb, var(--pf-accent) 34%, var(--pf-border));
+  box-shadow:
+    0 20px 48px rgb(37 43 46 / 0.13),
+    inset 0 1px 0 rgb(255 255 255 / 0.62);
+  transform: translate3d(0, -2px, 0);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel + .hidden.justify-end {
+  margin-top: -0.35rem;
+  border: 1px solid color-mix(in srgb, var(--pf-border) 72%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--pf-panel) 70%, transparent);
+  padding: 0.75rem 1rem;
+  box-shadow:
+    0 16px 40px rgb(37 43 46 / 0.08),
+    inset 0 1px 0 rgb(255 255 255 / 0.52);
+  backdrop-filter: blur(16px);
+}
+
 .pf-workspace-subpage .pf-panel-soft {
   border: 0;
   border-radius: 20px;
@@ -1218,6 +1313,24 @@ textarea {
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
 }
 
+/*
+ * The flatten rule above was meant for the ONE outer content panel that should
+ * dissolve into the glass shell. But list pages render many sibling CARDS
+ * (provider profiles, generation groups, config cards) that are also
+ * .rounded-xl.border — the rule erased their borders and painted them the same
+ * colour as the shell, so neighbouring cards bled into one another. Cards are
+ * distinguished from the panel by carrying their own bg-* utility (bg-white /
+ * dark:bg-[#...]); the bare panel wrapper has none. Re-assert a visible boundary
+ * and a slightly raised surface for those nested cards so siblings read apart.
+ */
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-content, .pf-side-toc)
+  :is(.rounded-xl, .rounded-lg)[class*="border"]:is([class*="bg-white"], [class*="bg-slate-50"], [class*="bg-[#"]):not([aria-pressed]):not([role="tablist"]) {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 62%, transparent);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.5), 0 4px 14px rgb(37 43 46 / 0.04);
+}
+
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   .pf-side-content
   :is(table, thead, tbody, tr, th, td) {
@@ -1239,7 +1352,7 @@ textarea {
 
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   :is(.pf-side-content, .pf-side-toc)
-  :is(button[class*="bg-indigo"], button[class*="bg-slate-950"], button[class*="bg-violet"]):not([aria-pressed]) {
+  :is(button[class*="bg-indigo"], button[class*="bg-slate-950"], button[class*="bg-violet"])[class*="text-white"]:not([aria-pressed]) {
   border-color: transparent;
   background: var(--pf-deep);
   color: var(--pf-bg);
@@ -1248,8 +1361,26 @@ textarea {
 
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   :is(.pf-side-content, .pf-side-toc)
-  :is(button[class*="bg-indigo"], button[class*="bg-slate-950"], button[class*="bg-violet"]):not([aria-pressed]):hover {
+  :is(button[class*="bg-indigo"], button[class*="bg-slate-950"], button[class*="bg-violet"])[class*="text-white"]:not([aria-pressed]):hover {
   background: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+}
+
+/*
+ * Soft/tinted accent buttons inside content (filter chips, test/secondary
+ * actions) carry a light tint (bg-indigo-50, bg-violet-500/12) WITHOUT
+ * text-white — they are NOT solid primaries. The broad bg-indigo/violet rule
+ * above used to crush their text to --pf-bg, which was illegible on the tint
+ * (this is why an active filter chip "disappeared"). Give them an accent-tint
+ * surface, bright text and an accent border so they stay legible and bounded,
+ * and so an active filter chip reads clearly selected against neutral ones.
+ * Enhanced from 15% bg / 50% border to 22% bg / 64% border for stronger pop.
+ */
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-content, .pf-side-toc)
+  :is(button[class*="bg-indigo"], button[class*="bg-violet"]):not([class*="text-white"]):not([aria-pressed]) {
+  border-color: color-mix(in srgb, var(--pf-accent) 64%, transparent);
+  background: color-mix(in srgb, var(--pf-accent) 22%, transparent);
+  color: var(--pf-text);
 }
 
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
@@ -1257,6 +1388,38 @@ textarea {
   button[class*="border-slate"] {
   border-color: var(--pf-line-strong);
   background: color-mix(in srgb, var(--pf-panel) 44%, transparent);
+  color: var(--pf-text);
+}
+
+/*
+ * Selectable TOGGLE buttons inside the drawer (capability switches, enable
+ * toggle, segmented options) carry [aria-pressed]. The drawer layer above only
+ * modelled "solid primary button", "outline button" and "panel container" —
+ * none fit a toggle, and the broad [class*="bg-indigo"] / .rounded-xl.border
+ * rules mis-captured pressed toggles (crushing text to --pf-bg and overpainting
+ * the accent tint with panel fill). Those rules now exclude [aria-pressed]; this
+ * rule owns the toggle look explicitly, with specificity high enough to win
+ * deterministically rather than relying on fall-through to the global layer.
+ * aria-pressed="true"  → accent tint surface + bright text + accent border.
+ * aria-pressed="false" → quiet panel surface + muted text + soft line border.
+ */
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 52%, transparent);
+  background: color-mix(in srgb, var(--pf-accent) 16%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  button[aria-pressed="false"] {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 50%, transparent);
+  color: var(--pf-muted);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  button[aria-pressed="false"]:hover {
+  border-color: var(--pf-accent);
   color: var(--pf-text);
 }
 
@@ -1276,9 +1439,25 @@ textarea {
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
   :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
-  :is(.pf-side-rail, .pf-side-content, .pf-side-toc, .rounded-xl.border, .rounded-lg.border, [role="tablist"]) {
+  :is(.pf-side-rail, .pf-side-content, .pf-side-toc, .rounded-xl.border, .rounded-lg.border, [role="tablist"]):not([aria-pressed]) {
   background: rgb(32 35 29 / 0.88);
   box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+/*
+ * Dusk counterpart of the nested-card boundary fix above. The flatten rule
+ * paints every card the same rgb(32 35 29 / .88) as the shell, so sibling
+ * cards merge. Cards (which carry their own bg-* utility) get a surface one
+ * step lighter than the shell plus a visible warm-line border, so neighbours
+ * read apart against the darker container.
+ */
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(.pf-side-content, .pf-side-toc)
+  :is(.rounded-xl, .rounded-lg)[class*="border"]:is([class*="bg-white"], [class*="bg-slate-50"], [class*="bg-[#"]):not([aria-pressed]):not([role="tablist"]) {
+  border-color: rgb(255 245 224 / 0.14);
+  background: rgb(56 60 50 / 0.78);
+  box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.06), 0 4px 14px rgb(0 0 0 / 0.22);
 }
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
@@ -1914,6 +2093,53 @@ textarea {
 ) {
   background: rgb(32 35 29 / 0.88);
   box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage .pf-table-panel {
+  border: 1px solid rgb(255 245 224 / 0.16);
+  background:
+    linear-gradient(180deg, rgb(43 47 38 / 0.98), rgb(34 37 30 / 0.98)),
+    rgb(38 41 34 / 0.95);
+  box-shadow:
+    0 30px 78px rgb(0 0 0 / 0.38),
+    0 8px 22px rgb(0 0 0 / 0.24),
+    inset 0 1px 0 rgb(255 245 224 / 0.1);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage .pf-table-panel::before {
+  box-shadow: inset 0 0 0 1px rgb(255 245 224 / 0.06);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage .pf-table-panel tbody tr[role="button"]:hover,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage .pf-table-panel tbody tr[role="button"]:focus-visible {
+  background-color: rgb(55 60 49 / 0.98) !important;
+  box-shadow:
+    0 18px 38px rgb(0 0 0 / 0.34),
+    inset 3px 0 0 rgb(146 170 122 / 0.82),
+    inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage article[role="button"]:hover,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage article[role="button"]:focus-visible {
+  border-color: rgb(146 170 122 / 0.42);
+  box-shadow:
+    0 22px 54px rgb(0 0 0 / 0.34),
+    inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage .pf-table-panel + .hidden.justify-end {
+  border-color: rgb(255 245 224 / 0.12);
+  background: rgb(38 41 34 / 0.82);
+  box-shadow:
+    0 18px 44px rgb(0 0 0 / 0.3),
+    inset 0 1px 0 rgb(255 245 224 / 0.07);
 }
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] :is(
@@ -5758,4 +5984,436 @@ textarea {
   :root[data-ui-layout-scheme="workspace"] .pf-shell-weather-trigger {
     color: var(--pf-accent) !important;
   }
+}
+
+.pf-metric-card {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--pf-border) 86%, transparent);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.96), color-mix(in srgb, var(--pf-panel) 88%, var(--pf-bg))),
+    var(--pf-panel);
+  box-shadow:
+    0 18px 46px rgb(15 23 42 / 0.08),
+    0 0 0 1px rgb(15 23 42 / 0.025),
+    inset 0 1px 0 rgb(255 255 255 / 0.9);
+}
+
+.pf-metric-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 72%, transparent),
+    color-mix(in srgb, var(--pf-accent-2) 58%, transparent),
+    transparent
+  );
+  opacity: 0.78;
+  pointer-events: none;
+}
+
+:root.dark .pf-metric-card {
+  border-color: rgb(148 163 184 / 0.2);
+  background:
+    linear-gradient(180deg, rgb(15 23 42 / 0.92), rgb(10 17 28 / 0.92)),
+    #0f1726;
+  box-shadow:
+    0 20px 52px rgb(0 0 0 / 0.34),
+    0 0 0 1px rgb(255 255 255 / 0.035),
+    inset 0 1px 0 rgb(255 255 255 / 0.055);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-metric-card {
+  border-color: var(--pf-line-strong);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--pf-panel) 86%, transparent),
+      color-mix(in srgb, var(--pf-panel) 68%, var(--pf-bg))
+    ),
+    color-mix(in srgb, var(--pf-panel) 78%, transparent);
+  box-shadow:
+    0 24px 58px rgb(37 43 46 / 0.11),
+    inset 0 1px 0 rgb(255 255 255 / 0.42);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-metric-card {
+  border-color: rgb(255 245 224 / 0.14);
+  background:
+    linear-gradient(180deg, rgb(48 52 43 / 0.92), rgb(34 37 30 / 0.92)),
+    rgb(38 41 34 / 0.88);
+  box-shadow:
+    0 24px 62px rgb(0 0 0 / 0.36),
+    inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+.pf-gradient-divide > * {
+  position: relative;
+}
+
+.pf-gradient-divide > * + *::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  border-radius: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 86%, var(--pf-text)) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 70%, var(--pf-border)) 32%,
+    color-mix(in srgb, var(--pf-accent) 16%, transparent) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+:root.dark .pf-gradient-divide > * + *::before {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 86%, transparent) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 76%, transparent) 32%,
+    color-mix(in srgb, var(--pf-accent) 18%, transparent) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-gradient-divide > * + *::before {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 88%, var(--pf-text)) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 72%, var(--pf-panel)) 32%,
+    color-mix(in srgb, var(--pf-accent) 18%, transparent) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+}
+
+.pf-gradient-table-body tr + tr {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 86%, var(--pf-text)) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 70%, var(--pf-border)) 32%,
+    color-mix(in srgb, var(--pf-accent) 16%, transparent) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+  background-position: left top;
+  background-repeat: no-repeat;
+  background-size: 100% 4px;
+}
+
+:root.dark .pf-gradient-table-body tr + tr {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 86%, transparent) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 76%, transparent) 32%,
+    color-mix(in srgb, var(--pf-accent) 18%, transparent) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-gradient-table-body tr + tr {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 88%, var(--pf-text)) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 72%, var(--pf-panel)) 32%,
+    color-mix(in srgb, var(--pf-accent) 18%, transparent) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+}
+
+.pf-governed-list-panel {
+  border: 1px solid color-mix(in srgb, var(--pf-border) 76%, var(--pf-accent) 24%);
+  box-shadow:
+    0 24px 64px rgb(15 23 42 / 0.1),
+    0 0 0 1px color-mix(in srgb, var(--pf-border) 82%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.82);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-governed-list-panel,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-governed-list-panel {
+  border: 1px solid color-mix(in srgb, var(--pf-line-strong) 80%, var(--pf-accent) 20%);
+  box-shadow:
+    0 30px 76px rgb(37 43 46 / 0.14),
+    0 0 0 1px color-mix(in srgb, var(--pf-line-strong) 96%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.42) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-governed-list-panel,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage .pf-governed-list-panel {
+  border: 1px solid rgb(255 245 224 / 0.24);
+  box-shadow:
+    0 30px 78px rgb(0 0 0 / 0.38),
+    0 0 0 1px rgb(255 245 224 / 0.14),
+    inset 0 1px 0 rgb(255 245 224 / 0.08) !important;
+}
+
+.pf-governed-table-panel {
+  border-color: color-mix(in srgb, var(--pf-border) 82%, var(--pf-accent) 18%);
+  box-shadow:
+    0 24px 64px rgb(15 23 42 / 0.1),
+    0 0 0 1px color-mix(in srgb, var(--pf-border) 72%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.82);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-governed-table-panel {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 86%, var(--pf-accent) 14%);
+  box-shadow:
+    0 30px 76px rgb(37 43 46 / 0.14),
+    0 0 0 1px color-mix(in srgb, var(--pf-line-strong) 92%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.42);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-governed-table-panel {
+  border-color: rgb(255 245 224 / 0.22);
+  box-shadow:
+    0 30px 78px rgb(0 0 0 / 0.38),
+    0 0 0 1px rgb(255 245 224 / 0.12),
+    inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-app > main:is(.pf-page, [class*="max-w-[1440px]"]) .pf-rbac-user-table-panel {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 84%, var(--pf-accent) 16%) !important;
+  box-shadow:
+    0 30px 76px rgb(37 43 46 / 0.14),
+    0 0 0 1px color-mix(in srgb, var(--pf-line-strong) 96%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.42) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-app > main:is(.pf-page, [class*="max-w-[1440px]"]) .pf-rbac-user-table-panel {
+  border-color: rgb(255 245 224 / 0.24) !important;
+  box-shadow:
+    0 30px 78px rgb(0 0 0 / 0.38),
+    0 0 0 1px rgb(255 245 224 / 0.14),
+    inset 0 1px 0 rgb(255 245 224 / 0.08) !important;
+}
+
+.pf-settings-nav-item,
+.pf-help-nav-item {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.pf-settings-nav-item:hover,
+.pf-help-nav-item:hover {
+  background: linear-gradient(
+    90deg,
+    rgb(100 116 139 / 0.13),
+    rgb(100 116 139 / 0.02) 34%,
+    rgb(100 116 139 / 0.02) 66%,
+    rgb(100 116 139 / 0.13)
+  );
+}
+
+.pf-settings-nav-item[aria-current="page"] {
+  border-color: transparent;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 24%, transparent),
+    color-mix(in srgb, var(--pf-accent) 4%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent-2) 4%, transparent) 66%,
+    color-mix(in srgb, var(--pf-accent-2) 22%, transparent)
+  ) !important;
+  box-shadow: none;
+}
+
+.pf-help-nav-item[aria-current="page"] {
+  border-color: transparent;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 24%, transparent),
+    color-mix(in srgb, var(--pf-accent) 4%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent-2) 4%, transparent) 66%,
+    color-mix(in srgb, var(--pf-accent-2) 22%, transparent)
+  ) !important;
+  box-shadow: none;
+}
+
+:root.dark .pf-settings-nav-item:hover,
+:root.dark .pf-help-nav-item:hover {
+  background: linear-gradient(
+    90deg,
+    rgb(139 92 246 / 0.16),
+    rgb(139 92 246 / 0.02) 34%,
+    rgb(139 92 246 / 0.02) 66%,
+    rgb(139 92 246 / 0.16)
+  );
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-nav-item[aria-current="page"],
+:root[data-ui-layout-scheme="workspace"] .pf-help-nav-item[aria-current="page"] {
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  .pf-side-rail
+  nav
+  :is(.pf-settings-nav-item, .pf-help-nav-item)[aria-current="page"] {
+  border-color: transparent;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--pf-accent) 24%, transparent),
+    color-mix(in srgb, var(--pf-accent) 4%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent-2) 4%, transparent) 66%,
+    color-mix(in srgb, var(--pf-accent-2) 22%, transparent)
+  ) !important;
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  :is(.pf-settings-nav-item, .pf-help-nav-item)[aria-current="page"] {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-workspace-stage {
+  border: 1px solid var(--pf-line-strong);
+  background:
+    radial-gradient(circle at 18% 10%, color-mix(in srgb, var(--pf-accent) 10%, transparent), transparent 28rem),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--pf-panel) 74%, transparent),
+      color-mix(in srgb, var(--pf-bg-soft) 76%, transparent)
+    );
+  box-shadow:
+    0 26px 68px rgb(37 43 46 / 0.12),
+    inset 0 1px 0 rgb(255 255 255 / 0.38);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-workspace-tool-rail,
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-workspace-tool-drawer {
+  border-color: var(--pf-line-strong);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--pf-panel) 88%, transparent),
+      color-mix(in srgb, var(--pf-panel) 72%, var(--pf-bg))
+    );
+  box-shadow:
+    0 24px 64px rgb(37 43 46 / 0.12),
+    inset 0 1px 0 rgb(255 255 255 / 0.38);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-image-chat-session-header {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--pf-panel) 62%, transparent), transparent),
+    color-mix(in srgb, var(--pf-bg-soft) 34%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-image-chat-filter {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel) 54%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.26);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-image-chat-session-card {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel) 54%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-image-chat-session-card--idle:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 28%, var(--pf-line));
+  box-shadow:
+    0 14px 34px rgb(37 43 46 / 0.11),
+    inset 0 1px 0 rgb(255 255 255 / 0.34);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-image-chat-session-card--active {
+  border-color: color-mix(in srgb, var(--pf-accent) 42%, transparent);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--pf-accent) 18%, transparent),
+      color-mix(in srgb, var(--pf-panel) 52%, transparent)
+    );
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--pf-accent) 78%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.34);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-image-chat-action,
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-workspace-action-primary {
+  border-color: color-mix(in srgb, var(--pf-deep) 86%, var(--pf-accent));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--pf-deep) 92%, var(--pf-accent)),
+    color-mix(in srgb, var(--pf-deep) 74%, var(--pf-accent-2))
+  );
+  color: var(--pf-bg);
+  box-shadow:
+    0 12px 28px color-mix(in srgb, var(--pf-deep) 16%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-image-chat-action:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-workspace-action-primary:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 48%, var(--pf-deep));
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--pf-deep) 20%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-image-chat-action:disabled,
+:root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace .pf-workspace-action-primary:disabled {
+  border-color: var(--pf-line) !important;
+  background: color-mix(in srgb, var(--pf-panel) 64%, transparent) !important;
+  color: var(--pf-muted) !important;
+  box-shadow: none !important;
+}
+
+@media (min-width: 1024px) {
+  :root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace-main {
+    gap: clamp(10px, 1.1vw, 16px);
+    padding-inline: clamp(12px, 2vw, 28px);
+    padding-bottom: clamp(14px, 1.8vw, 24px);
+  }
+
+  :root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace-main > .pf-workspace-tool-rail,
+  :root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace-main > .pf-workspace-stage {
+    overflow: hidden;
+    border-radius: 26px;
+  }
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-image-chat-workspace .pf-workspace-stage {
+  border-color: rgb(255 245 224 / 0.14);
+  background:
+    radial-gradient(circle at 16% 8%, rgb(146 170 122 / 0.1), transparent 28rem),
+    linear-gradient(145deg, rgb(44 48 39 / 0.95), rgb(31 34 27 / 0.95));
+  box-shadow:
+    0 28px 72px rgb(0 0 0 / 0.38),
+    inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-image-chat-workspace :is(.pf-workspace-tool-rail, .pf-workspace-tool-drawer) {
+  border-color: rgb(255 245 224 / 0.14);
+  background: linear-gradient(180deg, rgb(43 47 38 / 0.94), rgb(33 36 29 / 0.94));
+  box-shadow:
+    0 26px 68px rgb(0 0 0 / 0.36),
+    inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-image-chat-workspace .pf-image-chat-action,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-image-chat-workspace .pf-workspace-action-primary {
+  border-color: rgb(198 155 102 / 0.48);
+  background: linear-gradient(135deg, rgb(232 222 203 / 0.96), rgb(198 155 102 / 0.88));
+  color: rgb(32 35 29);
+  box-shadow:
+    0 14px 34px rgb(0 0 0 / 0.28),
+    inset 0 1px 0 rgb(255 245 224 / 0.32);
 }

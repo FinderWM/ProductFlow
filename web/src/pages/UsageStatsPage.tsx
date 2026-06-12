@@ -116,7 +116,7 @@ function MetricCard({
   icon: LucideIcon;
 }) {
   return (
-    <div className={`${PANEL_CLASS} p-4`}>
+    <div className={`${PANEL_CLASS} pf-metric-card p-4`}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
         <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">
@@ -402,7 +402,7 @@ function UsageStatsDetailPage() {
             />
           </div>
 
-          <section className={`${PANEL_CLASS} overflow-hidden`}>
+          <section className={`${PANEL_CLASS} pf-governed-list-panel overflow-hidden`}>
             <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-base font-semibold text-slate-950 dark:text-white">
@@ -422,7 +422,7 @@ function UsageStatsDetailPage() {
                 </span>
               ) : null}
             </div>
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            <div className="pf-gradient-divide">
               {items.length ? (
                 items.map((item) => <UsageStatRow key={item.id} item={item} />)
               ) : (

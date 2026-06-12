@@ -94,7 +94,7 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     assert items[0]["image"]["download_url"].startswith("/api/image-session-assets/")
 
 
-def test_gallery_list_ignores_resource_group_filter_and_keeps_group_metadata(
+def test_gallery_list_filters_resource_group_and_keeps_group_metadata(
     configured_env: Path,
     db_session,
 ) -> None:
@@ -163,13 +163,13 @@ def test_gallery_list_ignores_resource_group_filter_and_keeps_group_metadata(
 
     default_list = client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert default_list.status_code == 200
-    assert {item["id"] for item in default_list.json()["items"]} == {default_entry.id, premium_entry.id}
-    assert {item["resource_group"]["key"] for item in default_list.json()["items"]} == {"default", "premium-gallery"}
+    assert [item["id"] for item in default_list.json()["items"]] == [default_entry.id]
+    assert {item["resource_group"]["key"] for item in default_list.json()["items"]} == {"default"}
 
     premium_list = client.get("/api/gallery", params={"resource_group_id": premium_group.id})
     assert premium_list.status_code == 200
-    assert {item["id"] for item in premium_list.json()["items"]} == {default_entry.id, premium_entry.id}
-    assert {item["resource_group"]["key"] for item in premium_list.json()["items"]} == {"default", "premium-gallery"}
+    assert [item["id"] for item in premium_list.json()["items"]] == [premium_entry.id]
+    assert {item["resource_group"]["key"] for item in premium_list.json()["items"]} == {"premium-gallery"}
 
     all_list = client.get("/api/gallery")
     assert all_list.status_code == 200

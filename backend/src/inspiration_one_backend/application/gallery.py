@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from inspiration_one_backend.application.moderation import ensure_resource_usable, moderation_state_for_resource
+from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.application.ownership import ensure_actor_can_mutate_owner
 from inspiration_one_backend.config import get_runtime_settings
 from inspiration_one_backend.domain.enums import ImageSessionAssetKind
@@ -19,6 +19,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     ImageSession,
     ImageSessionAsset,
     ImageSessionRound,
+    Inspiration,
     utcnow,
 )
 
@@ -49,16 +50,69 @@ def _gallery_entry_query():
     return (
         select(ImageGalleryEntry)
         .options(
+            selectinload(ImageGalleryEntry.disabled_by),
             selectinload(ImageGalleryEntry.asset)
             .selectinload(ImageSessionAsset.session)
             .selectinload(ImageSession.inspiration),
+            selectinload(ImageGalleryEntry.asset)
+            .selectinload(ImageSessionAsset.session)
+            .selectinload(ImageSession.disabled_by),
+            selectinload(ImageGalleryEntry.asset)
+            .selectinload(ImageSessionAsset.session)
+            .selectinload(ImageSession.inspiration)
+            .selectinload(Inspiration.disabled_by),
             selectinload(ImageGalleryEntry.owner),
             selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.owner),
+            selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.disabled_by),
             selectinload(ImageGalleryEntry.round),
             selectinload(ImageGalleryEntry.resource_group),
             selectinload(ImageGalleryEntry.round).selectinload(ImageSessionRound.resource_group),
         )
         .order_by(desc(ImageGalleryEntry.created_at))
+    )
+
+
+def _apply_gallery_entry_list_filters(
+    statement,
+    *,
+    resource_group_id: str | None,
+    include_disabled: bool,
+):
+    normalized_group_id = (resource_group_id or "").strip() or None
+    if normalized_group_id is not None:
+        statement = statement.outerjoin(
+            ImageSessionRound,
+            ImageGalleryEntry.image_session_round_id == ImageSessionRound.id,
+        ).where(
+            or_(
+                ImageGalleryEntry.resource_group_id == normalized_group_id,
+                and_(
+                    ImageGalleryEntry.resource_group_id.is_(None),
+                    ImageSessionRound.resource_group_id == normalized_group_id,
+                ),
+            )
+        )
+    if include_disabled:
+        return statement
+    return (
+        statement.join(
+            ImageSessionAsset,
+            ImageGalleryEntry.image_session_asset_id == ImageSessionAsset.id,
+        )
+        .join(
+            ImageSession,
+            ImageSessionAsset.session_id == ImageSession.id,
+        )
+        .outerjoin(
+            Inspiration,
+            ImageSession.inspiration_id == Inspiration.id,
+        )
+        .where(
+            ImageGalleryEntry.enabled.is_(True),
+            ImageSessionAsset.enabled.is_(True),
+            ImageSession.enabled.is_(True),
+            or_(ImageSession.inspiration_id.is_(None), Inspiration.enabled.is_(True)),
+        )
     )
 
 
@@ -85,33 +139,41 @@ def list_gallery_entries(
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
     include_disabled: bool = False,
+    resource_group_id: str | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> GalleryEntryListResult:
-    statement = _gallery_entry_query()
-    entries = list(session.scalars(statement).all())
-    if not include_disabled:
-        entries = [entry for entry in entries if moderation_state_for_resource(entry).effective_enabled]
+    statement = _apply_gallery_entry_list_filters(
+        _gallery_entry_query(),
+        resource_group_id=resource_group_id,
+        include_disabled=include_disabled,
+    )
+    count_statement = _apply_gallery_entry_list_filters(
+        select(func.count(ImageGalleryEntry.id)),
+        resource_group_id=resource_group_id,
+        include_disabled=include_disabled,
+    )
+    total = int(session.scalar(count_statement) or 0)
 
     start = max(offset, 0)
     if limit is None:
-        page = entries[start:]
+        page = list(session.scalars(statement.offset(start)).all())
         return GalleryEntryListResult(
             items=page,
             view_counts=_view_counts_for_entries(session, [entry.id for entry in page]),
-            total=len(entries),
+            total=total,
             has_more=False,
             next_offset=None,
         )
 
     end = start + limit
-    page = entries[start:end]
+    page = list(session.scalars(statement.offset(start).limit(limit)).all())
     return GalleryEntryListResult(
         items=page,
         view_counts=_view_counts_for_entries(session, [entry.id for entry in page]),
-        total=len(entries),
-        has_more=len(entries) > end,
-        next_offset=end if len(entries) > end else None,
+        total=total,
+        has_more=total > end,
+        next_offset=end if total > end else None,
     )
 
 
