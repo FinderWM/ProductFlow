@@ -230,17 +230,17 @@ type ImageProviderKind =
 type ProviderModelKind = TextProviderKind | ImageProviderKind;
 
 const INPUT_CLASS =
-  "h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 " +
-  "placeholder:text-slate-400 shadow-sm shadow-slate-200/35 focus:border-indigo-500 focus:bg-white " +
-  "focus:outline-none focus:ring-1 focus:ring-indigo-500 " +
-  "dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/20 " +
+  "h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 " +
+  "placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white " +
+  "focus:outline-none focus:ring-2 focus:ring-indigo-500/20 " +
+  "dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 " +
   "dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]";
 
 const TEXTAREA_CLASS =
-  "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 " +
-  "placeholder:text-slate-400 shadow-sm shadow-slate-200/35 focus:border-indigo-500 focus:bg-white " +
-  "focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] " +
-  "dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-violet-400";
+  "w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 " +
+  "placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white " +
+  "focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] " +
+  "dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400";
 
 const PANEL_CLASS =
   "rounded-xl border border-slate-200 bg-white p-6 shadow-md shadow-slate-300/40 " +
@@ -266,9 +266,14 @@ const SETTINGS_DRAWER_SUBMIT_ACTION_CLASS =
   "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const SETTINGS_DANGER_ACTION_CLASS =
   "pf-danger-action inline-flex h-9 items-center justify-center rounded-xl border px-3 text-sm font-medium " +
-  "transition-colors disabled:opacity-50";
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
 const SETTINGS_DANGER_ICON_ACTION_CLASS =
-  "pf-danger-action inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-colors disabled:opacity-50";
+  "pf-danger-action inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
+const SETTINGS_RESET_ACTION_CLASS =
+  "pf-danger-action inline-flex h-11 shrink-0 items-center justify-center rounded-2xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
+const SETTINGS_BORDERED_MODULE_CLASS = "pf-settings-bordered-module";
+const SETTINGS_FIELD_CARD_CLASS = "pf-settings-field-card";
 
 const SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS = 3000;
 
@@ -1126,24 +1131,24 @@ function SettingsMigrationPanel({
   const { t } = useI18n();
   const counts = importPreview ? settingsImportSummaryCounts(importPreview) : null;
   return (
-    <section className={`${PANEL_CLASS} mb-8`}>
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-        <div className="max-w-2xl">
-          <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200">
-            <KeyRound size={13} className="mr-1.5" />
-            {t("settings.migration.sensitiveLabel")}
+    <section className="mb-8 space-y-4">
+      <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS}`}>
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200">
+              <KeyRound size={13} className="mr-1.5" />
+              {t("settings.migration.sensitiveLabel")}
+            </div>
+            <h2 className="mt-3 text-lg font-semibold text-slate-950 dark:text-white">
+              {t("settings.migration.exportTitle")}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              {t("settings.migration.exportDescription")}
+            </p>
+            <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+              {t("settings.migration.sensitiveWarning")}
+            </p>
           </div>
-          <h2 className="mt-3 text-lg font-semibold text-slate-950 dark:text-white">
-            {t("settings.migration.title")}
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            {t("settings.migration.description")}
-          </p>
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
-            {t("settings.migration.sensitiveWarning")}
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col">
           <button
             type="button"
             onClick={onRequestExport}
@@ -1153,6 +1158,19 @@ function SettingsMigrationPanel({
             {exportBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Download size={14} className="mr-2" />}
             {t("settings.migration.export")}
           </button>
+        </div>
+      </div>
+
+      <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS}`}>
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <h2 className="text-lg font-semibold text-slate-950 dark:text-white">
+              {t("settings.migration.importTitle")}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              {t("settings.migration.importDescription")}
+            </p>
+          </div>
           <button
             type="button"
             onClick={onChooseImportFile}
@@ -1170,92 +1188,96 @@ function SettingsMigrationPanel({
             ref={importInputRef}
             type="file"
             accept="application/json,.json"
-            className="hidden"
+            className="sr-only"
             onChange={onImportFileChange}
           />
         </div>
-      </div>
 
-      {importPreview && counts ? (
-        <div className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 dark:border-violet-400/35 dark:bg-violet-500/10">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="flex items-center text-sm font-semibold text-indigo-800 dark:text-violet-100">
-                <FileJson size={15} className="mr-2" />
-                {t("settings.migration.previewTitle")}
+        {importPreview && counts ? (
+          <div className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 dark:border-violet-400/35 dark:bg-violet-500/10">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center text-sm font-semibold text-indigo-800 dark:text-violet-100">
+                  <FileJson size={15} className="mr-2" />
+                  {t("settings.migration.previewTitle")}
+                </div>
+                <p className="mt-1 text-xs text-indigo-700/80 dark:text-violet-100/75">
+                  {t("settings.migration.previewFile", { file: importFileName })}
+                </p>
               </div>
-              <p className="mt-1 text-xs text-indigo-700/80 dark:text-violet-100/75">
-                {t("settings.migration.previewFile", { file: importFileName })}
-              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={onCancelImport}
+                  disabled={importCommitBusy}
+                  className={SETTINGS_COMPACT_ACTION_CLASS}
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={onCommitImport}
+                  disabled={!canMigrate || importCommitBusy}
+                  className={SETTINGS_MAIN_ACTION_CLASS}
+                >
+                  {importCommitBusy ? (
+                    <Loader2 size={14} className="mr-2 animate-spin" />
+                  ) : (
+                    <Check size={14} className="mr-2" />
+                  )}
+                  {t("settings.migration.commitImport")}
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={onCancelImport}
-                disabled={importCommitBusy}
-                className={SETTINGS_COMPACT_ACTION_CLASS}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={onCommitImport}
-                disabled={!canMigrate || importCommitBusy}
-                className={SETTINGS_MAIN_ACTION_CLASS}
-              >
-                {importCommitBusy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Check size={14} className="mr-2" />}
-                {t("settings.migration.commitImport")}
-              </button>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+                {t("settings.migration.runtimeCount", { count: counts.runtimeConfigCount })}
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+                {t("settings.migration.profileCount", { count: counts.providerProfileCount })}
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+                {t("settings.migration.generationResourceGroupCount", {
+                  count: counts.generationResourceGroupCount,
+                })}
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+                {t("settings.migration.generationConfigCount", { count: counts.generationConfigCount })}
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+                {t("settings.migration.bindingCount", { count: counts.providerBindingCount })}
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+                {t("settings.migration.templateCategoryCount", { count: counts.canvasTemplateCategoryCount })}
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+                {t("settings.migration.templateCount", { count: counts.canvasTemplateCount })}
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
+                {t("settings.migration.keyCount", { count: counts.providerProfilesWithApiKeyCount })}
+              </div>
             </div>
+            {importPreview.canvas_template_keys.length || importPreview.canvas_template_category_names.length ? (
+              <div className="mt-3 space-y-1 text-xs leading-5 text-indigo-700/85 dark:text-violet-100/75">
+                {importPreview.canvas_template_category_names.length ? (
+                  <p>
+                    {t("settings.migration.templateCategories", {
+                      names: importPreview.canvas_template_category_names.slice(0, 8).join(", "),
+                    })}
+                  </p>
+                ) : null}
+                {importPreview.canvas_template_keys.length ? (
+                  <p>
+                    {t("settings.migration.templateKeys", {
+                      keys: importPreview.canvas_template_keys.slice(0, 8).join(", "),
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
-              {t("settings.migration.runtimeCount", { count: counts.runtimeConfigCount })}
-            </div>
-            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
-              {t("settings.migration.profileCount", { count: counts.providerProfileCount })}
-            </div>
-            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
-              {t("settings.migration.generationResourceGroupCount", {
-                count: counts.generationResourceGroupCount,
-              })}
-            </div>
-            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
-              {t("settings.migration.generationConfigCount", { count: counts.generationConfigCount })}
-            </div>
-            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
-              {t("settings.migration.bindingCount", { count: counts.providerBindingCount })}
-            </div>
-            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
-              {t("settings.migration.templateCategoryCount", { count: counts.canvasTemplateCategoryCount })}
-            </div>
-            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
-              {t("settings.migration.templateCount", { count: counts.canvasTemplateCount })}
-            </div>
-            <div className="rounded-lg bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:bg-[#101827] dark:text-slate-300">
-              {t("settings.migration.keyCount", { count: counts.providerProfilesWithApiKeyCount })}
-            </div>
-          </div>
-          {importPreview.canvas_template_keys.length || importPreview.canvas_template_category_names.length ? (
-            <div className="mt-3 space-y-1 text-xs leading-5 text-indigo-700/85 dark:text-violet-100/75">
-              {importPreview.canvas_template_category_names.length ? (
-                <p>
-                  {t("settings.migration.templateCategories", {
-                    names: importPreview.canvas_template_category_names.slice(0, 8).join(", "),
-                  })}
-                </p>
-              ) : null}
-              {importPreview.canvas_template_keys.length ? (
-                <p>
-                  {t("settings.migration.templateKeys", {
-                    keys: importPreview.canvas_template_keys.slice(0, 8).join(", "),
-                  })}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -1648,6 +1670,69 @@ function ProviderModelInput({
   );
 }
 
+interface SettingsOptionToggleProps {
+  checked: boolean;
+  disabled?: boolean;
+  inputId?: string;
+  children: ReactNode;
+  onChange: (checked: boolean) => void;
+}
+
+function SettingsOptionToggle({
+  checked,
+  disabled = false,
+  inputId,
+  children,
+  onChange,
+}: SettingsOptionToggleProps) {
+  return (
+    <label
+      className={`pf-settings-option-toggle inline-flex min-h-11 w-full items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-sm font-medium transition-all ${
+        checked
+          ? "border-indigo-300 bg-indigo-50 text-slate-950 dark:border-violet-400/45 dark:bg-violet-500/14 dark:text-white"
+          : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-950 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:hover:text-white"
+      } ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer active:scale-[0.99]"}`}
+    >
+      <input
+        id={inputId}
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 shrink-0 rounded border-slate-300 accent-slate-900 dark:border-slate-600 dark:accent-violet-400"
+      />
+      <span className="min-w-0 flex-1 leading-5">{children}</span>
+    </label>
+  );
+}
+
+function ConfigFieldResetButton({
+  label,
+  busy,
+  disabled,
+  onReset,
+}: {
+  label: string;
+  busy: boolean;
+  disabled: boolean;
+  onReset: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      onClick={onReset}
+      disabled={disabled || busy}
+      className={SETTINGS_RESET_ACTION_CLASS}
+      aria-label={t("settings.restoreDefaultAria", { label })}
+      title={t("settings.restoreDefault")}
+    >
+      {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <RotateCcw size={14} className="mr-1.5" />}
+      {t("settings.restoreDefault")}
+    </button>
+  );
+}
+
 interface ConfigFieldProps {
   item: ConfigItem;
   value: DraftValue;
@@ -1682,28 +1767,39 @@ function ConfigField({
     }
     onChange(item.options.filter((option) => selected.has(option.value)).map((option) => option.value));
   };
+  const resetControl =
+    item.source === "database" ? (
+      <ConfigFieldResetButton
+        label={item.label}
+        busy={isResetting}
+        disabled={disabled}
+        onReset={onReset}
+      />
+    ) : null;
 
   const control =
     item.input_type === "multi_select" ? (
       <div className="grid gap-2 sm:grid-cols-2">
         {item.options.map((option) => (
-          <label
+          <SettingsOptionToggle
             key={`${item.key}-${option.value}`}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300"
+            checked={selectedMultiValues.includes(option.value)}
+            disabled={disabled}
+            onChange={() => toggleMultiValue(option.value)}
           >
-            <input
-              type="checkbox"
-              checked={selectedMultiValues.includes(option.value)}
-              disabled={disabled}
-              onChange={() => toggleMultiValue(option.value)}
-              className="h-3.5 w-3.5 accent-indigo-600"
-            />
-            <span>{option.label}</span>
-          </label>
+            {option.label}
+          </SettingsOptionToggle>
         ))}
       </div>
     ) : item.input_type === "select" ? (
-      <SelectField id={item.key} value={String(value)} options={item.options} onChange={onChange} disabled={disabled} />
+      <SelectField
+        id={item.key}
+        value={String(value)}
+        options={item.options}
+        onChange={onChange}
+        disabled={disabled}
+        radius="xl"
+      />
     ) : item.input_type === "textarea" ? (
       <textarea
         id={item.key}
@@ -1714,17 +1810,14 @@ function ConfigField({
         className={`${TEXTAREA_CLASS} resize-y leading-6`}
       />
     ) : item.input_type === "boolean" ? (
-      <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
-        <input
-          id={item.key}
-          type="checkbox"
-          checked={Boolean(value)}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-          className="h-4 w-4 accent-zinc-900"
-        />
-        <span>{Boolean(value) ? t("settings.enabled") : t("settings.disabled")}</span>
-      </label>
+      <SettingsOptionToggle
+        inputId={item.key}
+        checked={Boolean(value)}
+        disabled={disabled}
+        onChange={(checked) => onChange(checked)}
+      >
+        {Boolean(value) ? t("settings.enabled") : t("settings.disabled")}
+      </SettingsOptionToggle>
     ) : (
       <input
         id={item.key}
@@ -1742,45 +1835,42 @@ function ConfigField({
 
   if (layout === "card") {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/20">
-        <div className="flex items-start justify-between gap-3">
-          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(item)}`}>
-            {sourceLabel(item, t)}
-          </span>
-          {item.source === "database" ? (
-            <button
-              type="button"
-              onClick={onReset}
-              disabled={disabled || isResetting}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-slate-100 hover:text-zinc-900 disabled:opacity-50 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-white"
-              aria-label={t("settings.restoreDefault")}
-              title={t("settings.restoreDefault")}
-            >
-              {isResetting ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
-            </button>
-          ) : null}
-        </div>
-        <div className="mt-3">{control}</div>
-        <div className="mt-2">
-          <label htmlFor={item.key} className="block text-sm font-semibold text-zinc-950 dark:text-white">
-            {helpKey ? (
-              <ParameterHelpLabel label={item.label} helpKey={helpKey} uiType="settings" content={helpContent ?? undefined} />
-            ) : (
-              item.label
-            )}
-          </label>
-          <div className="mt-1 font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</div>
+      <div className={`${SETTINGS_FIELD_CARD_CLASS} rounded-2xl border border-slate-200 bg-white p-4 shadow-none dark:border-slate-800 dark:bg-[#0f1726]`}>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor={item.key} className="block text-sm font-semibold text-zinc-950 dark:text-white">
+              {helpKey ? (
+                <ParameterHelpLabel
+                  label={item.label}
+                  helpKey={helpKey}
+                  uiType="settings"
+                  content={helpContent ?? undefined}
+                />
+              ) : (
+                item.label
+              )}
+            </label>
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(item)}`}>
+              {sourceLabel(item, t)}
+            </span>
+            <span className="min-w-0 font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</span>
+          </div>
+          <p className="min-h-4 text-xs leading-5 text-zinc-500 dark:text-slate-400">{item.description}</p>
           {item.secret && secretTouched ? (
             <div className="mt-1 text-xs text-amber-600 dark:text-amber-300">{t("settings.writeNewSecret")}</div>
           ) : null}
+        </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+          <div className="min-w-0 flex-1">{control}</div>
+          {resetControl}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="grid gap-3 border-t border-slate-100 py-5 first:border-t-0 dark:border-slate-800">
-      <div className="space-y-2">
+    <div className="border-t border-slate-100 py-5 first:border-t-0 dark:border-slate-800">
+      <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor={item.key} className="text-sm font-medium text-zinc-900 dark:text-white">
             {helpKey ? (
@@ -1792,27 +1882,17 @@ function ConfigField({
           <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(item)}`}>
             {sourceLabel(item, t)}
           </span>
+          <span className="min-w-0 font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</span>
         </div>
-        <div className="font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</div>
-        {control}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="min-h-4 text-xs leading-5 text-zinc-500 dark:text-slate-400">
-            {item.description}
-            {item.secret && secretTouched ? (
-              <span className="ml-2 text-amber-600 dark:text-amber-300">{t("settings.writeNewSecret")}</span>
-            ) : null}
-          </p>
-          {item.source === "database" ? (
-            <button
-              type="button"
-              onClick={onReset}
-              disabled={disabled || isResetting}
-              className="inline-flex items-center text-xs font-medium text-zinc-500 hover:text-zinc-900 disabled:opacity-50 dark:text-slate-400 dark:hover:text-white"
-            >
-              {isResetting ? <Loader2 size={13} className="mr-1 animate-spin" /> : <RotateCcw size={13} className="mr-1" />}
-              {t("settings.restoreDefault")}
-            </button>
+        <p className="min-h-4 text-xs leading-5 text-zinc-500 dark:text-slate-400">
+          {item.description}
+          {item.secret && secretTouched ? (
+            <span className="ml-2 text-amber-600 dark:text-amber-300">{t("settings.writeNewSecret")}</span>
           ) : null}
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <div className="min-w-0 flex-1">{control}</div>
+          {resetControl}
         </div>
       </div>
     </div>
@@ -1866,7 +1946,7 @@ function ProvidersSection({
     editingProfile && editingProfileUsage ? providerDisableBlocked(editingProfile, editingProfileUsage) : false;
 
   return (
-    <section className={PANEL_CLASS}>
+    <section className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS}`}>
       <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -2008,7 +2088,7 @@ function GenerationResourceGroupSection({
   ];
 
   return (
-    <section className={`${PANEL_CLASS} space-y-4`}>
+    <section className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-4`}>
       <div>
         <h2 className="text-base font-semibold text-slate-950 dark:text-white">
           {t("settings.resourceGroup.title")}
@@ -2061,7 +2141,7 @@ function GenerationResourceGroupCard({
   const isNew = !group;
 
   return (
-    <div className="rounded-xl border border-slate-200/60 bg-white/80 p-4 shadow-md shadow-slate-200/50 backdrop-blur-sm dark:border-slate-700/40 dark:bg-[#0b1220]/80 dark:shadow-black/20">
+    <div className={`${SETTINGS_FIELD_CARD_CLASS} rounded-2xl border border-slate-200/70 bg-white/80 p-4 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0b1220]/80`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -2141,26 +2221,24 @@ function GenerationResourceGroupCard({
       </div>
 
       <div className="mt-4 flex flex-col gap-4 border-t border-slate-100 pt-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-        <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
-          <input
-            type="checkbox"
+        <div className="w-full sm:max-w-xs">
+          <SettingsOptionToggle
             checked={draft.enabled}
             disabled={!canWrite}
-            onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
-            className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
-          />
+            onChange={(enabled) => onChange({ ...draft, enabled })}
+          >
           {t("settings.resourceGroup.enabled")}
-        </label>
-        <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
-          <input
-            type="checkbox"
+          </SettingsOptionToggle>
+        </div>
+        <div className="w-full sm:max-w-xs">
+          <SettingsOptionToggle
             checked={draft.blur_images_by_default}
             disabled={!canWrite}
-            onChange={(event) => onChange({ ...draft, blur_images_by_default: event.target.checked })}
-            className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
-          />
+            onChange={(blur_images_by_default) => onChange({ ...draft, blur_images_by_default })}
+          >
           {t("settings.resourceGroup.blurImagesByDefault")}
-        </label>
+          </SettingsOptionToggle>
+        </div>
         <button
           type="button"
           onClick={onSave}
@@ -2779,7 +2857,7 @@ function TextConfigTestPanel({
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
 
   return (
-    <section className={`${PANEL_CLASS} space-y-4`}>
+    <section className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-4`}>
       <div>
         <h2 className="text-base font-semibold text-slate-950 dark:text-white">
           {t("settings.generation.testTitle")}
@@ -2941,7 +3019,7 @@ function GenerationConfigPoolSection({
       {purpose === "text" && textTestState && onTextTestDraftChange ? (
         <TextConfigTestPanel state={textTestState} onDraftChange={onTextTestDraftChange} />
       ) : null}
-      <div className={`${PANEL_CLASS} space-y-5`}>
+      <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-5`}>
         <div className="space-y-4">
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">
@@ -3097,7 +3175,7 @@ function GenerationConfigCard({
       : filteredProfiles;
 
   return (
-    <div className="rounded-xl border border-slate-200/60 bg-white/80 p-6 shadow-md shadow-slate-200/50 backdrop-blur-sm dark:border-slate-700/40 dark:bg-[#0f1726]/80 dark:shadow-black/20">
+    <div className={`${SETTINGS_FIELD_CARD_CLASS} rounded-2xl border border-slate-200/70 bg-white/80 p-6 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0f1726]/80`}>
       <div className="space-y-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -3345,16 +3423,15 @@ function GenerationConfigCard({
       </div>
 
       <div className="flex flex-col gap-4 border-t border-slate-100 pt-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-        <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
-          <input
-            type="checkbox"
+        <div className="w-full sm:max-w-xs">
+          <SettingsOptionToggle
             checked={draft.enabled}
             disabled={controlsDisabled}
-            onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
-            className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
-          />
+            onChange={(enabled) => onChange({ ...draft, enabled })}
+          >
           {t("settings.generation.enabled")}
-        </label>
+          </SettingsOptionToggle>
+        </div>
         <button
           type="button"
           onClick={onSave}
@@ -3599,20 +3676,19 @@ function GenerationConfigImageFields({
         </div>
       ) : null}
       {draft.provider_kind === "openai_responses" ? (
-        <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
-          <input
-            type="checkbox"
+        <div className="max-w-md">
+          <SettingsOptionToggle
             checked={draft.responses_background_enabled}
             disabled={pending}
-            onChange={(event) => onChange({ ...draft, responses_background_enabled: event.target.checked })}
-            className="h-4 w-4 rounded border-slate-300 accent-indigo-600 dark:border-slate-600"
-          />
+            onChange={(responses_background_enabled) => onChange({ ...draft, responses_background_enabled })}
+          >
           <ParameterHelpLabel
             label={t("settings.provider.responsesBackground")}
             helpKey="settingsResponsesBackground"
             uiType="settings"
           />
-        </label>
+          </SettingsOptionToggle>
+        </div>
       ) : null}
     </div>
   );
@@ -3629,6 +3705,7 @@ export function SettingsPage() {
   const [draftSnapshots, setDraftSnapshots] = useState<Record<string, DraftSnapshot>>({});
   const [secretTouched, setSecretTouched] = useState<Record<string, boolean>>({});
   const [resettingKey, setResettingKey] = useState<string | null>(null);
+  const [pendingResetItem, setPendingResetItem] = useState<ConfigItem | null>(null);
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
   const [activeSection, setActiveSection] = useState<SettingsSectionId>("providers");
@@ -3799,6 +3876,7 @@ export function SettingsPage() {
       queryClient.setQueryData(["config"], data);
       void queryClient.invalidateQueries({ queryKey: ["runtime-config"] });
       void queryClient.invalidateQueries({ queryKey: ["session"] });
+      setPendingResetItem(null);
       setSavedMessage(t("settings.restored"));
     },
     onError: (mutationError) => {
@@ -4202,7 +4280,7 @@ export function SettingsPage() {
   const isWorkspaceSubpage = activeScheme === "workspace";
 
   return (
-    <div className={`${isWorkspaceSubpage ? "pf-workspace" : "pf-app"} flex flex-col dark:text-slate-100`}>
+    <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} flex flex-col dark:text-slate-100`}>
       <TopNav
         breadcrumbs={t("settings.breadcrumb")}
         onLogout={() => logoutMutation.mutate()}
@@ -4362,7 +4440,7 @@ export function SettingsPage() {
                     />
                   ) : null}
                   {shouldShowGlobalTemplatesPanel(activeSection) ? (
-                    <div className={`${PANEL_CLASS} flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between`}>
+                    <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between`}>
                       <div>
                         <h2 className="text-base font-semibold text-slate-950 dark:text-white">
                           {t("settings.section.globalTemplates")}
@@ -4601,7 +4679,7 @@ export function SettingsPage() {
                     ) : null}
 
                     {genericSection ? (
-                      <form onSubmit={handleSubmit} className={`${PANEL_CLASS} space-y-2`}>
+                      <form onSubmit={handleSubmit} className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-2`}>
                         {activeItems.length ? (
                           activeSection === "queue" ? (
                             <div className="space-y-1">
@@ -4629,7 +4707,7 @@ export function SettingsPage() {
                                       }}
                                       onReset={() => {
                                         if (canWriteRuntimeSettings) {
-                                          resetMutation.mutate(item.key);
+                                          setPendingResetItem(item);
                                         }
                                       }}
                                     />
@@ -4657,7 +4735,7 @@ export function SettingsPage() {
                                   }}
                                   onReset={() => {
                                     if (canWriteRuntimeSettings) {
-                                      resetMutation.mutate(item.key);
+                                      setPendingResetItem(item);
                                     }
                                   }}
                                 />
@@ -4681,7 +4759,7 @@ export function SettingsPage() {
                                 }}
                                 onReset={() => {
                                   if (canWriteRuntimeSettings) {
-                                    resetMutation.mutate(item.key);
+                                    setPendingResetItem(item);
                                   }
                                 }}
                               />
@@ -4734,6 +4812,31 @@ export function SettingsPage() {
           destructive={false}
           onClose={() => setExportConfirmOpen(false)}
           onConfirm={() => exportSettingsMutation.mutate()}
+        />
+        <ConfirmDialog
+          open={Boolean(pendingResetItem)}
+          title={t("settings.restoreDefaultConfirmTitle")}
+          description={
+            pendingResetItem
+              ? t("settings.restoreDefaultConfirm", {
+                  label: pendingResetItem.label,
+                  key: pendingResetItem.key,
+                })
+              : ""
+          }
+          confirmLabel={t("settings.restoreDefaultConfirmLabel")}
+          cancelLabel={t("common.cancel")}
+          busy={resetMutation.isPending}
+          onClose={() => {
+            if (!resetMutation.isPending) {
+              setPendingResetItem(null);
+            }
+          }}
+          onConfirm={() => {
+            if (canWriteRuntimeSettings && pendingResetItem) {
+              resetMutation.mutate(pendingResetItem.key);
+            }
+          }}
         />
         <ConfirmDialog
           open={Boolean(pendingDeleteProviderProfile)}

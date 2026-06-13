@@ -830,6 +830,115 @@ textarea {
   box-shadow: none !important;
 }
 
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-workspace-action-primary {
+  border-color: color-mix(in srgb, var(--pf-accent) 42%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 18%, var(--pf-panel));
+  color: var(--pf-text);
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-workspace-action-primary:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 62%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 26%, var(--pf-panel));
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-workspace-action-primary:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 22%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-workspace-action-secondary {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 72%, transparent);
+  color: var(--pf-text);
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-workspace-action-secondary:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 45%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 12%, var(--pf-panel));
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-workspace-action-secondary:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 18%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-danger-action:hover {
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-help-button,
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-help-button:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-help-button:focus-visible {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-help-button:hover {
+  color: var(--pf-accent) !important;
+  transform: scale(1.1);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
+  :is(input[type="email"], input[type="number"], input[type="password"], input[type="search"], input[type="text"], input[type="url"], textarea, button[aria-haspopup="listbox"]) {
+  border-radius: 1rem;
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-bordered-module {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 70%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.32);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-field-card {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 58%, transparent);
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-option-toggle {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 54%, transparent);
+  color: var(--pf-muted);
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-option-toggle:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 42%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 10%, var(--pf-panel));
+  color: var(--pf-text);
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-option-toggle:has(input:checked) {
+  border-color: color-mix(in srgb, var(--pf-accent) 56%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 17%, var(--pf-panel));
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-settings-workspace
+  .pf-settings-bordered-module {
+  border-color: rgb(255 245 224 / 0.18);
+  background: rgb(32 35 29 / 0.9);
+  box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.08);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-settings-workspace
+  .pf-settings-field-card,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-settings-workspace
+  .pf-settings-option-toggle {
+  border-color: rgb(255 245 224 / 0.14);
+  background: rgb(56 60 50 / 0.72);
+}
+
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-card {
   background: rgb(32 35 29 / 0.88);
   box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 245 224 / 0.08);
@@ -863,6 +972,30 @@ textarea {
     0 0 0 3px rgb(146 170 122 / 0.24),
     0 14px 30px rgb(0 0 0 / 0.2),
     inset 0 1px 0 rgb(255 245 224 / 0.16);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-settings-workspace
+  .pf-workspace-action-primary {
+  border-color: rgb(146 170 122 / 0.42);
+  background: rgb(146 170 122 / 0.16);
+  color: var(--pf-text);
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-settings-workspace
+  .pf-workspace-action-primary:hover {
+  border-color: rgb(198 155 102 / 0.54);
+  background: rgb(146 170 122 / 0.23);
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-settings-workspace
+  .pf-workspace-action-primary:focus-visible {
+  box-shadow: 0 0 0 3px rgb(146 170 122 / 0.24);
 }
 
 .pf-workspace-page {
@@ -1696,6 +1829,50 @@ textarea {
   button:is([aria-current="page"], [class*="bg-indigo"], [class*="bg-white"]) {
   background: color-mix(in srgb, var(--pf-accent) 18%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 30%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-side-content .pf-settings-bordered-module {
+  border-color: var(--pf-line-strong) !important;
+  background: color-mix(in srgb, var(--pf-panel) 70%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.32) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-side-content .pf-settings-field-card {
+  border-color: var(--pf-line-strong) !important;
+  background: color-mix(in srgb, var(--pf-panel) 58%, transparent) !important;
+  box-shadow: none !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-side-content .pf-settings-option-toggle {
+  border-color: var(--pf-line-strong) !important;
+  background: color-mix(in srgb, var(--pf-panel) 54%, transparent) !important;
+  box-shadow: none !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-side-content
+  :is(input[type="email"], input[type="number"], input[type="password"], input[type="search"], input[type="text"], input[type="url"], textarea, button[aria-haspopup="listbox"]) {
+  box-shadow: none !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage
+  .pf-side-content
+  .pf-settings-bordered-module {
+  border-color: rgb(255 245 224 / 0.18) !important;
+  background: rgb(32 35 29 / 0.9) !important;
+  box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.08) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage
+  .pf-side-content
+  .pf-settings-field-card,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
+  .pf-workspace-subpage
+  .pf-side-content
+  .pf-settings-option-toggle {
+  border-color: rgb(255 245 224 / 0.14) !important;
+  background: rgb(56 60 50 / 0.72) !important;
 }
 
 .pf-workspace-gallery-feed-header {
@@ -4759,6 +4936,20 @@ textarea {
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-red"],
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:bg-rose"] {
   background-color: color-mix(in srgb, var(--pf-danger) 14%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"]
+  :where(body, body *)
+  :is(button[class*="bg-red"], button[class*="bg-rose"])[class*="text-white"] {
+  background-color: var(--pf-danger);
+  color: var(--pf-bg);
+}
+
+:root[data-ui-layout-scheme="workspace"]
+  :where(body, body *)
+  :is(button[class*="bg-red"], button[class*="bg-rose"])[class*="text-white"]:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--pf-danger) 88%, var(--pf-accent-2));
+  color: var(--pf-bg);
 }
 
 :root.dark[data-ui-layout-scheme="workspace"] :where(body, body *)[class*="dark:border-slate"],

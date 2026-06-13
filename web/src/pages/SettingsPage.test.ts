@@ -839,6 +839,34 @@ describe("SettingsPage provider profile helpers", () => {
     expect(translate("ja-JP", "settings.generation.archiveConfirmTitle")).toBe("生成設定をアーカイブ");
   });
 
+  it("localizes runtime reset confirmation and split migration module copy", () => {
+    expect(translate("zh-CN", "settings.restoreDefaultConfirmTitle")).toBe("恢复 env/default");
+    expect(
+      translate("zh-CN", "settings.restoreDefaultConfirm", {
+        label: "启用业务删除",
+        key: "deletion_enabled",
+      }),
+    ).toBe("确定恢复「启用业务删除」到 env/default 吗？这会删除数据库覆盖值（deletion_enabled）。");
+    expect(translate("zh-CN", "settings.restoreDefaultConfirmLabel")).toBe("确认恢复");
+    expect(translate("zh-CN", "settings.migration.exportTitle")).toBe("导出配置");
+    expect(translate("zh-CN", "settings.migration.importTitle")).toBe("导入配置");
+
+    expect(translate("en-US", "settings.restoreDefaultConfirmTitle")).toBe("Restore env/default");
+    expect(
+      translate("en-US", "settings.restoreDefaultConfirm", {
+        label: "Business deletion",
+        key: "deletion_enabled",
+      }),
+    ).toBe('Restore "Business deletion" to env/default? This removes the database override (deletion_enabled).');
+    expect(translate("en-US", "settings.restoreDefaultConfirmLabel")).toBe("Restore");
+    expect(translate("en-US", "settings.migration.exportTitle")).toBe("Export settings");
+    expect(translate("en-US", "settings.migration.importTitle")).toBe("Import settings");
+
+    expect(translate("ja-JP", "settings.restoreDefaultConfirmTitle")).toBe("env/default を復元");
+    expect(translate("ja-JP", "settings.migration.exportTitle")).toBe("設定をエクスポート");
+    expect(translate("ja-JP", "settings.migration.importTitle")).toBe("設定をインポート");
+  });
+
   it("localizes Google Gemini provider labels", () => {
     expect(translate("zh-CN", "settings.provider.capability.imageChat")).toBe("Chat Completions 图片");
     expect(translate("zh-CN", "settings.provider.interface.openaiChatImage")).toBe("OpenAI Chat 图片");
