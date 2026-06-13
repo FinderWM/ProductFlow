@@ -66,3 +66,6 @@ backend/backend/storage-dev/
 
 # Local AI memory
 .ai_memory/
+
+# temp file
+.tmp*
