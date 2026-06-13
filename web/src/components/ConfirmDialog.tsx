@@ -5,6 +5,7 @@ interface ConfirmDialogProps {
   open: boolean;
   title: string;
   description: string;
+  error?: string;
   confirmLabel: string;
   cancelLabel: string;
   busy?: boolean;
@@ -17,6 +18,7 @@ export function ConfirmDialog({
   open,
   title,
   description,
+  error = "",
   confirmLabel,
   cancelLabel,
   busy = false,
@@ -26,6 +28,7 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
+  const errorId = useId();
 
   useEffect(() => {
     if (!open) {
@@ -61,7 +64,7 @@ export function ConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        aria-describedby={descriptionId}
+        aria-describedby={error ? `${descriptionId} ${errorId}` : descriptionId}
         className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
       >
         <div className="flex items-start gap-3 px-5 pt-5">
@@ -75,6 +78,14 @@ export function ConfirmDialog({
             <p id={descriptionId} className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
               {description}
             </p>
+            {error ? (
+              <div
+                id={errorId}
+                className="pf-confirm-dialog-error mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm leading-5 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
+              >
+                {error}
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">

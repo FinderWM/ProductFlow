@@ -124,6 +124,10 @@ export function ParameterHelpButton({
           event.preventDefault();
           event.stopPropagation();
         }}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
         className={mergeClassNames(classes.button, className)}
         aria-label={title}
         title={title}
@@ -145,7 +149,7 @@ export function ParameterHelpLabel({
   className = "",
 }: ParameterHelpLabelProps) {
   return (
-    <span className={mergeClassNames("inline-flex min-w-0 items-center gap-1", className)}>
+    <span className={mergeClassNames("inline-flex w-fit max-w-full min-w-0 items-center gap-1.5", className)}>
       <span className="min-w-0 truncate">{label}</span>
       <ParameterHelpButton helpKey={helpKey} uiType={uiType} content={content} />
     </span>

@@ -7,6 +7,7 @@ import {
   draftsFromConfig,
   filterProviderModels,
   filterProviderProfiles,
+  archiveFailureMessage,
   type GenerationConfigDraft,
   generationConfigResourceGroupIds,
   generationConfigPayloadFromDraft,
@@ -35,6 +36,7 @@ import {
   settingsExportFilename,
   settingsImportSummaryCounts,
 } from "./settings/importExport";
+import { ApiError } from "../lib/api";
 import { translate } from "../lib/i18n";
 import type {
   ConfigItem,
@@ -886,6 +888,13 @@ describe("SettingsPage provider profile helpers", () => {
 });
 
 describe("SettingsPage import/export helpers", () => {
+  it("keeps archive API failure details for the confirmation dialog", () => {
+    const fallback = "生成配置归档失败";
+
+    expect(archiveFailureMessage(new ApiError(409, "仍被默认配置引用"), fallback)).toBe("仍被默认配置引用");
+    expect(archiveFailureMessage(new Error("network"), fallback)).toBe(fallback);
+  });
+
   it("keeps import and export controls on a dedicated settings section", () => {
     const sectionIds = settingsSectionIds();
 

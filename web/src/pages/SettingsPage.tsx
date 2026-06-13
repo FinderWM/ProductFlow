@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import type { ChangeEvent, FormEvent, ReactNode, RefObject } from "react";
+import type { ChangeEvent, FormEvent, ReactNode, RefObject, WheelEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Box,
@@ -1099,6 +1099,27 @@ export function configCategoryGroups(items: ConfigItem[]): ConfigCategoryGroup[]
   return groups;
 }
 
+export function archiveFailureMessage(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.detail : fallback;
+}
+
+function handleSettingsSideRailWheel(event: WheelEvent<HTMLElement>) {
+  if (event.deltaY === 0) {
+    return;
+  }
+  const element = event.currentTarget;
+  const scrollTop = element.scrollTop;
+  const canScrollUp = scrollTop > 0;
+  const canScrollDown = scrollTop + element.clientHeight < element.scrollHeight - 1;
+  const shouldPassToPage = event.deltaY < 0 ? !canScrollUp : !canScrollDown;
+
+  if (!shouldPassToPage) {
+    return;
+  }
+  event.preventDefault();
+  window.scrollBy({ top: event.deltaY });
+}
+
 interface SettingsMigrationPanelProps {
   importInputRef: RefObject<HTMLInputElement | null>;
   importFileName: string;
@@ -1291,15 +1312,20 @@ interface SettingsFormFieldProps {
 }
 
 function SettingsFormField({ label, children, className = "", helpKey, helpContent }: SettingsFormFieldProps) {
+  if (helpKey) {
+    return (
+      <div className={`block space-y-2 ${className}`}>
+        <div className="text-xs font-medium text-slate-600 dark:text-slate-300">
+          <ParameterHelpLabel label={label} helpKey={helpKey} uiType="settings" content={helpContent} />
+        </div>
+        {children}
+      </div>
+    );
+  }
+
   return (
     <label className={`block space-y-2 ${className}`}>
-      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
-        {helpKey ? (
-          <ParameterHelpLabel label={label} helpKey={helpKey} uiType="settings" content={helpContent} />
-        ) : (
-          label
-        )}
-      </span>
+      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{label}</span>
       {children}
     </label>
   );
@@ -1699,8 +1725,9 @@ function SettingsOptionToggle({
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
-        className="h-4 w-4 shrink-0 rounded border-slate-300 accent-slate-900 dark:border-slate-600 dark:accent-violet-400"
+        className="peer sr-only"
       />
+      <span className="pf-settings-option-toggle-control" aria-hidden="true" />
       <span className="min-w-0 flex-1 leading-5">{children}</span>
     </label>
   );
@@ -1776,6 +1803,11 @@ function ConfigField({
         onReset={onReset}
       />
     ) : null;
+  const keyLine = (
+    <div className="pf-settings-config-key min-w-0 break-all font-mono text-[11px] leading-5 text-zinc-400 dark:text-slate-500">
+      {item.key}
+    </div>
+  );
 
   const control =
     item.input_type === "multi_select" ? (
@@ -1853,8 +1885,8 @@ function ConfigField({
             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(item)}`}>
               {sourceLabel(item, t)}
             </span>
-            <span className="min-w-0 font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</span>
           </div>
+          {keyLine}
           <p className="min-h-4 text-xs leading-5 text-zinc-500 dark:text-slate-400">{item.description}</p>
           {item.secret && secretTouched ? (
             <div className="mt-1 text-xs text-amber-600 dark:text-amber-300">{t("settings.writeNewSecret")}</div>
@@ -1882,8 +1914,8 @@ function ConfigField({
           <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(item)}`}>
             {sourceLabel(item, t)}
           </span>
-          <span className="min-w-0 font-mono text-[11px] text-zinc-400 dark:text-slate-500">{item.key}</span>
         </div>
+        {keyLine}
         <p className="min-h-4 text-xs leading-5 text-zinc-500 dark:text-slate-400">
           {item.description}
           {item.secret && secretTouched ? (
@@ -3715,6 +3747,7 @@ export function SettingsPage() {
   const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
   const [pendingDeleteProviderProfile, setPendingDeleteProviderProfile] = useState<ProviderProfile | null>(null);
   const [pendingGenerationArchive, setPendingGenerationArchive] = useState<PendingGenerationArchive | null>(null);
+  const [pendingGenerationArchiveError, setPendingGenerationArchiveError] = useState("");
   const [togglingProviderProfileId, setTogglingProviderProfileId] = useState<string | null>(null);
   const [generationConfigDrafts, setGenerationConfigDrafts] = useState<Record<string, GenerationConfigDraft>>({});
   const [archivingGenerationConfigId, setArchivingGenerationConfigId] = useState<string | null>(null);
@@ -4087,6 +4120,7 @@ export function SettingsPage() {
     mutationFn: (configId: string) => api.archiveGenerationConfig(configId),
     onMutate: (configId) => {
       setArchivingGenerationConfigId(configId);
+      setPendingGenerationArchiveError("");
       setError("");
       setSavedMessage("");
     },
@@ -4095,16 +4129,17 @@ export function SettingsPage() {
         providerConfigWithGenerationConfig(current, generationConfig),
       );
       await refreshProviderSettingsQueries({ includeRuntimeConfig: true });
+      setPendingGenerationArchive(null);
+      setPendingGenerationArchiveError("");
       setError("");
       setSavedMessage(t("settings.generation.archived"));
     },
     onError: (mutationError) => {
       setSavedMessage("");
-      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.archiveFailed"));
+      setPendingGenerationArchiveError(archiveFailureMessage(mutationError, t("settings.generation.archiveFailed")));
     },
     onSettled: () => {
       setArchivingGenerationConfigId(null);
-      setPendingGenerationArchive(null);
     },
   });
 
@@ -4155,6 +4190,7 @@ export function SettingsPage() {
     mutationFn: (groupId: string) => api.archiveGenerationResourceGroup(groupId),
     onMutate: (groupId) => {
       setArchivingGenerationResourceGroupId(groupId);
+      setPendingGenerationArchiveError("");
       setError("");
       setSavedMessage("");
     },
@@ -4163,16 +4199,19 @@ export function SettingsPage() {
         providerConfigWithGenerationResourceGroup(current, group),
       );
       await refreshProviderSettingsQueries({ includeResourceGroups: true });
+      setPendingGenerationArchive(null);
+      setPendingGenerationArchiveError("");
       setError("");
       setSavedMessage(t("settings.resourceGroup.archived"));
     },
     onError: (mutationError) => {
       setSavedMessage("");
-      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.resourceGroup.archiveFailed"));
+      setPendingGenerationArchiveError(
+        archiveFailureMessage(mutationError, t("settings.resourceGroup.archiveFailed")),
+      );
     },
     onSettled: () => {
       setArchivingGenerationResourceGroupId(null);
-      setPendingGenerationArchive(null);
     },
   });
 
@@ -4239,6 +4278,7 @@ export function SettingsPage() {
   const requestGenerationResourceGroupArchive = useCallback(
     (groupId: string) => {
       const group = providerConfigQuery.data?.generation_resource_groups.find((item) => item.id === groupId);
+      setPendingGenerationArchiveError("");
       setPendingGenerationArchive({ kind: "resourceGroup", id: groupId, name: group?.name ?? groupId });
     },
     [providerConfigQuery.data],
@@ -4246,6 +4286,7 @@ export function SettingsPage() {
   const requestGenerationConfigArchive = useCallback(
     (configId: string) => {
       const config = providerConfigQuery.data?.generation_configs.find((item) => item.id === configId);
+      setPendingGenerationArchiveError("");
       setPendingGenerationArchive({ kind: "generationConfig", id: configId, name: config?.name ?? configId });
     },
     [providerConfigQuery.data],
@@ -4312,7 +4353,10 @@ export function SettingsPage() {
               </div>
             ) : (
               <div className="pf-side-shell min-h-full">
-              <aside className="pf-side-rail backdrop-blur-sm bg-white/60 dark:bg-[#0a1018]/60">
+              <aside
+                className="pf-side-rail backdrop-blur-sm bg-white/60 dark:bg-[#0a1018]/60"
+                onWheel={handleSettingsSideRailWheel}
+              >
                 <div className="border-b border-slate-200/60 px-5 py-7 dark:border-slate-700/40">
                   <div className="flex items-center gap-3 text-lg font-semibold text-slate-950 dark:text-white">
                     <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">
@@ -4860,18 +4904,21 @@ export function SettingsPage() {
           open={Boolean(pendingGenerationArchive)}
           title={pendingGenerationArchiveTitle}
           description={pendingGenerationArchiveDescription}
+          error={pendingGenerationArchiveError}
           confirmLabel={pendingGenerationArchiveConfirmLabel}
           cancelLabel={t("common.cancel")}
           busy={pendingGenerationArchiveBusy}
           onClose={() => {
             if (!pendingGenerationArchiveBusy) {
               setPendingGenerationArchive(null);
+              setPendingGenerationArchiveError("");
             }
           }}
           onConfirm={() => {
             if (!canWriteProviderSettings || !pendingGenerationArchive) {
               return;
             }
+            setPendingGenerationArchiveError("");
             if (pendingGenerationArchive.kind === "resourceGroup") {
               archiveGenerationResourceGroupMutation.mutate(pendingGenerationArchive.id);
               return;

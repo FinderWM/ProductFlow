@@ -110,7 +110,7 @@ export const PARAMETER_HELP_UI_CLASS_REGISTRY: Record<ParameterHelpUiType, Parti
   },
   settings: {
     button:
-      "pf-settings-help-button bg-transparent transition-transform hover:scale-110 hover:bg-transparent hover:text-indigo-600 focus-visible:bg-transparent dark:hover:bg-transparent dark:hover:text-violet-200",
+      "pf-settings-help-button bg-transparent p-0 hover:bg-transparent hover:text-indigo-600 focus-visible:bg-transparent dark:hover:bg-transparent dark:hover:text-violet-200",
     overlay: "fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/50 px-4 py-6 backdrop-blur-sm",
     panel:
       "max-h-[min(760px,calc(100dvh-3rem))] w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/18 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45",
