@@ -71,6 +71,14 @@
   --pf-line-strong: rgb(18 21 18 / 0.15);
   --pf-workspace-glow: rgb(79 117 131 / 0.16);
   --pf-shadow: 0 32px 86px rgb(33 38 42 / 0.08);
+  --pf-brand-panel: rgb(251 252 253 / 0.72);
+  --pf-brand-panel-hover: rgb(251 252 253 / 0.9);
+  --pf-brand-border: rgb(79 117 131 / 0.22);
+  --pf-brand-text: #172024;
+  --pf-brand-muted: #5f7179;
+  --pf-brand-mark-text: #101614;
+  --pf-brand-mark-shadow: 0 12px 26px rgb(79 117 131 / 0.18);
+  --pf-brand-shadow: 0 14px 34px rgb(79 117 131 / 0.1), inset 0 1px 0 rgb(255 255 255 / 0.84);
 }
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="sage"] {
@@ -92,6 +100,14 @@
   --pf-line-strong: rgb(18 32 22 / 0.16);
   --pf-workspace-glow: rgb(62 121 81 / 0.17);
   --pf-shadow: 0 32px 86px rgb(34 50 31 / 0.08);
+  --pf-brand-panel: rgb(247 251 239 / 0.7);
+  --pf-brand-panel-hover: rgb(247 251 239 / 0.88);
+  --pf-brand-border: rgb(62 121 81 / 0.24);
+  --pf-brand-text: #152416;
+  --pf-brand-muted: #546d55;
+  --pf-brand-mark-text: #10180f;
+  --pf-brand-mark-shadow: 0 12px 26px rgb(62 121 81 / 0.18);
+  --pf-brand-shadow: 0 14px 34px rgb(34 50 31 / 0.11), inset 0 1px 0 rgb(255 255 255 / 0.78);
 }
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] {
@@ -113,6 +129,14 @@
   --pf-line-strong: rgb(255 245 224 / 0.18);
   --pf-workspace-glow: rgb(146 170 122 / 0.12);
   --pf-shadow: 0 32px 86px rgb(18 16 12 / 0.16);
+  --pf-brand-panel: rgb(41 45 35 / 0.72);
+  --pf-brand-panel-hover: rgb(48 53 41 / 0.88);
+  --pf-brand-border: rgb(232 222 203 / 0.16);
+  --pf-brand-text: #eee4d0;
+  --pf-brand-muted: #b9af9d;
+  --pf-brand-mark-text: #181a14;
+  --pf-brand-mark-shadow: 0 14px 30px rgb(0 0 0 / 0.24);
+  --pf-brand-shadow: 0 18px 44px rgb(0 0 0 / 0.2), inset 0 1px 0 rgb(255 245 224 / 0.09);
 }
 
 html,
@@ -664,23 +688,146 @@ textarea {
 }
 
 .pf-workspace-action-primary {
-  background: var(--pf-deep);
+  border-color: color-mix(in srgb, var(--pf-deep) 84%, var(--pf-accent));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-deep) 94%, var(--pf-accent)), color-mix(in srgb, var(--pf-deep) 82%, var(--pf-accent-2))),
+    var(--pf-deep);
   color: var(--pf-bg);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
+  box-shadow:
+    0 12px 28px color-mix(in srgb, var(--pf-deep) 14%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.16);
+  transition: transform 240ms var(--pf-motion-soft), border-color 260ms var(--pf-motion-standard),
+    background 260ms var(--pf-motion-standard), color 260ms var(--pf-motion-standard),
+    box-shadow 260ms var(--pf-motion-standard);
 }
 
 .pf-workspace-action-primary:hover {
-  background: color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+  border-color: color-mix(in srgb, var(--pf-accent) 42%, var(--pf-deep));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent)), color-mix(in srgb, var(--pf-deep) 74%, var(--pf-accent-2))),
+    color-mix(in srgb, var(--pf-deep) 88%, var(--pf-accent));
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--pf-deep) 18%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+
+.pf-workspace-action-primary:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--pf-accent) 24%, transparent),
+    0 12px 28px color-mix(in srgb, var(--pf-deep) 14%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+
+.pf-workspace-action-primary:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+.pf-workspace-action-primary:disabled {
+  border-color: var(--pf-line) !important;
+  background: color-mix(in srgb, var(--pf-panel) 62%, transparent) !important;
+  color: var(--pf-muted) !important;
+  box-shadow: none !important;
 }
 
 .pf-workspace-action-secondary {
   border: 1px solid var(--pf-line-strong);
-  background: color-mix(in srgb, var(--pf-panel) 44%, transparent);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.18), transparent 48%),
+    color-mix(in srgb, var(--pf-panel) 68%, transparent);
   color: var(--pf-text);
+  box-shadow:
+    0 8px 20px color-mix(in srgb, var(--pf-deep) 5%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.18);
+  transition: transform 240ms var(--pf-motion-soft), border-color 260ms var(--pf-motion-standard),
+    background 260ms var(--pf-motion-standard), color 260ms var(--pf-motion-standard),
+    box-shadow 260ms var(--pf-motion-standard);
 }
 
 .pf-workspace-action-secondary:hover {
-  background: color-mix(in srgb, var(--pf-deep) 7%, transparent);
+  border-color: color-mix(in srgb, var(--pf-accent) 36%, var(--pf-line-strong));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 9%, transparent), transparent 52%),
+    color-mix(in srgb, var(--pf-panel) 84%, transparent);
+  color: var(--pf-text);
+}
+
+.pf-workspace-action-secondary:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--pf-accent) 20%, transparent),
+    0 8px 20px color-mix(in srgb, var(--pf-deep) 5%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+
+.pf-workspace-action-secondary:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+.pf-workspace-action-secondary:disabled {
+  border-color: var(--pf-line) !important;
+  background: color-mix(in srgb, var(--pf-panel) 44%, transparent) !important;
+  color: var(--pf-subtle) !important;
+  box-shadow: none !important;
+}
+
+.pf-danger-action {
+  border-color: rgb(254 202 202);
+  background: rgb(254 242 242 / 0.9);
+  color: rgb(185 28 28);
+}
+
+.pf-danger-action:hover {
+  border-color: rgb(252 165 165);
+  background: rgb(254 226 226 / 0.95);
+  color: rgb(153 27 27);
+}
+
+:root.dark .pf-danger-action {
+  border-color: rgb(248 113 113 / 0.38);
+  background: rgb(239 68 68 / 0.12);
+  color: rgb(254 202 202);
+}
+
+:root.dark .pf-danger-action:hover {
+  border-color: rgb(252 165 165 / 0.62);
+  background: rgb(239 68 68 / 0.18);
+  color: rgb(254 226 226);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-danger-action {
+  border-color: color-mix(in srgb, var(--pf-danger) 46%, transparent);
+  background: color-mix(in srgb, var(--pf-danger) 12%, transparent);
+  color: var(--pf-danger);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-danger-action:hover {
+  border-color: color-mix(in srgb, var(--pf-danger) 64%, transparent);
+  background: color-mix(in srgb, var(--pf-danger) 18%, transparent);
+  color: var(--pf-danger);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-danger-action {
+  border-color: rgb(217 146 120 / 0.36);
+  background: rgb(217 146 120 / 0.12);
+}
+
+.pf-danger-action:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--pf-danger) 22%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.12);
+}
+
+.pf-danger-action:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+.pf-danger-action:disabled {
+  border-color: color-mix(in srgb, var(--pf-danger) 18%, transparent) !important;
+  background: color-mix(in srgb, var(--pf-danger) 6%, transparent) !important;
+  color: color-mix(in srgb, var(--pf-danger) 54%, var(--pf-subtle)) !important;
+  box-shadow: none !important;
 }
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-card {
@@ -694,8 +841,28 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-action-primary {
-  background: #5b6847;
+  border-color: rgb(146 170 122 / 0.5);
+  background:
+    linear-gradient(135deg, rgb(91 104 71), rgb(80 92 62)),
+    #5b6847;
   color: #f2ead8;
+  box-shadow:
+    0 14px 30px rgb(0 0 0 / 0.2),
+    inset 0 1px 0 rgb(255 245 224 / 0.16);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-action-primary:hover {
+  border-color: rgb(198 155 102 / 0.52);
+  background:
+    linear-gradient(135deg, rgb(102 117 78), rgb(91 103 69)),
+    #66754e;
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-workspace-action-primary:focus-visible {
+  box-shadow:
+    0 0 0 3px rgb(146 170 122 / 0.24),
+    0 14px 30px rgb(0 0 0 / 0.2),
+    inset 0 1px 0 rgb(255 245 224 / 0.16);
 }
 
 .pf-workspace-page {
@@ -1273,9 +1440,33 @@ textarea {
     button[aria-haspopup="listbox"]
   ) {
   border-color: var(--pf-line-strong);
-  background-color: color-mix(in srgb, var(--pf-panel) 58%, transparent);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.18), transparent 48%),
+    color-mix(in srgb, var(--pf-panel) 64%, transparent);
   color: var(--pf-text);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.36);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.36),
+    0 6px 18px color-mix(in srgb, var(--pf-deep) 4%, transparent);
+  transition: border-color 220ms var(--pf-motion-standard), background 220ms var(--pf-motion-standard),
+    box-shadow 220ms var(--pf-motion-standard), color 220ms var(--pf-motion-standard);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="text"],
+    input[type="url"],
+    textarea,
+    button[aria-haspopup="listbox"]
+  ):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--pf-accent) 30%, var(--pf-line-strong));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 6%, transparent), transparent 52%),
+    color-mix(in srgb, var(--pf-panel) 76%, transparent);
 }
 
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
@@ -1290,8 +1481,29 @@ textarea {
     button[aria-haspopup="listbox"]
   ):focus {
   border-color: color-mix(in srgb, var(--pf-accent) 46%, transparent);
-  background-color: color-mix(in srgb, var(--pf-panel) 76%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 9%, transparent), transparent 52%),
+    color-mix(in srgb, var(--pf-panel) 86%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.42);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
+  :is(
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="text"],
+    input[type="url"],
+    textarea,
+    button[aria-haspopup="listbox"]
+  ):disabled {
+  border-color: var(--pf-line);
+  background: color-mix(in srgb, var(--pf-panel) 36%, transparent);
+  color: var(--pf-subtle);
+  box-shadow: none;
 }
 
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
@@ -1307,7 +1519,9 @@ textarea {
 
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   :is(.pf-side-content, .pf-side-toc)
-  :is(.rounded-xl.border, .rounded-lg.border, [role="tablist"]):not([aria-pressed]) {
+  :is(.rounded-xl.border, .rounded-lg.border, [role="tablist"]):not(.pf-workspace-action-primary):not(
+    .pf-workspace-action-secondary
+  ):not(.pf-danger-action):not(input):not(textarea):not(select):not(button):not([aria-pressed]) {
   border-color: transparent;
   background: rgb(255 255 255 / 0.54);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
@@ -1325,7 +1539,9 @@ textarea {
  */
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   :is(.pf-side-content, .pf-side-toc)
-  :is(.rounded-xl, .rounded-lg)[class*="border"]:is([class*="bg-white"], [class*="bg-slate-50"], [class*="bg-[#"]):not([aria-pressed]):not([role="tablist"]) {
+  :is(.rounded-xl, .rounded-lg)[class*="border"]:is([class*="bg-white"], [class*="bg-slate-50"], [class*="bg-[#"]):not(input):not(
+    textarea
+  ):not(select):not(button):not([aria-pressed]):not([role="tablist"]) {
   border-color: var(--pf-line-strong);
   background: color-mix(in srgb, var(--pf-panel) 62%, transparent);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.5), 0 4px 14px rgb(37 43 46 / 0.04);
@@ -1439,7 +1655,11 @@ textarea {
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
   :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
-  :is(.pf-side-rail, .pf-side-content, .pf-side-toc, .rounded-xl.border, .rounded-lg.border, [role="tablist"]):not([aria-pressed]) {
+  :is(.pf-side-rail, .pf-side-content, .pf-side-toc, .rounded-xl.border, .rounded-lg.border, [role="tablist"]):not(
+    .pf-workspace-action-primary
+  ):not(.pf-workspace-action-secondary):not(.pf-danger-action):not(input):not(textarea):not(select):not(button):not(
+    [aria-pressed]
+  ) {
   background: rgb(32 35 29 / 0.88);
   box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.08);
 }
@@ -1454,7 +1674,9 @@ textarea {
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
   :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   :is(.pf-side-content, .pf-side-toc)
-  :is(.rounded-xl, .rounded-lg)[class*="border"]:is([class*="bg-white"], [class*="bg-slate-50"], [class*="bg-[#"]):not([aria-pressed]):not([role="tablist"]) {
+  :is(.rounded-xl, .rounded-lg)[class*="border"]:is([class*="bg-white"], [class*="bg-slate-50"], [class*="bg-[#"]):not(input):not(
+    textarea
+  ):not(select):not(button):not([aria-pressed]):not([role="tablist"]) {
   border-color: rgb(255 245 224 / 0.14);
   background: rgb(56 60 50 / 0.78);
   box-shadow: inset 0 1px 0 rgb(255 245 224 / 0.06), 0 4px 14px rgb(0 0 0 / 0.22);
@@ -2540,14 +2762,44 @@ textarea {
 }
 
 .pf-shell-brand-chip {
+  position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 16px 10px 10px;
+  border: 1px solid var(--pf-brand-border, color-mix(in srgb, var(--pf-line-strong) 86%, transparent));
   border-radius: 999px;
-  background: var(--pf-deep);
-  color: var(--pf-bg);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.3), transparent 46%),
+    var(--pf-brand-panel, color-mix(in srgb, var(--pf-panel) 72%, transparent));
+  color: var(--pf-brand-text, var(--pf-text));
   font-weight: 660;
+  box-shadow: var(--pf-brand-shadow, var(--pf-shadow));
+  backdrop-filter: blur(22px) saturate(1.12);
+  transition: transform 520ms var(--pf-motion-standard), border-color 520ms var(--pf-motion-standard),
+    background 520ms var(--pf-motion-standard), box-shadow 520ms var(--pf-motion-standard);
+}
+
+.pf-shell-brand-chip::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 18% 50%, color-mix(in srgb, var(--pf-accent) 16%, transparent), transparent 34%),
+    radial-gradient(circle at 92% 20%, color-mix(in srgb, var(--pf-accent-2) 12%, transparent), transparent 30%);
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.pf-shell-brand-chip:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--pf-accent) 34%, var(--pf-brand-border));
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.36), transparent 48%),
+    var(--pf-brand-panel-hover, color-mix(in srgb, var(--pf-panel) 86%, transparent));
 }
 
 .pf-shell-brand-chip > .group {
@@ -2558,6 +2810,12 @@ textarea {
   min-width: 0;
   color: inherit;
   text-decoration: none;
+  outline: none;
+}
+
+.pf-shell-brand-chip a:focus-visible {
+  border-radius: 9px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 22%, transparent);
 }
 
 .pf-shell-brand-chip span {
@@ -2567,56 +2825,63 @@ textarea {
 .pf-shell-brand-chip small {
   display: block;
   margin-top: 1px;
-  color: color-mix(in srgb, var(--pf-bg) 68%, transparent);
+  color: var(--pf-brand-muted, var(--pf-muted));
   font-size: 10px;
   font-weight: 560;
   letter-spacing: 0;
 }
 
-.pf-shell-brand-chip .pf-shell-weather-trigger {
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger {
   position: relative;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   overflow: hidden;
-  border: 0;
+  border: 1px solid color-mix(in srgb, var(--pf-accent) 26%, rgb(255 255 255 / 0.22));
   border-radius: 999px;
   background:
-    radial-gradient(circle at 42% 38%, rgb(255 246 196 / 0.95) 0 18%, transparent 19%),
-    radial-gradient(circle at 62% 62%, rgb(177 213 195 / 0.8) 0 24%, transparent 25%),
-    linear-gradient(135deg, rgb(255 255 255 / 0.2), rgb(255 255 255 / 0.04)),
+    radial-gradient(circle at 34% 30%, rgb(255 255 255 / 0.62) 0 11%, transparent 12%),
+    radial-gradient(circle at 66% 74%, color-mix(in srgb, var(--pf-accent-2) 78%, transparent) 0 27%, transparent 28%),
+    radial-gradient(circle at 18% 86%, color-mix(in srgb, var(--pf-panel) 58%, transparent) 0 16%, transparent 17%),
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 92%, white 8%), color-mix(in srgb, var(--pf-accent-2) 84%, var(--pf-accent))),
     var(--pf-accent) !important;
-  color: var(--pf-deep) !important;
+  color: var(--pf-brand-mark-text, var(--pf-deep)) !important;
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.36),
-    0 0 0 1px rgb(255 255 255 / 0.16),
-    0 12px 24px color-mix(in srgb, var(--pf-accent) 24%, transparent);
+    inset 0 1px 0 rgb(255 255 255 / 0.42),
+    inset 0 -10px 18px rgb(0 0 0 / 0.08),
+    var(--pf-brand-mark-shadow, 0 12px 24px color-mix(in srgb, var(--pf-accent) 22%, transparent));
+  transition: transform 520ms var(--pf-motion-standard), box-shadow 520ms var(--pf-motion-standard);
 }
 
-.pf-shell-brand-chip .pf-shell-weather-trigger::before,
-.pf-shell-brand-chip .pf-shell-weather-trigger::after {
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip:hover .pf-shell-weather-trigger {
+  transform: rotate(-4deg) scale(1.03);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::before,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::after {
   content: "";
   position: absolute;
   pointer-events: none;
   border-radius: 999px;
 }
 
-.pf-shell-brand-chip .pf-shell-weather-trigger::before {
-  width: 18px;
-  height: 7px;
-  left: 12px;
-  top: 18px;
-  background: rgb(255 255 255 / 0.84);
-  box-shadow: -6px 1px 0 rgb(255 255 255 / 0.56), 7px 2px 0 rgb(255 255 255 / 0.42);
-  animation: pf-weather-logo-drift 4.8s var(--pf-motion-standard) infinite alternate;
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::before {
+  width: 24px;
+  height: 24px;
+  left: -5px;
+  top: -5px;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.5), transparent 68%);
+  box-shadow: none;
+  opacity: 0.9;
 }
 
-.pf-shell-brand-chip .pf-shell-weather-trigger::after {
-  inset: 4px;
-  border: 1px solid rgb(255 255 255 / 0.26);
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::after {
+  inset: 3px;
+  border: 1px solid rgb(255 255 255 / 0.28);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.04);
   animation: pf-weather-logo-breathe 3.2s var(--pf-motion-standard) infinite;
 }
 
-.pf-shell-brand-chip .pf-shell-weather-trigger svg {
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger svg {
   position: relative;
   z-index: 1;
 }
@@ -5986,6 +6251,39 @@ textarea {
   }
 }
 
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger,
+:root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger svg {
+  color: var(--pf-brand-mark-text, var(--pf-deep)) !important;
+}
+
+:where([class~="fixed"][class~="inset-0"]):is(
+  [class~="bg-slate-950/35"],
+  [class~="bg-slate-950/42"],
+  [class~="bg-slate-950/45"],
+  [class~="bg-slate-950/55"],
+  [class~="bg-slate-950/60"],
+  [class~="bg-slate-950/86"],
+  [class~="bg-zinc-950/70"],
+  [class~="bg-black/25"]
+) {
+  background-color: color-mix(in srgb, var(--pf-panel) 10%, transparent) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(1.04);
+  backdrop-filter: blur(8px) saturate(1.04);
+}
+
+:root.dark :where([class~="fixed"][class~="inset-0"]):is(
+  [class~="bg-slate-950/35"],
+  [class~="bg-slate-950/42"],
+  [class~="bg-slate-950/45"],
+  [class~="bg-slate-950/55"],
+  [class~="bg-slate-950/60"],
+  [class~="bg-slate-950/86"],
+  [class~="bg-zinc-950/70"],
+  [class~="bg-black/25"]
+) {
+  background-color: color-mix(in srgb, var(--pf-panel) 12%, transparent) !important;
+}
+
 .pf-metric-card {
   position: relative;
   overflow: hidden;
@@ -6061,10 +6359,10 @@ textarea {
   border-radius: 0;
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--pf-accent) 86%, var(--pf-text)) 0%,
-    color-mix(in srgb, var(--pf-accent-2) 70%, var(--pf-border)) 32%,
-    color-mix(in srgb, var(--pf-accent) 16%, transparent) 50%,
-    transparent 62%,
+    color-mix(in srgb, var(--pf-accent) 38%, transparent) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 28%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent) 9%, transparent) 72%,
+    transparent 86%,
     transparent 100%
   );
   pointer-events: none;
@@ -6073,10 +6371,10 @@ textarea {
 :root.dark .pf-gradient-divide > * + *::before {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--pf-accent) 86%, transparent) 0%,
-    color-mix(in srgb, var(--pf-accent-2) 76%, transparent) 32%,
-    color-mix(in srgb, var(--pf-accent) 18%, transparent) 50%,
-    transparent 62%,
+    color-mix(in srgb, var(--pf-accent) 42%, transparent) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 32%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent) 10%, transparent) 72%,
+    transparent 86%,
     transparent 100%
   );
 }
@@ -6084,10 +6382,10 @@ textarea {
 :root[data-ui-layout-scheme="workspace"] .pf-gradient-divide > * + *::before {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--pf-accent) 88%, var(--pf-text)) 0%,
-    color-mix(in srgb, var(--pf-accent-2) 72%, var(--pf-panel)) 32%,
-    color-mix(in srgb, var(--pf-accent) 18%, transparent) 50%,
-    transparent 62%,
+    color-mix(in srgb, var(--pf-accent) 44%, transparent) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 34%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent) 10%, transparent) 72%,
+    transparent 86%,
     transparent 100%
   );
 }
@@ -6095,10 +6393,10 @@ textarea {
 .pf-gradient-table-body tr + tr {
   background-image: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--pf-accent) 86%, var(--pf-text)) 0%,
-    color-mix(in srgb, var(--pf-accent-2) 70%, var(--pf-border)) 32%,
-    color-mix(in srgb, var(--pf-accent) 16%, transparent) 50%,
-    transparent 62%,
+    color-mix(in srgb, var(--pf-accent) 38%, transparent) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 28%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent) 9%, transparent) 72%,
+    transparent 86%,
     transparent 100%
   );
   background-position: left top;
@@ -6109,10 +6407,10 @@ textarea {
 :root.dark .pf-gradient-table-body tr + tr {
   background-image: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--pf-accent) 86%, transparent) 0%,
-    color-mix(in srgb, var(--pf-accent-2) 76%, transparent) 32%,
-    color-mix(in srgb, var(--pf-accent) 18%, transparent) 50%,
-    transparent 62%,
+    color-mix(in srgb, var(--pf-accent) 42%, transparent) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 32%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent) 10%, transparent) 72%,
+    transparent 86%,
     transparent 100%
   );
 }
@@ -6120,10 +6418,10 @@ textarea {
 :root[data-ui-layout-scheme="workspace"] .pf-gradient-table-body tr + tr {
   background-image: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--pf-accent) 88%, var(--pf-text)) 0%,
-    color-mix(in srgb, var(--pf-accent-2) 72%, var(--pf-panel)) 32%,
-    color-mix(in srgb, var(--pf-accent) 18%, transparent) 50%,
-    transparent 62%,
+    color-mix(in srgb, var(--pf-accent) 44%, transparent) 0%,
+    color-mix(in srgb, var(--pf-accent-2) 34%, transparent) 34%,
+    color-mix(in srgb, var(--pf-accent) 10%, transparent) 72%,
+    transparent 86%,
     transparent 100%
   );
 }

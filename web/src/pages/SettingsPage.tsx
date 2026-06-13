@@ -210,6 +210,16 @@ interface TextGenerationConfigTestMutationInput {
   payload: TextGenerationConfigTestRequest;
 }
 
+type PendingGenerationArchive =
+  | { kind: "resourceGroup"; id: string; name: string }
+  | { kind: "generationConfig"; id: string; name: string };
+
+interface ProviderSettingsRefreshOptions {
+  includeProviderModels?: boolean;
+  includeResourceGroups?: boolean;
+  includeRuntimeConfig?: boolean;
+}
+
 type TextProviderKind = "mock" | "openai";
 type ImageProviderKind =
   | "mock"
@@ -220,14 +230,14 @@ type ImageProviderKind =
 type ProviderModelKind = TextProviderKind | ImageProviderKind;
 
 const INPUT_CLASS =
-  "h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 " +
+  "h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 " +
   "placeholder:text-slate-400 shadow-sm shadow-slate-200/35 focus:border-indigo-500 focus:bg-white " +
   "focus:outline-none focus:ring-1 focus:ring-indigo-500 " +
   "dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/20 " +
   "dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]";
 
 const TEXTAREA_CLASS =
-  "w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 " +
+  "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-950 " +
   "placeholder:text-slate-400 shadow-sm shadow-slate-200/35 focus:border-indigo-500 focus:bg-white " +
   "focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] " +
   "dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-violet-400";
@@ -237,8 +247,28 @@ const PANEL_CLASS =
   "dark:border-slate-700/70 dark:bg-[#0f1726] dark:shadow-black/35";
 
 const SETTINGS_MAIN_ACTION_CLASS =
-  "inline-flex h-11 items-center justify-center rounded-lg bg-indigo-600 px-5 text-sm font-semibold text-white " +
-  "shadow-sm shadow-indigo-500/25 hover:bg-indigo-500 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-400";
+  "pf-workspace-action-primary inline-flex h-11 items-center justify-center rounded-2xl border px-5 text-sm font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const SETTINGS_SECONDARY_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-11 items-center justify-center rounded-2xl border px-5 text-sm font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const SETTINGS_COMPACT_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-9 items-center justify-center rounded-xl border px-3 text-sm font-medium " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const SETTINGS_ICON_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const SETTINGS_SQUARE_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const SETTINGS_DRAWER_SUBMIT_ACTION_CLASS =
+  "pf-workspace-action-primary inline-flex h-12 w-full items-center justify-center rounded-2xl border px-5 text-sm font-bold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const SETTINGS_DANGER_ACTION_CLASS =
+  "pf-danger-action inline-flex h-9 items-center justify-center rounded-xl border px-3 text-sm font-medium " +
+  "transition-colors disabled:opacity-50";
+const SETTINGS_DANGER_ICON_ACTION_CLASS =
+  "pf-danger-action inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-colors disabled:opacity-50";
 
 const SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS = 3000;
 
@@ -924,6 +954,56 @@ function generationConfigCountsForResourceGroup(
   );
 }
 
+function mergeActiveProviderConfigItem<T extends { id: string; archived_at?: string | null }>(items: T[], item: T): T[] {
+  const existingIndex = items.findIndex((current) => current.id === item.id);
+  if (item.archived_at) {
+    return existingIndex === -1 ? items : items.filter((current) => current.id !== item.id);
+  }
+  if (existingIndex === -1) {
+    return [...items, item];
+  }
+  return items.map((current) => (current.id === item.id ? item : current));
+}
+
+export function providerConfigWithProviderProfile(
+  data: ProviderConfigResponse | undefined,
+  profile: ProviderProfile,
+): ProviderConfigResponse | undefined {
+  if (!data) {
+    return data;
+  }
+  return {
+    ...data,
+    profiles: mergeActiveProviderConfigItem(data.profiles, profile),
+  };
+}
+
+export function providerConfigWithGenerationConfig(
+  data: ProviderConfigResponse | undefined,
+  generationConfig: GenerationConfig,
+): ProviderConfigResponse | undefined {
+  if (!data) {
+    return data;
+  }
+  return {
+    ...data,
+    generation_configs: mergeActiveProviderConfigItem(data.generation_configs, generationConfig),
+  };
+}
+
+export function providerConfigWithGenerationResourceGroup(
+  data: ProviderConfigResponse | undefined,
+  group: GenerationResourceGroup,
+): ProviderConfigResponse | undefined {
+  if (!data) {
+    return data;
+  }
+  return {
+    ...data,
+    generation_resource_groups: mergeActiveProviderConfigItem(data.generation_resource_groups, group),
+  };
+}
+
 function generationResourceGroupPayloadFromDraft(
   draft: GenerationResourceGroupDraft,
 ): GenerationResourceGroupCreateRequest | GenerationResourceGroupUpdateRequest {
@@ -1077,7 +1157,7 @@ function SettingsMigrationPanel({
             type="button"
             onClick={onChooseImportFile}
             disabled={!canMigrate || importPreviewBusy || importCommitBusy}
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:hover:bg-slate-800"
+            className={SETTINGS_SECONDARY_ACTION_CLASS}
           >
             {importPreviewBusy ? (
               <Loader2 size={14} className="mr-2 animate-spin" />
@@ -1113,7 +1193,7 @@ function SettingsMigrationPanel({
                 type="button"
                 onClick={onCancelImport}
                 disabled={importCommitBusy}
-                className="h-9 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-white/70 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-white/10"
+                className={SETTINGS_COMPACT_ACTION_CLASS}
               >
                 {t("common.cancel")}
               </button>
@@ -1516,7 +1596,7 @@ function ProviderModelInput({
               void modelsQuery.refetch();
             }}
             disabled={disabled || !canFetchModels || modelsQuery.isFetching}
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm shadow-slate-200/35 hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-400 dark:shadow-black/20 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+            className={SETTINGS_SQUARE_ACTION_CLASS}
             aria-label={t("settings.provider.refreshModels")}
             title={t("settings.provider.refreshModels")}
           >
@@ -2011,7 +2091,7 @@ function GenerationResourceGroupCard({
             type="button"
             onClick={onArchive}
             disabled={!canWrite || pending}
-            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
+            className={SETTINGS_DANGER_ACTION_CLASS}
           >
             {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
             {t("settings.resourceGroup.archive")}
@@ -2251,7 +2331,7 @@ function ProviderProfileCard({
           type="button"
           onClick={onEdit}
           disabled={!canWrite}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-300/50 dark:hover:text-violet-100"
+          className={SETTINGS_ICON_ACTION_CLASS}
           aria-label={t("settings.provider.editAria")}
           title={t("settings.provider.edit")}
         >
@@ -2261,7 +2341,7 @@ function ProviderProfileCard({
           type="button"
           onClick={onDelete}
           disabled={!canWrite || pending}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
+          className={SETTINGS_DANGER_ICON_ACTION_CLASS}
           aria-label={t("settings.provider.deleteAria")}
           title={t("settings.provider.deleteAria")}
         >
@@ -2502,7 +2582,7 @@ function ProviderProfileDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-950 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-white"
+            className={SETTINGS_ICON_ACTION_CLASS}
             aria-label={t("settings.provider.closeDrawer")}
             title={t("settings.provider.closeDrawer")}
           >
@@ -2611,7 +2691,7 @@ function ProviderProfileDrawer({
             <button
               type="submit"
               disabled={!canWrite || pending || !form.name.trim() || !form.capabilities.length}
-              className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-indigo-600 px-5 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition hover:bg-indigo-500 disabled:opacity-50 dark:bg-violet-500 dark:shadow-violet-950/30 dark:hover:bg-violet-400"
+              className={SETTINGS_DRAWER_SUBMIT_ACTION_CLASS}
             >
               {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
               {t("detail.save")}
@@ -2890,7 +2970,7 @@ function GenerationConfigPoolSection({
           <button
             type="button"
             onClick={onRefreshSort}
-            className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:hover:bg-slate-800"
+            className={SETTINGS_COMPACT_ACTION_CLASS}
           >
             <RefreshCw size={14} className="mr-2" />
             {t("settings.generation.refreshSort")}
@@ -3056,7 +3136,7 @@ function GenerationConfigCard({
               type="button"
               onClick={onTest}
               disabled={controlsDisabled || testing || !draft.name.trim() || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
-              className="inline-flex h-9 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100 dark:hover:bg-violet-500/20"
+              className={SETTINGS_COMPACT_ACTION_CLASS}
             >
               {testing ? <Loader2 size={14} className="mr-2 animate-spin" /> : <MessageSquareText size={14} className="mr-2" />}
               {t("settings.generation.test")}
@@ -3067,7 +3147,7 @@ function GenerationConfigCard({
               type="button"
               onClick={onUnfreeze}
               disabled={controlsDisabled}
-              className="inline-flex h-9 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-100 dark:hover:bg-amber-500/20"
+              className={SETTINGS_COMPACT_ACTION_CLASS}
             >
               {unfreezing ? <Loader2 size={14} className="mr-2 animate-spin" /> : <RotateCcw size={14} className="mr-2" />}
               {t("settings.generation.unfreeze")}
@@ -3078,7 +3158,7 @@ function GenerationConfigCard({
               type="button"
               onClick={onArchive}
               disabled={controlsDisabled}
-              className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-red-300/50 dark:hover:text-red-200"
+              className={SETTINGS_DANGER_ACTION_CLASS}
             >
               {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
               {t("settings.generation.archive")}
@@ -3557,6 +3637,7 @@ export function SettingsPage() {
   const [editingProviderProfileId, setEditingProviderProfileId] = useState<string | null>(null);
   const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
   const [pendingDeleteProviderProfile, setPendingDeleteProviderProfile] = useState<ProviderProfile | null>(null);
+  const [pendingGenerationArchive, setPendingGenerationArchive] = useState<PendingGenerationArchive | null>(null);
   const [togglingProviderProfileId, setTogglingProviderProfileId] = useState<string | null>(null);
   const [generationConfigDrafts, setGenerationConfigDrafts] = useState<Record<string, GenerationConfigDraft>>({});
   const [archivingGenerationConfigId, setArchivingGenerationConfigId] = useState<string | null>(null);
@@ -3654,6 +3735,32 @@ export function SettingsPage() {
     setSavedMessage("");
     setError("");
   }, []);
+
+  const refreshProviderSettingsQueries = useCallback(
+    async ({
+      includeProviderModels = false,
+      includeResourceGroups = false,
+      includeRuntimeConfig = false,
+    }: ProviderSettingsRefreshOptions = {}) => {
+      const refreshes = [
+        queryClient.invalidateQueries({ queryKey: ["provider-config"] }),
+        queryClient.invalidateQueries({ queryKey: ["generation-config-options"] }),
+        queryClient.invalidateQueries({ queryKey: ["generation-config-status"] }),
+      ];
+      if (includeProviderModels) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["provider-models"] }));
+      }
+      if (includeResourceGroups) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] }));
+      }
+      if (includeRuntimeConfig) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["config"] }));
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["runtime-config"] }));
+      }
+      await Promise.all(refreshes);
+    },
+    [queryClient],
+  );
 
   useEffect(() => {
     if (!savedMessage) {
@@ -3795,8 +3902,11 @@ export function SettingsPage() {
 
   const createProviderProfileMutation = useMutation({
     mutationFn: () => api.createProviderProfile(providerProfileCreatePayload(providerProfileForm)),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+    onSuccess: async (profile) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithProviderProfile(current, profile),
+      );
+      await refreshProviderSettingsQueries({ includeProviderModels: true });
       setProviderProfileForm(EMPTY_PROVIDER_FORM);
       setEditingProviderProfileId(null);
       setProviderDrawerOpen(false);
@@ -3816,8 +3926,11 @@ export function SettingsPage() {
       }
       return api.updateProviderProfile(editingProviderProfileId, providerProfileUpdatePayload(providerProfileForm));
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+    onSuccess: async (profile) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithProviderProfile(current, profile),
+      );
+      await refreshProviderSettingsQueries({ includeProviderModels: true });
       setProviderProfileForm(EMPTY_PROVIDER_FORM);
       setEditingProviderProfileId(null);
       setProviderDrawerOpen(false);
@@ -3832,8 +3945,11 @@ export function SettingsPage() {
 
   const deleteProviderProfileMutation = useMutation({
     mutationFn: (profileId: string) => api.archiveProviderProfile(profileId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+    onSuccess: async (profile) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithProviderProfile(current, profile),
+      );
+      await refreshProviderSettingsQueries({ includeProviderModels: true });
       setPendingDeleteProviderProfile(null);
       setError("");
       setSavedMessage(t("settings.provider.deletedMessage"));
@@ -3853,8 +3969,11 @@ export function SettingsPage() {
       setError("");
       setSavedMessage("");
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+    onSuccess: async (profile) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithProviderProfile(current, profile),
+      );
+      await refreshProviderSettingsQueries();
       setError("");
       setSavedMessage(t("settings.provider.saved"));
     },
@@ -3872,10 +3991,11 @@ export function SettingsPage() {
         ? api.updateGenerationConfig(draft.id, payload as GenerationConfigUpdateRequest)
         : api.createGenerationConfig(payload as GenerationConfigCreateRequest);
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
+    onSuccess: async (generationConfig) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationConfig(current, generationConfig),
+      );
+      await refreshProviderSettingsQueries({ includeRuntimeConfig: true });
       setError("");
       setSavedMessage(t("settings.generation.saved"));
     },
@@ -3892,10 +4012,11 @@ export function SettingsPage() {
       setError("");
       setSavedMessage("");
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
+    onSuccess: async (generationConfig) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationConfig(current, generationConfig),
+      );
+      await refreshProviderSettingsQueries({ includeRuntimeConfig: true });
       setError("");
       setSavedMessage(t("settings.generation.archived"));
     },
@@ -3903,7 +4024,10 @@ export function SettingsPage() {
       setSavedMessage("");
       setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.archiveFailed"));
     },
-    onSettled: () => setArchivingGenerationConfigId(null),
+    onSettled: () => {
+      setArchivingGenerationConfigId(null);
+      setPendingGenerationArchive(null);
+    },
   });
 
   const unfreezeGenerationConfigMutation = useMutation({
@@ -3913,10 +4037,11 @@ export function SettingsPage() {
       setError("");
       setSavedMessage("");
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
+    onSuccess: async (generationConfig) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationConfig(current, generationConfig),
+      );
+      await refreshProviderSettingsQueries();
       setError("");
       setSavedMessage(t("settings.generation.unfrozen"));
     },
@@ -3934,11 +4059,11 @@ export function SettingsPage() {
         ? api.updateGenerationResourceGroup(draft.id, payload as GenerationResourceGroupUpdateRequest)
         : api.createGenerationResourceGroup(payload as GenerationResourceGroupCreateRequest);
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
-      await queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
+    onSuccess: async (group) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationResourceGroup(current, group),
+      );
+      await refreshProviderSettingsQueries({ includeResourceGroups: true });
       setError("");
       setSavedMessage(t("settings.resourceGroup.saved"));
     },
@@ -3955,11 +4080,11 @@ export function SettingsPage() {
       setError("");
       setSavedMessage("");
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
-      await queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
+    onSuccess: async (group) => {
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationResourceGroup(current, group),
+      );
+      await refreshProviderSettingsQueries({ includeResourceGroups: true });
       setError("");
       setSavedMessage(t("settings.resourceGroup.archived"));
     },
@@ -3967,7 +4092,10 @@ export function SettingsPage() {
       setSavedMessage("");
       setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.resourceGroup.archiveFailed"));
     },
-    onSettled: () => setArchivingGenerationResourceGroupId(null),
+    onSettled: () => {
+      setArchivingGenerationResourceGroupId(null);
+      setPendingGenerationArchive(null);
+    },
   });
 
   const testTextGenerationConfigMutation = useMutation({
@@ -4030,6 +4158,44 @@ export function SettingsPage() {
   const providerPending = providerProfilePending || saveGenerationConfigMutation.isPending;
   const resourceGroupPending =
     saveGenerationResourceGroupMutation.isPending || archiveGenerationResourceGroupMutation.isPending;
+  const requestGenerationResourceGroupArchive = useCallback(
+    (groupId: string) => {
+      const group = providerConfigQuery.data?.generation_resource_groups.find((item) => item.id === groupId);
+      setPendingGenerationArchive({ kind: "resourceGroup", id: groupId, name: group?.name ?? groupId });
+    },
+    [providerConfigQuery.data],
+  );
+  const requestGenerationConfigArchive = useCallback(
+    (configId: string) => {
+      const config = providerConfigQuery.data?.generation_configs.find((item) => item.id === configId);
+      setPendingGenerationArchive({ kind: "generationConfig", id: configId, name: config?.name ?? configId });
+    },
+    [providerConfigQuery.data],
+  );
+  const pendingGenerationArchiveBusy =
+    pendingGenerationArchive?.kind === "resourceGroup"
+      ? archiveGenerationResourceGroupMutation.isPending
+      : pendingGenerationArchive?.kind === "generationConfig"
+        ? archiveGenerationConfigMutation.isPending
+        : false;
+  const pendingGenerationArchiveTitle =
+    pendingGenerationArchive?.kind === "resourceGroup"
+      ? t("settings.resourceGroup.archiveConfirmTitle")
+      : pendingGenerationArchive?.kind === "generationConfig"
+        ? t("settings.generation.archiveConfirmTitle")
+        : "";
+  const pendingGenerationArchiveDescription =
+    pendingGenerationArchive?.kind === "resourceGroup"
+      ? t("settings.resourceGroup.archiveConfirm", { name: pendingGenerationArchive.name })
+      : pendingGenerationArchive?.kind === "generationConfig"
+        ? t("settings.generation.archiveConfirm", { name: pendingGenerationArchive.name })
+        : "";
+  const pendingGenerationArchiveConfirmLabel =
+    pendingGenerationArchive?.kind === "resourceGroup"
+      ? t("settings.resourceGroup.archive")
+      : pendingGenerationArchive?.kind === "generationConfig"
+        ? t("settings.generation.archive")
+        : "";
 
   const loadingMain = configQuery.isLoading || providerConfigQuery.isLoading;
   const genericSection = ["prompts", "upload", "queue", "layoutAppearance", "security"].includes(activeSection);
@@ -4336,7 +4502,7 @@ export function SettingsPage() {
                           if (!canWriteProviderSettings) {
                             return;
                           }
-                          archiveGenerationResourceGroupMutation.mutate(groupId);
+                          requestGenerationResourceGroupArchive(groupId);
                         }}
                       />
                     ) : null}
@@ -4367,7 +4533,7 @@ export function SettingsPage() {
                           if (!canWriteProviderSettings) {
                             return;
                           }
-                          archiveGenerationConfigMutation.mutate(configId);
+                          requestGenerationConfigArchive(configId);
                         }}
                         onUnfreeze={(configId) => {
                           if (!canWriteProviderSettings) {
@@ -4388,7 +4554,7 @@ export function SettingsPage() {
                           });
                         }}
                         onRefreshSort={() => {
-                          void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+                          void refreshProviderSettingsQueries();
                         }}
                         unfreezingConfigId={unfreezingGenerationConfigId}
                       />
@@ -4419,7 +4585,7 @@ export function SettingsPage() {
                           if (!canWriteProviderSettings) {
                             return;
                           }
-                          archiveGenerationConfigMutation.mutate(configId);
+                          requestGenerationConfigArchive(configId);
                         }}
                         onUnfreeze={(configId) => {
                           if (!canWriteProviderSettings) {
@@ -4428,7 +4594,7 @@ export function SettingsPage() {
                           unfreezeGenerationConfigMutation.mutate(configId);
                         }}
                         onRefreshSort={() => {
-                          void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+                          void refreshProviderSettingsQueries();
                         }}
                         unfreezingConfigId={unfreezingGenerationConfigId}
                       />
@@ -4531,7 +4697,7 @@ export function SettingsPage() {
                             type="button"
                             onClick={() => resetDraftsFromConfig(configQuery.data)}
                             disabled={!canWriteRuntimeSettings}
-                            className="px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-slate-300 dark:hover:text-white"
+                            className={SETTINGS_COMPACT_ACTION_CLASS}
                           >
                             {t("settings.discard")}
                           </button>
@@ -4585,6 +4751,29 @@ export function SettingsPage() {
             if (canWriteProviderSettings && pendingDeleteProviderProfile) {
               deleteProviderProfileMutation.mutate(pendingDeleteProviderProfile.id);
             }
+          }}
+        />
+        <ConfirmDialog
+          open={Boolean(pendingGenerationArchive)}
+          title={pendingGenerationArchiveTitle}
+          description={pendingGenerationArchiveDescription}
+          confirmLabel={pendingGenerationArchiveConfirmLabel}
+          cancelLabel={t("common.cancel")}
+          busy={pendingGenerationArchiveBusy}
+          onClose={() => {
+            if (!pendingGenerationArchiveBusy) {
+              setPendingGenerationArchive(null);
+            }
+          }}
+          onConfirm={() => {
+            if (!canWriteProviderSettings || !pendingGenerationArchive) {
+              return;
+            }
+            if (pendingGenerationArchive.kind === "resourceGroup") {
+              archiveGenerationResourceGroupMutation.mutate(pendingGenerationArchive.id);
+              return;
+            }
+            archiveGenerationConfigMutation.mutate(pendingGenerationArchive.id);
           }}
         />
       </main>

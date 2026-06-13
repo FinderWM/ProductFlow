@@ -33,6 +33,12 @@ const RESOURCE_LIBRARY_SOURCE_TYPES: ResourceLibrarySourceType[] = [
   "image_session_asset",
   "upload",
 ];
+const RESOURCE_LIBRARY_GROUP_ACTIVE_CLASS =
+  "font-semibold text-indigo-700 bg-[linear-gradient(90deg,rgba(99,102,241,0.22),rgba(99,102,241,0.03)_32%,rgba(99,102,241,0.03)_68%,rgba(99,102,241,0.22))] " +
+  "dark:text-violet-100 dark:bg-[linear-gradient(90deg,rgba(139,92,246,0.32),rgba(139,92,246,0.04)_32%,rgba(139,92,246,0.04)_68%,rgba(139,92,246,0.32))]";
+const RESOURCE_LIBRARY_GROUP_IDLE_CLASS =
+  "text-slate-500 hover:text-slate-800 hover:bg-[linear-gradient(90deg,rgba(100,116,139,0.13),rgba(100,116,139,0.02)_32%,rgba(100,116,139,0.02)_68%,rgba(100,116,139,0.13))] " +
+  "dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-[linear-gradient(90deg,rgba(139,92,246,0.16),rgba(139,92,246,0.02)_32%,rgba(139,92,246,0.02)_68%,rgba(139,92,246,0.16))]";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.detail : fallback;
@@ -467,10 +473,8 @@ function ResourceLibraryManagePage({
               <button
                 type="button"
                 onClick={() => setSelectedGroupId("")}
-                className={`flex h-10 w-full items-center rounded-lg px-3 text-left text-sm font-semibold ${
-                  !selectedGroupId
-                    ? "bg-slate-950 text-white dark:bg-violet-500/25 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40"
-                    : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                className={`flex h-10 w-full items-center rounded-lg px-3 text-left text-sm transition-colors ${
+                  !selectedGroupId ? RESOURCE_LIBRARY_GROUP_ACTIVE_CLASS : RESOURCE_LIBRARY_GROUP_IDLE_CLASS
                 }`}
               >
                 {t("resourceLibrary.allGroups")}
@@ -480,10 +484,10 @@ function ResourceLibraryManagePage({
                 return (
                   <div
                     key={group.id}
-                    className={`rounded-lg ${
+                    className={`rounded-lg transition-colors ${
                       selectedGroupId === group.id
-                        ? "bg-slate-950 text-white dark:bg-violet-500/25 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40"
-                        : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                        ? RESOURCE_LIBRARY_GROUP_ACTIVE_CLASS
+                        : RESOURCE_LIBRARY_GROUP_IDLE_CLASS
                     }`}
                   >
                     {editing ? (
@@ -543,7 +547,7 @@ function ResourceLibraryManagePage({
                         <button
                           type="button"
                           onClick={() => setPendingArchive({ kind: "group", id: group.id, name: group.name })}
-                          className="mr-1 inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-200"
+                          className="pf-danger-action mr-1 inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors"
                           aria-label={t("resourceLibrary.archiveGroup")}
                           title={t("resourceLibrary.archiveGroup")}
                         >
@@ -668,7 +672,7 @@ function ResourceLibraryManagePage({
                           <button
                             type="button"
                             onClick={() => setPendingArchive({ kind: "asset", id: asset.id, name: asset.original_filename })}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-400/35 dark:text-red-200 dark:hover:bg-red-500/10"
+                            className="pf-danger-action inline-flex h-9 w-9 items-center justify-center rounded-lg border transition-colors"
                             aria-label={t("resourceLibrary.archiveAsset")}
                             title={t("resourceLibrary.archiveAsset")}
                           >

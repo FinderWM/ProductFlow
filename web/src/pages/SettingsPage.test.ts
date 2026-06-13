@@ -14,6 +14,9 @@ import {
   markTextConfigTestStarted,
   markTextConfigTestSucceeded,
   providerDisableBlocked,
+  providerConfigWithGenerationConfig,
+  providerConfigWithGenerationResourceGroup,
+  providerConfigWithProviderProfile,
   providerDrawerCreateState,
   providerDrawerEditState,
   providerFormFromProfile,
@@ -39,6 +42,7 @@ import type {
   GenerationConfig,
   GenerationResourceGroup,
   ProviderCapability,
+  ProviderConfigResponse,
   ProviderModel,
   ProviderProfile,
   SettingsImportPreviewResponse,
@@ -154,6 +158,16 @@ function generationResourceGroup(overrides: Partial<GenerationResourceGroup> = {
     archived_at: overrides.archived_at ?? null,
     created_at: overrides.created_at ?? "2026-05-13T00:00:00Z",
     updated_at: overrides.updated_at ?? "2026-05-13T00:00:00Z",
+  };
+}
+
+function providerConfigResponse(overrides: Partial<ProviderConfigResponse> = {}): ProviderConfigResponse {
+  return {
+    profiles: overrides.profiles ?? [providerProfile()],
+    bindings: overrides.bindings ?? [],
+    generation_resource_groups: overrides.generation_resource_groups ?? [generationResourceGroup()],
+    generation_configs: overrides.generation_configs ?? [generationConfig({ purpose: "text" })],
+    status_summary: overrides.status_summary ?? null,
   };
 }
 
@@ -725,6 +739,62 @@ describe("SettingsPage provider profile helpers", () => {
     expect(providerDisableBlocked(providerProfile({ enabled: false }), { text: true, image: true })).toBe(false);
   });
 
+  it("merges provider profile mutation responses into provider config cache", () => {
+    const cached = providerConfigResponse({
+      profiles: [providerProfile({ id: "profile-1", name: "Old" })],
+    });
+
+    expect(
+      providerConfigWithProviderProfile(cached, providerProfile({ id: "profile-1", name: "Updated" }))?.profiles,
+    ).toMatchObject([{ id: "profile-1", name: "Updated" }]);
+    expect(
+      providerConfigWithProviderProfile(cached, providerProfile({ id: "profile-1", archived_at: "2026-06-13T00:00:00Z" }))
+        ?.profiles,
+    ).toEqual([]);
+  });
+
+  it("merges generation config mutation responses into provider config cache", () => {
+    const cached = providerConfigResponse({
+      generation_configs: [generationConfig({ id: "text-config", purpose: "text", name: "Old" })],
+    });
+
+    expect(
+      providerConfigWithGenerationConfig(
+        cached,
+        generationConfig({ id: "text-config", purpose: "text", name: "Updated" }),
+      )?.generation_configs,
+    ).toMatchObject([{ id: "text-config", name: "Updated" }]);
+    expect(
+      providerConfigWithGenerationConfig(
+        cached,
+        generationConfig({
+          id: "text-config",
+          purpose: "text",
+          archived_at: "2026-06-13T00:00:00Z",
+        }),
+      )?.generation_configs,
+    ).toEqual([]);
+  });
+
+  it("merges generation resource group mutation responses into provider config cache", () => {
+    const cached = providerConfigResponse({
+      generation_resource_groups: [generationResourceGroup({ id: "group-default", name: "Old" })],
+    });
+
+    expect(
+      providerConfigWithGenerationResourceGroup(
+        cached,
+        generationResourceGroup({ id: "group-default", name: "Updated" }),
+      )?.generation_resource_groups,
+    ).toMatchObject([{ id: "group-default", name: "Updated" }]);
+    expect(
+      providerConfigWithGenerationResourceGroup(
+        cached,
+        generationResourceGroup({ id: "group-default", archived_at: "2026-06-13T00:00:00Z" }),
+      )?.generation_resource_groups,
+    ).toEqual([]);
+  });
+
   it("keeps settings generation groups in API order while keeping disabled groups visible", () => {
     const groups = settingsGenerationResourceGroupsInApiOrder([
       generationResourceGroup({ id: "default", name: "default", sort_order: 0 }),
@@ -748,6 +818,25 @@ describe("SettingsPage provider profile helpers", () => {
       'Delete "OpenRouter"?',
     );
     expect(translate("en-US", "settings.provider.deleteConfirmLabel")).toBe("Delete");
+  });
+
+  it("localizes generation archive confirmation dialog copy", () => {
+    expect(translate("zh-CN", "settings.resourceGroup.archiveConfirmTitle")).toBe("归档生成分组");
+    expect(translate("zh-CN", "settings.resourceGroup.archiveConfirm", { name: "default" })).toBe(
+      "确定归档生成分组「default」吗？归档后该分组不再出现在调度配置里。",
+    );
+    expect(translate("zh-CN", "settings.generation.archiveConfirmTitle")).toBe("归档生成配置");
+    expect(translate("zh-CN", "settings.generation.archiveConfirm", { name: "main" })).toBe(
+      "确定归档生成配置「main」吗？归档后该配置不再参与调度。",
+    );
+    expect(translate("en-US", "settings.resourceGroup.archiveConfirm", { name: "default" })).toBe(
+      'Archive generation group "default"? It will no longer appear in scheduling settings.',
+    );
+    expect(translate("en-US", "settings.generation.archiveConfirm", { name: "main" })).toBe(
+      'Archive generation config "main"? It will no longer participate in scheduling.',
+    );
+    expect(translate("ja-JP", "settings.resourceGroup.archiveConfirmTitle")).toBe("生成グループをアーカイブ");
+    expect(translate("ja-JP", "settings.generation.archiveConfirmTitle")).toBe("生成設定をアーカイブ");
   });
 
   it("localizes Google Gemini provider labels", () => {

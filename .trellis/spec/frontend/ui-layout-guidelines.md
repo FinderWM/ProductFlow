@@ -92,6 +92,12 @@ Current classic page surfaces include:
   requirement explicitly designs scheme-specific public pages.
 - Do not assume `App.tsx` `LayoutSchemeRoute` is the only workspace dispatch mechanism. Some routes branch internally with
   `activeScheme`, so route audits must inspect both `App.tsx` and page-level layout branches.
+- Workspace subpage controls must keep semantic control classes above broad glass-panel selectors. Primary, secondary,
+  compact, icon, and destructive buttons should use semantic classes such as `pf-workspace-action-primary`,
+  `pf-workspace-action-secondary`, and `pf-danger-action` so default, hover, focus-visible, active, and disabled states
+  resolve through `--pf-*` tokens in `mist`, `sage`, and `dusk`. Broad selectors that flatten panels or cards must exclude
+  `input`, `textarea`, `select`, `button`, and these semantic action classes; otherwise rounded buttons and inputs are
+  painted as passive panels and lose their state styling.
 
 Current workspace page surfaces include:
 
