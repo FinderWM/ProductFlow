@@ -93,9 +93,14 @@ export function SelectField({
   }, [activeOption, open]);
 
   useEffect(() => {
-    if (open && searchable) {
-      searchInputRef.current?.focus();
+    if (!open || !searchable) {
+      return undefined;
     }
+    const frame = window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [open, searchable]);
 
   const radiusClassName = radius === "lg" ? "rounded-lg" : "rounded-xl";
@@ -191,7 +196,7 @@ export function SelectField({
         layer="modal"
         matchTriggerWidth
         onOpenChange={setOpen}
-        className={`flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10 ${menuTextClassName}`}
+        className={`pf-select-field-surface flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10 ${menuTextClassName}`}
       >
         {searchable ? (
           <div className="border-b border-slate-100 p-1.5 dark:border-slate-800">

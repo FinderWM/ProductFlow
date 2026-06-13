@@ -140,6 +140,19 @@ export interface WorkspaceTopNavTargetInput {
   workspaceTo?: string;
 }
 
+export interface DesktopMoreMenuState {
+  open: boolean;
+  pinned: boolean;
+}
+
+export type DesktopMoreMenuAction = "hover-open" | "button-click" | "close";
+
+export interface DesktopMoreBlurState {
+  hasNextTarget: boolean;
+  nextTargetInsideTrigger: boolean;
+  nextTargetInsideMenu: boolean;
+}
+
 const DESKTOP_NAV_GAP_PX = 4;
 const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 36;
 const WORKSPACE_NAV_HORIZONTAL_CHROME_PX = 36;
@@ -154,6 +167,7 @@ const navItems: TopNavItem[] = [
   {
     labelKey: "nav.resourceLibrary",
     to: "/resource-library",
+    workspaceTo: "/resource-library/manage",
     menuCode: null,
     priority: "primary",
     icon: Trees,
@@ -542,6 +556,30 @@ function workspaceOrderedItems(items: TopNavItem[]): TopNavItem[] {
 
 export function workspaceTopNavTarget(item: WorkspaceTopNavTargetInput): string {
   return item.workspaceTo ?? item.to;
+}
+
+export function nextDesktopMoreMenuState(
+  state: DesktopMoreMenuState,
+  action: DesktopMoreMenuAction,
+): DesktopMoreMenuState {
+  if (action === "close") {
+    return { open: false, pinned: false };
+  }
+  if (action === "hover-open") {
+    return { open: true, pinned: state.pinned };
+  }
+  if (state.open && state.pinned) {
+    return { open: false, pinned: false };
+  }
+  return { open: true, pinned: true };
+}
+
+export function shouldCloseDesktopMoreOnBlur({
+  hasNextTarget,
+  nextTargetInsideMenu,
+  nextTargetInsideTrigger,
+}: DesktopMoreBlurState): boolean {
+  return !hasNextTarget || (!nextTargetInsideTrigger && !nextTargetInsideMenu);
 }
 
 function isWorkspaceNavItemActive(item: TopNavItem, pathname: string): boolean {
@@ -1452,6 +1490,7 @@ export function TopNav({ onLogout }: TopNavProps) {
   const desktopMeasureItemRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const desktopMoreMeasureRef = useRef<HTMLSpanElement | null>(null);
   const desktopMoreButtonRef = useRef<HTMLButtonElement | null>(null);
+  const desktopMoreMenuRef = useRef<HTMLDivElement | null>(null);
   const desktopMoreCloseTimerRef = useRef<number | null>(null);
   const desktopMorePinnedRef = useRef(false);
   const desktopRightControlsRef = useRef<HTMLDivElement | null>(null);
@@ -1592,6 +1631,7 @@ export function TopNav({ onLogout }: TopNavProps) {
     clearCurtainAutoHideTimer();
     curtainAutoHideTimerRef.current = window.setTimeout(() => {
       setCurtainOpen(false);
+      desktopMorePinnedRef.current = false;
       setDesktopMoreOpen(false);
       setMobileMoreOpen(false);
       curtainAutoHideTimerRef.current = null;
@@ -1632,16 +1672,39 @@ export function TopNav({ onLogout }: TopNavProps) {
     }
   }, []);
 
+  const applyDesktopMoreMenuAction = useCallback((action: DesktopMoreMenuAction) => {
+    setDesktopMoreOpen((currentOpen) => {
+      const nextState = nextDesktopMoreMenuState(
+        { open: currentOpen, pinned: desktopMorePinnedRef.current },
+        action,
+      );
+      desktopMorePinnedRef.current = nextState.pinned;
+      return nextState.open;
+    });
+  }, []);
+
+  const closeDesktopMoreMenu = useCallback(() => {
+    applyDesktopMoreMenuAction("close");
+  }, [applyDesktopMoreMenuAction]);
+
+  const openDesktopMoreMenuFromHover = useCallback(() => {
+    applyDesktopMoreMenuAction("hover-open");
+  }, [applyDesktopMoreMenuAction]);
+
+  const toggleDesktopMoreMenuFromButton = useCallback(() => {
+    applyDesktopMoreMenuAction("button-click");
+  }, [applyDesktopMoreMenuAction]);
+
   const scheduleDesktopMoreClose = useCallback(() => {
     if (desktopMorePinnedRef.current) {
       return;
     }
     clearDesktopMoreCloseTimer();
     desktopMoreCloseTimerRef.current = window.setTimeout(() => {
-      setDesktopMoreOpen(false);
+      closeDesktopMoreMenu();
       desktopMoreCloseTimerRef.current = null;
     }, 180);
-  }, [clearDesktopMoreCloseTimer]);
+  }, [clearDesktopMoreCloseTimer, closeDesktopMoreMenu]);
 
   const updateDesktopNavLayout = useCallback(() => {
     const navArea = desktopNavAreaRef.current;
@@ -1746,14 +1809,13 @@ export function TopNav({ onLogout }: TopNavProps) {
   );
 
   useEffect(() => {
-    setDesktopMoreOpen(false);
-    desktopMorePinnedRef.current = false;
+    closeDesktopMoreMenu();
     setMobileMoreOpen(false);
     scheduleCurtainAutoHide();
     setWorkspaceThemeDockOpen(true);
     setWorkspaceThemeDockPassThrough(false);
     scheduleWorkspaceThemeDockAutoHide();
-  }, [location.pathname, scheduleCurtainAutoHide, scheduleWorkspaceThemeDockAutoHide]);
+  }, [closeDesktopMoreMenu, location.pathname, scheduleCurtainAutoHide, scheduleWorkspaceThemeDockAutoHide]);
 
   useEffect(() => {
     const handlePageActivity = () => {
@@ -1895,16 +1957,15 @@ export function TopNav({ onLogout }: TopNavProps) {
 
   useEffect(() => {
     if (desktopOverflowNavItems.length === 0) {
-      desktopMorePinnedRef.current = false;
-      setDesktopMoreOpen(false);
+      closeDesktopMoreMenu();
     }
-  }, [desktopOverflowNavItems.length]);
+  }, [closeDesktopMoreMenu, desktopOverflowNavItems.length]);
 
   useEffect(() => {
     if (shellScheme === "workspace" && workspaceMoreNavItems.length === 0) {
-      setDesktopMoreOpen(false);
+      closeDesktopMoreMenu();
     }
-  }, [shellScheme, workspaceMoreNavItems.length]);
+  }, [closeDesktopMoreMenu, shellScheme, workspaceMoreNavItems.length]);
 
   useEffect(() => {
     if (!desktopMoreOpen || typeof window === "undefined") {
@@ -1915,15 +1976,14 @@ export function TopNav({ onLogout }: TopNavProps) {
       const compactQuery = shellScheme === "workspace" ? "(max-width: 980px)" : "(max-width: 767.98px)";
       if (window.matchMedia(compactQuery).matches) {
         clearDesktopMoreCloseTimer();
-        desktopMorePinnedRef.current = false;
-        setDesktopMoreOpen(false);
+        closeDesktopMoreMenu();
       }
     };
 
     closeDesktopMoreInCompactMode();
     window.addEventListener("resize", closeDesktopMoreInCompactMode);
     return () => window.removeEventListener("resize", closeDesktopMoreInCompactMode);
-  }, [clearDesktopMoreCloseTimer, desktopMoreOpen, shellScheme]);
+  }, [clearDesktopMoreCloseTimer, closeDesktopMoreMenu, desktopMoreOpen, shellScheme]);
 
   useEffect(() => {
     if (!mobileMoreOpen) {
@@ -2082,7 +2142,7 @@ export function TopNav({ onLogout }: TopNavProps) {
         className="pf-shell-more-item"
         onClick={() => {
           clearDesktopMoreCloseTimer();
-          setDesktopMoreOpen(false);
+          closeDesktopMoreMenu();
         }}
       >
         <span>{label}</span>
@@ -2205,20 +2265,27 @@ export function TopNav({ onLogout }: TopNavProps) {
                 onPointerEnter={() => {
                   clearDesktopMoreCloseTimer();
                   keepCurtainOpen();
-                  setDesktopMoreOpen(true);
+                  openDesktopMoreMenuFromHover();
                 }}
                 onPointerLeave={scheduleDesktopMoreClose}
                 onBlur={(event) => {
                   const nextTarget = event.relatedTarget;
-                  if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                  const hasNextTarget = nextTarget instanceof Node;
+                  if (
+                    shouldCloseDesktopMoreOnBlur({
+                      hasNextTarget,
+                      nextTargetInsideTrigger: hasNextTarget && event.currentTarget.contains(nextTarget),
+                      nextTargetInsideMenu: hasNextTarget && Boolean(desktopMoreMenuRef.current?.contains(nextTarget)),
+                    })
+                  ) {
                     clearDesktopMoreCloseTimer();
-                    setDesktopMoreOpen(false);
+                    closeDesktopMoreMenu();
                   }
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
                     clearDesktopMoreCloseTimer();
-                    setDesktopMoreOpen(false);
+                    closeDesktopMoreMenu();
                   }
                 }}
               >
@@ -2231,7 +2298,7 @@ export function TopNav({ onLogout }: TopNavProps) {
                   onClick={() => {
                     clearDesktopMoreCloseTimer();
                     keepCurtainOpen();
-                    setDesktopMoreOpen((current) => !current);
+                    toggleDesktopMoreMenuFromButton();
                   }}
                 >
                   {t("nav.more")}
@@ -2248,12 +2315,15 @@ export function TopNav({ onLogout }: TopNavProps) {
                   onOpenChange={(nextOpen) => {
                     if (!nextOpen) {
                       clearDesktopMoreCloseTimer();
+                      closeDesktopMoreMenu();
+                      return;
                     }
-                    setDesktopMoreOpen(nextOpen);
+                    openDesktopMoreMenuFromHover();
                   }}
                   className="pf-shell-more-panel"
                 >
                   <div
+                    ref={desktopMoreMenuRef}
                     role="menu"
                     aria-label={t("nav.more")}
                     onPointerEnter={clearDesktopMoreCloseTimer}
@@ -2311,7 +2381,7 @@ export function TopNav({ onLogout }: TopNavProps) {
             className="pf-shell-action-ball"
             onClick={() => {
               clearDesktopMoreCloseTimer();
-              setDesktopMoreOpen(false);
+              closeDesktopMoreMenu();
               setMobileMoreOpen((current) => !current);
             }}
           >
@@ -2448,22 +2518,27 @@ export function TopNav({ onLogout }: TopNavProps) {
                       onPointerEnter={() => {
                         clearDesktopMoreCloseTimer();
                         keepCurtainOpen();
-                        setDesktopMoreOpen(true);
+                        openDesktopMoreMenuFromHover();
                       }}
                       onPointerLeave={scheduleDesktopMoreClose}
                       onBlur={(event) => {
                         const nextTarget = event.relatedTarget;
-                        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                        const hasNextTarget = nextTarget instanceof Node;
+                        if (
+                          shouldCloseDesktopMoreOnBlur({
+                            hasNextTarget,
+                            nextTargetInsideTrigger: hasNextTarget && event.currentTarget.contains(nextTarget),
+                            nextTargetInsideMenu: hasNextTarget && Boolean(desktopMoreMenuRef.current?.contains(nextTarget)),
+                          })
+                        ) {
                           clearDesktopMoreCloseTimer();
-                          desktopMorePinnedRef.current = false;
-                          setDesktopMoreOpen(false);
+                          closeDesktopMoreMenu();
                         }
                       }}
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           clearDesktopMoreCloseTimer();
-                          desktopMorePinnedRef.current = false;
-                          setDesktopMoreOpen(false);
+                          closeDesktopMoreMenu();
                         }
                       }}
                     >
@@ -2477,14 +2552,7 @@ export function TopNav({ onLogout }: TopNavProps) {
                         onClick={() => {
                           clearDesktopMoreCloseTimer();
                           keepCurtainOpen();
-                          setDesktopMoreOpen((current) => {
-                            if (current && desktopMorePinnedRef.current) {
-                              desktopMorePinnedRef.current = false;
-                              return false;
-                            }
-                            desktopMorePinnedRef.current = true;
-                            return true;
-                          });
+                          toggleDesktopMoreMenuFromButton();
                         }}
                       >
                         <MoreHorizontal size={16} aria-hidden="true" />
@@ -2498,41 +2566,42 @@ export function TopNav({ onLogout }: TopNavProps) {
                         onOpenChange={(nextOpen) => {
                           if (!nextOpen) {
                             clearDesktopMoreCloseTimer();
-                            desktopMorePinnedRef.current = false;
+                            closeDesktopMoreMenu();
+                            return;
                           }
-                          setDesktopMoreOpen(nextOpen);
+                          openDesktopMoreMenuFromHover();
                         }}
                         className={desktopMoreMenuClassName()}
                       >
-                      <div
-                        role="menu"
-                        aria-label={t("nav.more")}
-                        onPointerEnter={clearDesktopMoreCloseTimer}
-                        onPointerLeave={scheduleDesktopMoreClose}
-                      >
-                        {desktopOverflowNavItems.map((item) => {
-                          const Icon = item.icon;
-                          const active = item.match(location.pathname);
-                          const label = t(item.labelKey);
-                          return (
-                            <Link
-                              key={item.to}
-                              to={item.to}
-                              role="menuitem"
-                              aria-current={active ? "page" : undefined}
-                              className={menuItemClassName(active)}
-                              onClick={() => {
-                                clearDesktopMoreCloseTimer();
-                                desktopMorePinnedRef.current = false;
-                                setDesktopMoreOpen(false);
-                              }}
-                            >
-                              <Icon size={16} aria-hidden="true" />
-                              <span className="truncate">{label}</span>
-                            </Link>
-                          );
-                        })}
-                      </div>
+                        <div
+                          ref={desktopMoreMenuRef}
+                          role="menu"
+                          aria-label={t("nav.more")}
+                          onPointerEnter={clearDesktopMoreCloseTimer}
+                          onPointerLeave={scheduleDesktopMoreClose}
+                        >
+                          {desktopOverflowNavItems.map((item) => {
+                            const Icon = item.icon;
+                            const active = item.match(location.pathname);
+                            const label = t(item.labelKey);
+                            return (
+                              <Link
+                                key={item.to}
+                                to={item.to}
+                                role="menuitem"
+                                aria-current={active ? "page" : undefined}
+                                className={menuItemClassName(active)}
+                                onClick={() => {
+                                  clearDesktopMoreCloseTimer();
+                                  closeDesktopMoreMenu();
+                                }}
+                              >
+                                <Icon size={16} aria-hidden="true" />
+                                <span className="truncate">{label}</span>
+                              </Link>
+                            );
+                          })}
+                        </div>
                       </FloatingSurface>
                     </div>
                   ) : null}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from base64 import b64encode
 from io import BytesIO
@@ -30,6 +31,7 @@ from inspiration_one_backend.application.contracts import (
     LayoutBriefCopyContent,
     PosterGenerationInput,
     ReferenceImageInput,
+    TailSplitPlanInput,
 )
 from inspiration_one_backend.application.copy_payloads import normalize_copy_payload
 from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
@@ -72,6 +74,10 @@ from inspiration_one_backend.infrastructure.openai_client import (
 from inspiration_one_backend.infrastructure.provider_config import (
     ResolvedImageProviderConfig,
     ResolvedTextProviderConfig,
+)
+from inspiration_one_backend.infrastructure.text.openai_chat_completions_provider import (
+    OpenAIChatCompletionsTextProvider,
+    normalize_chat_completions_url,
 )
 
 REMOVED_COPY_OUTPUT_KEYS = [
@@ -332,6 +338,367 @@ def test_openai_text_provider_reads_sse_text_response() -> None:
         "summary": "促销文案",
         "content": {"kind": "freeform", "text": "五一促销"},
     }
+
+
+def test_openai_chat_completions_text_provider_sends_non_stream_payload_and_reads_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+    client_kwargs: list[dict] = []
+
+    class DummyResponse:
+        headers = {"content-type": "application/json"}
+        text = '{"choices":[{"message":{"content":"润色后的画面描述"}}]}'
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"choices": [{"message": {"content": "润色后的画面描述"}}]}
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            client_kwargs.append(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            calls.append({"url": url, "json": json})
+            return DummyResponse()
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    provider = OpenAIChatCompletionsTextProvider(
+        ResolvedTextProviderConfig(
+            provider_kind="openai_chat_completions",
+            brief_model="brief-model",
+            copy_model="copy-model",
+            api_key="demo-api-key",
+            base_url="https://gateway.example/v1",
+        )
+    )
+
+    text, model = provider.polish_image_prompt("改成白底")
+
+    assert text == "润色后的画面描述"
+    assert model == "copy-model"
+    assert client_kwargs == [
+        {
+            "timeout": OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
+            "headers": {
+                **OPENAI_COMPATIBLE_DEFAULT_HEADERS,
+                "Authorization": "Bearer demo-api-key",
+                "Content-Type": "application/json",
+            },
+        }
+    ]
+    assert calls[0]["url"] == "https://gateway.example/v1/chat/completions"
+    payload = calls[0]["json"]
+    assert payload["model"] == "copy-model"
+    assert payload["stream"] is False
+    assert "response_format" not in payload
+    assert payload["messages"][0]["role"] == "system"
+    assert "只输出润色后的中文画面描述，不要输出 markdown、标题或解释。" in payload["messages"][0]["content"]
+    assert payload["messages"][1] == {"role": "user", "content": "原始画面描述：\n改成白底"}
+
+
+def test_openai_chat_completions_text_provider_sends_response_format_for_json_tasks_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = [
+        {
+            "positioning": "通勤保温杯",
+            "audience": "上班族",
+            "selling_angles": ["保温", "轻便", "好清洁"],
+            "taboo_phrases": [],
+            "poster_style_hint": "白底",
+        },
+        {
+            "version": 2,
+            "summary": "通勤杯文案",
+            "content": {"kind": "freeform", "text": "轻便保温，通勤随手带。"},
+        },
+        {
+            "source_summary": "通勤杯素材",
+            "items": [
+                {
+                    "title": "白底主图",
+                    "instruction": "生成白底通勤杯主图",
+                    "visual_intent": "突出杯身和保温",
+                    "source_refs": ["入口长文本"],
+                }
+            ],
+        },
+        "润色后的画面描述",
+    ]
+    calls: list[dict] = []
+
+    class DummyResponse:
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, content: dict | str) -> None:
+            self._payload = {"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]}
+            if isinstance(content, str):
+                self._payload = {"choices": [{"message": {"content": content}}]}
+            self.text = json.dumps(self._payload, ensure_ascii=False)
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._payload
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            calls.append({"url": url, "json": json})
+            return DummyResponse(responses.pop(0))
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    provider = OpenAIChatCompletionsTextProvider(
+        ResolvedTextProviderConfig(
+            provider_kind="openai_chat_completions",
+            brief_model="brief-model",
+            copy_model="copy-model",
+            api_key="demo-api-key",
+            base_url="https://gateway.example/v1",
+            structured_json_response_format_enabled=True,
+        )
+    )
+    inspiration = InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
+
+    brief, _ = provider.generate_brief(inspiration)
+    copy_payload, _ = provider.generate_copy(inspiration, brief)
+    tail_plan, _ = provider.generate_tail_split_plan(
+        TailSplitPlanInput(inspiration_name="通勤杯", source_text="白底主图", max_items=2)
+    )
+    polished, _ = provider.polish_image_prompt("改成白底")
+
+    assert brief.positioning == "通勤保温杯"
+    assert copy_payload.summary == "通勤杯文案"
+    assert tail_plan.items[0].title == "白底主图"
+    assert polished == "润色后的画面描述"
+    assert [call["json"].get("response_format") for call in calls] == [
+        {"type": "json_object"},
+        {"type": "json_object"},
+        {"type": "json_object"},
+        None,
+    ]
+
+
+def test_openai_chat_completions_text_provider_reads_sse_despite_stream_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = [
+        "\n".join(
+            [
+                'data: {"choices":[{"delta":{"content":"{\\"positioning\\":\\"通勤保温杯\\","}}]}',
+                "",
+                'data: {"choices":[{"delta":{"content":"\\"audience\\":\\"上班族\\","}}]}',
+                "",
+                (
+                    'data: {"choices":[{"delta":{"content":"\\"selling_angles\\":[\\"保温\\",\\"轻便\\",'
+                    '\\"好清洁\\"],\\"taboo_phrases\\":[],\\"poster_style_hint\\":\\"白底\\"}"}}]}'
+                ),
+                "",
+                "data: [DONE]",
+            ]
+        ),
+        "\n".join(
+            [
+                'data: {"choices":[{"delta":{"content":"{\\"version\\":2,\\"summary\\":\\"通勤杯文案\\","}}]}',
+                "",
+                (
+                    'data: {"choices":[{"delta":{"content":"\\"content\\":{\\"kind\\":\\"freeform\\",'
+                    '\\"text\\":\\"轻便保温，通勤随手带\\"}}"}}]}'
+                ),
+                "",
+                "data: [DONE]",
+            ]
+        ),
+    ]
+    calls: list[dict] = []
+
+    class DummyResponse:
+        headers = {"content-type": "text/event-stream"}
+
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            raise AssertionError("SSE response should not be parsed as JSON")
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            calls.append({"url": url, "json": json})
+            return DummyResponse(responses.pop(0))
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    provider = OpenAIChatCompletionsTextProvider(
+        ResolvedTextProviderConfig(
+            provider_kind="openai_chat_completions",
+            brief_model="brief-model",
+            copy_model="copy-model",
+            api_key="demo-api-key",
+            base_url="https://gateway.example",
+        )
+    )
+
+    inspiration = InspirationInput(
+        name="通勤杯",
+        category="杯具",
+        price="99",
+        source_note="轻量杯身",
+        image_path="/tmp/source.png",
+    )
+    brief, brief_model = provider.generate_brief(inspiration)
+    copy_payload, copy_model = provider.generate_copy(inspiration, brief)
+
+    assert brief_model == "brief-model"
+    assert copy_model == "copy-model"
+    assert brief.positioning == "通勤保温杯"
+    assert brief.audience == "上班族"
+    assert copy_payload.summary == "通勤杯文案"
+    assert copy_payload.content.kind == "freeform"
+    assert all(call["json"]["stream"] is False for call in calls)
+    assert [call["url"] for call in calls] == [
+        "https://gateway.example/v1/chat/completions",
+        "https://gateway.example/v1/chat/completions",
+    ]
+
+
+def test_openai_chat_completions_text_provider_normalizes_loose_copy_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = [
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"positioning":"通勤保温杯","audience":"上班族",'
+                            '"selling_angles":["保温","轻便","好清洁"],'
+                            '"taboo_phrases":[],"poster_style_hint":"白底"}'
+                        )
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"主标题":"轻便保温","副标题":"通勤随手带",'
+                            '"卖点":["长效保温","杯口好清洁"],"视觉建议":"白底主图，杯身居中"}'
+                        )
+                    }
+                }
+            ]
+        },
+    ]
+
+    class DummyResponse:
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+            self.text = json.dumps(payload, ensure_ascii=False)
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._payload
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            return DummyResponse(responses.pop(0))
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    provider = OpenAIChatCompletionsTextProvider(
+        ResolvedTextProviderConfig(
+            provider_kind="openai_chat_completions",
+            brief_model="brief-model",
+            copy_model="copy-model",
+            api_key="demo-api-key",
+            base_url="https://gateway.example/v1",
+        )
+    )
+
+    inspiration = InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
+    brief, _ = provider.generate_brief(inspiration)
+    copy_payload, _ = provider.generate_copy(inspiration, brief, CopyNodeConfigV2(purpose="main_image"))
+
+    assert copy_payload.purpose == "main_image"
+    assert copy_payload.summary == "轻便保温"
+    assert copy_payload.content.kind == "blocks"
+    assert [block.text for block in copy_payload.content.blocks] == [
+        "轻便保温",
+        "通勤随手带",
+        "长效保温",
+        "杯口好清洁",
+    ]
+    assert copy_payload.visual_guidance is not None
+    assert copy_payload.visual_guidance.composition_hint == "白底主图，杯身居中"
+
+
+def test_normalize_chat_completions_url() -> None:
+    assert normalize_chat_completions_url(None) == "https://api.openai.com/v1/chat/completions"
+    assert normalize_chat_completions_url("https://gateway.example") == "https://gateway.example/v1/chat/completions"
+    assert normalize_chat_completions_url("https://gateway.example/v1") == "https://gateway.example/v1/chat/completions"
+    assert (
+        normalize_chat_completions_url("https://gateway.example/v1/chat/completions")
+        == "https://gateway.example/v1/chat/completions"
+    )
 
 
 def test_ai_payload_normalizes_scalar_text_lists_without_swallowing_malformed_values() -> None:

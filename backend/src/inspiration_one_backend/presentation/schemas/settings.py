@@ -348,6 +348,19 @@ class TextGenerationConfigTestResponse(BaseModel):
     duration_ms: int
 
 
+class TextGenerationConfigJsonResponseFormatTestRequest(BaseModel):
+    generation_config_id: str | None = Field(default=None, max_length=36)
+    generation_config: GenerationConfigCreateRequest | None = None
+
+
+class TextGenerationConfigJsonResponseFormatTestResponse(BaseModel):
+    generation_config_id: str | None = None
+    provider_kind: str
+    model: str
+    parsed_json: dict[str, Any]
+    duration_ms: int
+
+
 class SettingsExportMetadataResponse(BaseModel):
     schema_version: int
     exported_at: datetime

@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Download, Eye, Loader2, Pencil, Plus, Save, Trees } from "lucide-react";
+import { Archive, CheckCircle2, Download, Eye, Loader2, Pencil, Plus, Save, Trees, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../components/ResourceGovernance";
+import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
@@ -33,12 +34,29 @@ const RESOURCE_LIBRARY_SOURCE_TYPES: ResourceLibrarySourceType[] = [
   "image_session_asset",
   "upload",
 ];
-const RESOURCE_LIBRARY_GROUP_ACTIVE_CLASS =
-  "font-semibold text-indigo-700 bg-[linear-gradient(90deg,rgba(99,102,241,0.22),rgba(99,102,241,0.03)_32%,rgba(99,102,241,0.03)_68%,rgba(99,102,241,0.22))] " +
-  "dark:text-violet-100 dark:bg-[linear-gradient(90deg,rgba(139,92,246,0.32),rgba(139,92,246,0.04)_32%,rgba(139,92,246,0.04)_68%,rgba(139,92,246,0.32))]";
-const RESOURCE_LIBRARY_GROUP_IDLE_CLASS =
-  "text-slate-500 hover:text-slate-800 hover:bg-[linear-gradient(90deg,rgba(100,116,139,0.13),rgba(100,116,139,0.02)_32%,rgba(100,116,139,0.02)_68%,rgba(100,116,139,0.13))] " +
-  "dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-[linear-gradient(90deg,rgba(139,92,246,0.16),rgba(139,92,246,0.02)_32%,rgba(139,92,246,0.02)_68%,rgba(139,92,246,0.16))]";
+const RESOURCE_LIBRARY_MAIN_ACTION_CLASS =
+  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_SECONDARY_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_COMPACT_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_ICON_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_DANGER_ICON_ACTION_CLASS =
+  "pf-danger-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
+const RESOURCE_LIBRARY_GROUP_ACTION_CLASS =
+  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-slate-500 opacity-80 " +
+  "transition-all hover:bg-slate-950/[0.06] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 " +
+  "focus-visible:ring-slate-400/35 active:scale-95 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-100";
+const RESOURCE_LIBRARY_GROUP_DANGER_ACTION_CLASS =
+  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-slate-500 opacity-80 " +
+  "transition-all hover:bg-red-500/10 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 " +
+  "focus-visible:ring-red-400/30 active:scale-95 dark:text-slate-400 dark:hover:bg-red-500/15 dark:hover:text-red-200";
+const RESOURCE_LIBRARY_FEEDBACK_AUTO_DISMISS_MS = 1000;
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.detail : fallback;
@@ -68,6 +86,218 @@ function resourceLibrarySourceLabelKey(sourceType: ResourceLibrarySourceType): T
     default:
       return "resourceLibrary.source.upload";
   }
+}
+
+function ResourceLibraryFeedbackDialog({
+  successMessage,
+  errorMessage,
+  onCloseSuccess,
+  onCloseError,
+}: {
+  successMessage: string;
+  errorMessage: string;
+  onCloseSuccess: () => void;
+  onCloseError: () => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+  const descriptionId = useId();
+  const open = Boolean(successMessage || errorMessage);
+  const isError = Boolean(errorMessage);
+  const message = errorMessage || successMessage;
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        if (isError) {
+          onCloseError();
+          return;
+        }
+        onCloseSuccess();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isError, onCloseError, onCloseSuccess, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  const Icon = isError ? X : CheckCircle2;
+
+  return (
+    <div
+      className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+        if (isError) {
+          onCloseError();
+          return;
+        }
+        onCloseSuccess();
+      }}
+    >
+      <div
+        role={isError ? "alertdialog" : "dialog"}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+      >
+        <div className="flex items-start gap-3 px-5 py-5">
+          <div
+            className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+              isError
+                ? "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-200"
+                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-200"
+            }`}
+          >
+            <Icon size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
+              {isError ? t("settings.operationFailed") : t("settings.operationSucceeded")}
+            </h2>
+            <p id={descriptionId} className="mt-2 break-words text-sm leading-6 text-slate-600 dark:text-slate-300">
+              {message}
+            </p>
+          </div>
+          {isError ? (
+            <button
+              type="button"
+              onClick={onCloseError}
+              className={RESOURCE_LIBRARY_ICON_ACTION_CLASS}
+              aria-label={t("resourceLibrary.close")}
+              title={t("resourceLibrary.close")}
+            >
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResourceLibraryCreateGroupDialog({
+  open,
+  name,
+  pending,
+  onNameChange,
+  onCreate,
+  onClose,
+}: {
+  open: boolean;
+  name: string;
+  pending: boolean;
+  onNameChange: (name: string) => void;
+  onCreate: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+  const inputId = useId();
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !pending) {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open, pending]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !pending) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+      >
+        <div className="flex h-16 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="text-indigo-600 dark:text-violet-300">
+              <Plus size={18} />
+            </span>
+            <h2 id={titleId} className="truncate text-lg font-semibold text-slate-950 dark:text-white">
+              {t("resourceLibrary.createGroup")}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className={RESOURCE_LIBRARY_ICON_ACTION_CLASS}
+            aria-label={t("resourceLibrary.close")}
+            title={t("resourceLibrary.close")}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="space-y-4 px-5 py-5">
+          <label htmlFor={inputId} className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+            {t("resourceLibrary.groupName")}
+          </label>
+          <input
+            id={inputId}
+            value={name}
+            autoFocus
+            onChange={(event) => onNameChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onCreate();
+              }
+            }}
+            disabled={pending}
+            className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-950 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+            placeholder={t("resourceLibrary.groupNamePlaceholder")}
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className={RESOURCE_LIBRARY_SECONDARY_ACTION_CLASS}
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={onCreate}
+            disabled={!name.trim() || pending}
+            className={RESOURCE_LIBRARY_MAIN_ACTION_CLASS}
+          >
+            {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Plus size={14} className="mr-2" />}
+            {t("resourceLibrary.createGroup")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ResourceLibraryWorkspaceLanding() {
@@ -214,6 +444,7 @@ function ResourceLibraryManagePage({
   const queryClient = useQueryClient();
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
+  const [createGroupDialogOpen, setCreateGroupDialogOpen] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState("");
   const [assetGroupDrafts, setAssetGroupDrafts] = useState<Record<string, string[]>>({});
@@ -257,6 +488,7 @@ function ResourceLibraryManagePage({
     mutationFn: (name: string) => api.createResourceLibraryGroup({ name, sort_order: groups.length }),
     onSuccess: async (group) => {
       setNewGroupName("");
+      setCreateGroupDialogOpen(false);
       setSelectedGroupId(group.id);
       setMessage(t("resourceLibrary.groupCreated"));
       setError("");
@@ -348,6 +580,14 @@ function ResourceLibraryManagePage({
     return t("resourceLibrary.assetCount", { count: assets.length });
   }, [assets.length, assetsQuery.isLoading, t]);
 
+  useEffect(() => {
+    if (!message) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setMessage(""), RESOURCE_LIBRARY_FEEDBACK_AUTO_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
   function handleCreateGroup() {
     const name = newGroupName.trim();
     if (!name) {
@@ -404,7 +644,7 @@ function ResourceLibraryManagePage({
   }
 
   return (
-    <div className={`${workspaceSubpage ? "pf-workspace" : "pf-app"} min-h-screen text-slate-950 dark:text-slate-100`}>
+    <div className={`${workspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} min-h-screen text-slate-950 dark:text-slate-100`}>
       <TopNav
         breadcrumbs={subpage ? t("resourceLibrary.manageTitle") : t("resourceLibrary.title")}
         onHome={() => navigate("/inspirations")}
@@ -423,72 +663,63 @@ function ResourceLibraryManagePage({
               {(selectedGroup ? selectedGroup.name : t("resourceLibrary.allGroups")) + " · " + assetCountLabel}
             </div>
           </div>
-          <div className="flex min-w-0 flex-col gap-2 sm:w-80">
-            <div className="flex gap-2">
-              <input
-                id="resource-library-new-group-name"
-                name="resource-library-new-group-name"
-                value={newGroupName}
-                onChange={(event) => setNewGroupName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleCreateGroup();
-                  }
-                }}
-                placeholder={t("resourceLibrary.groupNamePlaceholder")}
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
-              />
-              <button
-                type="button"
-                onClick={handleCreateGroup}
-                disabled={!newGroupName.trim() || createGroupMutation.isPending}
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-violet-500/25 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40"
-                aria-label={t("resourceLibrary.createGroup")}
-                title={t("resourceLibrary.createGroup")}
-              >
-                {createGroupMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setNewGroupName("");
+              setCreateGroupDialogOpen(true);
+              setMessage("");
+              setError("");
+            }}
+            className={RESOURCE_LIBRARY_MAIN_ACTION_CLASS}
+          >
+            <Plus size={14} className="mr-2" />
+            {t("resourceLibrary.createGroup")}
+          </button>
         </section>
 
-        {message ? (
-          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
-            {message}
-          </div>
-        ) : null}
-        {error ? (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-[#0f1726]">
-            <div className="mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-              {t("resourceLibrary.groups")}
+        <div className={workspaceSubpage ? "pf-side-shell min-h-full" : "grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]"}>
+          <aside className={workspaceSubpage ? "pf-side-rail" : "rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-[#0f1726]"}>
+            <div className={workspaceSubpage ? "border-b border-slate-200/60 px-5 py-6 dark:border-slate-700/40" : "mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400"}>
+              <div className={workspaceSubpage ? "flex items-center gap-3 text-base font-semibold text-slate-950 dark:text-white" : ""}>
+                {workspaceSubpage ? (
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">
+                    <Trees size={18} />
+                  </span>
+                ) : null}
+                <span>{t("resourceLibrary.groups")}</span>
+              </div>
+              {workspaceSubpage ? (
+                <div className="mt-4 lg:hidden">
+                  <SelectField
+                    value={selectedGroupId}
+                    options={[
+                      { value: "", label: t("resourceLibrary.allGroups") },
+                      ...groups.map((group) => ({ value: group.id, label: group.name })),
+                    ]}
+                    onChange={setSelectedGroupId}
+                    radius="lg"
+                  />
+                </div>
+              ) : null}
             </div>
-            <div className="space-y-1">
+            <nav className={workspaceSubpage ? "hidden space-y-1 px-3 py-5 lg:block" : "space-y-1"} aria-label={t("resourceLibrary.groups")}>
               <button
                 type="button"
                 onClick={() => setSelectedGroupId("")}
-                className={`flex h-10 w-full items-center rounded-lg px-3 text-left text-sm transition-colors ${
-                  !selectedGroupId ? RESOURCE_LIBRARY_GROUP_ACTIVE_CLASS : RESOURCE_LIBRARY_GROUP_IDLE_CLASS
+                aria-current={!selectedGroupId ? "page" : undefined}
+                className={`pf-settings-nav-item flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                  !selectedGroupId ? "font-semibold" : ""
                 }`}
               >
-                {t("resourceLibrary.allGroups")}
+                <span className="min-w-0 whitespace-normal break-words leading-5">{t("resourceLibrary.allGroups")}</span>
               </button>
               {groups.map((group) => {
                 const editing = editingGroupId === group.id;
                 return (
                   <div
                     key={group.id}
-                    className={`rounded-lg transition-colors ${
-                      selectedGroupId === group.id
-                        ? RESOURCE_LIBRARY_GROUP_ACTIVE_CLASS
-                        : RESOURCE_LIBRARY_GROUP_IDLE_CLASS
-                    }`}
+                    className={`rounded-lg transition-colors ${selectedGroupId === group.id ? "font-semibold" : ""}`}
                   >
                     {editing ? (
                       <div className="space-y-2 p-2">
@@ -506,7 +737,7 @@ function ResourceLibraryManagePage({
                               setEditingGroupId(null);
                               setEditingGroupName("");
                             }}
-                            className="rounded-md px-2 py-1 text-xs font-semibold"
+                            className={RESOURCE_LIBRARY_COMPACT_ACTION_CLASS}
                           >
                             {t("common.cancel")}
                           </button>
@@ -514,7 +745,7 @@ function ResourceLibraryManagePage({
                             type="button"
                             onClick={() => handleSaveGroupName(group.id)}
                             disabled={!editingGroupName.trim() || updateGroupMutation.isPending}
-                            className="inline-flex rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-950 disabled:opacity-60 dark:bg-slate-950 dark:text-white"
+                            className={RESOURCE_LIBRARY_COMPACT_ACTION_CLASS}
                           >
                             {updateGroupMutation.isPending && updateGroupMutation.variables?.groupId === group.id ? (
                               <Loader2 size={12} className="mr-1 animate-spin" />
@@ -524,44 +755,51 @@ function ResourceLibraryManagePage({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex h-10 items-center">
+                      <div className="group/resource-group-row relative flex min-h-10 items-center py-1">
                         <button
                           type="button"
                           onClick={() => setSelectedGroupId(group.id)}
-                          className="min-w-0 flex-1 truncate px-3 text-left text-sm font-semibold"
+                          aria-current={selectedGroupId === group.id ? "page" : undefined}
+                          className="pf-settings-nav-item min-w-0 flex-1 rounded-lg px-3 py-2 pr-16 text-left text-sm"
                         >
-                          {group.name}
+                          <span className="block min-w-0 whitespace-normal break-words leading-5">{group.name}</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingGroupId(group.id);
-                            setEditingGroupName(group.name);
-                          }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-slate-200/70 dark:hover:bg-slate-700"
-                          aria-label={t("resourceLibrary.renameGroup")}
-                          title={t("resourceLibrary.renameGroup")}
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPendingArchive({ kind: "group", id: group.id, name: group.name })}
-                          className="pf-danger-action mr-1 inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors"
-                          aria-label={t("resourceLibrary.archiveGroup")}
-                          title={t("resourceLibrary.archiveGroup")}
-                        >
-                          <Archive size={13} />
-                        </button>
+                        <div className="pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/resource-group-row:pointer-events-auto group-hover/resource-group-row:opacity-100 group-focus-within/resource-group-row:pointer-events-auto group-focus-within/resource-group-row:opacity-100">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEditingGroupId(group.id);
+                              setEditingGroupName(group.name);
+                            }}
+                            className={RESOURCE_LIBRARY_GROUP_ACTION_CLASS}
+                            aria-label={t("resourceLibrary.renameGroup")}
+                            title={t("resourceLibrary.renameGroup")}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setPendingArchive({ kind: "group", id: group.id, name: group.name });
+                            }}
+                            className={RESOURCE_LIBRARY_GROUP_DANGER_ACTION_CLASS}
+                            aria-label={t("resourceLibrary.archiveGroup")}
+                            title={t("resourceLibrary.archiveGroup")}
+                          >
+                            <Archive size={13} />
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
                 );
               })}
-            </div>
+            </nav>
           </aside>
 
-          <section className="min-w-0">
+          <section className={workspaceSubpage ? "pf-side-content px-4 py-5 sm:px-6 lg:px-8" : "min-w-0"}>
             {assetsQuery.isLoading || groupsQuery.isLoading ? (
               <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 dark:border-slate-800 dark:bg-[#0f1726]">
                 <Loader2 size={24} className="animate-spin" />
@@ -611,21 +849,21 @@ function ResourceLibraryManagePage({
                           {groups.map((group) => {
                             const checkboxId = `resource-library-asset-${asset.id}-group-${group.id}`;
                             return (
-                            <label
-                              key={group.id}
-                              htmlFor={checkboxId}
-                              className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950/55 dark:text-slate-200"
-                            >
-                              <input
-                                id={checkboxId}
-                                name={`resource-library-asset-${asset.id}-groups`}
-                                type="checkbox"
-                                checked={draftGroupIds.includes(group.id)}
-                                onChange={(event) => setAssetGroupChecked(asset, group.id, event.target.checked)}
-                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
-                              />
-                              <span className="min-w-0 truncate">{group.name}</span>
-                            </label>
+                              <label
+                                key={group.id}
+                                htmlFor={checkboxId}
+                                className="flex min-h-9 min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950/55 dark:text-slate-200"
+                              >
+                                <input
+                                  id={checkboxId}
+                                  name={`resource-library-asset-${asset.id}-groups`}
+                                  type="checkbox"
+                                  checked={draftGroupIds.includes(group.id)}
+                                  onChange={(event) => setAssetGroupChecked(asset, group.id, event.target.checked)}
+                                  className="h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+                                />
+                                <span className="min-w-0 flex-1 whitespace-normal break-words leading-5">{group.name}</span>
+                              </label>
                             );
                           })}
                         </div>
@@ -633,7 +871,7 @@ function ResourceLibraryManagePage({
                           <button
                             type="button"
                             onClick={() => setPreviewAsset(asset)}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                            className={RESOURCE_LIBRARY_ICON_ACTION_CLASS}
                             aria-label={t("common.preview")}
                             title={t("common.preview")}
                           >
@@ -643,7 +881,7 @@ function ResourceLibraryManagePage({
                             href={api.toApiUrl(asset.download_url)}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                            className={RESOURCE_LIBRARY_ICON_ACTION_CLASS}
                             aria-label={t("common.download")}
                             title={t("common.download")}
                           >
@@ -659,7 +897,7 @@ function ResourceLibraryManagePage({
                               (updateAssetGroupsMutation.isPending &&
                                 updateAssetGroupsMutation.variables?.assetId === asset.id)
                             }
-                            className="inline-flex h-9 min-w-0 flex-1 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60 dark:bg-violet-500/25 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40"
+                            className={`${RESOURCE_LIBRARY_MAIN_ACTION_CLASS} min-w-0 flex-1`}
                           >
                             {updateAssetGroupsMutation.isPending &&
                             updateAssetGroupsMutation.variables?.assetId === asset.id ? (
@@ -672,7 +910,7 @@ function ResourceLibraryManagePage({
                           <button
                             type="button"
                             onClick={() => setPendingArchive({ kind: "asset", id: asset.id, name: asset.original_filename })}
-                            className="pf-danger-action inline-flex h-9 w-9 items-center justify-center rounded-lg border transition-colors"
+                            className={RESOURCE_LIBRARY_DANGER_ICON_ACTION_CLASS}
                             aria-label={t("resourceLibrary.archiveAsset")}
                             title={t("resourceLibrary.archiveAsset")}
                           >
@@ -696,6 +934,29 @@ function ResourceLibraryManagePage({
         </div>
       </main>
 
+      <ResourceLibraryCreateGroupDialog
+        open={createGroupDialogOpen}
+        name={newGroupName}
+        pending={createGroupMutation.isPending}
+        onNameChange={(name) => {
+          setNewGroupName(name);
+          setMessage("");
+          setError("");
+        }}
+        onCreate={handleCreateGroup}
+        onClose={() => {
+          if (!createGroupMutation.isPending) {
+            setCreateGroupDialogOpen(false);
+            setNewGroupName("");
+          }
+        }}
+      />
+      <ResourceLibraryFeedbackDialog
+        successMessage={message}
+        errorMessage={error}
+        onCloseSuccess={() => setMessage("")}
+        onCloseError={() => setError("")}
+      />
       {previewAsset ? (
         <GalleryImagePreviewDialog
           ariaLabel={t("detail.previewImage", { alt: previewAsset.original_filename })}
@@ -711,7 +972,7 @@ function ResourceLibraryManagePage({
                 {previewAsset.groups.map((group) => (
                   <span
                     key={group.id}
-                    className="rounded-full border border-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600"
+                    className="rounded-full border border-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300"
                   >
                     {group.name}
                   </span>

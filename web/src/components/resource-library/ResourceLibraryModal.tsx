@@ -24,6 +24,15 @@ interface ResourceLibraryModalProps {
 
 const EMPTY_RESOURCE_LIBRARY_GROUPS: ResourceLibraryGroup[] = [];
 const EMPTY_RESOURCE_LIBRARY_ASSETS: ResourceLibraryAsset[] = [];
+const RESOURCE_LIBRARY_MODAL_PRIMARY_ACTION_CLASS =
+  "pf-workspace-action-primary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_MODAL_ICON_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_MODAL_CLOSE_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 
 export function ResourceLibraryModal({
   open,
@@ -61,6 +70,19 @@ export function ResourceLibraryModal({
   }, [open]);
 
   useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !selectingAssetId) {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open, selectingAssetId]);
+
+  useEffect(() => {
     if (selectedGroupId && groupsQuery.isSuccess && !groups.some((group) => group.id === selectedGroupId)) {
       setSelectedGroupId("");
     }
@@ -83,9 +105,9 @@ export function ResourceLibraryModal({
         role="dialog"
         aria-modal="true"
         aria-label={t("resourceLibrary.title")}
-        className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6"
+        className="pf-settings-workspace fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6"
         onMouseDown={(event) => {
-          if (event.target === event.currentTarget) {
+          if (event.target === event.currentTarget && !selectingAssetId) {
             onClose();
           }
         }}
@@ -104,7 +126,8 @@ export function ResourceLibraryModal({
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+              disabled={Boolean(selectingAssetId)}
+              className={RESOURCE_LIBRARY_MODAL_CLOSE_ACTION_CLASS}
               aria-label={t("resourceLibrary.close")}
               title={t("resourceLibrary.close")}
             >
@@ -126,26 +149,26 @@ export function ResourceLibraryModal({
                   <button
                     type="button"
                     onClick={() => setSelectedGroupId("")}
-                    className={`inline-flex h-9 shrink-0 items-center rounded-lg px-3 text-sm font-medium transition-colors lg:w-full ${
+                    className={`inline-flex min-h-9 shrink-0 items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors lg:w-full ${
                       !selectedGroupId
                         ? "bg-slate-950 text-white dark:bg-violet-500/25 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40"
                         : "bg-white text-slate-700 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                     }`}
                   >
-                    {t("resourceLibrary.allGroups")}
+                    <span className="min-w-0 whitespace-normal break-words leading-5">{t("resourceLibrary.allGroups")}</span>
                   </button>
                   {groups.map((group) => (
                     <button
                       key={group.id}
                       type="button"
                       onClick={() => setSelectedGroupId(group.id)}
-                      className={`inline-flex h-9 min-w-[160px] shrink-0 items-center rounded-lg px-3 text-left text-sm font-medium transition-colors lg:w-full lg:min-w-0 ${
+                      className={`inline-flex min-h-9 min-w-[160px] shrink-0 items-center rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full lg:min-w-0 ${
                         selectedGroupId === group.id
                           ? "bg-slate-950 text-white dark:bg-violet-500/25 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40"
                           : "bg-white text-slate-700 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                       }`}
                     >
-                      <span className="min-w-0 truncate">{group.name}</span>
+                      <span className="min-w-0 whitespace-normal break-words leading-5">{group.name}</span>
                     </button>
                   ))}
                 </div>
@@ -205,7 +228,7 @@ export function ResourceLibraryModal({
                               <button
                                 type="button"
                                 onClick={() => setPreviewAsset(asset)}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                className={RESOURCE_LIBRARY_MODAL_ICON_ACTION_CLASS}
                                 aria-label={t("common.preview")}
                                 title={t("common.preview")}
                               >
@@ -215,7 +238,7 @@ export function ResourceLibraryModal({
                                 href={api.toApiUrl(asset.download_url)}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                className={RESOURCE_LIBRARY_MODAL_ICON_ACTION_CLASS}
                                 aria-label={t("common.download")}
                                 title={t("common.download")}
                               >
@@ -227,10 +250,10 @@ export function ResourceLibraryModal({
                                   onClick={() => onSelectAsset(asset)}
                                   disabled={actionDisabled}
                                   title={selectDisabledTitle ?? selectLabel ?? t("resourceLibrary.select")}
-                                  className="ml-auto inline-flex h-8 min-w-0 items-center justify-center rounded-lg bg-slate-950 px-2.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-violet-500/25 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40"
+                                  className={`${RESOURCE_LIBRARY_MODAL_PRIMARY_ACTION_CLASS} ml-auto min-w-0`}
                                 >
                                   {selectedBusy ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Check size={13} className="mr-1" />}
-                                  <span className="truncate">{selectLabel ?? t("resourceLibrary.select")}</span>
+                                  <span className="min-w-0 truncate">{selectLabel ?? t("resourceLibrary.select")}</span>
                                 </button>
                               ) : null}
                             </div>

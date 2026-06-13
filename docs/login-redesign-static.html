@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inspiration One 登录页概念稿</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #111416;
+        --ink-2: #1c2223;
+        --paper: #f3f7f5;
+        --aqua: #dcefed;
+        --mint: #bedbd0;
+        --verdigris: #285f59;
+        --copper: #a75d49;
+        --citron: #d6c45d;
+        --blue: #6f91aa;
+        --mist: rgba(255, 255, 255, 0.72);
+        --surface: #fbfdfb;
+        --surface-2: #edf4f1;
+        --line: rgba(17, 20, 22, 0.12);
+        --line-strong: rgba(17, 20, 22, 0.2);
+        --muted: #687673;
+        --subtle: #8b9692;
+        --shadow: 0 34px 90px rgba(36, 49, 47, 0.15);
+        --shadow-soft: 0 18px 44px rgba(36, 49, 47, 0.1);
+        --ease: cubic-bezier(0.32, 0.72, 0, 1);
+        font-family:
+          Geist,
+          "Plus Jakarta Sans",
+          "PingFang SC",
+          "Hiragino Sans GB",
+          "Microsoft YaHei",
+          ui-sans-serif,
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        background:
+          linear-gradient(124deg, rgba(111, 145, 170, 0.24) 0 18%, transparent 18% 100%),
+          linear-gradient(302deg, rgba(190, 219, 208, 0.7) 0 28%, transparent 28% 100%),
+          linear-gradient(180deg, #f7faf8 0%, var(--paper) 58%, #e5efea 100%);
+        color: var(--ink);
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        pointer-events: none;
+        opacity: 0.035;
+        background-image:
+          repeating-linear-gradient(0deg, rgba(17, 20, 22, 0.22) 0 1px, transparent 1px 3px),
+          repeating-linear-gradient(90deg, rgba(17, 20, 22, 0.14) 0 1px, transparent 1px 5px);
+        mix-blend-mode: multiply;
+      }
+
+      body::after {
+        content: "";
+        position: fixed;
+        right: -18vw;
+        bottom: -28vh;
+        z-index: 0;
+        width: 72vw;
+        height: 74vh;
+        pointer-events: none;
+        background:
+          linear-gradient(135deg, transparent 0 22%, rgba(40, 95, 89, 0.14) 22% 38%, transparent 38%),
+          linear-gradient(38deg, transparent 0 32%, rgba(167, 93, 73, 0.12) 32% 48%, transparent 48%);
+        transform: rotate(-8deg);
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .page {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(420px, 0.82fr);
+        gap: 54px;
+        align-items: center;
+        width: min(1340px, calc(100% - 72px));
+        min-height: 100dvh;
+        margin: 0 auto;
+        padding: 42px 0;
+      }
+
+      .poster {
+        position: relative;
+        min-width: 0;
+        min-height: 760px;
+        padding: 28px 0;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        animation: rise 900ms var(--ease) both;
+      }
+
+      .mark-shell {
+        display: grid;
+        width: 50px;
+        height: 50px;
+        place-items: center;
+        border-radius: 19px;
+        background: rgba(17, 20, 22, 0.08);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
+      }
+
+      .mark-core {
+        position: relative;
+        width: 38px;
+        height: 38px;
+        border-radius: 15px;
+        background: var(--ink);
+        box-shadow: 0 18px 34px rgba(17, 20, 22, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      }
+
+      .mark-core::before,
+      .mark-core::after {
+        content: "";
+        position: absolute;
+        background: #f8f4e8;
+      }
+
+      .mark-core::before {
+        left: 10px;
+        top: 12px;
+        width: 18px;
+        height: 2px;
+        border-radius: 999px;
+        box-shadow: 0 7px 0 rgba(248, 244, 232, 0.92);
+      }
+
+      .mark-core::after {
+        right: 9px;
+        bottom: 8px;
+        width: 8px;
+        height: 8px;
+        border-radius: 3px;
+        transform: rotate(45deg);
+      }
+
+      .brand strong {
+        display: block;
+        font-size: 15px;
+        font-weight: 760;
+      }
+
+      .brand span {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .headline {
+        position: relative;
+        z-index: 2;
+        margin-top: 86px;
+        animation: rise 940ms var(--ease) 80ms both;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--verdigris);
+        font-size: 12px;
+        font-weight: 780;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 30px;
+        height: 2px;
+        border-radius: 999px;
+        background: var(--verdigris);
+      }
+
+      h1 {
+        max-width: 640px;
+        margin: 22px 0 0;
+        font-size: 74px;
+        line-height: 1.02;
+        font-weight: 820;
+        letter-spacing: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .title-mobile {
+        display: none;
+      }
+
+      .lead {
+        max-width: 520px;
+        margin: 28px 0 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.78;
+      }
+
+      .art-stack {
+        position: relative;
+        overflow: hidden;
+        min-height: 330px;
+        margin-top: 54px;
+        animation: rise 1040ms var(--ease) 170ms both;
+      }
+
+      .plate {
+        position: absolute;
+        padding: 8px;
+        border-radius: 34px;
+        background: rgba(255, 255, 255, 0.48);
+        box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      }
+
+      .plate-inner {
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.74);
+        border-radius: 26px;
+        background: var(--surface);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.88);
+      }
+
+      .plate-a {
+        left: 0;
+        top: 22px;
+        width: min(420px, 62%);
+        transform: rotate(-4deg);
+      }
+
+      .plate-a .plate-inner {
+        min-height: 244px;
+        background:
+          linear-gradient(118deg, rgba(40, 95, 89, 0.14) 0 24%, transparent 24%),
+          linear-gradient(240deg, rgba(214, 196, 93, 0.28) 0 28%, transparent 28%),
+          #fbfdfb;
+      }
+
+      .plate-b {
+        left: min(285px, 38%);
+        top: 0;
+        width: min(340px, 46%);
+        transform: rotate(3deg);
+      }
+
+      .plate-b .plate-inner {
+        min-height: 300px;
+        background:
+          linear-gradient(145deg, rgba(111, 145, 170, 0.28) 0 36%, transparent 36%),
+          linear-gradient(28deg, rgba(167, 93, 73, 0.18) 0 22%, transparent 22%),
+          #f6faf8;
+      }
+
+      .plate-c {
+        left: min(520px, 67%);
+        top: 88px;
+        width: min(220px, 30%);
+        transform: rotate(-2deg);
+      }
+
+      .plate-c .plate-inner {
+        min-height: 176px;
+        background: var(--ink);
+      }
+
+      .glyph-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 9px;
+        padding: 24px;
+      }
+
+      .glyph-grid span {
+        aspect-ratio: 1;
+        border-radius: 12px;
+        background: rgba(17, 20, 22, 0.08);
+      }
+
+      .glyph-grid span:nth-child(2n) {
+        background: rgba(40, 95, 89, 0.16);
+      }
+
+      .glyph-grid span:nth-child(5n) {
+        background: var(--copper);
+      }
+
+      .poster-lines {
+        padding: 28px;
+      }
+
+      .poster-lines strong {
+        display: block;
+        font-size: 48px;
+        line-height: 0.92;
+      }
+
+      .poster-lines small {
+        display: block;
+        margin-top: 18px;
+        color: rgba(17, 20, 22, 0.56);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .dark-ticket {
+        display: grid;
+        min-height: 176px;
+        padding: 22px;
+        color: #f7f1e3;
+      }
+
+      .dark-ticket strong {
+        align-self: end;
+        font-size: 34px;
+        line-height: 0.94;
+      }
+
+      .dark-ticket span {
+        width: 44px;
+        height: 44px;
+        border-radius: 999px;
+        background:
+          linear-gradient(90deg, var(--citron) 0 45%, transparent 45% 55%, var(--copper) 55% 100%);
+      }
+
+      .login-zone {
+        min-width: 0;
+        justify-self: end;
+        width: min(500px, 100%);
+        animation: rise 1000ms var(--ease) 250ms both;
+      }
+
+      .mode-input {
+        position: fixed;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .pass-shell {
+        padding: 9px;
+        border-radius: 42px;
+        background: rgba(255, 255, 255, 0.48);
+        box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+      }
+
+      .pass-core {
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.76);
+        border-radius: 33px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66)),
+          var(--surface);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.92);
+      }
+
+      .pass-top {
+        position: relative;
+        display: grid;
+        gap: 22px;
+        padding: 28px 30px 0;
+      }
+
+      .pass-top::before {
+        content: "";
+        position: absolute;
+        right: -64px;
+        top: -88px;
+        width: 220px;
+        height: 190px;
+        background:
+          linear-gradient(135deg, transparent 0 28%, rgba(40, 95, 89, 0.13) 28% 46%, transparent 46%),
+          linear-gradient(52deg, transparent 0 42%, rgba(167, 93, 73, 0.12) 42% 60%, transparent 60%);
+        transform: rotate(18deg);
+      }
+
+      .pass-label {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .access-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--verdigris);
+        font-size: 12px;
+        font-weight: 780;
+      }
+
+      .access-tag::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 4px;
+        background: var(--verdigris);
+        transform: rotate(45deg);
+      }
+
+      .mini-code {
+        display: grid;
+        grid-template-columns: repeat(5, 8px);
+        gap: 5px;
+        align-items: center;
+      }
+
+      .mini-code i {
+        display: block;
+        height: 30px;
+        border-radius: 999px;
+        background: rgba(17, 20, 22, 0.12);
+      }
+
+      .mini-code i:nth-child(2),
+      .mini-code i:nth-child(5) {
+        height: 18px;
+        background: rgba(40, 95, 89, 0.22);
+      }
+
+      .pass-top h2 {
+        position: relative;
+        margin: 0;
+        max-width: 320px;
+        font-size: 40px;
+        line-height: 1;
+        font-weight: 820;
+        letter-spacing: 0;
+      }
+
+      .pass-top p {
+        position: relative;
+        margin: -8px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.62;
+      }
+
+      .switch-shell {
+        margin: 28px 30px 0;
+        padding: 5px;
+        border-radius: 999px;
+        background: rgba(17, 20, 22, 0.055);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+      }
+
+      .switch-core {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 5px;
+      }
+
+      .switch-core label {
+        display: grid;
+        min-height: 44px;
+        place-items: center;
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 760;
+        transition:
+          transform 720ms var(--ease),
+          background 720ms var(--ease),
+          color 720ms var(--ease),
+          box-shadow 720ms var(--ease);
+      }
+
+      .switch-core label:hover {
+        transform: translateY(-1px);
+        color: var(--ink);
+      }
+
+      #mode-login:checked ~ .pass-shell label[for="mode-login"],
+      #mode-setup:checked ~ .pass-shell label[for="mode-setup"] {
+        background: var(--ink);
+        color: #f8f1e1;
+        box-shadow: 0 16px 32px rgba(17, 20, 22, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      }
+
+      .form {
+        display: grid;
+        gap: 15px;
+        padding: 24px 30px 30px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .field-shell {
+        padding: 5px;
+        border-radius: 24px;
+        background: rgba(17, 20, 22, 0.055);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
+        transition:
+          transform 720ms var(--ease),
+          background 720ms var(--ease),
+          box-shadow 720ms var(--ease);
+      }
+
+      .field-shell:focus-within {
+        transform: translateY(-1px);
+        background: rgba(40, 95, 89, 0.16);
+        box-shadow: 0 16px 34px rgba(40, 95, 89, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      }
+
+      .field-core {
+        width: 100%;
+        min-height: 50px;
+        border: 0;
+        border-radius: 19px;
+        outline: 0;
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.92);
+        color: var(--ink);
+        padding: 0 16px;
+        font-size: 14px;
+      }
+
+      .field-core::placeholder {
+        color: rgba(104, 118, 115, 0.72);
+      }
+
+      .setup-only {
+        display: none;
+      }
+
+      #mode-setup:checked ~ .pass-shell .setup-only {
+        display: grid;
+        animation: fieldRise 820ms var(--ease) both;
+      }
+
+      .state-line {
+        display: flex;
+        min-height: 42px;
+        align-items: center;
+        gap: 10px;
+        border-radius: 20px;
+        padding: 0 14px;
+        background: rgba(167, 93, 73, 0.09);
+        color: #8c493a;
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .state-line::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--copper);
+      }
+
+      .primary {
+        display: flex;
+        width: 100%;
+        min-height: 58px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--ink);
+        color: #f8f1e1;
+        padding: 9px 9px 9px 24px;
+        box-shadow: 0 22px 46px rgba(17, 20, 22, 0.23), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+        font-size: 14px;
+        font-weight: 780;
+        transition:
+          transform 720ms var(--ease),
+          background 720ms var(--ease),
+          box-shadow 720ms var(--ease);
+      }
+
+      .primary:hover {
+        transform: translateY(-2px);
+        background: #1a2323;
+        box-shadow: 0 28px 58px rgba(17, 20, 22, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      }
+
+      .primary:active {
+        transform: scale(0.985);
+      }
+
+      .primary span:last-child {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        place-items: center;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+        transition:
+          transform 720ms var(--ease),
+          background 720ms var(--ease);
+      }
+
+      .primary:hover span:last-child {
+        transform: translate(4px, -1px) scale(1.06);
+        background: rgba(255, 255, 255, 0.18);
+      }
+
+      .pass-foot {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 18px;
+        align-items: center;
+        padding: 0 30px 30px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .pass-foot span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .pass-foot span::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--citron);
+      }
+
+      .text-button {
+        border: 0;
+        background: transparent;
+        color: var(--verdigris);
+        padding: 8px 0;
+        font-size: 12px;
+        font-weight: 760;
+        transition:
+          transform 720ms var(--ease),
+          color 720ms var(--ease);
+      }
+
+      .text-button:hover {
+        transform: translateY(-1px);
+        color: var(--ink);
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(34px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes fieldRise {
+        from {
+          opacity: 0;
+          transform: translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 1ms !important;
+          transition-duration: 1ms !important;
+        }
+      }
+
+      @media (max-width: 1140px) {
+        .page {
+          grid-template-columns: 1fr;
+          width: min(760px, calc(100% - 42px));
+          gap: 34px;
+          padding: 32px 0 54px;
+        }
+
+        .poster {
+          min-height: auto;
+          padding: 0;
+        }
+
+        .headline {
+          margin-top: 60px;
+        }
+
+        h1 {
+          max-width: 560px;
+          font-size: 56px;
+        }
+
+        .art-stack {
+          min-height: 280px;
+        }
+
+        .login-zone {
+          justify-self: stretch;
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          width: 100%;
+          padding: 24px 16px 42px;
+        }
+
+        .headline {
+          margin-top: 44px;
+          max-width: 100%;
+        }
+
+        h1 {
+          max-width: 344px;
+          font-size: 36px;
+          line-height: 1.08;
+        }
+
+        .title-desktop {
+          display: none;
+        }
+
+        .title-mobile {
+          display: inline;
+        }
+
+        .lead {
+          max-width: 326px;
+          font-size: 15px;
+          overflow-wrap: anywhere;
+          word-break: break-all;
+        }
+
+        .art-stack {
+          min-height: 284px;
+          margin-top: 34px;
+          border-radius: 28px;
+          width: 100%;
+        }
+
+        .plate-a {
+          left: -16px;
+          width: 55%;
+        }
+
+        .plate-b {
+          left: 31%;
+          width: 44%;
+        }
+
+        .plate-c {
+          left: 51%;
+          top: 80px;
+          width: 40%;
+        }
+
+        .poster-lines strong {
+          font-size: 31px;
+        }
+
+        .glyph-grid {
+          gap: 6px;
+          padding: 18px;
+        }
+
+        .dark-ticket {
+          padding: 17px;
+        }
+
+        .dark-ticket strong {
+          font-size: 24px;
+        }
+
+        .pass-top,
+        .form,
+        .pass-foot {
+          padding-right: 22px;
+          padding-left: 22px;
+        }
+
+        .switch-shell {
+          margin-right: 22px;
+          margin-left: 22px;
+        }
+
+        .pass-top h2 {
+          font-size: 32px;
+        }
+
+        .pass-foot {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="poster" aria-label="Inspiration One">
+        <div class="brand">
+          <div class="mark-shell" aria-hidden="true">
+            <div class="mark-core"></div>
+          </div>
+          <div>
+            <strong>Inspiration One</strong>
+            <span>Creative access point</span>
+          </div>
+        </div>
+
+        <div class="headline">
+          <span class="eyebrow">PRIVATE STUDIO</span>
+          <h1>
+            <span class="title-desktop">把灵感入口做成一张门禁海报</span>
+            <span class="title-mobile">把灵感入口<br />做成门禁海报</span>
+          </h1>
+          <p class="lead">登录页不再只是表单容器，它应该在第一秒建立品牌记忆、秩序感和创意工作的仪式感。</p>
+        </div>
+
+        <div class="art-stack" aria-hidden="true">
+          <div class="plate plate-a">
+            <div class="plate-inner">
+              <div class="glyph-grid">
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+            </div>
+          </div>
+          <div class="plate plate-b">
+            <div class="plate-inner">
+              <div class="poster-lines">
+                <strong>ONE<br />FLOW</strong>
+                <small>Concept / Copy / Image / Review</small>
+              </div>
+            </div>
+          </div>
+          <div class="plate plate-c">
+            <div class="plate-inner dark-ticket">
+              <span></span>
+              <strong>ACCESS<br />01</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="login-zone" aria-label="登录表单静态稿">
+        <input class="mode-input" type="radio" name="mode" id="mode-login" checked />
+        <input class="mode-input" type="radio" name="mode" id="mode-setup" />
+
+        <div class="pass-shell">
+          <div class="pass-core">
+            <div class="pass-top">
+              <div class="pass-label">
+                <span class="access-tag">SECURE ACCESS</span>
+                <span class="mini-code" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+              </div>
+              <h2>工作台登录</h2>
+              <p>使用账号密码进入私有创意空间。</p>
+            </div>
+
+            <div class="switch-shell">
+              <div class="switch-core" role="tablist" aria-label="登录模式">
+                <label for="mode-login">登录</label>
+                <label for="mode-setup">设置密码</label>
+              </div>
+            </div>
+
+            <form class="form">
+              <div class="field">
+                <label for="username">账号</label>
+                <div class="field-shell">
+                  <input class="field-core" id="username" type="text" placeholder="请输入账号" autocomplete="username" />
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="password">密码</label>
+                <div class="field-shell">
+                  <input
+                    class="field-core"
+                    id="password"
+                    type="password"
+                    placeholder="请输入密码"
+                    autocomplete="current-password"
+                  />
+                </div>
+              </div>
+
+              <div class="field setup-only">
+                <label for="setup-token">设密凭据</label>
+                <div class="field-shell">
+                  <input
+                    class="field-core"
+                    id="setup-token"
+                    type="password"
+                    placeholder="输入管理员提供的一次性凭据"
+                    autocomplete="one-time-code"
+                  />
+                </div>
+              </div>
+
+              <div class="field setup-only">
+                <label for="confirm-password">确认密码</label>
+                <div class="field-shell">
+                  <input
+                    class="field-core"
+                    id="confirm-password"
+                    type="password"
+                    placeholder="再次输入密码"
+                    autocomplete="new-password"
+                  />
+                </div>
+              </div>
+
+              <div class="state-line">错误状态示例：请填写账号和密码。</div>
+
+              <button class="primary" type="button">
+                <span>进入工作台</span>
+                <span aria-hidden="true">↗</span>
+              </button>
+            </form>
+
+            <div class="pass-foot">
+              <span>Session protected</span>
+              <button class="text-button" type="button">联系管理员</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

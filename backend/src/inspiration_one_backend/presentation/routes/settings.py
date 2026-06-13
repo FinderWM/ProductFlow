@@ -25,6 +25,7 @@ from inspiration_one_backend.config import (
     get_runtime_settings,
     normalize_config_values,
     normalize_image_generation_size,
+    parse_config_multi_select,
     parse_image_tool_allowed_fields,
 )
 from inspiration_one_backend.domain.rbac import (
@@ -64,6 +65,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     PROVIDER_TYPES,
     TEXT_PROVIDER_KINDS,
     UNSET_PROVIDER_FIELD,
+    ResolvedTextProviderConfig,
     add_generation_config,
     add_generation_resource_group,
     archive_generation_config,
@@ -94,8 +96,7 @@ from inspiration_one_backend.infrastructure.provider_models import (
     ProviderModelDiscoveryUnsupportedError,
     list_provider_models,
 )
-from inspiration_one_backend.infrastructure.text.mock_provider import MockTextProvider
-from inspiration_one_backend.infrastructure.text.openai_provider import OpenAITextProvider
+from inspiration_one_backend.infrastructure.text.factory import get_text_provider_from_config
 from inspiration_one_backend.presentation.deps import (
     get_current_user,
     get_session,
@@ -138,6 +139,8 @@ from inspiration_one_backend.presentation.schemas.settings import (
     SettingsImportPreviewResponse,
     SettingsProviderBindingExport,
     SettingsProviderProfileExport,
+    TextGenerationConfigJsonResponseFormatTestRequest,
+    TextGenerationConfigJsonResponseFormatTestResponse,
     TextGenerationConfigTestRequest,
     TextGenerationConfigTestResponse,
     UserUiPreferencesResponse,
@@ -224,7 +227,7 @@ def _serialize_config(session: Session) -> ConfigResponse:
         source = "database" if definition.key in db_values else "env_default"
         raw_value = getattr(settings, definition.key)
         effective_value = (
-            list(parse_image_tool_allowed_fields(raw_value))
+            list(parse_config_multi_select(definition.key, raw_value))
             if definition.input_type == "multi_select"
             else _public_value(raw_value, secret=definition.secret)
         )
@@ -439,19 +442,41 @@ def _filter_generation_config_stat_aggregates_by_ids(
     return {config_id: stat for config_id, stat in stats.items() if config_id in generation_config_ids}
 
 
-def _filter_generation_configs_for_user(
+def _available_generation_resource_group_ids_for_user(
     session: Session,
-    generation_configs: list[GenerationConfig],
     *,
     user: AuthUser | None,
-) -> list[GenerationConfig]:
+) -> set[str] | None:
     if user is None:
+        return None
+    return {group.id for group in list_available_generation_resource_groups_for_user(session, user=user)}
+
+
+def _visible_generation_config_resource_group_ids(
+    generation_config: GenerationConfig,
+    *,
+    available_resource_group_ids: set[str] | None,
+) -> list[str]:
+    resource_group_ids = generation_config_resource_group_ids(generation_config)
+    if available_resource_group_ids is None:
+        return resource_group_ids
+    return [group_id for group_id in resource_group_ids if group_id in available_resource_group_ids]
+
+
+def _filter_generation_configs_by_available_groups(
+    generation_configs: list[GenerationConfig],
+    *,
+    available_resource_group_ids: set[str] | None,
+) -> list[GenerationConfig]:
+    if available_resource_group_ids is None:
         return generation_configs
-    allowed_group_ids = {group.id for group in list_available_generation_resource_groups_for_user(session, user=user)}
     return [
         generation_config
         for generation_config in generation_configs
-        if set(generation_config_resource_group_ids(generation_config)) & allowed_group_ids
+        if _visible_generation_config_resource_group_ids(
+            generation_config,
+            available_resource_group_ids=available_resource_group_ids,
+        )
     ]
 
 
@@ -499,8 +524,12 @@ def _serialize_generation_config_status_config(
     *,
     today_stats: dict[str, GenerationConfigDailyStat],
     range_stats: dict[str, _GenerationConfigStatAggregate],
+    available_resource_group_ids: set[str] | None,
 ) -> GenerationConfigStatusConfigResponse:
-    resource_group_ids = generation_config_resource_group_ids(generation_config)
+    resource_group_ids = _visible_generation_config_resource_group_ids(
+        generation_config,
+        available_resource_group_ids=available_resource_group_ids,
+    )
     return GenerationConfigStatusConfigResponse(
         id=generation_config.id,
         resource_group_id=resource_group_ids[0] if resource_group_ids else None,
@@ -516,6 +545,59 @@ def _serialize_generation_config_status_config(
         range_stat=_serialize_generation_config_stat_aggregate(
             range_stats.get(generation_config.id, _GenerationConfigStatAggregate())
         ),
+    )
+
+
+def _safe_text_generation_test_error_detail(exc: ValueError) -> str:
+    if isinstance(exc, ValidationError):
+        details = []
+        for error in exc.errors(include_input=False):
+            loc = ".".join(str(part) for part in error.get("loc", ())) or "-"
+            message = str(error.get("msg") or error.get("type") or "校验失败")
+            details.append(f"{loc}: {message}")
+        return "; ".join(details)[:500] or exc.__class__.__name__
+
+    detail = str(exc).strip() or exc.__class__.__name__
+    if "未返回 JSON 对象" in detail:
+        return detail.split("：", 1)[0].split(":", 1)[0]
+    return detail[:500]
+
+
+def _resolve_text_generation_config_for_test(
+    session: Session,
+    *,
+    generation_config_id: str | None,
+    generation_config: GenerationConfigCreateRequest | None,
+) -> ResolvedTextProviderConfig:
+    if generation_config is not None:
+        return resolve_text_provider_config_from_draft(
+            session,
+            name=generation_config.name,
+            provider_kind=generation_config.provider_kind,
+            provider_profile_id=generation_config.provider_profile_id,
+            model_settings=generation_config.model_settings,
+            config=generation_config.config,
+        )
+    if generation_config_id is None:
+        raise ValueError("请提供文案生成配置")
+    db_generation_config = session.scalar(
+        select(GenerationConfig)
+        .options(selectinload(GenerationConfig.provider_profile))
+        .where(
+            GenerationConfig.id == generation_config_id,
+            GenerationConfig.purpose == "text",
+            GenerationConfig.archived_at.is_(None),
+        )
+    )
+    if db_generation_config is None:
+        raise ValueError("生成配置不存在")
+    return resolve_text_provider_config_from_draft(
+        session,
+        name=db_generation_config.name,
+        provider_kind=db_generation_config.provider_kind,
+        provider_profile_id=db_generation_config.provider_profile_id,
+        model_settings=dict(db_generation_config.model_settings_json or {}),
+        config=dict(db_generation_config.config_json or {}),
     )
 
 
@@ -547,10 +629,10 @@ def _serialize_generation_config_status_summary(
     today = now.date()
     range_start = start_date or end_date or today
     range_end = end_date or range_start
-    generation_configs = _filter_generation_configs_for_user(
-        session,
+    available_resource_group_ids = _available_generation_resource_group_ids_for_user(session, user=user)
+    generation_configs = _filter_generation_configs_by_available_groups(
         list_generation_configs(session),
-        user=user,
+        available_resource_group_ids=available_resource_group_ids,
     )
     generation_config_ids = {generation_config.id for generation_config in generation_configs}
     config_purposes = {generation_config.id: generation_config.purpose for generation_config in generation_configs}
@@ -612,6 +694,7 @@ def _serialize_generation_config_status_summary(
                 generation_config,
                 today_stats=today_stats,
                 range_stats=range_stats,
+                available_resource_group_ids=available_resource_group_ids,
             )
             for generation_config in generation_configs
         ]
@@ -665,11 +748,11 @@ def _load_profile_for_model_discovery(session: Session, profile_id: str, provide
     return profile
 
 
-def _export_config_value(value: Any, *, input_type: str) -> str | int | bool | list[str] | None:
+def _export_config_value(key: str, value: Any, *, input_type: str) -> str | int | bool | list[str] | None:
     if isinstance(value, Path):
         return str(value)
     if input_type == "multi_select":
-        return list(parse_image_tool_allowed_fields(value))
+        return list(parse_config_multi_select(key, value))
     return value
 
 
@@ -745,7 +828,11 @@ def _build_settings_export_document(session: Session) -> SettingsExportDocument:
     ensure_provider_config_bootstrapped(session)
     settings = get_runtime_settings()
     runtime_config = {
-        definition.key: _export_config_value(getattr(settings, definition.key), input_type=definition.input_type)
+        definition.key: _export_config_value(
+            definition.key,
+            getattr(settings, definition.key),
+            input_type=definition.input_type,
+        )
         for definition in CONFIG_DEFINITIONS
     }
     profiles = session.scalars(
@@ -1652,44 +1739,12 @@ def test_text_generation_config_endpoint(
 ) -> TextGenerationConfigTestResponse:
     try:
         ensure_provider_config_bootstrapped(session)
-        if payload.generation_config is not None:
-            draft = payload.generation_config
-            resolved_config = resolve_text_provider_config_from_draft(
-                session,
-                name=draft.name,
-                provider_kind=draft.provider_kind,
-                provider_profile_id=draft.provider_profile_id,
-                model_settings=draft.model_settings,
-                config=draft.config,
-            )
-        elif payload.generation_config_id is not None:
-            generation_config = session.scalar(
-                select(GenerationConfig)
-                .options(selectinload(GenerationConfig.provider_profile))
-                .where(
-                    GenerationConfig.id == payload.generation_config_id,
-                    GenerationConfig.purpose == "text",
-                    GenerationConfig.archived_at.is_(None),
-                )
-            )
-            if generation_config is None:
-                raise ValueError("生成配置不存在")
-            resolved_config = resolve_text_provider_config_from_draft(
-                session,
-                name=generation_config.name,
-                provider_kind=generation_config.provider_kind,
-                provider_profile_id=generation_config.provider_profile_id,
-                model_settings=dict(generation_config.model_settings_json or {}),
-                config=dict(generation_config.config_json or {}),
-            )
-        else:
-            raise ValueError("请提供文案生成配置")
-        if resolved_config.provider_kind == "mock":
-            text_provider = MockTextProvider()
-        elif resolved_config.provider_kind == "openai":
-            text_provider = OpenAITextProvider(resolved_config)
-        else:
-            raise ValueError(f"暂不支持的文案 provider: {resolved_config.provider_kind}")
+        resolved_config = _resolve_text_generation_config_for_test(
+            session,
+            generation_config_id=payload.generation_config_id,
+            generation_config=payload.generation_config,
+        )
+        text_provider = get_text_provider_from_config(resolved_config)
         inspiration_input = InspirationInput(
             name=payload.inspiration.name,
             category=payload.inspiration.category,
@@ -1709,6 +1764,12 @@ def test_text_generation_config_endpoint(
         copy, copy_model = text_provider.generate_copy(inspiration_input, brief, copy_config)
         duration_ms = int((perf_counter() - brief_start) * 1000)
     except ValueError as exc:
+        logger.info(
+            "文案生成配置测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
+            payload.generation_config_id or "-",
+            resolved_config.provider_kind if "resolved_config" in locals() else "-",
+            _safe_text_generation_test_error_detail(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("文案生成配置测试失败")
@@ -1720,6 +1781,53 @@ def test_text_generation_config_endpoint(
         copy_model=copy_model,
         brief=brief.model_dump(mode="json"),
         copy_result=copy.model_dump(mode="json"),
+        duration_ms=duration_ms,
+    )
+
+
+@router.post(
+    "/generation-configs/test-json-response-format",
+    response_model=TextGenerationConfigJsonResponseFormatTestResponse,
+    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
+)
+def test_text_generation_config_json_response_format_endpoint(
+    payload: TextGenerationConfigJsonResponseFormatTestRequest,
+    session: Session = Depends(get_session),
+) -> TextGenerationConfigJsonResponseFormatTestResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        resolved_config = _resolve_text_generation_config_for_test(
+            session,
+            generation_config_id=payload.generation_config_id,
+            generation_config=payload.generation_config,
+        )
+        if resolved_config.provider_kind != "openai_chat_completions":
+            raise ValueError("结构化 JSON response_format 仅支持 Chat Completions 文案接口")
+        if not resolved_config.structured_json_response_format_enabled:
+            raise ValueError("请先启用结构化 JSON response_format")
+        text_provider = get_text_provider_from_config(resolved_config)
+        test_method = getattr(text_provider, "test_structured_json_response_format", None)
+        if not callable(test_method):
+            raise ValueError("当前文案接口不支持结构化 JSON response_format 测试")
+        start = perf_counter()
+        parsed_json, model = test_method()
+        duration_ms = int((perf_counter() - start) * 1000)
+    except ValueError as exc:
+        logger.info(
+            "结构化 JSON response_format 测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
+            payload.generation_config_id or "-",
+            resolved_config.provider_kind if "resolved_config" in locals() else "-",
+            _safe_text_generation_test_error_detail(exc),
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("结构化 JSON response_format 测试失败")
+        raise HTTPException(status_code=502, detail="结构化 JSON response_format 测试失败，请稍后重试") from exc
+    return TextGenerationConfigJsonResponseFormatTestResponse(
+        generation_config_id=payload.generation_config_id,
+        provider_kind=resolved_config.provider_kind,
+        model=model,
+        parsed_json=parsed_json,
         duration_ms=duration_ms,
     )
 

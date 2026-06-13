@@ -13,6 +13,7 @@ import {
   KeyRound,
   Link2,
   Layers3,
+  LayoutGrid,
   BellRing,
   Palette,
   Pencil,
@@ -78,8 +79,11 @@ import type {
   ProviderProfileCreateRequest,
   ProviderProfileUpdateRequest,
   ProviderType,
+  ResourceLibraryAsset,
   SettingsExportPayload,
   SettingsImportPreviewResponse,
+  TextGenerationConfigJsonResponseFormatTestRequest,
+  TextGenerationConfigJsonResponseFormatTestResponse,
   TextGenerationConfigTestRequest,
   TextGenerationConfigTestResponse,
 } from "../lib/types";
@@ -110,6 +114,7 @@ export type SettingsSectionId =
   | "queue"
   | "globalTemplates"
   | "layoutAppearance"
+  | "loginPage"
   | "weather"
   | "notifications"
   | "security"
@@ -165,6 +170,7 @@ export interface GenerationConfigDraft {
   images_quality: string;
   images_style: string;
   responses_background_enabled: boolean;
+  structured_json_response_format_enabled: boolean;
   gemini_api_version: string;
   gemini_output_mime_type: string;
   priority: string;
@@ -205,9 +211,25 @@ export interface TextConfigTestState {
   records: Record<string, TextConfigTestRecord>;
 }
 
+export interface TextConfigJsonResponseFormatTestRecord {
+  testing: boolean;
+  result: TextGenerationConfigJsonResponseFormatTestResponse | null;
+  error: string;
+}
+
+export interface TextConfigJsonResponseFormatTestState {
+  latestKey: string | null;
+  records: Record<string, TextConfigJsonResponseFormatTestRecord>;
+}
+
 interface TextGenerationConfigTestMutationInput {
   key: string;
   payload: TextGenerationConfigTestRequest;
+}
+
+interface TextGenerationConfigJsonResponseFormatTestMutationInput {
+  key: string;
+  payload: TextGenerationConfigJsonResponseFormatTestRequest;
 }
 
 type PendingGenerationArchive =
@@ -220,7 +242,7 @@ interface ProviderSettingsRefreshOptions {
   includeRuntimeConfig?: boolean;
 }
 
-type TextProviderKind = "mock" | "openai";
+type TextProviderKind = "mock" | "openai" | "openai_chat_completions";
 type ImageProviderKind =
   | "mock"
   | "openai_responses"
@@ -242,40 +264,39 @@ const TEXTAREA_CLASS =
   "focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] " +
   "dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400";
 
+const PROMPT_TEXTAREA_CLASS = `${TEXTAREA_CLASS} pf-settings-prompt-textarea`;
+
 const PANEL_CLASS =
   "rounded-xl border border-slate-200 bg-white p-6 shadow-md shadow-slate-300/40 " +
   "dark:border-slate-700/70 dark:bg-[#0f1726] dark:shadow-black/35";
 
 const SETTINGS_MAIN_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-11 items-center justify-center rounded-2xl border px-5 text-sm font-semibold " +
+  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
   "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const SETTINGS_SECONDARY_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-11 items-center justify-center rounded-2xl border px-5 text-sm font-semibold " +
+  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
   "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const SETTINGS_COMPACT_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 items-center justify-center rounded-xl border px-3 text-sm font-medium " +
+  "pf-workspace-action-secondary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium " +
   "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const SETTINGS_ICON_ACTION_CLASS =
   "pf-workspace-action-secondary inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all " +
   "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const SETTINGS_SQUARE_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border " +
+  "pf-workspace-action-secondary inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border " +
   "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const SETTINGS_DRAWER_SUBMIT_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-12 w-full items-center justify-center rounded-2xl border px-5 text-sm font-bold " +
+  "pf-workspace-action-primary inline-flex h-9 w-full items-center justify-center rounded-xl border px-3.5 text-xs font-semibold " +
   "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const SETTINGS_DANGER_ACTION_CLASS =
-  "pf-danger-action inline-flex h-9 items-center justify-center rounded-xl border px-3 text-sm font-medium " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
 const SETTINGS_DANGER_ICON_ACTION_CLASS =
   "pf-danger-action inline-flex h-8 w-8 items-center justify-center rounded-xl border transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
 const SETTINGS_RESET_ACTION_CLASS =
-  "pf-danger-action inline-flex h-11 shrink-0 items-center justify-center rounded-2xl border px-3.5 text-xs font-semibold " +
+  "pf-danger-action inline-flex h-8 shrink-0 items-center justify-center rounded-lg border px-2.5 text-xs font-semibold " +
   "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
 const SETTINGS_BORDERED_MODULE_CLASS = "pf-settings-bordered-module";
 const SETTINGS_FIELD_CARD_CLASS = "pf-settings-field-card";
 
-const SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS = 3000;
+const SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS = 1000;
 
 const PROVIDER_DRAWER_INPUT_CLASS =
   "h-[43px] w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-950 " +
@@ -348,6 +369,13 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     icon: Palette,
   },
   {
+    id: "loginPage",
+    labelKey: "settings.section.loginPage",
+    descriptionKey: "settings.section.loginPageDescription",
+    groupKey: "settings.groupExperience",
+    icon: LayoutGrid,
+  },
+  {
     id: "weather",
     labelKey: "settings.section.weather",
     descriptionKey: "settings.section.weatherDescription",
@@ -400,6 +428,7 @@ export function shouldShowGlobalTemplatesPanel(section: SettingsSectionId): bool
 
 const PROVIDER_CAPABILITY_OPTIONS: Array<{ value: ProviderCapability; labelKey: TranslationKey }> = [
   { value: "text_responses", labelKey: "settings.provider.capability.textResponses" },
+  { value: "text_chat_completions", labelKey: "settings.provider.capability.textChatCompletions" },
   { value: "image_responses", labelKey: "settings.provider.capability.imageResponses" },
   { value: "image_images", labelKey: "settings.provider.capability.imageImages" },
   { value: "image_chat", labelKey: "settings.provider.capability.imageChat" },
@@ -468,6 +497,57 @@ export function markTextConfigTestFailed(
   key: string,
   error: string,
 ): TextConfigTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: false, result: null, error },
+    },
+  };
+}
+
+export function textConfigJsonResponseFormatTestRecordForKey(
+  state: TextConfigJsonResponseFormatTestState | undefined,
+  key: string,
+): TextConfigJsonResponseFormatTestRecord | null {
+  return state?.records[key] ?? null;
+}
+
+export function markTextConfigJsonResponseFormatTestStarted(
+  state: TextConfigJsonResponseFormatTestState,
+  key: string,
+): TextConfigJsonResponseFormatTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: true, result: null, error: "" },
+    },
+  };
+}
+
+export function markTextConfigJsonResponseFormatTestSucceeded(
+  state: TextConfigJsonResponseFormatTestState,
+  key: string,
+  result: TextGenerationConfigJsonResponseFormatTestResponse,
+): TextConfigJsonResponseFormatTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: false, result, error: "" },
+    },
+  };
+}
+
+export function markTextConfigJsonResponseFormatTestFailed(
+  state: TextConfigJsonResponseFormatTestState,
+  key: string,
+  error: string,
+): TextConfigJsonResponseFormatTestState {
   return {
     ...state,
     latestKey: key,
@@ -807,6 +887,7 @@ function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfig
     images_quality: "",
     images_style: "",
     responses_background_enabled: true,
+    structured_json_response_format_enabled: false,
     gemini_api_version: "v1beta",
     gemini_output_mime_type: "",
     priority: "100",
@@ -818,11 +899,11 @@ function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfig
   };
 }
 
-function generationConfigDraft(config: GenerationConfig): GenerationConfigDraft {
+export function generationConfigDraft(config: GenerationConfig): GenerationConfigDraft {
   const providerKind =
     config.purpose === "text"
-      ? config.provider_kind === "openai"
-        ? "openai"
+      ? config.provider_kind === "openai" || config.provider_kind === "openai_chat_completions"
+        ? config.provider_kind
         : "mock"
       : config.provider_kind === "openai_responses" ||
           config.provider_kind === "openai_images" ||
@@ -843,6 +924,11 @@ function generationConfigDraft(config: GenerationConfig): GenerationConfigDraft 
     images_quality: textValue(config.config, "images_quality"),
     images_style: textValue(config.config, "images_style"),
     responses_background_enabled: boolValue(config.config, "responses_background_enabled", true),
+    structured_json_response_format_enabled: boolValue(
+      config.config,
+      "structured_json_response_format_enabled",
+      false,
+    ),
     gemini_api_version: textValue(config.config, "gemini_api_version") || "v1beta",
     gemini_output_mime_type: textValue(config.config, "gemini_output_mime_type"),
     priority: String(config.priority),
@@ -881,7 +967,9 @@ export function generationConfigPayloadFromDraft(
         ? { model: draft.model.trim() }
         : {};
   const config =
-    draft.provider_kind === "openai_responses"
+    draft.provider_kind === "openai_chat_completions"
+      ? { structured_json_response_format_enabled: draft.structured_json_response_format_enabled }
+      : draft.provider_kind === "openai_responses"
       ? { responses_background_enabled: draft.responses_background_enabled }
       : draft.provider_kind === "openai_images"
         ? {
@@ -1046,6 +1134,16 @@ function textGenerationConfigTestPayload(
   };
 }
 
+function textGenerationConfigJsonResponseFormatTestPayload(
+  generationConfigDraft: GenerationConfigDraft,
+): TextGenerationConfigJsonResponseFormatTestRequest {
+  const generationConfig = generationConfigPayloadFromDraft(generationConfigDraft) as GenerationConfigCreateRequest;
+  return {
+    generation_config_id: generationConfigDraft.id,
+    generation_config: generationConfig,
+  };
+}
+
 function itemsForSection(config: ConfigResponse | undefined, section: SettingsSectionId): ConfigItem[] {
   const items = config?.items ?? [];
   if (section === "prompts") {
@@ -1063,6 +1161,9 @@ function itemsForSection(config: ConfigResponse | undefined, section: SettingsSe
   }
   if (section === "layoutAppearance") {
     return items.filter((item) => item.category === "界面与外观");
+  }
+  if (section === "loginPage") {
+    return items.filter((item) => item.category === "登录页");
   }
   if (section === "security") {
     return items.filter((item) => item.category === "安全与运维");
@@ -1331,9 +1432,113 @@ function SettingsFormField({ label, children, className = "", helpKey, helpConte
   );
 }
 
+function SettingsFeedbackDialog({
+  successMessage,
+  errorMessage,
+  onCloseSuccess,
+  onCloseError,
+}: {
+  successMessage: string;
+  errorMessage: string;
+  onCloseSuccess: () => void;
+  onCloseError: () => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+  const descriptionId = useId();
+  const open = Boolean(errorMessage || successMessage);
+  const isError = Boolean(errorMessage);
+  const message = errorMessage || successMessage;
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        if (isError) {
+          onCloseError();
+          return;
+        }
+        onCloseSuccess();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isError, onCloseError, onCloseSuccess, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  const Icon = isError ? X : CheckCircle2;
+
+  return (
+    <div
+      className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+        if (isError) {
+          onCloseError();
+          return;
+        }
+        onCloseSuccess();
+      }}
+    >
+      <div
+        role={isError ? "alertdialog" : "dialog"}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+      >
+        <div className="flex items-start gap-3 px-5 py-5">
+          <div
+            className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+              isError
+                ? "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-200"
+                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-200"
+            }`}
+          >
+            <Icon size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
+              {isError ? t("settings.operationFailed") : t("settings.operationSucceeded")}
+            </h2>
+            <p id={descriptionId} className="mt-2 break-words text-sm leading-6 text-slate-600 dark:text-slate-300">
+              {message}
+            </p>
+          </div>
+          {isError ? (
+            <button
+              type="button"
+              onClick={onCloseError}
+              className={SETTINGS_ICON_ACTION_CLASS}
+              aria-label={t("create.close")}
+              title={t("create.close")}
+            >
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WeatherSettingsPanel({ onSaved }: { onSaved: () => void }) {
   const { t } = useI18n();
   const [weatherSettings, setWeatherSettings] = useState(readWeatherSettings);
+  const saveWeatherSettings = () => {
+    const sourceId = normalizeWeatherSourceId(weatherSettings.sourceId);
+    writeWeatherSourceId(sourceId);
+    writeWeatherRefreshMinutes(weatherSettings.refreshMinutes);
+    setWeatherSettings(readWeatherSettings());
+    onSaved();
+  };
 
   return (
     <section className={`${PANEL_CLASS} space-y-5`}>
@@ -1355,9 +1560,7 @@ function WeatherSettingsPanel({ onSaved }: { onSaved: () => void }) {
             }))}
             onChange={(value) => {
               const sourceId = normalizeWeatherSourceId(value);
-              writeWeatherSourceId(sourceId);
-              setWeatherSettings(readWeatherSettings());
-              onSaved();
+              setWeatherSettings((current) => ({ ...current, sourceId }));
             }}
             radius="lg"
           />
@@ -1370,13 +1573,17 @@ function WeatherSettingsPanel({ onSaved }: { onSaved: () => void }) {
             value={weatherSettings.refreshMinutes}
             onChange={(event) => {
               const nextValue = Number(event.target.value);
-              writeWeatherRefreshMinutes(nextValue);
-              setWeatherSettings(readWeatherSettings());
-              onSaved();
+              setWeatherSettings((current) => ({ ...current, refreshMinutes: nextValue }));
             }}
             className={INPUT_CLASS}
           />
         </SettingsFormField>
+      </div>
+      <div className="flex justify-end">
+        <button type="button" onClick={saveWeatherSettings} className={SETTINGS_COMPACT_ACTION_CLASS}>
+          <Save size={14} className="mr-1.5" />
+          {t("common.save")}
+        </button>
       </div>
     </section>
   );
@@ -1385,6 +1592,11 @@ function WeatherSettingsPanel({ onSaved }: { onSaved: () => void }) {
 function NotificationSettingsPanel({ onSaved }: { onSaved: () => void }) {
   const { t } = useI18n();
   const [notificationAutoCloseMs, setNotificationAutoCloseMs] = useState(readNotificationAutoCloseMs);
+  const saveNotificationSettings = () => {
+    writeNotificationAutoCloseMs(notificationAutoCloseMs);
+    setNotificationAutoCloseMs(readNotificationAutoCloseMs());
+    onSaved();
+  };
 
   return (
     <section className={`${PANEL_CLASS} space-y-5`}>
@@ -1406,13 +1618,17 @@ function NotificationSettingsPanel({ onSaved }: { onSaved: () => void }) {
             value={notificationAutoCloseMs}
             onChange={(event) => {
               const nextValue = Number(event.target.value || DEFAULT_NOTIFICATION_AUTO_CLOSE_MS);
-              writeNotificationAutoCloseMs(nextValue);
-              setNotificationAutoCloseMs(readNotificationAutoCloseMs());
-              onSaved();
+              setNotificationAutoCloseMs(nextValue);
             }}
             className={INPUT_CLASS}
           />
         </SettingsFormField>
+      </div>
+      <div className="flex justify-end">
+        <button type="button" onClick={saveNotificationSettings} className={SETTINGS_COMPACT_ACTION_CLASS}>
+          <Save size={14} className="mr-1.5" />
+          {t("common.save")}
+        </button>
       </div>
     </section>
   );
@@ -1713,7 +1929,7 @@ function SettingsOptionToggle({
 }: SettingsOptionToggleProps) {
   return (
     <label
-      className={`pf-settings-option-toggle inline-flex min-h-11 w-full items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-sm font-medium transition-all ${
+      className={`pf-settings-option-toggle inline-flex min-h-9 max-w-full items-center gap-2 rounded-full border py-1.5 pl-2.5 pr-3 text-xs font-medium transition-all ${
         checked
           ? "border-indigo-300 bg-indigo-50 text-slate-950 dark:border-violet-400/45 dark:bg-violet-500/14 dark:text-white"
           : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-950 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:hover:text-white"
@@ -1728,7 +1944,42 @@ function SettingsOptionToggle({
         className="peer sr-only"
       />
       <span className="pf-settings-option-toggle-control" aria-hidden="true" />
-      <span className="min-w-0 flex-1 leading-5">{children}</span>
+      <span className="min-w-0 leading-5">{children}</span>
+    </label>
+  );
+}
+
+interface SettingsSwitchToggleProps {
+  checked: boolean;
+  disabled?: boolean;
+  inputId?: string;
+  children: ReactNode;
+  onChange: (checked: boolean) => void;
+}
+
+function SettingsSwitchToggle({
+  checked,
+  disabled = false,
+  inputId,
+  children,
+  onChange,
+}: SettingsSwitchToggleProps) {
+  return (
+    <label
+      className={`pf-settings-switch-toggle inline-flex min-h-9 max-w-full items-center gap-2 rounded-full border py-1.5 pl-3 pr-2 text-xs font-semibold transition-all ${
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer active:scale-[0.99]"
+      }`}
+    >
+      <span className="min-w-0 leading-5">{children}</span>
+      <input
+        id={inputId}
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="peer sr-only"
+      />
+      <span className="pf-settings-switch-control" aria-hidden="true" />
     </label>
   );
 }
@@ -1838,18 +2089,20 @@ function ConfigField({
         value={String(value)}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        rows={item.key.startsWith("prompt_") ? 8 : 3}
-        className={`${TEXTAREA_CLASS} resize-y leading-6`}
+        rows={item.key.startsWith("prompt_") ? 10 : 3}
+        className={`${item.key.startsWith("prompt_") ? PROMPT_TEXTAREA_CLASS : TEXTAREA_CLASS} ${
+          item.key.startsWith("prompt_") ? "min-h-[240px]" : ""
+        } resize-y leading-6`}
       />
     ) : item.input_type === "boolean" ? (
-      <SettingsOptionToggle
+      <SettingsSwitchToggle
         inputId={item.key}
         checked={Boolean(value)}
         disabled={disabled}
         onChange={(checked) => onChange(checked)}
       >
         {Boolean(value) ? t("settings.enabled") : t("settings.disabled")}
-      </SettingsOptionToggle>
+      </SettingsSwitchToggle>
     ) : (
       <input
         id={item.key}
@@ -1927,6 +2180,146 @@ function ConfigField({
           {resetControl}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface LoginPageSettingsPanelProps {
+  items: ConfigItem[];
+  drafts: Record<string, DraftValue>;
+  secretTouched: Record<string, boolean>;
+  resettingKey: string | null;
+  disabled: boolean;
+  assets: ResourceLibraryAsset[];
+  assetsLoading: boolean;
+  assetsError: boolean;
+  onChange: (item: ConfigItem, value: DraftValue, touchedSecret?: boolean) => void;
+  onReset: (item: ConfigItem) => void;
+}
+
+function LoginPageSettingsPanel({
+  items,
+  drafts,
+  secretTouched,
+  resettingKey,
+  disabled,
+  assets,
+  assetsLoading,
+  assetsError,
+  onChange,
+  onReset,
+}: LoginPageSettingsPanelProps) {
+  const { t } = useI18n();
+  const assetItem = items.find((item) => item.key === "login_page_image_lab_hero_image_asset_id");
+  const textItems = items.filter((item) => item.key !== "login_page_image_lab_hero_image_asset_id");
+  const selectableAssets = assets.filter(
+    (asset) => asset.kind === "image" && !asset.archived_at && asset.effective_enabled !== false,
+  );
+  const selectedAssetId = assetItem ? String(drafts[assetItem.key] ?? draftFromItem(assetItem)) : "";
+  const selectedAsset = selectableAssets.find((asset) => asset.id === selectedAssetId);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 lg:grid-cols-2">
+        {textItems.map((item) => (
+          <ConfigField
+            key={item.key}
+            item={item}
+            value={drafts[item.key] ?? draftFromItem(item)}
+            secretTouched={Boolean(secretTouched[item.key])}
+            isResetting={resettingKey === item.key}
+            layout="card"
+            disabled={disabled}
+            onChange={(nextValue, touchedSecret) => onChange(item, nextValue, touchedSecret)}
+            onReset={() => onReset(item)}
+          />
+        ))}
+      </div>
+
+      {assetItem ? (
+        <div className={`${SETTINGS_FIELD_CARD_CLASS} rounded-2xl border border-slate-200 bg-white p-4 shadow-none dark:border-slate-800 dark:bg-[#0f1726]`}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor={assetItem.key} className="block text-sm font-semibold text-zinc-950 dark:text-white">
+                  {assetItem.label}
+                </label>
+                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(assetItem)}`}>
+                  {sourceLabel(assetItem, t)}
+                </span>
+              </div>
+              <div className="pf-settings-config-key min-w-0 break-all font-mono text-[11px] leading-5 text-zinc-400 dark:text-slate-500">
+                {assetItem.key}
+              </div>
+              <p className="text-xs leading-5 text-zinc-500 dark:text-slate-400">
+                {t("settings.loginPage.assetDescription")}
+              </p>
+            </div>
+            {assetItem.source === "database" ? (
+              <ConfigFieldResetButton
+                label={assetItem.label}
+                busy={resettingKey === assetItem.key}
+                disabled={disabled}
+                onReset={() => onReset(assetItem)}
+              />
+            ) : null}
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-start">
+            <div className="space-y-2">
+              <SelectField
+                id={assetItem.key}
+                value={selectedAssetId}
+                options={[
+                  { value: "", label: t("settings.loginPage.defaultHeroImage") },
+                  ...selectableAssets.map((asset) => ({
+                    value: asset.id,
+                    label: asset.original_filename,
+                  })),
+                ]}
+                onChange={(value) => onChange(assetItem, value)}
+                disabled={disabled || assetsLoading}
+                radius="xl"
+              />
+              {assetsLoading ? (
+                <div className="flex items-center text-xs text-slate-500 dark:text-slate-400">
+                  <Loader2 size={13} className="mr-2 animate-spin" />
+                  {t("settings.loginPage.loadingAssets")}
+                </div>
+              ) : assetsError ? (
+                <p className="text-xs text-red-600 dark:text-red-300">{t("settings.loginPage.assetsLoadFailed")}</p>
+              ) : selectableAssets.length ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {t("settings.loginPage.assetCount", { count: selectableAssets.length })}
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {t("settings.loginPage.noAssets")}
+                </p>
+              )}
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950">
+              {selectedAsset ? (
+                <img
+                  src={api.toApiUrl(selectedAsset.thumbnail_url)}
+                  alt={selectedAsset.original_filename}
+                  className="aspect-[4/3] w-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+              ) : (
+                <div className="flex aspect-[4/3] w-full items-center justify-center text-slate-400 dark:text-slate-500">
+                  <Image size={24} />
+                </div>
+              )}
+              <div className="border-t border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                {selectedAsset?.original_filename ?? t("settings.loginPage.defaultHeroImage")}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2089,8 +2482,12 @@ interface GenerationResourceGroupSectionProps {
   archivingGroupId: string | null;
   canWrite: boolean;
   onChange: (key: string, next: GenerationResourceGroupDraft) => void;
-  onSave: (draft: GenerationResourceGroupDraft) => void;
+  onSave: (draft: GenerationResourceGroupDraft, options?: GenerationResourceGroupSaveOptions) => void;
   onArchive: (groupId: string) => void;
+}
+
+interface GenerationResourceGroupSaveOptions {
+  onSuccess?: () => void;
 }
 
 function GenerationResourceGroupSection({
@@ -2105,29 +2502,39 @@ function GenerationResourceGroupSection({
   onArchive,
 }: GenerationResourceGroupSectionProps) {
   const { t } = useI18n();
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const activeGroups = settingsGenerationResourceGroupsInApiOrder(groups);
   const activeGenerationConfigs = generationConfigs.filter((config) => !config.archived_at);
   const newDraftKey = "new-generation-resource-group";
   const newDraft = drafts[newDraftKey] ?? emptyGenerationResourceGroupDraft();
-  const cards = [
-    ...activeGroups.map((group) => ({
-      key: group.id,
-      group,
-      draft: drafts[group.id] ?? generationResourceGroupDraft(group),
-      counts: generationConfigCountsForResourceGroup(activeGenerationConfigs, group.id),
-    })),
-    { key: newDraftKey, group: null, draft: newDraft, counts: { text: 0, image: 0 } },
-  ];
+  const cards = activeGroups.map((group) => ({
+    key: group.id,
+    group,
+    draft: drafts[group.id] ?? generationResourceGroupDraft(group),
+    counts: generationConfigCountsForResourceGroup(activeGenerationConfigs, group.id),
+  }));
+  const resetNewDraft = () => onChange(newDraftKey, emptyGenerationResourceGroupDraft());
 
   return (
     <section className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-4`}>
-      <div>
-        <h2 className="text-base font-semibold text-slate-950 dark:text-white">
-          {t("settings.resourceGroup.title")}
-        </h2>
-        <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-          {t("settings.resourceGroup.description")}
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+            {t("settings.resourceGroup.title")}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+            {t("settings.resourceGroup.description")}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCreateDialogOpen(true)}
+          disabled={!canWrite}
+          className={SETTINGS_MAIN_ACTION_CLASS}
+        >
+          <Plus size={14} className="mr-2" />
+          {t("settings.resourceGroup.newGroup")}
+        </button>
       </div>
       <div className="grid gap-4">
         {cards.map(({ key, group, draft, counts }) => (
@@ -2144,7 +2551,119 @@ function GenerationResourceGroupSection({
           />
         ))}
       </div>
+      <GenerationResourceGroupCreateDialog
+        open={createDialogOpen}
+        draft={newDraft}
+        pending={pending}
+        canWrite={canWrite}
+        onChange={(next) => onChange(newDraftKey, next)}
+        onSave={() => {
+          onSave(newDraft, {
+            onSuccess: () => {
+              setCreateDialogOpen(false);
+              resetNewDraft();
+            },
+          });
+        }}
+        onClose={() => {
+          if (pending) {
+            return;
+          }
+          setCreateDialogOpen(false);
+          resetNewDraft();
+        }}
+      />
     </section>
+  );
+}
+
+interface GenerationResourceGroupCreateDialogProps {
+  open: boolean;
+  draft: GenerationResourceGroupDraft;
+  pending: boolean;
+  canWrite: boolean;
+  onChange: (next: GenerationResourceGroupDraft) => void;
+  onSave: () => void;
+  onClose: () => void;
+}
+
+function GenerationResourceGroupCreateDialog({
+  open,
+  draft,
+  pending,
+  canWrite,
+  onChange,
+  onSave,
+  onClose,
+}: GenerationResourceGroupCreateDialogProps) {
+  const { t } = useI18n();
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !pending) {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open, pending]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !pending) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex max-h-[calc(100dvh-3rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
+      >
+        <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="text-indigo-600 dark:text-violet-300">
+              <Plus size={18} />
+            </span>
+            <h2 id={titleId} className="truncate text-lg font-semibold text-slate-950 dark:text-white">
+              {t("settings.resourceGroup.newGroup")}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className={SETTINGS_ICON_ACTION_CLASS}
+            aria-label={t("create.close")}
+            title={t("create.close")}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+          <GenerationResourceGroupCard
+            group={null}
+            draft={draft}
+            counts={{ text: 0, image: 0 }}
+            pending={pending}
+            canWrite={canWrite}
+            onChange={onChange}
+            onSave={onSave}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2173,7 +2692,19 @@ function GenerationResourceGroupCard({
   const isNew = !group;
 
   return (
-    <div className={`${SETTINGS_FIELD_CARD_CLASS} rounded-2xl border border-slate-200/70 bg-white/80 p-4 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0b1220]/80`}>
+    <div className={`${SETTINGS_FIELD_CARD_CLASS} relative rounded-2xl border border-slate-200/70 bg-white/80 p-4 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0b1220]/80 ${onArchive ? "pr-14" : ""}`}>
+      {onArchive ? (
+        <button
+          type="button"
+          onClick={onArchive}
+          disabled={!canWrite || pending}
+          className={`absolute right-4 top-4 ${SETTINGS_DANGER_ICON_ACTION_CLASS}`}
+          aria-label={t("settings.resourceGroup.archive")}
+          title={t("settings.resourceGroup.archive")}
+        >
+          {pending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+        </button>
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -2198,17 +2729,6 @@ function GenerationResourceGroupCard({
             </div>
           ) : null}
         </div>
-        {onArchive ? (
-          <button
-            type="button"
-            onClick={onArchive}
-            disabled={!canWrite || pending}
-            className={SETTINGS_DANGER_ACTION_CLASS}
-          >
-            {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-            {t("settings.resourceGroup.archive")}
-          </button>
-        ) : null}
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_120px]">
@@ -2252,23 +2772,21 @@ function GenerationResourceGroupCard({
         </SettingsFormField>
       </div>
 
-      <div className="mt-4 flex flex-col gap-4 border-t border-slate-100 pt-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-        <div className="w-full sm:max-w-xs">
-          <SettingsOptionToggle
+      <div className="mt-4 flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <SettingsSwitchToggle
             checked={draft.enabled}
             disabled={!canWrite}
             onChange={(enabled) => onChange({ ...draft, enabled })}
           >
-          {t("settings.resourceGroup.enabled")}
-          </SettingsOptionToggle>
-        </div>
-        <div className="w-full sm:max-w-xs">
+            {t("settings.resourceGroup.enabled")}
+          </SettingsSwitchToggle>
           <SettingsOptionToggle
             checked={draft.blur_images_by_default}
             disabled={!canWrite}
             onChange={(blur_images_by_default) => onChange({ ...draft, blur_images_by_default })}
           >
-          {t("settings.resourceGroup.blurImagesByDefault")}
+            {t("settings.resourceGroup.blurImagesByDefault")}
           </SettingsOptionToggle>
         </div>
         <button
@@ -2507,14 +3025,14 @@ function ProviderCapabilityToggle({ option, selected, disabled = false, onToggle
       aria-pressed={selected}
       disabled={disabled}
       onClick={onToggle}
-      className={`flex h-[46px] items-center gap-3 rounded-xl border px-3 text-left text-sm font-semibold transition ${
+      className={`pf-settings-provider-option flex min-h-[46px] items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm font-semibold transition ${
         selected
           ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-violet-500 dark:bg-violet-500/12 dark:text-violet-50"
           : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-[#171f30] dark:text-slate-300 dark:hover:border-slate-500"
       }`}
     >
       <span
-        className={`grid h-5 w-5 shrink-0 place-items-center rounded-[5px] transition ${
+        className={`pf-settings-provider-option-mark grid h-5 w-5 shrink-0 place-items-center rounded-[5px] transition ${
           selected
             ? "bg-indigo-600 text-white dark:bg-violet-500"
             : "bg-slate-200 dark:bg-slate-600"
@@ -2522,7 +3040,7 @@ function ProviderCapabilityToggle({ option, selected, disabled = false, onToggle
       >
         {selected ? <Check size={13} strokeWidth={3} /> : null}
       </span>
-      {t(option.labelKey)}
+      <span className="min-w-0 flex-1 whitespace-normal break-words leading-5">{t(option.labelKey)}</span>
     </button>
   );
 }
@@ -2584,7 +3102,7 @@ function ProviderDrawerEnableToggle({ checked, disabled, blocked = false, onTogg
         aria-pressed={checked}
         aria-describedby={blocked ? helpId : undefined}
         onClick={() => onToggle(!checked)}
-        className={`flex h-[46px] w-full items-center gap-3 rounded-xl border px-3 text-left text-sm font-semibold transition ${
+        className={`pf-settings-provider-option flex h-[46px] w-full items-center gap-3 rounded-xl border px-3 text-left text-sm font-semibold transition ${
           checked
             ? "border-indigo-300 bg-indigo-50 text-slate-900 dark:border-slate-700 dark:bg-[#171f30] dark:text-slate-100"
             : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-[#171f30] dark:text-slate-300"
@@ -2595,7 +3113,7 @@ function ProviderDrawerEnableToggle({ checked, disabled, blocked = false, onTogg
         }`}
       >
         <span
-          className={`grid h-5 w-5 shrink-0 place-items-center rounded-md transition ${
+          className={`pf-settings-provider-option-mark grid h-5 w-5 shrink-0 place-items-center rounded-md transition ${
             checked ? "bg-indigo-600 text-white dark:bg-violet-500" : "bg-slate-200 dark:bg-slate-600"
           }`}
         >
@@ -2821,23 +3339,31 @@ interface GenerationConfigPoolSectionProps {
   archivingConfigId: string | null;
   canWrite: boolean;
   textTestState?: TextConfigTestState;
+  jsonResponseFormatTestState?: TextConfigJsonResponseFormatTestState;
   onChange: (key: string, next: GenerationConfigDraft) => void;
-  onSave: (draft: GenerationConfigDraft) => void;
+  onSave: (draft: GenerationConfigDraft, options?: GenerationConfigSaveOptions) => void;
   onArchive: (configId: string) => void;
   onUnfreeze: (configId: string) => void;
   onTextTestDraftChange?: (draft: TextConfigTestDraft) => void;
   onTestTextConfig?: (key: string, draft: GenerationConfigDraft) => void;
+  onTestJsonResponseFormatConfig?: (key: string, draft: GenerationConfigDraft) => void;
   onRefreshSort: () => void;
   unfreezingConfigId: string | null;
 }
 
-function providerProfilesForGenerationConfig(
+interface GenerationConfigSaveOptions {
+  onSuccess?: () => void;
+}
+
+export function providerProfilesForGenerationConfig(
   profiles: ProviderProfile[],
   draft: GenerationConfigDraft,
 ): ProviderProfile[] {
   const requiredCapability =
     draft.purpose === "text"
-      ? "text_responses"
+      ? draft.provider_kind === "openai_chat_completions"
+        ? "text_chat_completions"
+        : "text_responses"
       : draft.provider_kind === "openai_responses"
         ? "image_responses"
         : draft.provider_kind === "openai_chat_image"
@@ -2860,10 +3386,8 @@ function generationConfigSuccessRate(config: GenerationConfig): string {
 
 function generationConfigTabClassName(active: boolean): string {
   return [
-    "inline-flex min-h-9 items-center rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors",
-    active
-      ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-violet-400 dark:bg-violet-500/15 dark:text-violet-100"
-      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:bg-slate-800",
+    "pf-settings-generation-tab inline-flex min-h-9 items-center px-3 py-2 text-sm font-semibold transition-all",
+    active ? "is-active" : "",
   ].join(" ");
 }
 
@@ -2990,6 +3514,127 @@ function TextConfigTestPanel({
   );
 }
 
+interface GenerationConfigCreateDialogProps {
+  open: boolean;
+  title: string;
+  draft: GenerationConfigDraft;
+  resourceGroups: GenerationResourceGroup[];
+  profiles: ProviderProfile[];
+  pending: boolean;
+  canWrite: boolean;
+  testing?: boolean;
+  testResult?: TextGenerationConfigTestResponse | null;
+  testError?: string;
+  jsonResponseFormatTesting?: boolean;
+  jsonResponseFormatTestResult?: TextGenerationConfigJsonResponseFormatTestResponse | null;
+  jsonResponseFormatTestError?: string;
+  onChange: (next: GenerationConfigDraft) => void;
+  onSave: () => void;
+  onClose: () => void;
+  onTest?: () => void;
+  onTestJsonResponseFormat?: () => void;
+}
+
+function GenerationConfigCreateDialog({
+  open,
+  title,
+  draft,
+  resourceGroups,
+  profiles,
+  pending,
+  canWrite,
+  testing = false,
+  testResult = null,
+  testError = "",
+  jsonResponseFormatTesting = false,
+  jsonResponseFormatTestResult = null,
+  jsonResponseFormatTestError = "",
+  onChange,
+  onSave,
+  onClose,
+  onTest,
+  onTestJsonResponseFormat,
+}: GenerationConfigCreateDialogProps) {
+  const { t } = useI18n();
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !pending) {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open, pending]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !pending) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex max-h-[calc(100dvh-3rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
+      >
+        <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="text-indigo-600 dark:text-violet-300">
+              <Plus size={18} />
+            </span>
+            <h2 id={titleId} className="truncate text-lg font-semibold text-slate-950 dark:text-white">
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className={SETTINGS_ICON_ACTION_CLASS}
+            aria-label={t("create.close")}
+            title={t("create.close")}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+          <GenerationConfigCard
+            config={null}
+            draft={draft}
+            resourceGroups={resourceGroups}
+            profiles={profiles}
+            pending={pending}
+            canWrite={canWrite}
+            testing={testing}
+            testResult={testResult}
+            testError={testError}
+            jsonResponseFormatTesting={jsonResponseFormatTesting}
+            jsonResponseFormatTestResult={jsonResponseFormatTestResult}
+            jsonResponseFormatTestError={jsonResponseFormatTestError}
+            onChange={onChange}
+            onSave={onSave}
+            onTest={onTest}
+            onTestJsonResponseFormat={onTestJsonResponseFormat}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GenerationConfigPoolSection({
   data,
   purpose,
@@ -2998,12 +3643,14 @@ function GenerationConfigPoolSection({
   archivingConfigId,
   canWrite,
   textTestState,
+  jsonResponseFormatTestState,
   onChange,
   onSave,
   onArchive,
   onUnfreeze,
   onTextTestDraftChange,
   onTestTextConfig,
+  onTestJsonResponseFormatConfig,
   onRefreshSort,
   unfreezingConfigId,
 }: GenerationConfigPoolSectionProps) {
@@ -3013,6 +3660,7 @@ function GenerationConfigPoolSection({
   const firstEnabledGroupId = resourceGroups.find((group) => group.enabled)?.id ?? "";
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
   const [configSearch, setConfigSearch] = useState("");
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const activeResourceGroupId = selectedResourceGroupId ?? firstEnabledGroupId;
   useEffect(() => {
     if (selectedResourceGroupId === null || selectedResourceGroupId === "") {
@@ -3028,7 +3676,6 @@ function GenerationConfigPoolSection({
       : generationConfigResourceGroupIds(config).length === 0,
   );
   const configs = filterGenerationConfigsByName(configsInActiveGroup, configSearch);
-  const showNewDraftCard = !configSearch.trim();
   const newDraftKey = `new-${purpose}-${activeResourceGroupId || "unbound"}`;
   const newDraft =
     drafts[newDraftKey] ??
@@ -3043,8 +3690,12 @@ function GenerationConfigPoolSection({
       config,
       draft: drafts[config.id] ?? generationConfigDraft(config),
     })),
-    ...(showNewDraftCard ? [{ key: newDraftKey, draftKey: newDraftKey, config: null, draft: newDraft }] : []),
   ];
+  const newDraftTestRecord = textConfigTestRecordForKey(textTestState, newDraftKey);
+  const newDraftJsonResponseFormatTestRecord = textConfigJsonResponseFormatTestRecordForKey(
+    jsonResponseFormatTestState,
+    newDraftKey,
+  );
 
   return (
     <section className="space-y-4">
@@ -3053,93 +3704,146 @@ function GenerationConfigPoolSection({
       ) : null}
       <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-5`}>
         <div className="space-y-4">
-        <div>
-          <h2 className="text-base font-semibold text-slate-950 dark:text-white">
-            {purpose === "text" ? t("settings.generation.textPoolTitle") : t("settings.generation.imagePoolTitle")}
-          </h2>
-          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            {t("settings.generation.poolDescription")}
-          </p>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <label className="relative block w-full sm:max-w-md">
-            <span className="sr-only">{t("settings.generation.search")}</span>
-            <Search
-              size={16}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
-            />
-            <input
-              type="search"
-              value={configSearch}
-              onChange={(event) => setConfigSearch(event.target.value)}
-              className={`${INPUT_CLASS} pl-10`}
-              placeholder={t("settings.generation.searchPlaceholder")}
-              aria-label={t("settings.generation.search")}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={onRefreshSort}
-            className={SETTINGS_COMPACT_ACTION_CLASS}
-          >
-            <RefreshCw size={14} className="mr-2" />
-            {t("settings.generation.refreshSort")}
-          </button>
-        </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-        {resourceGroups.map((group) => {
-          const active = activeResourceGroupId === group.id;
-          return (
-            <button
-              key={group.id}
-              type="button"
-              onClick={() => setSelectedResourceGroupId(group.id)}
-              className={generationConfigTabClassName(active)}
-            >
-              {group.enabled ? group.name : `${group.name} (${t("settings.resourceGroup.disabled")})`}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => setSelectedResourceGroupId("")}
-          className={generationConfigTabClassName(activeResourceGroupId === "")}
-        >
-          {t("settings.generation.unboundResourceGroup")}
-        </button>
-      </div>
-      {cards.length ? (
-        <div className="space-y-4">
-          {cards.map(({ key, draftKey, config, draft }) => {
-            const testRecord = textConfigTestRecordForKey(textTestState, key);
-            return (
-              <GenerationConfigCard
-                key={key}
-                config={config}
-                draft={draft}
-                resourceGroups={resourceGroups}
-                profiles={providerProfilesForGenerationConfig(profiles, draft)}
-                pending={pending || archivingConfigId === config?.id}
-                canWrite={canWrite}
-                onChange={(next) => onChange(draftKey, next)}
-                onSave={() => onSave(draft)}
-                onArchive={config ? () => onArchive(config.id) : undefined}
-                onUnfreeze={config ? () => onUnfreeze(config.id) : undefined}
-                unfreezing={unfreezingConfigId === config?.id}
-                onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(key, draft) : undefined}
-                testing={Boolean(testRecord?.testing)}
-                testResult={testRecord?.result ?? null}
-                testError={testRecord?.error ?? ""}
+          <div>
+            <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+              {purpose === "text" ? t("settings.generation.textPoolTitle") : t("settings.generation.imagePoolTitle")}
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              {t("settings.generation.poolDescription")}
+            </p>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label className="relative block w-full sm:max-w-md">
+              <span className="sr-only">{t("settings.generation.search")}</span>
+              <Search
+                size={16}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               />
+              <input
+                type="search"
+                value={configSearch}
+                onChange={(event) => setConfigSearch(event.target.value)}
+                className={`${INPUT_CLASS} pl-10`}
+                placeholder={t("settings.generation.searchPlaceholder")}
+                aria-label={t("settings.generation.search")}
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setCreateDialogOpen(true)}
+                disabled={!canWrite}
+                className={SETTINGS_MAIN_ACTION_CLASS}
+              >
+                <Plus size={14} className="mr-2" />
+                {t("settings.generation.newConfig")}
+              </button>
+              <button
+                type="button"
+                onClick={onRefreshSort}
+                className={SETTINGS_COMPACT_ACTION_CLASS}
+              >
+                <RefreshCw size={14} className="mr-2" />
+                {t("settings.generation.refreshSort")}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="pf-settings-generation-tabs flex flex-wrap gap-1">
+          {resourceGroups.map((group) => {
+            const active = activeResourceGroupId === group.id;
+            return (
+              <button
+                key={group.id}
+                type="button"
+                aria-current={active ? "true" : undefined}
+                onClick={() => setSelectedResourceGroupId(group.id)}
+                className={generationConfigTabClassName(active)}
+              >
+                {group.enabled ? group.name : `${group.name} (${t("settings.resourceGroup.disabled")})`}
+              </button>
             );
           })}
+          <button
+            type="button"
+            aria-current={activeResourceGroupId === "" ? "true" : undefined}
+            onClick={() => setSelectedResourceGroupId("")}
+            className={generationConfigTabClassName(activeResourceGroupId === "")}
+          >
+            {t("settings.generation.unboundResourceGroup")}
+          </button>
         </div>
-      ) : (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm font-medium text-slate-500 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-400 dark:shadow-black/25">
-          {t("settings.generation.searchEmpty")}
-        </div>
-      )}
+        {cards.length ? (
+          <div className="space-y-4">
+            {cards.map(({ key, draftKey, config, draft }) => {
+              const testRecord = textConfigTestRecordForKey(textTestState, key);
+              const jsonResponseFormatTestRecord = textConfigJsonResponseFormatTestRecordForKey(
+                jsonResponseFormatTestState,
+                key,
+              );
+              return (
+                <GenerationConfigCard
+                  key={key}
+                  config={config}
+                  draft={draft}
+                  resourceGroups={resourceGroups}
+                  profiles={providerProfilesForGenerationConfig(profiles, draft)}
+                  pending={pending || archivingConfigId === config?.id}
+                  canWrite={canWrite}
+                  onChange={(next) => onChange(draftKey, next)}
+                  onSave={() => onSave(draft)}
+                  onArchive={config ? () => onArchive(config.id) : undefined}
+                  onUnfreeze={config ? () => onUnfreeze(config.id) : undefined}
+                  unfreezing={unfreezingConfigId === config?.id}
+                  onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(key, draft) : undefined}
+                  onTestJsonResponseFormat={
+                    purpose === "text" && onTestJsonResponseFormatConfig
+                      ? () => onTestJsonResponseFormatConfig(key, draft)
+                      : undefined
+                  }
+                  testing={Boolean(testRecord?.testing)}
+                  testResult={testRecord?.result ?? null}
+                  testError={testRecord?.error ?? ""}
+                  jsonResponseFormatTesting={Boolean(jsonResponseFormatTestRecord?.testing)}
+                  jsonResponseFormatTestResult={jsonResponseFormatTestRecord?.result ?? null}
+                  jsonResponseFormatTestError={jsonResponseFormatTestRecord?.error ?? ""}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm font-medium text-slate-500 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-400 dark:shadow-black/25">
+            {t("settings.generation.searchEmpty")}
+          </div>
+        )}
+        <GenerationConfigCreateDialog
+          open={createDialogOpen}
+          title={t("settings.generation.newConfig")}
+          draft={newDraft}
+          resourceGroups={resourceGroups}
+          profiles={providerProfilesForGenerationConfig(profiles, newDraft)}
+          pending={pending}
+          canWrite={canWrite}
+          testing={Boolean(newDraftTestRecord?.testing)}
+          testResult={newDraftTestRecord?.result ?? null}
+          testError={newDraftTestRecord?.error ?? ""}
+          jsonResponseFormatTesting={Boolean(newDraftJsonResponseFormatTestRecord?.testing)}
+          jsonResponseFormatTestResult={newDraftJsonResponseFormatTestRecord?.result ?? null}
+          jsonResponseFormatTestError={newDraftJsonResponseFormatTestRecord?.error ?? ""}
+          onChange={(next) => {
+            onChange(newDraftKey, next);
+          }}
+          onSave={() => {
+            onSave(newDraft, { onSuccess: () => setCreateDialogOpen(false) });
+          }}
+          onClose={() => setCreateDialogOpen(false)}
+          onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(newDraftKey, newDraft) : undefined}
+          onTestJsonResponseFormat={
+            purpose === "text" && onTestJsonResponseFormatConfig
+              ? () => onTestJsonResponseFormatConfig(newDraftKey, newDraft)
+              : undefined
+          }
+        />
       </div>
     </section>
   );
@@ -3157,10 +3861,14 @@ interface GenerationConfigCardProps {
   onArchive?: () => void;
   onUnfreeze?: () => void;
   onTest?: () => void;
+  onTestJsonResponseFormat?: () => void;
   unfreezing?: boolean;
   testing?: boolean;
   testResult?: TextGenerationConfigTestResponse | null;
   testError?: string;
+  jsonResponseFormatTesting?: boolean;
+  jsonResponseFormatTestResult?: TextGenerationConfigJsonResponseFormatTestResponse | null;
+  jsonResponseFormatTestError?: string;
 }
 
 function GenerationConfigCard({
@@ -3175,10 +3883,14 @@ function GenerationConfigCard({
   onArchive,
   onUnfreeze,
   onTest,
+  onTestJsonResponseFormat,
   unfreezing = false,
   testing = false,
   testResult = null,
   testError = "",
+  jsonResponseFormatTesting = false,
+  jsonResponseFormatTestResult = null,
+  jsonResponseFormatTestError = "",
 }: GenerationConfigCardProps) {
   const { t } = useI18n();
   const [providerProfileSearch, setProviderProfileSearch] = useState("");
@@ -3188,6 +3900,7 @@ function GenerationConfigCard({
       ? [
           { value: "mock", label: t("settings.provider.interface.mock") },
           { value: "openai", label: t("settings.provider.interface.openaiResponses") },
+          { value: "openai_chat_completions", label: t("settings.provider.interface.openaiChatCompletions") },
         ]
       : [
           { value: "mock", label: t("settings.provider.interface.mock") },
@@ -3205,9 +3918,127 @@ function GenerationConfigCard({
     selectedProfile && !filteredProfiles.some((profile) => profile.id === selectedProfile.id)
       ? [selectedProfile, ...filteredProfiles]
       : filteredProfiles;
+  const testStatus = testing || testResult || testError ? (
+    <div
+      className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm ${
+        testError
+          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
+          : testResult
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100"
+            : "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100"
+      }`}
+    >
+      {testError ? (
+        <X size={16} className="mt-0.5 shrink-0" />
+      ) : testResult ? (
+        <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+      ) : (
+        <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
+      )}
+      <div className="min-w-0">
+        <div className="font-semibold">
+          {testError
+            ? t("settings.generation.testFailed")
+            : testResult
+              ? t("settings.generation.testPassed")
+              : t("settings.generation.testRunning")}
+        </div>
+        <div className="mt-0.5 break-words text-xs opacity-80">
+          {testError ||
+            (testResult
+              ? t("settings.generation.testPassedDetail", {
+                  duration: String(Math.max(1, Math.round(testResult.duration_ms))),
+                  briefModel: testResult.brief_model,
+                  copyModel: testResult.copy_model,
+                })
+              : t("settings.generation.testRunningDetail"))}
+        </div>
+      </div>
+    </div>
+  ) : null;
+  const testResultPreview = testResult ? (
+    <div className="grid gap-3 lg:grid-cols-2">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          {t("settings.generation.testBriefResult", { model: testResult.brief_model })}
+        </div>
+        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+          {JSON.stringify(testResult.brief, null, 2)}
+        </pre>
+      </div>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          {t("settings.generation.testCopyResult", { model: testResult.copy_model })}
+        </div>
+        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+          {JSON.stringify(testResult.copy_result, null, 2)}
+        </pre>
+      </div>
+    </div>
+  ) : null;
+  const jsonResponseFormatTestStatus =
+    jsonResponseFormatTesting || jsonResponseFormatTestResult || jsonResponseFormatTestError ? (
+      <div
+        className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm ${
+          jsonResponseFormatTestError
+            ? "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
+            : jsonResponseFormatTestResult
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100"
+              : "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100"
+        }`}
+      >
+        {jsonResponseFormatTestError ? (
+          <X size={16} className="mt-0.5 shrink-0" />
+        ) : jsonResponseFormatTestResult ? (
+          <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+        ) : (
+          <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
+        )}
+        <div className="min-w-0">
+          <div className="font-semibold">
+            {jsonResponseFormatTestError
+              ? t("settings.generation.jsonResponseFormatTestFailed")
+              : jsonResponseFormatTestResult
+                ? t("settings.generation.jsonResponseFormatTestPassed")
+                : t("settings.generation.jsonResponseFormatTestRunning")}
+          </div>
+          <div className="mt-0.5 break-words text-xs opacity-80">
+            {jsonResponseFormatTestError ||
+              (jsonResponseFormatTestResult
+                ? t("settings.generation.jsonResponseFormatTestPassedDetail", {
+                    duration: String(Math.max(1, Math.round(jsonResponseFormatTestResult.duration_ms))),
+                    model: jsonResponseFormatTestResult.model,
+                  })
+                : t("settings.generation.jsonResponseFormatTestRunningDetail"))}
+          </div>
+        </div>
+      </div>
+    ) : null;
+  const jsonResponseFormatTestResultPreview = jsonResponseFormatTestResult ? (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+      <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+        {t("settings.generation.jsonResponseFormatTestResult", { model: jsonResponseFormatTestResult.model })}
+      </div>
+      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+        {JSON.stringify(jsonResponseFormatTestResult.parsed_json, null, 2)}
+      </pre>
+    </div>
+  ) : null;
 
   return (
-    <div className={`${SETTINGS_FIELD_CARD_CLASS} rounded-2xl border border-slate-200/70 bg-white/80 p-6 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0f1726]/80`}>
+    <div className={`${SETTINGS_FIELD_CARD_CLASS} relative rounded-2xl border border-slate-200/70 bg-white/80 p-6 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0f1726]/80 ${onArchive ? "pr-16" : ""}`}>
+      {onArchive ? (
+        <button
+          type="button"
+          onClick={onArchive}
+          disabled={controlsDisabled}
+          className={`absolute right-5 top-5 ${SETTINGS_DANGER_ICON_ACTION_CLASS}`}
+          aria-label={t("settings.generation.archive")}
+          title={t("settings.generation.archive")}
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+        </button>
+      ) : null}
       <div className="space-y-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -3240,100 +4071,7 @@ function GenerationConfigCard({
             </p>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {onTest ? (
-            <button
-              type="button"
-              onClick={onTest}
-              disabled={controlsDisabled || testing || !draft.name.trim() || (draft.provider_kind !== "mock" && !draft.provider_profile_id)}
-              className={SETTINGS_COMPACT_ACTION_CLASS}
-            >
-              {testing ? <Loader2 size={14} className="mr-2 animate-spin" /> : <MessageSquareText size={14} className="mr-2" />}
-              {t("settings.generation.test")}
-            </button>
-          ) : null}
-          {activeFrozen && onUnfreeze ? (
-            <button
-              type="button"
-              onClick={onUnfreeze}
-              disabled={controlsDisabled}
-              className={SETTINGS_COMPACT_ACTION_CLASS}
-            >
-              {unfreezing ? <Loader2 size={14} className="mr-2 animate-spin" /> : <RotateCcw size={14} className="mr-2" />}
-              {t("settings.generation.unfreeze")}
-            </button>
-          ) : null}
-          {onArchive ? (
-            <button
-              type="button"
-              onClick={onArchive}
-              disabled={controlsDisabled}
-              className={SETTINGS_DANGER_ACTION_CLASS}
-            >
-              {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Trash2 size={14} className="mr-2" />}
-              {t("settings.generation.archive")}
-            </button>
-          ) : null}
-        </div>
       </div>
-      {testing || testResult || testError ? (
-        <div
-          className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm ${
-            testError
-              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
-              : testResult
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100"
-                : "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100"
-          }`}
-        >
-          {testError ? (
-            <X size={16} className="mt-0.5 shrink-0" />
-          ) : testResult ? (
-            <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
-          ) : (
-            <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
-          )}
-          <div className="min-w-0">
-            <div className="font-semibold">
-              {testError
-                ? t("settings.generation.testFailed")
-                : testResult
-                  ? t("settings.generation.testPassed")
-                  : t("settings.generation.testRunning")}
-            </div>
-            <div className="mt-0.5 break-words text-xs opacity-80">
-              {testError ||
-                (testResult
-                  ? t("settings.generation.testPassedDetail", {
-                      duration: String(Math.max(1, Math.round(testResult.duration_ms))),
-                      briefModel: testResult.brief_model,
-                      copyModel: testResult.copy_model,
-                    })
-                  : t("settings.generation.testRunningDetail"))}
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {testResult ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              {t("settings.generation.testBriefResult", { model: testResult.brief_model })}
-            </div>
-            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
-              {JSON.stringify(testResult.brief, null, 2)}
-            </pre>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              {t("settings.generation.testCopyResult", { model: testResult.copy_model })}
-            </div>
-            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
-              {JSON.stringify(testResult.copy_result, null, 2)}
-            </pre>
-          </div>
-        </div>
-      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
         <SettingsFormField label={t("settings.generation.nameLabel")}>
@@ -3367,8 +4105,8 @@ function GenerationConfigCard({
                 ...draft,
                 provider_kind:
                   draft.purpose === "text"
-                    ? value === "openai"
-                      ? "openai"
+                    ? value === "openai" || value === "openai_chat_completions"
+                      ? value
                       : "mock"
                     : value === "openai_responses" ||
                         value === "openai_images" ||
@@ -3408,29 +4146,52 @@ function GenerationConfigCard({
       ) : null}
 
       {draft.purpose === "text" ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <ProviderModelInput
-            idPrefix={`text-brief-model-${config?.id ?? "new"}`}
-            label={t("settings.provider.textBriefModelLabel")}
-            value={draft.brief_model}
-            placeholder={t("settings.provider.textBriefModelPlaceholder")}
-            providerKind={draft.provider_kind === "openai" ? "openai" : "mock"}
-            providerProfileId={draft.provider_profile_id}
-            disabled={controlsDisabled}
-            helpKey="settingsTextBriefModel"
-            onChange={(brief_model) => onChange({ ...draft, brief_model })}
-          />
-          <ProviderModelInput
-            idPrefix={`text-copy-model-${config?.id ?? "new"}`}
-            label={t("settings.provider.textCopyModelLabel")}
-            value={draft.copy_model}
-            placeholder={t("settings.provider.textCopyModelPlaceholder")}
-            providerKind={draft.provider_kind === "openai" ? "openai" : "mock"}
-            providerProfileId={draft.provider_profile_id}
-            disabled={controlsDisabled}
-            helpKey="settingsTextCopyModel"
-            onChange={(copy_model) => onChange({ ...draft, copy_model })}
-          />
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ProviderModelInput
+              idPrefix={`text-brief-model-${config?.id ?? "new"}`}
+              label={t("settings.provider.textBriefModelLabel")}
+              value={draft.brief_model}
+              placeholder={t("settings.provider.textBriefModelPlaceholder")}
+              providerKind={
+                draft.provider_kind === "openai" || draft.provider_kind === "openai_chat_completions"
+                  ? draft.provider_kind
+                  : "mock"
+              }
+              providerProfileId={draft.provider_profile_id}
+              disabled={controlsDisabled}
+              helpKey="settingsTextBriefModel"
+              onChange={(brief_model) => onChange({ ...draft, brief_model })}
+            />
+            <ProviderModelInput
+              idPrefix={`text-copy-model-${config?.id ?? "new"}`}
+              label={t("settings.provider.textCopyModelLabel")}
+              value={draft.copy_model}
+              placeholder={t("settings.provider.textCopyModelPlaceholder")}
+              providerKind={
+                draft.provider_kind === "openai" || draft.provider_kind === "openai_chat_completions"
+                  ? draft.provider_kind
+                  : "mock"
+              }
+              providerProfileId={draft.provider_profile_id}
+              disabled={controlsDisabled}
+              helpKey="settingsTextCopyModel"
+              onChange={(copy_model) => onChange({ ...draft, copy_model })}
+            />
+          </div>
+          {draft.provider_kind === "openai_chat_completions" ? (
+            <div className="max-w-md">
+              <SettingsOptionToggle
+                checked={draft.structured_json_response_format_enabled}
+                disabled={controlsDisabled}
+                onChange={(structured_json_response_format_enabled) =>
+                  onChange({ ...draft, structured_json_response_format_enabled })
+                }
+              >
+                {t("settings.provider.structuredJsonResponseFormat")}
+              </SettingsOptionToggle>
+            </div>
+          ) : null}
         </div>
       ) : (
         <GenerationConfigImageFields draft={draft} pending={controlsDisabled} onChange={onChange} configId={config?.id ?? "new"} />
@@ -3454,30 +4215,88 @@ function GenerationConfigCard({
         </SettingsFormField>
       </div>
 
-      <div className="flex flex-col gap-4 border-t border-slate-100 pt-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="w-full sm:max-w-xs">
-          <SettingsOptionToggle
+          <SettingsSwitchToggle
             checked={draft.enabled}
             disabled={controlsDisabled}
             onChange={(enabled) => onChange({ ...draft, enabled })}
           >
-          {t("settings.generation.enabled")}
-          </SettingsOptionToggle>
+            {t("settings.generation.enabled")}
+          </SettingsSwitchToggle>
         </div>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={
-            controlsDisabled ||
-            !draft.name.trim() ||
-            (draft.provider_kind !== "mock" && !draft.provider_profile_id)
-          }
-          className={SETTINGS_MAIN_ACTION_CLASS}
-        >
-          {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
-          {isNew ? t("settings.generation.create") : t("settings.generation.save")}
-        </button>
+        <div className="flex flex-wrap justify-end gap-2">
+          {onTestJsonResponseFormat && draft.purpose === "text" && draft.provider_kind === "openai_chat_completions" ? (
+            <button
+              type="button"
+              onClick={onTestJsonResponseFormat}
+              disabled={
+                controlsDisabled ||
+                jsonResponseFormatTesting ||
+                !draft.structured_json_response_format_enabled ||
+                !draft.name.trim() ||
+                !draft.provider_profile_id
+              }
+              className={SETTINGS_COMPACT_ACTION_CLASS}
+            >
+              {jsonResponseFormatTesting ? (
+                <Loader2 size={14} className="mr-1.5 animate-spin" />
+              ) : (
+                <FileJson size={14} className="mr-1.5" />
+              )}
+              {t("settings.generation.testJsonResponseFormat")}
+            </button>
+          ) : null}
+          {onTest ? (
+            <button
+              type="button"
+              onClick={onTest}
+              disabled={
+                controlsDisabled ||
+                testing ||
+                !draft.name.trim() ||
+                (draft.provider_kind !== "mock" && !draft.provider_profile_id)
+              }
+              className={SETTINGS_COMPACT_ACTION_CLASS}
+            >
+              {testing ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <MessageSquareText size={14} className="mr-1.5" />}
+              {t("settings.generation.test")}
+            </button>
+          ) : null}
+          {activeFrozen && onUnfreeze ? (
+            <button
+              type="button"
+              onClick={onUnfreeze}
+              disabled={controlsDisabled}
+              className={SETTINGS_COMPACT_ACTION_CLASS}
+            >
+              {unfreezing ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <RotateCcw size={14} className="mr-1.5" />}
+              {t("settings.generation.unfreeze")}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={
+              controlsDisabled ||
+              !draft.name.trim() ||
+              (draft.provider_kind !== "mock" && !draft.provider_profile_id)
+            }
+            className={SETTINGS_MAIN_ACTION_CLASS}
+          >
+            {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
+            {isNew ? t("settings.generation.create") : t("settings.generation.save")}
+          </button>
+        </div>
       </div>
+      {testStatus || testResultPreview || jsonResponseFormatTestStatus || jsonResponseFormatTestResultPreview ? (
+        <div className="space-y-3 pt-1">
+          {jsonResponseFormatTestStatus}
+          {jsonResponseFormatTestResultPreview}
+          {testStatus}
+          {testResultPreview}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -3765,6 +4584,11 @@ export function SettingsPage() {
     latestKey: null,
     records: {},
   });
+  const [textConfigJsonResponseFormatTestState, setTextConfigJsonResponseFormatTestState] =
+    useState<TextConfigJsonResponseFormatTestState>({
+      latestKey: null,
+      records: {},
+    });
 
   const configQuery = useQuery({
     queryKey: ["config"],
@@ -3774,6 +4598,12 @@ export function SettingsPage() {
   const providerConfigQuery = useQuery({
     queryKey: ["provider-config"],
     queryFn: api.getProviderConfig,
+  });
+
+  const loginPageAssetsQuery = useQuery({
+    queryKey: ["resource-library-assets", "login-page"],
+    queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
+    enabled: activeSection === "loginPage",
   });
 
   const resetDraftsFromConfig = useCallback((config: ConfigResponse | undefined) => {
@@ -3870,6 +4700,19 @@ export function SettingsPage() {
       await Promise.all(refreshes);
     },
     [queryClient],
+  );
+  const reconcileProviderProfileCache = useCallback(
+    async (profile: ProviderProfile, options: ProviderSettingsRefreshOptions = {}) => {
+      await queryClient.cancelQueries({ queryKey: ["provider-config"] });
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithProviderProfile(current, profile),
+      );
+      await refreshProviderSettingsQueries(options);
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithProviderProfile(current, profile),
+      );
+    },
+    [queryClient, refreshProviderSettingsQueries],
   );
 
   useEffect(() => {
@@ -4014,10 +4857,7 @@ export function SettingsPage() {
   const createProviderProfileMutation = useMutation({
     mutationFn: () => api.createProviderProfile(providerProfileCreatePayload(providerProfileForm)),
     onSuccess: async (profile) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithProviderProfile(current, profile),
-      );
-      await refreshProviderSettingsQueries({ includeProviderModels: true });
+      await reconcileProviderProfileCache(profile, { includeProviderModels: true });
       setProviderProfileForm(EMPTY_PROVIDER_FORM);
       setEditingProviderProfileId(null);
       setProviderDrawerOpen(false);
@@ -4038,10 +4878,7 @@ export function SettingsPage() {
       return api.updateProviderProfile(editingProviderProfileId, providerProfileUpdatePayload(providerProfileForm));
     },
     onSuccess: async (profile) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithProviderProfile(current, profile),
-      );
-      await refreshProviderSettingsQueries({ includeProviderModels: true });
+      await reconcileProviderProfileCache(profile, { includeProviderModels: true });
       setProviderProfileForm(EMPTY_PROVIDER_FORM);
       setEditingProviderProfileId(null);
       setProviderDrawerOpen(false);
@@ -4057,10 +4894,7 @@ export function SettingsPage() {
   const deleteProviderProfileMutation = useMutation({
     mutationFn: (profileId: string) => api.archiveProviderProfile(profileId),
     onSuccess: async (profile) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithProviderProfile(current, profile),
-      );
-      await refreshProviderSettingsQueries({ includeProviderModels: true });
+      await reconcileProviderProfileCache(profile, { includeProviderModels: true });
       setPendingDeleteProviderProfile(null);
       setError("");
       setSavedMessage(t("settings.provider.deletedMessage"));
@@ -4081,10 +4915,7 @@ export function SettingsPage() {
       setSavedMessage("");
     },
     onSuccess: async (profile) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithProviderProfile(current, profile),
-      );
-      await refreshProviderSettingsQueries();
+      await reconcileProviderProfileCache(profile);
       setError("");
       setSavedMessage(t("settings.provider.saved"));
     },
@@ -4236,6 +5067,34 @@ export function SettingsPage() {
     },
   });
 
+  const testTextGenerationConfigJsonResponseFormatMutation = useMutation({
+    mutationFn: ({ payload }: TextGenerationConfigJsonResponseFormatTestMutationInput) =>
+      api.testTextGenerationConfigJsonResponseFormat(payload),
+    onMutate: ({ key }) => {
+      setTextConfigJsonResponseFormatTestState((current) =>
+        markTextConfigJsonResponseFormatTestStarted(current, key),
+      );
+      setSavedMessage("");
+      setError("");
+    },
+    onSuccess: (result, { key }) => {
+      setTextConfigJsonResponseFormatTestState((current) =>
+        markTextConfigJsonResponseFormatTestSucceeded(current, key, result),
+      );
+    },
+    onError: (mutationError, { key }) => {
+      setTextConfigJsonResponseFormatTestState((current) =>
+        markTextConfigJsonResponseFormatTestFailed(
+          current,
+          key,
+          mutationError instanceof ApiError
+            ? mutationError.detail
+            : t("settings.generation.jsonResponseFormatTestFailed"),
+        ),
+      );
+    },
+  });
+
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
     onSuccess: async () => {
@@ -4317,7 +5176,9 @@ export function SettingsPage() {
         : "";
 
   const loadingMain = configQuery.isLoading || providerConfigQuery.isLoading;
-  const genericSection = ["prompts", "upload", "queue", "layoutAppearance", "security"].includes(activeSection);
+  const genericSection = ["prompts", "upload", "queue", "layoutAppearance", "loginPage", "security"].includes(
+    activeSection,
+  );
   const isWorkspaceSubpage = activeScheme === "workspace";
 
   return (
@@ -4522,17 +5383,6 @@ export function SettingsPage() {
                       }}
                     />
                   ) : null}
-                  {error ? (
-                    <div className="mb-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                      {error}
-                    </div>
-                  ) : null}
-                  {savedMessage ? (
-                    <div className="mb-5 flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
-                      <CheckCircle2 size={16} className="mr-2" />
-                      {savedMessage}
-                    </div>
-                  ) : null}
                   <div>
                     {activeSection === "providers" ? (
                       <ProvidersSection
@@ -4612,13 +5462,16 @@ export function SettingsPage() {
                           setGenerationResourceGroupDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
                         }}
-                        onSave={(draft) => {
+                        onSave={(draft, options) => {
                           if (!canWriteProviderSettings) {
                             return;
                           }
                           setError("");
                           setSavedMessage("");
-                          saveGenerationResourceGroupMutation.mutate(draft);
+                          saveGenerationResourceGroupMutation.mutate(
+                            draft,
+                            options?.onSuccess ? { onSuccess: options.onSuccess } : undefined,
+                          );
                         }}
                         onArchive={(groupId) => {
                           if (!canWriteProviderSettings) {
@@ -4639,17 +5492,21 @@ export function SettingsPage() {
                         archivingConfigId={archivingGenerationConfigId}
                         canWrite={canWriteProviderSettings}
                         textTestState={textConfigTestState}
+                        jsonResponseFormatTestState={textConfigJsonResponseFormatTestState}
                         onChange={(key, next) => {
                           setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
                         }}
-                        onSave={(draft) => {
+                        onSave={(draft, options) => {
                           if (!canWriteProviderSettings) {
                             return;
                           }
                           setError("");
                           setSavedMessage("");
-                          saveGenerationConfigMutation.mutate(draft);
+                          saveGenerationConfigMutation.mutate(
+                            draft,
+                            options?.onSuccess ? { onSuccess: options.onSuccess } : undefined,
+                          );
                         }}
                         onArchive={(configId) => {
                           if (!canWriteProviderSettings) {
@@ -4675,6 +5532,15 @@ export function SettingsPage() {
                             payload: textGenerationConfigTestPayload(draft, textConfigTestState.draft),
                           });
                         }}
+                        onTestJsonResponseFormatConfig={(key, draft) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
+                          testTextGenerationConfigJsonResponseFormatMutation.mutate({
+                            key,
+                            payload: textGenerationConfigJsonResponseFormatTestPayload(draft),
+                          });
+                        }}
                         onRefreshSort={() => {
                           void refreshProviderSettingsQueries();
                         }}
@@ -4695,13 +5561,16 @@ export function SettingsPage() {
                           setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
                         }}
-                        onSave={(draft) => {
+                        onSave={(draft, options) => {
                           if (!canWriteProviderSettings) {
                             return;
                           }
                           setError("");
                           setSavedMessage("");
-                          saveGenerationConfigMutation.mutate(draft);
+                          saveGenerationConfigMutation.mutate(
+                            draft,
+                            options?.onSuccess ? { onSuccess: options.onSuccess } : undefined,
+                          );
                         }}
                         onArchive={(configId) => {
                           if (!canWriteProviderSettings) {
@@ -4725,7 +5594,30 @@ export function SettingsPage() {
                     {genericSection ? (
                       <form onSubmit={handleSubmit} className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-2`}>
                         {activeItems.length ? (
-                          activeSection === "queue" ? (
+                          activeSection === "loginPage" ? (
+                            <LoginPageSettingsPanel
+                              items={activeItems}
+                              drafts={drafts}
+                              secretTouched={secretTouched}
+                              resettingKey={resettingKey}
+                              disabled={!canWriteRuntimeSettings}
+                              assets={loginPageAssetsQuery.data?.items ?? []}
+                              assetsLoading={loginPageAssetsQuery.isLoading}
+                              assetsError={loginPageAssetsQuery.isError}
+                              onChange={(item, nextValue, touchedSecret) => {
+                                setDrafts((current) => ({ ...current, [item.key]: nextValue }));
+                                setSavedMessage("");
+                                if (touchedSecret) {
+                                  setSecretTouched((current) => ({ ...current, [item.key]: true }));
+                                }
+                              }}
+                              onReset={(item) => {
+                                if (canWriteRuntimeSettings) {
+                                  setPendingResetItem(item);
+                                }
+                              }}
+                            />
+                          ) : activeSection === "queue" ? (
                             <div className="space-y-1">
                               {activeConfigGroups.map((group) => (
                                 <div key={group.category} className="border-t border-slate-100 py-2 first:border-t-0 dark:border-slate-800">
@@ -4846,6 +5738,12 @@ export function SettingsPage() {
 
           </div>
         </div>
+        <SettingsFeedbackDialog
+          successMessage={savedMessage}
+          errorMessage={error}
+          onCloseSuccess={() => setSavedMessage("")}
+          onCloseError={() => setError("")}
+        />
         <ConfirmDialog
           open={exportConfirmOpen}
           title={t("settings.migration.exportConfirmTitle")}

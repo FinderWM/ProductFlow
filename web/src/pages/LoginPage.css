@@ -1,0 +1,2193 @@
+@property --orbit-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --orbit-glow {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.22;
+}
+
+.pf-login-orbit,
+.pf-login-orbit *,
+.pf-login-mist,
+.pf-login-mist *,
+.pf-login-lab,
+.pf-login-lab * {
+  box-sizing: border-box;
+}
+
+.pf-login-orbit button,
+.pf-login-orbit input,
+.pf-login-mist button,
+.pf-login-mist input,
+.pf-login-lab button,
+.pf-login-lab input {
+  font: inherit;
+}
+
+.pf-login-orbit button,
+.pf-login-mist button,
+.pf-login-lab button {
+  cursor: pointer;
+}
+
+.pf-login-orbit button:disabled,
+.pf-login-mist button:disabled,
+.pf-login-lab button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+/* Codex Orbit */
+.pf-login-orbit {
+  --void: #050505;
+  --void-2: #090b0b;
+  --ink: #f7efe2;
+  --muted: #a9a095;
+  --subtle: #6f756d;
+  --line: rgba(247, 239, 226, 0.12);
+  --line-strong: rgba(247, 239, 226, 0.22);
+  --glass: rgba(247, 239, 226, 0.065);
+  --glass-strong: rgba(247, 239, 226, 0.105);
+  --emerald: #79d6bc;
+  --amber: #edbd63;
+  --rust: #c36b55;
+  --lilac: #8f82df;
+  --shadow: 0 34px 90px rgba(1, 9, 8, 0.32);
+  --glow: 0 0 48px rgba(121, 214, 188, 0.16);
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --cursor-x: 50vw;
+  --cursor-y: 50vh;
+  --orbit-x: 0px;
+  --orbit-y: 0px;
+  --auth-card-x: 0px;
+  --auth-card-y: 0px;
+  --auth-card-tilt: 0deg;
+  --satellite-x: 0px;
+  --satellite-y: 0px;
+  --login-chip-x: 0px;
+  --login-chip-y: 0px;
+  --login-chip-tilt: 0deg;
+  --setkey-chip-x: 0px;
+  --setkey-chip-y: 0px;
+  --setkey-chip-tilt: 0deg;
+  --pointer-tilt: 0deg;
+  --orbit-scale: 1;
+  --orbit-glow: 0.22;
+  position: relative;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  background:
+    linear-gradient(116deg, rgba(121, 214, 188, 0.13) 0 1px, transparent 1px 28%),
+    linear-gradient(242deg, rgba(237, 189, 99, 0.12) 0 1px, transparent 1px 36%),
+    linear-gradient(160deg, transparent 0 58%, rgba(143, 130, 223, 0.1) 58% 59%, transparent 59%),
+    radial-gradient(circle at 50% 50%, #101616 0%, var(--void) 58%);
+  color: var(--ink);
+  font-family:
+    "Clash Display",
+    Geist,
+    "Plus Jakarta Sans",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    ui-sans-serif,
+    sans-serif;
+}
+
+.pf-login-orbit::before {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  content: "";
+  opacity: 0.04;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.28) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.14) 0 1px, transparent 1px 5px);
+}
+
+.pf-login-orbit::after {
+  position: fixed;
+  left: -18vw;
+  top: -20vh;
+  z-index: 0;
+  width: 140vw;
+  height: 140vh;
+  pointer-events: none;
+  content: "";
+  opacity: 0.46;
+  background:
+    linear-gradient(118deg, transparent 0 36%, rgba(121, 214, 188, 0.18) 36% 37%, transparent 37%),
+    linear-gradient(242deg, transparent 0 49%, rgba(237, 189, 99, 0.14) 49% 50%, transparent 50%),
+    linear-gradient(168deg, transparent 0 62%, rgba(143, 130, 223, 0.12) 62% 63%, transparent 63%);
+  transform: translate3d(-2vw, -2vh, 0) rotate(-2deg);
+  animation: orbitAmbientDrift 16s var(--ease) infinite alternate;
+}
+
+.pf-login-orbit .stage {
+  position: relative;
+  z-index: 1;
+  width: min(1440px, calc(100% - 56px));
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 28px 0;
+}
+
+.pf-login-orbit .pointer-glow {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  width: 520px;
+  height: 520px;
+  pointer-events: none;
+  border-radius: 999px;
+  opacity: 0.42;
+  background:
+    radial-gradient(circle, rgba(121, 214, 188, 0.18), transparent 62%),
+    radial-gradient(circle, rgba(237, 189, 99, 0.09), transparent 58%);
+  transform: translate3d(calc(var(--cursor-x) - 260px), calc(var(--cursor-y) - 260px), 0);
+  transition: opacity 900ms var(--ease);
+}
+
+.pf-login-orbit .brand {
+  position: absolute;
+  left: 0;
+  top: 34px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  animation: orbitEnter 980ms var(--ease) both;
+}
+
+.pf-login-orbit .brand strong {
+  display: block;
+  font-size: 24px;
+  font-weight: 840;
+  line-height: 1;
+}
+
+.pf-login-orbit .brand small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pf-login-orbit .vertical-title {
+  position: absolute;
+  right: -18px;
+  top: 72px;
+  z-index: 1;
+  color: rgba(247, 239, 226, 0.055);
+  font-size: clamp(72px, 7vw, 120px);
+  font-weight: 840;
+  letter-spacing: 0;
+  line-height: 0.82;
+  pointer-events: none;
+  writing-mode: vertical-rl;
+  animation: orbitEnter 1180ms var(--ease) 100ms both;
+}
+
+.pf-login-orbit .orbit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(880px, 62vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    linear-gradient(128deg, rgb(121 214 188 / var(--orbit-glow)) 0 1px, transparent 1px 42%),
+    linear-gradient(44deg, transparent 0 52%, rgb(237 189 99 / var(--orbit-glow)) 52% 53%, transparent 53%);
+  box-shadow:
+    inset 0 0 0 1px rgb(247 239 226 / calc(var(--orbit-glow) * 0.52)),
+    inset 0 0 0 28px rgb(247 239 226 / calc(var(--orbit-glow) * 0.08)),
+    0 34px 90px rgba(1, 9, 8, 0.32),
+    0 0 62px rgb(121 214 188 / calc(var(--orbit-glow) * 0.36));
+  transform: translate(calc(-50% + var(--orbit-x)), calc(-50% + var(--orbit-y)))
+    rotate(calc(-12deg + var(--pointer-tilt))) scale(var(--orbit-scale));
+  animation: orbitIn 1120ms var(--ease) 80ms both, orbitHeartbeat 3.2s var(--ease) 1300ms infinite;
+}
+
+.pf-login-orbit .orbit::before,
+.pf-login-orbit .orbit::after {
+  position: absolute;
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+  transform-origin: center;
+}
+
+.pf-login-orbit .orbit::before {
+  inset: 72px;
+  opacity: 0.72;
+  box-shadow: inset 0 0 0 1px rgba(247, 239, 226, 0.09), 0 0 52px rgba(121, 214, 188, 0.07);
+}
+
+.pf-login-orbit .orbit::after {
+  inset: 180px;
+  opacity: 0.82;
+  background: rgba(5, 5, 5, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(247, 239, 226, 0.07);
+}
+
+.pf-login-orbit .headline {
+  position: absolute;
+  left: 7%;
+  top: 23%;
+  z-index: 4;
+  width: min(460px, 34vw);
+  animation: orbitEnter 980ms var(--ease) 160ms both;
+}
+
+.pf-login-orbit .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pf-login-orbit .eyebrow::before {
+  width: 30px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--amber);
+  content: "";
+}
+
+.pf-login-orbit h1 {
+  max-width: 460px;
+  margin: 22px 0 0;
+  font-size: clamp(52px, 5.2vw, 82px);
+  font-weight: 840;
+  letter-spacing: 0;
+  line-height: 0.94;
+}
+
+.pf-login-orbit .headline p {
+  max-width: 430px;
+  margin: 26px 0 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.78;
+}
+
+.pf-login-orbit .auth-shell {
+  position: absolute;
+  left: 58%;
+  top: 52%;
+  z-index: 6;
+  width: min(520px, 38vw);
+  padding: 8px;
+  border-radius: 48px;
+  background: var(--glass-strong);
+  box-shadow: inset 0 1px 0 rgba(247, 239, 226, 0.12), var(--shadow), var(--glow);
+  transform: translate(calc(-50% + var(--auth-card-x)), calc(-50% + var(--auth-card-y)))
+    rotate(calc(7deg + var(--auth-card-tilt)));
+  animation: orbitCardIn 1120ms var(--ease) 240ms both;
+}
+
+.pf-login-orbit .auth-core {
+  min-height: 560px;
+  overflow: hidden;
+  border: 1px solid rgba(247, 239, 226, 0.13);
+  border-radius: 40px;
+  background:
+    linear-gradient(132deg, rgba(121, 214, 188, 0.12) 0 1px, transparent 1px 48%),
+    linear-gradient(34deg, transparent 0 56%, rgba(195, 107, 85, 0.12) 56% 57%, transparent 57%),
+    #080a09;
+  box-shadow: inset 0 1px 1px rgba(247, 239, 226, 0.1);
+  transform: rotate(-7deg);
+}
+
+.pf-login-orbit .auth-head {
+  padding: 32px 32px 0;
+}
+
+.pf-login-orbit .access-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.pf-login-orbit .access-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--emerald);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.pf-login-orbit .access-label::before {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--emerald);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.pf-login-orbit .console-index {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: rgba(247, 239, 226, 0.32);
+  font-weight: 820;
+}
+
+.pf-login-orbit .console-index strong {
+  color: var(--ink);
+  font-size: 30px;
+}
+
+.pf-login-orbit .auth-head h2 {
+  margin: 36px 0 0;
+  font-size: 42px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.pf-login-orbit .auth-head p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.pf-login-orbit .switch-shell {
+  margin: 30px 32px 0;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(247, 239, 226, 0.065);
+  box-shadow: inset 0 1px 0 rgba(247, 239, 226, 0.1);
+}
+
+.pf-login-orbit .switch-core {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.pf-login-orbit .switch-core button {
+  display: grid;
+  min-height: 44px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 780;
+  transition: transform 720ms var(--ease), background 720ms var(--ease), color 720ms var(--ease),
+    box-shadow 720ms var(--ease);
+}
+
+.pf-login-orbit .switch-core button:hover {
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.pf-login-orbit .switch-core button.active {
+  background: var(--ink);
+  color: var(--void);
+  box-shadow: 0 16px 34px rgba(1, 9, 8, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.pf-login-orbit .form {
+  display: grid;
+  gap: 14px;
+  padding: 24px 32px 32px;
+}
+
+.pf-login-orbit .field {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.pf-login-orbit .field label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.pf-login-orbit .field-shell {
+  min-width: 0;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(247, 239, 226, 0.065);
+  box-shadow: inset 0 1px 0 rgba(247, 239, 226, 0.1);
+  transition: transform 720ms var(--ease), background 720ms var(--ease), box-shadow 720ms var(--ease);
+}
+
+.pf-login-orbit .field-shell:focus-within {
+  background: rgba(121, 214, 188, 0.14);
+  box-shadow: 0 16px 40px rgba(121, 214, 188, 0.1), inset 0 1px 0 rgba(247, 239, 226, 0.12);
+  transform: translateX(4px);
+}
+
+.pf-login-orbit .field-core {
+  width: 100%;
+  min-height: 50px;
+  border: 0;
+  border-radius: 999px;
+  outline: 0;
+  background: rgba(5, 5, 5, 0.58) !important;
+  box-shadow: inset 0 1px 1px rgba(247, 239, 226, 0.08);
+  color: var(--ink) !important;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+.pf-login-orbit .field-core::placeholder {
+  color: rgba(169, 160, 149, 0.68);
+}
+
+.pf-login-orbit .setup-only {
+  animation: orbitEnter 760ms var(--ease) both;
+}
+
+.pf-login-orbit .notice {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  border-radius: 20px;
+  padding: 0 14px;
+  background: rgba(195, 107, 85, 0.12);
+  color: #e7a191;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.pf-login-orbit .notice::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--rust);
+  content: "";
+}
+
+.pf-login-orbit .notice-placeholder,
+.pf-login-lab .error-placeholder {
+  visibility: hidden;
+}
+
+.pf-login-orbit .primary {
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--void);
+  padding: 9px 9px 9px 24px;
+  box-shadow: 0 24px 54px rgba(1, 9, 8, 0.3), 0 0 44px rgba(237, 189, 99, 0.13);
+  font-size: 14px;
+  font-weight: 820;
+  transition: transform 720ms var(--ease), background 720ms var(--ease), box-shadow 720ms var(--ease);
+}
+
+.pf-login-orbit .primary:hover {
+  background: #fff5df;
+  box-shadow: 0 30px 68px rgba(1, 9, 8, 0.34), 0 0 58px rgba(237, 189, 99, 0.19);
+  transform: translateY(-2px) rotate(-1deg);
+}
+
+.pf-login-orbit .primary:active {
+  transform: scale(0.985);
+}
+
+.pf-login-orbit .primary span:last-child {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(5, 5, 5, 0.12);
+  transition: transform 720ms var(--ease), background 720ms var(--ease);
+}
+
+.pf-login-orbit .primary:hover span:last-child {
+  background: rgba(5, 5, 5, 0.16);
+  transform: translate(4px, -1px) scale(1.06);
+}
+
+.pf-login-orbit .satellite {
+  position: absolute;
+  z-index: 5;
+  padding: 7px;
+  border-radius: 30px;
+  background: var(--glass);
+  box-shadow: inset 0 1px 0 rgba(247, 239, 226, 0.11), var(--shadow);
+  animation: orbitEnter 1040ms var(--ease) both;
+}
+
+.pf-login-orbit .satellite-inner {
+  min-height: 100%;
+  border: 1px solid rgba(247, 239, 226, 0.11);
+  border-radius: 23px;
+  background: var(--void-2);
+  box-shadow: inset 0 1px 1px rgba(247, 239, 226, 0.08);
+}
+
+.pf-login-orbit .satellite-a {
+  left: 56%;
+  top: 16%;
+  width: 250px;
+  transform: translate3d(var(--satellite-x), var(--satellite-y), 0) rotate(-7deg);
+  animation-delay: 320ms;
+}
+
+.pf-login-orbit .satellite-a .satellite-inner {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  padding: 18px;
+}
+
+.pf-login-orbit .satellite-a span {
+  min-height: 38px;
+  border-radius: 13px;
+  background: rgba(247, 239, 226, 0.06);
+}
+
+.pf-login-orbit .satellite-a span:nth-child(3n) {
+  background: rgba(121, 214, 188, 0.24);
+}
+
+.pf-login-orbit .satellite-a span:nth-child(7n) {
+  background: rgba(237, 189, 99, 0.22);
+}
+
+.pf-login-orbit .satellite-b {
+  right: 7%;
+  bottom: 12%;
+  width: 260px;
+  transform: translate3d(calc(var(--satellite-x) * -1), calc(var(--satellite-y) * -1), 0) rotate(5deg);
+  animation-delay: 400ms;
+}
+
+.pf-login-orbit .satellite-b .satellite-inner {
+  padding: 24px;
+  background:
+    linear-gradient(128deg, rgba(195, 107, 85, 0.16) 0 1px, transparent 1px 58%),
+    #120d0b;
+}
+
+.pf-login-orbit .satellite-b small {
+  display: block;
+  color: var(--rust);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.pf-login-orbit .satellite-b strong {
+  display: block;
+  margin-top: 20px;
+  font-size: 38px;
+  font-weight: 840;
+  line-height: 0.9;
+}
+
+.pf-login-orbit .mode-rail {
+  position: absolute;
+  left: calc(58% - 390px);
+  top: calc(52% + 170px);
+  z-index: 7;
+  display: grid;
+  gap: 9px;
+  animation: orbitRailEnter 980ms var(--ease) 460ms both;
+}
+
+.pf-login-orbit .rail-chip {
+  display: inline-flex;
+  min-width: 120px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-radius: 999px;
+  padding: 10px 12px;
+  background: rgba(247, 239, 226, 0.075);
+  box-shadow: inset 0 1px 0 rgba(247, 239, 226, 0.11);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 780;
+  transition: transform 760ms var(--ease);
+}
+
+.pf-login-orbit .rail-chip::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.pf-login-orbit .rail-chip.active {
+  background: var(--ink);
+  color: var(--void);
+}
+
+.pf-login-orbit .rail-chip-login {
+  transform: translate3d(var(--login-chip-x), var(--login-chip-y), 0) rotate(var(--login-chip-tilt));
+}
+
+.pf-login-orbit .rail-chip-setkey {
+  transform: translate3d(var(--setkey-chip-x), var(--setkey-chip-y), 0) rotate(var(--setkey-chip-tilt));
+}
+
+@keyframes orbitEnter {
+  from {
+    opacity: 0;
+    transform: translateY(34px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes orbitAmbientDrift {
+  from {
+    opacity: 0.34;
+    transform: translate3d(-2vw, -2vh, 0) rotate(-2deg);
+  }
+
+  to {
+    opacity: 0.56;
+    transform: translate3d(3vw, 4vh, 0) rotate(2deg);
+  }
+}
+
+@keyframes orbitIn {
+  from {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--orbit-x)), calc(-50% + var(--orbit-y)))
+      rotate(calc(-12deg + var(--pointer-tilt))) scale(0.88);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--orbit-x)), calc(-50% + var(--orbit-y)))
+      rotate(calc(-12deg + var(--pointer-tilt))) scale(var(--orbit-scale));
+  }
+}
+
+@keyframes orbitCardIn {
+  from {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--auth-card-x)), calc(-50% + var(--auth-card-y)))
+      rotate(calc(7deg + var(--auth-card-tilt))) scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--auth-card-x)), calc(-50% + var(--auth-card-y)))
+      rotate(calc(7deg + var(--auth-card-tilt))) scale(1);
+  }
+}
+
+@keyframes orbitRailEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 34px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes orbitHeartbeat {
+  0%,
+  100% {
+    --orbit-scale: 1;
+    --orbit-glow: 0.16;
+    opacity: 0.82;
+  }
+
+  12% {
+    --orbit-scale: 1.026;
+    --orbit-glow: 0.31;
+    opacity: 0.96;
+  }
+
+  22% {
+    --orbit-scale: 0.992;
+    --orbit-glow: 0.2;
+    opacity: 0.86;
+  }
+
+  36% {
+    --orbit-scale: 1.014;
+    --orbit-glow: 0.26;
+    opacity: 0.92;
+  }
+}
+
+/* Fluid Mist */
+.pf-login-mist {
+  position: relative;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  background: #f5f5f3;
+  color: #1a1a1d;
+  font-family: "Outfit", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.pf-login-mist ::selection {
+  background: rgba(255, 107, 88, 0.25);
+  color: #1a1a1d;
+}
+
+.pf-login-mist .background-layer {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.pf-login-mist .mesh-blob {
+  position: absolute;
+  border-radius: 50%;
+  contain: paint;
+  filter: blur(100px);
+  opacity: 0.55;
+  transition: transform 0.35s ease-out;
+}
+
+.pf-login-mist .blob-1 {
+  top: -15%;
+  right: 8%;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle at 30% 40%, #e85d4a, #f5a89f 60%, transparent);
+}
+
+.pf-login-mist .blob-2 {
+  bottom: -10%;
+  left: 3%;
+  width: 560px;
+  height: 560px;
+  background: radial-gradient(circle at 60% 50%, #4a92bd, #9bc4e0 65%, transparent);
+}
+
+.pf-login-mist .blob-3 {
+  top: 35%;
+  left: 20%;
+  width: 480px;
+  height: 480px;
+  background: radial-gradient(circle at 50% 50%, #e8b74a, #f5d89f 70%, transparent);
+}
+
+.pf-login-mist .blob-4 {
+  top: 10%;
+  left: 50%;
+  width: 440px;
+  height: 440px;
+  background: radial-gradient(circle at 40% 60%, #e87a6a, #f5b8af 60%, transparent);
+}
+
+.pf-login-mist .mist-main {
+  position: relative;
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+}
+
+.pf-login-mist .sparkle-dot {
+  position: absolute;
+  border-radius: 50%;
+  animation: mistSparkle 3s ease-in-out infinite;
+}
+
+.pf-login-mist .dot-1 {
+  top: 5rem;
+  left: 15%;
+  width: 0.75rem;
+  height: 0.75rem;
+  background: #e85d4a;
+  animation-delay: 0.5s;
+}
+
+.pf-login-mist .dot-2 {
+  top: 8rem;
+  right: 20%;
+  width: 0.625rem;
+  height: 0.625rem;
+  background: #4a92bd;
+  animation-delay: 1.2s;
+}
+
+.pf-login-mist .dot-3 {
+  top: 11rem;
+  left: 25%;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: #e8b74a;
+  animation-delay: 2s;
+}
+
+.pf-login-mist .dot-4 {
+  right: 15%;
+  bottom: 25%;
+  width: 0.625rem;
+  height: 0.625rem;
+  background: #f07560;
+  animation-delay: 2.8s;
+}
+
+.pf-login-mist .dot-5 {
+  bottom: 33.333333%;
+  left: 18%;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: #6aa8cc;
+  animation-delay: 1.5s;
+}
+
+.pf-login-mist .dot-6 {
+  top: 33.333333%;
+  right: 30%;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: #e87a6a;
+  animation-delay: 3.2s;
+}
+
+.pf-login-mist .dot-7 {
+  top: 15rem;
+  left: 40%;
+  width: 0.75rem;
+  height: 0.75rem;
+  background: #e85d4a;
+  animation-delay: 0.8s;
+}
+
+.pf-login-mist .dot-8 {
+  right: 25%;
+  bottom: 10rem;
+  width: 0.625rem;
+  height: 0.625rem;
+  background: #4a92bd;
+  animation-delay: 2.5s;
+}
+
+.pf-login-mist .dot-9 {
+  top: 15%;
+  right: 12%;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: #f5a89f;
+  animation-delay: 1.8s;
+}
+
+.pf-login-mist .dot-10 {
+  bottom: 20%;
+  left: 35%;
+  width: 0.625rem;
+  height: 0.625rem;
+  background: #9bc4e0;
+  animation-delay: 3.5s;
+}
+
+.pf-login-mist .main-card {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 2rem;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 2.5rem;
+  box-shadow: 0 20px 60px -15px rgba(26, 26, 29, 0.12);
+  backdrop-filter: blur(24px);
+  opacity: 0;
+  transform-style: preserve-3d;
+  animation: mistFloatIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s;
+}
+
+.pf-login-mist .main-card:hover {
+  box-shadow: 0 24px 48px -15px rgba(255, 107, 88, 0.28);
+  transform: translateY(-6px);
+}
+
+.pf-login-mist .brand-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.pf-login-mist .brand-block h1 {
+  margin: 0;
+  color: #1a1a1d;
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  text-align: center;
+}
+
+.pf-login-mist .brand-block p {
+  margin: 0.75rem 0 0;
+  color: rgba(26, 26, 29, 0.4);
+  font-family: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.24em;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+
+.pf-login-mist .greeting {
+  margin-bottom: 2rem;
+  text-align: center;
+}
+
+.pf-login-mist .greeting h2 {
+  margin: 0;
+  color: rgba(26, 26, 29, 0.9);
+  font-size: 1.35rem;
+  font-weight: 600;
+  line-height: 1.375;
+}
+
+.pf-login-mist .greeting p {
+  margin: 0.375rem 0 0;
+  color: rgba(26, 26, 29, 0.5);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.pf-login-mist .mist-form,
+.pf-login-mist .field-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.pf-login-mist .mist-form {
+  gap: 1rem;
+}
+
+.pf-login-mist .field-block {
+  gap: 0.5rem;
+}
+
+.pf-login-mist label {
+  color: rgba(26, 26, 29, 0.7);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+.pf-login-mist input {
+  height: 3rem;
+  border: 1px solid rgba(26, 26, 29, 0.1);
+  border-radius: 0.75rem;
+  outline: none;
+  background: #fff !important;
+  color: #1a1a1d !important;
+  padding: 0 1rem;
+  font-size: 15px;
+  transition: border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pf-login-mist input::placeholder {
+  color: rgba(26, 26, 29, 0.3);
+}
+
+.pf-login-mist input:focus {
+  border-color: #ff6b58;
+  box-shadow: 0 0 0 4px rgba(255, 107, 88, 0.12), 0 4px 12px -2px rgba(255, 107, 88, 0.15);
+  transform: translateY(-1px);
+}
+
+.pf-login-mist .password-wrap {
+  position: relative;
+}
+
+.pf-login-mist .password-wrap input {
+  width: 100%;
+  padding-right: 2.75rem;
+}
+
+.pf-login-mist .password-wrap button {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: rgba(26, 26, 29, 0.4);
+  transform: translateY(-50%);
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.pf-login-mist .password-wrap button:hover {
+  background: rgba(26, 26, 29, 0.05);
+  color: #1a1a1d;
+}
+
+.pf-login-mist .pw-error {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+  padding-top: 0.125rem;
+  color: #e85d4a;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.pf-login-mist .submit-btn {
+  display: flex;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: linear-gradient(to right, #e85d4a, #d04835);
+  box-shadow: 0 8px 20px -6px rgba(255, 107, 88, 0.5);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s;
+}
+
+.pf-login-mist .submit-btn:hover {
+  background: linear-gradient(to right, #f07560, #e85d4a);
+  box-shadow: 0 14px 28px -8px rgba(255, 107, 88, 0.5);
+  transform: translateY(-2px) scale(1.02);
+}
+
+.pf-login-mist .submit-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.pf-login-mist .btn-label,
+.pf-login-mist .btn-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pf-login-mist .btn-label svg {
+  transition: transform 0.3s ease;
+}
+
+.pf-login-mist .submit-btn:hover .btn-label svg {
+  transform: translateX(0.25rem);
+}
+
+@keyframes mistFloatIn {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes mistSparkle {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.4);
+  }
+}
+
+/* Image Lab */
+.pf-login-lab {
+  --charcoal: #151612;
+  --paper: #eee7da;
+  --paper-soft: #d9cfbd;
+  --muted: #9c9487;
+  --line: rgb(238 231 218 / 0.18);
+  --line-strong: rgb(238 231 218 / 0.34);
+  --accent: #8aa77e;
+  --accent-soft: #c7d6a9;
+  --danger: #d1866b;
+  --shadow: 0 38px 120px rgb(0 0 0 / 0.36);
+  --motion: cubic-bezier(0.32, 0.72, 0, 1);
+  position: relative;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  background:
+    linear-gradient(112deg, #22251d 0 54%, #2b3228 54.2% 100%),
+    linear-gradient(135deg, transparent 0 52%, rgb(168 187 139 / 0.22) 52.2% 66%, transparent 66.2%),
+    #22251d;
+  color: var(--paper);
+  font-family:
+    "Geist",
+    "Satoshi",
+    "Outfit",
+    "Avenir Next",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    system-ui,
+    sans-serif;
+  letter-spacing: 0;
+}
+
+.pf-login-lab::before {
+  position: fixed;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+  background:
+    radial-gradient(circle at 72% 38%, rgb(168 187 139 / 0.2), transparent 25rem),
+    linear-gradient(124deg, transparent 0 42%, rgb(238 231 218 / 0.1) 42.2% 52%, transparent 52.2%);
+  opacity: 0.76;
+  animation: labBackgroundDrift 18s ease-in-out infinite alternate;
+}
+
+.pf-login-lab::after {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  content: "";
+  opacity: 0.56;
+  background: radial-gradient(circle at 76% 68%, rgb(238 231 218 / 0.11), transparent 22rem);
+  animation: labSoftPulse 10s var(--motion) infinite alternate;
+}
+
+.pf-login-lab .page {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(420px, 0.86fr);
+  gap: clamp(22px, 3.4vw, 56px);
+  width: min(100%, 1500px);
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 40px);
+}
+
+.pf-login-lab .page::before {
+  position: absolute;
+  top: clamp(16px, 3vw, 40px);
+  right: clamp(16px, 3vw, 40px);
+  bottom: clamp(16px, 3vw, 40px);
+  left: 56%;
+  border: 0;
+  border-radius: 46px;
+  background:
+    linear-gradient(128deg, transparent 0 48%, rgb(168 187 139 / 0.18) 48.2% 62%, transparent 62.2%),
+    #293025;
+  content: "";
+  opacity: 0.76;
+  animation: labBackgroundPanelFloat 14s var(--motion) infinite alternate;
+}
+
+.pf-login-lab .page::after {
+  position: absolute;
+  right: 34%;
+  bottom: 0;
+  width: 1px;
+  height: 72vh;
+  background: linear-gradient(180deg, transparent, rgb(238 231 218 / 0.24), transparent);
+  content: "";
+  transform: rotate(16deg);
+}
+
+.pf-login-lab .brand {
+  position: fixed;
+  top: clamp(18px, calc(1.2vw + 10px), 26px);
+  left: 50px;
+  z-index: 4;
+  display: block;
+  max-width: min(64vw, 940px);
+  color: var(--paper);
+  font-size: clamp(72px, 7.6vw, 122px);
+  font-weight: 820;
+  line-height: 0.88;
+  opacity: 0.72;
+  text-decoration: none;
+  white-space: nowrap;
+  transform: scaleX(0.88);
+  transform-origin: left top;
+}
+
+.pf-login-lab .gallery {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-height: calc(100dvh - clamp(32px, 6vw, 80px));
+  padding-top: 58px;
+}
+
+.pf-login-lab .art-frame {
+  position: relative;
+  min-height: 610px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 36px;
+  background: #202119;
+  box-shadow: var(--shadow), inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.pf-login-lab .art-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 58% center;
+  opacity: 0.72;
+  transform: scale(1.04);
+}
+
+.pf-login-lab .art-frame::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(90deg, rgb(21 22 18 / 0.88), transparent 42%),
+    linear-gradient(180deg, transparent 42%, rgb(21 22 18 / 0.76));
+  content: "";
+}
+
+.pf-login-lab .art-frame::after {
+  position: absolute;
+  inset: 22px;
+  z-index: 2;
+  border: 1px solid rgb(238 231 218 / 0.16);
+  border-radius: 28px;
+  content: "";
+}
+
+.pf-login-lab .caption {
+  position: absolute;
+  left: clamp(26px, 4vw, 54px);
+  bottom: clamp(26px, 4vw, 54px);
+  z-index: 3;
+  display: grid;
+  gap: 16px;
+  max-width: 560px;
+}
+
+.pf-login-lab .caption code {
+  width: fit-content;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgb(21 22 18 / 0.44);
+  color: var(--paper-soft);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.pf-login-lab .caption h1 {
+  margin: 0;
+  color: var(--paper);
+  font-size: clamp(50px, 6vw, 92px);
+  font-weight: 880;
+  letter-spacing: 0;
+  line-height: 0.82;
+}
+
+.pf-login-lab .caption p {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--paper-soft);
+  font-size: 15px;
+  line-height: 1.72;
+}
+
+.pf-login-lab .rail-text {
+  position: absolute;
+  top: 86px;
+  right: 26px;
+  z-index: 3;
+  color: rgb(238 231 218 / 0.44);
+  font-size: 12px;
+  font-weight: 760;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+}
+
+.pf-login-lab .login-panel {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: calc(100dvh - clamp(32px, 6vw, 80px));
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 58px;
+}
+
+.pf-login-lab .entry-frame {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: min(100%, 508px);
+  gap: 12px;
+  padding: 10px 0 0 34px;
+}
+
+.pf-login-lab .entry-frame::before {
+  position: absolute;
+  inset: -34px -16px -38px -70px;
+  z-index: 0;
+  border: 1px solid rgb(238 231 218 / 0.18);
+  border-radius: 40px;
+  background:
+    linear-gradient(125deg, rgb(238 231 218 / 0.08) 0 34%, transparent 34.4%),
+    linear-gradient(145deg, transparent 0 62%, rgb(138 167 126 / 0.14) 62.4% 100%),
+    rgb(37 42 33 / 0.82);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 24px 78px rgb(0 0 0 / 0.24);
+  content: "";
+  animation: labFloatingKicker 13s var(--motion) infinite;
+}
+
+.pf-login-lab .entry-frame::after {
+  position: absolute;
+  inset: -17px 2px -18px -52px;
+  z-index: 0;
+  border: 1px solid rgb(199 214 169 / 0.1);
+  border-radius: 32px;
+  content: "";
+  pointer-events: none;
+  animation: labFloatingKicker 13s var(--motion) infinite;
+}
+
+.pf-login-lab .panel-kicker {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  width: min(100%, 316px);
+  overflow: hidden;
+  padding: 10px 2px 2px;
+  animation: labFloatingKicker 13s var(--motion) infinite;
+}
+
+.pf-login-lab .panel-kicker span {
+  color: var(--accent-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pf-login-lab .panel-kicker h2 {
+  max-width: 12ch;
+  margin: 0;
+  color: var(--paper);
+  font-size: clamp(34px, 3.3vw, 52px);
+  font-weight: 840;
+  line-height: 0.96;
+  word-break: keep-all;
+}
+
+.pf-login-lab .scan-card {
+  position: relative;
+  z-index: 3;
+  justify-self: end;
+  width: min(100%, 462px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  padding: 17px 17px 17px 44px;
+  background:
+    linear-gradient(145deg, rgb(238 231 218 / 0.12), rgb(238 231 218 / 0.045)),
+    linear-gradient(118deg, transparent 0 56%, rgb(138 167 126 / 0.12) 56.2% 71%, transparent 71.2%),
+    rgb(21 22 18 / 0.74);
+  box-shadow: 0 22px 70px rgb(0 0 0 / 0.26), inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.pf-login-lab .scan-card::before {
+  position: absolute;
+  top: -34%;
+  right: -18%;
+  width: 64%;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: conic-gradient(from 120deg, transparent, rgb(138 167 126 / 0.34), transparent 46%);
+  content: "";
+  opacity: 0.68;
+  transform: rotate(22deg);
+}
+
+.pf-login-lab .scan-card::after {
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgb(238 231 218 / 0.09);
+  border-radius: 22px;
+  content: "";
+  pointer-events: none;
+}
+
+.pf-login-lab .scan-head,
+.pf-login-lab .scan-body,
+.pf-login-lab .mode-switch,
+.pf-login-lab form,
+.pf-login-lab .states {
+  position: relative;
+  z-index: 1;
+}
+
+.pf-login-lab .scan-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+.pf-login-lab .scan-head span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.pf-login-lab .scan-head strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--paper);
+  font-size: 16px;
+  line-height: 1.16;
+}
+
+.pf-login-lab .scan-code {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 10px;
+  color: var(--paper-soft);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.pf-login-lab .scan-body {
+  display: grid;
+  grid-template-columns: 104px 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 9px;
+}
+
+.pf-login-lab .scanner {
+  position: relative;
+  display: grid;
+  aspect-ratio: 1;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgb(238 231 218 / 0.16);
+  border-radius: 50%;
+  background:
+    linear-gradient(180deg, rgb(238 231 218 / 0.1), transparent),
+    rgb(16 21 17 / 0.42);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.11), inset 0 -18px 34px rgb(0 0 0 / 0.22);
+}
+
+.pf-login-lab .scanner::before {
+  position: absolute;
+  inset: 9px;
+  border-radius: inherit;
+  background:
+    conic-gradient(from 20deg, transparent, rgb(138 167 126 / 0.88), transparent 38%),
+    linear-gradient(rgb(238 231 218 / 0.12), transparent);
+  content: "";
+  transform: rotate(28deg);
+}
+
+.pf-login-lab .scanner::after {
+  position: absolute;
+  inset: 20px;
+  border: 1px solid rgb(238 231 218 / 0.2);
+  border-radius: inherit;
+  background: rgb(16 21 17 / 0.72);
+  content: "";
+}
+
+.pf-login-lab .scanner-core {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid rgb(238 231 218 / 0.23);
+  border-radius: 50%;
+  background: rgb(238 231 218 / 0.08);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 860;
+  text-transform: uppercase;
+}
+
+.pf-login-lab .scan-line {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(199 214 169 / 0.9), transparent);
+  opacity: 0.82;
+}
+
+.pf-login-lab .meter {
+  display: grid;
+  gap: 7px;
+}
+
+.pf-login-lab .meter-row {
+  display: grid;
+  grid-template-columns: 38px 1fr auto;
+  gap: 7px;
+  align-items: center;
+  color: var(--paper-soft);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.pf-login-lab .meter-row i {
+  position: relative;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(238 231 218 / 0.11);
+}
+
+.pf-login-lab .meter-row i::after {
+  position: absolute;
+  inset: 0;
+  width: var(--meter);
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgb(138 167 126 / 0.82), rgb(238 231 218 / 0.54));
+  content: "";
+  transform-origin: left center;
+}
+
+.pf-login-lab .mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px;
+  background: rgb(238 231 218 / 0.055);
+}
+
+.pf-login-lab .mode-switch button {
+  min-height: 35px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 760;
+  transition: transform 240ms var(--motion), background 240ms var(--motion), color 240ms var(--motion);
+}
+
+.pf-login-lab .mode-switch .active {
+  background: var(--paper);
+  color: var(--charcoal);
+}
+
+.pf-login-lab .mode-switch button:active,
+.pf-login-lab .primary-button:active,
+.pf-login-lab .icon-button:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.pf-login-lab form {
+  display: grid;
+  gap: 8px;
+}
+
+.pf-login-lab .field {
+  display: grid;
+  gap: 4px;
+}
+
+.pf-login-lab label {
+  color: var(--paper);
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.pf-login-lab .input-wrap {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 17px;
+  padding: 0 14px;
+  background:
+    linear-gradient(90deg, rgb(138 167 126 / 0.13), transparent 38%),
+    rgb(238 231 218 / 0.08);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  transition: border-color 240ms var(--motion), box-shadow 240ms var(--motion), background 240ms var(--motion);
+}
+
+.pf-login-lab .input-wrap:focus-within {
+  border-color: rgb(199 214 169 / 0.68);
+  background: rgb(238 231 218 / 0.11);
+  box-shadow: 0 0 0 4px rgb(138 167 126 / 0.15), inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.pf-login-lab .input-index {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgb(238 231 218 / 0.16);
+  border-radius: 11px;
+  color: var(--accent-soft);
+  font-size: 11px;
+  font-weight: 860;
+}
+
+.pf-login-lab input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent !important;
+  color: var(--paper) !important;
+}
+
+.pf-login-lab input::placeholder {
+  color: rgb(156 148 135 / 0.78);
+}
+
+.pf-login-lab .helper {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.pf-login-lab .error-message {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid rgb(209 134 107 / 0.28);
+  border-radius: 17px;
+  padding: 8px 11px;
+  background:
+    linear-gradient(90deg, rgb(180 91 74 / 0.16), transparent 58%),
+    rgb(238 231 218 / 0.045);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.pf-login-lab .error-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 5px rgb(209 134 107 / 0.13);
+}
+
+.pf-login-lab .submit-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+}
+
+.pf-login-lab .primary-button,
+.pf-login-lab .icon-button {
+  min-height: 44px;
+  border: 1px solid rgb(238 231 218 / 0.82);
+  background: var(--paper);
+  color: var(--charcoal);
+  transition: transform 240ms var(--motion), background 240ms var(--motion), border-color 240ms var(--motion);
+}
+
+.pf-login-lab .primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 17px;
+  padding: 0 16px 0 18px;
+  font-weight: 820;
+}
+
+.pf-login-lab .primary-button:hover,
+.pf-login-lab .icon-button:hover {
+  border-color: rgb(199 214 169 / 0.78);
+  background: #f6eee1;
+}
+
+.pf-login-lab .primary-button svg,
+.pf-login-lab .icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.pf-login-lab .icon-button {
+  display: grid;
+  width: 44px;
+  place-items: center;
+  border-radius: 17px;
+}
+
+.pf-login-lab .states {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: min(100%, 420px);
+  gap: 10px;
+}
+
+.pf-login-lab .state-card {
+  min-height: 66px;
+  border: 1px solid var(--line);
+  border-radius: 19px;
+  padding: 10px;
+  background: rgb(238 231 218 / 0.055);
+}
+
+.pf-login-lab .state-card span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.pf-login-lab .state-card strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--paper);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.pf-login-lab .load-lines {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.pf-login-lab .load-lines i {
+  position: relative;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(238 231 218 / 0.11);
+}
+
+.pf-login-lab .load-lines i::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(238 231 218 / 0.38), transparent);
+  content: "";
+  opacity: 0.48;
+}
+
+.pf-login-lab .load-lines i:nth-child(2) {
+  width: 64%;
+}
+
+@keyframes labBackgroundDrift {
+  to {
+    transform: translate3d(1.8%, -1.2%, 0);
+  }
+}
+
+@keyframes labBackgroundPanelFloat {
+  to {
+    opacity: 0.88;
+    transform: translate3d(-14px, 10px, 0);
+  }
+}
+
+@keyframes labSoftPulse {
+  to {
+    opacity: 0.26;
+    transform: translate3d(-1.4%, 1%, 0) scale(1.03);
+  }
+}
+
+@keyframes labFloatingKicker {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  22% {
+    transform: translate3d(10px, -8px, 0) rotate(-0.4deg);
+  }
+
+  47% {
+    transform: translate3d(-7px, 6px, 0) rotate(0.35deg);
+  }
+
+  73% {
+    transform: translate3d(6px, 11px, 0) rotate(-0.2deg);
+  }
+
+  100% {
+    transform: translate3d(-5px, -5px, 0) rotate(0.25deg);
+  }
+}
+
+@media (max-width: 1180px) {
+  .pf-login-orbit .stage {
+    display: grid;
+    width: min(840px, calc(100% - 40px));
+    gap: 22px;
+    padding: 28px 0 56px;
+  }
+
+  .pf-login-orbit .brand,
+  .pf-login-orbit .vertical-title,
+  .pf-login-orbit .orbit,
+  .pf-login-orbit .headline,
+  .pf-login-orbit .auth-shell,
+  .pf-login-orbit .satellite,
+  .pf-login-orbit .mode-rail {
+    position: relative;
+    inset: auto;
+    transform: none;
+  }
+
+  .pf-login-orbit .vertical-title {
+    display: none;
+  }
+
+  .pf-login-orbit .orbit {
+    order: 2;
+    justify-self: center;
+    width: min(620px, 86vw);
+    margin: 18px 0 -240px;
+    opacity: 0.38;
+    animation: orbitEnter 980ms var(--ease) both;
+  }
+
+  .pf-login-orbit .headline {
+    order: 3;
+    width: min(620px, 100%);
+    padding-top: 12px;
+  }
+
+  .pf-login-orbit h1 {
+    max-width: 620px;
+    font-size: 58px;
+  }
+
+  .pf-login-orbit .auth-shell {
+    order: 4;
+    justify-self: stretch;
+    width: 100%;
+    animation: orbitEnter 980ms var(--ease) both;
+  }
+
+  .pf-login-orbit .auth-core {
+    transform: none;
+  }
+
+  .pf-login-orbit .satellite-a,
+  .pf-login-orbit .satellite-b {
+    display: none;
+  }
+
+  .pf-login-orbit .mode-rail {
+    order: 5;
+    grid-template-columns: repeat(2, max-content);
+  }
+}
+
+@media (max-width: 1040px) {
+  .pf-login-lab .page {
+    grid-template-columns: 1fr;
+    gap: 24px;
+    padding: 18px;
+  }
+
+  .pf-login-lab .page::after {
+    display: none;
+  }
+
+  .pf-login-lab .page::before {
+    inset: 14px;
+    left: 18%;
+    border-radius: 32px;
+  }
+
+  .pf-login-lab .brand {
+    top: 22px;
+    left: 50px;
+    max-width: calc(100% - 24px);
+    font-size: clamp(56px, 9.4vw, 82px);
+  }
+
+  .pf-login-lab .gallery {
+    min-height: auto;
+    padding-top: 0;
+  }
+
+  .pf-login-lab .art-frame {
+    min-height: 390px;
+  }
+
+  .pf-login-lab .login-panel {
+    align-items: stretch;
+    min-height: auto;
+    padding-top: 0;
+  }
+
+  .pf-login-lab .entry-frame,
+  .pf-login-lab .states {
+    width: 100%;
+  }
+
+  .pf-login-lab .scan-card {
+    width: min(100%, 462px);
+  }
+}
+
+@media (max-width: 760px) {
+  .pf-login-orbit .stage {
+    width: 100%;
+    padding: 22px 16px 40px;
+  }
+
+  .pf-login-orbit .brand {
+    order: 1;
+  }
+
+  .pf-login-orbit .orbit {
+    width: 420px;
+    margin: 6px auto -230px;
+  }
+
+  .pf-login-orbit .headline {
+    padding-top: 0;
+  }
+
+  .pf-login-orbit h1 {
+    max-width: 340px;
+    font-size: 40px;
+    line-height: 1.04;
+  }
+
+  .pf-login-orbit .headline p {
+    max-width: 330px;
+    font-size: 15px;
+  }
+
+  .pf-login-orbit .auth-head,
+  .pf-login-orbit .form {
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+
+  .pf-login-orbit .switch-shell {
+    margin-right: 22px;
+    margin-left: 22px;
+  }
+
+  .pf-login-orbit .auth-core {
+    min-height: auto;
+  }
+
+  .pf-login-orbit .auth-head h2 {
+    font-size: 34px;
+  }
+
+  .pf-login-orbit .access-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .pf-login-orbit .console-index {
+    font-size: 11px;
+  }
+
+  .pf-login-orbit .console-index strong {
+    font-size: 22px;
+  }
+
+  .pf-login-orbit .field {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .pf-login-orbit .field-shell:focus-within {
+    transform: translateY(-1px);
+  }
+
+  .pf-login-orbit .mode-rail {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pf-login-orbit .rail-chip {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .pf-login-mist .main-card {
+    padding: 2.25rem 1.5rem;
+  }
+
+  .pf-login-mist .brand-block h1 {
+    font-size: 3rem;
+  }
+
+  .pf-login-lab .page {
+    padding: 16px;
+  }
+
+  .pf-login-lab .page::before {
+    inset: 10px;
+    left: 8px;
+    opacity: 0.54;
+  }
+
+  .pf-login-lab .brand {
+    top: 18px;
+    left: 50px;
+    max-width: calc(100% - 20px);
+    font-size: clamp(39px, 11.2vw, 47px);
+  }
+
+  .pf-login-lab .gallery {
+    padding-top: 32px;
+  }
+
+  .pf-login-lab .art-frame {
+    min-height: 250px;
+    border-radius: 28px;
+  }
+
+  .pf-login-lab .caption {
+    right: 20px;
+    bottom: 20px;
+    left: 20px;
+    gap: 12px;
+  }
+
+  .pf-login-lab .caption h1 {
+    max-width: 7ch;
+    font-size: clamp(38px, 13vw, 56px);
+  }
+
+  .pf-login-lab .caption p,
+  .pf-login-lab .rail-text {
+    display: none;
+  }
+
+  .pf-login-lab .panel-kicker {
+    width: min(100%, 290px);
+    padding: 8px 0 0;
+  }
+
+  .pf-login-lab .entry-frame {
+    padding-left: 0;
+  }
+
+  .pf-login-lab .panel-kicker h2 {
+    max-width: 12ch;
+    font-size: clamp(29px, 7.6vw, 34px);
+  }
+
+  .pf-login-lab .scan-card {
+    justify-self: start;
+    width: calc(100% - 16px);
+    border-radius: 26px;
+    padding: 16px 16px 16px 22px;
+  }
+
+  .pf-login-lab .scan-head,
+  .pf-login-lab .scan-body {
+    grid-template-columns: 1fr;
+  }
+
+  .pf-login-lab .scan-code {
+    width: fit-content;
+  }
+
+  .pf-login-lab .scanner {
+    width: min(100%, 188px);
+    justify-self: center;
+  }
+
+  .pf-login-lab .meter-row {
+    grid-template-columns: 42px 1fr 28px;
+  }
+
+  .pf-login-lab .submit-row,
+  .pf-login-lab .states {
+    grid-template-columns: 1fr;
+  }
+
+  .pf-login-lab .icon-button {
+    display: none;
+  }
+}
+
+@media (min-width: 640px) {
+  .pf-login-mist .main-card {
+    padding: 3rem;
+  }
+
+  .pf-login-mist .brand-block h1 {
+    font-size: 3.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-login-orbit *,
+  .pf-login-orbit *::before,
+  .pf-login-orbit *::after,
+  .pf-login-mist *,
+  .pf-login-mist *::before,
+  .pf-login-mist *::after,
+  .pf-login-lab *,
+  .pf-login-lab *::before,
+  .pf-login-lab *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProductFlow · 登录</title>
+
+  <!-- Fonts: Satoshi (display/body) + JetBrains Mono (labels/numbers) -->
+  <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            ink: "#0B0B0D",
+            panel: "#0F0F12",
+            ivory: "#F5F3EF",
+            ember: { DEFAULT: "#E8694E", soft: "#F0795F", deep: "#C9543C" },
+          },
+          fontFamily: {
+            sans: ['Satoshi', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; }
+    body {
+      background: #0B0B0D;
+      font-family: 'Satoshi', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Warm ivory text selection */
+    ::selection { background: rgba(232,105,78,0.32); color: #fff; }
+
+    /* ---- Fine film grain (fixed, never repaints on scroll) ---- */
+    .grain::after {
+      content: "";
+      position: fixed; inset: 0; z-index: 60; pointer-events: none;
+      opacity: 0.045;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    /* ---- Load-in stagger (transform + opacity only) ---- */
+    @keyframes riseIn {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .rise { opacity: 0; animation: riseIn 0.7s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+    /* ---- Gallery vertical drift (seamless loop) ---- */
+    @keyframes driftUp   { from { transform: translateY(0); }    to { transform: translateY(-50%); } }
+    @keyframes driftDown { from { transform: translateY(-50%); } to { transform: translateY(0); } }
+    .drift-up   { animation: driftUp 48s linear infinite; }
+    .drift-down { animation: driftDown 56s linear infinite; }
+
+    /* ---- Breathing live dot ---- */
+    @keyframes breathe {
+      0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(232,105,78,0.45); }
+      50%     { opacity: 0.55; box-shadow: 0 0 0 6px rgba(232,105,78,0); }
+    }
+    .breathe { animation: breathe 2.4s ease-in-out infinite; }
+
+    /* ---- Slow aurora behind the form heading (subtle, tinted) ---- */
+    @keyframes auroraShift {
+      0%,100% { transform: translate3d(-6%, -4%, 0) scale(1); }
+      50%     { transform: translate3d(6%, 4%, 0) scale(1.12); }
+    }
+    .aurora { animation: auroraShift 18s ease-in-out infinite; will-change: transform; }
+
+    /* ---- Button press feedback ---- */
+    .tactile { transition: transform .25s cubic-bezier(0.16,1,0.3,1), background-color .25s, box-shadow .25s; }
+    .tactile:hover  { transform: translateY(-1px); }
+    .tactile:active { transform: scale(0.985) translateY(0); }
+
+    /* ---- Underline-on-hover for text links ---- */
+    .ul-link { position: relative; }
+    .ul-link::after {
+      content:""; position:absolute; left:0; bottom:-2px; height:1px; width:100%;
+      background: currentColor; transform: scaleX(0); transform-origin: left;
+      transition: transform .35s cubic-bezier(0.16,1,0.3,1);
+    }
+    .ul-link:hover::after { transform: scaleX(1); }
+
+    .image-cohere { filter: saturate(0.92) contrast(1.03) brightness(0.96); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .drift-up, .drift-down, .breathe, .aurora, .rise { animation: none !important; opacity: 1 !important; }
+    }
+  </style>
+</head>
+
+<body class="grain text-ivory antialiased">
+  <main class="min-h-[100dvh] w-full grid grid-cols-1 lg:grid-cols-[minmax(0,0.92fr)_1.08fr]">
+
+    <!-- ============================ LEFT · FORM ============================ -->
+    <section class="relative flex flex-col min-h-[100dvh] px-6 sm:px-10 lg:px-16 xl:px-24 py-8 lg:py-10 overflow-hidden">
+
+      <!-- subtle tinted aurora glow, top-left, behind content -->
+      <div aria-hidden="true" class="pointer-events-none absolute -top-32 -left-24 h-[460px] w-[460px] rounded-full blur-[120px] opacity-[0.18] aurora"
+           style="background: radial-gradient(circle at center, #E8694E 0%, rgba(232,105,78,0) 70%);"></div>
+
+      <!-- ---- Top bar: brand + utilities ---- -->
+      <header class="relative flex items-center justify-between rise" style="animation-delay:.02s">
+        <a href="#" class="flex items-center gap-3 group">
+          <span class="grid place-items-center h-9 w-9 rounded-[11px] bg-ember shadow-[0_8px_24px_-8px_rgba(232,105,78,0.7)]">
+            <!-- aperture / lens mark -->
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0B0B0D" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M12 3 L12 12 L19.8 16.5"/>
+              <path d="M12 12 L4.2 16.5"/>
+              <path d="M12 12 L12 21" opacity="0"/>
+            </svg>
+          </span>
+          <span class="flex flex-col leading-none">
+            <span class="text-[15px] font-bold tracking-tight">ProductFlow</span>
+            <span class="font-mono text-[10px] tracking-[0.28em] text-ivory/40 mt-1">VISUAL&nbsp;STUDIO</span>
+          </span>
+        </a>
+
+        <div class="flex items-center gap-1 text-[13px] text-ivory/55">
+          <button class="px-2.5 py-1 rounded-md text-ivory font-medium">中</button>
+          <span class="text-ivory/20">/</span>
+          <button class="px-2.5 py-1 rounded-md hover:text-ivory transition-colors">EN</button>
+        </div>
+      </header>
+
+      <!-- ---- Form block (vertically centered) ---- -->
+      <div class="relative flex-1 flex flex-col justify-center max-w-[408px] w-full py-12">
+
+        <p class="rise font-mono text-[11px] tracking-[0.22em] text-ember mb-4" style="animation-delay:.08s">
+          AI&nbsp;影像创作平台
+        </p>
+
+        <h1 class="rise text-[2rem] sm:text-[2.3rem] font-bold tracking-tight leading-[1.08] mb-3" style="animation-delay:.14s">
+          登录你的创作台
+        </h1>
+        <p class="rise text-[15px] text-ivory/50 leading-relaxed mb-9" style="animation-delay:.2s">
+          继续未完成的灵感、批量生图与画廊管理。
+        </p>
+
+        <form id="loginForm" class="flex flex-col gap-5" novalidate>
+          <!-- 账号 -->
+          <div class="rise flex flex-col gap-2" style="animation-delay:.26s">
+            <label for="account" class="text-[13px] font-medium text-ivory/75">账号</label>
+            <div class="relative">
+              <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-ivory/35">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/>
+                </svg>
+              </span>
+              <input id="account" type="text" autocomplete="username" placeholder="name@studio.com"
+                class="w-full h-12 rounded-xl bg-white/[0.03] border border-white/10 pl-11 pr-4 text-[15px] text-ivory placeholder:text-ivory/30
+                       outline-none transition-all duration-300
+                       focus:border-ember/70 focus:bg-white/[0.05] focus:ring-4 focus:ring-ember/12" />
+            </div>
+          </div>
+
+          <!-- 密码 -->
+          <div class="rise flex flex-col gap-2" style="animation-delay:.32s">
+            <div class="flex items-center justify-between">
+              <label for="password" class="text-[13px] font-medium text-ivory/75">密码</label>
+              <a href="#" class="ul-link text-[12.5px] text-ivory/45 hover:text-ivory transition-colors">忘记密码？</a>
+            </div>
+            <div class="relative">
+              <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-ivory/35">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>
+                </svg>
+              </span>
+              <input id="password" type="password" autocomplete="current-password" placeholder="输入密码"
+                class="peer w-full h-12 rounded-xl bg-white/[0.03] border border-white/10 pl-11 pr-12 text-[15px] text-ivory placeholder:text-ivory/30
+                       outline-none transition-all duration-300
+                       focus:border-ember/70 focus:bg-white/[0.05] focus:ring-4 focus:ring-ember/12" />
+              <button type="button" id="togglePw" aria-label="显示密码"
+                class="absolute right-3 top-1/2 -translate-y-1/2 grid place-items-center h-8 w-8 rounded-lg text-ivory/40 hover:text-ivory hover:bg-white/5 transition-colors">
+                <svg id="eyeOpen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>
+                </svg>
+                <svg id="eyeOff" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 3l18 18"/><path d="M10.6 6.1A9.7 9.7 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.2 3.8M6.3 8.3A15.9 15.9 0 0 0 2.5 12S6 18 12 18a9.4 9.4 0 0 0 3.4-.6"/>
+                </svg>
+              </button>
+            </div>
+            <!-- inline error slot (hidden by default) -->
+            <p id="pwError" class="hidden items-center gap-1.5 text-[12.5px] text-ember-soft pt-0.5">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5"/><path d="M12 16h.01"/></svg>
+              <span>账号或密码不正确，请重试</span>
+            </p>
+          </div>
+
+          <!-- remember -->
+          <label class="rise flex items-center gap-2.5 select-none cursor-pointer w-fit" style="animation-delay:.36s">
+            <input type="checkbox" id="remember" class="peer sr-only" checked />
+            <span class="grid place-items-center h-[18px] w-[18px] rounded-[6px] border border-white/20 bg-white/[0.03]
+                         peer-checked:bg-ember peer-checked:border-ember transition-all duration-200">
+              <svg class="opacity-0 peer-checked:opacity-100 transition-opacity" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0B0B0D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            </span>
+            <span class="text-[13px] text-ivory/60">保持登录状态</span>
+          </label>
+
+          <!-- primary CTA -->
+          <button type="submit" id="submitBtn"
+            class="rise tactile group mt-1 h-12 rounded-xl bg-ember hover:bg-ember-soft text-[#0B0B0D] font-bold text-[15px]
+                   shadow-[0_12px_30px_-10px_rgba(232,105,78,0.65)] flex items-center justify-center gap-2"
+            style="animation-delay:.42s">
+            <span id="btnLabel" class="flex items-center gap-2">
+              登录
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-300 group-hover:translate-x-1"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+            </span>
+            <span id="btnLoading" class="hidden items-center gap-2">
+              <svg class="animate-spin" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.5" opacity="0.9"/></svg>
+              登录中…
+            </span>
+          </button>
+
+          <!-- divider -->
+          <div class="rise flex items-center gap-4 my-1" style="animation-delay:.48s">
+            <span class="h-px flex-1 bg-white/10"></span>
+            <span class="font-mono text-[11px] text-ivory/35">或</span>
+            <span class="h-px flex-1 bg-white/10"></span>
+          </div>
+
+          <!-- access key (ties to backend admin_access_key path) -->
+          <button type="button"
+            class="rise tactile h-12 rounded-xl border border-white/12 bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/20
+                   text-[14.5px] font-medium text-ivory/85 flex items-center justify-center gap-2.5"
+            style="animation-delay:.52s">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2"/><path d="m17 5 2 2"/><path d="m14 8 2 2"/></svg>
+            使用访问密钥登录
+          </button>
+        </form>
+
+        <p class="rise text-[13px] text-ivory/45 mt-9" style="animation-delay:.58s">
+          还没有账号？<a href="#" class="ul-link text-ember hover:text-ember-soft font-medium">联系工作区管理员开通</a>
+        </p>
+      </div>
+
+      <!-- ---- Footer ---- -->
+      <footer class="relative flex items-center justify-between text-[12px] text-ivory/35 rise" style="animation-delay:.64s">
+        <span>© 2026 ProductFlow</span>
+        <div class="flex items-center gap-5">
+          <a href="#" class="ul-link hover:text-ivory/70 transition-colors">服务条款</a>
+          <a href="#" class="ul-link hover:text-ivory/70 transition-colors">隐私政策</a>
+          <span class="font-mono text-ivory/25">v2.8.1</span>
+        </div>
+      </footer>
+    </section>
+
+    <!-- ============================ RIGHT · LIVING GALLERY ============================ -->
+    <aside class="relative hidden lg:block overflow-hidden bg-[#0d0d10]">
+
+      <!-- two drifting masonry columns -->
+      <div class="absolute inset-0 grid grid-cols-2 gap-3 p-3 image-cohere">
+        <!-- column A (drifts up) -->
+        <div class="flex flex-col gap-3 drift-up">
+          <img class="w-full rounded-2xl object-cover aspect-[4/5]" src="https://picsum.photos/seed/atlas-flow/640/800" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-square" src="https://picsum.photos/seed/ember-grain/640/640" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[3/4]" src="https://picsum.photos/seed/studio-north/640/860" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[4/5]" src="https://picsum.photos/seed/relic-22/640/800" alt="" />
+          <!-- duplicate for seamless loop -->
+          <img class="w-full rounded-2xl object-cover aspect-[4/5]" src="https://picsum.photos/seed/atlas-flow/640/800" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-square" src="https://picsum.photos/seed/ember-grain/640/640" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[3/4]" src="https://picsum.photos/seed/studio-north/640/860" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[4/5]" src="https://picsum.photos/seed/relic-22/640/800" alt="" />
+        </div>
+        <!-- column B (drifts down), offset start -->
+        <div class="flex flex-col gap-3 drift-down -mt-16">
+          <img class="w-full rounded-2xl object-cover aspect-[3/4]" src="https://picsum.photos/seed/dusk-tide/640/860" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[4/5]" src="https://picsum.photos/seed/field-11/640/800" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-square" src="https://picsum.photos/seed/mono-09/640/640" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[3/4]" src="https://picsum.photos/seed/halcyon-3/640/860" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[3/4]" src="https://picsum.photos/seed/dusk-tide/640/860" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[4/5]" src="https://picsum.photos/seed/field-11/640/800" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-square" src="https://picsum.photos/seed/mono-09/640/640" alt="" />
+          <img class="w-full rounded-2xl object-cover aspect-[3/4]" src="https://picsum.photos/seed/halcyon-3/640/860" alt="" />
+        </div>
+      </div>
+
+      <!-- left fade: melt gallery into the form panel -->
+      <div aria-hidden="true" class="absolute inset-y-0 left-0 w-40 bg-gradient-to-r from-[#0B0B0D] to-transparent"></div>
+      <!-- top + bottom vignette -->
+      <div aria-hidden="true" class="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#0d0d10] to-transparent"></div>
+      <div aria-hidden="true" class="absolute inset-x-0 bottom-0 h-64 bg-gradient-to-t from-[#0d0d10] via-[#0d0d10]/80 to-transparent"></div>
+
+      <!-- live status pill, top-right -->
+      <div class="absolute top-7 right-7 flex items-center gap-2.5 rounded-full border border-white/10 bg-black/40 backdrop-blur-md px-4 py-2
+                  shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <span class="h-2 w-2 rounded-full bg-ember breathe"></span>
+        <span class="text-[12.5px] text-ivory/80 font-medium">实时渲染中</span>
+        <span class="font-mono text-[12px] text-ivory/45">47,213 张 / 今日</span>
+      </div>
+
+      <!-- floating caption: liquid-glass panel -->
+      <figure class="absolute bottom-9 left-9 right-9 max-w-[440px] rounded-2xl border border-white/10
+                     bg-white/[0.04] backdrop-blur-xl p-6
+                     shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_30px_60px_-20px_rgba(0,0,0,0.6)]">
+        <blockquote class="text-[16px] leading-relaxed text-ivory/90 font-medium tracking-tight">
+          “从草图到成片，我们把单组海报的出图周期压到了原来的三分之一。”
+        </blockquote>
+        <figcaption class="mt-4 flex items-center gap-3">
+          <span class="grid place-items-center h-9 w-9 rounded-xl text-[#0B0B0D] font-bold text-[14px]"
+                style="background:linear-gradient(135deg,#F0795F,#C9543C);">林</span>
+          <span class="flex flex-col leading-tight">
+            <span class="text-[13.5px] font-medium text-ivory">林知夏</span>
+            <span class="text-[12px] text-ivory/45">鲸落视觉 · 创意总监</span>
+          </span>
+          <span class="ml-auto font-mono text-[11px] text-ivory/35 tracking-wider">CASE&nbsp;/&nbsp;038</span>
+        </figcaption>
+      </figure>
+    </aside>
+  </main>
+
+  <script>
+    // password show / hide
+    const pw = document.getElementById('password');
+    const toggle = document.getElementById('togglePw');
+    const eyeOpen = document.getElementById('eyeOpen');
+    const eyeOff = document.getElementById('eyeOff');
+    toggle.addEventListener('click', () => {
+      const show = pw.type === 'password';
+      pw.type = show ? 'text' : 'password';
+      eyeOpen.classList.toggle('hidden', show);
+      eyeOff.classList.toggle('hidden', !show);
+    });
+
+    // demo: submit -> loading -> error state (illustrates Rule 5 interaction states)
+    const form = document.getElementById('loginForm');
+    const btn = document.getElementById('submitBtn');
+    const btnLabel = document.getElementById('btnLabel');
+    const btnLoading = document.getElementById('btnLoading');
+    const pwError = document.getElementById('pwError');
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      pwError.classList.add('hidden'); pwError.classList.remove('flex');
+      pw.classList.remove('border-ember-soft', 'ring-4', 'ring-ember/20');
+      btnLabel.classList.add('hidden'); btnLoading.classList.remove('hidden'); btnLoading.classList.add('flex');
+      btn.disabled = true; btn.style.opacity = '0.85';
+      setTimeout(() => {
+        btnLoading.classList.add('hidden'); btnLoading.classList.remove('flex'); btnLabel.classList.remove('hidden');
+        btn.disabled = false; btn.style.opacity = '1';
+        pwError.classList.remove('hidden'); pwError.classList.add('flex');
+        pw.classList.add('border-ember-soft', 'ring-4', 'ring-ember/20');
+      }, 1400);
+    });
+  </script>
+</body>
+</html>

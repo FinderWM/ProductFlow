@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inspiration One 登录页概念稿 B</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --void: #050505;
+        --panel: #0b0e0d;
+        --panel-2: #111715;
+        --panel-3: #17120e;
+        --ink: #f4efe6;
+        --muted: #a69f94;
+        --subtle: #6e756e;
+        --line: rgba(244, 239, 230, 0.11);
+        --line-strong: rgba(244, 239, 230, 0.2);
+        --emerald: #76d1b6;
+        --amber: #e1b45d;
+        --oxide: #b7654e;
+        --violet: #8776d6;
+        --shadow: 0 34px 90px rgba(1, 10, 8, 0.28);
+        --glow: 0 0 44px rgba(118, 209, 182, 0.16);
+        --ease: cubic-bezier(0.32, 0.72, 0, 1);
+        font-family:
+          "Clash Display",
+          Geist,
+          "Plus Jakarta Sans",
+          "PingFang SC",
+          "Hiragino Sans GB",
+          "Microsoft YaHei",
+          ui-sans-serif,
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        background:
+          linear-gradient(118deg, rgba(118, 209, 182, 0.16) 0 1px, transparent 1px 23%),
+          linear-gradient(242deg, rgba(225, 180, 93, 0.13) 0 1px, transparent 1px 28%),
+          linear-gradient(156deg, transparent 0 36%, rgba(135, 118, 214, 0.08) 36% 37%, transparent 37%),
+          var(--void);
+        color: var(--ink);
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        pointer-events: none;
+        opacity: 0.045;
+        background-image:
+          repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.28) 0 1px, transparent 1px 3px),
+          repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.13) 0 1px, transparent 1px 5px);
+        mix-blend-mode: screen;
+      }
+
+      body::after {
+        content: "";
+        position: fixed;
+        inset: auto -12vw -32vh auto;
+        z-index: 0;
+        width: 72vw;
+        height: 72vh;
+        pointer-events: none;
+        background:
+          linear-gradient(132deg, transparent 0 28%, rgba(118, 209, 182, 0.18) 28% 30%, transparent 30%),
+          linear-gradient(38deg, transparent 0 40%, rgba(225, 180, 93, 0.12) 40% 42%, transparent 42%);
+        transform: rotate(-10deg);
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .page {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 0.94fr) minmax(480px, 0.76fr);
+        gap: 38px;
+        align-items: center;
+        width: min(1360px, calc(100% - 72px));
+        min-height: 100dvh;
+        margin: 0 auto;
+        padding: 34px 0;
+      }
+
+      .gallery {
+        position: relative;
+        min-width: 0;
+        min-height: 800px;
+        display: grid;
+        grid-template-columns: 1fr 0.62fr;
+        grid-template-rows: 92px 1fr 190px;
+        gap: 18px;
+      }
+
+      .brand,
+      .type-panel,
+      .signal-panel,
+      .caption-panel,
+      .index-panel,
+      .auth-shell {
+        animation: enter 980ms var(--ease) both;
+      }
+
+      .brand {
+        grid-column: 1 / 3;
+        align-self: start;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .brand-lock {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 48px;
+        height: 48px;
+        place-items: center;
+        border-radius: 18px;
+        background: rgba(244, 239, 230, 0.06);
+        box-shadow: inset 0 1px 0 rgba(244, 239, 230, 0.12), var(--glow);
+      }
+
+      .brand-mark span {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        border-radius: 12px;
+        background: var(--ink);
+      }
+
+      .brand-mark span::before,
+      .brand-mark span::after {
+        content: "";
+        position: absolute;
+        background: var(--void);
+      }
+
+      .brand-mark span::before {
+        left: 8px;
+        top: 10px;
+        width: 16px;
+        height: 2px;
+        border-radius: 999px;
+        box-shadow: 0 7px 0 var(--void);
+      }
+
+      .brand-mark span::after {
+        right: 6px;
+        bottom: 5px;
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+      }
+
+      .brand strong {
+        display: block;
+        font-size: 15px;
+        font-weight: 760;
+      }
+
+      .brand small {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .scene-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: rgba(244, 239, 230, 0.055);
+        box-shadow: inset 0 1px 0 rgba(244, 239, 230, 0.1);
+        color: var(--emerald);
+        font-size: 11px;
+        font-weight: 760;
+      }
+
+      .scene-chip::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: var(--emerald);
+        box-shadow: 0 0 20px rgba(118, 209, 182, 0.5);
+      }
+
+      .bezel {
+        padding: 7px;
+        border-radius: 34px;
+        background: rgba(244, 239, 230, 0.055);
+        box-shadow: inset 0 1px 0 rgba(244, 239, 230, 0.11), var(--shadow);
+      }
+
+      .core {
+        height: 100%;
+        overflow: hidden;
+        border: 1px solid rgba(244, 239, 230, 0.12);
+        border-radius: 27px;
+        background: var(--panel);
+        box-shadow: inset 0 1px 1px rgba(244, 239, 230, 0.1);
+      }
+
+      .type-panel {
+        grid-row: 2 / 4;
+        animation-delay: 80ms;
+      }
+
+      .type-core {
+        position: relative;
+        display: grid;
+        min-height: 654px;
+        padding: 34px;
+        background:
+          linear-gradient(130deg, rgba(118, 209, 182, 0.13) 0 1px, transparent 1px 38%),
+          linear-gradient(40deg, transparent 0 56%, rgba(225, 180, 93, 0.16) 56% 57%, transparent 57%),
+          #080a09;
+      }
+
+      .type-core::before {
+        content: "INSPIRATION";
+        position: absolute;
+        left: 28px;
+        top: 24px;
+        writing-mode: vertical-rl;
+        color: rgba(244, 239, 230, 0.06);
+        font-size: 82px;
+        line-height: 0.82;
+        font-weight: 820;
+        letter-spacing: 0;
+      }
+
+      .headline {
+        position: relative;
+        z-index: 1;
+        align-self: end;
+        max-width: 560px;
+      }
+
+      .headline .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--amber);
+        font-size: 12px;
+        font-weight: 780;
+      }
+
+      .headline .eyebrow::before {
+        content: "";
+        width: 28px;
+        height: 2px;
+        border-radius: 999px;
+        background: var(--amber);
+      }
+
+      h1 {
+        margin: 22px 0 0;
+        max-width: 520px;
+        font-size: 74px;
+        line-height: 0.98;
+        font-weight: 820;
+        letter-spacing: 0;
+      }
+
+      .headline p {
+        max-width: 440px;
+        margin: 24px 0 0;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.78;
+      }
+
+      .signal-panel {
+        animation-delay: 150ms;
+      }
+
+      .signal-core {
+        display: grid;
+        min-height: 260px;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 9px;
+        padding: 24px;
+        background:
+          linear-gradient(150deg, rgba(135, 118, 214, 0.11), transparent 52%),
+          var(--panel-2);
+      }
+
+      .signal-core span {
+        min-height: 42px;
+        border-radius: 14px;
+        background: rgba(244, 239, 230, 0.06);
+        box-shadow: inset 0 1px 0 rgba(244, 239, 230, 0.07);
+      }
+
+      .signal-core span:nth-child(4n) {
+        background: rgba(118, 209, 182, 0.2);
+      }
+
+      .signal-core span:nth-child(7n) {
+        background: rgba(225, 180, 93, 0.22);
+      }
+
+      .signal-core span:nth-child(11n) {
+        background: rgba(183, 101, 78, 0.22);
+      }
+
+      .caption-panel {
+        animation-delay: 220ms;
+      }
+
+      .caption-core {
+        min-height: 176px;
+        padding: 24px;
+        background:
+          linear-gradient(120deg, rgba(225, 180, 93, 0.14) 0 1px, transparent 1px 56%),
+          var(--panel-3);
+      }
+
+      .caption-core small {
+        display: block;
+        color: var(--oxide);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .caption-core strong {
+        display: block;
+        margin-top: 22px;
+        font-size: 34px;
+        line-height: 0.96;
+        font-weight: 820;
+      }
+
+      .index-panel {
+        position: absolute;
+        right: 26px;
+        bottom: 230px;
+        width: 190px;
+        transform: rotate(3deg);
+        animation-delay: 310ms;
+      }
+
+      .index-core {
+        min-height: 154px;
+        padding: 22px;
+        background: #f4efe6;
+        color: var(--void);
+      }
+
+      .index-core small {
+        display: block;
+        color: rgba(5, 5, 5, 0.56);
+        font-size: 11px;
+        font-weight: 780;
+      }
+
+      .index-core strong {
+        display: block;
+        margin-top: 20px;
+        font-size: 44px;
+        line-height: 0.88;
+        font-weight: 840;
+      }
+
+      .auth-zone {
+        min-width: 0;
+        justify-self: end;
+        width: min(500px, 100%);
+      }
+
+      .mode-input {
+        position: fixed;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .auth-shell {
+        padding: 8px;
+        border-radius: 42px;
+        background: rgba(244, 239, 230, 0.064);
+        box-shadow: inset 0 1px 0 rgba(244, 239, 230, 0.12), var(--shadow), var(--glow);
+        animation-delay: 260ms;
+      }
+
+      .auth-core {
+        overflow: hidden;
+        border: 1px solid rgba(244, 239, 230, 0.13);
+        border-radius: 34px;
+        background:
+          linear-gradient(152deg, rgba(118, 209, 182, 0.1) 0 1px, transparent 1px 46%),
+          linear-gradient(32deg, transparent 0 58%, rgba(225, 180, 93, 0.12) 58% 59%, transparent 59%),
+          #090b0a;
+        box-shadow: inset 0 1px 1px rgba(244, 239, 230, 0.1);
+      }
+
+      .auth-head {
+        position: relative;
+        padding: 30px 30px 0;
+      }
+
+      .access-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .access-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--emerald);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .access-label::before {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-radius: 3px;
+        background: var(--emerald);
+        transform: rotate(45deg);
+      }
+
+      .scan-code {
+        display: flex;
+        gap: 5px;
+        align-items: end;
+      }
+
+      .scan-code span {
+        display: block;
+        width: 7px;
+        border-radius: 999px;
+        background: rgba(244, 239, 230, 0.18);
+      }
+
+      .scan-code span:nth-child(1) {
+        height: 24px;
+      }
+
+      .scan-code span:nth-child(2) {
+        height: 15px;
+        background: rgba(118, 209, 182, 0.45);
+      }
+
+      .scan-code span:nth-child(3) {
+        height: 31px;
+      }
+
+      .scan-code span:nth-child(4) {
+        height: 20px;
+        background: rgba(225, 180, 93, 0.45);
+      }
+
+      .auth-head h2 {
+        margin: 34px 0 0;
+        font-size: 42px;
+        line-height: 1;
+        font-weight: 820;
+        letter-spacing: 0;
+      }
+
+      .auth-head p {
+        margin: 12px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.68;
+      }
+
+      .switch-shell,
+      .field-shell {
+        padding: 5px;
+        border-radius: 999px;
+        background: rgba(244, 239, 230, 0.065);
+        box-shadow: inset 0 1px 0 rgba(244, 239, 230, 0.1);
+      }
+
+      .switch-shell {
+        margin: 28px 30px 0;
+      }
+
+      .switch-core {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 5px;
+      }
+
+      .switch-core label {
+        display: grid;
+        min-height: 44px;
+        place-items: center;
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 760;
+        transition:
+          transform 720ms var(--ease),
+          background 720ms var(--ease),
+          color 720ms var(--ease),
+          box-shadow 720ms var(--ease);
+      }
+
+      .switch-core label:hover {
+        transform: translateY(-1px);
+        color: var(--ink);
+      }
+
+      #mode-login:checked ~ .auth-shell label[for="mode-login"],
+      #mode-setup:checked ~ .auth-shell label[for="mode-setup"] {
+        background: var(--ink);
+        color: var(--void);
+        box-shadow: 0 16px 34px rgba(1, 10, 8, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+      }
+
+      .form {
+        display: grid;
+        gap: 15px;
+        padding: 24px 30px 30px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .field-shell {
+        border-radius: 24px;
+        transition:
+          transform 720ms var(--ease),
+          background 720ms var(--ease),
+          box-shadow 720ms var(--ease);
+      }
+
+      .field-shell:focus-within {
+        transform: translateY(-1px);
+        background: rgba(118, 209, 182, 0.13);
+        box-shadow: 0 18px 42px rgba(118, 209, 182, 0.1), inset 0 1px 0 rgba(244, 239, 230, 0.12);
+      }
+
+      .field-core {
+        width: 100%;
+        min-height: 52px;
+        border: 0;
+        border-radius: 19px;
+        outline: 0;
+        background: rgba(5, 5, 5, 0.6);
+        box-shadow: inset 0 1px 1px rgba(244, 239, 230, 0.08);
+        color: var(--ink);
+        padding: 0 16px;
+        font-size: 14px;
+      }
+
+      .field-core::placeholder {
+        color: rgba(166, 159, 148, 0.68);
+      }
+
+      .setup-only {
+        display: none;
+      }
+
+      #mode-setup:checked ~ .auth-shell .setup-only {
+        display: grid;
+        animation: fieldEnter 820ms var(--ease) both;
+      }
+
+      .notice {
+        display: flex;
+        min-height: 42px;
+        align-items: center;
+        gap: 10px;
+        border-radius: 20px;
+        padding: 0 14px;
+        background: rgba(183, 101, 78, 0.12);
+        color: #e0a090;
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .notice::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--oxide);
+      }
+
+      .primary {
+        display: flex;
+        width: 100%;
+        min-height: 58px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--ink);
+        color: var(--void);
+        padding: 9px 9px 9px 24px;
+        box-shadow: 0 24px 54px rgba(1, 10, 8, 0.28), 0 0 44px rgba(225, 180, 93, 0.12);
+        font-size: 14px;
+        font-weight: 820;
+        transition:
+          transform 720ms var(--ease),
+          background 720ms var(--ease),
+          box-shadow 720ms var(--ease);
+      }
+
+      .primary:hover {
+        transform: translateY(-2px);
+        background: #fff7df;
+        box-shadow: 0 30px 68px rgba(1, 10, 8, 0.32), 0 0 54px rgba(225, 180, 93, 0.18);
+      }
+
+      .primary:active {
+        transform: scale(0.985);
+      }
+
+      .primary span:last-child {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        place-items: center;
+        border-radius: 999px;
+        background: rgba(5, 5, 5, 0.1);
+        transition:
+          transform 720ms var(--ease),
+          background 720ms var(--ease);
+      }
+
+      .primary:hover span:last-child {
+        transform: translate(4px, -1px) scale(1.06);
+        background: rgba(5, 5, 5, 0.14);
+      }
+
+      .auth-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 0 30px 30px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .auth-foot span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .auth-foot span::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--amber);
+      }
+
+      .text-button {
+        border: 0;
+        background: transparent;
+        color: var(--emerald);
+        padding: 8px 0;
+        font-size: 12px;
+        font-weight: 760;
+        transition:
+          transform 720ms var(--ease),
+          color 720ms var(--ease);
+      }
+
+      .text-button:hover {
+        transform: translateY(-1px);
+        color: var(--ink);
+      }
+
+      @keyframes enter {
+        from {
+          opacity: 0;
+          transform: translateY(36px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes fieldEnter {
+        from {
+          opacity: 0;
+          transform: translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 1ms !important;
+          transition-duration: 1ms !important;
+        }
+      }
+
+      @media (max-width: 1140px) {
+        .page {
+          grid-template-columns: 1fr;
+          width: min(780px, calc(100% - 42px));
+          gap: 32px;
+          padding: 28px 0 54px;
+        }
+
+        .gallery {
+          min-height: 680px;
+          grid-template-columns: 1fr 0.76fr;
+        }
+
+        .auth-zone {
+          justify-self: stretch;
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          width: 100%;
+          padding: 22px 16px 40px;
+        }
+
+        .gallery {
+          min-height: auto;
+          grid-template-columns: 1fr;
+          grid-template-rows: auto;
+          gap: 14px;
+        }
+
+        .brand {
+          grid-column: auto;
+        }
+
+        .scene-chip {
+          display: none;
+        }
+
+        .type-panel {
+          grid-row: auto;
+        }
+
+        .type-core {
+          min-height: 390px;
+          padding: 24px;
+        }
+
+        .type-core::before {
+          left: 18px;
+          top: 16px;
+          font-size: 46px;
+        }
+
+        h1 {
+          max-width: 330px;
+          font-size: 42px;
+          line-height: 1.03;
+        }
+
+        .headline p {
+          max-width: 312px;
+          font-size: 15px;
+        }
+
+        .signal-panel,
+        .caption-panel {
+          display: none;
+        }
+
+        .index-panel {
+          display: none;
+        }
+
+        .auth-head,
+        .form,
+        .auth-foot {
+          padding-right: 22px;
+          padding-left: 22px;
+        }
+
+        .switch-shell {
+          margin-right: 22px;
+          margin-left: 22px;
+        }
+
+        .auth-head h2 {
+          font-size: 34px;
+        }
+
+        .auth-foot {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 4px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="gallery" aria-label="Inspiration One alternate login concept">
+        <div class="brand">
+          <div class="brand-lock">
+            <div class="brand-mark" aria-hidden="true"><span></span></div>
+            <div>
+              <strong>Inspiration One</strong>
+              <small>Nocturne access concept</small>
+            </div>
+          </div>
+          <span class="scene-chip">PRIVATE ENTRY</span>
+        </div>
+
+        <div class="bezel type-panel">
+          <div class="core type-core">
+            <div class="headline">
+              <span class="eyebrow">NOCTURNE STUDIO</span>
+              <h1>在黑场里点亮创意入口</h1>
+              <p>这一版把登录页处理成夜间艺廊的入口控制台，用高反差光带和错层信息块建立更强的舞台感。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bezel signal-panel" aria-hidden="true">
+          <div class="core signal-core">
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <div class="bezel caption-panel" aria-hidden="true">
+          <div class="core caption-core">
+            <small>ACCESS SURFACE</small>
+            <strong>Signal<br />before form</strong>
+          </div>
+        </div>
+
+        <div class="bezel index-panel" aria-hidden="true">
+          <div class="core index-core">
+            <small>ALT CONCEPT</small>
+            <strong>B/02</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="auth-zone" aria-label="登录表单静态稿 B">
+        <input class="mode-input" type="radio" name="mode" id="mode-login" checked />
+        <input class="mode-input" type="radio" name="mode" id="mode-setup" />
+
+        <div class="auth-shell">
+          <div class="auth-core">
+            <div class="auth-head">
+              <div class="access-row">
+                <span class="access-label">SECURE CONSOLE</span>
+                <span class="scan-code" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+              </div>
+              <h2>工作台登录</h2>
+              <p>使用账号密码进入私有创意空间。</p>
+            </div>
+
+            <div class="switch-shell">
+              <div class="switch-core" role="tablist" aria-label="登录模式">
+                <label for="mode-login">登录</label>
+                <label for="mode-setup">设置密码</label>
+              </div>
+            </div>
+
+            <form class="form">
+              <div class="field">
+                <label for="username">账号</label>
+                <div class="field-shell">
+                  <input class="field-core" id="username" type="text" placeholder="请输入账号" autocomplete="username" />
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="password">密码</label>
+                <div class="field-shell">
+                  <input
+                    class="field-core"
+                    id="password"
+                    type="password"
+                    placeholder="请输入密码"
+                    autocomplete="current-password"
+                  />
+                </div>
+              </div>
+
+              <div class="field setup-only">
+                <label for="setup-token">设密凭据</label>
+                <div class="field-shell">
+                  <input
+                    class="field-core"
+                    id="setup-token"
+                    type="password"
+                    placeholder="输入管理员提供的一次性凭据"
+                    autocomplete="one-time-code"
+                  />
+                </div>
+              </div>
+
+              <div class="field setup-only">
+                <label for="confirm-password">确认密码</label>
+                <div class="field-shell">
+                  <input
+                    class="field-core"
+                    id="confirm-password"
+                    type="password"
+                    placeholder="再次输入密码"
+                    autocomplete="new-password"
+                  />
+                </div>
+              </div>
+
+              <div class="notice">错误状态示例：请填写账号和密码。</div>
+
+              <button class="primary" type="button">
+                <span>进入工作台</span>
+                <span aria-hidden="true">↗</span>
+              </button>
+            </form>
+
+            <div class="auth-foot">
+              <span>Encrypted session boundary</span>
+              <button class="text-button" type="button">联系管理员</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

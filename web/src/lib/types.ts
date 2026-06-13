@@ -1121,6 +1121,15 @@ export interface RuntimeConfig {
   deletion_enabled: boolean;
 }
 
+export type LoginPageTemplateId = "codex-orbit" | "fluid-mist" | "image-lab";
+
+export interface LoginPageConfig {
+  template_id: LoginPageTemplateId;
+  template_name: string;
+  content: Record<string, string>;
+  assets: Record<string, string>;
+}
+
 export interface GenerationQueueOverview {
   active_count: number;
   running_count: number;
@@ -1150,6 +1159,7 @@ export interface UserUiPreferencesUpdateRequest {
 
 export type ProviderCapability =
   | "text_responses"
+  | "text_chat_completions"
   | "image_responses"
   | "image_images"
   | "image_chat"
@@ -1434,6 +1444,19 @@ export interface TextGenerationConfigTestResponse {
   copy_model: string;
   brief: Record<string, unknown>;
   copy_result: Record<string, unknown>;
+  duration_ms: number;
+}
+
+export interface TextGenerationConfigJsonResponseFormatTestRequest {
+  generation_config_id?: string | null;
+  generation_config?: GenerationConfigCreateRequest | null;
+}
+
+export interface TextGenerationConfigJsonResponseFormatTestResponse {
+  generation_config_id: string | null;
+  provider_kind: string;
+  model: string;
+  parsed_json: Record<string, unknown>;
   duration_ms: number;
 }
 

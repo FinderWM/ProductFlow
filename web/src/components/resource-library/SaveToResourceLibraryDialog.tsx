@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Image as ImageIcon, Loader2, Save, X } from "lucide-react";
+import { Check, CheckCircle2, Image as ImageIcon, Loader2, Save, X } from "lucide-react";
 
 import { api, ApiError } from "../../lib/api";
 import { useI18n } from "../../lib/preferences";
@@ -22,6 +22,113 @@ interface SaveToResourceLibraryDialogProps {
 }
 
 const EMPTY_RESOURCE_LIBRARY_GROUPS: ResourceLibraryGroup[] = [];
+const RESOURCE_LIBRARY_DIALOG_MAIN_ACTION_CLASS =
+  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_DIALOG_SECONDARY_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_DIALOG_ICON_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_SAVE_FEEDBACK_AUTO_DISMISS_MS = 1000;
+
+function ResourceLibrarySaveFeedbackDialog({
+  successMessage,
+  errorMessage,
+  onCloseSuccess,
+  onCloseError,
+}: {
+  successMessage: string;
+  errorMessage: string;
+  onCloseSuccess: () => void;
+  onCloseError: () => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+  const descriptionId = useId();
+  const open = Boolean(successMessage || errorMessage);
+  const isError = Boolean(errorMessage);
+  const message = errorMessage || successMessage;
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        if (isError) {
+          onCloseError();
+          return;
+        }
+        onCloseSuccess();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isError, onCloseError, onCloseSuccess, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  const Icon = isError ? X : CheckCircle2;
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+        if (isError) {
+          onCloseError();
+          return;
+        }
+        onCloseSuccess();
+      }}
+    >
+      <div
+        role={isError ? "alertdialog" : "dialog"}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+      >
+        <div className="flex items-start gap-3 px-5 py-5">
+          <div
+            className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+              isError
+                ? "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-200"
+                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-200"
+            }`}
+          >
+            <Icon size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
+              {isError ? t("settings.operationFailed") : t("settings.operationSucceeded")}
+            </h2>
+            <p id={descriptionId} className="mt-2 break-words text-sm leading-6 text-slate-600 dark:text-slate-300">
+              {message}
+            </p>
+          </div>
+          {isError ? (
+            <button
+              type="button"
+              onClick={onCloseError}
+              className={RESOURCE_LIBRARY_DIALOG_ICON_ACTION_CLASS}
+              aria-label={t("resourceLibrary.close")}
+              title={t("resourceLibrary.close")}
+            >
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function SaveToResourceLibraryDialog({
   source,
@@ -32,8 +139,10 @@ export function SaveToResourceLibraryDialog({
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const open = Boolean(source);
+  const titleId = useId();
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
-  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [feedbackError, setFeedbackError] = useState("");
 
   const groupsQuery = useQuery({
     queryKey: ["resource-library-groups"],
@@ -57,7 +166,8 @@ export function SaveToResourceLibraryDialog({
   useEffect(() => {
     if (!open) {
       setSelectedGroupIds([]);
-      setError("");
+      setSuccessMessage("");
+      setFeedbackError("");
     }
   }, [open]);
 
@@ -90,9 +200,9 @@ export function SaveToResourceLibraryDialog({
       });
     },
     onSuccess: (asset) => {
-      setError("");
+      setFeedbackError("");
+      setSuccessMessage(t("resourceLibrary.saved"));
       onSaved?.(asset);
-      onClose();
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["resource-library-assets"] }),
         queryClient.invalidateQueries({ queryKey: ["resource-library-groups"] }),
@@ -100,9 +210,34 @@ export function SaveToResourceLibraryDialog({
       ]);
     },
     onError: (mutationError) => {
-      setError(mutationError instanceof ApiError ? mutationError.detail : t("resourceLibrary.saveFailed"));
+      setSuccessMessage("");
+      setFeedbackError(mutationError instanceof ApiError ? mutationError.detail : t("resourceLibrary.saveFailed"));
     },
   });
+
+  useEffect(() => {
+    if (!successMessage) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setSuccessMessage("");
+      onClose();
+    }, RESOURCE_LIBRARY_SAVE_FEEDBACK_AUTO_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [onClose, successMessage]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !saveMutation.isPending && !successMessage && !feedbackError) {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [feedbackError, onClose, open, saveMutation.isPending, successMessage]);
 
   function toggleGroup(groupId: string, checked: boolean) {
     setSelectedGroupIds((current) => {
@@ -115,7 +250,8 @@ export function SaveToResourceLibraryDialog({
 
   function handleSave() {
     if (!selectedGroupIds.length) {
-      setError(t("resourceLibrary.groupRequired"));
+      setSuccessMessage("");
+      setFeedbackError(t("resourceLibrary.groupRequired"));
       return;
     }
     saveMutation.mutate();
@@ -126,127 +262,128 @@ export function SaveToResourceLibraryDialog({
   }
 
   const dialog = (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("resourceLibrary.saveDialogTitle")}
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !saveMutation.isPending) {
-          onClose();
-        }
-      }}
-    >
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-          <div className="min-w-0">
-            <div className="text-base font-semibold text-slate-950 dark:text-white">
-              {t("resourceLibrary.saveDialogTitle")}
+    <>
+      <div
+        className="pf-settings-workspace fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !saveMutation.isPending) {
+            onClose();
+          }
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+            <div className="min-w-0">
+              <div id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
+                {t("resourceLibrary.saveDialogTitle")}
+              </div>
+              {source?.title ? (
+                <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{source.title}</div>
+              ) : null}
             </div>
-            {source?.title ? (
-              <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{source.title}</div>
-            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saveMutation.isPending}
+              className={RESOURCE_LIBRARY_DIALOG_ICON_ACTION_CLASS}
+              aria-label={t("resourceLibrary.close")}
+              title={t("resourceLibrary.close")}
+            >
+              <X size={18} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saveMutation.isPending}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 disabled:opacity-60 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-            aria-label={t("resourceLibrary.close")}
-            title={t("resourceLibrary.close")}
-          >
-            <X size={18} />
-          </button>
-        </div>
 
-        <div className="space-y-4 px-5 py-4">
-          {!canWrite ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-              {t("resourceLibrary.permissionWriteRequired")}
-            </div>
-          ) : null}
-          {source?.thumbnail_url ? (
-            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950/45">
-              <img
-                src={api.toApiUrl(source.thumbnail_url)}
-                alt={source.title ?? t("resourceLibrary.saveToLibrary")}
-                className="h-16 w-16 shrink-0 rounded-lg object-cover"
-              />
-              <div className="min-w-0 text-sm font-medium text-slate-800 dark:text-slate-100">
-                <div className="truncate">{source.title ?? t("resourceLibrary.saveToLibrary")}</div>
-                <div className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
-                  {alreadySaved ? t("resourceLibrary.alreadyInLibrary") : t("resourceLibrary.selectGroups")}
+          <div className="space-y-4 px-5 py-4">
+            {!canWrite ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
+                {t("resourceLibrary.permissionWriteRequired")}
+              </div>
+            ) : null}
+            {source?.thumbnail_url ? (
+              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950/45">
+                <img
+                  src={api.toApiUrl(source.thumbnail_url)}
+                  alt={source.title ?? t("resourceLibrary.saveToLibrary")}
+                  className="h-16 w-16 shrink-0 rounded-lg object-cover"
+                />
+                <div className="min-w-0 text-sm font-medium text-slate-800 dark:text-slate-100">
+                  <div className="truncate">{source.title ?? t("resourceLibrary.saveToLibrary")}</div>
+                  <div className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    {alreadySaved ? t("resourceLibrary.alreadyInLibrary") : t("resourceLibrary.selectGroups")}
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
-              <ImageIcon size={20} />
-              <span className="text-sm">{t("resourceLibrary.selectGroups")}</span>
-            </div>
-          )}
-
-          <div>
-            <div className="mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-              {t("resourceLibrary.groups")}
-            </div>
-            {groupsQuery.isLoading ? (
-              <div className="flex h-24 items-center justify-center text-slate-400">
-                <Loader2 size={18} className="animate-spin" />
-              </div>
-            ) : groupsQuery.isError ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                {t("resourceLibrary.loadFailed")}
-              </div>
-            ) : groups.length ? (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {groups.map((group) => {
-                  const alreadyLinked = existingGroupIds.has(group.id);
-                  const selected = selectedGroupIds.includes(group.id);
-                  return (
-                    <label
-                      key={group.id}
-                      className={`flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium ${
-                        alreadyLinked
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200"
-                          : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/55 dark:text-slate-200"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected || alreadyLinked}
-                        onChange={(event) => toggleGroup(group.id, event.target.checked)}
-                        disabled={!canWrite || saveMutation.isPending || alreadyLinked}
-                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-70 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
-                      />
-                      <span className="min-w-0 truncate">{group.name}</span>
-                      {alreadyLinked ? (
-                        <span className="ml-auto shrink-0 text-[10px] font-semibold">
-                          {t("resourceLibrary.alreadyInLibrary")}
-                        </span>
-                      ) : selected ? (
-                        <Check size={14} className="ml-auto shrink-0 text-indigo-600 dark:text-violet-300" />
-                      ) : null}
-                    </label>
-                  );
-                })}
-              </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                {t("resourceLibrary.noGroups")}
+              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+                <ImageIcon size={20} />
+                <span className="text-sm">{t("resourceLibrary.selectGroups")}</span>
               </div>
             )}
+
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                {t("resourceLibrary.groups")}
+              </div>
+              {groupsQuery.isLoading ? (
+                <div className="flex h-24 items-center justify-center text-slate-400">
+                  <Loader2 size={18} className="animate-spin" />
+                </div>
+              ) : groupsQuery.isError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+                  {t("resourceLibrary.loadFailed")}
+                </div>
+              ) : groups.length ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {groups.map((group) => {
+                    const alreadyLinked = existingGroupIds.has(group.id);
+                    const selected = selectedGroupIds.includes(group.id);
+                    return (
+                      <label
+                        key={group.id}
+                        className={`flex min-h-10 min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium ${
+                          alreadyLinked
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200"
+                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/55 dark:text-slate-200"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected || alreadyLinked}
+                          onChange={(event) => toggleGroup(group.id, event.target.checked)}
+                          disabled={!canWrite || saveMutation.isPending || alreadyLinked}
+                          className="h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-70 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+                        />
+                        <span className="min-w-0 flex-1 whitespace-normal break-words leading-5">{group.name}</span>
+                        {alreadyLinked ? (
+                          <span className="ml-auto shrink-0 text-[10px] font-semibold">
+                            {t("resourceLibrary.alreadyInLibrary")}
+                          </span>
+                        ) : selected ? (
+                          <Check size={14} className="ml-auto shrink-0 text-indigo-600 dark:text-violet-300" />
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                  {t("resourceLibrary.noGroups")}
+                </div>
+              )}
+            </div>
           </div>
 
-          {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">{error}</div> : null}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
           <button
             type="button"
             onClick={onClose}
             disabled={saveMutation.isPending}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+            className={RESOURCE_LIBRARY_DIALOG_SECONDARY_ACTION_CLASS}
           >
             {t("common.cancel")}
           </button>
@@ -260,7 +397,7 @@ export function SaveToResourceLibraryDialog({
               groupsQuery.isLoading ||
               sourceStatusQuery.isLoading
             }
-            className="inline-flex rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+            className={RESOURCE_LIBRARY_DIALOG_MAIN_ACTION_CLASS}
           >
             {saveMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Save size={15} className="mr-2" />}
             {t("resourceLibrary.saveToLibrary")}
@@ -268,6 +405,16 @@ export function SaveToResourceLibraryDialog({
         </div>
       </div>
     </div>
+    <ResourceLibrarySaveFeedbackDialog
+      successMessage={successMessage}
+      errorMessage={feedbackError}
+      onCloseSuccess={() => {
+        setSuccessMessage("");
+        onClose();
+      }}
+      onCloseError={() => setFeedbackError("")}
+    />
+    </>
   );
 
   return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);

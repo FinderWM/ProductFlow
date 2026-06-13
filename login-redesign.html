@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inspiration One · 登录</title>
+
+  <!-- Premium type: Clash Display (display) + Plus Jakarta Sans (body) -->
+  <link rel="preconnect" href="https://api.fontshare.com" />
+  <link href="https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --ink: #050506;
+      --spring: cubic-bezier(0.32, 0.72, 0, 1);
+      --violet: 139, 92, 246;
+      --emerald: 16, 185, 129;
+      --sky: 56, 189, 248;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--ink);
+      color: #f4f4f5;
+      font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      min-height: 100dvh;
+    }
+
+    .font-display {
+      font-family: "Clash Display", "Plus Jakarta Sans", sans-serif;
+      letter-spacing: -0.02em;
+    }
+
+    /* ---------- Ambient mesh orbs (GPU: transform/opacity only) ---------- */
+    .orbs {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.5;
+      will-change: transform;
+    }
+    .orb-1 {
+      width: 46vw; height: 46vw;
+      top: -14vw; left: -8vw;
+      background: radial-gradient(circle at 30% 30%, rgba(var(--violet), 0.85), transparent 70%);
+      animation: drift1 22s var(--spring) infinite alternate;
+    }
+    .orb-2 {
+      width: 40vw; height: 40vw;
+      bottom: -16vw; right: -6vw;
+      background: radial-gradient(circle at 60% 40%, rgba(var(--sky), 0.6), transparent 70%);
+      animation: drift2 26s var(--spring) infinite alternate;
+    }
+    .orb-3 {
+      width: 30vw; height: 30vw;
+      bottom: 8vh; left: 28vw;
+      background: radial-gradient(circle at 50% 50%, rgba(var(--emerald), 0.45), transparent 70%);
+      animation: drift3 30s var(--spring) infinite alternate;
+    }
+    @keyframes drift1 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(6vw, 5vh, 0) scale(1.12); } }
+    @keyframes drift2 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(-5vw, -4vh, 0) scale(1.1); } }
+    @keyframes drift3 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(3vw, -6vh, 0) scale(1.18); } }
+
+    /* ---------- Film grain (fixed, non-scrolling) ---------- */
+    .grain {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      pointer-events: none;
+      opacity: 0.04;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    /* ---------- Layout ---------- */
+    .stage {
+      position: relative;
+      z-index: 10;
+      min-height: 100dvh;
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      align-items: center;
+      gap: 4rem;
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 7rem 4rem;
+    }
+
+    /* ---------- Floating island nav ---------- */
+    .nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 40;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .nav-pill {
+      pointer-events: auto;
+      margin-top: 1.6rem;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      padding: 0.55rem 0.65rem 0.55rem 1.4rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.08);
+    }
+    .brand-mark {
+      display: flex; align-items: center; gap: 0.7rem;
+      font-weight: 600; font-size: 0.92rem; letter-spacing: -0.01em;
+    }
+    .brand-logo {
+      width: 26px; height: 26px; border-radius: 9px;
+      background: conic-gradient(from 140deg, rgba(var(--violet),1), rgba(var(--sky),1), rgba(var(--emerald),1), rgba(var(--violet),1));
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.4), 0 0 18px rgba(var(--violet),0.5);
+    }
+    .nav-link {
+      display: flex; align-items: center; gap: 0.55rem;
+      font-size: 0.82rem; color: rgba(244,244,245,0.7);
+      text-decoration: none;
+      padding: 0.5rem 0.55rem 0.5rem 1rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      transition: color 0.5s var(--spring), background 0.5s var(--spring);
+    }
+    .nav-link:hover { color: #fff; background: rgba(255,255,255,0.09); }
+    .nav-link .ico-wrap {
+      width: 26px; height: 26px; border-radius: 999px;
+      display: grid; place-items: center;
+      background: rgba(255,255,255,0.08);
+      transition: transform 0.6s var(--spring);
+    }
+    .nav-link:hover .ico-wrap { transform: translate(2px, -1px) scale(1.06); }
+
+    /* ---------- Left editorial column ---------- */
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 0.55rem;
+      padding: 0.38rem 0.85rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.24em;
+      color: rgba(244,244,245,0.75);
+    }
+    .eyebrow .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: rgb(var(--emerald));
+      box-shadow: 0 0 10px rgb(var(--emerald));
+    }
+    .headline {
+      font-size: clamp(2.8rem, 5vw, 4.6rem);
+      line-height: 0.98;
+      font-weight: 600;
+      margin: 1.8rem 0 1.5rem;
+      letter-spacing: -0.03em;
+    }
+    .headline .grad {
+      background: linear-gradient(120deg, #fff 10%, rgba(var(--violet),1) 55%, rgba(var(--sky),1) 95%);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .lede {
+      max-width: 30rem;
+      color: rgba(244,244,245,0.6);
+      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+
+    /* floating prompt chips (AI 生图氛围) */
+    .chips { margin-top: 3rem; display: flex; flex-wrap: wrap; gap: 0.75rem; max-width: 32rem; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 0.55rem;
+      padding: 0.6rem 1rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.07);
+      backdrop-filter: blur(10px);
+      font-size: 0.82rem; color: rgba(244,244,245,0.78);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.06);
+    }
+    .chip .swatch { width: 14px; height: 14px; border-radius: 5px; }
+
+    .stats { margin-top: 3.5rem; display: flex; gap: 3rem; }
+    .stat .num { font-family: "Clash Display", sans-serif; font-size: 1.9rem; font-weight: 600; letter-spacing: -0.02em; }
+    .stat .lbl { margin-top: 0.25rem; font-size: 0.78rem; color: rgba(244,244,245,0.5); letter-spacing: 0.02em; }
+
+    /* ---------- Right: double-bezel login card ---------- */
+    .card-shell {
+      padding: 0.5rem;
+      border-radius: 2.5rem;
+      background: rgba(255,255,255,0.045);
+      border: 1px solid rgba(255,255,255,0.09);
+      box-shadow: 0 40px 120px -40px rgba(0,0,0,0.8), inset 0 1px 1px rgba(255,255,255,0.06);
+      backdrop-filter: blur(8px);
+    }
+    .card-core {
+      border-radius: calc(2.5rem - 0.5rem);
+      padding: 2.6rem 2.4rem;
+      background: linear-gradient(180deg, rgba(20,20,24,0.92), rgba(10,10,12,0.92));
+      border: 1px solid rgba(255,255,255,0.05);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.12);
+    }
+    .card-title { font-size: 1.7rem; font-weight: 600; letter-spacing: -0.02em; }
+    .card-sub { margin-top: 0.55rem; color: rgba(244,244,245,0.55); font-size: 0.92rem; }
+
+    .field { margin-top: 1.5rem; }
+    .field-label {
+      display: block; margin-bottom: 0.55rem;
+      font-size: 0.78rem; font-weight: 500;
+      color: rgba(244,244,245,0.7); letter-spacing: 0.01em;
+    }
+    .input-shell {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.2rem 0.45rem 0.2rem 1rem;
+      border-radius: 1rem;
+      background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.05);
+      transition: border-color 0.5s var(--spring), box-shadow 0.5s var(--spring), background 0.5s var(--spring);
+    }
+    .input-shell:focus-within {
+      border-color: rgba(var(--violet), 0.55);
+      background: rgba(255,255,255,0.05);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.08), 0 0 0 4px rgba(var(--violet), 0.16);
+    }
+    .input-shell .lead-ico { color: rgba(244,244,245,0.45); flex-shrink: 0; }
+    .input-shell input {
+      flex: 1; border: none; outline: none; background: transparent;
+      color: #fff; font-size: 0.95rem; font-family: inherit;
+      padding: 0.85rem 0;
+    }
+    .input-shell input::placeholder { color: rgba(244,244,245,0.3); }
+    .eye-btn {
+      width: 34px; height: 34px; border-radius: 0.7rem;
+      display: grid; place-items: center;
+      background: rgba(255,255,255,0.06);
+      border: none; color: rgba(244,244,245,0.55);
+      cursor: pointer;
+      transition: background 0.4s var(--spring), color 0.4s var(--spring);
+    }
+    .eye-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+    .row-between { display: flex; align-items: center; justify-content: space-between; margin-top: 1.2rem; }
+    .remember { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; color: rgba(244,244,245,0.7); cursor: pointer; user-select: none; }
+    .check {
+      width: 20px; height: 20px; border-radius: 7px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.14);
+      display: grid; place-items: center;
+      transition: background 0.4s var(--spring), border-color 0.4s var(--spring);
+    }
+    .remember input { display: none; }
+    .remember input:checked + .check {
+      background: rgb(var(--violet));
+      border-color: rgb(var(--violet));
+    }
+    .check svg { opacity: 0; transition: opacity 0.3s var(--spring); }
+    .remember input:checked + .check svg { opacity: 1; }
+    .link-muted { font-size: 0.85rem; color: rgba(var(--sky),0.9); text-decoration: none; transition: color 0.4s var(--spring); }
+    .link-muted:hover { color: #fff; }
+
+    /* primary CTA: button-in-button */
+    .cta {
+      margin-top: 1.8rem;
+      width: 100%;
+      display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+      position: relative;
+      padding: 0.55rem 0.6rem 0.55rem 1.5rem;
+      border-radius: 999px;
+      border: none; cursor: pointer;
+      background: linear-gradient(180deg, #ffffff, #e9e9ee);
+      color: #0a0a0c;
+      font-family: inherit; font-size: 0.98rem; font-weight: 600;
+      box-shadow: 0 18px 40px -18px rgba(255,255,255,0.4), inset 0 1px 1px rgba(255,255,255,0.9);
+      transition: transform 0.5s var(--spring), box-shadow 0.5s var(--spring);
+    }
+    .cta:hover { box-shadow: 0 24px 50px -16px rgba(var(--violet),0.5), inset 0 1px 1px rgba(255,255,255,0.9); }
+    .cta:active { transform: scale(0.98); }
+    .cta .label { flex: 1; text-align: center; }
+    .cta .arrow {
+      width: 36px; height: 36px; border-radius: 999px;
+      display: grid; place-items: center;
+      background: #0a0a0c; color: #fff;
+      transition: transform 0.6s var(--spring);
+    }
+    .cta:hover .arrow { transform: translate(3px, -1px) scale(1.06); }
+
+    .divider { display: flex; align-items: center; gap: 1rem; margin: 1.8rem 0; color: rgba(244,244,245,0.35); font-size: 0.78rem; }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent); }
+
+    .alt-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .alt-btn {
+      display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+      padding: 0.85rem; border-radius: 1rem;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: rgba(244,244,245,0.85); font-size: 0.85rem; font-weight: 500;
+      cursor: pointer; text-decoration: none;
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.05);
+      transition: background 0.5s var(--spring), border-color 0.5s var(--spring), transform 0.5s var(--spring);
+    }
+    .alt-btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); transform: translateY(-1px); }
+
+    .card-foot { margin-top: 1.8rem; text-align: center; font-size: 0.85rem; color: rgba(244,244,245,0.5); }
+    .card-foot a { color: #fff; text-decoration: none; font-weight: 500; }
+
+    /* ---------- Entry choreography ---------- */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(26px); filter: blur(8px); }
+      to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
+    }
+    .reveal { opacity: 0; animation: fadeUp 0.9s var(--spring) forwards; }
+    .d1 { animation-delay: 0.05s; }
+    .d2 { animation-delay: 0.15s; }
+    .d3 { animation-delay: 0.25s; }
+    .d4 { animation-delay: 0.35s; }
+    .d5 { animation-delay: 0.45s; }
+    .d6 { animation-delay: 0.55s; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .reveal { animation: none; opacity: 1; }
+      .orb { animation: none; }
+    }
+
+    /* ---------- Responsive collapse ---------- */
+    @media (max-width: 960px) {
+      .stage {
+        grid-template-columns: 1fr;
+        gap: 2.5rem;
+        padding: 6.5rem 1.25rem 3rem;
+        max-width: 36rem;
+      }
+      .editorial { text-align: center; display: flex; flex-direction: column; align-items: center; }
+      .chips, .lede { margin-left: auto; margin-right: auto; }
+      .chips { justify-content: center; }
+      .stats { justify-content: center; gap: 2rem; }
+      .nav-link span.txt { display: none; }
+    }
+    @media (max-width: 520px) {
+      .card-core { padding: 2rem 1.4rem; }
+      .stats { display: none; }
+      .alt-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Ambient layers -->
+  <div class="orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+  <div class="grain"></div>
+
+  <!-- Floating island nav -->
+  <nav class="nav">
+    <div class="nav-pill reveal d1">
+      <div class="brand-mark">
+        <span class="brand-logo"></span>
+        Inspiration&nbsp;One
+      </div>
+      <a class="nav-link" href="#">
+        <span class="txt">返回官网</span>
+        <span class="ico-wrap">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+        </span>
+      </a>
+    </div>
+  </nav>
+
+  <main class="stage">
+    <!-- Left editorial -->
+    <section class="editorial">
+      <span class="eyebrow reveal d2"><span class="dot"></span>AI 创意工作台</span>
+
+      <h1 class="headline font-display reveal d3">
+        让灵感<br />
+        <span class="grad">即刻成像</span>
+      </h1>
+
+      <p class="lede reveal d3">
+        从一句提示词到一组成品物料，Inspiration One 把创意、生成与协作收束在同一张画布上。登录，继续你的工作流。
+      </p>
+
+      <div class="chips reveal d4">
+        <span class="chip"><span class="swatch" style="background:linear-gradient(135deg,#8b5cf6,#38bdf8)"></span>极简产品海报</span>
+        <span class="chip"><span class="swatch" style="background:linear-gradient(135deg,#10b981,#a3e635)"></span>晨雾色调写真</span>
+        <span class="chip"><span class="swatch" style="background:linear-gradient(135deg,#f59e0b,#ef4444)"></span>赛博霓虹场景</span>
+      </div>
+
+      <div class="stats reveal d5">
+        <div class="stat"><div class="num">12.8M</div><div class="lbl">累计生成作品</div></div>
+        <div class="stat"><div class="num">240+</div><div class="lbl">预置风格模板</div></div>
+        <div class="stat"><div class="num">99.9%</div><div class="lbl">服务可用性</div></div>
+      </div>
+    </section>
+
+    <!-- Right login card -->
+    <section class="reveal d4">
+      <div class="card-shell">
+        <div class="card-core">
+          <h2 class="card-title font-display">欢迎回来</h2>
+          <p class="card-sub">登录账户，继续未完成的创作。</p>
+
+          <!-- Account -->
+          <div class="field">
+            <label class="field-label" for="account">账号</label>
+            <div class="input-shell">
+              <span class="lead-ico">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+              </span>
+              <input id="account" type="text" placeholder="邮箱或用户名" autocomplete="username" />
+            </div>
+          </div>
+
+          <!-- Password -->
+          <div class="field">
+            <label class="field-label" for="password">密码</label>
+            <div class="input-shell">
+              <span class="lead-ico">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+              </span>
+              <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password" />
+              <button class="eye-btn" type="button" aria-label="显示密码">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="row-between">
+            <label class="remember">
+              <input type="checkbox" checked />
+              <span class="check">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+              </span>
+              保持登录
+            </label>
+            <a class="link-muted" href="#">忘记密码？</a>
+          </div>
+
+          <!-- Primary CTA -->
+          <button class="cta" type="button">
+            <span class="label">登录工作台</span>
+            <span class="arrow">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </span>
+          </button>
+
+          <div class="divider">其他登录方式</div>
+
+          <div class="alt-row">
+            <a class="alt-btn" href="#">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 8l9 5 9-5"/></svg>
+              企业 SSO
+            </a>
+            <a class="alt-btn" href="#">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 5 5 .7-3.7 3.6.9 5.2L12 19l-5.1 2.5.9-5.2L4 12.7 9 12z"/></svg>
+              访问密钥
+            </a>
+          </div>
+
+          <p class="card-foot">还没有账户？ <a href="#">申请内测资格 ↗</a></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // 仅预览交互：密码可见性切换
+    document.querySelector('.eye-btn')?.addEventListener('click', (e) => {
+      const input = document.getElementById('password');
+      input.type = input.type === 'password' ? 'text' : 'password';
+    });
+  </script>
+</body>
+</html>

@@ -6,6 +6,8 @@ import {
   getWorkspaceNavAvailableWidth,
   getWorkspaceNavLayout,
   isPointerInWorkspaceThemeDockRevealZone,
+  nextDesktopMoreMenuState,
+  shouldCloseDesktopMoreOnBlur,
   workspaceTopNavTarget,
   type DesktopNavLayoutInput,
   type WorkspaceThemeDockRect,
@@ -196,6 +198,9 @@ describe("workspaceTopNavTarget", () => {
     expect(workspaceTopNavTarget({ to: "/image-chat", workspaceTo: "/image-chat/workbench" })).toBe(
       "/image-chat/workbench",
     );
+    expect(workspaceTopNavTarget({ to: "/resource-library", workspaceTo: "/resource-library/manage" })).toBe(
+      "/resource-library/manage",
+    );
     expect(workspaceTopNavTarget({ to: "/gallery", workspaceTo: "/gallery/manage" })).toBe("/gallery/manage");
     expect(workspaceTopNavTarget({ to: "/usage-stats", workspaceTo: "/usage-stats/detail" })).toBe(
       "/usage-stats/detail",
@@ -203,7 +208,80 @@ describe("workspaceTopNavTarget", () => {
   });
 
   it("falls back to the normal top-level route without a workspace override", () => {
-    expect(workspaceTopNavTarget({ to: "/resource-library" })).toBe("/resource-library");
+    expect(workspaceTopNavTarget({ to: "/workflow/templates" })).toBe("/workflow/templates");
+  });
+});
+
+describe("nextDesktopMoreMenuState", () => {
+  it("opens from hover without pinning the menu", () => {
+    expect(nextDesktopMoreMenuState({ open: false, pinned: false }, "hover-open")).toEqual({
+      open: true,
+      pinned: false,
+    });
+  });
+
+  it("pins a hover-open menu on the first button click", () => {
+    expect(nextDesktopMoreMenuState({ open: true, pinned: false }, "button-click")).toEqual({
+      open: true,
+      pinned: true,
+    });
+  });
+
+  it("closes and unpins a pinned menu on the second button click", () => {
+    expect(nextDesktopMoreMenuState({ open: true, pinned: true }, "button-click")).toEqual({
+      open: false,
+      pinned: false,
+    });
+  });
+
+  it("resets pinned state on close before the next hover-open cycle", () => {
+    const closed = nextDesktopMoreMenuState({ open: true, pinned: true }, "close");
+    const reopened = nextDesktopMoreMenuState(closed, "hover-open");
+
+    expect(closed).toEqual({ open: false, pinned: false });
+    expect(reopened).toEqual({ open: true, pinned: false });
+  });
+});
+
+describe("shouldCloseDesktopMoreOnBlur", () => {
+  it("keeps the menu open when focus moves into the portal menu", () => {
+    expect(
+      shouldCloseDesktopMoreOnBlur({
+        hasNextTarget: true,
+        nextTargetInsideTrigger: false,
+        nextTargetInsideMenu: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the menu open when focus stays inside the trigger wrapper", () => {
+    expect(
+      shouldCloseDesktopMoreOnBlur({
+        hasNextTarget: true,
+        nextTargetInsideTrigger: true,
+        nextTargetInsideMenu: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("closes the menu when focus moves outside both trigger and portal menu", () => {
+    expect(
+      shouldCloseDesktopMoreOnBlur({
+        hasNextTarget: true,
+        nextTargetInsideTrigger: false,
+        nextTargetInsideMenu: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("closes the menu when the next focus target is unavailable", () => {
+    expect(
+      shouldCloseDesktopMoreOnBlur({
+        hasNextTarget: false,
+        nextTargetInsideTrigger: false,
+        nextTargetInsideMenu: false,
+      }),
+    ).toBe(true);
   });
 });
 

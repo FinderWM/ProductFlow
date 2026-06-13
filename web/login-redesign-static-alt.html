@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inspiration One 登录页静态稿 B</title>
+    <style>
+      :root {
+        --charcoal: #151612;
+        --charcoal-soft: #202119;
+        --paper: #eee7da;
+        --paper-soft: #d9cfbd;
+        --muted: #9c9487;
+        --line: rgb(238 231 218 / 0.18);
+        --line-strong: rgb(238 231 218 / 0.34);
+        --accent: #b45b4a;
+        --accent-soft: #d49b72;
+        --danger: #d1866b;
+        --shadow: 0 38px 120px rgb(0 0 0 / 0.36);
+        --motion: cubic-bezier(0.32, 0.72, 0, 1);
+        font-family:
+          "Geist",
+          "Satoshi",
+          "Outfit",
+          "Avenir Next",
+          "PingFang SC",
+          "Hiragino Sans GB",
+          "Microsoft YaHei",
+          system-ui,
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-height: 100%;
+        background: var(--charcoal);
+        color: var(--paper);
+        letter-spacing: 0;
+      }
+
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        overflow-x: hidden;
+        background:
+          linear-gradient(90deg, rgb(238 231 218 / 0.04) 1px, transparent 1px),
+          linear-gradient(180deg, rgb(238 231 218 / 0.035) 1px, transparent 1px),
+          radial-gradient(circle at 22% 10%, rgb(180 91 74 / 0.18), transparent 34rem),
+          linear-gradient(135deg, #151612 0%, #1e2019 52%, #11120f 100%);
+        background-size: 52px 52px, 52px 52px, auto, auto;
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0;
+        z-index: 9;
+        pointer-events: none;
+        content: "";
+        opacity: 0.19;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23noise)' opacity='0.2'/%3E%3C/svg%3E");
+        mix-blend-mode: soft-light;
+      }
+
+      button,
+      input {
+        font: inherit;
+        letter-spacing: 0;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .page {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1.14fr) minmax(420px, 0.86fr);
+        gap: clamp(28px, 4vw, 70px);
+        min-height: 100dvh;
+        width: min(100%, 1500px);
+        margin: 0 auto;
+        padding: clamp(20px, 4vw, 56px);
+      }
+
+      .page::after {
+        position: absolute;
+        right: 34%;
+        bottom: 0;
+        width: 1px;
+        height: 72vh;
+        background: linear-gradient(180deg, transparent, rgb(238 231 218 / 0.24), transparent);
+        content: "";
+        transform: rotate(16deg);
+      }
+
+      .brand {
+        position: absolute;
+        top: clamp(20px, 4vw, 56px);
+        left: clamp(20px, 4vw, 56px);
+        z-index: 4;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 14px 8px 8px;
+        background: rgb(21 22 18 / 0.52);
+        color: var(--paper);
+        box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+        text-decoration: none;
+        backdrop-filter: blur(18px);
+      }
+
+      .brand img {
+        width: 34px;
+        height: 34px;
+        border-radius: 13px;
+        background: var(--paper);
+        padding: 7px;
+        filter: grayscale(1) sepia(0.22) hue-rotate(328deg) saturate(0.85);
+      }
+
+      .brand span {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .brand small {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 560;
+      }
+
+      .gallery {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        min-height: calc(100dvh - clamp(40px, 8vw, 112px));
+        padding-top: 76px;
+      }
+
+      .art-frame {
+        position: relative;
+        min-height: 680px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 42px;
+        background: #202119;
+        box-shadow: var(--shadow), inset 0 1px 0 rgb(255 255 255 / 0.08);
+      }
+
+      .art-frame img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: 58% center;
+        filter: grayscale(1) sepia(0.35) hue-rotate(328deg) saturate(0.58) brightness(0.62) contrast(1.16);
+        transform: scale(1.04);
+      }
+
+      .art-frame::before {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        background:
+          linear-gradient(90deg, rgb(21 22 18 / 0.88), transparent 42%),
+          linear-gradient(180deg, transparent 42%, rgb(21 22 18 / 0.76));
+        content: "";
+      }
+
+      .art-frame::after {
+        position: absolute;
+        inset: 26px;
+        z-index: 2;
+        border: 1px solid rgb(238 231 218 / 0.16);
+        border-radius: 32px;
+        content: "";
+      }
+
+      .caption {
+        position: absolute;
+        left: clamp(26px, 4vw, 54px);
+        bottom: clamp(26px, 4vw, 54px);
+        z-index: 3;
+        display: grid;
+        gap: 20px;
+        max-width: 560px;
+      }
+
+      .caption code {
+        width: fit-content;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 12px;
+        background: rgb(21 22 18 / 0.44);
+        color: var(--paper-soft);
+        font-size: 12px;
+        font-weight: 760;
+        backdrop-filter: blur(16px);
+      }
+
+      .caption h1 {
+        margin: 0;
+        color: var(--paper);
+        font-size: clamp(58px, 7vw, 112px);
+        font-weight: 880;
+        letter-spacing: 0;
+        line-height: 0.82;
+      }
+
+      .caption p {
+        max-width: 36ch;
+        margin: 0;
+        color: var(--paper-soft);
+        font-size: 15px;
+        line-height: 1.72;
+      }
+
+      .rail-text {
+        position: absolute;
+        top: 86px;
+        right: 26px;
+        z-index: 3;
+        color: rgb(238 231 218 / 0.44);
+        font-size: 12px;
+        font-weight: 760;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        writing-mode: vertical-rl;
+      }
+
+      .login-panel {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        min-height: calc(100dvh - clamp(40px, 8vw, 112px));
+        flex-direction: column;
+        justify-content: center;
+        gap: 22px;
+        padding-top: 76px;
+      }
+
+      .panel-kicker {
+        display: grid;
+        gap: 10px;
+      }
+
+      .panel-kicker span {
+        color: var(--accent-soft);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .panel-kicker h2 {
+        max-width: 10ch;
+        margin: 0;
+        color: var(--paper);
+        font-size: clamp(42px, 4.2vw, 64px);
+        font-weight: 840;
+        line-height: 0.96;
+      }
+
+      .panel-kicker p {
+        max-width: 35ch;
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .ticket {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        padding: 24px;
+        background:
+          linear-gradient(145deg, rgb(238 231 218 / 0.12), rgb(238 231 218 / 0.045)),
+          rgb(21 22 18 / 0.72);
+        box-shadow: 0 22px 70px rgb(0 0 0 / 0.26), inset 0 1px 0 rgb(255 255 255 / 0.08);
+        backdrop-filter: blur(20px);
+      }
+
+      .ticket::before,
+      .ticket::after {
+        position: absolute;
+        top: 88px;
+        width: 24px;
+        height: 24px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--charcoal);
+        content: "";
+      }
+
+      .ticket::before {
+        left: -13px;
+      }
+
+      .ticket::after {
+        right: -13px;
+      }
+
+      .ticket-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 22px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .ticket-head strong {
+        color: var(--paper);
+        font-size: 13px;
+      }
+
+      .mode-switch {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-bottom: 20px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 5px;
+        background: rgb(238 231 218 / 0.055);
+      }
+
+      .mode-switch button {
+        min-height: 42px;
+        border: 0;
+        border-radius: 13px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 740;
+        transition:
+          transform 240ms var(--motion),
+          background 240ms var(--motion),
+          color 240ms var(--motion);
+      }
+
+      .mode-switch .active {
+        background: var(--paper);
+        color: var(--charcoal);
+      }
+
+      .mode-switch button:active {
+        transform: translateY(1px) scale(0.99);
+      }
+
+      form {
+        display: grid;
+        gap: 15px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+
+      label {
+        color: var(--paper);
+        font-size: 14px;
+        font-weight: 740;
+      }
+
+      .input-wrap {
+        position: relative;
+      }
+
+      .input-wrap svg {
+        position: absolute;
+        top: 50%;
+        left: 16px;
+        width: 18px;
+        height: 18px;
+        color: var(--muted);
+        transform: translateY(-50%);
+      }
+
+      input {
+        width: 100%;
+        min-height: 52px;
+        border: 1px solid var(--line-strong);
+        border-radius: 17px;
+        outline: none;
+        padding: 0 16px 0 46px;
+        background: rgb(238 231 218 / 0.08);
+        color: var(--paper);
+        box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+        transition:
+          border-color 240ms var(--motion),
+          box-shadow 240ms var(--motion),
+          background 240ms var(--motion);
+      }
+
+      input::placeholder {
+        color: rgb(156 148 135 / 0.78);
+      }
+
+      input:focus {
+        border-color: rgb(212 155 114 / 0.7);
+        background: rgb(238 231 218 / 0.11);
+        box-shadow: 0 0 0 4px rgb(180 91 74 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.08);
+      }
+
+      .helper {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .error-message {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        border: 1px solid rgb(209 134 107 / 0.28);
+        border-radius: 17px;
+        padding: 12px 14px;
+        background: rgb(180 91 74 / 0.13);
+        color: var(--danger);
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.55;
+      }
+
+      .error-message svg {
+        flex: 0 0 auto;
+        width: 17px;
+        height: 17px;
+        margin-top: 1px;
+      }
+
+      .submit-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        margin-top: 4px;
+      }
+
+      .primary-button,
+      .icon-button {
+        min-height: 52px;
+        border: 1px solid rgb(238 231 218 / 0.82);
+        color: var(--charcoal);
+        background: var(--paper);
+        transition:
+          transform 240ms var(--motion),
+          background 240ms var(--motion),
+          border-color 240ms var(--motion);
+      }
+
+      .primary-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        border-radius: 17px;
+        padding: 0 18px;
+        font-weight: 820;
+      }
+
+      .primary-button:hover,
+      .icon-button:hover {
+        border-color: rgb(212 155 114 / 0.78);
+        background: #f6eee1;
+      }
+
+      .primary-button:active,
+      .icon-button:active {
+        transform: translateY(1px) scale(0.99);
+      }
+
+      .primary-button svg,
+      .icon-button svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .icon-button {
+        display: grid;
+        width: 52px;
+        place-items: center;
+        border-radius: 17px;
+      }
+
+      .states {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .state-card {
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 14px;
+        background: rgb(238 231 218 / 0.055);
+      }
+
+      .state-card span {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .state-card strong {
+        display: block;
+        margin-top: 7px;
+        color: var(--paper);
+        font-size: 15px;
+        line-height: 1.25;
+      }
+
+      .load-lines {
+        display: grid;
+        gap: 7px;
+        margin-top: 10px;
+      }
+
+      .load-lines i {
+        position: relative;
+        overflow: hidden;
+        height: 8px;
+        border-radius: 999px;
+        background: rgb(238 231 218 / 0.11);
+      }
+
+      .load-lines i::after {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgb(238 231 218 / 0.38), transparent);
+        content: "";
+        transform: translateX(-100%);
+        animation: shimmer 2.5s var(--motion) infinite;
+      }
+
+      .load-lines i:nth-child(2) {
+        width: 64%;
+      }
+
+      .side-note {
+        max-width: 46ch;
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+
+      @keyframes shimmer {
+        to {
+          transform: translateX(100%);
+        }
+      }
+
+      @media (max-width: 1040px) {
+        .page {
+          grid-template-columns: 1fr;
+          gap: 24px;
+          padding: 18px;
+        }
+
+        .page::after {
+          display: none;
+        }
+
+        .brand {
+          position: relative;
+          top: auto;
+          left: auto;
+          width: fit-content;
+        }
+
+        .gallery {
+          min-height: auto;
+          padding-top: 0;
+        }
+
+        .art-frame {
+          min-height: 430px;
+        }
+
+        .login-panel {
+          min-height: auto;
+          padding-top: 0;
+        }
+
+        .panel-kicker h2 {
+          max-width: 12ch;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          padding: 16px;
+        }
+
+        .brand {
+          width: 100%;
+        }
+
+        .brand span {
+          overflow: hidden;
+        }
+
+        .brand strong,
+        .brand small {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .art-frame {
+          min-height: 280px;
+          border-radius: 28px;
+        }
+
+        .caption {
+          left: 20px;
+          right: 20px;
+          bottom: 20px;
+          gap: 12px;
+        }
+
+        .caption h1 {
+          max-width: 7ch;
+          font-size: clamp(38px, 13vw, 56px);
+        }
+
+        .caption p,
+        .rail-text {
+          display: none;
+        }
+
+        .panel-kicker h2 {
+          max-width: 8ch;
+          font-size: clamp(32px, 9vw, 40px);
+          word-break: break-all;
+        }
+
+        .ticket {
+          border-radius: 26px;
+          padding: 20px;
+        }
+
+        .ticket-head {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .submit-row,
+        .states {
+          grid-template-columns: 1fr;
+        }
+
+        .icon-button {
+          display: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <a class="brand" href="#" aria-label="Inspiration One">
+        <img src="public/inspiration-one-mark.svg" alt="Inspiration One" />
+        <span>
+          <strong>Inspiration One</strong>
+          <small>private image lab</small>
+        </span>
+      </a>
+
+      <section class="gallery" aria-label="视觉概念">
+        <article class="art-frame">
+          <img src="public/hero.png" alt="视觉创作海报" />
+          <div class="rail-text">studio access</div>
+          <div class="caption">
+            <code>ACCESS / INVITATION ONLY</code>
+            <h1>Enter the image lab</h1>
+            <p>登录页像一张摄影棚邀请函，先给情绪和记忆点，再承载最短的进入路径。</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="login-panel" aria-label="登录表单">
+        <div class="panel-kicker">
+          <span>PRIVATE ENTRY</span>
+          <h2>验证身份，进入创作现场</h2>
+          <p>这个方向偏暗色画廊与摄影棚，强调影像、邀请函和低照度质感。</p>
+        </div>
+
+        <section class="ticket" aria-label="登录票据">
+          <div class="ticket-head">
+            <strong>Studio ticket</strong>
+            <span>IO-LAB-2714</span>
+          </div>
+
+          <div class="mode-switch" role="tablist" aria-label="登录模式">
+            <button class="active" type="button" role="tab" aria-selected="true">登录</button>
+            <button type="button" role="tab" aria-selected="false">设置密码</button>
+          </div>
+
+          <form>
+            <div class="field">
+              <label for="alt-username">账号</label>
+              <div class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" fill="none" stroke="currentColor" stroke-width="1.7" />
+                  <path d="m6.7 8.2 4.15 3.45a1.8 1.8 0 0 0 2.3 0L17.3 8.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                </svg>
+                <input id="alt-username" type="text" placeholder="输入账号" autocomplete="username" />
+              </div>
+              <div class="helper">使用授权账号登录。</div>
+            </div>
+
+            <div class="field">
+              <label for="alt-password">密码</label>
+              <div class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 10V8.2A5 5 0 0 1 12 3.2a5 5 0 0 1 5 5V10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                  <path d="M6.4 10h11.2A2.4 2.4 0 0 1 20 12.4v5.2a2.4 2.4 0 0 1-2.4 2.4H6.4A2.4 2.4 0 0 1 4 17.6v-5.2A2.4 2.4 0 0 1 6.4 10Z" fill="none" stroke="currentColor" stroke-width="1.7" />
+                  <path d="M12 14v2.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                </svg>
+                <input id="alt-password" type="password" placeholder="输入密码" autocomplete="current-password" />
+              </div>
+              <div class="helper">重置后可切换到设置密码。</div>
+            </div>
+
+            <div class="error-message" role="alert">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 8v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                <path d="M12 16.8h.01" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+                <path d="M10.1 4.9 3.7 16a2.5 2.5 0 0 0 2.15 3.75h12.3A2.5 2.5 0 0 0 20.3 16L13.9 4.9a2.2 2.2 0 0 0-3.8 0Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+              </svg>
+              <span>账号或密码不正确，请检查后重试。</span>
+            </div>
+
+            <div class="submit-row">
+              <button class="primary-button" type="button">
+                进入创作现场
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12h13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                  <path d="m13 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <button class="icon-button" type="button" aria-label="安全说明">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3.5 19 6v5.2c0 4.3-2.78 7.34-7 9.3-4.22-1.96-7-5-7-9.3V6l7-2.5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+                  <path d="m9 12 2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <div class="states" aria-label="状态示例">
+          <div class="state-card">
+            <span>LOADING</span>
+            <strong>会话校验中</strong>
+            <div class="load-lines" aria-hidden="true">
+              <i></i>
+              <i></i>
+            </div>
+          </div>
+          <div class="state-card">
+            <span>EMPTY</span>
+            <strong>设置密码后进入</strong>
+          </div>
+        </div>
+
+        <p class="side-note">静态稿 B 只用于看视觉方向：暗色、影像、邀请函、细线票据；没有接入任何业务逻辑。</p>
+      </section>
+    </main>
+  </body>
+</html>

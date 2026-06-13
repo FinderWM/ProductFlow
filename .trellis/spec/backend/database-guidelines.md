@@ -262,7 +262,7 @@ ConfigDefinition(
 - DB table: `provider_bindings`
   - Compatibility mirror for the old settings API/UI shape. It is not the runtime provider source.
   - `purpose: "text" | "image"`
-  - `provider_kind: "mock" | "openai" | "openai_responses" | "openai_images" | "google_gemini_image"`
+  - `provider_kind: "mock" | "openai" | "openai_chat_completions" | "openai_responses" | "openai_images" | "openai_chat_image" | "google_gemini_image"`
   - `provider_profile_id: String(36) | null`
   - `model_settings_json: JSON object`
   - `config_json: JSON object`
@@ -271,7 +271,7 @@ ConfigDefinition(
   - `resource_group_id: String(36) | null` compatibility mirror for the first bound group
   - `purpose: "text" | "image"`
   - `name: String(120)`
-  - `provider_kind: "mock" | "openai" | "openai_responses" | "openai_images" | "google_gemini_image"`
+  - `provider_kind: "mock" | "openai" | "openai_chat_completions" | "openai_responses" | "openai_images" | "openai_chat_image" | "google_gemini_image"`
   - `provider_profile_id: String(36) | null`
   - `model_settings_json: JSON object`
   - `config_json: JSON object`
@@ -312,6 +312,7 @@ ConfigDefinition(
   - `POST /api/settings/generation-configs/{generation_config_id}/unfreeze`
   - `DELETE /api/settings/generation-configs/{generation_config_id}`
   - `POST /api/settings/generation-configs/reorder`
+  - `POST /api/settings/generation-configs/test-json-response-format`
   - `GET /api/settings/generation-config-status`
 - Resolver functions:
   - `resolve_text_provider_config(generation_config_id: str | None = None) -> ResolvedTextProviderConfig`
@@ -350,6 +351,10 @@ ConfigDefinition(
   `provider_profiles.default_models_json`. If required model settings are absent after bootstrap, resolvers must fail
   with a clear configuration error instead of falling back to legacy `Settings.text_brief_model`,
   `Settings.text_copy_model`, or `Settings.image_generate_model`.
+- Text config is provider-kind scoped: `openai_chat_completions` owns
+  `config_json.structured_json_response_format_enabled` (`false` by default). When enabled, JSON-producing text provider
+  calls such as brief, copy, and tail split send Chat Completions `response_format={"type":"json_object"}` with
+  `stream=false`; non-JSON text calls such as image-prompt polishing must not send `response_format`.
 - Image config is provider-kind scoped: `openai_responses` owns `responses_background_enabled`, while
   `openai_images` owns `images_quality` and `images_style`, and `google_gemini_image` owns `gemini_api_version` plus
   optional `gemini_output_mime_type`. Do not require or persist Responses background config for `openai_images`, Google
@@ -414,6 +419,12 @@ ConfigDefinition(
   `400`.
 - Missing `responses_background_enabled` -> only `openai_responses` image bindings fail. `openai_images` and `mock` must
   not require that field.
+- `POST /api/settings/generation-configs/test-json-response-format` with a non-`openai_chat_completions` text config ->
+  `400`, Chat Completions-only detail.
+- `POST /api/settings/generation-configs/test-json-response-format` with
+  `structured_json_response_format_enabled=false` -> `400`, enable-config detail.
+- `POST /api/settings/generation-configs/test-json-response-format` provider output that cannot be parsed as a JSON
+  object -> `400` validation detail or `502` provider-test failure, matching the settings test boundary.
 - `POST/PATCH /api/settings/generation-configs` with `resource_group_ids` present -> replace all group bindings and update
   compatibility `resource_group_id` to the first binding or `null`.
 - `POST/PATCH /api/settings/generation-configs` with only legacy `resource_group_id` -> store zero or one group binding.
@@ -421,8 +432,10 @@ ConfigDefinition(
 
 ### 5. Good/Base/Bad Cases
 
-- Good: one OpenAI-compatible gateway supports `text_responses` and `image_images`; multiple text/image generation
-  configs point to the same profile and carry separate model settings.
+- Good: one OpenAI-compatible gateway supports `text_responses`, `text_chat_completions`, `image_images`, or
+  `image_chat`; multiple text/image generation configs point to the same profile and carry separate model settings.
+- Good: an `openai_chat_completions` text generation config stores
+  `structured_json_response_format_enabled=true`, and only its JSON-producing text calls send `response_format`.
 - Good: a text gateway and an image gateway use different keys or URLs; bootstrap creates two profiles and one default
   config per purpose.
 - Good: a Google Gemini profile has `provider_type="google_gemini"`, no `base_url`, capability
@@ -439,6 +452,7 @@ ConfigDefinition(
 - Bad: letting a failed task remain running because release/update stats raised on naive-vs-aware datetime comparison.
 - Bad: filtering runtime candidates only by the compatibility `generation_configs.resource_group_id` field after
   multi-group bindings exist.
+- Bad: sending Chat Completions `response_format` from image-prompt polishing, because that operation expects plain text.
 - Bad: treating frontend label removal or a shortened cooldown value as manual unfreeze while
   `generation_config_states.frozen_until` still blocks scheduler claims.
 
@@ -464,6 +478,12 @@ ConfigDefinition(
   capabilities across Google Gemini and OpenAI-compatible profiles.
 - Settings API test that `google_gemini_image` binding accepts only `v1` or `v1beta`, persists
   `gemini_output_mime_type` only when non-empty, and round-trips through config export/import.
+- Settings API test that `openai_chat_completions` generation config persists
+  `structured_json_response_format_enabled`, resolver exposes it, and export/import round-trips it.
+- Settings API test that `/api/settings/generation-configs/test-json-response-format` sends Chat Completions
+  `response_format={"type":"json_object"}` and returns parsed JSON without mutating generation configs.
+- Provider payload test that `openai_chat_completions` sends `response_format` for brief/copy/tail split only when the
+  per-config flag is enabled, and does not send it for image-prompt polishing.
 - Provider payload test that `google_gemini_image` dispatches to the official `google-genai` client with text plus
   reference image parts, aspect-ratio mapping, sanitized request metadata, and generic provider errors.
 - Provider payload tests should set legacy provider kind explicitly when they rely on env bootstrap.
@@ -483,6 +503,19 @@ Correct:
 
 ```python
 unfreeze_generation_config(session, config_id)
+```
+
+Wrong:
+
+```python
+payload["response_format"] = {"type": "json_object"}  # sent for every text call
+```
+
+Correct:
+
+```python
+if response_format_json:
+    payload["response_format"] = {"type": "json_object"}
 ```
 
 Wrong:
@@ -791,8 +824,9 @@ return GenerationResourceGroupTag(
   read permission or `settings:read`.
 - `GET /api/settings/generation-config-status` must filter `configs` and all summary counters/stat aggregates to the
   current user's available generation resource groups. Admin users see all enabled, non-archived groups; regular users see
-  only `user_generation_resource_group_grants`. Do not expose all generation config status rows only because the caller has
-  `status:read`.
+  only `user_generation_resource_group_grants`. If a visible generation config is bound to both granted and ungranted
+  groups, the status response's `resource_group_id` / `resource_group_ids` must include only granted group ids. Do not
+  expose all generation config status rows only because the caller has `status:read`.
 - `DELETE /api/auth/session` clears the browser session and subsequent private route calls return `401` until login.
 - Settings import must ignore/drop a legacy `runtime_config.admin_access_required` value instead of reintroducing a
   database-controlled login bypass.
@@ -805,8 +839,8 @@ return GenerationResourceGroupTag(
 - Logged-in user without a route's API permission -> `403`, `{"detail": "没有接口权限"}`.
 - Logged-in non-admin user calling admin-only RBAC management -> `403`, `{"detail": "需要管理员权限"}`.
 - User with `status:read` can call status APIs but cannot call settings read/write APIs.
-- User with `status:read` but only one generation resource-group grant -> status response omits configs, counts, and
-  per-range/today stats from ungranted groups.
+- User with `status:read` but only one generation resource-group grant -> status response omits configs, config group ids,
+  counts, and per-range/today stats from ungranted groups.
 - `PATCH /api/settings` with `admin_access_required` -> `400`, `{"detail": "未知配置项: admin_access_required"}`.
 
 ### 5. Good/Base/Bad Cases
@@ -834,7 +868,7 @@ return GenerationResourceGroupTag(
 - A custom status-only role cannot call runtime selector APIs unless it has a matching workbench/image-chat/settings
   permission.
 - Status API test creates two generation groups/configs, grants a non-admin caller one group, and asserts the hidden group's
-  config id and aggregate counts are absent from `GET /api/settings/generation-config-status`.
+  config id, config group ids, and aggregate counts are absent from `GET /api/settings/generation-config-status`.
 - Settings runtime/config/export tests assert `admin_access_required` is absent, while legacy import payloads containing it
   do not restore a configurable login bypass.
 

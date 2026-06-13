@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'" />
+  <title>Inspiration One · 登录</title>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      background: #F5F5F3;
+      font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    ::selection { background: rgba(255,107,88,0.25); color: #1A1A1D; }
+
+    .mesh-blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.55;
+      contain: paint;
+      transition: transform 0.35s ease-out;
+    }
+    .blob-1 { top: -15%; right: 8%; width: 600px; height: 600px; background: radial-gradient(circle at 30% 40%, #E85D4A, #F5A89F 60%, transparent); }
+    .blob-2 { bottom: -10%; left: 3%; width: 560px; height: 560px; background: radial-gradient(circle at 60% 50%, #4A92BD, #9BC4E0 65%, transparent); }
+    .blob-3 { top: 35%; left: 20%; width: 480px; height: 480px; background: radial-gradient(circle at 50% 50%, #E8B74A, #F5D89F 70%, transparent); }
+    .blob-4 { top: 10%; left: 50%; width: 440px; height: 440px; background: radial-gradient(circle at 40% 60%, #E87A6A, #F5B8AF 60%, transparent); }
+
+    /* ---- Float-in stagger ---- */
+    @keyframes floatIn {
+      from { opacity: 0; transform: translateY(24px) scale(0.96); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .float { opacity: 0; animation: floatIn 0.8s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+    @keyframes sparkle {
+      0%, 100% { opacity: 0.4; transform: translateY(0) scale(1); }
+      50%      { opacity: 1; transform: translateY(-10px) scale(1.4); }
+    }
+    .sparkle-dot {
+      animation: sparkle 3s ease-in-out infinite;
+    }
+
+    /* ---- Card hover lift ---- */
+    .card-lift {
+      transition: transform 0.4s cubic-bezier(0.16,1,0.3,1), box-shadow 0.4s;
+    }
+    .card-lift:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 24px 48px -15px rgba(255,107,88,0.28);
+    }
+
+    /* ---- Card parallax tilt (mouse follow) ---- */
+    .card-tilt {
+      transform-style: preserve-3d;
+    }
+
+    /* ---- Button magnetic pull (subtle) ---- */
+    .btn-magnetic { transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s; }
+    .btn-magnetic:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 14px 28px -8px rgba(255,107,88,0.5); }
+    .btn-magnetic:active { transform: translateY(0) scale(0.98); }
+
+    /* ---- Input focus ring with spring ---- */
+    .input-focus {
+      transition: border-color 0.3s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s cubic-bezier(0.16,1,0.3,1), transform 0.3s cubic-bezier(0.16,1,0.3,1);
+    }
+    .input-focus:focus {
+      outline: none;
+      border-color: #FF6B58;
+      box-shadow: 0 0 0 4px rgba(255,107,88,0.12), 0 4px 12px -2px rgba(255,107,88,0.15);
+      transform: translateY(-1px);
+    }
+
+    /* ---- Underline link ---- */
+    .ul-link { position: relative; }
+    .ul-link::after {
+      content:""; position:absolute; left:0; bottom:-2px; height:2px; width:100%;
+      background: currentColor; transform: scaleX(0); transform-origin: left;
+      transition: transform .35s cubic-bezier(0.16,1,0.3,1);
+    }
+    .ul-link:hover::after { transform: scaleX(1); }
+
+    /* Static subset replacing runtime Tailwind CDN for this standalone prototype. */
+    .hidden { display: none !important; }
+    .relative { position: relative; }
+    .fixed { position: fixed; }
+    .absolute { position: absolute; }
+    .inset-0 { inset: 0; }
+    .top-20 { top: 5rem; }
+    .top-32 { top: 8rem; }
+    .top-44 { top: 11rem; }
+    .top-60 { top: 15rem; }
+    .top-1\/2 { top: 50%; }
+    .top-1\/3 { top: 33.333333%; }
+    [class~="top-[15%]"] { top: 15%; }
+    [class~="left-[15%]"] { left: 15%; }
+    [class~="left-[25%]"] { left: 25%; }
+    [class~="left-[40%]"] { left: 40%; }
+    [class~="left-[18%]"] { left: 18%; }
+    [class~="left-[35%]"] { left: 35%; }
+    [class~="right-[20%]"] { right: 20%; }
+    [class~="right-[15%]"] { right: 15%; }
+    [class~="right-[30%]"] { right: 30%; }
+    [class~="right-[25%]"] { right: 25%; }
+    [class~="right-[12%]"] { right: 12%; }
+    .right-3 { right: 0.75rem; }
+    .bottom-1\/4 { bottom: 25%; }
+    .bottom-1\/3 { bottom: 33.333333%; }
+    .bottom-40 { bottom: 10rem; }
+    [class~="bottom-[20%]"] { bottom: 20%; }
+    .flex { display: flex; }
+    .grid { display: grid; }
+    .flex-col { flex-direction: column; }
+    .items-center { align-items: center; }
+    .justify-center { justify-content: center; }
+    .place-items-center { place-items: center; }
+    .text-center { text-align: center; }
+    .w-full { width: 100%; }
+    [class~="max-w-[460px]"] { max-width: 460px; }
+    [class~="min-h-[100dvh]"] { min-height: 100dvh; }
+    .h-12 { height: 3rem; }
+    .h-8 { height: 2rem; }
+    .w-8 { width: 2rem; }
+    .w-3 { width: 0.75rem; }
+    .h-3 { height: 0.75rem; }
+    [class~="w-2.5"] { width: 0.625rem; }
+    [class~="h-2.5"] { height: 0.625rem; }
+    .w-2 { width: 0.5rem; }
+    .h-2 { height: 0.5rem; }
+    .overflow-hidden { overflow: hidden; }
+    .pointer-events-none { pointer-events: none; }
+    .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+    .py-12 { padding-top: 3rem; padding-bottom: 3rem; }
+    .p-10 { padding: 2.5rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .pl-4 { padding-left: 1rem; }
+    .pr-11 { padding-right: 2.75rem; }
+    .pt-0\.5 { padding-top: 0.125rem; }
+    .mt-1\.5 { margin-top: 0.375rem; }
+    .mt-2 { margin-top: 0.5rem; }
+    .mt-3 { margin-top: 0.75rem; }
+    .mb-8 { margin-bottom: 2rem; }
+    .gap-1\.5 { gap: 0.375rem; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-4 { gap: 1rem; }
+    .rounded-full { border-radius: 999px; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-xl { border-radius: 0.75rem; }
+    [class~="rounded-[2rem]"] { border-radius: 2rem; }
+    .border { border: 1px solid transparent; }
+    .border-white\/60 { border-color: rgba(255, 255, 255, 0.6); }
+    .border-ink\/10 { border-color: rgba(26, 26, 29, 0.1); }
+    .border-coral { border-color: #E85D4A !important; }
+    .bg-white { background: #fff; }
+    .bg-white\/80 { background: rgba(255, 255, 255, 0.82); }
+    .bg-coral { background: #E85D4A; }
+    .bg-sky { background: #4A92BD; }
+    .bg-coral-soft { background: #F07560; }
+    .bg-sky-soft { background: #6AA8CC; }
+    .bg-gradient-to-r { background: linear-gradient(to right, #E85D4A, #D04835); }
+    .bg-gradient-to-r:hover { background: linear-gradient(to right, #F07560, #E85D4A); }
+    .text-white { color: #fff; }
+    .text-ink { color: #1A1A1D; }
+    .text-coral { color: #E85D4A; }
+    .text-ink\/90 { color: rgba(26, 26, 29, 0.9); }
+    .text-ink\/70 { color: rgba(26, 26, 29, 0.7); }
+    .text-ink\/50 { color: rgba(26, 26, 29, 0.5); }
+    .text-ink\/40 { color: rgba(26, 26, 29, 0.4); }
+    .placeholder\:text-ink\/30::placeholder { color: rgba(26, 26, 29, 0.3); }
+    .font-mono { font-family: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .font-bold { font-weight: 700; }
+    .font-semibold { font-weight: 600; }
+    .font-medium { font-weight: 500; }
+    [class~="text-[1.35rem]"] { font-size: 1.35rem; }
+    [class~="text-[15px]"] { font-size: 15px; }
+    .text-xs { font-size: 0.75rem; line-height: 1rem; }
+    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    .text-5xl { font-size: 3rem; line-height: 1; }
+    .leading-none { line-height: 1; }
+    .leading-snug { line-height: 1.375; }
+    .tracking-tighter { letter-spacing: 0; }
+    [class~="tracking-[0.24em]"] { letter-spacing: 0.24em; }
+    .uppercase { text-transform: uppercase; }
+    .backdrop-blur-xl { backdrop-filter: blur(24px); }
+    [class~="shadow-[0_20px_60px_-15px_rgba(26,26,29,0.12)]"] { box-shadow: 0 20px 60px -15px rgba(26, 26, 29, 0.12); }
+    [class~="shadow-[0_8px_20px_-6px_rgba(255,107,88,0.5)]"] { box-shadow: 0 8px 20px -6px rgba(255, 107, 88, 0.5); }
+    .group:hover .group-hover\:translate-x-1 { transform: translateX(0.25rem); }
+    .transition-colors { transition: color 0.2s ease, background-color 0.2s ease; }
+    .transition-transform { transition: transform 0.3s ease; }
+    .duration-300 { transition-duration: 300ms; }
+    .hover\:text-ink:hover { color: #1A1A1D; }
+    .hover\:bg-ink\/5:hover { background: rgba(26, 26, 29, 0.05); }
+    .-translate-y-1\/2 { transform: translateY(-50%); }
+    .antialiased { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+    @media (min-width: 640px) {
+      .sm\:p-12 { padding: 3rem; }
+      .sm\:text-6xl { font-size: 3.75rem; line-height: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .mesh-blob, .sparkle-dot, .float { animation: none !important; opacity: 1 !important; transition: none !important; }
+    }
+  </style>
+</head>
+
+<body class="text-ink antialiased relative">
+  <!-- Animated mesh gradient background -->
+  <div aria-hidden="true" class="fixed inset-0 overflow-hidden pointer-events-none">
+    <div class="mesh-blob blob-1"></div>
+    <div class="mesh-blob blob-2"></div>
+    <div class="mesh-blob blob-3"></div>
+    <div class="mesh-blob blob-4"></div>
+  </div>
+
+  <main class="relative min-h-[100dvh] flex flex-col items-center justify-center px-6 py-12">
+
+    <!-- Decorative sparkle dots (增加数量，分散布局) -->
+    <div aria-hidden="true" class="sparkle-dot absolute top-20 left-[15%] w-3 h-3 rounded-full bg-coral" style="animation-delay:.5s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute top-32 right-[20%] w-2.5 h-2.5 rounded-full bg-sky" style="animation-delay:1.2s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute top-44 left-[25%] w-2 h-2 rounded-full" style="background:#E8B74A; animation-delay:2s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute bottom-1/4 right-[15%] w-2.5 h-2.5 rounded-full bg-coral-soft" style="animation-delay:2.8s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute bottom-1/3 left-[18%] w-2 h-2 rounded-full bg-sky-soft" style="animation-delay:1.5s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute top-1/3 right-[30%] w-2 h-2 rounded-full" style="background:#E87A6A; animation-delay:3.2s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute top-60 left-[40%] w-3 h-3 rounded-full bg-coral" style="animation-delay:.8s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute bottom-40 right-[25%] w-2.5 h-2.5 rounded-full bg-sky" style="animation-delay:2.5s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute top-[15%] right-[12%] w-2 h-2 rounded-full" style="background:#F5A89F; animation-delay:1.8s"></div>
+    <div aria-hidden="true" class="sparkle-dot absolute bottom-[20%] left-[35%] w-2.5 h-2.5 rounded-full" style="background:#9BC4E0; animation-delay:3.5s"></div>
+
+    <!-- Main card -->
+    <div id="mainCard" class="float card-lift card-tilt relative w-full max-w-[460px] bg-white/80 backdrop-blur-xl rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(26,26,29,0.12)] border border-white/60 p-10 sm:p-12"
+         style="animation-delay:.1s">
+
+      <!-- Brand mark (text-only logo, enlarged and slim) -->
+      <div class="flex flex-col items-center mb-8">
+        <h1 class="text-5xl sm:text-6xl font-bold tracking-tighter leading-none text-center" style="letter-spacing: -0.03em;">
+          Inspiration One
+        </h1>
+        <p class="mt-3 font-mono text-xs tracking-[0.24em] text-ink/40 uppercase">Visual Studio</p>
+      </div>
+
+      <!-- Greeting -->
+      <div class="text-center mb-8">
+        <h2 class="text-[1.35rem] font-semibold text-ink/90 leading-snug">
+          欢迎回来，继续创作
+        </h2>
+        <p class="mt-1.5 text-sm text-ink/50">
+          登录你的工作台，开启灵感之旅
+        </p>
+      </div>
+
+      <!-- Form -->
+      <form id="loginForm" class="flex flex-col gap-4" novalidate>
+        <!-- Account -->
+        <div class="flex flex-col gap-2">
+          <label for="account" class="text-sm font-medium text-ink/70">账号</label>
+          <input id="account" type="text" autocomplete="username" placeholder="name@studio.com"
+            class="input-focus h-12 rounded-xl bg-white border border-ink/10 px-4 text-[15px] text-ink placeholder:text-ink/30" />
+        </div>
+
+        <!-- Password -->
+        <div class="flex flex-col gap-2">
+          <label for="password" class="text-sm font-medium text-ink/70">密码</label>
+          <div class="relative">
+            <input id="password" type="password" autocomplete="current-password" placeholder="输入密码"
+              class="peer input-focus w-full h-12 rounded-xl bg-white border border-ink/10 pl-4 pr-11 text-[15px] text-ink placeholder:text-ink/30" />
+            <button type="button" id="togglePw" aria-label="显示密码"
+              class="absolute right-3 top-1/2 -translate-y-1/2 grid place-items-center h-8 w-8 rounded-lg text-ink/40 hover:text-ink hover:bg-ink/5 transition-colors">
+              <svg id="eyeOpen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg id="eyeOff" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 3l18 18"/><path d="M10.6 6.1A9.7 9.7 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.2 3.8M6.3 8.3A15.9 15.9 0 0 0 2.5 12S6 18 12 18a9.4 9.4 0 0 0 3.4-.6"/>
+              </svg>
+            </button>
+          </div>
+          <p id="pwError" class="hidden items-center gap-1.5 text-xs text-coral pt-0.5">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5"/><path d="M12 16h.01"/></svg>
+            <span>账号或密码不正确</span>
+          </p>
+        </div>
+
+        <!-- Primary CTA -->
+        <button type="submit" id="submitBtn"
+          class="btn-magnetic group mt-2 h-12 rounded-xl bg-gradient-to-r from-coral to-coral-deep hover:from-coral-soft hover:to-coral text-white font-semibold text-[15px]
+                 shadow-[0_8px_20px_-6px_rgba(255,107,88,0.5)] flex items-center justify-center gap-2">
+          <span id="btnLabel" class="flex items-center gap-2">
+            开始创作
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-300 group-hover:translate-x-1"><path d="m9 18 6-6-6-6"/></svg>
+          </span>
+          <span id="btnLoading" class="hidden items-center gap-2">
+            <svg class="animate-spin" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>
+            登录中…
+          </span>
+        </button>
+      </form>
+    </div>
+  </main>
+
+  <script>
+    const blobs = document.querySelectorAll('.mesh-blob');
+    const canUsePointerMotion = window.matchMedia('(pointer: fine)').matches &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (canUsePointerMotion) {
+      let pointerX = window.innerWidth / 2;
+      let pointerY = window.innerHeight / 2;
+      let motionFrame = 0;
+      let motionTargets = [];
+
+      const measureTargets = () => {
+        motionTargets = Array.from(blobs).map((el) => ({ el, factor: 0.4, radius: 1000 })).map((target) => {
+          const rect = target.el.getBoundingClientRect();
+          return {
+            ...target,
+            centerX: rect.left + rect.width / 2,
+            centerY: rect.top + rect.height / 2,
+          };
+        });
+      };
+
+      const applyPointerMotion = () => {
+        motionFrame = 0;
+        motionTargets.forEach((target) => {
+          const distance = Math.hypot(pointerX - target.centerX, pointerY - target.centerY);
+          const influence = Math.max(0, 1 - distance / target.radius);
+          const deltaX = (pointerX - target.centerX) * target.factor * influence;
+          const deltaY = (pointerY - target.centerY) * target.factor * influence;
+          target.el.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+        });
+      };
+
+      const requestPointerMotion = () => {
+        if (!motionFrame) {
+          motionFrame = requestAnimationFrame(applyPointerMotion);
+        }
+      };
+
+      measureTargets();
+      document.addEventListener('pointermove', (event) => {
+        pointerX = event.clientX;
+        pointerY = event.clientY;
+        requestPointerMotion();
+      }, { passive: true });
+      window.addEventListener('resize', () => {
+        measureTargets();
+        requestPointerMotion();
+      }, { passive: true });
+    }
+
+    const card = document.getElementById('mainCard');
+    if (card && canUsePointerMotion) {
+      let cardRect = null;
+      let cardEvent = null;
+      let cardFrame = 0;
+
+      const applyCardMotion = () => {
+        cardFrame = 0;
+        if (!cardRect || !cardEvent) return;
+        const x = cardEvent.clientX - cardRect.left;
+        const y = cardEvent.clientY - cardRect.top;
+        const centerX = cardRect.width / 2;
+        const centerY = cardRect.height / 2;
+
+        const rotateX = ((y - centerY) / centerY) * -15;
+        const rotateY = ((x - centerX) / centerX) * 15;
+
+        card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-8px) scale(1.03)`;
+      };
+
+      card.addEventListener('pointerenter', () => {
+        cardRect = card.getBoundingClientRect();
+      }, { passive: true });
+
+      card.addEventListener('pointermove', (event) => {
+        cardEvent = event;
+        if (!cardRect) cardRect = card.getBoundingClientRect();
+        if (!cardFrame) cardFrame = requestAnimationFrame(applyCardMotion);
+      }, { passive: true });
+
+      card.addEventListener('pointerleave', () => {
+        cardRect = null;
+        cardEvent = null;
+        card.style.transform = 'perspective(800px) rotateX(0deg) rotateY(0deg) translateY(0) scale(1)';
+      }, { passive: true });
+    }
+
+    // Password toggle
+    const pw = document.getElementById('password');
+    const toggle = document.getElementById('togglePw');
+    const eyeOpen = document.getElementById('eyeOpen');
+    const eyeOff = document.getElementById('eyeOff');
+    if (pw && toggle && eyeOpen && eyeOff) {
+      toggle.addEventListener('click', () => {
+        const show = pw.type === 'password';
+        pw.type = show ? 'text' : 'password';
+        eyeOpen.classList.toggle('hidden', show);
+        eyeOff.classList.toggle('hidden', !show);
+      });
+    }
+
+    // Submit demo
+    const form = document.getElementById('loginForm');
+    const btn = document.getElementById('submitBtn');
+    const btnLabel = document.getElementById('btnLabel');
+    const btnLoading = document.getElementById('btnLoading');
+    const pwError = document.getElementById('pwError');
+    if (form && btn && btnLabel && btnLoading && pwError && pw) {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        pwError.classList.add('hidden'); pwError.classList.remove('flex');
+        pw.classList.remove('border-coral', 'ring-4', 'ring-coral/20');
+        btnLabel.classList.add('hidden'); btnLoading.classList.remove('hidden'); btnLoading.classList.add('flex');
+        btn.disabled = true; btn.style.opacity = '0.8';
+        setTimeout(() => {
+          btnLoading.classList.add('hidden'); btnLoading.classList.remove('flex'); btnLabel.classList.remove('hidden');
+          btn.disabled = false; btn.style.opacity = '1';
+          pwError.classList.remove('hidden'); pwError.classList.add('flex');
+          pw.classList.add('border-coral');
+        }, 1400);
+      });
+    }
+  </script>
+</body>
+</html>

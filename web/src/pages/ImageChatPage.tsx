@@ -272,6 +272,7 @@ function ImageChatWorkbenchPage() {
   const pendingGeneratedRoundCountRef = useRef<number | null>(null);
   const duplicateSubmitGuardRef = useRef<ImageGenerationSubmitGuard | null>(null);
   const createSessionRouteIntentConsumedRef = useRef(false);
+  const pendingCreatedSessionIdRef = useRef<string | null>(null);
   const mobileSessionButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileHistoryButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileSettingsButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -667,12 +668,32 @@ function ImageChatWorkbenchPage() {
     setSelectedResourceGroupId(value || null);
   }
 
+  function clearPendingCreatedSessionSelection() {
+    pendingCreatedSessionIdRef.current = null;
+  }
+
   function handleSelectSession(sessionId: string) {
+    clearPendingCreatedSessionSelection();
     setSelectedSessionId(sessionId);
     resetImageSessionSelection();
     setSuccessMessage("");
     setErrorMessage("");
     setMobileSessionDrawerOpen(false);
+  }
+
+  function handleSessionResourceGroupFilterChange(value: string) {
+    clearPendingCreatedSessionSelection();
+    setSelectedSessionResourceGroupId(value);
+  }
+
+  function handleSessionOwnerFilterChange(value: string) {
+    clearPendingCreatedSessionSelection();
+    setSelectedSessionOwnerUserId(value);
+  }
+
+  function handleOnlyDeletedSessionsChange(value: boolean) {
+    clearPendingCreatedSessionSelection();
+    setOnlyDeletedSessions(value);
   }
 
   useEffect(() => {
@@ -748,6 +769,7 @@ function ImageChatWorkbenchPage() {
       );
     },
     onSuccess: async (imageSession, variables) => {
+      pendingCreatedSessionIdRef.current = imageSession.id;
       setSelectedSessionId(imageSession.id);
       setSelectedResourceGroupId(variables.resourceGroupId);
       setSelectedSessionResourceGroupId(variables.resourceGroupId);
@@ -798,6 +820,13 @@ function ImageChatWorkbenchPage() {
       return;
     }
     if (selectedSessionId && sessionItems.some((item) => item.id === selectedSessionId)) {
+      if (pendingCreatedSessionIdRef.current === selectedSessionId) {
+        pendingCreatedSessionIdRef.current = null;
+      }
+      return;
+    }
+    // Newly created sessions are selected before the invalidated list refetch includes them.
+    if (selectedSessionId && pendingCreatedSessionIdRef.current === selectedSessionId) {
       return;
     }
     if (sessionItems.length) {
@@ -2228,7 +2257,7 @@ function ImageChatWorkbenchPage() {
                     disabled: !group.enabled,
                   })),
                 ]}
-                onChange={setSelectedSessionResourceGroupId}
+                onChange={handleSessionResourceGroupFilterChange}
                 ariaLabel={t("chat.sessionResourceGroupFilter")}
                 radius="lg"
                 visualSize="sm"
@@ -2255,7 +2284,7 @@ function ImageChatWorkbenchPage() {
                   <SelectField
                     value={selectedSessionOwnerUserId}
                     options={sessionOwnerOptions}
-                    onChange={setSelectedSessionOwnerUserId}
+                    onChange={handleSessionOwnerFilterChange}
                     ariaLabel={t("chat.sessionOwnerFilter")}
                     searchValue={selectedSessionOwnerSearch}
                     onSearchChange={setSelectedSessionOwnerSearch}
@@ -2271,7 +2300,7 @@ function ImageChatWorkbenchPage() {
                   <input
                     type="checkbox"
                     checked={onlyDeletedSessions}
-                    onChange={(event) => setOnlyDeletedSessions(event.target.checked)}
+                    onChange={(event) => handleOnlyDeletedSessionsChange(event.target.checked)}
                     className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
                   />
                   <span>{t("chat.onlyDeletedSessions")}</span>

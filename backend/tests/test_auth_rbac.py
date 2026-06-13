@@ -449,7 +449,7 @@ def test_runtime_and_generation_option_apis_require_matching_rbac_permission(con
     visible_config = admin_client.post(
         "/api/settings/generation-configs",
         json={
-            "resource_group_id": visible_group.json()["id"],
+            "resource_group_ids": [visible_group.json()["id"], hidden_group.json()["id"]],
             "name": "状态可见文案配置",
             "purpose": "text",
             "provider_kind": "mock",

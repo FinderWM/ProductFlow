@@ -103,6 +103,21 @@ def extract_sse_output_text(text: str) -> str | None:
         )
         if is_output_text_delta and isinstance(delta, str):
             chunks.append(delta)
+        choices = payload.get("choices")
+        if isinstance(choices, list):
+            for choice in choices:
+                if not isinstance(choice, dict):
+                    continue
+                choice_delta = choice.get("delta")
+                if isinstance(choice_delta, dict):
+                    content = choice_delta.get("content")
+                    if isinstance(content, str):
+                        chunks.append(content)
+                message = choice.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        chunks.append(content)
 
     if chunks:
         return "".join(chunks)

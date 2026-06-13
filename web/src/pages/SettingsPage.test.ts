@@ -9,8 +9,12 @@ import {
   filterProviderProfiles,
   archiveFailureMessage,
   type GenerationConfigDraft,
+  generationConfigDraft as generationConfigDraftFromConfig,
   generationConfigResourceGroupIds,
   generationConfigPayloadFromDraft,
+  markTextConfigJsonResponseFormatTestFailed,
+  markTextConfigJsonResponseFormatTestStarted,
+  markTextConfigJsonResponseFormatTestSucceeded,
   markTextConfigTestFailed,
   markTextConfigTestStarted,
   markTextConfigTestSucceeded,
@@ -21,6 +25,7 @@ import {
   providerDrawerCreateState,
   providerDrawerEditState,
   providerFormFromProfile,
+  providerProfilesForGenerationConfig,
   providerProfileCreatePayload,
   providerProfileUpdatePayload,
   providerUsageFromGenerationConfigs,
@@ -28,6 +33,8 @@ import {
   settingsSectionIds,
   settingsGenerationResourceGroupsInApiOrder,
   shouldShowSettingsMigrationPanel,
+  textConfigJsonResponseFormatTestRecordForKey,
+  type TextConfigJsonResponseFormatTestState,
   textConfigTestRecordForKey,
   type TextConfigTestState,
 } from "./SettingsPage";
@@ -48,6 +55,7 @@ import type {
   ProviderModel,
   ProviderProfile,
   SettingsImportPreviewResponse,
+  TextGenerationConfigJsonResponseFormatTestResponse,
   TextGenerationConfigTestResponse,
 } from "../lib/types";
 
@@ -136,6 +144,7 @@ function generationConfigDraft(overrides: Partial<GenerationConfigDraft> & Pick<
     images_quality: "",
     images_style: "",
     responses_background_enabled: true,
+    structured_json_response_format_enabled: false,
     gemini_api_version: "v1beta",
     gemini_output_mime_type: "",
     priority: "100",
@@ -196,6 +205,23 @@ function textConfigTestResponse(model: string): TextGenerationConfigTestResponse
     brief: { positioning: model },
     copy_result: { summary: model },
     duration_ms: 1200,
+  };
+}
+
+function textConfigJsonResponseFormatTestState(): TextConfigJsonResponseFormatTestState {
+  return {
+    latestKey: null,
+    records: {},
+  };
+}
+
+function textConfigJsonResponseFormatTestResponse(model: string): TextGenerationConfigJsonResponseFormatTestResponse {
+  return {
+    generation_config_id: null,
+    provider_kind: "openai_chat_completions",
+    model,
+    parsed_json: { ok: true, model },
+    duration_ms: 300,
   };
 }
 
@@ -392,6 +418,27 @@ describe("SettingsPage text config test state", () => {
       error: "",
     });
     expect(state.latestKey).toBe("config-b");
+  });
+
+  it("keeps JSON response_format test records separate from text output tests", () => {
+    const result = textConfigJsonResponseFormatTestResponse("grok-copy");
+    let state = textConfigJsonResponseFormatTestState();
+
+    state = markTextConfigJsonResponseFormatTestStarted(state, "config-a");
+    state = markTextConfigJsonResponseFormatTestSucceeded(state, "config-a", result);
+    state = markTextConfigJsonResponseFormatTestFailed(state, "config-b", "json mode failed");
+
+    expect(textConfigJsonResponseFormatTestRecordForKey(state, "config-a")).toEqual({
+      testing: false,
+      result,
+      error: "",
+    });
+    expect(textConfigJsonResponseFormatTestRecordForKey(state, "config-b")).toEqual({
+      testing: false,
+      result: null,
+      error: "json mode failed",
+    });
+    expect(textConfigTestRecordForKey(textConfigTestState(), "config-a")).toBeNull();
   });
 });
 
@@ -673,6 +720,74 @@ describe("SettingsPage provider profile helpers", () => {
       failure_threshold: 3,
       cooldown_minutes: 10,
     });
+  });
+
+  it("preserves Chat Completions text generation config kind in drafts and payloads", () => {
+    const draft = generationConfigDraftFromConfig(
+      generationConfig({
+        purpose: "text",
+        name: "Grok Chat",
+        provider_kind: "openai_chat_completions",
+        provider_profile_id: "profile-chat",
+        model_settings: { brief_model: "grok-brief", copy_model: "grok-copy" },
+      }),
+    );
+
+    expect(draft.provider_kind).toBe("openai_chat_completions");
+    expect(
+      generationConfigPayloadFromDraft({
+        ...draft,
+        availability_window_minutes: "10",
+        failure_threshold: "3",
+        cooldown_minutes: "10",
+      }),
+    ).toMatchObject({
+      name: "Grok Chat",
+      purpose: "text",
+      provider_kind: "openai_chat_completions",
+      provider_profile_id: "profile-chat",
+      model_settings: {
+        brief_model: "grok-brief",
+        copy_model: "grok-copy",
+      },
+      config: { structured_json_response_format_enabled: false },
+    });
+  });
+
+  it("round-trips Chat Completions structured JSON response_format config", () => {
+    const draft = generationConfigDraftFromConfig(
+      generationConfig({
+        purpose: "text",
+        provider_kind: "openai_chat_completions",
+        provider_profile_id: "profile-chat",
+        model_settings: { brief_model: "grok-brief", copy_model: "grok-copy" },
+        config: { structured_json_response_format_enabled: true },
+      }),
+    );
+
+    expect(draft.structured_json_response_format_enabled).toBe(true);
+    expect(generationConfigPayloadFromDraft(draft)).toMatchObject({
+      provider_kind: "openai_chat_completions",
+      config: { structured_json_response_format_enabled: true },
+    });
+  });
+
+  it("filters Chat Completions text configs by text_chat_completions capability", () => {
+    const profiles = [
+      providerProfile({ id: "responses", capabilities: ["text_responses"] }),
+      providerProfile({ id: "chat", capabilities: ["text_chat_completions"] }),
+      providerProfile({ id: "disabled-chat", capabilities: ["text_chat_completions"], enabled: false }),
+    ];
+
+    expect(
+      providerProfilesForGenerationConfig(
+        profiles,
+        generationConfigDraft({
+          purpose: "text",
+          provider_kind: "openai_chat_completions",
+        }),
+      ).map((profile) => profile.id),
+    ).toEqual(["chat"]);
   });
 
   it("allows generation configs without a resource group", () => {

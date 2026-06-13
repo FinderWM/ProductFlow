@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -11,6 +11,7 @@ import {
   Save,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -21,6 +22,7 @@ import { api, ApiError } from "../lib/api";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import type {
   CanvasTemplateCategory,
   CanvasTemplateEntryMode,
@@ -69,6 +71,41 @@ interface CopyGlobalDraft {
   sort_order: string;
 }
 
+const TEMPLATE_INPUT_CLASS =
+  "h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 " +
+  "placeholder:text-slate-400 outline-none transition-colors focus:border-indigo-500 focus:bg-white " +
+  "focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60 dark:border-slate-700 dark:bg-[#111b2d] " +
+  "dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]";
+const TEMPLATE_TEXTAREA_CLASS =
+  "w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-950 " +
+  "placeholder:text-slate-400 outline-none transition-colors focus:border-indigo-500 focus:bg-white " +
+  "focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60 dark:border-slate-700 dark:bg-[#111b2d] " +
+  "dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]";
+const TEMPLATE_PANEL_CLASS =
+  "pf-settings-bordered-module rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 " +
+  "dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25";
+const TEMPLATE_FIELD_CARD_CLASS =
+  "pf-settings-field-card rounded-xl border border-slate-200 bg-slate-50/70 shadow-none dark:border-slate-700 dark:bg-[#0b1220]";
+const TEMPLATE_MAIN_ACTION_CLASS =
+  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const TEMPLATE_SECONDARY_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const TEMPLATE_COMPACT_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const TEMPLATE_ICON_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const TEMPLATE_DANGER_ACTION_CLASS =
+  "pf-danger-action inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const TEMPLATE_DANGER_ICON_ACTION_CLASS =
+  "pf-danger-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const TEMPLATE_FEEDBACK_AUTO_DISMISS_MS = 1000;
+
 const ENTRY_OPTIONS: Array<{ value: EntryFilter; labelKey: TranslationKey }> = [
   { value: "all", labelKey: "templateManage.entryAll" },
   { value: "image", labelKey: "templateManage.entry.image" },
@@ -109,7 +146,13 @@ function parseSortOrder(value: string): number {
 }
 
 function apiErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? error.detail : fallback;
+  if (error instanceof ApiError) {
+    return error.detail;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
 }
 
 function templateAvailabilityLabelKey(template: CanvasTemplateSummary): TranslationKey {
@@ -129,8 +172,115 @@ function templateAvailabilityClassName(template: CanvasTemplateSummary): string 
   return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200";
 }
 
+function TemplateManagementFeedbackDialog({
+  successMessage,
+  errorMessage,
+  onCloseSuccess,
+  onCloseError,
+}: {
+  successMessage: string;
+  errorMessage: string;
+  onCloseSuccess: () => void;
+  onCloseError: () => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+  const descriptionId = useId();
+  const open = Boolean(successMessage || errorMessage);
+  const isError = Boolean(errorMessage);
+  const message = errorMessage || successMessage;
+
+  useEffect(() => {
+    if (!successMessage || isError) {
+      return undefined;
+    }
+    const timer = window.setTimeout(onCloseSuccess, TEMPLATE_FEEDBACK_AUTO_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [isError, onCloseSuccess, successMessage]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      if (isError) {
+        onCloseError();
+        return;
+      }
+      onCloseSuccess();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isError, onCloseError, onCloseSuccess, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  const Icon = isError ? X : CheckCircle2;
+
+  return (
+    <div
+      className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+        if (isError) {
+          onCloseError();
+          return;
+        }
+        onCloseSuccess();
+      }}
+    >
+      <div
+        role={isError ? "alertdialog" : "dialog"}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+      >
+        <div className="flex items-start gap-3 px-5 py-5">
+          <div
+            className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+              isError
+                ? "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-200"
+                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-200"
+            }`}
+          >
+            <Icon size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
+              {isError ? t("settings.operationFailed") : t("settings.operationSucceeded")}
+            </h2>
+            <p id={descriptionId} className="mt-2 break-words text-sm leading-6 text-slate-600 dark:text-slate-300">
+              {message}
+            </p>
+          </div>
+          {isError ? (
+            <button
+              type="button"
+              onClick={onCloseError}
+              className={TEMPLATE_ICON_ACTION_CLASS}
+              aria-label={t("common.close")}
+              title={t("common.close")}
+            >
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const { locale, t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const scope: CanvasTemplateScope = mode === "global" ? "global" : "user";
@@ -335,12 +485,15 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const backLabel = mode === "global" ? t("templateManage.backToSettings") : t("templateManage.backToCreate");
   const loading = templatesQuery.isLoading || categoriesQuery.isLoading || globalCategoriesQuery.isLoading;
   const loadFailed = templatesQuery.isError || categoriesQuery.isError || globalCategoriesQuery.isError;
+  const isWorkspaceSubpage = activeScheme === "workspace";
 
   return (
-    <div className="pf-app min-h-[100dvh] text-slate-900 dark:text-slate-100">
+    <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} min-h-[100dvh] text-slate-900 dark:text-slate-100`}>
       <TopNav breadcrumbs={pageTitle} />
-      <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-slate-800 lg:flex-row lg:items-end lg:justify-between">
+      <main className={isWorkspaceSubpage ? "pf-workspace-subpage flex-1" : "mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8"}>
+        <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame-shell w-full" : "contents"}>
+          <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame" : "contents"}>
+        <header className={isWorkspaceSubpage ? "pf-workspace-subpage-header flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" : "mb-6 flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-slate-800 lg:flex-row lg:items-end lg:justify-between"}>
           <div>
             <div className="pf-eyebrow mb-2">
               <Layers3 size={13} className="mr-1.5" />
@@ -352,28 +505,22 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
           <button
             type="button"
             onClick={() => navigate(backPath)}
-            className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+            className={TEMPLATE_SECONDARY_ACTION_CLASS}
           >
             <ArrowLeft size={15} className="mr-2" />
             {backLabel}
           </button>
-        </div>
+        </header>
 
-        {savedMessage ? (
-          <div className="mb-4 flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
-            <CheckCircle2 size={16} className="mr-2" />
-            {savedMessage}
-          </div>
-        ) : null}
-        {error || loadFailed ? (
+        {loadFailed ? (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-            {error || t("templateManage.loadFailed")}
+            {t("templateManage.loadFailed")}
           </div>
         ) : null}
 
-        <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className="space-y-5">
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25">
+        <div className={isWorkspaceSubpage ? "pf-side-shell min-h-full" : "grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]"}>
+          <aside className={isWorkspaceSubpage ? "pf-side-rail space-y-5 px-4 py-5 sm:px-5" : "space-y-5"}>
+            <section className={TEMPLATE_PANEL_CLASS}>
               <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateFilter.search")}</h2>
               <div className="mt-4 space-y-3">
                 <label className="block">
@@ -385,7 +532,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                     <input
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
-                      className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-950 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                      className={`${TEMPLATE_INPUT_CLASS} pl-9`}
                       placeholder={t("templateFilter.searchPlaceholder")}
                     />
                   </span>
@@ -419,7 +566,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25">
+            <section className={TEMPLATE_PANEL_CLASS}>
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateManage.categoryPanel")}</h2>
                 <button
@@ -428,7 +575,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                     setCategoryEditor(categoryDraft());
                     setCategoryEditorOpen(true);
                   }}
-                  className="inline-flex h-9 items-center rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-indigo-500 dark:bg-violet-500 dark:hover:bg-violet-400"
+                  className={TEMPLATE_MAIN_ACTION_CLASS}
                 >
                   <Plus size={13} className="mr-1.5" />
                   {t("templateManage.categoryCreate")}
@@ -436,7 +583,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
               </div>
               {categoryEditorOpen ? (
                 <form
-                  className="mt-4 grid gap-3 rounded-xl border border-indigo-100 bg-indigo-50/45 p-3 dark:border-violet-400/30 dark:bg-violet-500/10"
+                  className={`${TEMPLATE_FIELD_CARD_CLASS} mt-4 grid gap-3 p-3`}
                   onSubmit={(event) => {
                     event.preventDefault();
                     saveCategoryMutation.mutate();
@@ -445,7 +592,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   <input
                     value={categoryEditor.name}
                     onChange={(event) => setCategoryEditor((current) => ({ ...current, name: event.target.value }))}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400"
+                    className={TEMPLATE_INPUT_CLASS}
                     placeholder={t("templateManage.categoryName")}
                     maxLength={120}
                   />
@@ -453,21 +600,21 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                     type="number"
                     value={categoryEditor.sort_order}
                     onChange={(event) => setCategoryEditor((current) => ({ ...current, sort_order: event.target.value }))}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400"
+                    className={TEMPLATE_INPUT_CLASS}
                     placeholder={t("templateManage.categorySort")}
                   />
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => setCategoryEditorOpen(false)}
-                      className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+                      className={TEMPLATE_COMPACT_ACTION_CLASS}
                     >
                       {t("common.cancel")}
                     </button>
                     <button
                       type="submit"
-                      disabled={saveCategoryMutation.isPending}
-                      className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white disabled:opacity-60 dark:bg-violet-500"
+                      disabled={saveCategoryMutation.isPending || !categoryEditor.name.trim()}
+                      className={TEMPLATE_MAIN_ACTION_CLASS}
                     >
                       {saveCategoryMutation.isPending ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : null}
                       {t("templateManage.categorySave")}
@@ -480,7 +627,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   categories.map((category) => (
                     <div
                       key={category.id}
-                      className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-[#0b1220]"
+                      className={`${TEMPLATE_FIELD_CARD_CLASS} flex items-center gap-2 px-3 py-2`}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{category.name}</div>
@@ -492,7 +639,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                           setCategoryEditor(categoryDraft(category));
                           setCategoryEditorOpen(true);
                         }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-indigo-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-violet-100"
+                        className={TEMPLATE_ICON_ACTION_CLASS}
                         aria-label={t("templateManage.categorySave")}
                         title={t("templateManage.categorySave")}
                       >
@@ -501,7 +648,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                       <button
                         type="button"
                         onClick={() => setPendingDelete({ kind: "category", id: category.id, name: category.name })}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-200"
+                        className={TEMPLATE_DANGER_ICON_ACTION_CLASS}
                         aria-label={t("templateManage.categoryDelete")}
                         title={t("templateManage.categoryDelete")}
                       >
@@ -518,7 +665,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
             </section>
           </aside>
 
-          <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25">
+          <section className={isWorkspaceSubpage ? "pf-side-content min-w-0 px-4 py-5 sm:px-6 lg:px-8" : "min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25"}>
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateManage.templatePanel")}</h2>
@@ -547,7 +694,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   return (
                     <article
                       key={template.key}
-                      className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60 shadow-sm dark:border-slate-700 dark:bg-[#0b1220]"
+                      className={`${TEMPLATE_FIELD_CARD_CLASS} overflow-hidden`}
                     >
                       <div className="border-b border-slate-200 dark:border-slate-700">
                         <TemplateGraphPreview template={template} />
@@ -596,7 +743,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                             }))
                           }
                           readOnly={!canEditTemplate}
-                          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+                          className={`${TEMPLATE_INPUT_CLASS} font-semibold`}
                           placeholder={t("templateManage.templateTitle")}
                           maxLength={255}
                         />
@@ -609,7 +756,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                             }))
                           }
                           readOnly={!canEditTemplate}
-                          className="min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+                          className={`${TEMPLATE_TEXTAREA_CLASS} min-h-20 resize-y`}
                           placeholder={t("templateManage.templateDescription")}
                           maxLength={1000}
                         />
@@ -641,12 +788,12 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                               }))
                             }
                             readOnly={!canEditTemplate}
-                            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+                            className={`${TEMPLATE_INPUT_CLASS} h-9`}
                             placeholder={t("templateManage.templateSort")}
                           />
                         </div>
                         {canManageAvailability ? (
-                          <div className="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-[#111b2d]">
+                          <div className={`${TEMPLATE_FIELD_CARD_CLASS} space-y-2 px-3 py-2`}>
                             <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
                               <input
                                 type="checkbox"
@@ -670,7 +817,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                     [template.key]: { ...draft, disabled_reason: event.target.value },
                                   }))
                                 }
-                                className="min-h-16 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400"
+                                className={`${TEMPLATE_TEXTAREA_CLASS} min-h-16 resize-y text-xs leading-5`}
                                 placeholder={t("templateManage.disabledReasonPlaceholder")}
                                 maxLength={1000}
                               />
@@ -686,7 +833,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                 [template.key]: { ...draft, review_note: event.target.value },
                               }))
                             }
-                            className="min-h-16 w-full resize-y rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-950 outline-none focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                            className={`${TEMPLATE_TEXTAREA_CLASS} min-h-16 resize-y border-amber-200 bg-amber-50 text-xs leading-5 text-amber-950 focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100`}
                             placeholder={t("templateManage.reviewNotePlaceholder")}
                             maxLength={1000}
                           />
@@ -704,7 +851,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                   sort_order: String(template.sort_order ?? 100),
                                 })
                               }
-                              className="inline-flex h-9 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100"
+                              className={TEMPLATE_SECONDARY_ACTION_CLASS}
                             >
                               <CopyPlus size={13} className="mr-1.5" />
                               {t("templateManage.copyGlobal")}
@@ -716,7 +863,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                 type="button"
                                 disabled={reviewTemplateMutation.isPending || !templateId}
                                 onClick={() => reviewTemplateMutation.mutate({ template, approved: false })}
-                                className="inline-flex h-9 items-center rounded-lg border border-amber-200 bg-white px-3 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:border-amber-400/35 dark:bg-[#111b2d] dark:text-amber-100 dark:hover:bg-amber-500/10"
+                                className={TEMPLATE_SECONDARY_ACTION_CLASS}
                               >
                                 {t("templateManage.reviewReject")}
                               </button>
@@ -724,7 +871,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                 type="button"
                                 disabled={reviewTemplateMutation.isPending || !templateId}
                                 onClick={() => reviewTemplateMutation.mutate({ template, approved: true })}
-                                className="inline-flex h-9 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100"
+                                className={TEMPLATE_MAIN_ACTION_CLASS}
                               >
                                 {t("templateManage.reviewApprove")}
                               </button>
@@ -735,7 +882,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                               type="button"
                               disabled={saveTemplateMutation.isPending || !templateId}
                               onClick={() => saveTemplateMutation.mutate({ template, draft })}
-                              className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                              className={TEMPLATE_MAIN_ACTION_CLASS}
                             >
                               {saveTemplateMutation.isPending ? (
                                 <Loader2 size={13} className="mr-1.5 animate-spin" />
@@ -751,7 +898,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                 <button
                                   type="button"
                                   onClick={() => setPendingDelete({ kind: "template", id: template.key, name: template.title })}
-                                  className="inline-flex h-9 items-center rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-400/35 dark:bg-[#111b2d] dark:text-red-200 dark:hover:bg-red-500/10"
+                                  className={TEMPLATE_DANGER_ACTION_CLASS}
                                 >
                                   <Trash2 size={13} className="mr-1.5" />
                                   {t("templateManage.templateDelete")}
@@ -766,7 +913,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                   (requiresReviewNote && !draft.review_note.trim())
                                 }
                                 onClick={() => saveTemplateMutation.mutate({ template, draft })}
-                                className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                                className={TEMPLATE_MAIN_ACTION_CLASS}
                               >
                                 {saveTemplateMutation.isPending ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Save size={13} className="mr-1.5" />}
                                 {t("templateManage.templateSave")}
@@ -782,7 +929,16 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
             )}
           </section>
         </div>
+          </div>
+        </div>
       </main>
+
+      <TemplateManagementFeedbackDialog
+        successMessage={savedMessage}
+        errorMessage={error}
+        onCloseSuccess={() => setSavedMessage("")}
+        onCloseError={() => setError("")}
+      />
 
       {copyGlobalDraft ? (
         <CopyGlobalDialog
@@ -845,12 +1001,54 @@ function CopyGlobalDialog({
   onConfirm: () => void;
 }) {
   const { t } = useI18n();
+  const titleId = useId();
+  const descriptionId = useId();
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [busy, onClose]);
+
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45">
-        <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-          <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateManage.copyGlobalTitle")}</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">{t("templateManage.copyGlobalDescription")}</p>
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
+              {t("templateManage.copyGlobalTitle")}
+            </h2>
+            <p id={descriptionId} className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              {t("templateManage.copyGlobalDescription")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className={TEMPLATE_ICON_ACTION_CLASS}
+            aria-label={t("common.close")}
+            title={t("common.close")}
+          >
+            <X size={16} />
+          </button>
         </div>
         <div className="space-y-3 px-5 py-4">
           <SelectField
@@ -866,20 +1064,20 @@ function CopyGlobalDialog({
           <input
             value={draft.title}
             onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
-            className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+            className={TEMPLATE_INPUT_CLASS}
             placeholder={t("templateManage.templateTitle")}
           />
           <textarea
             value={draft.description}
             onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
-            className="min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+            className={`${TEMPLATE_TEXTAREA_CLASS} min-h-20 resize-y`}
             placeholder={t("templateManage.templateDescription")}
           />
           <input
             type="number"
             value={draft.sort_order}
             onChange={(event) => onDraftChange({ ...draft, sort_order: event.target.value })}
-            className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+            className={TEMPLATE_INPUT_CLASS}
             placeholder={t("templateManage.templateSort")}
           />
         </div>
@@ -888,7 +1086,7 @@ function CopyGlobalDialog({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+            className={TEMPLATE_SECONDARY_ACTION_CLASS}
           >
             {t("common.cancel")}
           </button>
@@ -896,7 +1094,7 @@ function CopyGlobalDialog({
             type="button"
             onClick={onConfirm}
             disabled={busy || !draft.category_id}
-            className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+            className={TEMPLATE_MAIN_ACTION_CLASS}
           >
             {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
             {t("templateManage.copyGlobal")}

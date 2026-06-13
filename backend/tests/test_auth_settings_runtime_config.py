@@ -336,6 +336,62 @@ def test_settings_api_has_no_extra_unlock_dependency(
     assert config.status_code == 200
 
 
+def test_public_login_page_config_returns_selected_template_without_auth(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    updated = admin_client.patch(
+        "/api/settings",
+        json={
+            "values": {
+                "login_page_mode": "selected",
+                "login_page_selected_template_id": "image-lab",
+                "login_page_enabled_template_ids": ["image-lab"],
+                "login_page_image_lab_hero_description": "用一张视觉邀请函进入创作现场。",
+            }
+        },
+    )
+    assert updated.status_code == 200
+
+    response = TestClient(app).get("/api/public/login-page-config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "template_id": "image-lab",
+        "template_name": "Image Lab",
+        "content": {"hero_description": "用一张视觉邀请函进入创作现场。"},
+        "assets": {"hero_image": "/hero.png"},
+    }
+
+
+def test_public_login_page_config_falls_back_when_selected_template_disabled(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    updated = client.patch(
+        "/api/settings",
+        json={
+            "values": {
+                "login_page_mode": "selected",
+                "login_page_selected_template_id": "image-lab",
+                "login_page_enabled_template_ids": ["codex-orbit"],
+            }
+        },
+    )
+    assert updated.status_code == 200
+
+    response = TestClient(app).get("/api/public/login-page-config")
+
+    assert response.status_code == 200
+    assert response.json()["template_id"] == "codex-orbit"
+
+
 def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
@@ -1370,6 +1426,312 @@ def test_text_generation_config_test_api_reports_missing_real_provider_config(co
 
     assert response.status_code == 400
     assert "真实供应商必须选择供应商档案" in response.json()["detail"]
+
+
+def test_provider_config_supports_openai_chat_completions_text_profiles_and_bindings(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Chat Completions 文案网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://chat-text.example/v1",
+            "api_key": "chat-text-secret-key",
+            "capabilities": ["text_chat_completions"],
+            "default_models": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    profile = created.json()
+    profile_id = profile["id"]
+    assert profile["provider_type"] == "openai_compatible"
+    assert profile["capabilities"] == ["text_chat_completions"]
+    assert "chat-text-secret-key" not in str(profile)
+
+    rejected_binding = client.patch(
+        "/api/settings/provider-bindings/text",
+        json={
+            "provider_kind": "openai",
+            "provider_profile_id": profile_id,
+            "model_settings": {"brief_model": "gpt-4.1", "copy_model": "gpt-4.1"},
+            "config": {},
+        },
+    )
+    assert rejected_binding.status_code == 400
+    assert "不支持当前接口能力" in rejected_binding.json()["detail"]
+
+    text_binding = client.patch(
+        "/api/settings/provider-bindings/text",
+        json={
+            "provider_kind": "openai_chat_completions",
+            "provider_profile_id": profile_id,
+            "model_settings": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+            "config": {},
+        },
+    )
+    assert text_binding.status_code == 200
+    assert text_binding.json()["provider_kind"] == "openai_chat_completions"
+    assert text_binding.json()["config"] == {"structured_json_response_format_enabled": False}
+
+    text_config = resolve_text_provider_config()
+    assert text_config.provider_kind == "openai_chat_completions"
+    assert text_config.api_key == "chat-text-secret-key"
+    assert text_config.base_url == "https://chat-text.example/v1"
+    assert text_config.brief_model == "grok-brief"
+    assert text_config.copy_model == "grok-copy"
+    assert text_config.structured_json_response_format_enabled is False
+
+    exported = client.get("/api/settings/export")
+    assert exported.status_code == 200
+    document = exported.json()
+    exported_profile = next(item for item in document["provider_profiles"] if item["id"] == profile_id)
+    assert exported_profile["capabilities"] == ["text_chat_completions"]
+    exported_text = next(item for item in document["provider_bindings"] if item["purpose"] == "text")
+    assert exported_text["provider_kind"] == "openai_chat_completions"
+    assert exported_text["config"] == {"structured_json_response_format_enabled": False}
+
+
+def test_chat_completions_generation_config_round_trips_structured_json_response_format(
+    configured_env: Path,
+) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Chat Completions JSON 网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://chat-json.example/v1",
+            "api_key": "chat-json-secret-key",
+            "capabilities": ["text_chat_completions"],
+            "default_models": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+
+    generation_config = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_ids": [],
+            "name": "Chat Completions JSON 文案",
+            "purpose": "text",
+            "provider_kind": "openai_chat_completions",
+            "provider_profile_id": created.json()["id"],
+            "model_settings": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+            "config": {"structured_json_response_format_enabled": True},
+            "priority": 100,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert generation_config.status_code == 200
+    payload = generation_config.json()
+    assert payload["config"] == {"structured_json_response_format_enabled": True}
+
+    text_config = resolve_text_provider_config(generation_config_id=payload["id"])
+    assert text_config.provider_kind == "openai_chat_completions"
+    assert text_config.structured_json_response_format_enabled is True
+
+    exported = client.get("/api/settings/export")
+    assert exported.status_code == 200
+    exported_generation_config = next(
+        item for item in exported.json()["generation_configs"] if item["id"] == payload["id"]
+    )
+    assert exported_generation_config["config"] == {"structured_json_response_format_enabled": True}
+
+
+def test_text_generation_config_test_api_runs_openai_chat_completions_provider(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.application.contracts import CopyPayloadV2, CreativeBriefPayload, FreeformCopyContent
+    from inspiration_one_backend.presentation.api import create_app
+
+    calls: list[str] = []
+
+    def fake_generate_brief(self, inspiration):
+        calls.append(f"brief:{self.provider_name}:{inspiration.name}")
+        return (
+            CreativeBriefPayload(
+                positioning="通勤杯定位",
+                audience="上班族",
+                selling_angles=["保温", "轻便", "好清洁"],
+                taboo_phrases=[],
+                poster_style_hint="白底",
+            ),
+            self.brief_model,
+        )
+
+    def fake_generate_copy(self, inspiration, brief, config=None, reference_images=None):
+        calls.append(f"copy:{self.provider_name}:{brief.positioning}:{len(reference_images or [])}")
+        return (
+            CopyPayloadV2(
+                summary=f"{inspiration.name} 主图文案",
+                content=FreeformCopyContent(text="轻便保温，通勤随手带。"),
+            ),
+            self.copy_model,
+        )
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider."
+        "OpenAIChatCompletionsTextProvider.generate_brief",
+        fake_generate_brief,
+    )
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider."
+        "OpenAIChatCompletionsTextProvider.generate_copy",
+        fake_generate_copy,
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Chat Completions 测试网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://chat-test.example/v1",
+            "api_key": "chat-test-secret-key",
+            "capabilities": ["text_chat_completions"],
+            "default_models": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+
+    response = client.post(
+        "/api/settings/generation-configs/test-text",
+        json={
+            "generation_config": {
+                "name": "Chat Completions 文案测试",
+                "purpose": "text",
+                "provider_kind": "openai_chat_completions",
+                "provider_profile_id": created.json()["id"],
+                "model_settings": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+                "config": {},
+                "priority": 100,
+                "max_concurrency": 1,
+                "enabled": True,
+            },
+            "inspiration": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
+            "copy_request": {"instruction": "突出保温和便携", "output_mode": "blocks"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generation_config_id"] is None
+    assert payload["provider_kind"] == "openai_chat_completions"
+    assert payload["brief_model"] == "grok-brief"
+    assert payload["copy_model"] == "grok-copy"
+    assert payload["copy_result"]["summary"] == "便携咖啡杯 主图文案"
+    assert calls == [
+        "brief:openai-chat-completions:便携咖啡杯",
+        "copy:openai-chat-completions:通勤杯定位:0",
+    ]
+
+
+def test_text_generation_config_json_response_format_test_api_sends_response_format(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    calls: list[dict] = []
+
+    class DummyResponse:
+        headers = {"content-type": "application/json"}
+
+        def __init__(self) -> None:
+            content = '{"ok":true,"kind":"structured_json_response_format_test"}'
+            self._payload = {"choices": [{"message": {"content": content}}]}
+            self.text = str(self._payload)
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._payload
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            calls.append({"url": url, "json": json})
+            return DummyResponse()
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Chat Completions JSON 测试网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://chat-json-test.example/v1",
+            "api_key": "chat-json-test-secret-key",
+            "capabilities": ["text_chat_completions"],
+            "default_models": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+
+    response = client.post(
+        "/api/settings/generation-configs/test-json-response-format",
+        json={
+            "generation_config": {
+                "name": "Chat Completions JSON 模式测试",
+                "purpose": "text",
+                "provider_kind": "openai_chat_completions",
+                "provider_profile_id": created.json()["id"],
+                "model_settings": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+                "config": {"structured_json_response_format_enabled": True},
+                "priority": 100,
+                "max_concurrency": 1,
+                "enabled": True,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider_kind"] == "openai_chat_completions"
+    assert payload["model"] == "grok-copy"
+    assert payload["parsed_json"] == {"ok": True, "kind": "structured_json_response_format_test"}
+    assert calls[0]["url"] == "https://chat-json-test.example/v1/chat/completions"
+    assert calls[0]["json"]["stream"] is False
+    assert calls[0]["json"]["response_format"] == {"type": "json_object"}
 
 
 def test_real_image_binding_switches_visible_poster_mode_to_generated(configured_env: Path) -> None:

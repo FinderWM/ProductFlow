@@ -20,6 +20,33 @@ from inspiration_one_backend.domain.ui_layout import (
 
 ConfigInputType = Literal["text", "password", "number", "boolean", "select", "multi_select", "textarea"]
 IMAGE_SIZE_PATTERN = re.compile(r"^\d+x\d+$")
+DEFAULT_LOGIN_PAGE_TEMPLATE_ID = "codex-orbit"
+LOGIN_PAGE_TEMPLATE_IDS: tuple[str, ...] = ("codex-orbit", "fluid-mist", "image-lab")
+LOGIN_PAGE_TEMPLATE_NAMES: dict[str, str] = {
+    "codex-orbit": "Codex Orbit",
+    "fluid-mist": "Fluid Mist",
+    "image-lab": "Image Lab",
+}
+LOGIN_PAGE_MODE_VALUES: tuple[str, ...] = ("random", "selected")
+DEFAULT_LOGIN_PAGE_MODE = "random"
+DEFAULT_LOGIN_PAGE_ENABLED_TEMPLATE_IDS_TEXT = ",".join(LOGIN_PAGE_TEMPLATE_IDS)
+LOGIN_PAGE_CATEGORY = "登录页"
+DEFAULT_LOGIN_PAGE_CODEX_ORBIT_BRAND_SUBTITLE = "Orbital access concept"
+DEFAULT_LOGIN_PAGE_CODEX_ORBIT_HERO_TITLE = "进入你的创意工作台"
+DEFAULT_LOGIN_PAGE_CODEX_ORBIT_HERO_DESCRIPTION = (
+    "从灵感编排、图像会话到素材沉淀，Inspiration One 将创作链路收束成一座私有控制台。"
+)
+DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_TITLE = "欢迎回来，继续创作"
+DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_DESCRIPTION = "登录你的工作台，开启灵感之旅"
+DEFAULT_LOGIN_PAGE_IMAGE_LAB_HERO_DESCRIPTION = "登录页像一张摄影棚邀请函，先给情绪和记忆点，再承载最短的进入路径。"
+LOGIN_PAGE_TEXT_CONFIG_LIMITS: dict[str, int] = {
+    "login_page_codex_orbit_brand_subtitle": 48,
+    "login_page_codex_orbit_hero_title": 48,
+    "login_page_codex_orbit_hero_description": 180,
+    "login_page_fluid_mist_greeting_title": 48,
+    "login_page_fluid_mist_greeting_description": 120,
+    "login_page_image_lab_hero_description": 180,
+}
 DEFAULT_IMAGE_GENERATION_MAX_DIMENSION = 3840
 IMAGE_GENERATION_MIN_DIMENSION = 512
 IMAGE_GENERATION_DIMENSION_MULTIPLE = 16
@@ -274,6 +301,16 @@ class Settings(BaseSettings):
         ge=GALLERY_VIEW_DEDUP_WINDOW_MIN_MINUTES,
         le=GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES,
     )
+    login_page_mode: str = DEFAULT_LOGIN_PAGE_MODE
+    login_page_selected_template_id: str = ""
+    login_page_enabled_template_ids: str = DEFAULT_LOGIN_PAGE_ENABLED_TEMPLATE_IDS_TEXT
+    login_page_codex_orbit_brand_subtitle: str = DEFAULT_LOGIN_PAGE_CODEX_ORBIT_BRAND_SUBTITLE
+    login_page_codex_orbit_hero_title: str = DEFAULT_LOGIN_PAGE_CODEX_ORBIT_HERO_TITLE
+    login_page_codex_orbit_hero_description: str = DEFAULT_LOGIN_PAGE_CODEX_ORBIT_HERO_DESCRIPTION
+    login_page_fluid_mist_greeting_title: str = DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_TITLE
+    login_page_fluid_mist_greeting_description: str = DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_DESCRIPTION
+    login_page_image_lab_hero_description: str = DEFAULT_LOGIN_PAGE_IMAGE_LAB_HERO_DESCRIPTION
+    login_page_image_lab_hero_image_asset_id: str = ""
     admin_access_required: bool = True
     deletion_enabled: bool = False
 
@@ -339,6 +376,54 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_image_tool_allowed_fields(cls, value: Any) -> str:
         return normalize_image_tool_allowed_fields(value)
+
+    @field_validator("login_page_mode", mode="before")
+    @classmethod
+    def _normalize_login_page_mode(cls, value: Any) -> str:
+        normalized = DEFAULT_LOGIN_PAGE_MODE if value is None else str(value).strip()
+        if normalized in LOGIN_PAGE_MODE_VALUES:
+            return normalized
+        supported = ", ".join(LOGIN_PAGE_MODE_VALUES)
+        raise ValueError(f"登录页选择方式必须是以下之一: {supported}")
+
+    @field_validator("login_page_selected_template_id", mode="before")
+    @classmethod
+    def _normalize_login_page_selected_template_id(cls, value: Any) -> str:
+        normalized = "" if value is None else str(value).strip()
+        if not normalized or normalized in LOGIN_PAGE_TEMPLATE_IDS:
+            return normalized
+        supported = ", ".join(LOGIN_PAGE_TEMPLATE_IDS)
+        raise ValueError(f"指定登录页必须是以下之一: {supported}")
+
+    @field_validator("login_page_enabled_template_ids", mode="before")
+    @classmethod
+    def _normalize_login_page_enabled_template_ids(cls, value: Any) -> str:
+        return normalize_login_page_template_ids(value)
+
+    @field_validator(
+        "login_page_codex_orbit_brand_subtitle",
+        "login_page_codex_orbit_hero_title",
+        "login_page_codex_orbit_hero_description",
+        "login_page_fluid_mist_greeting_title",
+        "login_page_fluid_mist_greeting_description",
+        "login_page_image_lab_hero_description",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_login_page_text(cls, value: Any, info: ValidationInfo) -> str:
+        normalized = "" if value is None else str(value).strip()
+        maximum = LOGIN_PAGE_TEXT_CONFIG_LIMITS.get(info.field_name)
+        if maximum is not None and len(normalized) > maximum:
+            raise ValueError(f"{info.field_name} 不能超过 {maximum} 个字符")
+        return normalized
+
+    @field_validator("login_page_image_lab_hero_image_asset_id", mode="before")
+    @classmethod
+    def _normalize_login_page_asset_id(cls, value: Any) -> str:
+        normalized = "" if value is None else str(value).strip()
+        if len(normalized) > 64:
+            raise ValueError("登录页资源库图片 ID 不能超过 64 个字符")
+        return normalized
 
     @model_validator(mode="after")
     def _validate_storage_backend_config(self) -> Settings:
@@ -751,6 +836,98 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         maximum=GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES,
     ),
     ConfigDefinition(
+        key="login_page_mode",
+        label="登录页选择方式",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="select",
+        options=(
+            ConfigOption("random", "随机"),
+            ConfigOption("selected", "指定"),
+        ),
+        description="随机模式会从启用模板中选择；指定模式使用下方指定模板，异常时回退到 Codex Orbit。",
+    ),
+    ConfigDefinition(
+        key="login_page_selected_template_id",
+        label="指定登录页",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="select",
+        options=(
+            ConfigOption("", "未指定"),
+            *(
+                ConfigOption(template_id, LOGIN_PAGE_TEMPLATE_NAMES[template_id])
+                for template_id in LOGIN_PAGE_TEMPLATE_IDS
+            ),
+        ),
+        description="仅在选择方式为指定时生效。",
+        optional=True,
+    ),
+    ConfigDefinition(
+        key="login_page_enabled_template_ids",
+        label="随机候选模板",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="multi_select",
+        options=tuple(
+            ConfigOption(template_id, LOGIN_PAGE_TEMPLATE_NAMES[template_id]) for template_id in LOGIN_PAGE_TEMPLATE_IDS
+        ),
+        description="随机模式只会从这些模板中选择，至少保留一个。",
+    ),
+    ConfigDefinition(
+        key="login_page_codex_orbit_brand_subtitle",
+        label="Codex Orbit 品牌副标题",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="text",
+        description="留空时使用模板默认文案；最多 48 个字符。",
+        optional=True,
+    ),
+    ConfigDefinition(
+        key="login_page_codex_orbit_hero_title",
+        label="Codex Orbit 主标题",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="text",
+        description="留空时使用模板默认文案；最多 48 个字符。",
+        optional=True,
+    ),
+    ConfigDefinition(
+        key="login_page_codex_orbit_hero_description",
+        label="Codex Orbit 主说明",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="textarea",
+        description="留空时使用模板默认文案；最多 180 个字符。",
+        optional=True,
+    ),
+    ConfigDefinition(
+        key="login_page_fluid_mist_greeting_title",
+        label="Fluid Mist 欢迎标题",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="text",
+        description="留空时使用模板默认文案；最多 48 个字符。",
+        optional=True,
+    ),
+    ConfigDefinition(
+        key="login_page_fluid_mist_greeting_description",
+        label="Fluid Mist 欢迎说明",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="text",
+        description="留空时使用模板默认文案；最多 120 个字符。",
+        optional=True,
+    ),
+    ConfigDefinition(
+        key="login_page_image_lab_hero_description",
+        label="Image Lab 英雄图说明",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="textarea",
+        description="留空时使用模板默认文案；最多 180 个字符。",
+        optional=True,
+    ),
+    ConfigDefinition(
+        key="login_page_image_lab_hero_image_asset_id",
+        label="Image Lab 英雄图资源",
+        category=LOGIN_PAGE_CATEGORY,
+        input_type="text",
+        description="留空使用默认 /hero.png；也可在下方从资源库图片中选择。",
+        optional=True,
+    ),
+    ConfigDefinition(
         key="deletion_enabled",
         label="启用业务删除",
         category="安全与运维",
@@ -879,6 +1056,42 @@ def normalize_image_tool_allowed_fields(value: Any) -> str:
     return ",".join(parse_image_tool_allowed_fields(value))
 
 
+def parse_login_page_template_ids(value: Any) -> tuple[str, ...]:
+    if value is None:
+        parts: list[str] = []
+    elif isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[\s,]+", value) if part.strip()]
+    elif isinstance(value, list | tuple | set):
+        parts = [str(part).strip() for part in value if str(part).strip()]
+    else:
+        parts = [str(value).strip()] if str(value).strip() else []
+
+    selected = set(parts)
+    unknown = selected - set(LOGIN_PAGE_TEMPLATE_IDS)
+    if unknown:
+        raise ValueError(f"随机候选模板包含不支持的登录页: {', '.join(sorted(unknown))}")
+    ordered = tuple(template_id for template_id in LOGIN_PAGE_TEMPLATE_IDS if template_id in selected)
+    if not ordered:
+        raise ValueError("随机候选模板至少保留一个")
+    return ordered
+
+
+def normalize_login_page_template_ids(value: Any) -> str:
+    return ",".join(parse_login_page_template_ids(value))
+
+
+def parse_config_multi_select(key: str, value: Any) -> tuple[str, ...]:
+    if key == "image_tool_allowed_fields":
+        return parse_image_tool_allowed_fields(value)
+    if key == "login_page_enabled_template_ids":
+        return parse_login_page_template_ids(value)
+    raise ValueError(f"未知多选配置项: {key}")
+
+
+def normalize_config_multi_select(key: str, value: Any) -> str:
+    return ",".join(parse_config_multi_select(key, value))
+
+
 def filter_image_tool_options(
     tool_options: Mapping[str, Any] | None,
     *,
@@ -916,7 +1129,7 @@ def normalize_config_value(key: str, value: Any) -> str:
         raise ValueError(f"{definition.label} 必须是布尔值")
 
     if definition.input_type == "multi_select":
-        return normalize_image_tool_allowed_fields(value)
+        return normalize_config_multi_select(key, value)
 
     if definition.input_type == "number":
         if definition.optional and (value is None or str(value).strip() == ""):
@@ -941,6 +1154,12 @@ def normalize_config_value(key: str, value: Any) -> str:
         if normalized not in allowed_values:
             allowed_text = ", ".join(sorted(allowed_values))
             raise ValueError(f"{definition.label} 必须是以下之一: {allowed_text}")
+    if key in LOGIN_PAGE_TEXT_CONFIG_LIMITS:
+        maximum = LOGIN_PAGE_TEXT_CONFIG_LIMITS[key]
+        if len(normalized) > maximum:
+            raise ValueError(f"{definition.label} 不能超过 {maximum} 个字符")
+    if key == "login_page_image_lab_hero_image_asset_id" and len(normalized) > 64:
+        raise ValueError("登录页资源库图片 ID 不能超过 64 个字符")
     return normalized
 
 

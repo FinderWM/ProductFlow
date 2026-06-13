@@ -40,6 +40,7 @@ import type {
   InspirationDetail,
   InspirationHistory,
   InspirationInitialWorkflowEntry,
+  LoginPageConfig,
   ProviderBinding,
   ProviderBindingUpdateRequest,
   ProviderConfigResponse,
@@ -72,6 +73,8 @@ import type {
   SettingsImportPreviewResponse,
   SaveResourceLibraryAssetInput,
   SessionState,
+  TextGenerationConfigJsonResponseFormatTestRequest,
+  TextGenerationConfigJsonResponseFormatTestResponse,
   TextGenerationConfigTestRequest,
   TextGenerationConfigTestResponse,
   UpdateCanvasTemplateCategoryInput,
@@ -337,6 +340,9 @@ export const api = {
   destroySession(): Promise<{ ok: boolean }> {
     return request("/api/auth/session", { method: "DELETE" });
   },
+  getLoginPageConfig(): Promise<LoginPageConfig> {
+    return request<LoginPageConfig>("/api/public/login-page-config");
+  },
   listRbacUsers(input?: {
     page?: number;
     page_size?: number;
@@ -574,6 +580,14 @@ export const api = {
   },
   testTextGenerationConfig(payload: TextGenerationConfigTestRequest): Promise<TextGenerationConfigTestResponse> {
     return request("/api/settings/generation-configs/test-text", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  testTextGenerationConfigJsonResponseFormat(
+    payload: TextGenerationConfigJsonResponseFormatTestRequest,
+  ): Promise<TextGenerationConfigJsonResponseFormatTestResponse> {
+    return request("/api/settings/generation-configs/test-json-response-format", {
       method: "POST",
       body: JSON.stringify(payload),
     });

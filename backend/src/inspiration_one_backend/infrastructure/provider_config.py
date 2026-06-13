@@ -30,22 +30,25 @@ PROVIDER_TYPE_OPENAI_COMPATIBLE = "openai_compatible"
 PROVIDER_TYPE_GOOGLE_GEMINI = "google_gemini"
 PROVIDER_TYPES = {PROVIDER_TYPE_OPENAI_COMPATIBLE, PROVIDER_TYPE_GOOGLE_GEMINI}
 
-TEXT_PROVIDER_KINDS = {"mock", "openai"}
+TEXT_PROVIDER_KINDS = {"mock", "openai", "openai_chat_completions"}
 IMAGE_PROVIDER_KINDS = {"mock", "openai_responses", "openai_images", "openai_chat_image", "google_gemini_image"}
 REAL_IMAGE_PROVIDER_KINDS = IMAGE_PROVIDER_KINDS - {"mock"}
 PROVIDER_PURPOSES = {TEXT_PURPOSE, IMAGE_PURPOSE}
 CAPABILITY_TEXT_RESPONSES = "text_responses"
+CAPABILITY_TEXT_CHAT_COMPLETIONS = "text_chat_completions"
 CAPABILITY_IMAGE_RESPONSES = "image_responses"
 CAPABILITY_IMAGE_IMAGES = "image_images"
 CAPABILITY_IMAGE_CHAT = "image_chat"
 CAPABILITY_IMAGE_GOOGLE_GEMINI = "image_google_gemini"
 PROVIDER_CAPABILITIES = {
     CAPABILITY_TEXT_RESPONSES,
+    CAPABILITY_TEXT_CHAT_COMPLETIONS,
     CAPABILITY_IMAGE_RESPONSES,
     CAPABILITY_IMAGE_IMAGES,
     CAPABILITY_IMAGE_CHAT,
     CAPABILITY_IMAGE_GOOGLE_GEMINI,
 }
+TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY = "structured_json_response_format_enabled"
 UNSET_PROVIDER_FIELD = object()
 DEFAULT_GENERATION_CONFIG_PRIORITY = 100
 DEFAULT_GENERATION_CONFIG_MAX_CONCURRENCY = 1
@@ -77,12 +80,13 @@ LEGACY_PROVIDER_CONFIG_KEYS = {
 
 @dataclass(frozen=True, slots=True)
 class ResolvedTextProviderConfig:
-    provider_kind: Literal["mock", "openai"]
+    provider_kind: Literal["mock", "openai", "openai_chat_completions"]
     brief_model: str
     copy_model: str
     provider_profile_id: str | None = None
     api_key: str | None = None
     base_url: str | None = None
+    structured_json_response_format_enabled: bool = False
     generation_config_id: str | None = None
     generation_config_name: str | None = None
 
@@ -175,20 +179,20 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
     text_kind = _normalize_provider_kind(settings.text_provider_kind, allowed=TEXT_PROVIDER_KINDS, default="mock")
     image_kind = _normalize_provider_kind(settings.image_provider_kind, allowed=IMAGE_PROVIDER_KINDS, default="mock")
 
-    if text_kind == "openai":
+    if text_kind in {"openai", "openai_chat_completions"}:
         text_profile = _profile_for_legacy_connection(
             session,
             profiles_by_connection,
             base_url=settings.text_base_url,
             api_key=settings.text_api_key,
-            capability=CAPABILITY_TEXT_RESPONSES,
+            capability=_capability_for_kind(text_kind),
         )
         add_generation_config(
             session,
             resource_group_id=default_group_id,
             name="默认文案配置",
             purpose=TEXT_PURPOSE,
-            provider_kind="openai",
+            provider_kind=text_kind,
             provider_profile_id=text_profile.id,
             model_settings={
                 "brief_model": settings.text_brief_model,
@@ -878,13 +882,13 @@ def resolve_text_provider_config_from_draft(
             ),
             generation_config_name=name,
         )
-    if provider_kind != "openai":
+    if provider_kind not in {"openai", "openai_chat_completions"}:
         raise RuntimeError(f"暂不支持的文案 provider: {provider_kind}")
     profile = session.get(ProviderProfile, provider_profile_id) if provider_profile_id else None
     if profile is None or profile.archived_at is not None:
         raise RuntimeError("供应商不存在")
     return ResolvedTextProviderConfig(
-        provider_kind="openai",
+        provider_kind=provider_kind,  # type: ignore[arg-type]
         brief_model=_require_text_value(
             normalized_model_settings,
             "brief_model",
@@ -900,6 +904,10 @@ def resolve_text_provider_config_from_draft(
         provider_profile_id=profile.id,
         api_key=profile.api_key,
         base_url=profile.base_url,
+        structured_json_response_format_enabled=_text_structured_json_response_format_enabled(
+            normalized_config,
+            provider_kind=provider_kind,
+        ),
         generation_config_name=name,
     )
 
@@ -1145,12 +1153,12 @@ def _resolved_text_provider_config_from_generation_config(
             generation_config_id=generation_config.id,
             generation_config_name=generation_config.name,
         )
-    if kind != "openai":
+    if kind not in {"openai", "openai_chat_completions"}:
         raise RuntimeError(f"暂不支持的文案 provider: {kind}")
     profile = _require_active_profile_for_config(generation_config)
-    _require_capability(profile, CAPABILITY_TEXT_RESPONSES)
+    _require_capability(profile, _capability_for_kind(kind))
     return ResolvedTextProviderConfig(
-        provider_kind="openai",
+        provider_kind=kind,  # type: ignore[arg-type]
         brief_model=_require_text_value(
             generation_config.model_settings_json,
             "brief_model",
@@ -1166,6 +1174,10 @@ def _resolved_text_provider_config_from_generation_config(
         provider_profile_id=profile.id,
         api_key=profile.api_key,
         base_url=profile.base_url,
+        structured_json_response_format_enabled=_text_structured_json_response_format_enabled(
+            dict(generation_config.config_json or {}),
+            provider_kind=kind,
+        ),
         generation_config_id=generation_config.id,
         generation_config_name=generation_config.name,
     )
@@ -1837,6 +1849,8 @@ def _local_stat_date(value: datetime) -> date:
 def _capability_for_kind(provider_kind: str) -> str:
     if provider_kind == "openai":
         return CAPABILITY_TEXT_RESPONSES
+    if provider_kind == "openai_chat_completions":
+        return CAPABILITY_TEXT_CHAT_COMPLETIONS
     if provider_kind == "openai_responses":
         return CAPABILITY_IMAGE_RESPONSES
     if provider_kind == "openai_images":
@@ -1900,6 +1914,15 @@ def _normalize_text_model_settings(model_settings: dict[str, Any]) -> dict[str, 
 
 
 def _normalize_binding_config(*, purpose: str, provider_kind: str, config: dict[str, Any]) -> dict[str, Any]:
+    if purpose == TEXT_PURPOSE:
+        if provider_kind == "openai_chat_completions":
+            return {
+                TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY: _optional_bool(
+                    config.get(TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY),
+                    default=False,
+                )
+            }
+        return {}
     if purpose != IMAGE_PURPOSE:
         return {}
     if provider_kind == "openai_responses":
@@ -1933,6 +1956,12 @@ def _normalize_binding_config(*, purpose: str, provider_kind: str, config: dict[
             if value is not None
         }
     return {}
+
+
+def _text_structured_json_response_format_enabled(config: dict[str, Any], *, provider_kind: str) -> bool:
+    if provider_kind != "openai_chat_completions":
+        return False
+    return _optional_bool(config.get(TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY), default=False)
 
 
 def _require_text_value(

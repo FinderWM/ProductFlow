@@ -35,6 +35,10 @@ Current query key patterns:
 - Runtime config: `['runtime-config']` in `InspirationDetailPage.tsx`, `InspirationListPage.tsx`, and `ImageChatPage.tsx`.
 - Full settings config: `['config']` in `SettingsPage.tsx`; successful settings saves/resets must invalidate
   `['runtime-config']` when they can affect public runtime behavior.
+- Provider config mutations in `SettingsPage.tsx` use `['provider-config']`. When a write endpoint returns the changed
+  provider profile, generation config, or resource group, merge that response into `['provider-config']` after any
+  related invalidation/refetch completes. Immediate refetches can race with backend transaction finalization and return the
+  previous list, so the mutation response must remain the final local cache source for the changed record.
 - Settings import/export: successful import must refresh or invalidate settings/provider/runtime queries plus
   `['canvas-templates']` and `['canvas-template-categories']` because import can replace template governance data.
 - Generation config status: `['generation-config-status', startDate, endDate]` in `StatusPage.tsx`; fetch
