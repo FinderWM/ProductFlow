@@ -41,7 +41,7 @@
   opacity: 0.72;
 }
 
-/* Codex Orbit */
+/* Command Orbit */
 .pf-login-orbit {
   --void: #050505;
   --void-2: #090b0b;
@@ -130,7 +130,7 @@
 .pf-login-orbit .stage {
   position: relative;
   z-index: 1;
-  width: min(1440px, calc(100% - 56px));
+  width: calc(100% - 56px);
   min-height: 100dvh;
   margin: 0 auto;
   padding: 28px 0;
@@ -573,7 +573,7 @@
 }
 
 .pf-login-orbit .satellite-b {
-  right: 7%;
+  right: 1%;
   bottom: 12%;
   width: 260px;
   transform: translate3d(calc(var(--satellite-x) * -1), calc(var(--satellite-y) * -1), 0) rotate(5deg);
@@ -1229,7 +1229,7 @@
 .pf-login-lab .brand {
   position: fixed;
   top: clamp(18px, calc(1.2vw + 10px), 26px);
-  left: 50px;
+  left: 10px;
   z-index: 4;
   display: block;
   max-width: min(64vw, 940px);
@@ -1953,7 +1953,7 @@
 
   .pf-login-lab .brand {
     top: 22px;
-    left: 50px;
+    left: 10px;
     max-width: calc(100% - 24px);
     font-size: clamp(56px, 9.4vw, 82px);
   }
@@ -2085,7 +2085,7 @@
 
   .pf-login-lab .brand {
     top: 18px;
-    left: 50px;
+    left: 10px;
     max-width: calc(100% - 20px);
     font-size: clamp(39px, 11.2vw, 47px);
   }

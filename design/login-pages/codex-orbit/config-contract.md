@@ -1,4 +1,4 @@
-# Codex Orbit 登录页配置契约
+# Command Orbit 登录页配置契约
 
 `index.html` 是视觉、布局、动效和登录框结构参考；本文件定义后续实现时可配置字段的契约。
 
@@ -7,7 +7,7 @@
 ```json
 {
   "template_id": "codex-orbit",
-  "template_name": "Codex Orbit",
+  "template_name": "Command Orbit",
   "default_selection_mode": "random",
   "assets": []
 }

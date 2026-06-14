@@ -30,7 +30,7 @@ interface LoginFormModel {
 
 const DEFAULT_LOGIN_PAGE_CONFIG: LoginPageConfig = {
   template_id: "codex-orbit",
-  template_name: "Codex Orbit",
+  template_name: "Command Orbit",
   content: {
     brand_subtitle: "Orbital access concept",
     hero_title: "进入你的创意工作台",
@@ -369,9 +369,87 @@ function CodexOrbitLogin({ config, form }: { config: LoginPageConfig; form: Logi
 
 function FluidMistLogin({ config, form }: { config: LoginPageConfig; form: LoginFormModel }) {
   const [showPassword, setShowPassword] = useState(false);
+  const backgroundRef = useRef<HTMLDivElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const greetingTitle = textOrDefault(config.content.greeting_title, "欢迎回来，继续创作");
   const greetingDescription = textOrDefault(config.content.greeting_description, "登录你的工作台，开启灵感之旅");
+
+  useEffect(() => {
+    const background = backgroundRef.current;
+    if (
+      !background ||
+      !window.matchMedia("(pointer: fine)").matches ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return undefined;
+    }
+
+    const blobs = Array.from(background.querySelectorAll<HTMLElement>(".mesh-blob"));
+    let pointerX = window.innerWidth / 2;
+    let pointerY = window.innerHeight / 2;
+    let motionFrame = 0;
+    let motionTargets: Array<{
+      el: HTMLElement;
+      factor: number;
+      radius: number;
+      centerX: number;
+      centerY: number;
+    }> = [];
+
+    const measureTargets = () => {
+      motionTargets = blobs.map((el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          el,
+          factor: 0.4,
+          radius: 1000,
+          centerX: rect.left + rect.width / 2,
+          centerY: rect.top + rect.height / 2,
+        };
+      });
+    };
+
+    const applyPointerMotion = () => {
+      motionFrame = 0;
+      motionTargets.forEach((target) => {
+        const distance = Math.hypot(pointerX - target.centerX, pointerY - target.centerY);
+        const influence = Math.max(0, 1 - distance / target.radius);
+        const deltaX = (pointerX - target.centerX) * target.factor * influence;
+        const deltaY = (pointerY - target.centerY) * target.factor * influence;
+        target.el.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+      });
+    };
+
+    const requestPointerMotion = () => {
+      if (!motionFrame) {
+        motionFrame = window.requestAnimationFrame(applyPointerMotion);
+      }
+    };
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      requestPointerMotion();
+    };
+
+    const handleResize = () => {
+      measureTargets();
+      requestPointerMotion();
+    };
+
+    measureTargets();
+    document.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("resize", handleResize, { passive: true });
+
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("resize", handleResize);
+      if (motionFrame) {
+        window.cancelAnimationFrame(motionFrame);
+      }
+      blobs.forEach((blob) => blob.style.removeProperty("transform"));
+    };
+  }, []);
 
   const handleCardPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!window.matchMedia("(pointer: fine)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -394,7 +472,7 @@ function FluidMistLogin({ config, form }: { config: LoginPageConfig; form: Login
 
   return (
     <div className="pf-login-mist text-ink antialiased relative">
-      <div aria-hidden="true" className="background-layer">
+      <div ref={backgroundRef} aria-hidden="true" className="background-layer">
         <div className="mesh-blob blob-1" />
         <div className="mesh-blob blob-2" />
         <div className="mesh-blob blob-3" />

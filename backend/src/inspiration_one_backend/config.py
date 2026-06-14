@@ -23,7 +23,7 @@ IMAGE_SIZE_PATTERN = re.compile(r"^\d+x\d+$")
 DEFAULT_LOGIN_PAGE_TEMPLATE_ID = "codex-orbit"
 LOGIN_PAGE_TEMPLATE_IDS: tuple[str, ...] = ("codex-orbit", "fluid-mist", "image-lab")
 LOGIN_PAGE_TEMPLATE_NAMES: dict[str, str] = {
-    "codex-orbit": "Codex Orbit",
+    "codex-orbit": "Command Orbit",
     "fluid-mist": "Fluid Mist",
     "image-lab": "Image Lab",
 }
@@ -844,7 +844,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
             ConfigOption("random", "随机"),
             ConfigOption("selected", "指定"),
         ),
-        description="随机模式会从启用模板中选择；指定模式使用下方指定模板，异常时回退到 Codex Orbit。",
+        description="随机模式会从启用模板中选择；指定模式使用下方指定模板，异常时回退到 Command Orbit。",
     ),
     ConfigDefinition(
         key="login_page_selected_template_id",
@@ -873,7 +873,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ),
     ConfigDefinition(
         key="login_page_codex_orbit_brand_subtitle",
-        label="Codex Orbit 品牌副标题",
+        label="Command Orbit 品牌副标题",
         category=LOGIN_PAGE_CATEGORY,
         input_type="text",
         description="留空时使用模板默认文案；最多 48 个字符。",
@@ -881,7 +881,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ),
     ConfigDefinition(
         key="login_page_codex_orbit_hero_title",
-        label="Codex Orbit 主标题",
+        label="Command Orbit 主标题",
         category=LOGIN_PAGE_CATEGORY,
         input_type="text",
         description="留空时使用模板默认文案；最多 48 个字符。",
@@ -889,7 +889,7 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ),
     ConfigDefinition(
         key="login_page_codex_orbit_hero_description",
-        label="Codex Orbit 主说明",
+        label="Command Orbit 主说明",
         category=LOGIN_PAGE_CATEGORY,
         input_type="textarea",
         description="留空时使用模板默认文案；最多 180 个字符。",
