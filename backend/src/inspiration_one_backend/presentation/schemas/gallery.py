@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from inspiration_one_backend.infrastructure.db.models import ImageGalleryEntry
 from inspiration_one_backend.presentation.schemas.generation_resource_groups import (
@@ -51,6 +51,7 @@ class GalleryEntryResponse(ResourceModerationFields):
     candidate_index: int | None = None
     candidate_count: int | None = None
     base_asset_ids: list[str]
+    base_assets: list[ImageSessionAssetResponse] = Field(default_factory=list)
     base_asset_id: str | None = None
     selected_reference_asset_ids: list[str]
     provider_notes: list[str]
@@ -69,6 +70,23 @@ class GalleryEntryViewResponse(BaseModel):
     id: str
     view_count: int
     counted: bool
+
+
+def _gallery_entry_base_assets(
+    entry: ImageGalleryEntry,
+    round_item,
+) -> list[ImageSessionAssetResponse]:
+    if round_item is None:
+        return []
+    base_asset_ids = image_session_base_asset_ids(round_item)
+    if not base_asset_ids:
+        return []
+    assets_by_id = {asset.id: asset for asset in entry.asset.session.assets}
+    return [
+        serialize_image_session_asset(asset)
+        for asset_id in base_asset_ids
+        if (asset := assets_by_id.get(asset_id)) is not None
+    ]
 
 
 def serialize_gallery_entry(entry: ImageGalleryEntry, *, view_count: int = 0) -> GalleryEntryResponse:
@@ -105,6 +123,7 @@ def serialize_gallery_entry(entry: ImageGalleryEntry, *, view_count: int = 0) ->
         candidate_index=round_item.candidate_index if round_item else None,
         candidate_count=round_item.candidate_count if round_item else None,
         base_asset_ids=image_session_base_asset_ids(round_item) if round_item else [],
+        base_assets=_gallery_entry_base_assets(entry, round_item),
         base_asset_id=round_item.base_asset_id if round_item else None,
         selected_reference_asset_ids=round_item.selected_reference_asset_ids or [] if round_item else [],
         provider_notes=extract_provider_notes(round_item.provider_output_json) if round_item else [],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import desc, select
@@ -54,6 +55,13 @@ class ResourceLibrarySaveResult:
 class ResourceLibrarySourceStatus:
     source_id: str
     asset: ResourceLibraryAsset | None
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceLibraryUploadImage:
+    filename: str
+    mime_type: str
+    content: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +342,50 @@ def save_resource_library_asset_from_source(
         asset=_get_asset_or_raise(session, asset_id, actor_user_id=actor_user_id),
         created=True,
     )
+
+
+def upload_resource_library_assets(
+    session: Session,
+    *,
+    uploads: Sequence[ResourceLibraryUploadImage],
+    group_ids: list[str] | None,
+    actor_user_id: str,
+    storage: LocalStorage | None = None,
+) -> list[ResourceLibraryAsset]:
+    if not uploads:
+        raise BusinessValidationError("请选择要上传的图片")
+
+    normalized_group_ids = _normalize_group_ids(
+        session,
+        group_ids=group_ids,
+        owner_user_id=actor_user_id,
+        use_default_when_empty=True,
+    )
+    storage = storage or LocalStorage()
+    asset_ids: list[str] = []
+    for upload in uploads:
+        relative_path = storage.save_resource_library_asset(actor_user_id, upload.filename, upload.content)
+        storage_metadata = storage.metadata_for(relative_path)
+        asset = ResourceLibraryAsset(
+            owner_user_id=actor_user_id,
+            kind=ResourceLibraryAssetKind.IMAGE,
+            original_filename=upload.filename,
+            mime_type=upload.mime_type or "application/octet-stream",
+            source_type=ResourceLibrarySourceType.UPLOAD,
+            source_resource_id=None,
+            **storage_metadata.as_model_kwargs(),
+        )
+        session.add(asset)
+        session.flush()
+        _replace_asset_group_links(session, asset, normalized_group_ids)
+        asset_ids.append(asset.id)
+
+    session.commit()
+    session.expire_all()
+    return [
+        _get_asset_or_raise(session, asset_id, actor_user_id=actor_user_id)
+        for asset_id in asset_ids
+    ]
 
 
 def update_resource_library_asset_groups(

@@ -72,6 +72,7 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     assert payload["provider_name"] == "mock"
     assert payload["candidate_index"] == 1
     assert payload["candidate_count"] == 2
+    assert payload["base_assets"] == []
     assert payload["image"]["thumbnail_url"].endswith("variant=thumbnail")
 
     saved_again = client.post("/api/gallery", json={"image_session_asset_id": asset_id})
@@ -91,7 +92,74 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     items = listed.json()["items"]
     assert len(items) == 1
     assert items[0]["id"] == payload["id"]
+    assert items[0]["base_assets"] == []
     assert items[0]["image"]["download_url"].startswith("/api/image-session-assets/")
+
+
+def test_gallery_entry_includes_base_assets(configured_env: Path) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created_session = client.post("/api/image-sessions", json={"title": "基图画廊会话"})
+    assert created_session.status_code == 201
+    session_id = created_session.json()["id"]
+
+    first = client.post(
+        f"/api/image-sessions/{session_id}/generate",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "第一张基础图",
+            "size": "1024x1024",
+        },
+    )
+    assert first.status_code == 202
+    first_round = next(round_item for round_item in first.json()["rounds"] if round_item["prompt"] == "第一张基础图")
+    first_asset = first_round["generated_asset"]
+
+    uploaded = client.post(
+        f"/api/image-sessions/{session_id}/reference-images",
+        files=[("reference_images", ("ref-a.png", _make_demo_image_bytes(), "image/png"))],
+    )
+    assert uploaded.status_code == 200
+    reference_asset = uploaded.json()["assets"][0]
+
+    branched = client.post(
+        f"/api/image-sessions/{session_id}/generate",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "带基图保存到画廊",
+            "size": "1024x1024",
+            "base_asset_id": first_asset["id"],
+            "selected_reference_asset_ids": [reference_asset["id"]],
+        },
+    )
+    assert branched.status_code == 202
+    branch_round = next(
+        round_item for round_item in branched.json()["rounds"] if round_item["prompt"] == "带基图保存到画廊"
+    )
+    branch_asset_id = branch_round["generated_asset"]["id"]
+
+    saved = client.post("/api/gallery", json={"image_session_asset_id": branch_asset_id})
+    assert saved.status_code == 201
+    payload = saved.json()
+    assert payload["base_asset_ids"] == [first_asset["id"], reference_asset["id"]]
+    assert [asset["id"] for asset in payload["base_assets"]] == [first_asset["id"], reference_asset["id"]]
+    assert [asset["kind"] for asset in payload["base_assets"]] == ["generated_image", "reference_upload"]
+    assert [asset["original_filename"] for asset in payload["base_assets"]] == [
+        first_asset["original_filename"],
+        "ref-a.png",
+    ]
+    assert all(asset["download_url"].startswith("/api/image-session-assets/") for asset in payload["base_assets"])
+
+    listed = client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
+    assert listed.status_code == 200
+    listed_payload = listed.json()
+    assert listed_payload["total"] == 1
+    assert [asset["id"] for asset in listed_payload["items"][0]["base_assets"]] == [
+        first_asset["id"],
+        reference_asset["id"],
+    ]
 
 
 def test_gallery_list_filters_resource_group_and_keeps_group_metadata(

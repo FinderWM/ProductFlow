@@ -20,7 +20,7 @@
 {
   "login_page_mode": "random",
   "login_page_selected_template_id": "",
-  "login_page_enabled_template_ids": ["codex-orbit", "fluid-mist", "image-lab"]
+  "login_page_enabled_template_ids": ["command-orbit", "fluid-mist", "image-lab"]
 }
 ```
 
@@ -144,8 +144,8 @@ GET /api/public/login-page-config
 ## 兜底规则
 
 - 未配置模板时使用 `random`。
-- `random` 没有可用模板时回退到 `codex-orbit`。
-- `login_page_selected_template_id` 不存在或未启用时回退到 `codex-orbit`。
+- `random` 没有可用模板时回退到 `command-orbit`。
+- `login_page_selected_template_id` 不存在或未启用时回退到 `command-orbit`。
 - `hero_description` 缺失、空字符串或仅空白时使用本文件中的默认值。
 - `hero_image` 缺失时使用模板默认图。
 - 公开接口失败时，前端可直接渲染 `image-lab` 默认内容。

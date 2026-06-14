@@ -103,12 +103,25 @@ export function buildTaskNotificationEventNotification(
         dedupeKey: `image-task-succeeded:${event.task_id}`,
       };
     }
+    if (event.status === "attempt_failed") {
+      const body = imageAttemptFailedBody(event, t);
+      return {
+        title: t("notification.imageAttemptFailed.title"),
+        body,
+        bodyLines: buildAttemptFailedBodyLines(body, event, t),
+        variant: "warning",
+        autoClose: false,
+        dedupeKey: `image-task-attempt-failed:${event.task_id}:${event.attempt ?? event.event_id}`,
+      };
+    }
     if (event.status === "failed") {
+      const body = event.failure_reason
+        ? t("notification.imageFailed.bodyWithReason", { title: event.title, reason: event.failure_reason })
+        : t("notification.imageFailed.body", { title: event.title });
       return {
         title: t("notification.imageFailed.title"),
-        body: event.failure_reason
-          ? t("notification.imageFailed.bodyWithReason", { title: event.title, reason: event.failure_reason })
-          : t("notification.imageFailed.body", { title: event.title }),
+        body,
+        bodyLines: buildTaskFailureBodyLines(body, event, t, { includeAttempt: true }),
         variant: "error",
         autoClose: false,
         dedupeKey: `image-task-failed:${event.task_id}`,
@@ -128,11 +141,13 @@ export function buildTaskNotificationEventNotification(
       };
     }
     if (event.status === "failed") {
+      const body = event.failure_reason
+        ? t("notification.inspirationFailed.bodyWithReason", { name: event.title, reason: event.failure_reason })
+        : t("notification.inspirationFailed.body", { name: event.title });
       return {
         title: t("notification.inspirationFailed.title"),
-        body: event.failure_reason
-          ? t("notification.inspirationFailed.bodyWithReason", { name: event.title, reason: event.failure_reason })
-          : t("notification.inspirationFailed.body", { name: event.title }),
+        body,
+        bodyLines: buildTaskFailureBodyLines(body, event, t, { includeWorkflowNode: true }),
         variant: "error",
         autoClose: false,
         dedupeKey: `workflow-run-failed:${event.task_id}`,
@@ -159,7 +174,12 @@ export function parseTaskNotificationEvent(rawMessage: string): TaskNotification
   if (record.task_kind !== "image_session_generation" && record.task_kind !== "inspiration_workflow") {
     return null;
   }
-  if (record.status !== "succeeded" && record.status !== "failed" && record.status !== "cancelled") {
+  if (
+    record.status !== "succeeded" &&
+    record.status !== "failed" &&
+    record.status !== "cancelled" &&
+    record.status !== "attempt_failed"
+  ) {
     return null;
   }
   const event_id = requiredString(record.event_id);
@@ -181,6 +201,15 @@ export function parseTaskNotificationEvent(rawMessage: string): TaskNotification
     failure_reason: optionalString(record.failure_reason),
     finished_at: optionalString(record.finished_at),
     resource_id,
+    generation_config_id: optionalString(record.generation_config_id),
+    generation_config_name: optionalString(record.generation_config_name),
+    resource_group_id: optionalString(record.resource_group_id),
+    resource_group_name: optionalString(record.resource_group_name),
+    attempt: optionalPositiveInteger(record.attempt),
+    max_attempts: optionalPositiveInteger(record.max_attempts),
+    next_attempt: optionalPositiveInteger(record.next_attempt),
+    node_id: optionalString(record.node_id),
+    node_title: optionalString(record.node_title),
   };
 }
 
@@ -201,7 +230,85 @@ function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function optionalPositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function generationContextLine(event: TaskNotificationEvent, t: TranslateFunction): string | null {
+  const context =
+    event.generation_config_name ??
+    event.generation_config_id ??
+    event.resource_group_name ??
+    event.resource_group_id;
+  return context ? t("notification.generationContext", { context }) : null;
+}
+
+function imageAttemptFailedBody(event: TaskNotificationEvent, t: TranslateFunction): string {
+  if (event.attempt && event.max_attempts) {
+    return t("notification.imageAttemptFailed.body", {
+      title: event.title,
+      attempt: event.attempt,
+      maxAttempts: event.max_attempts,
+    });
+  }
+  if (event.attempt) {
+    return t("notification.imageAttemptFailed.bodyWithoutMax", { title: event.title, attempt: event.attempt });
+  }
+  return t("notification.imageAttemptFailed.bodyUnknown", { title: event.title });
+}
+
+function buildAttemptFailedBodyLines(
+  body: string,
+  event: TaskNotificationEvent,
+  t: TranslateFunction,
+): NonNullable<NotificationInput["bodyLines"]> {
+  const lines: NonNullable<NotificationInput["bodyLines"]> = [{ text: body, tone: "warning" }];
+  if (event.next_attempt && event.max_attempts) {
+    lines.push({
+      text: t("notification.imageAttemptFailed.retryLine", {
+        nextAttempt: event.next_attempt,
+        maxAttempts: event.max_attempts,
+      }),
+      tone: "warning",
+    });
+  }
+  const contextLine = generationContextLine(event, t);
+  if (contextLine) {
+    lines.push({ text: contextLine, tone: "muted" });
+  }
+  if (event.failure_reason) {
+    lines.push({ text: t("notification.failureReasonLine", { reason: event.failure_reason }), tone: "danger" });
+  }
+  return lines;
+}
+
+function buildTaskFailureBodyLines(
+  body: string,
+  event: TaskNotificationEvent,
+  t: TranslateFunction,
+  options: { includeAttempt?: boolean; includeWorkflowNode?: boolean } = {},
+): NotificationInput["bodyLines"] {
+  const lines: NonNullable<NotificationInput["bodyLines"]> = [{ text: body }];
+  if (options.includeWorkflowNode) {
+    const node = event.node_title ?? event.node_id;
+    if (node) {
+      lines.push({ text: t("notification.workflowFailed.nodeLine", { node }), tone: "muted" });
+    }
+  }
+  const contextLine = generationContextLine(event, t);
+  if (contextLine) {
+    lines.push({ text: contextLine, tone: "muted" });
+  }
+  if (options.includeAttempt && event.attempt) {
+    lines.push({ text: t("notification.taskAttemptLine", { attempt: event.attempt }), tone: "muted" });
+  }
+  return lines.length > 1 ? lines : undefined;
+}
+
 function taskNotificationTransitionKey(event: TaskNotificationEvent): string {
+  if (event.status === "attempt_failed") {
+    return `${event.task_kind}:${event.task_id}:${event.status}:${event.attempt ?? event.event_id}`;
+  }
   return `${event.task_kind}:${event.task_id}:${event.status}`;
 }
 
@@ -260,7 +367,11 @@ export function TaskNotificationBridge({ enabled }: { enabled: boolean }) {
         }
         notifiedWebSocketTransitionsRef.current.add(transitionKey);
         if (taskEvent.task_kind === "image_session_generation") {
-          notifiedImageTaskTransitionsRef.current.add(`${taskEvent.task_id}:${taskEvent.status}`);
+          notifiedImageTaskTransitionsRef.current.add(
+            taskEvent.status === "attempt_failed"
+              ? taskNotificationTransitionKey(taskEvent)
+              : `${taskEvent.task_id}:${taskEvent.status}`,
+          );
         } else {
           notifiedWorkflowRunTransitionsRef.current.add(`${taskEvent.task_id}:${taskEvent.status}`);
         }

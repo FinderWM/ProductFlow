@@ -6,7 +6,7 @@
 
 ```json
 {
-  "template_id": "codex-orbit",
+  "template_id": "command-orbit",
   "template_name": "Command Orbit",
   "default_selection_mode": "random",
   "assets": []
@@ -21,7 +21,7 @@
 {
   "login_page_mode": "random",
   "login_page_selected_template_id": "",
-  "login_page_enabled_template_ids": ["codex-orbit", "fluid-mist", "image-lab"]
+  "login_page_enabled_template_ids": ["command-orbit", "fluid-mist", "image-lab"]
 }
 ```
 
@@ -70,7 +70,7 @@
 
 ## 固定字段
 
-以下字段属于 `codex-orbit` 的视觉识别或登录框结构，不允许在配置页修改。
+以下字段属于 `command-orbit` 的视觉识别或登录框结构，不允许在配置页修改。
 
 ```json
 [
@@ -124,7 +124,7 @@ GET /api/public/login-page-config
 
 ```json
 {
-  "template_id": "codex-orbit",
+  "template_id": "command-orbit",
   "content": {
     "brand_subtitle": "Orbital access concept",
     "hero_title": "进入你的创意工作台",
@@ -138,7 +138,7 @@ GET /api/public/login-page-config
 
 - 生产实现不得从公网 CDN 加载运行时脚本、字体或样式；登录页资源应随前端构建产物或后端静态资源本地发布。
 - 登录页应配置 CSP；脚本、样式、图片和表单提交目标默认限制为同源。
-- 模板允许低频背景漂移和轨道心跳动画，以保留 `codex-orbit` 的概念动势。
+- 模板允许低频背景漂移和轨道心跳动画，以保留 `command-orbit` 的概念动势。
 - 空闲状态不得运行 JS 驱动的永久动画循环或其它高频持续合成动画。
 - 指针跟随动效只能在 `pointer: fine` 且非 `prefers-reduced-motion: reduce` 时启用，并且必须按 pointer 事件合并到单个 rAF。
 - 不允许每帧读取布局信息；长期 `will-change` 只允许在真实交互窗口内短暂启用。
@@ -147,7 +147,7 @@ GET /api/public/login-page-config
 ## 兜底规则
 
 - 未配置模板时使用 `random` 模式。
-- `random` 没有可用模板时回退到 `codex-orbit`。
-- `login_page_selected_template_id` 不存在或未启用时回退到 `codex-orbit`。
+- `random` 没有可用模板时回退到 `command-orbit`。
+- `login_page_selected_template_id` 不存在或未启用时回退到 `command-orbit`。
 - 可配置字段缺失、空字符串或仅空白时使用 `default_value`。
-- 公开接口失败时，前端可直接渲染 `codex-orbit` 默认内容。
+- 公开接口失败时，前端可直接渲染 `command-orbit` 默认内容。

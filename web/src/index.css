@@ -1091,6 +1091,17 @@ textarea {
   line-height: 1.25rem;
 }
 
+.pf-workspace-horizontal-switch-tabs {
+  align-items: stretch;
+}
+
+.pf-workspace-horizontal-switch-tabs .pf-settings-generation-tab {
+  min-width: min(9rem, 42vw);
+  padding: 0.625rem 1rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .pf-settings-generation-tab::before {
   content: "";
   position: absolute;
@@ -1386,6 +1397,13 @@ textarea {
   border-bottom-color: color-mix(in srgb, var(--pf-accent) 78%, var(--pf-line-strong));
   color: var(--pf-text);
   box-shadow: 0 -8px 18px -18px color-mix(in srgb, var(--pf-accent) 70%, transparent);
+}
+
+@media (max-width: 640px) {
+  .pf-workspace-horizontal-switch-tabs .pf-settings-generation-tab {
+    min-width: 0;
+    padding-inline: 0.75rem;
+  }
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-prompt-textarea {
@@ -2612,7 +2630,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
-  :is(.pf-side-content, .pf-side-rail, [role="dialog"])
+  :is(.pf-side-content, .pf-side-rail, .pf-rbac-page, [role="dialog"])
   :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
         [type="hidden"]
@@ -2632,7 +2650,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
-  :is(.pf-side-content, .pf-side-rail, [role="dialog"])
+  :is(.pf-side-content, .pf-side-rail, .pf-rbac-page, [role="dialog"])
   :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
         [type="hidden"]
@@ -2650,7 +2668,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
-  :is(.pf-side-content, .pf-side-rail, [role="dialog"])
+  :is(.pf-side-content, .pf-side-rail, .pf-rbac-page, [role="dialog"])
   :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
         [type="hidden"]
@@ -2660,7 +2678,7 @@ textarea {
     button[aria-haspopup="listbox"]
   ):focus,
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
-  :is(.pf-side-content, .pf-side-rail, [role="dialog"])
+  :is(.pf-side-content, .pf-side-rail, .pf-rbac-page, [role="dialog"])
   button[aria-haspopup="listbox"][aria-expanded="true"],
 :root[data-ui-layout-scheme="workspace"] .pf-select-field-surface
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
@@ -2671,7 +2689,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
-  :is(.pf-side-content, .pf-side-rail, [role="dialog"])
+  :is(.pf-side-content, .pf-side-rail, .pf-rbac-page, [role="dialog"])
   :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
         [type="hidden"]
@@ -2688,7 +2706,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
-  :is(.pf-side-content, .pf-side-rail, [role="dialog"])
+  :is(.pf-side-content, .pf-side-rail, .pf-rbac-page, [role="dialog"])
   :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
         [type="hidden"]
@@ -2708,10 +2726,296 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
-  :is(.pf-side-content, .pf-side-rail, [role="dialog"])
+  :is(.pf-side-content, .pf-side-rail, .pf-rbac-page, [role="dialog"])
   :is(input, textarea)::placeholder,
 :root[data-ui-layout-scheme="workspace"] .pf-select-field-surface input::placeholder {
   color: var(--pf-settings-input-placeholder) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"]
+  :is(.pf-workspace-subpage-frame, .pf-image-chat-workspace, .pf-workspace-tool-main, .pf-workspace > main)
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
+        [type="hidden"]
+      ),
+    textarea,
+    select,
+    button[aria-haspopup="listbox"]
+  ) {
+  border-color: var(--pf-settings-input-border) !important;
+  background: var(--pf-settings-input-bg) !important;
+  color: var(--pf-settings-input-color) !important;
+  box-shadow: var(--pf-settings-input-shadow) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"]
+  :is(.pf-workspace-subpage-frame, .pf-image-chat-workspace, .pf-workspace-tool-main, .pf-workspace > main)
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
+        [type="hidden"]
+      ),
+    textarea,
+    select,
+    button[aria-haspopup="listbox"]
+  ):hover:not(:disabled) {
+  border-color: var(--pf-settings-input-border-hover) !important;
+  background: var(--pf-settings-input-bg-hover) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"]
+  :is(.pf-workspace-subpage-frame, .pf-image-chat-workspace, .pf-workspace-tool-main, .pf-workspace > main)
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
+        [type="hidden"]
+      ),
+    textarea,
+    select,
+    button[aria-haspopup="listbox"]
+  ):focus,
+:root[data-ui-layout-scheme="workspace"]
+  :is(.pf-workspace-subpage-frame, .pf-image-chat-workspace, .pf-workspace-tool-main, .pf-workspace > main)
+  button[aria-haspopup="listbox"][aria-expanded="true"] {
+  border-color: var(--pf-settings-input-border-focus) !important;
+  background: var(--pf-settings-input-bg-focus) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"]
+  :is(.pf-workspace-subpage-frame, .pf-image-chat-workspace, .pf-workspace-tool-main, .pf-workspace > main)
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
+        [type="hidden"]
+      ),
+    textarea,
+    select,
+    button[aria-haspopup="listbox"]
+  ):focus-visible {
+  box-shadow: var(--pf-settings-input-shadow-focus) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"]
+  :is(.pf-workspace-subpage-frame, .pf-image-chat-workspace, .pf-workspace-tool-main, .pf-workspace > main)
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
+        [type="hidden"]
+      ),
+    textarea,
+    select,
+    button[aria-haspopup="listbox"]
+  ):disabled {
+  border-color: color-mix(in srgb, var(--pf-settings-input-border) 68%, transparent) !important;
+  background: var(--pf-settings-input-bg-disabled) !important;
+  color: var(--pf-settings-input-disabled-color) !important;
+  opacity: 1;
+}
+
+:root[data-ui-layout-scheme="workspace"]
+  :is(.pf-workspace-subpage-frame, .pf-image-chat-workspace, .pf-workspace-tool-main, .pf-workspace > main)
+  :is(input, textarea)::placeholder {
+  color: var(--pf-settings-input-placeholder) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-quick {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 72%, transparent);
+  background: color-mix(in srgb, var(--pf-panel) 78%, transparent);
+  color: var(--pf-muted);
+  font-size: 9px !important;
+  font-weight: 560;
+  line-height: 1;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-quick:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 42%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 12%, var(--pf-panel));
+  color: var(--pf-text);
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-quick[aria-current="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 62%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 18%, var(--pf-panel));
+  color: var(--pf-text);
+  box-shadow: 0 8px 18px -16px color-mix(in srgb, var(--pf-accent) 70%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell {
+  border-color: var(--pf-settings-input-border);
+  background: var(--pf-settings-input-bg);
+  color: var(--pf-settings-input-color);
+  box-shadow: var(--pf-settings-input-shadow);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-trigger:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 42%, var(--pf-settings-input-border));
+  background: var(--pf-settings-input-bg-hover);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-trigger:focus-visible {
+  outline: none;
+  border-color: var(--pf-settings-input-border-focus);
+  background: var(--pf-settings-input-bg-focus);
+  box-shadow: var(--pf-settings-input-shadow-focus);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell:focus-within {
+  border-color: var(--pf-settings-input-border-focus);
+  background: var(--pf-settings-input-bg-focus);
+  box-shadow: var(--pf-settings-input-shadow-focus);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-popover {
+  border-color: var(--pf-settings-input-border);
+  background: color-mix(in srgb, var(--pf-panel) 92%, transparent);
+  color: var(--pf-settings-input-color);
+  box-shadow: 0 18px 40px -28px var(--pf-shadow), inset 0 1px 0 rgb(255 255 255 / 0.16);
+  backdrop-filter: blur(18px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-time-card,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-nav {
+  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent);
+  background: color-mix(in srgb, var(--pf-panel-soft) 84%, transparent);
+  color: var(--pf-settings-input-color);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-nav:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 40%, var(--pf-settings-input-border));
+  background: color-mix(in srgb, var(--pf-accent) 10%, var(--pf-panel-soft));
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-nav:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day:focus-visible {
+  outline: none;
+  border-color: var(--pf-settings-input-border-focus);
+  box-shadow: var(--pf-settings-input-shadow-focus);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 58%, var(--pf-settings-input-border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 18%, transparent), transparent 54%),
+    color-mix(in srgb, var(--pf-panel) 90%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary[data-active-boundary="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 58%, var(--pf-settings-input-border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 18%, transparent), transparent 54%),
+    color-mix(in srgb, var(--pf-panel) 90%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day {
+  border: 1px solid transparent;
+  color: var(--pf-settings-input-color);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 34%, transparent);
+  background: color-mix(in srgb, var(--pf-accent) 10%, transparent);
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-outside-month="true"] {
+  color: color-mix(in srgb, var(--pf-muted) 62%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-today="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent-2) 52%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-in-range="true"] {
+  background: color-mix(in srgb, var(--pf-accent) 12%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-range-start="true"],
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-range-end="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 70%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 24%, var(--pf-panel));
+  color: var(--pf-text);
+  box-shadow: 0 10px 20px -18px color-mix(in srgb, var(--pf-accent) 72%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-active="true"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 60%, transparent),
+    0 10px 22px -20px color-mix(in srgb, var(--pf-accent) 72%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-time-input {
+  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent) !important;
+  background: var(--pf-settings-input-bg) !important;
+  color: var(--pf-settings-input-color) !important;
+  box-shadow: var(--pf-settings-input-shadow) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-time-input:focus {
+  border-color: var(--pf-settings-input-border-focus) !important;
+  background: var(--pf-settings-input-bg-focus) !important;
+  box-shadow: var(--pf-settings-input-shadow-focus) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-time-input:disabled {
+  background: var(--pf-settings-input-bg-disabled) !important;
+  color: var(--pf-settings-input-disabled-color) !important;
+  opacity: 1;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-segment {
+  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent) !important;
+  background: var(--pf-settings-input-bg) !important;
+  color: var(--pf-settings-input-color) !important;
+  box-shadow: var(--pf-settings-input-shadow) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-segment:hover:not(:disabled) {
+  border-color: var(--pf-settings-input-border-hover) !important;
+  background: var(--pf-settings-input-bg-hover) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-segment:focus {
+  border-color: var(--pf-settings-input-border-focus) !important;
+  background: var(--pf-settings-input-bg-focus) !important;
+  box-shadow: var(--pf-settings-input-shadow-focus) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-segment:disabled {
+  background: var(--pf-settings-input-bg-disabled) !important;
+  color: var(--pf-settings-input-disabled-color) !important;
+  opacity: 1;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-popover .pf-workspace-date-input {
+  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent) !important;
+  background: var(--pf-settings-input-bg) !important;
+  color: var(--pf-settings-input-color) !important;
+  box-shadow: var(--pf-settings-input-shadow) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-popover .pf-workspace-date-input:focus {
+  border-color: var(--pf-settings-input-border-focus) !important;
+  background: var(--pf-settings-input-bg-focus) !important;
+  box-shadow: var(--pf-settings-input-shadow-focus) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell .pf-workspace-date-input {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--pf-settings-input-color) !important;
+  box-shadow: none !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell .pf-workspace-date-input:focus {
+  background: color-mix(in srgb, var(--pf-accent) 9%, transparent) !important;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell .pf-workspace-date-input:disabled {
+  color: var(--pf-settings-input-disabled-color) !important;
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-side-content textarea.pf-settings-prompt-textarea {
@@ -4122,6 +4426,11 @@ textarea {
 }
 
 .pf-shell-theme-dock.is-open {
+  right: 24px;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 7px;
+  border-right-width: 1px;
+  border-radius: 999px;
   opacity: 0.92;
   transform: translate3d(0, 0, 0) scale(1);
   filter: none;
@@ -4129,20 +4438,39 @@ textarea {
 }
 
 .pf-shell-theme-dock.is-collapsed {
+  right: 0;
+  max-width: 36px;
+  overflow: hidden;
+  padding: 4px 3px 4px 6px;
+  border-right-width: 0;
+  border-radius: 999px 0 0 999px;
+  opacity: 0.96;
+  filter: saturate(0.92);
+  transform: translate3d(0, 0, 0) scale(1);
+  pointer-events: auto;
+}
+
+.pf-shell-theme-dock.is-collapsed .pf-shell-theme-option:not([aria-pressed="true"]) {
+  position: absolute;
   opacity: 0;
-  transform: translate3d(0, 12px, 0) scale(0.96);
-  filter: saturate(0.55);
   pointer-events: none;
+  transform: translate3d(10px, 0, 0);
 }
 
-.pf-shell-theme-dock.is-pass-through {
-  opacity: 0.1;
-  filter: saturate(0.22) contrast(0.86);
-  pointer-events: none;
+.pf-shell-theme-dock.is-collapsed .pf-shell-theme-option[aria-pressed="true"] {
+  width: 26px;
+  height: 26px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  color: transparent;
+  font-size: 0;
 }
 
-.pf-shell-theme-dock.is-pass-through .pf-shell-theme-option {
-  cursor: default;
+.pf-shell-theme-dock.is-collapsed .pf-shell-theme-option[aria-pressed="true"]::before {
+  width: 14px;
+  height: 14px;
 }
 
 .pf-shell-runtime-switch {
@@ -7711,6 +8039,31 @@ textarea {
 :root[data-ui-layout-scheme="workspace"] .pf-settings-nav-item[aria-current="page"],
 :root[data-ui-layout-scheme="workspace"] .pf-help-nav-item[aria-current="page"] {
   color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-help-search-surface,
+:root[data-ui-layout-scheme="workspace"] .pf-help-page-link {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 64%, transparent);
+  color: var(--pf-text);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.32),
+    0 10px 26px color-mix(in srgb, var(--pf-deep) 5%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-help-search-surface button:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-help-page-link:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 38%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-panel) 74%, var(--pf-accent) 8%);
+}
+
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-help-search-surface,
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-help-page-link {
+  border-color: rgb(255 245 224 / 0.16);
+  background: rgb(56 60 50 / 0.78);
+  box-shadow:
+    inset 0 1px 0 rgb(255 245 224 / 0.06),
+    0 12px 28px rgb(0 0 0 / 0.24);
 }
 
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)

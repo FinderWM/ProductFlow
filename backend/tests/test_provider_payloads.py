@@ -74,11 +74,13 @@ from inspiration_one_backend.infrastructure.openai_client import (
 from inspiration_one_backend.infrastructure.provider_config import (
     ResolvedImageProviderConfig,
     ResolvedTextProviderConfig,
+    TextStructuredOutputConfig,
 )
 from inspiration_one_backend.infrastructure.text.openai_chat_completions_provider import (
     OpenAIChatCompletionsTextProvider,
     normalize_chat_completions_url,
 )
+from inspiration_one_backend.infrastructure.text.openai_provider import OpenAITextProvider
 
 REMOVED_COPY_OUTPUT_KEYS = [
     "derived" + "_fields",
@@ -310,6 +312,88 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
     assert chat_prompt.endswith("改成白底")
 
 
+def test_openai_responses_text_provider_sends_structured_output_text_format(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+
+    class DummyTextResponse:
+        def __init__(self, output_text: str) -> None:
+            self.output_text = output_text
+
+    class DummyTextResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            payloads = [
+                {
+                    "positioning": "通勤保温杯",
+                    "audience": "上班族",
+                    "selling_angles": ["保温", "轻便", "好清洁"],
+                    "taboo_phrases": [],
+                    "poster_style_hint": "白底",
+                },
+                {
+                    "version": 2,
+                    "summary": "通勤杯文案",
+                    "content": {"kind": "freeform", "text": "轻便保温，通勤随手带。"},
+                },
+                {
+                    "source_summary": "通勤杯素材",
+                    "items": [
+                        {
+                            "title": "白底主图",
+                            "instruction": "生成白底通勤杯主图",
+                            "visual_intent": "突出杯身和保温",
+                            "source_refs": ["入口长文本"],
+                        }
+                    ],
+                },
+                {"polished_prompt": "润色后的画面描述"},
+            ]
+            return DummyTextResponse(json.dumps(payloads[len(calls) - 1], ensure_ascii=False))
+
+    class DummyTextOpenAI:
+        def __init__(self, **kwargs) -> None:
+            self.responses = DummyTextResponses()
+
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.text.openai_provider.OpenAI", DummyTextOpenAI)
+
+    provider = OpenAITextProvider(
+        ResolvedTextProviderConfig(
+            provider_kind="openai",
+            brief_model="brief-model",
+            copy_model="copy-model",
+            api_key="demo-api-key",
+            structured_output=TextStructuredOutputConfig(enabled=True, mode="json_schema"),
+        )
+    )
+    inspiration = InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
+
+    brief, _ = provider.generate_brief(inspiration)
+    copy_payload, _ = provider.generate_copy(inspiration, brief)
+    tail_plan, _ = provider.generate_tail_split_plan(
+        TailSplitPlanInput(inspiration_name="通勤杯", source_text="白底主图", max_items=2)
+    )
+    polished, _ = provider.polish_image_prompt("改成白底")
+
+    assert brief.positioning == "通勤保温杯"
+    assert copy_payload.summary == "通勤杯文案"
+    assert tail_plan.items[0].title == "白底主图"
+    assert polished == "润色后的画面描述"
+    assert [call["text"]["format"]["type"] for call in calls] == [
+        "json_schema",
+        "json_schema",
+        "json_schema",
+        "json_schema",
+    ]
+    assert calls[0]["text"]["format"]["name"] == "creative_brief"
+    assert calls[1]["text"]["format"]["name"] == "copy_payload_v2"
+    assert calls[2]["text"]["format"]["name"] == "tail_split_plan"
+    assert calls[3]["text"]["format"]["name"] == "polished_image_prompt"
+    assert all(call["text"]["format"]["strict"] is True for call in calls)
+
+
 def test_openai_text_provider_reads_sse_text_response() -> None:
     from inspiration_one_backend.infrastructure.text.openai_provider import OpenAITextProvider
 
@@ -409,7 +493,7 @@ def test_openai_chat_completions_text_provider_sends_non_stream_payload_and_read
     assert payload["messages"][1] == {"role": "user", "content": "原始画面描述：\n改成白底"}
 
 
-def test_openai_chat_completions_text_provider_sends_response_format_for_json_tasks_only(
+def test_openai_chat_completions_text_provider_sends_response_format_for_structured_output_tasks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     responses = [
@@ -436,7 +520,7 @@ def test_openai_chat_completions_text_provider_sends_response_format_for_json_ta
                 }
             ],
         },
-        "润色后的画面描述",
+        {"polished_prompt": "润色后的画面描述"},
     ]
     calls: list[dict] = []
 
@@ -481,7 +565,7 @@ def test_openai_chat_completions_text_provider_sends_response_format_for_json_ta
             copy_model="copy-model",
             api_key="demo-api-key",
             base_url="https://gateway.example/v1",
-            structured_json_response_format_enabled=True,
+            structured_output=TextStructuredOutputConfig(enabled=True, mode="json_object"),
         )
     )
     inspiration = InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
@@ -501,8 +585,77 @@ def test_openai_chat_completions_text_provider_sends_response_format_for_json_ta
         {"type": "json_object"},
         {"type": "json_object"},
         {"type": "json_object"},
-        None,
+        {"type": "json_object"},
     ]
+
+
+def test_openai_chat_completions_text_provider_sends_json_schema_response_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+
+    class DummyResponse:
+        headers = {"content-type": "application/json"}
+
+        def __init__(self) -> None:
+            content = json.dumps(
+                {
+                    "positioning": "通勤保温杯",
+                    "audience": "上班族",
+                    "selling_angles": ["保温", "轻便", "好清洁"],
+                    "taboo_phrases": [],
+                    "poster_style_hint": "白底",
+                },
+                ensure_ascii=False,
+            )
+            self._payload = {"choices": [{"message": {"content": content}}]}
+            self.text = json.dumps(self._payload, ensure_ascii=False)
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._payload
+
+    class DummyHTTPXClient:
+        def __init__(self, **kwargs) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict):
+            calls.append({"url": url, "json": json})
+            return DummyResponse()
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider.httpx.Client",
+        DummyHTTPXClient,
+    )
+
+    provider = OpenAIChatCompletionsTextProvider(
+        ResolvedTextProviderConfig(
+            provider_kind="openai_chat_completions",
+            brief_model="brief-model",
+            copy_model="copy-model",
+            api_key="demo-api-key",
+            base_url="https://gateway.example/v1",
+            structured_output=TextStructuredOutputConfig(enabled=True, mode="json_schema"),
+        )
+    )
+
+    brief, _ = provider.generate_brief(
+        InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
+    )
+
+    assert brief.positioning == "通勤保温杯"
+    response_format = calls[0]["json"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["name"] == "creative_brief"
+    assert response_format["json_schema"]["strict"] is True
 
 
 def test_openai_chat_completions_text_provider_reads_sse_despite_stream_false(
@@ -893,6 +1046,26 @@ def test_copy_payload_v2_normalizes_visual_guidance_text() -> None:
 
     assert payload.visual_guidance is not None
     assert payload.visual_guidance.composition_hint == "适合搭配冷灰、黑白背景，突出简洁文艺的视觉感。"
+
+
+def test_copy_payload_v2_accepts_string_version_from_provider() -> None:
+    payload = normalize_copy_payload(
+        {
+            "version": "2",
+            "purpose": "main_image",
+            "summary": "电商灵感产物测试文案",
+            "content": {
+                "kind": "freeform",
+                "text": "测试灵感产物 快速验证文案生成配置",
+            },
+            "visual_guidance": "主图风格：简洁电商风，产品置于中心。",
+        }
+    )
+
+    assert payload.version == 2
+    assert payload.content.kind == "freeform"
+    assert payload.visual_guidance is not None
+    assert payload.visual_guidance.composition_hint == "主图风格：简洁电商风，产品置于中心。"
 
 
 def test_copy_payload_v2_normalizes_layout_object_fields_to_sections() -> None:

@@ -16,6 +16,15 @@ const t = ((key, params = {}) => {
     "notification.imageFailed.title": "失败",
     "notification.imageFailed.body": "{title} 失败",
     "notification.imageFailed.bodyWithReason": "{title} 失败：{reason}",
+    "notification.imageAttemptFailed.title": "重试中",
+    "notification.imageAttemptFailed.body": "{title} 第 {attempt}/{maxAttempts} 次失败",
+    "notification.imageAttemptFailed.bodyWithoutMax": "{title} 第 {attempt} 次失败",
+    "notification.imageAttemptFailed.bodyUnknown": "{title} 本次失败",
+    "notification.imageAttemptFailed.retryLine": "将进入第 {nextAttempt}/{maxAttempts} 次",
+    "notification.failureReasonLine": "失败原因：{reason}",
+    "notification.generationContext": "生成设置：{context}",
+    "notification.workflowFailed.nodeLine": "失败节点：{node}",
+    "notification.taskAttemptLine": "尝试次数：第 {attempt} 次",
     "notification.inspirationDone.title": "工作流完成",
     "notification.inspirationDone.body": "{name} 完成",
     "notification.inspirationFailed.title": "工作流失败",
@@ -105,6 +114,15 @@ function taskEvent(overrides: Partial<TaskNotificationEvent>): TaskNotificationE
     failure_reason: null,
     finished_at: "2026-06-08T00:01:00Z",
     resource_id: "session-1",
+    generation_config_id: null,
+    generation_config_name: null,
+    resource_group_id: null,
+    resource_group_name: null,
+    attempt: null,
+    max_attempts: null,
+    next_attempt: null,
+    node_id: null,
+    node_title: null,
     ...overrides,
   };
 }
@@ -178,6 +196,41 @@ describe("task notification websocket events", () => {
     expect(parseTaskNotificationEvent("not-json")).toBeNull();
   });
 
+  it("parses attempt-failed websocket events and backfills legacy optional fields", () => {
+    const event = taskEvent({
+      status: "attempt_failed",
+      failure_reason: "供应商超时",
+      generation_config_name: "图片配置 A",
+      attempt: 1,
+      max_attempts: 3,
+      next_attempt: 2,
+      finished_at: null,
+    });
+    expect(parseTaskNotificationEvent(JSON.stringify(event))).toEqual(event);
+    expect(
+      parseTaskNotificationEvent(
+        JSON.stringify({
+          type: "task_notification",
+          event_id: "legacy-event",
+          task_kind: "image_session_generation",
+          task_id: "task-1",
+          owner_user_id: "user-1",
+          status: "failed",
+          title: "会话 A",
+          failure_reason: "供应商拒绝",
+          finished_at: "2026-06-08T00:01:00Z",
+          resource_id: "session-1",
+        }),
+      ),
+    ).toMatchObject({
+      generation_config_id: null,
+      generation_config_name: null,
+      attempt: null,
+      max_attempts: null,
+      next_attempt: null,
+    });
+  });
+
   it("builds websocket notifications and ignores cancelled events", () => {
     expect(buildTaskNotificationEventNotification(taskEvent({ status: "succeeded" }), t)).toMatchObject({
       title: "完成",
@@ -195,16 +248,52 @@ describe("task notification websocket events", () => {
           title: "灵感 A",
           failure_reason: "节点失败",
           resource_id: "inspiration-1",
+          generation_config_name: "文案配置 A",
+          node_title: "卖点文案",
         }),
         t,
       ),
     ).toMatchObject({
       title: "工作流失败",
       body: "灵感 A 失败：节点失败",
+      bodyLines: [
+        { text: "灵感 A 失败：节点失败" },
+        { text: "失败节点：卖点文案", tone: "muted" },
+        { text: "生成设置：文案配置 A", tone: "muted" },
+      ],
       variant: "error",
       autoClose: false,
       dedupeKey: "workflow-run-failed:run-1",
     });
     expect(buildTaskNotificationEventNotification(taskEvent({ status: "cancelled" }), t)).toBeNull();
+  });
+
+  it("builds warning notifications for failed image attempts", () => {
+    expect(
+      buildTaskNotificationEventNotification(
+        taskEvent({
+          status: "attempt_failed",
+          failure_reason: "供应商超时",
+          generation_config_name: "图片配置 A",
+          attempt: 1,
+          max_attempts: 3,
+          next_attempt: 2,
+          finished_at: null,
+        }),
+        t,
+      ),
+    ).toMatchObject({
+      title: "重试中",
+      body: "会话 A 第 1/3 次失败",
+      bodyLines: [
+        { text: "会话 A 第 1/3 次失败", tone: "warning" },
+        { text: "将进入第 2/3 次", tone: "warning" },
+        { text: "生成设置：图片配置 A", tone: "muted" },
+        { text: "失败原因：供应商超时", tone: "danger" },
+      ],
+      variant: "warning",
+      autoClose: false,
+      dedupeKey: "image-task-attempt-failed:task-1:1",
+    });
   });
 });

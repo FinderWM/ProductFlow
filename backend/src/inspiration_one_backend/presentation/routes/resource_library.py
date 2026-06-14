@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.application.resource_library import (
     ResourceLibrarySourceStatus,
+    ResourceLibraryUploadImage,
     archive_resource_library_asset,
     archive_resource_library_group,
     create_resource_library_group,
@@ -20,6 +21,9 @@ from inspiration_one_backend.application.resource_library import (
     save_resource_library_asset_from_source,
     update_resource_library_asset_groups,
     update_resource_library_group,
+)
+from inspiration_one_backend.application.resource_library import (
+    upload_resource_library_assets as upload_resource_library_assets_use_case,
 )
 from inspiration_one_backend.domain.enums import ResourceLibrarySourceType
 from inspiration_one_backend.infrastructure.db.models import AuthUser, ResourceLibraryAsset
@@ -49,6 +53,10 @@ from inspiration_one_backend.presentation.schemas.resource_library import (
     UpdateResourceLibraryGroupRequest,
     serialize_resource_library_asset,
     serialize_resource_library_group,
+)
+from inspiration_one_backend.presentation.upload_validation import (
+    read_validated_image_upload,
+    validate_reference_image_count,
 )
 
 router = APIRouter(
@@ -153,6 +161,33 @@ def save_resource_library_asset_endpoint(
     if not result.created:
         response.status_code = status.HTTP_200_OK
     return serialize_resource_library_asset(result.asset)
+
+
+@router.post("/assets/upload", response_model=ResourceLibraryAssetListResponse, status_code=status.HTTP_201_CREATED)
+async def upload_resource_library_assets_endpoint(
+    images: list[UploadFile] = File(...),
+    group_ids: Annotated[list[str] | None, Form()] = None,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_authenticated),
+) -> ResourceLibraryAssetListResponse:
+    validate_reference_image_count(len(images))
+    uploads: list[ResourceLibraryUploadImage] = []
+    for image in images:
+        validated = await read_validated_image_upload(image, fallback_filename="resource-library-image.bin")
+        uploads.append(
+            ResourceLibraryUploadImage(
+                filename=validated.filename,
+                mime_type=validated.mime_type,
+                content=validated.content,
+            )
+        )
+    assets = upload_resource_library_assets_use_case(
+        session,
+        uploads=uploads,
+        group_ids=group_ids or [],
+        actor_user_id=current_user.id,
+    )
+    return ResourceLibraryAssetListResponse(items=[serialize_resource_library_asset(asset) for asset in assets])
 
 
 @router.patch("/assets/{asset_id}/groups", response_model=ResourceLibraryAssetResponse)

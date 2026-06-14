@@ -1,10 +1,13 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, CheckCircle2, Download, Eye, Loader2, Pencil, Plus, Save, Trees, X } from "lucide-react";
+import { Archive, CheckCircle2, Download, Eye, Loader2, Pencil, Plus, Save, Trees, Upload, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ClipboardImageButton } from "../components/ClipboardImageButton";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
+import { ImageDropZone } from "../components/ImageDropZone";
+import { ModalShell } from "../components/ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../components/ResourceGovernance";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
@@ -106,23 +109,6 @@ function ResourceLibraryFeedbackDialog({
   const isError = Boolean(errorMessage);
   const message = errorMessage || successMessage;
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        if (isError) {
-          onCloseError();
-          return;
-        }
-        onCloseSuccess();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isError, onCloseError, onCloseSuccess, open]);
-
   if (!open) {
     return null;
   }
@@ -130,26 +116,15 @@ function ResourceLibraryFeedbackDialog({
   const Icon = isError ? X : CheckCircle2;
 
   return (
-    <div
-      className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target !== event.currentTarget) {
-          return;
-        }
-        if (isError) {
-          onCloseError();
-          return;
-        }
-        onCloseSuccess();
-      }}
+    <ModalShell
+      open={open}
+      role={isError ? "alertdialog" : "dialog"}
+      onClose={isError ? onCloseError : onCloseSuccess}
+      ariaLabelledBy={titleId}
+      ariaDescribedBy={descriptionId}
+      overlayClassName="z-[95] bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      panelClassName="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
     >
-      <div
-        role={isError ? "alertdialog" : "dialog"}
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        className="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
-      >
         <div className="flex items-start gap-3 px-5 py-5">
           <div
             className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
@@ -180,8 +155,7 @@ function ResourceLibraryFeedbackDialog({
             </button>
           ) : null}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -204,38 +178,19 @@ function ResourceLibraryCreateGroupDialog({
   const titleId = useId();
   const inputId = useId();
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !pending) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, open, pending]);
-
   if (!open) {
     return null;
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !pending) {
-          onClose();
-        }
-      }}
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      closeDisabled={pending}
+      ariaLabelledBy={titleId}
+      overlayClassName="z-[85] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      panelClassName="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
-      >
         <div className="flex h-16 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
           <div className="flex min-w-0 items-center gap-3">
             <span className="text-indigo-600 dark:text-violet-300">
@@ -295,8 +250,7 @@ function ResourceLibraryCreateGroupDialog({
             {t("resourceLibrary.createGroup")}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -566,6 +520,19 @@ function ResourceLibraryManagePage({
       setError(errorMessage(mutationError, t("resourceLibrary.archiveAssetFailed")));
     },
   });
+  const uploadAssetsMutation = useMutation({
+    mutationFn: (input: { files: File[]; group_ids: string[] }) => api.uploadResourceLibraryAssets(input),
+    onSuccess: async (response) => {
+      setMessage(t("resourceLibrary.uploadSucceeded", { count: response.items.length }));
+      setError("");
+      await queryClient.invalidateQueries({ queryKey: ["resource-library-assets"] });
+      await queryClient.invalidateQueries({ queryKey: ["resource-library-groups"] });
+    },
+    onError: (mutationError) => {
+      setMessage("");
+      setError(errorMessage(mutationError, t("resourceLibrary.uploadFailed")));
+    },
+  });
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
     onSuccess: async () => {
@@ -620,6 +587,16 @@ function ResourceLibraryManagePage({
       return;
     }
     updateAssetGroupsMutation.mutate({ assetId: asset.id, group_ids: draft });
+  }
+
+  function handleUploadAssetFiles(files: File[]) {
+    if (!files.length || uploadAssetsMutation.isPending) {
+      return;
+    }
+    uploadAssetsMutation.mutate({
+      files,
+      group_ids: selectedGroupId ? [selectedGroupId] : [],
+    });
   }
 
   function pendingArchiveBusy(): boolean {
@@ -800,6 +777,53 @@ function ResourceLibraryManagePage({
           </aside>
 
           <section className={workspaceSubpage ? "pf-side-content px-4 py-5 sm:px-6 lg:px-8" : "min-w-0"}>
+            <div className="mb-4 rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 shadow-sm dark:border-slate-700 dark:bg-[#0f1726]">
+              <div className="mb-3 flex flex-col gap-1">
+                <div className="text-sm font-semibold text-slate-950 dark:text-white">
+                  {t("resourceLibrary.uploadTitle")}
+                </div>
+                <div className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  {t("resourceLibrary.uploadHint")}
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <ImageDropZone
+                  ariaLabel={t("resourceLibrary.uploadAction")}
+                  multiple
+                  disabled={uploadAssetsMutation.isPending || groupsQuery.isLoading}
+                  className="flex min-h-12 cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm font-medium text-slate-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50/45 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-950/55 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10 dark:hover:text-violet-100"
+                  activeClassName="border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100"
+                  onFiles={handleUploadAssetFiles}
+                >
+                  {({ isDragging }) => (
+                    <span className="inline-flex items-center">
+                      {uploadAssetsMutation.isPending ? (
+                        <Loader2 size={15} className="mr-2 animate-spin" />
+                      ) : (
+                        <Upload size={15} className="mr-2" />
+                      )}
+                      {isDragging ? t("resourceLibrary.dropUpload") : t("resourceLibrary.uploadAction")}
+                    </span>
+                  )}
+                </ImageDropZone>
+                <ClipboardImageButton
+                  rootClassName="w-full sm:min-w-72"
+                  buttonClassName={`${RESOURCE_LIBRARY_SECONDARY_ACTION_CLASS} min-h-12 w-full`}
+                  multiple
+                  disabled={uploadAssetsMutation.isPending || groupsQuery.isLoading}
+                  label={t("common.pasteImage")}
+                  closeLabel={t("common.close")}
+                  pasteAreaLabel={t("common.pasteImageTarget")}
+                  pasteAreaPlaceholder={t("common.pasteImagePlaceholder")}
+                  noImageMessage={t("common.clipboardNoImage")}
+                  onFiles={handleUploadAssetFiles}
+                  onError={(message) => {
+                    setMessage("");
+                    setError(message);
+                  }}
+                />
+              </div>
+            </div>
             {assetsQuery.isLoading || groupsQuery.isLoading ? (
               <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 dark:border-slate-800 dark:bg-[#0f1726]">
                 <Loader2 size={24} className="animate-spin" />

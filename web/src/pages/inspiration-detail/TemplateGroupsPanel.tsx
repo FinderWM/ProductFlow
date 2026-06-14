@@ -16,8 +16,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
+import { ModalShell } from "../../components/ModalShell";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -566,33 +566,14 @@ function TemplatePreviewDialog({
   } | null>(null);
   const displayTemplate = localizeCanvasTemplateSummary(template, locale);
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  const dialog = (
-    <div
-      data-template-preview-dialog
-      data-vaul-no-drag
-      className="pointer-events-auto fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm sm:p-6"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
+  return (
+    <ModalShell
+      onClose={onClose}
+      ariaLabelledBy={titleId}
+      overlayClassName="pointer-events-auto z-[110] bg-slate-950/60 p-3 backdrop-blur-sm sm:p-6"
+      overlayProps={{ "data-template-preview-dialog": true, "data-vaul-no-drag": true }}
+      panelClassName="flex max-h-[88dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/50"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-[88dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/50"
-      >
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800 sm:px-5">
           <div className="min-w-0">
             <h2 id={titleId} className="truncate text-base font-semibold text-slate-950 dark:text-white">
@@ -658,11 +639,8 @@ function TemplatePreviewDialog({
         >
           <TemplateGraphPreview template={displayTemplate} variant="dialog" />
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
-
-  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
 }
 
 export function TemplateGroupsPanel({

@@ -15,7 +15,7 @@ from inspiration_one_backend.application.inspiration_workflows import (
     start_inspiration_workflow_run,
 )
 from inspiration_one_backend.application.use_cases import create_inspiration
-from inspiration_one_backend.domain.enums import JobStatus, WorkflowNodeStatus
+from inspiration_one_backend.domain.enums import JobStatus, WorkflowNodeStatus, WorkflowNodeType
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
@@ -26,6 +26,12 @@ from inspiration_one_backend.infrastructure.db.models import (
 
 def _set_generation_cap(db_session, value: int) -> None:
     db_session.add(AppSetting(key="generation_max_concurrent_tasks", value=str(value)))
+    db_session.commit()
+
+
+def _set_split_generation_caps(db_session, *, text: int, image: int) -> None:
+    db_session.add(AppSetting(key="text_generation_max_concurrent_tasks", value=str(text)))
+    db_session.add(AppSetting(key="image_generation_max_concurrent_tasks", value=str(image)))
     db_session.commit()
 
 
@@ -85,6 +91,62 @@ def test_generation_cap_accepts_and_queues_workflow_run_creation(
     assert workflow_response.json()["runs"][0]["queue_running_count"] == 1
     assert workflow_response.json()["runs"][0]["queue_queued_count"] == 1
     assert sent_run_ids == [queued_run_id]
+
+
+def test_generation_capacity_pools_do_not_block_each_other(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.application.admission import generation_running_capacity_available
+
+    text_inspiration = _create_inspiration(db_session, "文案占用灵感产物")
+    text_run = start_inspiration_workflow_run(db_session, inspiration_id=text_inspiration.id, actor_is_admin=True)
+    text_node = (
+        db_session.query(WorkflowNode)
+        .filter_by(workflow_id=text_run.workflow.id, node_type=WorkflowNodeType.COPY_GENERATION)
+        .first()
+    )
+    assert text_node is not None
+    text_node_run = (
+        db_session.query(WorkflowNodeRun).filter_by(workflow_run_id=text_run.run_id, node_id=text_node.id).one()
+    )
+    text_node.status = WorkflowNodeStatus.RUNNING
+    text_node_run.status = WorkflowNodeStatus.RUNNING
+    db_session.commit()
+    _set_split_generation_caps(db_session, text=1, image=1)
+
+    assert generation_running_capacity_available(db_session, pool="text") is False
+    assert generation_running_capacity_available(db_session, pool="image") is True
+
+
+def test_image_generation_capacity_pool_counts_image_sessions_and_image_nodes(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.application.admission import generation_running_capacity_available
+
+    image_inspiration = _create_inspiration(db_session, "图片占用灵感产物")
+    image_run = start_inspiration_workflow_run(db_session, inspiration_id=image_inspiration.id, actor_is_admin=True)
+    image_node = (
+        db_session.query(WorkflowNode)
+        .filter_by(workflow_id=image_run.workflow.id, node_type=WorkflowNodeType.IMAGE_GENERATION)
+        .first()
+    )
+    assert image_node is not None
+    image_node_run = db_session.query(WorkflowNodeRun).filter_by(
+        workflow_run_id=image_run.run_id,
+        node_id=image_node.id,
+    ).one()
+    image_node.status = WorkflowNodeStatus.RUNNING
+    image_node_run.status = WorkflowNodeStatus.RUNNING
+    image_session = create_image_session(db_session, inspiration_id=None, title="图片池占用会话")
+    running_task = create_image_session_generation_task(
+        db_session,
+        image_session_id=image_session.id,
+        prompt="占用图片池",
+        size="1024x1024",
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    ).task
+    running_task.status = JobStatus.RUNNING
+    db_session.commit()
+    _set_split_generation_caps(db_session, text=1, image=2)
+
+    assert generation_running_capacity_available(db_session, pool="image") is False
+    assert generation_running_capacity_available(db_session, pool="text") is True
 
 
 def test_generation_cap_accepts_and_queues_image_session_generation_task_creation(
@@ -242,5 +304,5 @@ def test_generation_queue_overview_endpoint_returns_public_snapshot(
         "active_count": 1,
         "running_count": 1,
         "queued_count": 0,
-        "max_concurrent_tasks": 3,
+        "max_concurrent_tasks": 6,
     }

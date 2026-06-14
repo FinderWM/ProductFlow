@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -12,10 +13,32 @@ from inspiration_one_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
     WORKFLOW_RUN_GENERATION_TASK_CONTRACT,
 )
-from inspiration_one_backend.domain.enums import WorkflowNodeStatus
-from inspiration_one_backend.infrastructure.db.models import ImageSessionGenerationTask, WorkflowNodeRun, WorkflowRun
+from inspiration_one_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType
+from inspiration_one_backend.infrastructure.db.models import (
+    ImageSessionGenerationTask,
+    WorkflowNode,
+    WorkflowNodeRun,
+    WorkflowRun,
+)
 
-GENERATION_CAPACITY_LOCK_KEY = 42630001
+GenerationCapacityPool = Literal["text", "image"]
+
+GENERATION_CAPACITY_LOCK_KEYS: dict[GenerationCapacityPool, int] = {
+    "text": 42630001,
+    "image": 42630002,
+}
+
+TEXT_GENERATION_NODE_TYPES = frozenset(
+    {
+        WorkflowNodeType.COPY_GENERATION,
+        WorkflowNodeType.TAIL_SPLITTER,
+    }
+)
+IMAGE_GENERATION_NODE_TYPES = frozenset(
+    {
+        WorkflowNodeType.IMAGE_GENERATION,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +86,38 @@ def _running_async_task_count(session: Session) -> int:
         .where(ImageSessionGenerationTask.status.in_(IMAGE_SESSION_GENERATION_TASK_CONTRACT.running_statuses))
     )
     return int(running_workflow_node_runs or 0) + int(running_image_session_tasks or 0)
+
+
+def _running_workflow_node_count(session: Session, *, node_types: frozenset[WorkflowNodeType]) -> int:
+    if not node_types:
+        return 0
+    count = session.scalar(
+        select(func.count())
+        .select_from(WorkflowNodeRun)
+        .join(WorkflowRun, WorkflowRun.id == WorkflowNodeRun.workflow_run_id)
+        .join(WorkflowNode, WorkflowNode.id == WorkflowNodeRun.node_id)
+        .where(
+            WorkflowRun.status.in_(WORKFLOW_RUN_GENERATION_TASK_CONTRACT.active_statuses),
+            WorkflowNodeRun.status.in_(WORKFLOW_RUN_GENERATION_TASK_CONTRACT.execution_running_statuses),
+            WorkflowNode.node_type.in_(node_types),
+        )
+    )
+    return int(count or 0)
+
+
+def _running_text_generation_task_count(session: Session) -> int:
+    return _running_workflow_node_count(session, node_types=TEXT_GENERATION_NODE_TYPES)
+
+
+def _running_image_generation_task_count(session: Session) -> int:
+    running_image_session_tasks = session.scalar(
+        select(func.count())
+        .select_from(ImageSessionGenerationTask)
+        .where(ImageSessionGenerationTask.status.in_(IMAGE_SESSION_GENERATION_TASK_CONTRACT.running_statuses))
+    )
+    return _running_workflow_node_count(session, node_types=IMAGE_GENERATION_NODE_TYPES) + int(
+        running_image_session_tasks or 0
+    )
 
 
 def _status_count(session: Session, model: type, statuses: tuple[StrEnum, ...]) -> int:
@@ -114,7 +169,7 @@ def get_generation_queue_overview(session: Session) -> GenerationQueueOverview:
         active_count=running_count + queued_count,
         running_count=running_count,
         queued_count=queued_count,
-        max_concurrent_tasks=get_runtime_settings().generation_max_concurrent_tasks,
+        max_concurrent_tasks=text_generation_capacity_limit() + image_generation_capacity_limit(),
     )
 
 
@@ -209,25 +264,62 @@ def active_generation_task_count(session: Session) -> int:
     return _active_async_task_count(session)
 
 
-def _lock_generation_capacity(session: Session) -> None:
+def text_generation_capacity_limit() -> int:
+    settings = get_runtime_settings()
+    return int(settings.text_generation_max_concurrent_tasks or settings.generation_max_concurrent_tasks)
+
+
+def image_generation_capacity_limit() -> int:
+    settings = get_runtime_settings()
+    return int(settings.image_generation_max_concurrent_tasks or settings.generation_max_concurrent_tasks)
+
+
+def _capacity_limit(pool: GenerationCapacityPool) -> int:
+    if pool == "text":
+        return text_generation_capacity_limit()
+    return image_generation_capacity_limit()
+
+
+def _running_task_count_for_pool(session: Session, pool: GenerationCapacityPool) -> int:
+    if pool == "text":
+        return _running_text_generation_task_count(session)
+    return _running_image_generation_task_count(session)
+
+
+def _lock_generation_capacity(session: Session, pool: GenerationCapacityPool) -> None:
     bind = session.get_bind()
     if bind.dialect.name == "postgresql":
-        session.execute(select(func.pg_advisory_xact_lock(GENERATION_CAPACITY_LOCK_KEY)))
+        session.execute(select(func.pg_advisory_xact_lock(GENERATION_CAPACITY_LOCK_KEYS[pool])))
 
 
-def generation_running_capacity_available(session: Session) -> bool:
+def generation_running_capacity_available(
+    session: Session,
+    *,
+    pool: GenerationCapacityPool = "image",
+) -> bool:
     """Serialize worker claim checks and return whether one more task may enter provider execution."""
 
-    _lock_generation_capacity(session)
-    limit = get_runtime_settings().generation_max_concurrent_tasks
-    return _running_async_task_count(session) < limit
+    _lock_generation_capacity(session, pool)
+    return _running_task_count_for_pool(session, pool) < _capacity_limit(pool)
 
 
-def ensure_generation_capacity(session: Session) -> None:
+def generation_capacity_pool_for_workflow_node_type(node_type: WorkflowNodeType) -> GenerationCapacityPool | None:
+    if node_type in TEXT_GENERATION_NODE_TYPES:
+        return "text"
+    if node_type in IMAGE_GENERATION_NODE_TYPES:
+        return "image"
+    return None
+
+
+def ensure_generation_capacity(
+    session: Session,
+    *,
+    pool: GenerationCapacityPool = "image",
+) -> None:
     """Lock capacity bookkeeping without rejecting durable queued submissions.
 
-    `generation_max_concurrent_tasks` limits worker entry into provider/running execution, not durable task admission.
+    Generation capacity limits worker entry into provider/running execution, not durable task admission.
     Keeping this entrypoint as a no-op compatibility shim avoids callers turning queue depth into a submit-time 429.
     """
 
-    _lock_generation_capacity(session)
+    _lock_generation_capacity(session, pool)

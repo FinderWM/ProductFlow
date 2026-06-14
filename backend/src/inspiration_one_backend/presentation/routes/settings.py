@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -16,13 +17,24 @@ from inspiration_one_backend import __version__
 from inspiration_one_backend.application.auth import list_available_generation_resource_groups_for_user
 from inspiration_one_backend.application.canvas_templates import CanvasTemplate as CanvasTemplatePayload
 from inspiration_one_backend.application.contracts import CopyNodeConfigV2, InspirationInput
+from inspiration_one_backend.application.image_generation_failures import classify_image_generation_failure
+from inspiration_one_backend.application.image_sessions import (
+    test_image_generation_config as run_image_generation_config_test,
+)
 from inspiration_one_backend.application.time import now_utc
 from inspiration_one_backend.config import (
     CONFIG_DEFINITION_BY_KEY,
     CONFIG_DEFINITIONS,
+    IMAGE_GENERATION_MAX_CONCURRENT_TASKS_KEY,
+    LEGACY_GENERATION_MAX_CONCURRENT_TASKS_KEY,
+    LEGACY_RUNTIME_CONFIG_KEYS,
+    LOGIN_PAGE_TEMPLATE_CONFIG_KEYS,
+    LOGIN_PAGE_TEMPLATE_IDS,
     RUNTIME_CONFIG_KEYS,
+    TEXT_GENERATION_MAX_CONCURRENT_TASKS_KEY,
     build_settings_with_overrides,
     get_runtime_settings,
+    migrate_legacy_login_page_config_values,
     normalize_config_values,
     normalize_image_generation_size,
     parse_config_multi_select,
@@ -65,6 +77,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     PROVIDER_TYPES,
     TEXT_PROVIDER_KINDS,
     UNSET_PROVIDER_FIELD,
+    ResolvedImageProviderConfig,
     ResolvedTextProviderConfig,
     add_generation_config,
     add_generation_resource_group,
@@ -82,6 +95,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     list_provider_profiles,
     normalize_provider_binding_model_settings,
     normalize_provider_binding_runtime_config,
+    resolve_image_provider_config_from_draft,
     resolve_text_provider_config_from_draft,
     unfreeze_generation_config,
     update_generation_config,
@@ -103,6 +117,7 @@ from inspiration_one_backend.presentation.deps import (
     require_any_api_permission,
     require_api_permission,
 )
+from inspiration_one_backend.presentation.schemas.image_sessions import serialize_image_session_round
 from inspiration_one_backend.presentation.schemas.settings import (
     ConfigItemResponse,
     ConfigOptionResponse,
@@ -120,6 +135,10 @@ from inspiration_one_backend.presentation.schemas.settings import (
     GenerationResourceGroupCreateRequest,
     GenerationResourceGroupResponse,
     GenerationResourceGroupUpdateRequest,
+    ImageGenerationConfigTestRequest,
+    ImageGenerationConfigTestResponse,
+    LoginPageSelectionUpdateRequest,
+    LoginPageTemplateConfigUpdateRequest,
     ProviderBindingResponse,
     ProviderBindingUpdateRequest,
     ProviderConfigResponse,
@@ -191,7 +210,9 @@ class _GenerationConfigStatAggregate:
 
 
 def _load_database_values(session: Session) -> dict[str, AppSetting]:
-    rows = session.scalars(select(AppSetting).where(AppSetting.key.in_(RUNTIME_CONFIG_KEYS))).all()
+    rows = session.scalars(
+        select(AppSetting).where(AppSetting.key.in_(RUNTIME_CONFIG_KEYS | LEGACY_RUNTIME_CONFIG_KEYS))
+    ).all()
     return {row.key: row for row in rows}
 
 
@@ -217,6 +238,41 @@ def _validate_runtime_settings(overrides: dict[str, str]) -> None:
     normalize_image_generation_size(settings.image_promo_poster_size, label="促销海报尺寸")
     if not settings.allowed_image_mime_types:
         raise ValueError("允许图片 MIME 不能为空")
+
+
+def _apply_runtime_config_update(
+    session: Session,
+    *,
+    values: Mapping[str, Any] | None = None,
+    reset_keys: set[str] | None = None,
+) -> ConfigResponse:
+    reset_keys = reset_keys or set()
+    raw_values = values or {}
+    try:
+        normalized_values = normalize_config_values(raw_values)
+        current_values = _load_database_values(session)
+        next_values = {key: row.value for key, row in current_values.items() if key not in reset_keys}
+        next_values.update(normalized_values)
+        _validate_runtime_settings(next_values)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    for key in reset_keys:
+        existing = session.get(AppSetting, key)
+        if existing is not None:
+            session.delete(existing)
+    for key, value in normalized_values.items():
+        _upsert_app_setting(session, key=key, value=value)
+    session.commit()
+    return _serialize_config(session)
+
+
+def _login_page_template_config_key(template_id: str) -> str:
+    config_key = LOGIN_PAGE_TEMPLATE_CONFIG_KEYS.get(template_id)
+    if config_key is None:
+        supported = ", ".join(LOGIN_PAGE_TEMPLATE_IDS)
+        raise HTTPException(status_code=400, detail=f"登录页模板必须是以下之一: {supported}")
+    return config_key
 
 
 def _serialize_config(session: Session) -> ConfigResponse:
@@ -601,6 +657,46 @@ def _resolve_text_generation_config_for_test(
     )
 
 
+def _resolve_image_generation_config_for_test(
+    session: Session,
+    *,
+    generation_config_id: str | None,
+    generation_config: GenerationConfigCreateRequest | None,
+) -> ResolvedImageProviderConfig:
+    if generation_config is not None:
+        return resolve_image_provider_config_from_draft(
+            session,
+            name=generation_config.name,
+            provider_kind=generation_config.provider_kind,
+            provider_profile_id=generation_config.provider_profile_id,
+            model_settings=generation_config.model_settings,
+            config=generation_config.config,
+            generation_config_id=generation_config_id,
+        )
+    if generation_config_id is None:
+        raise ValueError("请提供图片生成配置")
+    db_generation_config = session.scalar(
+        select(GenerationConfig)
+        .options(selectinload(GenerationConfig.provider_profile))
+        .where(
+            GenerationConfig.id == generation_config_id,
+            GenerationConfig.purpose == "image",
+            GenerationConfig.archived_at.is_(None),
+        )
+    )
+    if db_generation_config is None:
+        raise ValueError("生成配置不存在")
+    return resolve_image_provider_config_from_draft(
+        session,
+        name=db_generation_config.name,
+        provider_kind=db_generation_config.provider_kind,
+        provider_profile_id=db_generation_config.provider_profile_id,
+        model_settings=dict(db_generation_config.model_settings_json or {}),
+        config=dict(db_generation_config.config_json or {}),
+        generation_config_id=db_generation_config.id,
+    )
+
+
 def _serialize_generation_config_option(generation_config: GenerationConfig) -> GenerationConfigOptionResponse:
     state = generation_config.state
     resource_group_ids = generation_config_resource_group_ids(generation_config)
@@ -919,6 +1015,11 @@ def _parse_settings_import_document(payload: Any) -> SettingsExportDocument:
 
 def _normalize_runtime_import_config(document: SettingsExportDocument) -> dict[str, str]:
     runtime_config = {key: value for key, value in document.runtime_config.items() if key != "admin_access_required"}
+    legacy_capacity = runtime_config.pop(LEGACY_GENERATION_MAX_CONCURRENT_TASKS_KEY, None)
+    if legacy_capacity is not None:
+        runtime_config.setdefault(TEXT_GENERATION_MAX_CONCURRENT_TASKS_KEY, legacy_capacity)
+        runtime_config.setdefault(IMAGE_GENERATION_MAX_CONCURRENT_TASKS_KEY, legacy_capacity)
+    runtime_config = migrate_legacy_login_page_config_values(runtime_config)
     unknown_keys = set(runtime_config) - RUNTIME_CONFIG_KEYS
     if unknown_keys:
         raise ValueError(f"未知配置项: {', '.join(sorted(unknown_keys))}")
@@ -1801,34 +1902,88 @@ def test_text_generation_config_json_response_format_endpoint(
             generation_config_id=payload.generation_config_id,
             generation_config=payload.generation_config,
         )
-        if resolved_config.provider_kind != "openai_chat_completions":
-            raise ValueError("结构化 JSON response_format 仅支持 Chat Completions 文案接口")
-        if not resolved_config.structured_json_response_format_enabled:
-            raise ValueError("请先启用结构化 JSON response_format")
+        if resolved_config.provider_kind not in {"openai", "openai_chat_completions"}:
+            raise ValueError("文案结构化输出仅支持 OpenAI Responses 或 Chat Completions 文案接口")
+        if not resolved_config.structured_output.enabled:
+            raise ValueError("请先启用文案结构化输出")
         text_provider = get_text_provider_from_config(resolved_config)
-        test_method = getattr(text_provider, "test_structured_json_response_format", None)
+        test_method = getattr(text_provider, "test_structured_output", None)
         if not callable(test_method):
-            raise ValueError("当前文案接口不支持结构化 JSON response_format 测试")
+            raise ValueError("当前文案接口不支持文案结构化输出测试")
         start = perf_counter()
         parsed_json, model = test_method()
         duration_ms = int((perf_counter() - start) * 1000)
     except ValueError as exc:
         logger.info(
-            "结构化 JSON response_format 测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
+            "文案结构化输出测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
             payload.generation_config_id or "-",
             resolved_config.provider_kind if "resolved_config" in locals() else "-",
             _safe_text_generation_test_error_detail(exc),
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        logger.exception("结构化 JSON response_format 测试失败")
-        raise HTTPException(status_code=502, detail="结构化 JSON response_format 测试失败，请稍后重试") from exc
+        logger.exception("文案结构化输出测试失败")
+        raise HTTPException(status_code=502, detail="文案结构化输出测试失败，请稍后重试") from exc
     return TextGenerationConfigJsonResponseFormatTestResponse(
         generation_config_id=payload.generation_config_id,
         provider_kind=resolved_config.provider_kind,
         model=model,
         parsed_json=parsed_json,
         duration_ms=duration_ms,
+    )
+
+
+@router.post(
+    "/generation-configs/test-image",
+    response_model=ImageGenerationConfigTestResponse,
+)
+def test_image_generation_config_endpoint(
+    payload: ImageGenerationConfigTestRequest,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_SETTINGS_PROVIDER_WRITE)),
+) -> ImageGenerationConfigTestResponse:
+    try:
+        ensure_provider_config_bootstrapped(session)
+        resolved_config = _resolve_image_generation_config_for_test(
+            session,
+            generation_config_id=payload.generation_config_id,
+            generation_config=payload.generation_config,
+        )
+        result = run_image_generation_config_test(
+            session,
+            prompt=payload.prompt,
+            size=payload.size,
+            resource_group_id=payload.resource_group_id,
+            provider_config=resolved_config,
+            owner_user_id=current_user.id,
+            actor_is_admin=current_user.is_admin,
+        )
+    except ValueError as exc:
+        logger.info(
+            "图片生成配置测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
+            payload.generation_config_id or "-",
+            resolved_config.provider_kind if "resolved_config" in locals() else "-",
+            _safe_text_generation_test_error_detail(exc),
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("图片生成配置测试失败")
+        failure = classify_image_generation_failure(
+            exc,
+            generic_message="图片生成配置测试失败，请检查供应商配置后重试",
+        )
+        raise HTTPException(status_code=502, detail=failure.reason) from exc
+    round_item = next(item for item in result.image_session.rounds if item.id == result.round_id)
+    round_response = serialize_image_session_round(round_item)
+    return ImageGenerationConfigTestResponse(
+        generation_config_id=resolved_config.generation_config_id or payload.generation_config_id,
+        provider_kind=result.provider_kind,
+        model_name=round_response.model_name,
+        provider_name=round_response.provider_name,
+        duration_ms=result.duration_ms,
+        image_session_id=result.image_session.id,
+        round=round_response,
+        generated_asset=round_response.generated_asset,
     )
 
 
@@ -2143,6 +2298,8 @@ def get_runtime_config_endpoint() -> RuntimeConfigResponse:
         image_generation_max_dimension=settings.image_generation_max_dimension,
         image_session_max_base_images=settings.image_session_max_base_images,
         image_tool_allowed_fields=list(parse_image_tool_allowed_fields(settings.image_tool_allowed_fields)),
+        text_generation_max_concurrent_tasks=settings.text_generation_max_concurrent_tasks,
+        image_generation_max_concurrent_tasks=settings.image_generation_max_concurrent_tasks,
         generation_tail_splitter_max_items=settings.generation_tail_splitter_max_items,
         workflow_node_max_retry_count=settings.workflow_node_max_retry_count,
         workflow_node_retry_delay_ms=settings.workflow_node_retry_delay_ms,
@@ -2164,20 +2321,46 @@ def update_config_endpoint(
     if reset_keys & set(payload.values):
         raise HTTPException(status_code=400, detail="同一个配置项不能同时更新和恢复默认")
 
-    try:
-        normalized_values = normalize_config_values(payload.values)
-        current_values = _load_database_values(session)
-        next_values = {key: row.value for key, row in current_values.items() if key not in reset_keys}
-        next_values.update(normalized_values)
-        _validate_runtime_settings(next_values)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _apply_runtime_config_update(session, values=payload.values, reset_keys=reset_keys)
 
-    for key in reset_keys:
-        existing = session.get(AppSetting, key)
-        if existing is not None:
-            session.delete(existing)
-    for key, value in normalized_values.items():
-        _upsert_app_setting(session, key=key, value=value)
-    session.commit()
-    return _serialize_config(session)
+
+@router.patch("/login-page-selection", response_model=ConfigResponse, dependencies=[WRITE_SETTINGS_PERMISSION])
+def update_login_page_selection_endpoint(
+    payload: LoginPageSelectionUpdateRequest,
+    session: Session = Depends(get_session),
+) -> ConfigResponse:
+    return _apply_runtime_config_update(session, values={"login_page_mode": payload.value})
+
+
+@router.post("/login-page-selection/reset", response_model=ConfigResponse, dependencies=[WRITE_SETTINGS_PERMISSION])
+def reset_login_page_selection_endpoint(
+    session: Session = Depends(get_session),
+) -> ConfigResponse:
+    return _apply_runtime_config_update(session, reset_keys={"login_page_mode"})
+
+
+@router.patch(
+    "/login-page-template-config/{template_id}",
+    response_model=ConfigResponse,
+    dependencies=[WRITE_SETTINGS_PERMISSION],
+)
+def update_login_page_template_config_endpoint(
+    template_id: str,
+    payload: LoginPageTemplateConfigUpdateRequest,
+    session: Session = Depends(get_session),
+) -> ConfigResponse:
+    config_key = _login_page_template_config_key(template_id)
+    return _apply_runtime_config_update(session, values={config_key: payload.config})
+
+
+@router.post(
+    "/login-page-template-config/{template_id}/reset",
+    response_model=ConfigResponse,
+    dependencies=[WRITE_SETTINGS_PERMISSION],
+)
+def reset_login_page_template_config_endpoint(
+    template_id: str,
+    session: Session = Depends(get_session),
+) -> ConfigResponse:
+    config_key = _login_page_template_config_key(template_id)
+    return _apply_runtime_config_update(session, reset_keys={config_key})

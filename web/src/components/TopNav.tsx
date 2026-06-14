@@ -310,16 +310,6 @@ export function isPointerInWorkspaceThemeDockRevealZone({
   );
 }
 
-function isExternalInteractiveElement(element: Element, root: HTMLElement): boolean {
-  if (root.contains(element)) {
-    return false;
-  }
-  const interactiveElement = element.closest(
-    "button,a,input,textarea,select,[role='button'],[role='link'],[tabindex]:not([tabindex='-1'])",
-  );
-  return interactiveElement instanceof HTMLElement && !root.contains(interactiveElement);
-}
-
 function childrenVisualWidth(element: HTMLElement): number {
   const childRects = Array.from(element.children)
     .map((child) => child.getBoundingClientRect())
@@ -1507,7 +1497,6 @@ export function TopNav({ onLogout }: TopNavProps) {
   const curtainRef = useRef<HTMLDivElement | null>(null);
   const curtainAutoHideTimerRef = useRef<number | null>(null);
   const workspaceThemeDockRef = useRef<HTMLDivElement | null>(null);
-  const workspaceThemeDockRectRef = useRef<WorkspaceThemeDockRect | null>(null);
   const workspaceThemeDockAutoHideTimerRef = useRef<number | null>(null);
   const [desktopOverflowKeys, setDesktopOverflowKeys] = useState<string[]>([]);
   const [workspaceOverflowKeys, setWorkspaceOverflowKeys] = useState<string[]>([]);
@@ -1515,7 +1504,6 @@ export function TopNav({ onLogout }: TopNavProps) {
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [curtainOpen, setCurtainOpen] = useState(true);
   const [workspaceThemeDockOpen, setWorkspaceThemeDockOpen] = useState(true);
-  const [workspaceThemeDockPassThrough, setWorkspaceThemeDockPassThrough] = useState(false);
   const location = useLocation();
   const {
     locale,
@@ -1654,7 +1642,6 @@ export function TopNav({ onLogout }: TopNavProps) {
     clearWorkspaceThemeDockAutoHideTimer();
     workspaceThemeDockAutoHideTimerRef.current = window.setTimeout(() => {
       setWorkspaceThemeDockOpen(false);
-      setWorkspaceThemeDockPassThrough(false);
       workspaceThemeDockAutoHideTimerRef.current = null;
     }, NAV_AUTO_HIDE_DELAY_MS);
   }, [clearWorkspaceThemeDockAutoHideTimer]);
@@ -1662,7 +1649,6 @@ export function TopNav({ onLogout }: TopNavProps) {
   const keepWorkspaceThemeDockOpen = useCallback(() => {
     clearWorkspaceThemeDockAutoHideTimer();
     setWorkspaceThemeDockOpen(true);
-    setWorkspaceThemeDockPassThrough(false);
   }, [clearWorkspaceThemeDockAutoHideTimer]);
 
   const clearDesktopMoreCloseTimer = useCallback(() => {
@@ -1813,7 +1799,6 @@ export function TopNav({ onLogout }: TopNavProps) {
     setMobileMoreOpen(false);
     scheduleCurtainAutoHide();
     setWorkspaceThemeDockOpen(true);
-    setWorkspaceThemeDockPassThrough(false);
     scheduleWorkspaceThemeDockAutoHide();
   }, [closeDesktopMoreMenu, location.pathname, scheduleCurtainAutoHide, scheduleWorkspaceThemeDockAutoHide]);
 
@@ -1835,84 +1820,6 @@ export function TopNav({ onLogout }: TopNavProps) {
       document.removeEventListener("touchstart", handlePageActivity, true);
     };
   }, [curtainOpen, scheduleCurtainAutoHide]);
-
-  useEffect(() => {
-    if (shellScheme !== "workspace" || typeof window === "undefined") {
-      clearWorkspaceThemeDockAutoHideTimer();
-      return;
-    }
-
-    const updateDockRect = () => {
-      const dock = workspaceThemeDockRef.current;
-      if (!dock) {
-        return;
-      }
-      const rect = dock.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) {
-        return;
-      }
-      workspaceThemeDockRectRef.current = {
-        bottom: rect.bottom,
-        left: rect.left,
-        right: rect.right,
-        top: rect.top,
-      };
-    };
-
-    updateDockRect();
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const dock = workspaceThemeDockRef.current;
-      if (!dock) {
-        return;
-      }
-
-      if (workspaceThemeDockOpen) {
-        updateDockRect();
-      }
-
-      const inRevealZone = isPointerInWorkspaceThemeDockRevealZone({
-        clientX: event.clientX,
-        clientY: event.clientY,
-        rect: workspaceThemeDockRectRef.current,
-      });
-
-      if (!workspaceThemeDockOpen) {
-        if (inRevealZone) {
-          clearWorkspaceThemeDockAutoHideTimer();
-          setWorkspaceThemeDockOpen(true);
-          setWorkspaceThemeDockPassThrough(false);
-        }
-        return;
-      }
-
-      if (!inRevealZone) {
-        setWorkspaceThemeDockPassThrough(false);
-        if (workspaceThemeDockAutoHideTimerRef.current === null) {
-          scheduleWorkspaceThemeDockAutoHide();
-        }
-        return;
-      }
-
-      clearWorkspaceThemeDockAutoHideTimer();
-      const shouldPassThrough = document
-        .elementsFromPoint(event.clientX, event.clientY)
-        .some((element) => isExternalInteractiveElement(element, dock));
-      setWorkspaceThemeDockPassThrough(shouldPassThrough);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove, { passive: true });
-    window.addEventListener("resize", updateDockRect);
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("resize", updateDockRect);
-    };
-  }, [
-    clearWorkspaceThemeDockAutoHideTimer,
-    scheduleWorkspaceThemeDockAutoHide,
-    shellScheme,
-    workspaceThemeDockOpen,
-  ]);
 
   useEffect(() => {
     const navArea = desktopNavAreaRef.current;
@@ -2168,16 +2075,13 @@ export function TopNav({ onLogout }: TopNavProps) {
   };
 
   const renderWorkspaceThemeDock = () => {
-    const interactive = workspaceThemeDockOpen && !workspaceThemeDockPassThrough;
     return (
       <div
         ref={workspaceThemeDockRef}
-        aria-hidden={!workspaceThemeDockOpen}
         aria-label={t("nav.theme")}
         className={[
           "pf-shell-theme-dock",
           workspaceThemeDockOpen ? "is-open" : "is-collapsed",
-          workspaceThemeDockPassThrough ? "is-pass-through" : "",
         ].filter(Boolean).join(" ")}
         onBlurCapture={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -2190,15 +2094,16 @@ export function TopNav({ onLogout }: TopNavProps) {
       >
         {WORKSPACE_APPEARANCE_METADATA.map((appearance) => {
           const active = appearance.id === workspaceAppearance;
+          const hiddenWhileCollapsed = !workspaceThemeDockOpen && !active;
           return (
             <button
               key={appearance.id}
               type="button"
               aria-pressed={active}
+              aria-hidden={hiddenWhileCollapsed}
               className="pf-shell-theme-option"
-              disabled={!interactive}
               style={{ "--pf-shell-theme-swatch": appearance.swatch } as CSSProperties}
-              tabIndex={interactive ? undefined : -1}
+              tabIndex={hiddenWhileCollapsed ? -1 : undefined}
               onClick={() => {
                 handleThemeControlChange(appearance.id);
                 scheduleWorkspaceThemeDockAutoHide();

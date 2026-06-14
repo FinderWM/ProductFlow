@@ -4,6 +4,7 @@ import {
   ResourceBlockedNotice,
   ResourceMetaBadges,
 } from "../../components/ResourceGovernance";
+import { ModalShell } from "../../components/ModalShell";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
 import type { PosterVariant, InspirationDetail, SourceAsset, WorkflowNode } from "../../lib/types";
@@ -65,18 +66,13 @@ export function ImagesPanel({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("detail.images.galleryModalTitle")}
-      className="fixed inset-0 z-[74] flex items-center justify-center bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      ariaLabel={t("detail.images.galleryModalTitle")}
+      overlayClassName="z-[74] bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6"
+      panelClassName="flex h-[min(880px,calc(100dvh-2rem))] w-full max-w-6xl min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
     >
-      <div className="flex h-[min(880px,calc(100dvh-2rem))] w-full max-w-6xl min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45">
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800 sm:px-5">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
@@ -190,8 +186,7 @@ export function ImagesPanel({
                 </div>
               )}
             </div>
-          </div>
-    </div>
+    </ModalShell>
   );
 }
 

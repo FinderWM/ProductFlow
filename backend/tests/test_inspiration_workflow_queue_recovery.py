@@ -653,7 +653,6 @@ def test_inspiration_workflow_worker_defers_queued_run_when_global_running_capac
     from inspiration_one_backend.application.inspiration_workflows import (
         cancel_inspiration_workflow_run,
         execute_inspiration_workflow_node_run,
-        execute_inspiration_workflow_run,
         start_inspiration_workflow_run,
     )
 
@@ -668,10 +667,15 @@ def test_inspiration_workflow_worker_defers_queued_run_when_global_running_capac
         content_type="image/png",
     )
     occupying = start_inspiration_workflow_run(db_session, inspiration_id=occupying_inspiration.id)
-    occupying_node_run = db_session.query(WorkflowNodeRun).filter_by(workflow_run_id=occupying.run_id).first()
+    occupying_node = next(
+        node for node in occupying.workflow.nodes if node.node_type == WorkflowNodeType.COPY_GENERATION
+    )
+    occupying_node_run = (
+        db_session.query(WorkflowNodeRun)
+        .filter_by(workflow_run_id=occupying.run_id, node_id=occupying_node.id)
+        .one()
+    )
     assert occupying_node_run is not None
-    occupying_node = db_session.get(WorkflowNode, occupying_node_run.node_id)
-    assert occupying_node is not None
     occupying_node_run.status = WorkflowNodeStatus.RUNNING
     occupying_node.status = WorkflowNodeStatus.RUNNING
 
@@ -686,17 +690,15 @@ def test_inspiration_workflow_worker_defers_queued_run_when_global_running_capac
         content_type="image/png",
     )
     queued = start_inspiration_workflow_run(db_session, inspiration_id=queued_inspiration.id)
-    queued_node_run = db_session.query(WorkflowNodeRun).filter_by(workflow_run_id=queued.run_id).first()
+    queued_node = next(node for node in queued.workflow.nodes if node.node_type == WorkflowNodeType.COPY_GENERATION)
+    queued_node_run = (
+        db_session.query(WorkflowNodeRun).filter_by(workflow_run_id=queued.run_id, node_id=queued_node.id).one()
+    )
     assert queued_node_run is not None
     db_session.add(AppSetting(key="generation_max_concurrent_tasks", value="1"))
     db_session.commit()
 
     delayed_requeues: list[tuple[str, int]] = []
-    dispatched_node_run_ids: list[str] = []
-    monkeypatch.setattr(
-        "inspiration_one_backend.application.inspiration_workflow.execution.enqueue_workflow_node_run",
-        lambda node_run_id: dispatched_node_run_ids.append(node_run_id),
-    )
     monkeypatch.setattr(
         "inspiration_one_backend.application.inspiration_workflow.run_state.enqueue_workflow_node_run_later",
         lambda node_run_id, *, delay_ms: delayed_requeues.append((node_run_id, delay_ms)),
@@ -706,9 +708,7 @@ def test_inspiration_workflow_worker_defers_queued_run_when_global_running_capac
         lambda *args, **kwargs: pytest.fail("capacity-blocked workflow run must not call provider"),
     )
 
-    execute_inspiration_workflow_run(queued.run_id)
-    assert len(dispatched_node_run_ids) == 1
-    dispatched_node_run_id = dispatched_node_run_ids[0]
+    dispatched_node_run_id = queued_node_run.id
     execute_inspiration_workflow_node_run(dispatched_node_run_id)
 
     db_session.expire_all()

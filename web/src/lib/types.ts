@@ -25,7 +25,7 @@ export type WorkflowNodeStatus = "idle" | "queued" | "running" | "succeeded" | "
 export type WorkflowNodeRunStatusValue = WorkflowNodeStatus;
 export type WorkflowRunStatus = "running" | "waiting_confirmation" | "succeeded" | "failed" | "cancelled";
 export type TaskNotificationKind = "image_session_generation" | "inspiration_workflow";
-export type TaskNotificationStatus = "succeeded" | "failed" | "cancelled";
+export type TaskNotificationStatus = "succeeded" | "failed" | "cancelled" | "attempt_failed";
 export type WorkflowRunStartMode = "from_node" | "after_node";
 export type WorkflowRetryHint = "retry_later" | "revise_input" | "check_settings";
 export type CanvasTemplateKind = "full_canvas" | "node_group";
@@ -158,6 +158,15 @@ export interface TaskNotificationEvent {
   failure_reason: string | null;
   finished_at: string | null;
   resource_id: string;
+  generation_config_id: string | null;
+  generation_config_name: string | null;
+  resource_group_id: string | null;
+  resource_group_name: string | null;
+  attempt: number | null;
+  max_attempts: number | null;
+  next_attempt: number | null;
+  node_id: string | null;
+  node_title: string | null;
 }
 
 export interface RbacUser {
@@ -1061,6 +1070,7 @@ export interface GalleryEntry extends ModerationFields {
   candidate_index: number | null;
   candidate_count: number | null;
   base_asset_ids: string[];
+  base_assets: ImageSessionAsset[];
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
   provider_notes: string[];
@@ -1114,6 +1124,8 @@ export interface RuntimeConfig {
   image_generation_max_dimension: number;
   image_session_max_base_images: number;
   image_tool_allowed_fields: ImageToolOptionKey[];
+  text_generation_max_concurrent_tasks: number;
+  image_generation_max_concurrent_tasks: number;
   generation_tail_splitter_max_items: number;
   workflow_node_max_retry_count: number;
   workflow_node_retry_delay_ms: number;
@@ -1121,7 +1133,8 @@ export interface RuntimeConfig {
   deletion_enabled: boolean;
 }
 
-export type LoginPageTemplateId = "codex-orbit" | "fluid-mist" | "image-lab";
+export type LoginPageTemplateId = "command-orbit" | "fluid-mist" | "image-lab";
+export type LoginPageMode = "random" | LoginPageTemplateId;
 
 export interface LoginPageConfig {
   template_id: LoginPageTemplateId;
@@ -1140,6 +1153,14 @@ export interface GenerationQueueOverview {
 export interface ConfigUpdateRequest {
   values?: Record<string, string | number | boolean | string[] | null>;
   reset_keys?: string[];
+}
+
+export interface LoginPageSelectionUpdateRequest {
+  value: LoginPageMode;
+}
+
+export interface LoginPageTemplateConfigUpdateRequest {
+  config: Record<string, string>;
 }
 
 export interface UserUiPreferences {
@@ -1458,6 +1479,25 @@ export interface TextGenerationConfigJsonResponseFormatTestResponse {
   model: string;
   parsed_json: Record<string, unknown>;
   duration_ms: number;
+}
+
+export interface ImageGenerationConfigTestRequest {
+  generation_config_id?: string | null;
+  generation_config?: GenerationConfigCreateRequest | null;
+  resource_group_id: string;
+  prompt: string;
+  size: string;
+}
+
+export interface ImageGenerationConfigTestResponse {
+  generation_config_id: string | null;
+  provider_kind: string;
+  model_name: string;
+  provider_name: string;
+  duration_ms: number;
+  image_session_id: string;
+  round: ImageSessionRound;
+  generated_asset: ImageSessionAsset;
 }
 
 export interface ProviderConfigResponse {

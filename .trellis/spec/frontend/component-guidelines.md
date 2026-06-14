@@ -156,6 +156,71 @@ return locale === "en-US" ? translateInspirationName(inspiration.name) : inspira
 
 ---
 
+## Modal and Floating Overlay Contracts
+
+Use the shared overlay primitives for every new surface that appears above the page.
+
+- Page-level dialogs, alert dialogs, image previews, editor overlays, and drawer-like modal panels must use
+  `web/src/components/ModalShell.tsx`.
+- `ModalShell` owns the portal to `document.body`, `role`, `aria-modal`, Escape close handling, backdrop close handling,
+  body scroll locking, and `wheel` / `touchmove` / pointer / keyboard propagation boundaries.
+- Callers own the visible panel content, labels, disabled state, mutation state, and close callbacks. Use
+  `panelElement="form"` for submitting dialogs and `panelElement="aside"` for side drawers.
+- Nested modal flows are allowed through `ModalShell`; do not add page-local body scroll locks for nested previews or
+  feedback dialogs.
+- New modal code should not manually call `createPortal(document.body)`, add a window Escape listener, define a raw
+  `fixed inset-0` overlay, or mutate `document.body.style.overflow`.
+- Anchored non-modal popovers, select menus, date pickers, and top-nav menus should use `FloatingSurface`. Let
+  `FloatingSurface` own portal placement and scroll-chain containment.
+- Vaul mobile drawers may stay on `Drawer.Root` / `Drawer.Content`, but their overlay and content must stop click, wheel,
+  and touch propagation, and the drawer's own scroll area should use `overscroll-contain`.
+
+Good:
+
+```tsx
+<ModalShell
+  onClose={onClose}
+  closeDisabled={mutation.isPending}
+  ariaLabelledBy={titleId}
+  overlayClassName="z-[90] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+  panelClassName="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-[#0f1726]"
+>
+  <h2 id={titleId}>{title}</h2>
+  {children}
+</ModalShell>
+```
+
+Good:
+
+```tsx
+<ModalShell
+  panelElement="form"
+  panelProps={{ onSubmit: handleSubmit }}
+  onClose={onClose}
+  ariaLabelledBy={titleId}
+>
+  {formFields}
+</ModalShell>
+```
+
+Bad:
+
+```tsx
+useEffect(() => {
+  window.addEventListener("keydown", closeOnEscape);
+  document.body.style.overflow = "hidden";
+}, []);
+
+return createPortal(
+  <div className="fixed inset-0" onWheel={(event) => event.stopPropagation()}>
+    <div role="dialog" aria-modal="true">{children}</div>
+  </div>,
+  document.body,
+);
+```
+
+---
+
 ## Accessibility and Forms
 
 Follow the patterns already present:

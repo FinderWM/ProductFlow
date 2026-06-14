@@ -364,7 +364,7 @@ Without `just`:
 
 ```bash
 bash scripts/with_dev_env.sh bash -lc 'uv run --directory backend uvicorn inspiration_one_backend.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-29282}"'
-bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 inspiration_one_backend.workers
+bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 1 --threads 4 inspiration_one_backend.workers
 bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target="${VITE_DEV_PROXY_TARGET:-http://127.0.0.1:${APP_PORT:-29282}}"; VITE_API_BASE_URL= VITE_DEV_PROXY_TARGET="$api_target" pnpm --dir web dev -- --host 0.0.0.0 --port "$web_port" --strictPort'
 ```
 
@@ -407,6 +407,7 @@ Image providers:
 - `IMAGE_PROVIDER_KIND=openai_responses`: OpenAI Responses `image_generation` tool with reference image input. Inspiration One's current iterative image branch context is determined by the base image and reference images explicitly selected by the user; it does not automatically send the entire historical image chain to the provider.
 - Related variables: `IMAGE_API_KEY`, `IMAGE_BASE_URL`, `IMAGE_GENERATE_MODEL`, `IMAGE_RESPONSES_BACKGROUND_ENABLED`, `IMAGE_GENERATION_MAX_DIMENSION`, `IMAGE_MAIN_IMAGE_SIZE`, `IMAGE_PROMO_POSTER_SIZE`.
 - Advanced tool parameters: `IMAGE_TOOL_ALLOWED_FIELDS` controls which tool fields the frontend can show, the backend can persist, and the provider request can include. Optional defaults also include `IMAGE_TOOL_MODEL`, `IMAGE_TOOL_QUALITY`, `IMAGE_TOOL_OUTPUT_FORMAT`, `IMAGE_TOOL_OUTPUT_COMPRESSION`, `IMAGE_TOOL_BACKGROUND`, `IMAGE_TOOL_MODERATION`, `IMAGE_TOOL_ACTION`, `IMAGE_TOOL_INPUT_FIDELITY`, `IMAGE_TOOL_PARTIAL_IMAGES`, and `IMAGE_TOOL_N`.
+- Worker runtime is one Dramatiq process per container with multiple consumer threads; local commands and Compose explicitly use `--processes 1 --threads 4`. Scale out by adding worker container replicas. `TEXT_GENERATION_MAX_CONCURRENT_TASKS` and `IMAGE_GENERATION_MAX_CONCURRENT_TASKS` separately cap global business concurrency for text workflow nodes and image generation tasks. Legacy `GENERATION_MAX_CONCURRENT_TASKS` remains only as the compatibility default when the split values are unset.
 
 Poster modes:
 
@@ -426,7 +427,7 @@ Prompt templates:
 | Install frontend dependencies | `just web-install` | `pnpm --dir web install` |
 | Apply development DB migration | `just backend-migrate` | `bash scripts/with_dev_env.sh uv run --directory backend alembic upgrade head` |
 | Start development API | `just backend-run` | `bash scripts/with_dev_env.sh bash -lc 'uv run --directory backend uvicorn inspiration_one_backend.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-29282}"'` |
-| Start Dramatiq worker | `just backend-worker` | `bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 inspiration_one_backend.workers` |
+| Start Dramatiq worker | `just backend-worker` | `bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 1 --threads 4 inspiration_one_backend.workers` |
 | Run backend pytest | `just backend-test` | `uv run --directory backend pytest` |
 | Start Vite dev server | `just web-dev` | `bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target="${VITE_DEV_PROXY_TARGET:-http://127.0.0.1:${APP_PORT:-29282}}"; VITE_API_BASE_URL= VITE_DEV_PROXY_TARGET="$api_target" pnpm --dir web dev -- --host 0.0.0.0 --port "$web_port" --strictPort'` |
 | Run frontend lint | no just wrapper | `pnpm --dir web lint` |

@@ -56,6 +56,14 @@ def _gallery_entry_query():
             .selectinload(ImageSession.inspiration),
             selectinload(ImageGalleryEntry.asset)
             .selectinload(ImageSessionAsset.session)
+            .selectinload(ImageSession.assets)
+            .selectinload(ImageSessionAsset.gallery_entry),
+            selectinload(ImageGalleryEntry.asset)
+            .selectinload(ImageSessionAsset.session)
+            .selectinload(ImageSession.assets)
+            .selectinload(ImageSessionAsset.disabled_by),
+            selectinload(ImageGalleryEntry.asset)
+            .selectinload(ImageSessionAsset.session)
             .selectinload(ImageSession.disabled_by),
             selectinload(ImageGalleryEntry.asset)
             .selectinload(ImageSessionAsset.session)

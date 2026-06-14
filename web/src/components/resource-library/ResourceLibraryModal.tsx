@@ -8,6 +8,7 @@ import { formatDateTime } from "../../lib/format";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup } from "../../lib/types";
 import { GalleryImagePreviewDialog } from "../GalleryImagePreviewDialog";
+import { ModalShell } from "../ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../ResourceGovernance";
 
 interface ResourceLibraryModalProps {
@@ -19,6 +20,8 @@ interface ResourceLibraryModalProps {
   selectDisabled?: boolean;
   selectDisabledTitle?: string | null;
   selectingAssetId?: string | null;
+  isAssetSelectable?: (asset: ResourceLibraryAsset) => boolean;
+  assetSelectDisabledTitle?: string | null;
   footer?: ReactNode;
 }
 
@@ -43,6 +46,8 @@ export function ResourceLibraryModal({
   selectDisabled = false,
   selectDisabledTitle = null,
   selectingAssetId = null,
+  isAssetSelectable,
+  assetSelectDisabledTitle = null,
   footer = null,
 }: ResourceLibraryModalProps) {
   const { t } = useI18n();
@@ -70,19 +75,6 @@ export function ResourceLibraryModal({
   }, [open]);
 
   useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !selectingAssetId) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, open, selectingAssetId]);
-
-  useEffect(() => {
     if (selectedGroupId && groupsQuery.isSuccess && !groups.some((group) => group.id === selectedGroupId)) {
       setSelectedGroupId("");
     }
@@ -101,18 +93,14 @@ export function ResourceLibraryModal({
 
   return (
     <>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("resourceLibrary.title")}
-        className="pf-settings-workspace fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6"
-        onMouseDown={(event) => {
-          if (event.target === event.currentTarget && !selectingAssetId) {
-            onClose();
-          }
-        }}
+      <ModalShell
+        open={open}
+        onClose={onClose}
+        closeDisabled={Boolean(selectingAssetId)}
+        ariaLabel={t("resourceLibrary.title")}
+        overlayClassName="pf-settings-workspace z-[75] bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6"
+        panelClassName="flex h-[min(880px,calc(100dvh-2rem))] w-full max-w-6xl min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
       >
-        <div className="flex h-[min(880px,calc(100dvh-2rem))] w-full max-w-6xl min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800 sm:px-5">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
@@ -188,7 +176,11 @@ export function ResourceLibraryModal({
                     {assets.map((asset) => {
                       const assetBlocked = isResourceBlocked(asset);
                       const selectedBusy = selectingAssetId === asset.id;
-                      const actionDisabled = selectDisabled || assetBlocked || selectedBusy;
+                      const assetSelectable = isAssetSelectable ? isAssetSelectable(asset) : true;
+                      const actionDisabled = selectDisabled || assetBlocked || selectedBusy || !assetSelectable;
+                      const actionTitle = !assetSelectable
+                        ? assetSelectDisabledTitle ?? selectDisabledTitle ?? selectLabel ?? t("resourceLibrary.select")
+                        : selectDisabledTitle ?? selectLabel ?? t("resourceLibrary.select");
                       return (
                         <div
                           key={asset.id}
@@ -249,7 +241,7 @@ export function ResourceLibraryModal({
                                   type="button"
                                   onClick={() => onSelectAsset(asset)}
                                   disabled={actionDisabled}
-                                  title={selectDisabledTitle ?? selectLabel ?? t("resourceLibrary.select")}
+                                  title={actionTitle}
                                   className={`${RESOURCE_LIBRARY_MODAL_PRIMARY_ACTION_CLASS} ml-auto min-w-0`}
                                 >
                                   {selectedBusy ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Check size={13} className="mr-1" />}
@@ -272,8 +264,7 @@ export function ResourceLibraryModal({
               </main>
             </div>
           )}
-        </div>
-      </div>
+      </ModalShell>
 
       {previewAsset ? (
         <GalleryImagePreviewDialog

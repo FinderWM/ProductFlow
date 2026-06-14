@@ -17,7 +17,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { ImageDropZone } from "../components/ImageDropZone";
 import { MarkdownEditor } from "../components/MarkdownEditor";
@@ -90,6 +90,12 @@ const PREVIEW_HEIGHT = 560;
 const INSPIRATION_CREATE_FORM_ID = "inspiration-create-form";
 type MobileCreateStep = "entry" | "details" | "template";
 export type DocumentTextState = "idle" | "loading" | "ready" | "failed";
+
+interface InspirationCreateReturnState {
+  source?: "inspiration-list";
+  returnTo?: string;
+  listState?: unknown;
+}
 
 const NODE_TYPE_LABEL_KEYS: Record<WorkflowNodeType, TranslationKey> = {
   inspiration_context: "create.inspirationContext",
@@ -242,6 +248,7 @@ export function contextDocumentFileForSubmit(file: File | null): File | undefine
 export function InspirationCreatePage() {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
+  const location = useLocation();
   const [name, setName] = useState("");
   const [longText, setLongText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -259,6 +266,7 @@ export function InspirationCreatePage() {
   const [templateScope, setTemplateScope] = useState<TemplateScopeFilter>("all");
   const [error, setError] = useState("");
   const [mobileStep, setMobileStep] = useState<MobileCreateStep>("entry");
+  const createReturnState = location.state as InspirationCreateReturnState | null;
   const normalizedTemplateSearch = templateSearch.trim();
   const templateScopeParam = templateScope === "all" ? undefined : templateScope;
   const longTextRequired = initialWorkflowEntry === "copy" || initialWorkflowEntry === "tail";
@@ -568,6 +576,16 @@ export function InspirationCreatePage() {
     setError("");
   };
 
+  const handleClose = () => {
+    if (createReturnState?.source === "inspiration-list" && createReturnState.returnTo) {
+      navigate(createReturnState.returnTo, {
+        state: { restoreInspirationListState: createReturnState.listState },
+      });
+      return;
+    }
+    navigate("/inspirations/list");
+  };
+
   const templatePanelContent = (
     <>
       <div className="flex items-center justify-between gap-3">
@@ -776,7 +794,7 @@ export function InspirationCreatePage() {
           </div>
           <button
             type="button"
-            onClick={() => navigate("/inspirations")}
+            onClick={handleClose}
             aria-label={t("create.close")}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-200/70 text-zinc-500 transition-colors hover:bg-zinc-300 hover:text-zinc-900 dark:border dark:border-slate-700/80 dark:bg-[#151f33] dark:text-slate-300 dark:hover:bg-[#1a2740] dark:hover:text-white"
           >
@@ -1102,7 +1120,7 @@ export function InspirationCreatePage() {
               <div className="mt-6 hidden gap-3 md:flex">
                 <button
                   type="button"
-                  onClick={() => navigate("/inspirations")}
+                  onClick={handleClose}
                   className="flex-1 rounded-md border border-zinc-200 px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors active:scale-[0.99] hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
                 >
                   {t("create.cancel")}

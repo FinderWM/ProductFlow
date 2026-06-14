@@ -277,18 +277,25 @@ State contract:
 - Focus uses border, ring/shadow, and gradient intensity changes rather than sudden color inversion.
 - Disabled inputs keep the same dimensions and use `--pf-settings-input-bg-disabled`.
 
-## Settings Horizontal Menu Buttons
+## Workspace Horizontal Switch/Menu Buttons
 
-Generation purpose tabs such as copy/image generation use menu-like horizontal controls:
+Generation purpose tabs, resource-group filters, and page-level switches such as RBAC user/role management use the same
+menu-like horizontal controls:
 
 - Container: `pf-settings-generation-tabs`.
 - Item: `pf-settings-generation-tab`.
 - Active state: `aria-current="true"` or `.is-active`.
+- Add `pf-workspace-horizontal-switch-tabs` when the switch sits as a page-level or section-level tab row and needs
+  preserved button spacing plus a full container bottom rule.
 
 Visual contract:
 
 - Only the bottom border is visible. Other borders are removed.
 - Radius is `0`; the control should read as a menu row, not a pill button group.
+- The container bottom rule spans the switch group, including the gaps between buttons. It must not shrink to a pair of
+  tightly adjacent text-width buttons.
+- Buttons keep functional spacing: use a gap and a small `min-width` for short labels such as user/role management, while
+  allowing mobile buttons to flex instead of overflowing.
 - Hover fills upward from the bottom to about `72%`.
 - Active fills from the bottom to the full height.
 - Active state uses a subtle upward shadow such as `0 -8px 18px -18px ...`.
@@ -296,9 +303,11 @@ Visual contract:
 
 Behavior contract:
 
-- Switching the tab changes the visible generation config group only.
+- Switching the tab changes the visible local view, group, or filter only.
 - It should not trigger a database write by itself.
 - Keyboard focus must be visible and the active item must be announced by `aria-current`.
+- Do not use pill segmented controls for this pattern. Pills are reserved for compact value options; this switch is a menu
+  row with a persistent baseline.
 
 ## Settings Dialogs, Drawers, and Modals
 
@@ -367,7 +376,10 @@ Resource group panel:
 Generation config pool:
 
 - Text and image generation config pages share the same pool structure.
-- Text config page includes `TextConfigTestPanel` above the pool; image config page does not.
+- Text config page includes `TextConfigTestPanel` above the pool; image config page includes `ImageConfigTestPanel` above
+  the pool.
+- Text and image test panel drafts are browser-local test inputs. Persist edits immediately through guarded
+  `localStorage` helpers, keep empty user text as a valid saved value, and fall back only for invalid image sizes.
 - The pool header contains title/description, search input, "new config" primary action, and compact refresh sort action.
 - Resource groups are horizontal `pf-settings-generation-tab` menu buttons. Include the unbound group tab.
 - Disabled resource groups remain visible in the tab row with a disabled label suffix.
@@ -546,10 +558,94 @@ Status metrics and filters:
 
 - Use `pf-metric-card` for high-level metrics.
 - Metric cards include the top gradient accent line from CSS.
-- Date quick buttons are clickable filters and may have active tint/border states.
-- Date inputs and refresh buttons use the compact status form classes.
+- Status and personal usage statistics keep their top metric summaries as a horizontal responsive card row. Desktop uses
+  one compact scanning row (`xl:grid-cols-6` for status, `xl:grid-cols-5` for personal usage), tablet wraps to two columns,
+  and mobile stacks without changing the metric order.
+- Each metric card keeps a small label, a large tabular value, an optional one-line detail, and a compact icon chip.
+- Do not replace the metric row with a table, carousel, nested cards, or oversized hero cards. These metrics are operational
+  scan indicators, not marketing highlights.
+- Date quick buttons are clickable filters and may have active tint/border states. They sit on the same label row as
+  `时间范围` and should use a smaller, lower-emphasis text size with only a compact click boundary. They must not read as
+  full-size form buttons or visually overpower the label.
+- Time filters use the shared `WorkspaceDateTimeRangeField` control when a page needs start/end filtering.
+- `WorkspaceDateTimeRangeField` shows one label, `时间范围`, above a single merged range input surface. The two internal
+  inputs support seconds with `datetime-local` and `step=1`, and they keep start/end values linked so start cannot exceed
+  end and end cannot precede start. The visible surface is a single trigger; opening it shows the start and end controls
+  together, starts from the start control, then moves focus to the end control after the start changes.
+- Quick range actions sit on the same label row after `时间范围` and use `当日 / 最近一天 / 本周 / 本月`, computed from the
+  current local time. These actions update local filter state only; they are not database writes.
+- Backend endpoints that still accept day-level filters may receive date-only values derived from the second-level UI value,
+  but the visible control remains second-capable for consistency across status, personal statistics, and inspiration list.
+- Date inputs and refresh buttons use the compact status form classes and workspace input gradient tokens.
 - Disable refresh while fetching or when the date range is invalid.
 - Invalid date ranges show inline feedback near the filter controls.
+
+## Admin Lists: Non-clickable Rows
+
+RBAC and similar administrative lists may expose row-level data plus action buttons, but a row without a child page or
+detail navigation is not a clickable row.
+
+Non-clickable admin row contract:
+
+- Keep the current row/table semantics: plain `<tr>` or row `div`, no `role="button"`, no `tabIndex`, no row open handler,
+  and no `cursor-pointer` on the whole row.
+- Preserve clear row separation. For tables, `pf-gradient-table-body` or existing row dividers are valid; do not replace
+  them with the inspiration-list pressed row treatment.
+- Whole-row hover may be neutral and subtle at most. It must not add a strong tint, left accent inset, raised shadow, or
+  pressed state that implies navigation.
+- Only explicit row controls are interactive. Resource-grant chips, reset-password buttons, enable/disable buttons, and
+  other actions use compact icon or text buttons with visible focus states.
+- Action controls inside the row must be sized compactly and may use hover/focus/active feedback on the control itself.
+  They must not visually cover row data or depend on the whole row being clickable.
+- Keep row content readable without expanding or clicking the row. Administrative fields such as username, role, status,
+  grants, timestamps, and badges must be visible in the list itself.
+
+Use this pattern for `/rbac` user lists and future admin tables that only mutate data in place. Use the inspiration list
+clickable row pattern only when the whole row opens a real child surface.
+
+## Image Chat: Current-Round Canvas Layer
+
+The image-chat workbench is an immersive workspace surface. The main stage should display the current round image or task
+state with round-owned metadata attached to the canvas.
+
+Current-round canvas layer contract:
+
+- Session title is shown above the stage, truncated to the available width, with the full title exposed through `title`.
+  Do not show redundant labels such as “current result” in the title row.
+- Resource owner/governance badges that duplicate the session list should not sit under the title. Keep blocked-resource
+  notices near the affected action or result surface.
+- Current-round metadata belongs to the canvas layer: resource group, actual/requested size, candidate index/count,
+  model/provider, placeholder state, and waiting state render as compact canvas chips.
+- The current image download action belongs to the canvas layer because it targets the visible image file.
+- Send-to-gallery and save-to-resource-library actions sit after the session title. They are current-result actions, but
+  they should not compete with canvas metadata or cover the image. In the desktop title row, the title group stays left
+  and these action buttons are aligned right.
+- Canvas chips must use translucent theme-complete surfaces and stay compact enough that they do not hide the image
+  subject. Canvas metadata and canvas actions are right-aligned as one top row; actions stay at the far right and metadata
+  flows to their left, wrapping before overlap.
+- The image stage itself should reserve stable dimensions, center the current image, and keep the title row outside the
+  canvas so long session titles cannot collide with provider-returned size text.
+- Session-list titles and owner badges use truncation plus `title` for full-name hover. Operator-authored titles are not
+  translated.
+- History branch prompt snippets keep the preview behavior without an inline copy icon on the history strip. The prompt
+  preview dialog owns the copy action at the bottom of the full prompt text. Copy feedback may be local to the dialog
+  button; it is not a persistent write and does not use the settings database feedback dialog.
+- Current-image preview dialogs should place prompt assistant actions, such as copy, below the prompt text so they remain
+  available after reading long prompts.
+
+## Workspace Theme Dock
+
+The workspace appearance selector is a right-bottom dock controlled by the workspace shell.
+
+- The dock starts open, then auto-collapses after the same navigation idle delay.
+- Collapsed state sticks to the right edge and leaves only the current appearance logo/swatch visible. It remains
+  interactive; do not hide it with `opacity: 0`, `pointer-events: none`, or pass-through behavior.
+- Hovering or focusing the visible logo expands the three appearance options leftward. Leaving the dock schedules the same
+  auto-collapse timer.
+- Hidden options in collapsed state are removed from tab order; the visible current option remains focusable so keyboard
+  users can reveal the dock.
+- The dock uses workspace appearance tokens for border, panel, text, shadow, and swatches across `mist`, `sage`, and
+  `dusk`.
 
 ## Good, Base, and Bad Cases
 
@@ -558,6 +654,8 @@ Good:
 - A new settings save button uses `pf-workspace-action-primary h-9`, writes through a mutation, opens `SettingsFeedbackDialog`, invalidates the affected query, and shows success for 1 second.
 - A new searchable provider dropdown focuses and selects the search input on open, supports Arrow keys and Escape, and renders selected options with `aria-selected`.
 - A new status row displays state details in a `div` grid with gradient dividers and no pointer affordance.
+- A new RBAC user row keeps plain table-row semantics and exposes only compact action buttons for grants, password reset,
+  and enable/disable operations.
 
 Base:
 
@@ -571,6 +669,8 @@ Bad:
 - A write action shows only inline text feedback and auto-dismisses errors.
 - A settings select opens without focusing the search input when `searchable` is enabled.
 - A status list row gets `cursor-pointer` or row hover styling even though it has no navigation behavior.
+- An RBAC user row copies inspiration-list `role="button"` semantics or pressed row styling even though only the action
+  buttons mutate data.
 - A workspace settings input hard-codes a single light or dark background and breaks in `mist`, `sage`, or `dusk`.
 
 ## Wrong vs Correct
@@ -647,4 +747,6 @@ Before handing off workspace UI changes:
 - [ ] Clickable inspiration rows/cards support keyboard open, press cancellation, focus-visible, and child-action propagation guards.
 - [ ] Mobile inspiration swipe actions use transform-based movement and threshold constants.
 - [ ] Status rows remain readonly with no pointer affordance.
+- [ ] RBAC/admin rows without child navigation remain non-clickable, keep row separation, and expose only explicit compact
+      row actions as interactive controls.
 - [ ] Browser verification covers at least one desktop and one mobile viewport, plus all three workspace appearances when shared workspace CSS changes.

@@ -1684,6 +1684,7 @@ def test_image_session_worker_auto_retry_exposes_last_failure_metadata(
     from inspiration_one_backend.domain.enums import JobStatus
 
     sent: list[str] = []
+    attempt_failed_events: list[tuple[str, str, int, int]] = []
 
     def fail_generate(*args, **kwargs) -> None:
         raise TimeoutError("read timeout from provider")
@@ -1695,6 +1696,13 @@ def test_image_session_worker_auto_retry_exposes_last_failure_metadata(
     monkeypatch.setattr(
         "inspiration_one_backend.application.image_sessions.enqueue_image_session_generation_task",
         lambda task_id: sent.append(task_id),
+    )
+    monkeypatch.setattr(
+        "inspiration_one_backend.application.image_sessions."
+        "publish_image_session_generation_attempt_failed_notification_safely",
+        lambda task, *, reason, attempt, max_attempts: attempt_failed_events.append(
+            (task.id, reason, attempt, max_attempts)
+        ),
     )
 
     image_session = create_image_session(db_session, inspiration_id=None, title="自动重试元数据")
@@ -1725,6 +1733,14 @@ def test_image_session_worker_auto_retry_exposes_last_failure_metadata(
     assert task.is_retryable is True
     assert task.attempts == 1
     assert sent == [result.task.id]
+    assert attempt_failed_events == [
+        (
+            result.task.id,
+            "图片供应商请求超时，请稍后重试",
+            1,
+            IMAGE_SESSION_GENERATION_MAX_ATTEMPTS,
+        )
+    ]
 
 
 def test_image_session_worker_policy_failure_stops_without_auto_retry_but_allows_manual_retry(

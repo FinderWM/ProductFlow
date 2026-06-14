@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
@@ -49,6 +49,15 @@ PROVIDER_CAPABILITIES = {
     CAPABILITY_IMAGE_GOOGLE_GEMINI,
 }
 TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY = "structured_json_response_format_enabled"
+TEXT_STRUCTURED_OUTPUT_KEY = "structured_output"
+TEXT_STRUCTURED_OUTPUT_ENABLED_KEY = "enabled"
+TEXT_STRUCTURED_OUTPUT_MODE_KEY = "mode"
+TEXT_STRUCTURED_OUTPUT_MODE_JSON_OBJECT = "json_object"
+TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA = "json_schema"
+TEXT_STRUCTURED_OUTPUT_MODES = {
+    TEXT_STRUCTURED_OUTPUT_MODE_JSON_OBJECT,
+    TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA,
+}
 UNSET_PROVIDER_FIELD = object()
 DEFAULT_GENERATION_CONFIG_PRIORITY = 100
 DEFAULT_GENERATION_CONFIG_MAX_CONCURRENCY = 1
@@ -79,6 +88,12 @@ LEGACY_PROVIDER_CONFIG_KEYS = {
 
 
 @dataclass(frozen=True, slots=True)
+class TextStructuredOutputConfig:
+    enabled: bool = False
+    mode: Literal["json_object", "json_schema"] = TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedTextProviderConfig:
     provider_kind: Literal["mock", "openai", "openai_chat_completions"]
     brief_model: str
@@ -86,9 +101,13 @@ class ResolvedTextProviderConfig:
     provider_profile_id: str | None = None
     api_key: str | None = None
     base_url: str | None = None
-    structured_json_response_format_enabled: bool = False
+    structured_output: TextStructuredOutputConfig = field(default_factory=TextStructuredOutputConfig)
     generation_config_id: str | None = None
     generation_config_name: str | None = None
+
+    @property
+    def structured_json_response_format_enabled(self) -> bool:
+        return self.structured_output.enabled
 
 
 @dataclass(frozen=True, slots=True)
@@ -904,10 +923,93 @@ def resolve_text_provider_config_from_draft(
         provider_profile_id=profile.id,
         api_key=profile.api_key,
         base_url=profile.base_url,
-        structured_json_response_format_enabled=_text_structured_json_response_format_enabled(
+        structured_output=_text_structured_output_config(
             normalized_config,
             provider_kind=provider_kind,
         ),
+        generation_config_name=name,
+    )
+
+
+def resolve_image_provider_config_from_draft(
+    session: Session,
+    *,
+    name: str,
+    provider_kind: str,
+    provider_profile_id: str | None,
+    model_settings: dict[str, Any],
+    config: dict[str, Any],
+    generation_config_id: str | None = None,
+) -> ResolvedImageProviderConfig:
+    """Resolve an unsaved image generation config without creating scheduler rows."""
+
+    normalized_model_settings = _normalize_binding_model_settings(
+        purpose=IMAGE_PURPOSE,
+        model_settings=model_settings,
+    )
+    normalized_config = _normalize_binding_config(
+        purpose=IMAGE_PURPOSE,
+        provider_kind=provider_kind,
+        config=config,
+    )
+    _validate_binding_payload(
+        session,
+        purpose=IMAGE_PURPOSE,
+        provider_kind=provider_kind,
+        provider_profile_id=provider_profile_id,
+        model_settings=normalized_model_settings,
+        config=normalized_config,
+    )
+    if provider_kind == "mock":
+        return ResolvedImageProviderConfig(
+            provider_kind="mock",
+            model=_require_text_value(normalized_model_settings, "model", "图片模型未配置"),
+            generation_config_id=generation_config_id,
+            generation_config_name=name,
+        )
+    if provider_kind not in {"openai_responses", "openai_images", "openai_chat_image", "google_gemini_image"}:
+        raise RuntimeError(f"暂不支持的图片 provider: {provider_kind}")
+    profile = session.get(ProviderProfile, provider_profile_id) if provider_profile_id else None
+    if profile is None or profile.archived_at is not None:
+        raise RuntimeError("供应商不存在")
+    return ResolvedImageProviderConfig(
+        provider_kind=provider_kind,  # type: ignore[arg-type]
+        model=_require_text_value(
+            normalized_model_settings,
+            "model",
+            "图片模型未配置",
+            fallback_values=profile.default_models_json,
+            fallback_key="image_model",
+        ),
+        provider_profile_id=profile.id,
+        api_key=profile.api_key,
+        base_url=profile.base_url,
+        images_quality=(
+            _optional_str(normalized_config.get("images_quality")) if provider_kind == "openai_images" else None
+        ),
+        images_style=(
+            _optional_str(normalized_config.get("images_style")) if provider_kind == "openai_images" else None
+        ),
+        responses_background_enabled=(
+            _require_bool_value(
+                normalized_config,
+                "responses_background_enabled",
+                "图片 Responses 后台响应模式未配置",
+            )
+            if provider_kind == "openai_responses"
+            else False
+        ),
+        gemini_api_version=(
+            (_optional_str(normalized_config.get("gemini_api_version")) or "v1beta")
+            if provider_kind == "google_gemini_image"
+            else "v1beta"
+        ),
+        gemini_output_mime_type=(
+            _optional_str(normalized_config.get("gemini_output_mime_type"))
+            if provider_kind == "google_gemini_image"
+            else None
+        ),
+        generation_config_id=generation_config_id,
         generation_config_name=name,
     )
 
@@ -1174,7 +1276,7 @@ def _resolved_text_provider_config_from_generation_config(
         provider_profile_id=profile.id,
         api_key=profile.api_key,
         base_url=profile.base_url,
-        structured_json_response_format_enabled=_text_structured_json_response_format_enabled(
+        structured_output=_text_structured_output_config(
             dict(generation_config.config_json or {}),
             provider_kind=kind,
         ),
@@ -1915,13 +2017,8 @@ def _normalize_text_model_settings(model_settings: dict[str, Any]) -> dict[str, 
 
 def _normalize_binding_config(*, purpose: str, provider_kind: str, config: dict[str, Any]) -> dict[str, Any]:
     if purpose == TEXT_PURPOSE:
-        if provider_kind == "openai_chat_completions":
-            return {
-                TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY: _optional_bool(
-                    config.get(TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY),
-                    default=False,
-                )
-            }
+        if provider_kind in {"openai", "openai_chat_completions"}:
+            return {TEXT_STRUCTURED_OUTPUT_KEY: _normalize_text_structured_output_dict(config)}
         return {}
     if purpose != IMAGE_PURPOSE:
         return {}
@@ -1958,10 +2055,46 @@ def _normalize_binding_config(*, purpose: str, provider_kind: str, config: dict[
     return {}
 
 
-def _text_structured_json_response_format_enabled(config: dict[str, Any], *, provider_kind: str) -> bool:
-    if provider_kind != "openai_chat_completions":
-        return False
-    return _optional_bool(config.get(TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY), default=False)
+def _text_structured_output_config(config: dict[str, Any], *, provider_kind: str) -> TextStructuredOutputConfig:
+    if provider_kind not in {"openai", "openai_chat_completions"}:
+        return TextStructuredOutputConfig()
+    normalized = _normalize_text_structured_output_dict(config)
+    mode = _optional_str(normalized.get(TEXT_STRUCTURED_OUTPUT_MODE_KEY)) or TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA
+    if mode not in TEXT_STRUCTURED_OUTPUT_MODES:
+        raise ValueError("文案结构化输出模式必须是 json_schema 或 json_object")
+    return TextStructuredOutputConfig(
+        enabled=_optional_bool(normalized.get(TEXT_STRUCTURED_OUTPUT_ENABLED_KEY), default=False),
+        mode=mode,  # type: ignore[arg-type]
+    )
+
+
+def _normalize_text_structured_output_dict(config: dict[str, Any]) -> dict[str, Any]:
+    raw = config.get(TEXT_STRUCTURED_OUTPUT_KEY)
+    if raw is None:
+        legacy_enabled = _optional_bool(
+            config.get(TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY),
+            default=False,
+        )
+        return {
+            TEXT_STRUCTURED_OUTPUT_ENABLED_KEY: legacy_enabled,
+            TEXT_STRUCTURED_OUTPUT_MODE_KEY: (
+                TEXT_STRUCTURED_OUTPUT_MODE_JSON_OBJECT
+                if legacy_enabled
+                else TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA
+            ),
+        }
+    if not isinstance(raw, dict):
+        raise ValueError("文案结构化输出配置必须是对象")
+    mode = _optional_str(raw.get(TEXT_STRUCTURED_OUTPUT_MODE_KEY)) or TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA
+    if mode not in TEXT_STRUCTURED_OUTPUT_MODES:
+        raise ValueError("文案结构化输出模式必须是 json_schema 或 json_object")
+    return {
+        TEXT_STRUCTURED_OUTPUT_ENABLED_KEY: _optional_bool(
+            raw.get(TEXT_STRUCTURED_OUTPUT_ENABLED_KEY),
+            default=False,
+        ),
+        TEXT_STRUCTURED_OUTPUT_MODE_KEY: mode,
+    }
 
 
 def _require_text_value(

@@ -1,12 +1,13 @@
 import { type CSSProperties, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, Image as ImageIcon, Loader2, RotateCcw } from "lucide-react";
+import { Ban, Check, Copy, Image as ImageIcon, Loader2, RotateCcw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { ResourceBlockedNotice, ResourceMetaBadges } from "../components/ResourceGovernance";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { formatDateTime } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
@@ -63,6 +64,13 @@ function applyGalleryModeration(entry: GalleryEntry, moderation: ResourceModerat
   };
 }
 
+function galleryBaseAssetKindLabel(
+  asset: GalleryEntry["base_assets"][number],
+  t: ReturnType<typeof useI18n>["t"],
+) {
+  return t(asset.kind === "generated_image" ? "gallery.generatedBaseImage" : "gallery.referenceBaseImage");
+}
+
 interface GalleryPageProps {
   mode?: "auto" | "manage";
 }
@@ -74,6 +82,8 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   const queryClient = useQueryClient();
   const session = useSessionState();
   const [previewEntry, setPreviewEntry] = useState<GalleryEntry | null>(null);
+  const [previewBaseAsset, setPreviewBaseAsset] = useState<GalleryEntry["base_assets"][number] | null>(null);
+  const [promptCopyState, setPromptCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [moderationError, setModerationError] = useState("");
   const [gridContentWidth, setGridContentWidth] = useState<number | null>(null);
   const [isDesktopGrid, setIsDesktopGrid] = useState(false);
@@ -117,6 +127,19 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       resizeObserver?.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    setPromptCopyState("idle");
+    setPreviewBaseAsset(null);
+  }, [previewEntry?.id]);
+
+  useEffect(() => {
+    if (promptCopyState === "idle") {
+      return;
+    }
+    const timer = window.setTimeout(() => setPromptCopyState("idle"), 1600);
+    return () => window.clearTimeout(timer);
+  }, [promptCopyState]);
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -181,6 +204,34 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
     viewMutation.mutate(entry);
   };
 
+  const handleCopyPreviewPrompt = async () => {
+    const prompt = previewEntry?.prompt?.trim();
+    if (!prompt) {
+      return;
+    }
+    try {
+      await copyTextToClipboard(prompt);
+      setPromptCopyState("copied");
+    } catch {
+      setPromptCopyState("failed");
+    }
+  };
+
+  const promptCopyTitle =
+    promptCopyState === "copied"
+      ? t("gallery.promptCopied")
+      : promptCopyState === "failed"
+        ? t("gallery.promptCopyFailed")
+        : t("gallery.copyPrompt");
+
+  const handleClosePreview = () => {
+    if (previewBaseAsset) {
+      setPreviewBaseAsset(null);
+      return;
+    }
+    setPreviewEntry(null);
+  };
+
   const previewDialog = previewEntry ? (
     <GalleryImagePreviewDialog
       ariaLabel={t("gallery.previewLabel")}
@@ -188,10 +239,75 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       imageAlt={previewEntry.prompt ?? previewEntry.image.original_filename}
       title={t("gallery.prompt")}
       subtitle={previewEntry.image.original_filename}
+      imageInteractive={!previewBaseAsset}
       body={
-        <div className="space-y-3">
+        <div className="space-y-4 whitespace-normal">
           <ResourceBlockedNotice resource={previewEntry} />
-          <div>{previewEntry.prompt ?? t("gallery.noPrompt")}</div>
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-bold uppercase text-slate-400 dark:text-slate-500">{t("gallery.prompt")}</div>
+              <div className="flex shrink-0 items-center gap-2">
+                {promptCopyState !== "idle" ? (
+                  <span
+                    className={
+                      promptCopyState === "copied"
+                        ? "text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
+                        : "text-[11px] font-semibold text-red-700 dark:text-red-300"
+                    }
+                  >
+                    {promptCopyTitle}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleCopyPreviewPrompt}
+                  disabled={!previewEntry.prompt?.trim()}
+                  title={promptCopyTitle}
+                  aria-label={t("gallery.copyPrompt")}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-500 dark:hover:bg-violet-500/15 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+                >
+                  {promptCopyState === "copied" ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </div>
+            </div>
+            <div className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800 dark:text-slate-200">
+              {previewEntry.prompt ?? t("gallery.noPrompt")}
+            </div>
+          </section>
+          {previewEntry.base_assets.length ? (
+            <section className="border-t border-slate-200 pt-4 dark:border-slate-800">
+              <div className="text-xs font-bold uppercase text-slate-400 dark:text-slate-500">{t("gallery.baseImages")}</div>
+              <div className="mt-2 grid gap-2">
+                {previewEntry.base_assets.map((asset) => (
+                  <button
+                    type="button"
+                    key={asset.id}
+                    onClick={() => setPreviewBaseAsset(asset)}
+                    title={t("gallery.baseImagePreviewLabel")}
+                    aria-label={`${t("gallery.baseImagePreviewLabel")}: ${asset.original_filename}`}
+                    className="flex min-w-0 items-center gap-3 rounded-md border border-slate-200 bg-slate-50/80 p-2 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-800 dark:bg-slate-950/30 dark:hover:border-violet-400/40 dark:hover:bg-violet-500/10 dark:focus-visible:ring-violet-400"
+                  >
+                    <img
+                      src={api.toApiUrl(asset.thumbnail_url)}
+                      alt={`${t("gallery.baseImage")}: ${asset.original_filename}`}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-12 w-12 shrink-0 rounded-md bg-slate-100 object-cover dark:bg-slate-900"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-semibold text-slate-800 dark:text-slate-100">
+                        {asset.original_filename}
+                      </div>
+                      <div className="mt-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        {galleryBaseAssetKindLabel(asset, t)}
+                      </div>
+                      <ResourceMetaBadges resource={asset} className="mt-1" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </div>
       }
       metadataRows={metadataRows(previewEntry, locale, t, showGenerationResourceGroup).map(([label, value]) => ({
@@ -203,7 +319,31 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       downloadUrl={previewEntry.image.download_url}
       downloadLabel={t("gallery.download")}
       closeLabel={t("gallery.closePreview")}
-      onClose={() => setPreviewEntry(null)}
+      onClose={handleClosePreview}
+    />
+  ) : null;
+  const baseAssetPreviewDialog = previewBaseAsset ? (
+    <GalleryImagePreviewDialog
+      ariaLabel={t("gallery.baseImagePreviewLabel")}
+      imageUrl={api.toApiUrl(previewBaseAsset.preview_url)}
+      imageAlt={previewBaseAsset.original_filename}
+      title={t("gallery.baseImage")}
+      subtitle={previewBaseAsset.original_filename}
+      body={
+        <div className="space-y-2 whitespace-normal">
+          <ResourceBlockedNotice resource={previewBaseAsset} />
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            {galleryBaseAssetKindLabel(previewBaseAsset, t)}
+          </div>
+          <ResourceMetaBadges resource={previewBaseAsset} />
+        </div>
+      }
+      providerNotesTitle={t("gallery.providerNotes")}
+      downloadUrl={previewBaseAsset.download_url}
+      downloadLabel={t("gallery.download")}
+      closeLabel={t("gallery.closePreview")}
+      className="z-[90]"
+      onClose={() => setPreviewBaseAsset(null)}
     />
   ) : null;
   const isWorkspaceManage = activeScheme === "workspace" && mode === "manage";
@@ -401,6 +541,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       </main>
 
       {previewDialog}
+      {baseAssetPreviewDialog}
     </div>
   );
 }

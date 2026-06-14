@@ -145,6 +145,51 @@ def test_resource_library_saves_inspiration_source_image(configured_env: Path) -
     assert saved.json()["group_ids"] == [group_id]
 
 
+def test_resource_library_uploads_manual_images_to_default_and_selected_groups(
+    configured_env: Path,
+    db_session,
+) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    default_group_id = client.get("/api/resource-library/groups").json()["items"][0]["id"]
+    uploaded_default = client.post(
+        "/api/resource-library/assets/upload",
+        files=[("images", ("manual.png", _make_demo_image_bytes(), "image/png"))],
+    )
+
+    assert uploaded_default.status_code == 201
+    default_item = uploaded_default.json()["items"][0]
+    assert default_item["source_type"] == "upload"
+    assert default_item["source_resource_id"] is None
+    assert default_item["group_ids"] == [default_group_id]
+    db_session.expire_all()
+    default_asset = db_session.get(ResourceLibraryAsset, default_item["id"])
+    assert default_asset is not None
+    assert default_asset.storage_path.startswith("resource_library/")
+    assert default_asset.storage_object_key == default_asset.storage_path
+
+    group_id = client.post("/api/resource-library/groups", json={"name": "手动素材"}).json()["id"]
+    uploaded_group = client.post(
+        "/api/resource-library/assets/upload",
+        data={"group_ids": group_id},
+        files=[
+            ("images", ("manual-a.png", _make_demo_image_bytes(), "image/png")),
+            ("images", ("manual-b.png", _make_demo_image_bytes(), "image/png")),
+        ],
+    )
+
+    assert uploaded_group.status_code == 201
+    uploaded_ids = {item["id"] for item in uploaded_group.json()["items"]}
+    assert len(uploaded_ids) == 2
+    assert all(item["source_type"] == "upload" for item in uploaded_group.json()["items"])
+    assert all(item["group_ids"] == [group_id] for item in uploaded_group.json()["items"])
+    listed_group = client.get("/api/resource-library/assets", params={"group_id": group_id})
+    assert listed_group.status_code == 200
+    assert {item["id"] for item in listed_group.json()["items"]} == uploaded_ids
+
+
 def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     configured_env: Path,
     db_session,

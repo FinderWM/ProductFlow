@@ -140,7 +140,9 @@ PostgreSQL 是元数据和运行状态的权威存储；Redis/Dramatiq 只负责
   判断 idle，旧行才回退到 `started_at`。
 - 连续生图 worker 的 Dramatiq `time_limit` 只保留为内部 failsafe，避免进程永久占用，不作为用户可调的生成总时限。
 - Dramatiq actor 对 terminal/currently-running 的重复消息应 no-op。
-- 全局生成并发上限通过数据库中的 active `WorkflowRun`、`ImageSessionGenerationTask` 计数实现。
+- worker 部署模型固定为单容器单 Dramatiq process，多线程消费；扩容通过增加 worker 容器副本完成。
+- 业务生成并发拆分为 `text_generation_max_concurrent_tasks` 和 `image_generation_max_concurrent_tasks`。文案工作流节点只占用文案池；图片工作流节点和连续生图任务占用图片池。
+- 两个容量池通过 PostgreSQL advisory transaction lock 串行化 worker claim，适配多线程和多容器并发消费。
 - `/api/generation-queue` 返回全局 durable 队列概览；连续生图 status 响应会带回当前任务的队列位置。
 
 相关入口：
@@ -193,7 +195,7 @@ Provider 选择由 `provider_profiles`、`provider_bindings` 和对应 factory �
 配置分为两类：
 
 1. Env-only 基础设施配置：`DATABASE_URL`、`REDIS_URL`、`SESSION_SECRET`、`ADMIN_ACCESS_KEY` 等。这些配置在应用访问数据库前就必须可用，或属于部署级访问密钥，因此不支持运行时 DB 覆盖。
-2. 运行时业务配置：provider、模型、图片尺寸、上传限制、任务重试、全局生成并发上限、海报模式、提示词模板、登录门禁开关、业务删除开关等。它们可由 `.env` / `.env.dev` 提供默认值，也可在登录且具备 RBAC 配置权限后通过 `/api/settings` 写入 `app_settings` 并覆盖。
+2. 运行时业务配置：provider、模型、图片尺寸、上传限制、任务重试、文案/图片生成并发上限、海报模式、提示词模板、登录门禁开关、业务删除开关等。它们可由 `.env` / `.env.dev` 提供默认值，也可在登录且具备 RBAC 配置权限后通过 `/api/settings` 写入 `app_settings` 并覆盖。
 
 Secret 类配置在 API 响应中不回显已有值。
 

@@ -33,6 +33,8 @@ import type {
   GenerationConfigUpdateRequest,
   GenerationQueueOverview,
   CreateUserTemplateGroupInput,
+  ImageGenerationConfigTestRequest,
+  ImageGenerationConfigTestResponse,
   ImageSessionDetail,
   ImageSessionListResponse,
   ImageSessionStatus,
@@ -41,6 +43,8 @@ import type {
   InspirationHistory,
   InspirationInitialWorkflowEntry,
   LoginPageConfig,
+  LoginPageSelectionUpdateRequest,
+  LoginPageTemplateConfigUpdateRequest,
   ProviderBinding,
   ProviderBindingUpdateRequest,
   ProviderConfigResponse,
@@ -592,6 +596,12 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  testImageGenerationConfig(payload: ImageGenerationConfigTestRequest): Promise<ImageGenerationConfigTestResponse> {
+    return request("/api/settings/generation-configs/test-image", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   getRuntimeConfig(): Promise<RuntimeConfig> {
     return request("/api/settings/runtime");
   },
@@ -611,6 +621,29 @@ export const api = {
     return request("/api/settings", {
       method: "PATCH",
       body: JSON.stringify(payload),
+    });
+  },
+  updateLoginPageSelection(payload: LoginPageSelectionUpdateRequest): Promise<ConfigResponse> {
+    return request("/api/settings/login-page-selection", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  resetLoginPageSelection(): Promise<ConfigResponse> {
+    return request("/api/settings/login-page-selection/reset", { method: "POST" });
+  },
+  updateLoginPageTemplateConfig(
+    templateId: string,
+    payload: LoginPageTemplateConfigUpdateRequest,
+  ): Promise<ConfigResponse> {
+    return request(`/api/settings/login-page-template-config/${encodeURIComponent(templateId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  resetLoginPageTemplateConfig(templateId: string): Promise<ConfigResponse> {
+    return request(`/api/settings/login-page-template-config/${encodeURIComponent(templateId)}/reset`, {
+      method: "POST",
     });
   },
   exportSettings(): Promise<SettingsExportPayload> {
@@ -844,6 +877,22 @@ export const api = {
     return request("/api/resource-library/assets/save", {
       method: "POST",
       body: JSON.stringify(input),
+    });
+  },
+  uploadResourceLibraryAssets(input: {
+    files: File[];
+    group_ids?: string[];
+  }): Promise<ResourceLibraryAssetListResponse> {
+    const formData = new FormData();
+    input.files.forEach((file) => {
+      formData.append("images", file);
+    });
+    input.group_ids?.forEach((groupId) => {
+      formData.append("group_ids", groupId);
+    });
+    return request("/api/resource-library/assets/upload", {
+      method: "POST",
+      body: formData,
     });
   },
   updateResourceLibraryAssetGroups(assetId: string, input: { group_ids: string[] }): Promise<ResourceLibraryAsset> {

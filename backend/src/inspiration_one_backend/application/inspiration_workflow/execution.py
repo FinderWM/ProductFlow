@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from inspiration_one_backend.application.admission import ensure_generation_capacity
+from inspiration_one_backend.application.admission import generation_capacity_pool_for_workflow_node_type
 from inspiration_one_backend.application.auth import require_generation_resource_group_for_user
 from inspiration_one_backend.application.contracts import InspirationInput, TailSplitPlanInput
 from inspiration_one_backend.application.copy_payloads import (
@@ -377,7 +377,6 @@ def start_inspiration_workflow_run(
             should_enqueue=_workflow_run_should_enqueue(active_run),
         )
 
-    ensure_generation_capacity(session)
     next_progress_metadata = dict(progress_metadata or {})
     next_progress_metadata.setdefault("run_mode", "selected" if start_node_id is not None else "full")
     if start_node_id is not None:
@@ -803,7 +802,12 @@ def _execute_workflow_node_run(
         return
     workflow = queries.get_workflow_or_raise(run.workflow_id)
     node = queries.get_node_or_raise(node_run.node_id)
-    claim = claim_workflow_node_run(session, node_run_id=node_run.id, node_id=node.id)
+    claim = claim_workflow_node_run(
+        session,
+        node_run_id=node_run.id,
+        node_id=node.id,
+        capacity_pool=generation_capacity_pool_for_workflow_node_type(node.node_type),
+    )
     if not claim.claimed:
         if claim.should_requeue:
             requeue_workflow_node_run_after_capacity_wait(node_run_id)

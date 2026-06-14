@@ -10,7 +10,7 @@ backend-run-prod:
     uv run --directory backend uvicorn inspiration_one_backend.main:app --host ${APP_HOST:-0.0.0.0} --port ${APP_PORT:-29280}
 
 backend-worker:
-    bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 inspiration_one_backend.workers
+    bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 1 --threads 4 inspiration_one_backend.workers
 
 backend-migrate:
     bash scripts/with_dev_env.sh uv run --directory backend alembic upgrade head
@@ -19,7 +19,7 @@ backend-migrate-prod:
     uv run --directory backend alembic upgrade head
 
 backend-worker-prod:
-    uv run --directory backend dramatiq --processes 2 --threads 4 inspiration_one_backend.workers
+    uv run --directory backend dramatiq --processes 1 --threads 4 inspiration_one_backend.workers
 
 backend-test:
     uv run --directory backend pytest

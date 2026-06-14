@@ -58,6 +58,8 @@ Use the root `justfile` where possible so local env loading and ports match the 
   shell-sourcing production `.env` for development commands.
 - Web self-host runtime must serve Vite build output as static files and proxy same-origin `/api/*` to the backend service.
 - Runtime must not require host `uv`, `pnpm`, or `just`; those tools are only for local development.
+- Worker runtime is one Dramatiq process per container with multiple consumer threads. Keep `--processes 1` explicit in
+  local and Compose commands, and scale by adding worker container replicas.
 
 #### 4. Validation & Error Matrix
 
@@ -543,6 +545,7 @@ Preserve these semantics when editing durable task code.
 - Shared capacity gates:
   - durable submit compatibility lock: `application/admission.py::ensure_generation_capacity(...)`;
   - worker-time running cap: `application/admission.py::generation_running_capacity_available(...)`.
+  - capacity pool routing: `application/admission.py::generation_capacity_pool_for_workflow_node_type(...)`.
 - Current contracts:
   - `WORKFLOW_RUN_GENERATION_TASK_CONTRACT`;
   - `IMAGE_SESSION_GENERATION_TASK_CONTRACT`.
@@ -564,7 +567,8 @@ Preserve these semantics when editing durable task code.
 - Startup recovery must inspect durable DB state and then resend delivery only for queued or stale-running work according
   to the model's recovery rules. API startup must not reset recent running work owned by another worker.
 - Generation capacity must use the shared DB-backed worker gate. Submit paths create or reuse durable queued rows, while
-  worker claims count running work before entering provider execution.
+  worker claims count running work before entering provider execution. Text workflow nodes consume the text capacity pool;
+  image workflow nodes and image-session generation tasks consume the image capacity pool.
 - Status snapshots and queue metadata must be derived from durable rows and first-class result rows, not Redis queue
   length or in-process memory.
 - Manual cancel must be an owning durable-row transition. Terminal statuses include `cancelled` where the business model
@@ -648,6 +652,86 @@ def run_generation_task(task_id: str) -> None:
     execute_generation_task(task_id)
 ```
 
+#### Scenario: Worker process model and generation capacity pools
+
+##### 1. Scope / Trigger
+
+- Trigger: editing worker startup commands, `docker-compose.yml`, runtime generation capacity settings, or worker claim
+  admission logic.
+- Applies to local `just` worker commands, Compose worker command/env, `config.py`, `application/admission.py`, workflow
+  node claims, and image-session generation claims.
+
+##### 2. Signatures
+
+- Local worker command: `dramatiq --processes 1 --threads 4 inspiration_one_backend.workers`.
+- Compose worker service: `inspiration-one-worker.command` must include `--processes`, `"1"`, `--threads`, `"4"`.
+- Runtime settings: `text_generation_max_concurrent_tasks`, `image_generation_max_concurrent_tasks`.
+- Legacy compatibility input: `generation_max_concurrent_tasks`.
+- Capacity entrypoints:
+  - `generation_running_capacity_available(session, pool="text" | "image")`;
+  - `generation_capacity_pool_for_workflow_node_type(node_type)`;
+  - `ensure_generation_capacity(session, pool="image")`.
+
+##### 3. Contracts
+
+- A worker container owns exactly one Dramatiq process. Scale by adding worker container replicas.
+- `--threads` is a deployment-time consumer-thread count and requires worker restart to change.
+- `text_generation_max_concurrent_tasks` gates `copy_generation` and `tail_splitter` workflow nodes.
+- `image_generation_max_concurrent_tasks` gates `image_generation` workflow nodes and `ImageSessionGenerationTask`.
+- `inspiration_context` and `reference_image` workflow nodes do not consume provider capacity.
+- PostgreSQL advisory transaction locks are pool-specific so text and image capacity checks do not block each other.
+- `generation_max_concurrent_tasks` must only seed split values when the new keys are missing.
+
+##### 4. Validation & Error Matrix
+
+- Worker command contains `--processes 2` -> runtime-contract test fails.
+- Text pool full -> text workflow node remains queued and schedules delayed requeue; image pool remains available.
+- Image pool full -> image workflow node or image-session task remains queued and schedules delayed requeue; text pool
+  remains available.
+- Legacy import/env/database value only has `generation_max_concurrent_tasks` -> both split settings are populated with
+  that value.
+
+##### 5. Good/Base/Bad Cases
+
+- Good: `3` worker containers with `--threads 4` provide 12 consumer threads while text/image runtime settings cap provider
+  pressure separately.
+- Base: one local worker uses `--processes 1 --threads 4` and both capacity pools default to 3.
+- Bad: increasing `--processes` inside a container for scale-out.
+- Bad: using one aggregate running count to gate both text and image work.
+
+##### 6. Tests Required
+
+- Runtime-contract test for `justfile` and Compose worker command.
+- Admission tests proving text and image pools do not block each other.
+- Settings runtime tests for defaults, update/persist, export/import, runtime response, and legacy key fallback.
+- Capacity-wait regression tests for workflow node claims and image-session task claims.
+
+##### 7. Wrong vs Correct
+
+Wrong:
+
+```bash
+dramatiq --processes 2 --threads 4 inspiration_one_backend.workers
+```
+
+Correct:
+
+```bash
+dramatiq --processes 1 --threads 4 inspiration_one_backend.workers
+```
+
+Wrong:
+
+```python
+generation_running_capacity_available(session)
+```
+
+Correct:
+
+```python
+generation_running_capacity_available(session, pool="image")
+```
+
 #### Scenario: Durable async continuous image-session generation
 
 ##### 1. Scope / Trigger
@@ -692,7 +776,7 @@ def run_generation_task(task_id: str) -> None:
 ##### 3. Contracts
 
 - Task statuses are `queued`, `running`, `succeeded`, `failed`, and `cancelled`; queued/running rows count toward queue
-  overview metadata, while only running rows consume `generation_max_concurrent_tasks` provider capacity.
+  overview metadata, while only running rows consume the appropriate text or image provider capacity pool.
 - The continuous image-session worker actor keeps an internal failsafe Dramatiq `time_limit` via
   `image_session_worker_failsafe_time_limit_minutes`. User-facing stale behavior must be driven by progress heartbeat
   idle recovery, not a hard total task timeout.

@@ -49,6 +49,7 @@ function entry(overrides: Partial<GalleryEntry>): GalleryEntry {
     candidate_index: 1,
     candidate_count: 1,
     base_asset_ids: [],
+    base_assets: [],
     base_asset_id: null,
     selected_reference_asset_ids: [],
     provider_notes: [],

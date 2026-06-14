@@ -4,10 +4,16 @@ import {
   configCategoryGroups,
   configItemHelpContent,
   configValuesFromChangedDrafts,
+  clearTextConfigJsonResponseFormatTestRecord,
+  clearTextConfigTestRecord,
   draftsFromConfig,
   filterProviderModels,
   filterProviderProfiles,
   archiveFailureMessage,
+  isLoginPageMode,
+  isLoginPageTemplateId,
+  loginPageTemplateConfigItem,
+  loginPageTemplateIdFromConfigKey,
   type GenerationConfigDraft,
   generationConfigDraft as generationConfigDraftFromConfig,
   generationConfigResourceGroupIds,
@@ -18,6 +24,9 @@ import {
   markTextConfigTestFailed,
   markTextConfigTestStarted,
   markTextConfigTestSucceeded,
+  newGenerationConfigDraft,
+  normalizeImageConfigTestDraft,
+  normalizeTextConfigTestDraft,
   providerDisableBlocked,
   providerConfigWithGenerationConfig,
   providerConfigWithGenerationResourceGroup,
@@ -30,6 +39,8 @@ import {
   providerProfileUpdatePayload,
   providerUsageFromGenerationConfigs,
   providerUsageLabelKeys,
+  parseLoginPageTemplateConfigDraft,
+  serializeLoginPageTemplateConfigDraft,
   settingsSectionIds,
   settingsGenerationResourceGroupsInApiOrder,
   shouldShowSettingsMigrationPanel,
@@ -144,6 +155,8 @@ function generationConfigDraft(overrides: Partial<GenerationConfigDraft> & Pick<
     images_quality: "",
     images_style: "",
     responses_background_enabled: true,
+    structured_output_enabled: false,
+    structured_output_mode: "json_schema",
     structured_json_response_format_enabled: false,
     gemini_api_version: "v1beta",
     gemini_output_mime_type: "",
@@ -336,10 +349,38 @@ describe("SettingsPage draft helpers", () => {
     expect(changed).toEqual({ image_tool_allowed_fields: ["model", "quality"] });
   });
 
+  it("normalizes generation config test drafts without discarding empty user text", () => {
+    expect(
+      normalizeTextConfigTestDraft({
+        inspirationName: "测试",
+        category: "",
+        price: "12",
+        sourceNote: "",
+        instruction: "输出短句",
+      }),
+    ).toEqual({
+      inspirationName: "测试",
+      category: "",
+      price: "12",
+      sourceNote: "",
+      instruction: "输出短句",
+    });
+
+    expect(normalizeImageConfigTestDraft({ size: "", prompt: "" })).toEqual({
+      size: "1024x1024",
+      prompt: "",
+    });
+  });
+
   it("groups global generation config items by backend category suffix", () => {
     const groups = configCategoryGroups([
       configItem({
-        key: "generation_max_concurrent_tasks",
+        key: "text_generation_max_concurrent_tasks",
+        category: "全局生成配置 / 队列容量",
+        value: 3,
+      }),
+      configItem({
+        key: "image_generation_max_concurrent_tasks",
         category: "全局生成配置 / 队列容量",
         value: 3,
       }),
@@ -366,7 +407,7 @@ describe("SettingsPage draft helpers", () => {
     ]);
 
     expect(groups.map((group) => [group.title, group.items.map((item) => item.key)])).toEqual([
-      ["队列容量", ["generation_max_concurrent_tasks"]],
+      ["队列容量", ["text_generation_max_concurrent_tasks", "image_generation_max_concurrent_tasks"]],
       [
         "工作流生成",
         [
@@ -377,6 +418,71 @@ describe("SettingsPage draft helpers", () => {
         ],
       ],
     ]);
+  });
+
+  it("treats login page selection as random plus concrete templates", () => {
+    expect(isLoginPageTemplateId("command-orbit")).toBe(true);
+    expect(isLoginPageTemplateId("fluid-mist")).toBe(true);
+    expect(isLoginPageTemplateId("image-lab")).toBe(true);
+    expect(isLoginPageTemplateId("random")).toBe(false);
+    expect(isLoginPageTemplateId("selected")).toBe(false);
+    expect(isLoginPageMode("random")).toBe(true);
+    expect(isLoginPageMode("command-orbit")).toBe(true);
+    expect(isLoginPageMode("selected")).toBe(false);
+    expect(loginPageTemplateIdFromConfigKey("login_page_command_orbit_config")).toBe("command-orbit");
+    expect(loginPageTemplateIdFromConfigKey("login_page_fluid_mist_config")).toBe("fluid-mist");
+    expect(loginPageTemplateIdFromConfigKey("login_page_image_lab_config")).toBe("image-lab");
+    expect(loginPageTemplateIdFromConfigKey("login_page_mode")).toBeNull();
+  });
+
+  it("keeps each login page JSON config isolated by template", () => {
+    const items = [
+      configItem({ key: "login_page_mode", category: "登录页", value: "random" }),
+      configItem({
+        key: "login_page_command_orbit_config",
+        category: "登录页",
+        input_type: "textarea",
+        value: JSON.stringify({
+          brand_subtitle: "Orbit",
+          hero_title: "Console",
+          hero_description: "Command copy",
+        }),
+      }),
+      configItem({
+        key: "login_page_image_lab_config",
+        category: "登录页",
+        input_type: "textarea",
+        value: JSON.stringify({
+          hero_description: "Image copy",
+          hero_image_asset_id: "asset-1",
+        }),
+      }),
+    ];
+
+    expect(loginPageTemplateConfigItem(items, "command-orbit")?.key).toBe("login_page_command_orbit_config");
+    expect(loginPageTemplateConfigItem(items, "image-lab")?.key).toBe("login_page_image_lab_config");
+
+    const commandConfig = parseLoginPageTemplateConfigDraft(
+      "command-orbit",
+      items[1].value,
+    );
+    const imageLabConfig = parseLoginPageTemplateConfigDraft("image-lab", items[2].value);
+
+    expect(commandConfig).toEqual({
+      brand_subtitle: "Orbit",
+      hero_title: "Console",
+      hero_description: "Command copy",
+    });
+    expect(imageLabConfig).toEqual({
+      hero_description: "Image copy",
+      hero_image_asset_id: "asset-1",
+    });
+    expect(
+      serializeLoginPageTemplateConfigDraft("image-lab", {
+        ...imageLabConfig,
+        hero_image_asset_id: "asset-2",
+      }),
+    ).toBe(JSON.stringify({ hero_description: "Image copy", hero_image_asset_id: "asset-2" }));
   });
 });
 
@@ -440,6 +546,26 @@ describe("SettingsPage text config test state", () => {
     });
     expect(textConfigTestRecordForKey(textConfigTestState(), "config-a")).toBeNull();
   });
+
+  it("clears stale create-dialog test records by key only", () => {
+    const textResult = textConfigTestResponse("brief-a");
+    const jsonResult = textConfigJsonResponseFormatTestResponse("json-a");
+    let textState = textConfigTestState();
+    let jsonState = textConfigJsonResponseFormatTestState();
+
+    textState = markTextConfigTestSucceeded(textState, "new-text-group-a", textResult);
+    textState = markTextConfigTestFailed(textState, "config-b", "provider failed");
+    jsonState = markTextConfigJsonResponseFormatTestSucceeded(jsonState, "new-text-group-a", jsonResult);
+    jsonState = markTextConfigJsonResponseFormatTestFailed(jsonState, "config-b", "json failed");
+
+    textState = clearTextConfigTestRecord(textState, "new-text-group-a");
+    jsonState = clearTextConfigJsonResponseFormatTestRecord(jsonState, "new-text-group-a");
+
+    expect(textConfigTestRecordForKey(textState, "new-text-group-a")).toBeNull();
+    expect(textConfigJsonResponseFormatTestRecordForKey(jsonState, "new-text-group-a")).toBeNull();
+    expect(textConfigTestRecordForKey(textState, "config-b")?.error).toBe("provider failed");
+    expect(textConfigJsonResponseFormatTestRecordForKey(jsonState, "config-b")?.error).toBe("json failed");
+  });
 });
 
 describe("SettingsPage provider profile helpers", () => {
@@ -497,6 +623,25 @@ describe("SettingsPage provider profile helpers", () => {
         capabilities: ["text_responses", "image_images"],
         enabled: true,
       },
+    });
+  });
+
+  it("creates clean generation config drafts for the active resource group", () => {
+    expect(newGenerationConfigDraft("text", "group-a")).toMatchObject({
+      id: null,
+      purpose: "text",
+      resource_group_ids: ["group-a"],
+      name: "Text config",
+      provider_kind: "mock",
+      provider_profile_id: "",
+    });
+    expect(newGenerationConfigDraft("image", "")).toMatchObject({
+      id: null,
+      purpose: "image",
+      resource_group_ids: [],
+      name: "Image config",
+      provider_kind: "mock",
+      provider_profile_id: "",
     });
   });
 
@@ -712,7 +857,7 @@ describe("SettingsPage provider profile helpers", () => {
         brief_model: "gpt-5.4",
         copy_model: "gpt-5.4",
       },
-      config: {},
+      config: { structured_output: { enabled: false, mode: "json_schema" } },
       priority: 100,
       max_concurrency: 1,
       enabled: true,
@@ -750,11 +895,11 @@ describe("SettingsPage provider profile helpers", () => {
         brief_model: "grok-brief",
         copy_model: "grok-copy",
       },
-      config: { structured_json_response_format_enabled: false },
+      config: { structured_output: { enabled: false, mode: "json_schema" } },
     });
   });
 
-  it("round-trips Chat Completions structured JSON response_format config", () => {
+  it("round-trips legacy Chat Completions structured JSON response_format config", () => {
     const draft = generationConfigDraftFromConfig(
       generationConfig({
         purpose: "text",
@@ -765,10 +910,31 @@ describe("SettingsPage provider profile helpers", () => {
       }),
     );
 
+    expect(draft.structured_output_enabled).toBe(true);
+    expect(draft.structured_output_mode).toBe("json_object");
     expect(draft.structured_json_response_format_enabled).toBe(true);
     expect(generationConfigPayloadFromDraft(draft)).toMatchObject({
       provider_kind: "openai_chat_completions",
-      config: { structured_json_response_format_enabled: true },
+      config: { structured_output: { enabled: true, mode: "json_object" } },
+    });
+  });
+
+  it("round-trips Responses structured output config", () => {
+    const draft = generationConfigDraftFromConfig(
+      generationConfig({
+        purpose: "text",
+        provider_kind: "openai",
+        provider_profile_id: "profile-responses",
+        model_settings: { brief_model: "gpt-brief", copy_model: "gpt-copy" },
+        config: { structured_output: { enabled: true, mode: "json_schema" } },
+      }),
+    );
+
+    expect(draft.structured_output_enabled).toBe(true);
+    expect(draft.structured_output_mode).toBe("json_schema");
+    expect(generationConfigPayloadFromDraft(draft)).toMatchObject({
+      provider_kind: "openai",
+      config: { structured_output: { enabled: true, mode: "json_schema" } },
     });
   });
 

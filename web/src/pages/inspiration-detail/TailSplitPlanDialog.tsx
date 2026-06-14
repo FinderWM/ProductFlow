@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Sparkles, X } from "lucide-react";
 
 import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSettingsPanel";
+import { ModalShell } from "../../components/ModalShell";
 import { SelectField } from "../../components/SelectField";
 import {
   generationConfigOptionLabel,
@@ -159,8 +160,13 @@ export function TailSplitPlanDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm">
-      <div className="flex max-h-[min(88vh,960px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#0f1726]">
+    <ModalShell
+      onClose={onClose}
+      closeDisabled={busy}
+      ariaLabel={t("detail.tailPlan.title", { title: nodeTitle })}
+      overlayClassName="z-[90] bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      panelClassName="flex max-h-[min(88vh,960px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#0f1726]"
+    >
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-700">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950 dark:text-white">
@@ -452,8 +458,7 @@ export function TailSplitPlanDialog({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

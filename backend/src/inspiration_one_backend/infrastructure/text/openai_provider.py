@@ -24,6 +24,17 @@ from inspiration_one_backend.infrastructure.provider_config import (
     resolve_text_provider_config,
 )
 from inspiration_one_backend.infrastructure.text.base import TextProvider
+from inspiration_one_backend.infrastructure.text.structured_output import (
+    BRIEF_SCHEMA,
+    COPY_SCHEMA,
+    POLISHED_PROMPT_SCHEMA,
+    STRUCTURED_OUTPUT_TEST_SCHEMA,
+    TAIL_SPLIT_SCHEMA,
+    TextStructuredOutputSchema,
+    read_polished_prompt_from_payload,
+    responses_text_config,
+    structured_output_instructions,
+)
 
 
 class OpenAITextProvider(TextProvider):
@@ -38,16 +49,39 @@ class OpenAITextProvider(TextProvider):
         )
         self.brief_model = resolved_config.brief_model
         self.copy_model = resolved_config.copy_model
+        self.structured_output = resolved_config.structured_output
         self.brief_system_prompt = settings.prompt_brief_system
         self.copy_system_prompt = settings.prompt_copy_system
         self.image_prompt_polish_system_prompt = settings.prompt_image_prompt_polish_system
         self.tail_split_system_prompt = settings.prompt_tail_split_system
 
+    def _responses_create(
+        self,
+        *,
+        model: str,
+        instructions: str,
+        input: list[dict],
+        structured_schema: TextStructuredOutputSchema,
+    ):
+        payload = {
+            "model": model,
+            "instructions": structured_output_instructions(
+                instructions,
+                self.structured_output,
+                structured_schema,
+            ),
+            "input": input,
+        }
+        text_config = responses_text_config(self.structured_output, structured_schema)
+        if text_config is not None:
+            payload["text"] = text_config
+        return self.client.responses.create(**payload)
+
     def _read_output_json(self, response) -> dict:
         return read_json_object_from_response(response, error_label="文案 provider")
 
     def generate_brief(self, inspiration: InspirationInput) -> tuple[CreativeBriefPayload, str]:
-        response = self.client.responses.create(
+        response = self._responses_create(
             model=self.brief_model,
             instructions=text_or_default(self.brief_system_prompt, "请输出简洁、结构化的中文 JSON。"),
             input=[
@@ -63,6 +97,7 @@ class OpenAITextProvider(TextProvider):
                     ),
                 },
             ],
+            structured_schema=BRIEF_SCHEMA,
         )
         payload = CreativeBriefPayload.model_validate(self._read_output_json(response))
         return payload, self.brief_model
@@ -84,7 +119,7 @@ class OpenAITextProvider(TextProvider):
             for index, reference in enumerate(reference_images, start=1)
         ]
         reference_text = "\n".join(reference_lines) if reference_lines else "未连接"
-        response = self.client.responses.create(
+        response = self._responses_create(
             model=self.copy_model,
             instructions=text_or_default(self.copy_system_prompt, "请输出中文 JSON，不要输出 markdown。"),
             input=[
@@ -112,12 +147,13 @@ class OpenAITextProvider(TextProvider):
                     ),
                 },
             ],
+            structured_schema=COPY_SCHEMA,
         )
         payload = normalize_copy_payload(self._read_output_json(response), fallback_purpose=config.purpose)
         return payload, self.copy_model
 
     def polish_image_prompt(self, prompt: str) -> tuple[str, str]:
-        response = self.client.responses.create(
+        response = self._responses_create(
             model=self.copy_model,
             instructions=text_or_default(
                 self.image_prompt_polish_system_prompt,
@@ -129,8 +165,13 @@ class OpenAITextProvider(TextProvider):
                     "content": f"原始画面描述：\n{prompt.strip()}",
                 },
             ],
+            structured_schema=POLISHED_PROMPT_SCHEMA,
         )
-        polished = response_output_text(response).strip()
+        polished = (
+            read_polished_prompt_from_payload(self._read_output_json(response))
+            if self.structured_output.enabled
+            else response_output_text(response).strip()
+        )
         if not polished:
             raise ValueError("文案 provider 未返回润色结果")
         return polished, self.copy_model
@@ -146,7 +187,7 @@ class OpenAITextProvider(TextProvider):
         upstream_text = "\n".join(
             f"{index}. {text}" for index, text in enumerate(payload.upstream_text_contexts, start=1)
         )
-        response = self.client.responses.create(
+        response = self._responses_create(
             model=self.copy_model,
             instructions=text_or_default(
                 self.tail_split_system_prompt,
@@ -177,5 +218,29 @@ class OpenAITextProvider(TextProvider):
                     ),
                 },
             ],
+            structured_schema=TAIL_SPLIT_SCHEMA,
         )
         return TailSplitPlanDraft.model_validate(self._read_output_json(response)), self.copy_model
+
+    def test_structured_output(self) -> tuple[dict, str]:
+        response = self._responses_create(
+            model=self.copy_model,
+            instructions="只输出 JSON 对象，不要输出 markdown、标题或解释。",
+            input=[
+                {
+                    "role": "user",
+                    "content": (
+                        '请返回一个 JSON 对象，包含字段 ok=true、kind="text_structured_output_test"、'
+                        'items=["structured_output"]。'
+                    ),
+                },
+            ],
+            structured_schema=STRUCTURED_OUTPUT_TEST_SCHEMA,
+        )
+        payload = self._read_output_json(response)
+        if not payload:
+            raise ValueError("文案结构化输出测试返回空 JSON 对象")
+        return payload, self.copy_model
+
+    def test_structured_json_response_format(self) -> tuple[dict, str]:
+        return self.test_structured_output()

@@ -22,11 +22,17 @@ import {
   Archive,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SensitiveImageOverlay, sensitiveImageClassName } from "../components/SensitiveImageMask";
 import { SelectField } from "../components/SelectField";
+import {
+  WorkspaceDateTimeRangeField,
+  datePartFromDateTimeLocal,
+  workspaceQuickDateTimeRange,
+  type WorkspaceQuickRangeId,
+} from "../components/WorkspaceDateTimeRangeField";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -37,7 +43,6 @@ import { StatusPill } from "../components/StatusPill";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { formatDateTimeSeconds, formatPrice } from "../lib/format";
-import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import { API_INSPIRATIONS_WRITE, hasSessionApiPermission } from "../lib/rbac";
 import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
@@ -62,8 +67,6 @@ const HOVER_IMAGE_PREVIEW_GAP_PX = 12;
 const SEARCH_PANEL_SINGLE_ROW_WIDTH_PX = 920;
 const ADMIN_SEARCH_PANEL_SINGLE_ROW_WIDTH_PX = 1_220;
 
-type InspirationQuickRangeId = "day" | "week" | "month";
-
 interface InspirationSearchFilters {
   title: string;
   updated_from: string;
@@ -80,42 +83,27 @@ const EMPTY_INSPIRATION_SEARCH: InspirationSearchFilters = {
   only_deleted: false,
 };
 
-const INSPIRATION_QUICK_RANGE_IDS: InspirationQuickRangeId[] = ["day", "week", "month"];
-const INSPIRATION_QUICK_RANGE_LABEL_KEYS: Record<InspirationQuickRangeId, TranslationKey> = {
-  day: "inspirations.search.quick.day",
-  week: "inspirations.search.quick.week",
-  month: "inspirations.search.quick.month",
-};
+interface InspirationListRestoreState {
+  page: number;
+  searchDraft: InspirationSearchFilters;
+  activeSearch: InspirationSearchFilters;
+  selectedResourceGroupId: string | null;
+  ownerSearch: string;
+  mobileSearchOpen: boolean;
+}
+
+interface InspirationCreateReturnState {
+  source: "inspiration-list";
+  returnTo: string;
+  listState: InspirationListRestoreState;
+}
+
+interface InspirationListLocationState {
+  restoreInspirationListState?: InspirationListRestoreState;
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
-}
-
-function toDateInputValue(value: Date): string {
-  const year = value.getFullYear();
-  const month = `${value.getMonth() + 1}`.padStart(2, "0");
-  const day = `${value.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function shiftedDate(days: number): Date {
-  const value = new Date();
-  value.setHours(0, 0, 0, 0);
-  value.setDate(value.getDate() + days);
-  return value;
-}
-
-function quickInspirationDateRange(id: InspirationQuickRangeId): Pick<InspirationSearchFilters, "updated_from" | "updated_to"> {
-  const today = shiftedDate(0);
-  if (id === "week") {
-    return { updated_from: toDateInputValue(shiftedDate(-6)), updated_to: toDateInputValue(today) };
-  }
-  if (id === "month") {
-    const monthStart = new Date(today);
-    monthStart.setDate(1);
-    return { updated_from: toDateInputValue(monthStart), updated_to: toDateInputValue(today) };
-  }
-  return { updated_from: toDateInputValue(today), updated_to: toDateInputValue(today) };
 }
 
 function normalizeInspirationSearchFilters(filters: InspirationSearchFilters): InspirationSearchFilters {
@@ -125,6 +113,41 @@ function normalizeInspirationSearchFilters(filters: InspirationSearchFilters): I
     updated_to: filters.updated_to,
     owner_user_id: filters.owner_user_id,
     only_deleted: Boolean(filters.only_deleted),
+  };
+}
+
+function isInspirationSearchFilters(value: unknown): value is InspirationSearchFilters {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const filters = value as InspirationSearchFilters;
+  return (
+    typeof filters.title === "string" &&
+    typeof filters.updated_from === "string" &&
+    typeof filters.updated_to === "string" &&
+    typeof filters.owner_user_id === "string" &&
+    typeof filters.only_deleted === "boolean"
+  );
+}
+
+function restoredInspirationListState(value: unknown): InspirationListRestoreState | null {
+  const state = (value as InspirationListLocationState | null)?.restoreInspirationListState;
+  if (!state || typeof state !== "object") {
+    return null;
+  }
+  if (!isInspirationSearchFilters(state.searchDraft) || !isInspirationSearchFilters(state.activeSearch)) {
+    return null;
+  }
+  return {
+    page: Number.isFinite(state.page) ? Math.max(1, Math.floor(state.page)) : 1,
+    searchDraft: state.searchDraft,
+    activeSearch: state.activeSearch,
+    selectedResourceGroupId:
+      typeof state.selectedResourceGroupId === "string" || state.selectedResourceGroupId === null
+        ? state.selectedResourceGroupId
+        : null,
+    ownerSearch: typeof state.ownerSearch === "string" ? state.ownerSearch : "",
+    mobileSearchOpen: Boolean(state.mobileSearchOpen),
   };
 }
 
@@ -230,18 +253,29 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
   const { t } = useI18n();
   const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const session = useSessionState();
   const currentUser = session?.user ?? null;
   const isAdmin = Boolean(currentUser?.is_admin);
   const canWriteInspirations = hasSessionApiPermission(session, API_INSPIRATIONS_WRITE);
-  const [page, setPage] = useState(1);
-  const [searchDraft, setSearchDraft] = useState<InspirationSearchFilters>(EMPTY_INSPIRATION_SEARCH);
-  const [activeSearch, setActiveSearch] = useState<InspirationSearchFilters>(EMPTY_INSPIRATION_SEARCH);
-  const [adminOwnerFilterInitialized, setAdminOwnerFilterInitialized] = useState(false);
-  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
-  const [ownerSearch, setOwnerSearch] = useState("");
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const restoredListStateRef = useRef(restoredInspirationListState(location.state));
+  const hasRestoredListState = restoredListStateRef.current !== null;
+  const [page, setPage] = useState(() => restoredListStateRef.current?.page ?? 1);
+  const [searchDraft, setSearchDraft] = useState<InspirationSearchFilters>(
+    () => restoredListStateRef.current?.searchDraft ?? EMPTY_INSPIRATION_SEARCH,
+  );
+  const [activeSearch, setActiveSearch] = useState<InspirationSearchFilters>(
+    () => restoredListStateRef.current?.activeSearch ?? EMPTY_INSPIRATION_SEARCH,
+  );
+  const [adminOwnerFilterInitialized, setAdminOwnerFilterInitialized] = useState(() => hasRestoredListState);
+  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(
+    () => restoredListStateRef.current?.selectedResourceGroupId ?? null,
+  );
+  const [ownerSearch, setOwnerSearch] = useState(() => restoredListStateRef.current?.ownerSearch ?? "");
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(
+    () => restoredListStateRef.current?.mobileSearchOpen ?? false,
+  );
   const [deleteError, setDeleteError] = useState("");
   const [pendingDeleteInspiration, setPendingDeleteInspiration] = useState<InspirationSummary | null>(null);
   const [maskSensitiveImages, setMaskSensitiveImages] = useSensitiveImageMaskPreference("inspirations");
@@ -254,8 +288,8 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
         page,
         page_size: PAGE_SIZE,
         title: activeSearch.title || undefined,
-        updated_from: activeSearch.updated_from || undefined,
-        updated_to: activeSearch.updated_to || undefined,
+        updated_from: activeSearch.updated_from ? datePartFromDateTimeLocal(activeSearch.updated_from) : undefined,
+        updated_to: activeSearch.updated_to ? datePartFromDateTimeLocal(activeSearch.updated_to) : undefined,
         owner_user_id: isAdmin ? activeSearch.owner_user_id || undefined : undefined,
         only_deleted: isAdmin && activeSearch.only_deleted,
       }),
@@ -320,15 +354,19 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
     if (!resourceGroups.length) {
       if (selectedResourceGroupId === null) {
         setSelectedResourceGroupId("");
-        setPage(1);
+        if (!hasRestoredListState) {
+          setPage(1);
+        }
       }
       return;
     }
     if (selectedResourceGroupId === null || (selectedResourceGroupId && !resourceGroups.some((group) => group.id === selectedResourceGroupId))) {
       setSelectedResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
-      setPage(1);
+      if (!hasRestoredListState) {
+        setPage(1);
+      }
     }
-  }, [generationResourceGroupsQuery.isFetched, resourceGroups, selectedResourceGroupId]);
+  }, [generationResourceGroupsQuery.isFetched, hasRestoredListState, resourceGroups, selectedResourceGroupId]);
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -394,15 +432,32 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
     setMobileSearchOpen(false);
   };
 
-  const applyQuickRange = (rangeId: InspirationQuickRangeId) => {
-    const range = quickInspirationDateRange(rangeId);
-    setSearchDraft((current) => ({ ...current, ...range }));
+  const currentListReturnState = (): InspirationCreateReturnState => ({
+    source: "inspiration-list",
+    returnTo: `${location.pathname}${location.search}${location.hash}`,
+    listState: {
+      page,
+      searchDraft,
+      activeSearch,
+      selectedResourceGroupId,
+      ownerSearch,
+      mobileSearchOpen,
+    },
+  });
+
+  const openCreateInspiration = () => {
+    navigate("/inspirations/new", { state: currentListReturnState() });
+  };
+
+  const applyQuickRange = (rangeId: WorkspaceQuickRangeId) => {
+    const range = workspaceQuickDateTimeRange(rangeId);
+    setSearchDraft((current) => ({ ...current, updated_from: range.start_date, updated_to: range.end_date }));
   };
   const isWorkspaceSubpage = activeScheme === "workspace" && workspaceSubpage;
   const newInspirationButton = (
     <button
       type="button"
-      onClick={() => navigate("/inspirations/new")}
+      onClick={openCreateInspiration}
       disabled={!canWriteInspirations}
       title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
       className="inline-flex h-10 items-center justify-center rounded-full bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
@@ -436,7 +491,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
               </div>
               <button
                 type="button"
-                onClick={() => navigate("/inspirations/new")}
+                onClick={openCreateInspiration}
                 disabled={!canWriteInspirations}
                 aria-label={t("inspirations.new")}
                 title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
@@ -651,7 +706,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
               <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("inspirations.emptyDescription")}</p>
               <button
                 type="button"
-                onClick={() => navigate("/inspirations/new")}
+                onClick={openCreateInspiration}
                 disabled={!canWriteInspirations}
                 title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
                 className="mt-5 inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35"
@@ -1080,7 +1135,7 @@ function InspirationSearchPanel({
   onOwnerSearchChange: (value: string) => void;
   onResourceGroupChange: (resourceGroupId: string) => void;
   onMaskSensitiveImagesChange: (enabled: boolean) => void;
-  onQuickRange: (rangeId: InspirationQuickRangeId) => void;
+  onQuickRange: (rangeId: WorkspaceQuickRangeId) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
 }) {
   const { t } = useI18n();
@@ -1113,7 +1168,9 @@ function InspirationSearchPanel({
     })),
   ];
   const dateRangeSummary =
-    draft.updated_from || draft.updated_to ? `${draft.updated_from || "..."} - ${draft.updated_to || "..."}` : "";
+    draft.updated_from || draft.updated_to
+      ? `${(draft.updated_from || "...").replace("T", " ")} - ${(draft.updated_to || "...").replace("T", " ")}`
+      : "";
   const compactSummaryItems = [
     {
       key: "resource-group",
@@ -1156,8 +1213,8 @@ function InspirationSearchPanel({
   const fieldsOpen = singleRowLayoutAvailable || mobileOpen;
   const gridClassName = singleRowLayoutAvailable
     ? isAdmin
-      ? "grid-cols-[minmax(13rem,1.25fr)_minmax(18rem,1fr)_minmax(10rem,0.75fr)_minmax(10rem,0.75fr)_minmax(8.5rem,auto)_auto] items-end"
-      : "grid-cols-[minmax(13rem,1.25fr)_minmax(18rem,1fr)_minmax(10rem,0.75fr)_auto] items-end"
+      ? "grid-cols-[minmax(13rem,1fr)_minmax(30rem,1.45fr)_minmax(10rem,0.75fr)_minmax(10rem,0.75fr)_minmax(8.5rem,auto)_auto] items-end"
+      : "grid-cols-[minmax(13rem,1fr)_minmax(30rem,1.45fr)_minmax(10rem,0.75fr)_auto] items-end"
     : "md:grid-cols-2";
 
   useEffect(() => {
@@ -1266,34 +1323,12 @@ function InspirationSearchPanel({
             </div>
           </label>
 
-          <fieldset className="min-w-0 space-y-2">
-            <legend className={labelClassName}>{t("inspirations.search.updatedRange")}</legend>
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-[#0f1726]">
-              <label className="sr-only" htmlFor="inspiration-updated-from">
-                {t("inspirations.search.updatedFrom")}
-              </label>
-              <input
-                id="inspiration-updated-from"
-                type="date"
-                value={draft.updated_from}
-                onChange={(event) => onChange({ ...draft, updated_from: event.target.value })}
-                className="h-8 min-w-0 rounded-lg border-0 bg-transparent px-1.5 text-sm font-medium text-slate-900 outline-none focus:bg-indigo-50/70 focus:ring-2 focus:ring-indigo-500/15 dark:text-slate-100 dark:focus:bg-violet-500/10 dark:focus:ring-violet-400/30"
-              />
-              <span className="text-xs font-semibold text-slate-300 dark:text-slate-600" aria-hidden="true">
-                -
-              </span>
-              <label className="sr-only" htmlFor="inspiration-updated-to">
-                {t("inspirations.search.updatedTo")}
-              </label>
-              <input
-                id="inspiration-updated-to"
-                type="date"
-                value={draft.updated_to}
-                onChange={(event) => onChange({ ...draft, updated_to: event.target.value })}
-                className="h-8 min-w-0 rounded-lg border-0 bg-transparent px-1.5 text-sm font-medium text-slate-900 outline-none focus:bg-indigo-50/70 focus:ring-2 focus:ring-indigo-500/15 dark:text-slate-100 dark:focus:bg-violet-500/10 dark:focus:ring-violet-400/30"
-              />
-            </div>
-          </fieldset>
+          <WorkspaceDateTimeRangeField
+            idPrefix="inspiration-updated-range"
+            value={{ start_date: draft.updated_from, end_date: draft.updated_to }}
+            onChange={(range) => onChange({ ...draft, updated_from: range.start_date, updated_to: range.end_date })}
+            onQuickRangeChange={onQuickRange}
+          />
 
           {isAdmin ? (
             <label className="space-y-2">
@@ -1372,17 +1407,6 @@ function InspirationSearchPanel({
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-          <span className="font-medium">{t("inspirations.search.quickLabel")}</span>
-          {INSPIRATION_QUICK_RANGE_IDS.map((rangeId) => (
-            <button
-              key={rangeId}
-              type="button"
-              onClick={() => onQuickRange(rangeId)}
-              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:bg-violet-500/12 dark:hover:text-violet-100"
-            >
-              {t(INSPIRATION_QUICK_RANGE_LABEL_KEYS[rangeId])}
-            </button>
-          ))}
           {showSensitiveImageMaskPreference ? (
             <label className="inline-flex min-h-8 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 sm:ml-auto">
               <input

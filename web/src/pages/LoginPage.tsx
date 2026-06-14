@@ -28,8 +28,19 @@ interface LoginFormModel {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
+interface CommandOrbitPointerEffect {
+  xVar: string;
+  yVar: string;
+  tiltVar?: string;
+  scaleVar?: string;
+  x: number;
+  y: number;
+  tilt?: number;
+  scale?: number;
+}
+
 const DEFAULT_LOGIN_PAGE_CONFIG: LoginPageConfig = {
-  template_id: "codex-orbit",
+  template_id: "command-orbit",
   template_name: "Command Orbit",
   content: {
     brand_subtitle: "Orbital access concept",
@@ -38,6 +49,81 @@ const DEFAULT_LOGIN_PAGE_CONFIG: LoginPageConfig = {
   },
   assets: {},
 };
+
+const COMMAND_ORBIT_CARD_EFFECT: CommandOrbitPointerEffect = {
+  xVar: "--auth-card-x",
+  yVar: "--auth-card-y",
+  tiltVar: "--auth-card-tilt",
+  x: -5,
+  y: -4,
+  tilt: -0.45,
+};
+const COMMAND_ORBIT_PRIMARY_EFFECT: CommandOrbitPointerEffect = {
+  xVar: "--primary-x",
+  yVar: "--primary-y",
+  tiltVar: "--primary-tilt",
+  scaleVar: "--primary-scale",
+  x: 9,
+  y: 7,
+  tilt: -1.1,
+  scale: 1.045,
+};
+const COMMAND_ORBIT_LOGIN_CHIP_EFFECT: CommandOrbitPointerEffect = {
+  xVar: "--login-chip-x",
+  yVar: "--login-chip-y",
+  tiltVar: "--login-chip-tilt",
+  scaleVar: "--login-chip-scale",
+  x: 9,
+  y: 6,
+  tilt: -2.3,
+  scale: 1.09,
+};
+const COMMAND_ORBIT_SETKEY_CHIP_EFFECT: CommandOrbitPointerEffect = {
+  xVar: "--setkey-chip-x",
+  yVar: "--setkey-chip-y",
+  tiltVar: "--setkey-chip-tilt",
+  scaleVar: "--setkey-chip-scale",
+  x: 9,
+  y: 6,
+  tilt: 2.3,
+  scale: 1.09,
+};
+
+function canUseCommandOrbitPointerMotion() {
+  return (
+    window.matchMedia("(pointer: fine)").matches && !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function applyCommandOrbitPointerEffect(event: PointerEvent<HTMLElement>, effect: CommandOrbitPointerEffect) {
+  if (!canUseCommandOrbitPointerMotion()) {
+    return;
+  }
+  const target = event.currentTarget;
+  const rect = target.getBoundingClientRect();
+  const nextX = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
+  const nextY = ((event.clientY - rect.top) / rect.height - 0.5) * 2;
+  target.style.setProperty(effect.xVar, `${nextX * effect.x}px`);
+  target.style.setProperty(effect.yVar, `${nextY * effect.y}px`);
+  if (effect.tiltVar && effect.tilt !== undefined) {
+    target.style.setProperty(effect.tiltVar, `${nextX * effect.tilt}deg`);
+  }
+  if (effect.scaleVar && effect.scale !== undefined) {
+    target.style.setProperty(effect.scaleVar, `${effect.scale}`);
+  }
+}
+
+function clearCommandOrbitPointerEffect(event: PointerEvent<HTMLElement>, effect: CommandOrbitPointerEffect) {
+  const target = event.currentTarget;
+  target.style.removeProperty(effect.xVar);
+  target.style.removeProperty(effect.yVar);
+  if (effect.tiltVar) {
+    target.style.removeProperty(effect.tiltVar);
+  }
+  if (effect.scaleVar) {
+    target.style.removeProperty(effect.scaleVar);
+  }
+}
 
 export function LoginPage({ authenticated }: LoginPageProps) {
   const { t } = useI18n();
@@ -137,10 +223,10 @@ export function LoginPage({ authenticated }: LoginPageProps) {
   if (config.template_id === "image-lab") {
     return <ImageLabLogin config={config} form={formModel} />;
   }
-  return <CodexOrbitLogin config={config} form={formModel} />;
+  return <CommandOrbitLogin config={config} form={formModel} />;
 }
 
-function CodexOrbitLogin({ config, form }: { config: LoginPageConfig; form: LoginFormModel }) {
+function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: LoginFormModel }) {
   const brandSubtitle = textOrDefault(config.content.brand_subtitle, "Orbital access concept");
   const heroTitle = textOrDefault(config.content.hero_title, "进入你的创意工作台");
   const heroDescription = textOrDefault(
@@ -148,58 +234,8 @@ function CodexOrbitLogin({ config, form }: { config: LoginPageConfig; form: Logi
     "从灵感编排、图像会话到素材沉淀，Inspiration One 将创作链路收束成一座私有控制台。",
   );
 
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (!window.matchMedia("(pointer: fine)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      return;
-    }
-    const target = event.currentTarget;
-    const rect = target.getBoundingClientRect();
-    const nextX = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
-    const nextY = ((event.clientY - rect.top) / rect.height - 0.5) * 2;
-    target.style.setProperty("--cursor-x", `${event.clientX}px`);
-    target.style.setProperty("--cursor-y", `${event.clientY}px`);
-    target.style.setProperty("--orbit-x", `${nextX * 18}px`);
-    target.style.setProperty("--orbit-y", `${nextY * 14}px`);
-    target.style.setProperty("--auth-card-x", `${nextX * -8}px`);
-    target.style.setProperty("--auth-card-y", `${nextY * -6}px`);
-    target.style.setProperty("--auth-card-tilt", `${nextX * -0.8}deg`);
-    target.style.setProperty("--satellite-x", `${nextX * 14}px`);
-    target.style.setProperty("--satellite-y", `${nextY * 10}px`);
-    target.style.setProperty("--login-chip-x", `${nextX * 13}px`);
-    target.style.setProperty("--login-chip-y", `${nextY * -7}px`);
-    target.style.setProperty("--login-chip-tilt", `${nextX * -1.4}deg`);
-    target.style.setProperty("--setkey-chip-x", `${nextX * -9}px`);
-    target.style.setProperty("--setkey-chip-y", `${nextY * 9}px`);
-    target.style.setProperty("--setkey-chip-tilt", `${nextX * 1.1}deg`);
-    target.style.setProperty("--pointer-tilt", `${nextX * 1.4}deg`);
-  };
-
-  const handlePointerLeave = (event: PointerEvent<HTMLDivElement>) => {
-    const target = event.currentTarget;
-    [
-      "--orbit-x",
-      "--orbit-y",
-      "--auth-card-x",
-      "--auth-card-y",
-      "--auth-card-tilt",
-      "--satellite-x",
-      "--satellite-y",
-      "--login-chip-x",
-      "--login-chip-y",
-      "--login-chip-tilt",
-      "--setkey-chip-x",
-      "--setkey-chip-y",
-      "--setkey-chip-tilt",
-      "--pointer-tilt",
-    ].forEach((name) => target.style.removeProperty(name));
-  };
-
   return (
-    <div
-      className={`pf-login-orbit ${form.mode === "password" ? "is-setup" : "is-login"}`}
-      onPointerMove={handlePointerMove}
-      onPointerLeave={handlePointerLeave}
-    >
+    <div className={`pf-login-orbit ${form.mode === "password" ? "is-setup" : "is-login"}`}>
       <div className="pointer-glow" aria-hidden="true" />
       <main className="stage">
         <div className="brand">
@@ -222,7 +258,12 @@ function CodexOrbitLogin({ config, form }: { config: LoginPageConfig; form: Logi
           <p>{heroDescription}</p>
         </section>
 
-        <section className="auth-shell" aria-label="登录表单静态稿 C">
+        <section
+          className="auth-shell"
+          aria-label="登录表单静态稿 C"
+          onPointerMove={(event) => applyCommandOrbitPointerEffect(event, COMMAND_ORBIT_CARD_EFFECT)}
+          onPointerLeave={(event) => clearCommandOrbitPointerEffect(event, COMMAND_ORBIT_CARD_EFFECT)}
+        >
           <div className="auth-core">
             <div className="auth-head">
               <div className="access-row">
@@ -331,7 +372,19 @@ function CodexOrbitLogin({ config, form }: { config: LoginPageConfig; form: Logi
                 {form.error || "错误状态示例：请填写账号和密码。"}
               </div>
 
-              <button className="primary" type="submit" disabled={form.pending}>
+              <button
+                className="primary"
+                type="submit"
+                disabled={form.pending}
+                onPointerMove={(event) => {
+                  event.stopPropagation();
+                  applyCommandOrbitPointerEffect(event, COMMAND_ORBIT_PRIMARY_EFFECT);
+                }}
+                onPointerLeave={(event) => {
+                  event.stopPropagation();
+                  clearCommandOrbitPointerEffect(event, COMMAND_ORBIT_PRIMARY_EFFECT);
+                }}
+              >
                 <span>{form.pending ? "校验中..." : form.mode === "login" ? "进入工作台" : "完成设置"}</span>
                 <span aria-hidden="true">↗</span>
               </button>
@@ -359,8 +412,20 @@ function CodexOrbitLogin({ config, form }: { config: LoginPageConfig; form: Logi
         </div>
 
         <div className="mode-rail" aria-hidden="true">
-          <span className={`rail-chip rail-chip-login ${form.mode === "login" ? "active" : ""}`}>Login</span>
-          <span className={`rail-chip rail-chip-setkey ${form.mode === "password" ? "active" : ""}`}>Set key</span>
+          <span
+            className={`rail-chip rail-chip-login ${form.mode === "login" ? "active" : ""}`}
+            onPointerMove={(event) => applyCommandOrbitPointerEffect(event, COMMAND_ORBIT_LOGIN_CHIP_EFFECT)}
+            onPointerLeave={(event) => clearCommandOrbitPointerEffect(event, COMMAND_ORBIT_LOGIN_CHIP_EFFECT)}
+          >
+            Login
+          </span>
+          <span
+            className={`rail-chip rail-chip-setkey ${form.mode === "password" ? "active" : ""}`}
+            onPointerMove={(event) => applyCommandOrbitPointerEffect(event, COMMAND_ORBIT_SETKEY_CHIP_EFFECT)}
+            onPointerLeave={(event) => clearCommandOrbitPointerEffect(event, COMMAND_ORBIT_SETKEY_CHIP_EFFECT)}
+          >
+            Set key
+          </span>
         </div>
       </main>
     </div>

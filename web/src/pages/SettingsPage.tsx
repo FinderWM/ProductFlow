@@ -9,6 +9,7 @@ import {
   CloudSun,
   Download,
   FileJson,
+  GalleryHorizontalEnd,
   Image,
   KeyRound,
   Link2,
@@ -37,13 +38,18 @@ import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FloatingSurface } from "../components/FloatingSurface";
+import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
+import { ImageSizePicker } from "../components/ImageSizePicker";
+import { ModalShell } from "../components/ModalShell";
 import {
   ParameterHelpLabel,
   type ParameterHelpContentOverride,
 } from "../components/ParameterHelp";
+import { ResourceLibraryModal } from "../components/resource-library/ResourceLibraryModal";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
+import { DEFAULT_IMAGE_SIZE_OPTIONS, formatImageSizeValue } from "../lib/imageSizes";
 import type { TranslationKey } from "../lib/i18n";
 import {
   DEFAULT_NOTIFICATION_AUTO_CLOSE_MS,
@@ -56,6 +62,7 @@ import type { ParameterHelpKey } from "../lib/parameterHelp";
 import { useI18n } from "../lib/preferences";
 import {
   API_GLOBAL_TEMPLATES_MANAGE,
+  API_GALLERY_WRITE,
   API_SETTINGS_MIGRATE,
   API_SETTINGS_PROVIDER_WRITE,
   API_SETTINGS_WRITE,
@@ -66,11 +73,14 @@ import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import type {
   ConfigItem,
   ConfigResponse,
+  LoginPageMode,
+  LoginPageTemplateId,
   ProviderCapability,
   ProviderConfigResponse,
   GenerationConfig,
   GenerationConfigCreateRequest,
   GenerationConfigUpdateRequest,
+  GalleryEntry,
   GenerationResourceGroup,
   GenerationResourceGroupCreateRequest,
   GenerationResourceGroupUpdateRequest,
@@ -82,6 +92,8 @@ import type {
   ResourceLibraryAsset,
   SettingsExportPayload,
   SettingsImportPreviewResponse,
+  ImageGenerationConfigTestRequest,
+  ImageGenerationConfigTestResponse,
   TextGenerationConfigJsonResponseFormatTestRequest,
   TextGenerationConfigJsonResponseFormatTestResponse,
   TextGenerationConfigTestRequest,
@@ -170,6 +182,8 @@ export interface GenerationConfigDraft {
   images_quality: string;
   images_style: string;
   responses_background_enabled: boolean;
+  structured_output_enabled: boolean;
+  structured_output_mode: TextStructuredOutputMode;
   structured_json_response_format_enabled: boolean;
   gemini_api_version: string;
   gemini_output_mime_type: string;
@@ -222,6 +236,23 @@ export interface TextConfigJsonResponseFormatTestState {
   records: Record<string, TextConfigJsonResponseFormatTestRecord>;
 }
 
+export interface ImageConfigTestDraft {
+  size: string;
+  prompt: string;
+}
+
+export interface ImageConfigTestRecord {
+  testing: boolean;
+  result: ImageGenerationConfigTestResponse | null;
+  error: string;
+}
+
+export interface ImageConfigTestState {
+  draft: ImageConfigTestDraft;
+  latestKey: string | null;
+  records: Record<string, ImageConfigTestRecord>;
+}
+
 interface TextGenerationConfigTestMutationInput {
   key: string;
   payload: TextGenerationConfigTestRequest;
@@ -230,6 +261,11 @@ interface TextGenerationConfigTestMutationInput {
 interface TextGenerationConfigJsonResponseFormatTestMutationInput {
   key: string;
   payload: TextGenerationConfigJsonResponseFormatTestRequest;
+}
+
+interface ImageGenerationConfigTestMutationInput {
+  key: string;
+  payload: ImageGenerationConfigTestRequest;
 }
 
 type PendingGenerationArchive =
@@ -249,6 +285,7 @@ type ImageProviderKind =
   | "openai_images"
   | "openai_chat_image"
   | "google_gemini_image";
+type TextStructuredOutputMode = "json_schema" | "json_object";
 type ProviderModelKind = TextProviderKind | ImageProviderKind;
 
 const INPUT_CLASS =
@@ -459,6 +496,89 @@ const DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
   instruction: "输出适合主图的短文案。",
 };
 
+const TEXT_CONFIG_TEST_STORAGE_KEY = "inspiration-one.settings.text-config-test";
+const IMAGE_CONFIG_TEST_STORAGE_KEY = "inspiration-one.settings.image-config-test";
+const DEFAULT_IMAGE_CONFIG_TEST_DRAFT: ImageConfigTestDraft = {
+  size: "1024x1024",
+  prompt: "生成一张干净的产品展示图，主体清晰，背景简洁，适合验证当前图片生成配置。",
+};
+
+export function normalizeTextConfigTestDraft(value: unknown): TextConfigTestDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_TEXT_CONFIG_TEST_DRAFT;
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    inspirationName:
+      typeof record.inspirationName === "string"
+        ? record.inspirationName
+        : DEFAULT_TEXT_CONFIG_TEST_DRAFT.inspirationName,
+    category: typeof record.category === "string" ? record.category : DEFAULT_TEXT_CONFIG_TEST_DRAFT.category,
+    price: typeof record.price === "string" ? record.price : DEFAULT_TEXT_CONFIG_TEST_DRAFT.price,
+    sourceNote:
+      typeof record.sourceNote === "string" ? record.sourceNote : DEFAULT_TEXT_CONFIG_TEST_DRAFT.sourceNote,
+    instruction:
+      typeof record.instruction === "string" ? record.instruction : DEFAULT_TEXT_CONFIG_TEST_DRAFT.instruction,
+  };
+}
+
+function readTextConfigTestDraft(): TextConfigTestDraft {
+  if (typeof window === "undefined") {
+    return DEFAULT_TEXT_CONFIG_TEST_DRAFT;
+  }
+  try {
+    return normalizeTextConfigTestDraft(JSON.parse(window.localStorage.getItem(TEXT_CONFIG_TEST_STORAGE_KEY) || "null"));
+  } catch {
+    return DEFAULT_TEXT_CONFIG_TEST_DRAFT;
+  }
+}
+
+function writeTextConfigTestDraft(draft: TextConfigTestDraft): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(TEXT_CONFIG_TEST_STORAGE_KEY, JSON.stringify(normalizeTextConfigTestDraft(draft)));
+  } catch {
+    // Local storage may be unavailable in private or restricted browser contexts.
+  }
+}
+
+export function normalizeImageConfigTestDraft(value: unknown): ImageConfigTestDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_IMAGE_CONFIG_TEST_DRAFT;
+  }
+  const record = value as Record<string, unknown>;
+  const size =
+    typeof record.size === "string" && record.size.trim()
+      ? record.size.trim()
+      : DEFAULT_IMAGE_CONFIG_TEST_DRAFT.size;
+  const prompt = typeof record.prompt === "string" ? record.prompt : DEFAULT_IMAGE_CONFIG_TEST_DRAFT.prompt;
+  return { size, prompt };
+}
+
+function readImageConfigTestDraft(): ImageConfigTestDraft {
+  if (typeof window === "undefined") {
+    return DEFAULT_IMAGE_CONFIG_TEST_DRAFT;
+  }
+  try {
+    return normalizeImageConfigTestDraft(JSON.parse(window.localStorage.getItem(IMAGE_CONFIG_TEST_STORAGE_KEY) || "null"));
+  } catch {
+    return DEFAULT_IMAGE_CONFIG_TEST_DRAFT;
+  }
+}
+
+function writeImageConfigTestDraft(draft: ImageConfigTestDraft): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(IMAGE_CONFIG_TEST_STORAGE_KEY, JSON.stringify(normalizeImageConfigTestDraft(draft)));
+  } catch {
+    // Local storage may be unavailable in private or restricted browser contexts.
+  }
+}
+
 export function textConfigTestRecordForKey(
   state: TextConfigTestState | undefined,
   key: string,
@@ -504,6 +624,94 @@ export function markTextConfigTestFailed(
       ...state.records,
       [key]: { testing: false, result: null, error },
     },
+  };
+}
+
+export function clearTextConfigTestRecord(state: TextConfigTestState, key: string): TextConfigTestState {
+  if (!state.records[key] && state.latestKey !== key) {
+    return state;
+  }
+  const records = { ...state.records };
+  delete records[key];
+  return {
+    ...state,
+    latestKey: state.latestKey === key ? null : state.latestKey,
+    records,
+  };
+}
+
+export function imageConfigTestRecordForKey(
+  state: ImageConfigTestState | undefined,
+  key: string,
+): ImageConfigTestRecord | null {
+  return state?.records[key] ?? null;
+}
+
+export function markImageConfigTestStarted(state: ImageConfigTestState, key: string): ImageConfigTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: true, result: null, error: "" },
+    },
+  };
+}
+
+export function markImageConfigTestSucceeded(
+  state: ImageConfigTestState,
+  key: string,
+  result: ImageGenerationConfigTestResponse,
+): ImageConfigTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: false, result, error: "" },
+    },
+  };
+}
+
+export function markImageConfigTestFailed(
+  state: ImageConfigTestState,
+  key: string,
+  error: string,
+): ImageConfigTestState {
+  return {
+    ...state,
+    latestKey: key,
+    records: {
+      ...state.records,
+      [key]: { testing: false, result: null, error },
+    },
+  };
+}
+
+export function markImageConfigTestAssetSaved(
+  state: ImageConfigTestState,
+  assetId: string,
+  result: ImageGenerationConfigTestResponse,
+): ImageConfigTestState {
+  const records = Object.fromEntries(
+    Object.entries(state.records).map(([key, record]) => [
+      key,
+      record.result?.generated_asset.id === assetId ? { ...record, result } : record,
+    ]),
+  );
+  return { ...state, records };
+}
+
+export function clearImageConfigTestRecord(state: ImageConfigTestState, key: string): ImageConfigTestState {
+  if (!state.records[key] && state.latestKey !== key) {
+    return state;
+  }
+  const records = { ...state.records };
+  delete records[key];
+  return {
+    ...state,
+    latestKey: state.latestKey === key ? null : state.latestKey,
+    records,
   };
 }
 
@@ -555,6 +763,22 @@ export function markTextConfigJsonResponseFormatTestFailed(
       ...state.records,
       [key]: { testing: false, result: null, error },
     },
+  };
+}
+
+export function clearTextConfigJsonResponseFormatTestRecord(
+  state: TextConfigJsonResponseFormatTestState,
+  key: string,
+): TextConfigJsonResponseFormatTestState {
+  if (!state.records[key] && state.latestKey !== key) {
+    return state;
+  }
+  const records = { ...state.records };
+  delete records[key];
+  return {
+    ...state,
+    latestKey: state.latestKey === key ? null : state.latestKey,
+    records,
   };
 }
 
@@ -637,6 +861,102 @@ function sourceClassName(item: ConfigItem): string {
     return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12";
   }
   return "border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220]";
+}
+
+const LOGIN_PAGE_TEMPLATE_IDS: LoginPageTemplateId[] = ["command-orbit", "fluid-mist", "image-lab"];
+const LOGIN_PAGE_TEMPLATE_CONFIG_KEYS: Record<LoginPageTemplateId, string> = {
+  "command-orbit": "login_page_command_orbit_config",
+  "fluid-mist": "login_page_fluid_mist_config",
+  "image-lab": "login_page_image_lab_config",
+};
+const LOGIN_PAGE_TEMPLATE_ID_BY_CONFIG_KEY = Object.fromEntries(
+  Object.entries(LOGIN_PAGE_TEMPLATE_CONFIG_KEYS).map(([templateId, key]) => [key, templateId]),
+) as Record<string, LoginPageTemplateId>;
+
+interface LoginPageTemplateConfigField {
+  key: string;
+  labelKey: TranslationKey;
+  type: "text" | "textarea" | "asset";
+}
+
+const LOGIN_PAGE_TEMPLATE_CONFIG_FIELDS: Record<LoginPageTemplateId, LoginPageTemplateConfigField[]> = {
+  "command-orbit": [
+    { key: "brand_subtitle", labelKey: "settings.loginPage.commandOrbit.brandSubtitle", type: "text" },
+    { key: "hero_title", labelKey: "settings.loginPage.commandOrbit.heroTitle", type: "text" },
+    { key: "hero_description", labelKey: "settings.loginPage.commandOrbit.heroDescription", type: "textarea" },
+  ],
+  "fluid-mist": [
+    { key: "greeting_title", labelKey: "settings.loginPage.fluidMist.greetingTitle", type: "text" },
+    { key: "greeting_description", labelKey: "settings.loginPage.fluidMist.greetingDescription", type: "text" },
+  ],
+  "image-lab": [
+    { key: "hero_description", labelKey: "settings.loginPage.imageLab.heroDescription", type: "textarea" },
+    { key: "hero_image_asset_id", labelKey: "settings.loginPage.imageLab.heroImage", type: "asset" },
+  ],
+};
+
+const LOGIN_PAGE_TEMPLATE_LABEL_KEYS: Record<LoginPageTemplateId, TranslationKey> = {
+  "command-orbit": "settings.loginPage.template.commandOrbit",
+  "fluid-mist": "settings.loginPage.template.fluidMist",
+  "image-lab": "settings.loginPage.template.imageLab",
+};
+
+export function isLoginPageTemplateId(value: string): value is LoginPageTemplateId {
+  return LOGIN_PAGE_TEMPLATE_IDS.includes(value as LoginPageTemplateId);
+}
+
+export function isLoginPageMode(value: string): value is LoginPageMode {
+  return value === "random" || isLoginPageTemplateId(value);
+}
+
+export function loginPageTemplateIdFromConfigKey(key: string): LoginPageTemplateId | null {
+  return LOGIN_PAGE_TEMPLATE_ID_BY_CONFIG_KEY[key] ?? null;
+}
+
+export function loginPageTemplateConfigItem(
+  items: ConfigItem[],
+  templateId: LoginPageTemplateId,
+): ConfigItem | undefined {
+  return items.find((item) => item.key === LOGIN_PAGE_TEMPLATE_CONFIG_KEYS[templateId]);
+}
+
+export function parseLoginPageTemplateConfigDraft(
+  templateId: LoginPageTemplateId,
+  value: DraftValue | ConfigItem["value"],
+): Record<string, string> {
+  const fieldKeys = LOGIN_PAGE_TEMPLATE_CONFIG_FIELDS[templateId].map((field) => field.key);
+  const parsed: Record<string, string> = {};
+  for (const fieldKey of fieldKeys) {
+    parsed[fieldKey] = "";
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return parsed;
+  }
+  try {
+    const decoded = JSON.parse(value) as unknown;
+    if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
+      return parsed;
+    }
+    const decodedRecord = decoded as Record<string, unknown>;
+    for (const fieldKey of fieldKeys) {
+      const fieldValue = decodedRecord[fieldKey];
+      parsed[fieldKey] = fieldValue === null || fieldValue === undefined ? "" : String(fieldValue);
+    }
+  } catch {
+    return parsed;
+  }
+  return parsed;
+}
+
+export function serializeLoginPageTemplateConfigDraft(
+  templateId: LoginPageTemplateId,
+  config: Record<string, string>,
+): string {
+  const payload: Record<string, string> = {};
+  for (const field of LOGIN_PAGE_TEMPLATE_CONFIG_FIELDS[templateId]) {
+    payload[field.key] = config[field.key] ?? "";
+  }
+  return JSON.stringify(payload);
 }
 
 const PROMPT_CONFIG_PLACEHOLDER_KEYS = new Set([
@@ -749,6 +1069,29 @@ function textValue(record: Record<string, unknown> | undefined, key: string): st
 function boolValue(record: Record<string, unknown> | undefined, key: string, fallback: boolean): boolean {
   const value = record?.[key];
   return typeof value === "boolean" ? value : fallback;
+}
+
+function isTextStructuredOutputProviderKind(providerKind: TextProviderKind | ImageProviderKind): boolean {
+  return providerKind === "openai" || providerKind === "openai_chat_completions";
+}
+
+function textStructuredOutputDraft(
+  config: Record<string, unknown> | undefined,
+): { enabled: boolean; mode: TextStructuredOutputMode } {
+  const raw = config?.structured_output;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const structuredOutput = raw as Record<string, unknown>;
+    const mode = structuredOutput.mode === "json_object" ? "json_object" : "json_schema";
+    return {
+      enabled: typeof structuredOutput.enabled === "boolean" ? structuredOutput.enabled : false,
+      mode,
+    };
+  }
+  const legacyEnabled = boolValue(config, "structured_json_response_format_enabled", false);
+  return {
+    enabled: legacyEnabled,
+    mode: legacyEnabled ? "json_object" : "json_schema",
+  };
 }
 
 function defaultCapabilitiesForProviderType(providerType: ProviderType): ProviderCapability[] {
@@ -887,6 +1230,8 @@ function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfig
     images_quality: "",
     images_style: "",
     responses_background_enabled: true,
+    structured_output_enabled: false,
+    structured_output_mode: "json_schema",
     structured_json_response_format_enabled: false,
     gemini_api_version: "v1beta",
     gemini_output_mime_type: "",
@@ -896,6 +1241,16 @@ function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfig
     availability_window_minutes: "",
     failure_threshold: "",
     cooldown_minutes: "",
+  };
+}
+
+export function newGenerationConfigDraft(
+  purpose: "text" | "image",
+  resourceGroupId: string,
+): GenerationConfigDraft {
+  return {
+    ...emptyGenerationConfigDraft(purpose),
+    resource_group_ids: resourceGroupId ? [resourceGroupId] : [],
   };
 }
 
@@ -911,6 +1266,7 @@ export function generationConfigDraft(config: GenerationConfig): GenerationConfi
           config.provider_kind === "google_gemini_image"
         ? config.provider_kind
         : "mock";
+  const structuredOutput = textStructuredOutputDraft(config.config);
   return {
     id: config.id,
     resource_group_ids: generationConfigResourceGroupIds(config),
@@ -924,11 +1280,9 @@ export function generationConfigDraft(config: GenerationConfig): GenerationConfi
     images_quality: textValue(config.config, "images_quality"),
     images_style: textValue(config.config, "images_style"),
     responses_background_enabled: boolValue(config.config, "responses_background_enabled", true),
-    structured_json_response_format_enabled: boolValue(
-      config.config,
-      "structured_json_response_format_enabled",
-      false,
-    ),
+    structured_output_enabled: structuredOutput.enabled,
+    structured_output_mode: structuredOutput.mode,
+    structured_json_response_format_enabled: structuredOutput.enabled,
     gemini_api_version: textValue(config.config, "gemini_api_version") || "v1beta",
     gemini_output_mime_type: textValue(config.config, "gemini_output_mime_type"),
     priority: String(config.priority),
@@ -967,8 +1321,13 @@ export function generationConfigPayloadFromDraft(
         ? { model: draft.model.trim() }
         : {};
   const config =
-    draft.provider_kind === "openai_chat_completions"
-      ? { structured_json_response_format_enabled: draft.structured_json_response_format_enabled }
+    draft.purpose === "text" && isTextStructuredOutputProviderKind(draft.provider_kind)
+      ? {
+          structured_output: {
+            enabled: draft.structured_output_enabled,
+            mode: draft.structured_output_mode,
+          },
+        }
       : draft.provider_kind === "openai_responses"
       ? { responses_background_enabled: draft.responses_background_enabled }
       : draft.provider_kind === "openai_images"
@@ -1141,6 +1500,38 @@ function textGenerationConfigJsonResponseFormatTestPayload(
   return {
     generation_config_id: generationConfigDraft.id,
     generation_config: generationConfig,
+  };
+}
+
+function imageGenerationConfigTestPayload(
+  generationConfigDraft: GenerationConfigDraft,
+  testDraft: ImageConfigTestDraft,
+  resourceGroupId: string,
+): ImageGenerationConfigTestRequest {
+  const generationConfig = generationConfigPayloadFromDraft(generationConfigDraft) as GenerationConfigCreateRequest;
+  return {
+    generation_config_id: generationConfigDraft.id,
+    generation_config: generationConfig,
+    resource_group_id: resourceGroupId,
+    prompt: testDraft.prompt.trim() || DEFAULT_IMAGE_CONFIG_TEST_DRAFT.prompt,
+    size: testDraft.size.trim() || DEFAULT_IMAGE_CONFIG_TEST_DRAFT.size,
+  };
+}
+
+function imageGenerationConfigTestResultWithGalleryEntry(
+  result: ImageGenerationConfigTestResponse,
+  entry: GalleryEntry,
+): ImageGenerationConfigTestResponse {
+  if (result.generated_asset.id !== entry.image.id) {
+    return result;
+  }
+  return {
+    ...result,
+    generated_asset: entry.image,
+    round: {
+      ...result.round,
+      generated_asset: entry.image,
+    },
   };
 }
 
@@ -1450,23 +1841,6 @@ function SettingsFeedbackDialog({
   const isError = Boolean(errorMessage);
   const message = errorMessage || successMessage;
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        if (isError) {
-          onCloseError();
-          return;
-        }
-        onCloseSuccess();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isError, onCloseError, onCloseSuccess, open]);
-
   if (!open) {
     return null;
   }
@@ -1474,26 +1848,15 @@ function SettingsFeedbackDialog({
   const Icon = isError ? X : CheckCircle2;
 
   return (
-    <div
-      className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target !== event.currentTarget) {
-          return;
-        }
-        if (isError) {
-          onCloseError();
-          return;
-        }
-        onCloseSuccess();
-      }}
+    <ModalShell
+      open={open}
+      role={isError ? "alertdialog" : "dialog"}
+      onClose={isError ? onCloseError : onCloseSuccess}
+      ariaLabelledBy={titleId}
+      ariaDescribedBy={descriptionId}
+      overlayClassName="z-[95] bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      panelClassName="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
     >
-      <div
-        role={isError ? "alertdialog" : "dialog"}
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        className="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
-      >
         <div className="flex items-start gap-3 px-5 py-5">
           <div
             className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
@@ -1524,8 +1887,7 @@ function SettingsFeedbackDialog({
             </button>
           ) : null}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -2193,8 +2555,12 @@ interface LoginPageSettingsPanelProps {
   assets: ResourceLibraryAsset[];
   assetsLoading: boolean;
   assetsError: boolean;
+  selectionSaving: boolean;
+  templateConfigSaving: boolean;
   onChange: (item: ConfigItem, value: DraftValue, touchedSecret?: boolean) => void;
   onReset: (item: ConfigItem) => void;
+  onSaveSelection: (value: LoginPageMode) => void;
+  onSaveTemplateConfig: (templateId: LoginPageTemplateId, config: Record<string, string>) => void;
 }
 
 function LoginPageSettingsPanel({
@@ -2206,121 +2572,298 @@ function LoginPageSettingsPanel({
   assets,
   assetsLoading,
   assetsError,
+  selectionSaving,
+  templateConfigSaving,
   onChange,
   onReset,
+  onSaveSelection,
+  onSaveTemplateConfig,
 }: LoginPageSettingsPanelProps) {
   const { t } = useI18n();
-  const assetItem = items.find((item) => item.key === "login_page_image_lab_hero_image_asset_id");
-  const textItems = items.filter((item) => item.key !== "login_page_image_lab_hero_image_asset_id");
+  const [resourceLibraryOpen, setResourceLibraryOpen] = useState(false);
+  const selectionItem = items.find((item) => item.key === "login_page_mode");
+  const selectionValue = selectionItem ? String(drafts[selectionItem.key] ?? draftFromItem(selectionItem)) : "random";
+  const selectionMode = isLoginPageMode(selectionValue) ? selectionValue : "random";
+  const [editingTemplateId, setEditingTemplateId] = useState<LoginPageTemplateId>("command-orbit");
   const selectableAssets = assets.filter(
     (asset) => asset.kind === "image" && !asset.archived_at && asset.effective_enabled !== false,
   );
-  const selectedAssetId = assetItem ? String(drafts[assetItem.key] ?? draftFromItem(assetItem)) : "";
+  const activeConfigItem = loginPageTemplateConfigItem(items, editingTemplateId);
+  const activeConfig = activeConfigItem
+    ? parseLoginPageTemplateConfigDraft(
+        editingTemplateId,
+        drafts[activeConfigItem.key] ?? draftFromItem(activeConfigItem),
+      )
+    : {};
+  const selectedAssetId = activeConfig.hero_image_asset_id ?? "";
   const selectedAsset = selectableAssets.find((asset) => asset.id === selectedAssetId);
 
+  useEffect(() => {
+    if (isLoginPageTemplateId(selectionValue)) {
+      setEditingTemplateId(selectionValue);
+    }
+  }, [selectionValue]);
+
+  const updateActiveConfigField = (fieldKey: string, value: string) => {
+    if (!activeConfigItem) {
+      return;
+    }
+    onChange(
+      activeConfigItem,
+      serializeLoginPageTemplateConfigDraft(editingTemplateId, {
+        ...activeConfig,
+        [fieldKey]: value,
+      }),
+    );
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 lg:grid-cols-2">
-        {textItems.map((item) => (
+    <>
+    <div className="space-y-5">
+      {selectionItem ? (
+        <section className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-950 dark:text-white">
+              {t("settings.loginPage.selectionTitle")}
+            </h3>
+          </div>
           <ConfigField
-            key={item.key}
-            item={item}
-            value={drafts[item.key] ?? draftFromItem(item)}
-            secretTouched={Boolean(secretTouched[item.key])}
-            isResetting={resettingKey === item.key}
+            item={selectionItem}
+            value={drafts[selectionItem.key] ?? draftFromItem(selectionItem)}
+            secretTouched={Boolean(secretTouched[selectionItem.key])}
+            isResetting={resettingKey === selectionItem.key}
             layout="card"
             disabled={disabled}
-            onChange={(nextValue, touchedSecret) => onChange(item, nextValue, touchedSecret)}
-            onReset={() => onReset(item)}
+            onChange={(nextValue, touchedSecret) => onChange(selectionItem, nextValue, touchedSecret)}
+            onReset={() => onReset(selectionItem)}
           />
-        ))}
-      </div>
-
-      {assetItem ? (
-        <div className={`${SETTINGS_FIELD_CARD_CLASS} rounded-2xl border border-slate-200 bg-white p-4 shadow-none dark:border-slate-800 dark:bg-[#0f1726]`}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <label htmlFor={assetItem.key} className="block text-sm font-semibold text-zinc-950 dark:text-white">
-                  {assetItem.label}
-                </label>
-                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(assetItem)}`}>
-                  {sourceLabel(assetItem, t)}
-                </span>
-              </div>
-              <div className="pf-settings-config-key min-w-0 break-all font-mono text-[11px] leading-5 text-zinc-400 dark:text-slate-500">
-                {assetItem.key}
-              </div>
-              <p className="text-xs leading-5 text-zinc-500 dark:text-slate-400">
-                {t("settings.loginPage.assetDescription")}
-              </p>
-            </div>
-            {assetItem.source === "database" ? (
-              <ConfigFieldResetButton
-                label={assetItem.label}
-                busy={resettingKey === assetItem.key}
-                disabled={disabled}
-                onReset={() => onReset(assetItem)}
-              />
-            ) : null}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => onSaveSelection(selectionMode)}
+              disabled={disabled || selectionSaving}
+              className={SETTINGS_MAIN_ACTION_CLASS}
+            >
+              {selectionSaving ? (
+                <Loader2 size={14} className="mr-2 animate-spin" />
+              ) : (
+                <Save size={14} className="mr-2" />
+              )}
+              {t("settings.loginPage.saveSelection")}
+            </button>
           </div>
+        </section>
+      ) : null}
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-start">
-            <div className="space-y-2">
-              <SelectField
-                id={assetItem.key}
-                value={selectedAssetId}
-                options={[
-                  { value: "", label: t("settings.loginPage.defaultHeroImage") },
-                  ...selectableAssets.map((asset) => ({
-                    value: asset.id,
-                    label: asset.original_filename,
-                  })),
-                ]}
-                onChange={(value) => onChange(assetItem, value)}
-                disabled={disabled || assetsLoading}
-                radius="xl"
-              />
-              {assetsLoading ? (
-                <div className="flex items-center text-xs text-slate-500 dark:text-slate-400">
-                  <Loader2 size={13} className="mr-2 animate-spin" />
-                  {t("settings.loginPage.loadingAssets")}
-                </div>
-              ) : assetsError ? (
-                <p className="text-xs text-red-600 dark:text-red-300">{t("settings.loginPage.assetsLoadFailed")}</p>
-              ) : selectableAssets.length ? (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {t("settings.loginPage.assetCount", { count: selectableAssets.length })}
-                </p>
-              ) : (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {t("settings.loginPage.noAssets")}
-                </p>
-              )}
-            </div>
-
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950">
-              {selectedAsset ? (
-                <img
-                  src={api.toApiUrl(selectedAsset.thumbnail_url)}
-                  alt={selectedAsset.original_filename}
-                  className="aspect-[4/3] w-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                />
-              ) : (
-                <div className="flex aspect-[4/3] w-full items-center justify-center text-slate-400 dark:text-slate-500">
-                  <Image size={24} />
-                </div>
-              )}
-              <div className="border-t border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                {selectedAsset?.original_filename ?? t("settings.loginPage.defaultHeroImage")}
-              </div>
-            </div>
+      <section className="space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-950 dark:text-white">
+              {t("settings.loginPage.contentTitle")}
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-slate-400">
+              {t("settings.loginPage.contentDescription")}
+            </p>
+          </div>
+          <div className="min-w-48 text-xs font-medium text-zinc-600 dark:text-slate-300">
+            <span id="login-page-edit-template-label" className="mb-1 block">
+              {t("settings.loginPage.editTemplate")}
+            </span>
+            <SelectField
+              id="login-page-edit-template"
+              value={editingTemplateId}
+              options={LOGIN_PAGE_TEMPLATE_IDS.map((templateId) => ({
+                value: templateId,
+                label: t(LOGIN_PAGE_TEMPLATE_LABEL_KEYS[templateId]),
+              }))}
+              onChange={(value) => {
+                if (isLoginPageTemplateId(value)) {
+                  setEditingTemplateId(value);
+                }
+              }}
+              ariaLabel={t("settings.loginPage.editTemplate")}
+              radius="xl"
+            />
           </div>
         </div>
-      ) : null}
+
+        {activeConfigItem ? (
+          <div className={`${SETTINGS_FIELD_CARD_CLASS} rounded-2xl border border-slate-200 bg-white p-4 shadow-none dark:border-slate-800 dark:bg-[#0f1726]`}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="block text-sm font-semibold text-zinc-950 dark:text-white">
+                    {activeConfigItem.label}
+                  </div>
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${sourceClassName(activeConfigItem)}`}>
+                    {sourceLabel(activeConfigItem, t)}
+                  </span>
+                </div>
+                <div className="pf-settings-config-key min-w-0 break-all font-mono text-[11px] leading-5 text-zinc-400 dark:text-slate-500">
+                  {activeConfigItem.key}
+                </div>
+              </div>
+              {activeConfigItem.source === "database" ? (
+                <ConfigFieldResetButton
+                  label={activeConfigItem.label}
+                  busy={resettingKey === activeConfigItem.key}
+                  disabled={disabled}
+                  onReset={() => onReset(activeConfigItem)}
+                />
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              {LOGIN_PAGE_TEMPLATE_CONFIG_FIELDS[editingTemplateId].map((field) =>
+                field.type === "asset" ? (
+                  <div key={field.key} className="space-y-2 lg:col-span-2">
+                    <label
+                      htmlFor={`${activeConfigItem.key}-${field.key}`}
+                      className="block text-sm font-medium text-zinc-900 dark:text-white"
+                    >
+                      {t(field.labelKey)}
+                    </label>
+                    <p className="text-xs leading-5 text-zinc-500 dark:text-slate-400">
+                      {t("settings.loginPage.assetDescription")}
+                    </p>
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-start">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            id={`${activeConfigItem.key}-${field.key}`}
+                            type="button"
+                            onClick={() => setResourceLibraryOpen(true)}
+                            disabled={disabled}
+                            className={SETTINGS_COMPACT_ACTION_CLASS}
+                          >
+                            <Image size={14} className="mr-2" />
+                            {t("settings.loginPage.selectLargeImage")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateActiveConfigField(field.key, "")}
+                            disabled={disabled || !selectedAssetId}
+                            className={SETTINGS_COMPACT_ACTION_CLASS}
+                          >
+                            <RotateCcw size={14} className="mr-2" />
+                            {t("settings.loginPage.useDefaultLargeImage")}
+                          </button>
+                        </div>
+                        {assetsLoading ? (
+                          <div className="flex items-center text-xs text-slate-500 dark:text-slate-400">
+                            <Loader2 size={13} className="mr-2 animate-spin" />
+                            {t("settings.loginPage.loadingAssets")}
+                          </div>
+                        ) : assetsError ? (
+                          <p className="text-xs text-red-600 dark:text-red-300">{t("settings.loginPage.assetsLoadFailed")}</p>
+                        ) : selectableAssets.length ? (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {t("settings.loginPage.assetCount", { count: selectableAssets.length })}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {t("settings.loginPage.noAssets")}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950">
+                        {selectedAsset ? (
+                          <img
+                            src={api.toApiUrl(selectedAsset.thumbnail_url)}
+                            alt={selectedAsset.original_filename}
+                            className="aspect-[4/3] w-full object-cover"
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : !selectedAssetId ? (
+                          <img
+                            src={api.toApiUrl("/hero.png")}
+                            alt={t("settings.loginPage.defaultHeroImage")}
+                            className="aspect-[4/3] w-full object-cover"
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        ) : (
+                          <div className="flex aspect-[4/3] w-full items-center justify-center text-slate-400 dark:text-slate-500">
+                            <Image size={24} />
+                          </div>
+                        )}
+                        <div className="border-t border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                          {selectedAsset?.original_filename ??
+                            (selectedAssetId
+                              ? t("settings.loginPage.selectedAssetUnavailable")
+                              : t("settings.loginPage.defaultHeroImage"))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : field.type === "textarea" ? (
+                  <label key={field.key} className="space-y-2">
+                    <span className="block text-sm font-medium text-zinc-900 dark:text-white">{t(field.labelKey)}</span>
+                    <textarea
+                      value={activeConfig[field.key] ?? ""}
+                      disabled={disabled}
+                      onChange={(event) => updateActiveConfigField(field.key, event.target.value)}
+                      rows={3}
+                      className={`${TEXTAREA_CLASS} resize-y leading-6`}
+                    />
+                  </label>
+                ) : (
+                  <label key={field.key} className="space-y-2">
+                    <span className="block text-sm font-medium text-zinc-900 dark:text-white">{t(field.labelKey)}</span>
+                    <input
+                      type="text"
+                      value={activeConfig[field.key] ?? ""}
+                      disabled={disabled}
+                      onChange={(event) => updateActiveConfigField(field.key, event.target.value)}
+                      className={INPUT_CLASS}
+                    />
+                  </label>
+                ),
+              )}
+            </div>
+            <div className="mt-5 flex justify-end border-t border-slate-100 pt-4 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => onSaveTemplateConfig(editingTemplateId, activeConfig)}
+                disabled={disabled || templateConfigSaving}
+                className={SETTINGS_MAIN_ACTION_CLASS}
+              >
+                {templateConfigSaving ? (
+                  <Loader2 size={14} className="mr-2 animate-spin" />
+                ) : (
+                  <Save size={14} className="mr-2" />
+                )}
+                {t("settings.loginPage.saveTemplateConfig")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("settings.section.empty")}
+          </div>
+        )}
+      </section>
     </div>
+    <ResourceLibraryModal
+      open={resourceLibraryOpen}
+      onClose={() => setResourceLibraryOpen(false)}
+      canRead
+      onSelectAsset={(asset) => {
+        if (asset.kind !== "image") {
+          return;
+        }
+        updateActiveConfigField("hero_image_asset_id", asset.id);
+        setResourceLibraryOpen(false);
+      }}
+      selectLabel={t("settings.loginPage.selectLargeImage")}
+      selectDisabled={disabled}
+      selectDisabledTitle={disabled ? t("settings.writePermissionRequired") : null}
+      isAssetSelectable={(asset) => asset.kind === "image"}
+      assetSelectDisabledTitle={t("settings.loginPage.imageOnly")}
+    />
+    </>
   );
 }
 
@@ -2599,38 +3142,19 @@ function GenerationResourceGroupCreateDialog({
   const { t } = useI18n();
   const titleId = useId();
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !pending) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, open, pending]);
-
   if (!open) {
     return null;
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !pending) {
-          onClose();
-        }
-      }}
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      closeDisabled={pending}
+      ariaLabelledBy={titleId}
+      overlayClassName="z-[85] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      panelClassName="flex max-h-[calc(100dvh-3rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-[calc(100dvh-3rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
-      >
         <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
           <div className="flex min-w-0 items-center gap-3">
             <span className="text-indigo-600 dark:text-violet-300">
@@ -2662,8 +3186,7 @@ function GenerationResourceGroupCreateDialog({
             onSave={onSave}
           />
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -3186,18 +3709,14 @@ function ProviderProfileDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex justify-end bg-slate-950/55 backdrop-blur-sm">
-      <div
-        className="absolute inset-0 h-full w-full cursor-default"
-        aria-hidden="true"
-        onClick={onClose}
-      />
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="relative flex h-full w-full max-w-full flex-col overflow-hidden bg-white shadow-2xl shadow-slate-950/25 dark:bg-[#121722] sm:max-w-[448px]"
-      >
+    <ModalShell
+      onClose={onClose}
+      ariaLabelledBy={titleId}
+      overlayClassName="z-[80] bg-slate-950/55 backdrop-blur-sm"
+      overlayProps={{ style: { alignItems: "stretch", justifyContent: "flex-end" } }}
+      panelElement="aside"
+      panelClassName="relative flex h-full w-full max-w-full flex-col overflow-hidden bg-white shadow-2xl shadow-slate-950/25 dark:bg-[#121722] sm:max-w-[448px]"
+    >
         <div className="flex h-[74px] items-center justify-between border-b border-slate-200 px-6 dark:border-slate-800">
           <div className="flex min-w-0 items-center gap-3">
             <span className="text-indigo-600 dark:text-violet-400">
@@ -3326,8 +3845,7 @@ function ProviderProfileDrawer({
             </button>
           </div>
         </form>
-      </aside>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -3340,13 +3858,19 @@ interface GenerationConfigPoolSectionProps {
   canWrite: boolean;
   textTestState?: TextConfigTestState;
   jsonResponseFormatTestState?: TextConfigJsonResponseFormatTestState;
-  onChange: (key: string, next: GenerationConfigDraft) => void;
+  imageTestState?: ImageConfigTestState;
+  onChange: (key: string, next: GenerationConfigDraft, options?: { clearSavedMessage?: boolean }) => void;
   onSave: (draft: GenerationConfigDraft, options?: GenerationConfigSaveOptions) => void;
   onArchive: (configId: string) => void;
   onUnfreeze: (configId: string) => void;
   onTextTestDraftChange?: (draft: TextConfigTestDraft) => void;
+  onImageTestDraftChange?: (draft: ImageConfigTestDraft) => void;
+  onSaveImageTestDraft?: () => void;
   onTestTextConfig?: (key: string, draft: GenerationConfigDraft) => void;
+  onTestImageConfig?: (key: string, draft: GenerationConfigDraft, resourceGroupId: string) => void;
   onTestJsonResponseFormatConfig?: (key: string, draft: GenerationConfigDraft) => void;
+  onResetTextConfigTests?: (key: string) => void;
+  onResetImageConfigTests?: (key: string) => void;
   onRefreshSort: () => void;
   unfreezingConfigId: string | null;
 }
@@ -3514,6 +4038,156 @@ function TextConfigTestPanel({
   );
 }
 
+function ImageConfigTestPanel({
+  state,
+  onDraftChange,
+  onSaveDraft,
+}: {
+  state: ImageConfigTestState;
+  onDraftChange: (draft: ImageConfigTestDraft) => void;
+  onSaveDraft: () => void;
+}) {
+  const { t } = useI18n();
+  const latestRecord = state.latestKey ? state.records[state.latestKey] : null;
+  const latestResult = latestRecord?.result ?? null;
+  const latestError = latestRecord?.error ?? "";
+  const runningCount = Object.values(state.records).filter((record) => record.testing).length;
+
+  return (
+    <section className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-4`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+            {t("settings.generation.imageTestTitle")}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+            {t("settings.generation.imageTestDescription")}
+          </p>
+        </div>
+        <button type="button" onClick={onSaveDraft} className={SETTINGS_COMPACT_ACTION_CLASS}>
+          <Save size={14} className="mr-1.5" />
+          {t("settings.generation.imageTestSaveDraft")}
+        </button>
+      </div>
+      <ImageSizePicker
+        value={state.draft.size}
+        presets={DEFAULT_IMAGE_SIZE_OPTIONS}
+        onChange={(size) => onDraftChange({ ...state.draft, size })}
+      />
+      <SettingsFormField label={t("settings.generation.imageTestPrompt")}>
+        <textarea
+          value={state.draft.prompt}
+          onChange={(event) => onDraftChange({ ...state.draft, prompt: event.target.value })}
+          className={`${TEXTAREA_CLASS} min-h-28 resize-y`}
+        />
+      </SettingsFormField>
+      {runningCount > 0 ? (
+        <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
+          <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
+          <div>
+            <div className="font-semibold">{t("settings.generation.imageTestRunning")}</div>
+            <div className="mt-0.5 text-xs text-indigo-700/80 dark:text-violet-100/75">
+              {t("settings.generation.imageTestRunningDetail")}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {latestError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+          {latestError}
+        </div>
+      ) : null}
+      {runningCount === 0 && latestResult ? (
+        <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100">
+          <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-semibold">{t("settings.generation.imageTestPassed")}</div>
+            <div className="mt-0.5 text-xs text-emerald-700/80 dark:text-emerald-100/75">
+              {t("settings.generation.imageTestPassedDetail", {
+                duration: String(Math.max(1, Math.round(latestResult.duration_ms))),
+                model: latestResult.model_name,
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ImageConfigTestResultDialog({
+  result,
+  canSaveGallery,
+  saving,
+  onSave,
+  onClose,
+}: {
+  result: ImageGenerationConfigTestResponse;
+  canSaveGallery: boolean;
+  saving: boolean;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const saved = result.generated_asset.gallery_saved;
+  const saveTitle = !canSaveGallery
+    ? t("chat.permission.galleryWriteRequired")
+    : saved
+      ? t("chat.alreadyInGallery")
+      : t("settings.generation.imageTestKeep");
+
+  return (
+    <GalleryImagePreviewDialog
+      ariaLabel={t("settings.generation.imageTestPreviewLabel")}
+      imageUrl={api.toApiUrl(result.generated_asset.preview_url)}
+      imageAlt={result.round.prompt}
+      title={t("settings.generation.imageTestPreviewTitle")}
+      subtitle={result.generated_asset.original_filename}
+      body={result.round.prompt || t("gallery.noPrompt")}
+      metadataRows={[
+        {
+          label: t("gallery.meta.size"),
+          value: result.round.actual_size
+            ? t("gallery.sizeActualRequested", {
+                actual: formatImageSizeValue(result.round.actual_size),
+                requested: formatImageSizeValue(result.round.size),
+              })
+            : formatImageSizeValue(result.round.size),
+        },
+        { label: t("gallery.meta.model"), value: result.model_name },
+        { label: t("gallery.meta.resourceGroup"), value: result.round.resource_group.name },
+        {
+          label: t("settings.generation.imageTestDuration"),
+          value: `${Math.max(1, Math.round(result.duration_ms))}ms`,
+        },
+      ]}
+      providerNotes={result.round.provider_notes}
+      providerNotesTitle={t("gallery.providerNotes")}
+      downloadUrl={result.generated_asset.download_url}
+      downloadLabel={t("gallery.download")}
+      closeLabel={t("common.close")}
+      onClose={onClose}
+      footerExtra={
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!canSaveGallery || saving || saved}
+          title={saveTitle}
+          aria-label={saveTitle}
+          className={SETTINGS_MAIN_ACTION_CLASS}
+        >
+          {saving ? (
+            <Loader2 size={16} className="mr-2 animate-spin" />
+          ) : (
+            <GalleryHorizontalEnd size={16} className="mr-2" />
+          )}
+          {saved ? t("chat.alreadyInGallery") : t("settings.generation.imageTestKeep")}
+        </button>
+      }
+    />
+  );
+}
+
 interface GenerationConfigCreateDialogProps {
   open: boolean;
   title: string;
@@ -3525,6 +4199,9 @@ interface GenerationConfigCreateDialogProps {
   testing?: boolean;
   testResult?: TextGenerationConfigTestResponse | null;
   testError?: string;
+  imageTesting?: boolean;
+  imageTestResult?: ImageGenerationConfigTestResponse | null;
+  imageTestError?: string;
   jsonResponseFormatTesting?: boolean;
   jsonResponseFormatTestResult?: TextGenerationConfigJsonResponseFormatTestResponse | null;
   jsonResponseFormatTestError?: string;
@@ -3532,6 +4209,7 @@ interface GenerationConfigCreateDialogProps {
   onSave: () => void;
   onClose: () => void;
   onTest?: () => void;
+  onImageTest?: () => void;
   onTestJsonResponseFormat?: () => void;
 }
 
@@ -3546,6 +4224,9 @@ function GenerationConfigCreateDialog({
   testing = false,
   testResult = null,
   testError = "",
+  imageTesting = false,
+  imageTestResult = null,
+  imageTestError = "",
   jsonResponseFormatTesting = false,
   jsonResponseFormatTestResult = null,
   jsonResponseFormatTestError = "",
@@ -3553,43 +4234,25 @@ function GenerationConfigCreateDialog({
   onSave,
   onClose,
   onTest,
+  onImageTest,
   onTestJsonResponseFormat,
 }: GenerationConfigCreateDialogProps) {
   const { t } = useI18n();
   const titleId = useId();
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !pending) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, open, pending]);
 
   if (!open) {
     return null;
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !pending) {
-          onClose();
-        }
-      }}
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      closeDisabled={pending}
+      ariaLabelledBy={titleId}
+      overlayClassName="z-[85] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      panelClassName="flex max-h-[calc(100dvh-3rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-[calc(100dvh-3rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
-      >
         <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
           <div className="flex min-w-0 items-center gap-3">
             <span className="text-indigo-600 dark:text-violet-300">
@@ -3621,17 +4284,20 @@ function GenerationConfigCreateDialog({
             testing={testing}
             testResult={testResult}
             testError={testError}
+            imageTesting={imageTesting}
+            imageTestResult={imageTestResult}
+            imageTestError={imageTestError}
             jsonResponseFormatTesting={jsonResponseFormatTesting}
             jsonResponseFormatTestResult={jsonResponseFormatTestResult}
             jsonResponseFormatTestError={jsonResponseFormatTestError}
             onChange={onChange}
             onSave={onSave}
             onTest={onTest}
+            onImageTest={onImageTest}
             onTestJsonResponseFormat={onTestJsonResponseFormat}
           />
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -3644,13 +4310,19 @@ function GenerationConfigPoolSection({
   canWrite,
   textTestState,
   jsonResponseFormatTestState,
+  imageTestState,
   onChange,
   onSave,
   onArchive,
   onUnfreeze,
   onTextTestDraftChange,
+  onImageTestDraftChange,
+  onSaveImageTestDraft,
   onTestTextConfig,
+  onTestImageConfig,
   onTestJsonResponseFormatConfig,
+  onResetTextConfigTests,
+  onResetImageConfigTests,
   onRefreshSort,
   unfreezingConfigId,
 }: GenerationConfigPoolSectionProps) {
@@ -3678,11 +4350,8 @@ function GenerationConfigPoolSection({
   const configs = filterGenerationConfigsByName(configsInActiveGroup, configSearch);
   const newDraftKey = `new-${purpose}-${activeResourceGroupId || "unbound"}`;
   const newDraft =
-    drafts[newDraftKey] ??
-    ({
-      ...emptyGenerationConfigDraft(purpose),
-      resource_group_ids: activeResourceGroupId ? [activeResourceGroupId] : [],
-    } satisfies GenerationConfigDraft);
+    drafts[newDraftKey] ?? newGenerationConfigDraft(purpose, activeResourceGroupId);
+  const newDraftResourceGroupId = newDraft.resource_group_ids[0] ?? activeResourceGroupId;
   const cards = [
     ...configs.map((config) => ({
       key: config.id,
@@ -3696,11 +4365,28 @@ function GenerationConfigPoolSection({
     jsonResponseFormatTestState,
     newDraftKey,
   );
+  const newDraftImageTestRecord = imageConfigTestRecordForKey(imageTestState, newDraftKey);
+  const resetNewDraft = () => {
+    onChange(newDraftKey, newGenerationConfigDraft(purpose, activeResourceGroupId), { clearSavedMessage: false });
+    if (purpose === "text") {
+      onResetTextConfigTests?.(newDraftKey);
+    }
+    if (purpose === "image") {
+      onResetImageConfigTests?.(newDraftKey);
+    }
+  };
 
   return (
     <section className="space-y-4">
       {purpose === "text" && textTestState && onTextTestDraftChange ? (
         <TextConfigTestPanel state={textTestState} onDraftChange={onTextTestDraftChange} />
+      ) : null}
+      {purpose === "image" && imageTestState && onImageTestDraftChange && onSaveImageTestDraft ? (
+        <ImageConfigTestPanel
+          state={imageTestState}
+          onDraftChange={onImageTestDraftChange}
+          onSaveDraft={onSaveImageTestDraft}
+        />
       ) : null}
       <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-5`}>
         <div className="space-y-4">
@@ -3777,10 +4463,14 @@ function GenerationConfigPoolSection({
           <div className="space-y-4">
             {cards.map(({ key, draftKey, config, draft }) => {
               const testRecord = textConfigTestRecordForKey(textTestState, key);
+              const imageTestRecord = imageConfigTestRecordForKey(imageTestState, key);
               const jsonResponseFormatTestRecord = textConfigJsonResponseFormatTestRecordForKey(
                 jsonResponseFormatTestState,
                 key,
               );
+              const cardResourceGroupId = activeResourceGroupId && draft.resource_group_ids.includes(activeResourceGroupId)
+                ? activeResourceGroupId
+                : draft.resource_group_ids[0] ?? firstEnabledGroupId;
               return (
                 <GenerationConfigCard
                   key={key}
@@ -3796,6 +4486,11 @@ function GenerationConfigPoolSection({
                   onUnfreeze={config ? () => onUnfreeze(config.id) : undefined}
                   unfreezing={unfreezingConfigId === config?.id}
                   onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(key, draft) : undefined}
+                  onImageTest={
+                    purpose === "image" && onTestImageConfig && cardResourceGroupId
+                      ? () => onTestImageConfig(key, draft, cardResourceGroupId)
+                      : undefined
+                  }
                   onTestJsonResponseFormat={
                     purpose === "text" && onTestJsonResponseFormatConfig
                       ? () => onTestJsonResponseFormatConfig(key, draft)
@@ -3804,6 +4499,9 @@ function GenerationConfigPoolSection({
                   testing={Boolean(testRecord?.testing)}
                   testResult={testRecord?.result ?? null}
                   testError={testRecord?.error ?? ""}
+                  imageTesting={Boolean(imageTestRecord?.testing)}
+                  imageTestResult={imageTestRecord?.result ?? null}
+                  imageTestError={imageTestRecord?.error ?? ""}
                   jsonResponseFormatTesting={Boolean(jsonResponseFormatTestRecord?.testing)}
                   jsonResponseFormatTestResult={jsonResponseFormatTestRecord?.result ?? null}
                   jsonResponseFormatTestError={jsonResponseFormatTestRecord?.error ?? ""}
@@ -3827,6 +4525,9 @@ function GenerationConfigPoolSection({
           testing={Boolean(newDraftTestRecord?.testing)}
           testResult={newDraftTestRecord?.result ?? null}
           testError={newDraftTestRecord?.error ?? ""}
+          imageTesting={Boolean(newDraftImageTestRecord?.testing)}
+          imageTestResult={newDraftImageTestRecord?.result ?? null}
+          imageTestError={newDraftImageTestRecord?.error ?? ""}
           jsonResponseFormatTesting={Boolean(newDraftJsonResponseFormatTestRecord?.testing)}
           jsonResponseFormatTestResult={newDraftJsonResponseFormatTestRecord?.result ?? null}
           jsonResponseFormatTestError={newDraftJsonResponseFormatTestRecord?.error ?? ""}
@@ -3834,10 +4535,26 @@ function GenerationConfigPoolSection({
             onChange(newDraftKey, next);
           }}
           onSave={() => {
-            onSave(newDraft, { onSuccess: () => setCreateDialogOpen(false) });
+            onSave(newDraft, {
+              onSuccess: () => {
+                setCreateDialogOpen(false);
+                resetNewDraft();
+              },
+            });
           }}
-          onClose={() => setCreateDialogOpen(false)}
+          onClose={() => {
+            if (pending) {
+              return;
+            }
+            setCreateDialogOpen(false);
+            resetNewDraft();
+          }}
           onTest={purpose === "text" && onTestTextConfig ? () => onTestTextConfig(newDraftKey, newDraft) : undefined}
+          onImageTest={
+            purpose === "image" && onTestImageConfig && newDraftResourceGroupId
+              ? () => onTestImageConfig(newDraftKey, newDraft, newDraftResourceGroupId)
+              : undefined
+          }
           onTestJsonResponseFormat={
             purpose === "text" && onTestJsonResponseFormatConfig
               ? () => onTestJsonResponseFormatConfig(newDraftKey, newDraft)
@@ -3861,11 +4578,15 @@ interface GenerationConfigCardProps {
   onArchive?: () => void;
   onUnfreeze?: () => void;
   onTest?: () => void;
+  onImageTest?: () => void;
   onTestJsonResponseFormat?: () => void;
   unfreezing?: boolean;
   testing?: boolean;
   testResult?: TextGenerationConfigTestResponse | null;
   testError?: string;
+  imageTesting?: boolean;
+  imageTestResult?: ImageGenerationConfigTestResponse | null;
+  imageTestError?: string;
   jsonResponseFormatTesting?: boolean;
   jsonResponseFormatTestResult?: TextGenerationConfigJsonResponseFormatTestResponse | null;
   jsonResponseFormatTestError?: string;
@@ -3883,11 +4604,15 @@ function GenerationConfigCard({
   onArchive,
   onUnfreeze,
   onTest,
+  onImageTest,
   onTestJsonResponseFormat,
   unfreezing = false,
   testing = false,
   testResult = null,
   testError = "",
+  imageTesting = false,
+  imageTestResult = null,
+  imageTestError = "",
   jsonResponseFormatTesting = false,
   jsonResponseFormatTestResult = null,
   jsonResponseFormatTestError = "",
@@ -3973,6 +4698,43 @@ function GenerationConfigCard({
         <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
           {JSON.stringify(testResult.copy_result, null, 2)}
         </pre>
+      </div>
+    </div>
+  ) : null;
+  const imageTestStatus = imageTesting || imageTestResult || imageTestError ? (
+    <div
+      className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm ${
+        imageTestError
+          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
+          : imageTestResult
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100"
+            : "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100"
+      }`}
+    >
+      {imageTestError ? (
+        <X size={16} className="mt-0.5 shrink-0" />
+      ) : imageTestResult ? (
+        <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+      ) : (
+        <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
+      )}
+      <div className="min-w-0">
+        <div className="font-semibold">
+          {imageTestError
+            ? t("settings.generation.imageTestFailed")
+            : imageTestResult
+              ? t("settings.generation.imageTestPassed")
+              : t("settings.generation.imageTestRunning")}
+        </div>
+        <div className="mt-0.5 break-words text-xs opacity-80">
+          {imageTestError ||
+            (imageTestResult
+              ? t("settings.generation.imageTestPassedDetail", {
+                  duration: String(Math.max(1, Math.round(imageTestResult.duration_ms))),
+                  model: imageTestResult.model_name,
+                })
+              : t("settings.generation.imageTestRunningDetail"))}
+        </div>
       </div>
     </div>
   ) : null;
@@ -4179,17 +4941,41 @@ function GenerationConfigCard({
               onChange={(copy_model) => onChange({ ...draft, copy_model })}
             />
           </div>
-          {draft.provider_kind === "openai_chat_completions" ? (
-            <div className="max-w-md">
+          {isTextStructuredOutputProviderKind(draft.provider_kind) ? (
+            <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)] sm:items-end">
               <SettingsOptionToggle
-                checked={draft.structured_json_response_format_enabled}
+                checked={draft.structured_output_enabled}
                 disabled={controlsDisabled}
-                onChange={(structured_json_response_format_enabled) =>
-                  onChange({ ...draft, structured_json_response_format_enabled })
+                onChange={(structured_output_enabled) =>
+                  onChange({
+                    ...draft,
+                    structured_output_enabled,
+                    structured_json_response_format_enabled: structured_output_enabled,
+                    structured_output_mode: structured_output_enabled
+                      ? draft.structured_output_mode || "json_schema"
+                      : draft.structured_output_mode,
+                  })
                 }
               >
-                {t("settings.provider.structuredJsonResponseFormat")}
+                {t("settings.provider.structuredOutput")}
               </SettingsOptionToggle>
+              <SettingsFormField label={t("settings.provider.structuredOutputMode")}>
+                <SelectField
+                  value={draft.structured_output_mode}
+                  options={[
+                    { value: "json_schema", label: t("settings.provider.structuredOutputJsonSchema") },
+                    { value: "json_object", label: t("settings.provider.structuredOutputJsonObject") },
+                  ]}
+                  onChange={(value) =>
+                    onChange({
+                      ...draft,
+                      structured_output_mode: value === "json_object" ? "json_object" : "json_schema",
+                    })
+                  }
+                  disabled={controlsDisabled || !draft.structured_output_enabled}
+                  radius="lg"
+                />
+              </SettingsFormField>
             </div>
           ) : null}
         </div>
@@ -4226,14 +5012,14 @@ function GenerationConfigCard({
           </SettingsSwitchToggle>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          {onTestJsonResponseFormat && draft.purpose === "text" && draft.provider_kind === "openai_chat_completions" ? (
+          {onTestJsonResponseFormat && draft.purpose === "text" && isTextStructuredOutputProviderKind(draft.provider_kind) ? (
             <button
               type="button"
               onClick={onTestJsonResponseFormat}
               disabled={
                 controlsDisabled ||
                 jsonResponseFormatTesting ||
-                !draft.structured_json_response_format_enabled ||
+                !draft.structured_output_enabled ||
                 !draft.name.trim() ||
                 !draft.provider_profile_id
               }
@@ -4244,7 +5030,7 @@ function GenerationConfigCard({
               ) : (
                 <FileJson size={14} className="mr-1.5" />
               )}
-              {t("settings.generation.testJsonResponseFormat")}
+              {t("settings.generation.testStructuredOutput")}
             </button>
           ) : null}
           {onTest ? (
@@ -4260,6 +5046,23 @@ function GenerationConfigCard({
               className={SETTINGS_COMPACT_ACTION_CLASS}
             >
               {testing ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <MessageSquareText size={14} className="mr-1.5" />}
+              {t("settings.generation.test")}
+            </button>
+          ) : null}
+          {onImageTest ? (
+            <button
+              type="button"
+              onClick={onImageTest}
+              disabled={
+                controlsDisabled ||
+                imageTesting ||
+                !draft.name.trim() ||
+                !draft.model.trim() ||
+                (draft.provider_kind !== "mock" && !draft.provider_profile_id)
+              }
+              className={SETTINGS_COMPACT_ACTION_CLASS}
+            >
+              {imageTesting ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Image size={14} className="mr-1.5" />}
               {t("settings.generation.test")}
             </button>
           ) : null}
@@ -4289,10 +5092,15 @@ function GenerationConfigCard({
           </button>
         </div>
       </div>
-      {testStatus || testResultPreview || jsonResponseFormatTestStatus || jsonResponseFormatTestResultPreview ? (
+      {testStatus ||
+      testResultPreview ||
+      imageTestStatus ||
+      jsonResponseFormatTestStatus ||
+      jsonResponseFormatTestResultPreview ? (
         <div className="space-y-3 pt-1">
           {jsonResponseFormatTestStatus}
           {jsonResponseFormatTestResultPreview}
+          {imageTestStatus}
           {testStatus}
           {testResultPreview}
         </div>
@@ -4579,16 +5387,22 @@ export function SettingsPage() {
   const [importPayload, setImportPayload] = useState<SettingsExportPayload | null>(null);
   const [importPreview, setImportPreview] = useState<SettingsImportPreviewResponse | null>(null);
   const [importFileName, setImportFileName] = useState("");
-  const [textConfigTestState, setTextConfigTestState] = useState<TextConfigTestState>({
-    draft: DEFAULT_TEXT_CONFIG_TEST_DRAFT,
+  const [textConfigTestState, setTextConfigTestState] = useState<TextConfigTestState>(() => ({
+    draft: readTextConfigTestDraft(),
     latestKey: null,
     records: {},
-  });
+  }));
   const [textConfigJsonResponseFormatTestState, setTextConfigJsonResponseFormatTestState] =
     useState<TextConfigJsonResponseFormatTestState>({
       latestKey: null,
       records: {},
     });
+  const [imageConfigTestState, setImageConfigTestState] = useState<ImageConfigTestState>(() => ({
+    draft: readImageConfigTestDraft(),
+    latestKey: null,
+    records: {},
+  }));
+  const [imageConfigTestPreview, setImageConfigTestPreview] = useState<ImageGenerationConfigTestResponse | null>(null);
 
   const configQuery = useQuery({
     queryKey: ["config"],
@@ -4626,14 +5440,8 @@ export function SettingsPage() {
         (group) => group.enabled,
       )?.id ?? "";
     const nextDrafts: Record<string, GenerationConfigDraft> = {
-      "new-text": {
-        ...emptyGenerationConfigDraft("text"),
-        resource_group_ids: firstEnabledGroupId ? [firstEnabledGroupId] : [],
-      },
-      "new-image": {
-        ...emptyGenerationConfigDraft("image"),
-        resource_group_ids: firstEnabledGroupId ? [firstEnabledGroupId] : [],
-      },
+      "new-text": newGenerationConfigDraft("text", firstEnabledGroupId),
+      "new-image": newGenerationConfigDraft("image", firstEnabledGroupId),
     };
     for (const generationConfig of providerConfigQuery.data?.generation_configs ?? []) {
       if (!generationConfig.archived_at) {
@@ -4660,6 +5468,7 @@ export function SettingsPage() {
   const activeConfigGroups = activeSection === "queue" ? configCategoryGroups(activeItems) : [];
   const canWriteRuntimeSettings = hasSessionApiPermission(session, API_SETTINGS_WRITE);
   const canWriteProviderSettings = hasSessionApiPermission(session, API_SETTINGS_PROVIDER_WRITE);
+  const canSaveImageConfigTestGallery = hasSessionApiPermission(session, API_GALLERY_WRITE);
   const canMigrateSettings = hasSessionApiPermission(session, API_SETTINGS_MIGRATE);
   const canManageGlobalTemplates = hasSessionApiPermission(session, API_GLOBAL_TEMPLATES_MANAGE);
   const normalizedSectionSearch = sectionSearch.trim().toLowerCase();
@@ -4723,17 +5532,47 @@ export function SettingsPage() {
     return () => window.clearTimeout(timer);
   }, [savedMessage]);
 
+  const applyConfigResponse = useCallback(
+    (data: ConfigResponse, message: string) => {
+      queryClient.setQueryData(["config"], data);
+      void queryClient.invalidateQueries({ queryKey: ["runtime-config"] });
+      void queryClient.invalidateQueries({ queryKey: ["session"] });
+      setError("");
+      setSavedMessage(message);
+    },
+    [queryClient],
+  );
+
   const saveMutation = useMutation({
     mutationFn: () => {
       const values = configValuesFromChangedDrafts(activeItems, drafts, draftSnapshots, secretTouched);
       return api.updateConfig({ values });
     },
     onSuccess: (data) => {
-      queryClient.setQueryData(["config"], data);
-      void queryClient.invalidateQueries({ queryKey: ["runtime-config"] });
-      void queryClient.invalidateQueries({ queryKey: ["session"] });
-      setError("");
-      setSavedMessage(t("settings.saved"));
+      applyConfigResponse(data, t("settings.saved"));
+    },
+    onError: (mutationError) => {
+      setSavedMessage("");
+      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.saveFailed"));
+    },
+  });
+
+  const saveLoginPageSelectionMutation = useMutation({
+    mutationFn: (value: LoginPageMode) => api.updateLoginPageSelection({ value }),
+    onSuccess: (data) => {
+      applyConfigResponse(data, t("settings.loginPage.selectionSaved"));
+    },
+    onError: (mutationError) => {
+      setSavedMessage("");
+      setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.saveFailed"));
+    },
+  });
+
+  const saveLoginPageTemplateConfigMutation = useMutation({
+    mutationFn: (payload: { templateId: LoginPageTemplateId; config: Record<string, string> }) =>
+      api.updateLoginPageTemplateConfig(payload.templateId, { config: payload.config }),
+    onSuccess: (data) => {
+      applyConfigResponse(data, t("settings.loginPage.templateConfigSaved"));
     },
     onError: (mutationError) => {
       setSavedMessage("");
@@ -4742,18 +5581,24 @@ export function SettingsPage() {
   });
 
   const resetMutation = useMutation({
-    mutationFn: (key: string) => api.updateConfig({ reset_keys: [key] }),
+    mutationFn: (key: string) => {
+      if (key === "login_page_mode") {
+        return api.resetLoginPageSelection();
+      }
+      const templateId = loginPageTemplateIdFromConfigKey(key);
+      if (templateId) {
+        return api.resetLoginPageTemplateConfig(templateId);
+      }
+      return api.updateConfig({ reset_keys: [key] });
+    },
     onMutate: (key) => {
       setResettingKey(key);
       setError("");
       setSavedMessage("");
     },
     onSuccess: (data) => {
-      queryClient.setQueryData(["config"], data);
-      void queryClient.invalidateQueries({ queryKey: ["runtime-config"] });
-      void queryClient.invalidateQueries({ queryKey: ["session"] });
       setPendingResetItem(null);
-      setSavedMessage(t("settings.restored"));
+      applyConfigResponse(data, t("settings.restored"));
     },
     onError: (mutationError) => {
       setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.restoreFailed"));
@@ -5095,6 +5940,58 @@ export function SettingsPage() {
     },
   });
 
+  const testImageGenerationConfigMutation = useMutation({
+    mutationFn: ({ payload }: ImageGenerationConfigTestMutationInput) => api.testImageGenerationConfig(payload),
+    onMutate: ({ key }) => {
+      setImageConfigTestState((current) => markImageConfigTestStarted(current, key));
+      setImageConfigTestPreview(null);
+      setSavedMessage("");
+      setError("");
+    },
+    onSuccess: (result, { key }) => {
+      setImageConfigTestState((current) => markImageConfigTestSucceeded(current, key, result));
+      setImageConfigTestPreview(result);
+    },
+    onError: (mutationError, { key }) => {
+      setImageConfigTestState((current) =>
+        markImageConfigTestFailed(
+          current,
+          key,
+          mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.imageTestFailed"),
+        ),
+      );
+    },
+  });
+
+  const saveImageConfigTestGalleryMutation = useMutation({
+    mutationFn: (assetId: string) => api.saveGalleryEntry(assetId),
+    onSuccess: async (entry, assetId) => {
+      setImageConfigTestPreview((current) =>
+        current ? imageGenerationConfigTestResultWithGalleryEntry(current, entry) : current,
+      );
+      setImageConfigTestState((current) => {
+        const recordResult = Object.values(current.records).find(
+          (record) => record.result?.generated_asset.id === assetId,
+        )?.result;
+        if (!recordResult) {
+          return current;
+        }
+        return markImageConfigTestAssetSaved(
+          current,
+          assetId,
+          imageGenerationConfigTestResultWithGalleryEntry(recordResult, entry),
+        );
+      });
+      setError("");
+      await queryClient.invalidateQueries({ queryKey: ["gallery"] });
+      await queryClient.invalidateQueries({ queryKey: ["image-session", entry.image_session_id] });
+      await queryClient.invalidateQueries({ queryKey: ["image-sessions"] });
+    },
+    onError: (mutationError) => {
+      setError(mutationError instanceof ApiError ? mutationError.detail : t("chat.saveGalleryFailed"));
+    },
+  });
+
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
     onSuccess: async () => {
@@ -5176,7 +6073,7 @@ export function SettingsPage() {
         : "";
 
   const loadingMain = configQuery.isLoading || providerConfigQuery.isLoading;
-  const genericSection = ["prompts", "upload", "queue", "layoutAppearance", "loginPage", "security"].includes(
+  const genericSection = ["prompts", "upload", "queue", "layoutAppearance", "security"].includes(
     activeSection,
   );
   const isWorkspaceSubpage = activeScheme === "workspace";
@@ -5493,9 +6390,11 @@ export function SettingsPage() {
                         canWrite={canWriteProviderSettings}
                         textTestState={textConfigTestState}
                         jsonResponseFormatTestState={textConfigJsonResponseFormatTestState}
-                        onChange={(key, next) => {
+                        onChange={(key, next, options) => {
                           setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
-                          setSavedMessage("");
+                          if (options?.clearSavedMessage !== false) {
+                            setSavedMessage("");
+                          }
                         }}
                         onSave={(draft, options) => {
                           if (!canWriteProviderSettings) {
@@ -5521,7 +6420,9 @@ export function SettingsPage() {
                           unfreezeGenerationConfigMutation.mutate(configId);
                         }}
                         onTextTestDraftChange={(draft) => {
-                          setTextConfigTestState((current) => ({ ...current, draft }));
+                          const normalizedDraft = normalizeTextConfigTestDraft(draft);
+                          writeTextConfigTestDraft(normalizedDraft);
+                          setTextConfigTestState((current) => ({ ...current, draft: normalizedDraft }));
                         }}
                         onTestTextConfig={(key, draft) => {
                           if (!canWriteProviderSettings) {
@@ -5541,6 +6442,12 @@ export function SettingsPage() {
                             payload: textGenerationConfigJsonResponseFormatTestPayload(draft),
                           });
                         }}
+                        onResetTextConfigTests={(key) => {
+                          setTextConfigTestState((current) => clearTextConfigTestRecord(current, key));
+                          setTextConfigJsonResponseFormatTestState((current) =>
+                            clearTextConfigJsonResponseFormatTestRecord(current, key),
+                          );
+                        }}
                         onRefreshSort={() => {
                           void refreshProviderSettingsQueries();
                         }}
@@ -5557,9 +6464,12 @@ export function SettingsPage() {
                         pending={providerPending}
                         archivingConfigId={archivingGenerationConfigId}
                         canWrite={canWriteProviderSettings}
-                        onChange={(key, next) => {
+                        imageTestState={imageConfigTestState}
+                        onChange={(key, next, options) => {
                           setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
-                          setSavedMessage("");
+                          if (options?.clearSavedMessage !== false) {
+                            setSavedMessage("");
+                          }
                         }}
                         onSave={(draft, options) => {
                           if (!canWriteProviderSettings) {
@@ -5584,6 +6494,32 @@ export function SettingsPage() {
                           }
                           unfreezeGenerationConfigMutation.mutate(configId);
                         }}
+                        onImageTestDraftChange={(draft) => {
+                          const normalizedDraft = normalizeImageConfigTestDraft(draft);
+                          writeImageConfigTestDraft(normalizedDraft);
+                          setImageConfigTestState((current) => ({ ...current, draft: normalizedDraft }));
+                        }}
+                        onSaveImageTestDraft={() => {
+                          writeImageConfigTestDraft(imageConfigTestState.draft);
+                          setError("");
+                          setSavedMessage(t("settings.generation.imageTestDraftSaved"));
+                        }}
+                        onTestImageConfig={(key, draft, resourceGroupId) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
+                          testImageGenerationConfigMutation.mutate({
+                            key,
+                            payload: imageGenerationConfigTestPayload(
+                              draft,
+                              imageConfigTestState.draft,
+                              resourceGroupId,
+                            ),
+                          });
+                        }}
+                        onResetImageConfigTests={(key) => {
+                          setImageConfigTestState((current) => clearImageConfigTestRecord(current, key));
+                        }}
                         onRefreshSort={() => {
                           void refreshProviderSettingsQueries();
                         }}
@@ -5591,33 +6527,61 @@ export function SettingsPage() {
                       />
                     ) : null}
 
+                    {activeSection === "loginPage" ? (
+                      <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-2`}>
+                        {activeItems.length ? (
+                          <LoginPageSettingsPanel
+                            items={activeItems}
+                            drafts={drafts}
+                            secretTouched={secretTouched}
+                            resettingKey={resettingKey}
+                            disabled={!canWriteRuntimeSettings}
+                            assets={loginPageAssetsQuery.data?.items ?? []}
+                            assetsLoading={loginPageAssetsQuery.isLoading}
+                            assetsError={loginPageAssetsQuery.isError}
+                            selectionSaving={saveLoginPageSelectionMutation.isPending}
+                            templateConfigSaving={saveLoginPageTemplateConfigMutation.isPending}
+                            onChange={(item, nextValue, touchedSecret) => {
+                              setDrafts((current) => ({ ...current, [item.key]: nextValue }));
+                              setSavedMessage("");
+                              if (touchedSecret) {
+                                setSecretTouched((current) => ({ ...current, [item.key]: true }));
+                              }
+                            }}
+                            onReset={(item) => {
+                              if (canWriteRuntimeSettings) {
+                                setPendingResetItem(item);
+                              }
+                            }}
+                            onSaveSelection={(value) => {
+                              if (!canWriteRuntimeSettings) {
+                                return;
+                              }
+                              setError("");
+                              setSavedMessage("");
+                              saveLoginPageSelectionMutation.mutate(value);
+                            }}
+                            onSaveTemplateConfig={(templateId, config) => {
+                              if (!canWriteRuntimeSettings) {
+                                return;
+                              }
+                              setError("");
+                              setSavedMessage("");
+                              saveLoginPageTemplateConfigMutation.mutate({ templateId, config });
+                            }}
+                          />
+                        ) : (
+                          <div className="rounded-lg border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                            {t("settings.section.empty")}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
                     {genericSection ? (
                       <form onSubmit={handleSubmit} className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-2`}>
                         {activeItems.length ? (
-                          activeSection === "loginPage" ? (
-                            <LoginPageSettingsPanel
-                              items={activeItems}
-                              drafts={drafts}
-                              secretTouched={secretTouched}
-                              resettingKey={resettingKey}
-                              disabled={!canWriteRuntimeSettings}
-                              assets={loginPageAssetsQuery.data?.items ?? []}
-                              assetsLoading={loginPageAssetsQuery.isLoading}
-                              assetsError={loginPageAssetsQuery.isError}
-                              onChange={(item, nextValue, touchedSecret) => {
-                                setDrafts((current) => ({ ...current, [item.key]: nextValue }));
-                                setSavedMessage("");
-                                if (touchedSecret) {
-                                  setSecretTouched((current) => ({ ...current, [item.key]: true }));
-                                }
-                              }}
-                              onReset={(item) => {
-                                if (canWriteRuntimeSettings) {
-                                  setPendingResetItem(item);
-                                }
-                              }}
-                            />
-                          ) : activeSection === "queue" ? (
+                          activeSection === "queue" ? (
                             <div className="space-y-1">
                               {activeConfigGroups.map((group) => (
                                 <div key={group.category} className="border-t border-slate-100 py-2 first:border-t-0 dark:border-slate-800">
@@ -5744,6 +6708,20 @@ export function SettingsPage() {
           onCloseSuccess={() => setSavedMessage("")}
           onCloseError={() => setError("")}
         />
+        {imageConfigTestPreview ? (
+          <ImageConfigTestResultDialog
+            result={imageConfigTestPreview}
+            canSaveGallery={canSaveImageConfigTestGallery}
+            saving={saveImageConfigTestGalleryMutation.isPending}
+            onSave={() => {
+              if (!canSaveImageConfigTestGallery || imageConfigTestPreview.generated_asset.gallery_saved) {
+                return;
+              }
+              saveImageConfigTestGalleryMutation.mutate(imageConfigTestPreview.generated_asset.id);
+            }}
+            onClose={() => setImageConfigTestPreview(null)}
+          />
+        ) : null}
         <ConfirmDialog
           open={exportConfirmOpen}
           title={t("settings.migration.exportConfirmTitle")}

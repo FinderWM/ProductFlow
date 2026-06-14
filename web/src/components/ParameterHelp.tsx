@@ -1,5 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useId, useState, type ReactNode } from "react";
 import { CircleHelp, X } from "lucide-react";
 
 import {
@@ -12,6 +11,7 @@ import {
   type ParameterHelpUiType,
 } from "../lib/parameterHelp";
 import { useI18n } from "../lib/preferences";
+import { ModalShell } from "./ModalShell";
 
 export interface ParameterHelpContentOverride {
   title?: string;
@@ -162,26 +162,18 @@ function ParameterHelpDialog({ helpKey, uiType, content, onClose }: ParameterHel
   const classes = resolveClassNames(helpKey, uiType);
   const resolved = resolveContent(helpKey, t, content);
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose]);
-
-  if (!resolved || typeof document === "undefined") {
+  if (!resolved) {
     return null;
   }
 
-  return createPortal(
-    <div className={classes.overlay} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <div className={classes.panel}>
+  return (
+    <ModalShell
+      onClose={onClose}
+      closeOnBackdrop={false}
+      ariaLabelledBy={titleId}
+      overlayClassName={classes.overlay}
+      panelClassName={classes.panel}
+    >
         <div className={classes.header}>
           <div className={classes.icon}>
             <CircleHelp size={18} />
@@ -220,8 +212,6 @@ function ParameterHelpDialog({ helpKey, uiType, content, onClose }: ParameterHel
             </section>
           ) : null}
         </div>
-      </div>
-    </div>,
-    document.body,
+    </ModalShell>
   );
 }

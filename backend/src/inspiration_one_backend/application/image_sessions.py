@@ -5,6 +5,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
+from time import perf_counter
 from typing import Any, Literal, cast
 
 from dramatiq.middleware.time_limit import TimeLimitExceeded
@@ -45,9 +46,11 @@ from inspiration_one_backend.application.moderation import ensure_resource_usabl
 from inspiration_one_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
 from inspiration_one_backend.application.queue_submission import enqueue_or_mark_failed
 from inspiration_one_backend.application.task_notifications import (
+    publish_image_session_generation_attempt_failed_notification_safely,
     publish_image_session_generation_task_notification_safely,
 )
 from inspiration_one_backend.application.time import now_utc
+from inspiration_one_backend.config import normalize_image_generation_size
 from inspiration_one_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
     QUEUE_UNAVAILABLE_DETAIL,
@@ -72,6 +75,7 @@ from inspiration_one_backend.infrastructure.image.responses_provider import PROV
 from inspiration_one_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
     TEXT_PURPOSE,
+    ResolvedImageProviderConfig,
     ensure_provider_config_bootstrapped,
     generation_config_resource_group_ids,
 )
@@ -121,6 +125,14 @@ class ImagePromptPolishResult:
     model_name: str
     generation_config_id: str
     resource_group_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ImageGenerationConfigTestResult:
+    image_session: ImageSession
+    round_id: str
+    duration_ms: int
+    provider_kind: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,6 +574,117 @@ def create_image_session(
     session.commit()
     session.expire_all()
     return _get_image_session_or_raise(session, image_session.id)
+
+
+def test_image_generation_config(
+    session: Session,
+    *,
+    prompt: str,
+    size: str,
+    resource_group_id: str,
+    provider_config: ResolvedImageProviderConfig,
+    owner_user_id: str,
+    actor_is_admin: bool = False,
+    storage: LocalStorage | None = None,
+) -> ImageGenerationConfigTestResult:
+    normalized_prompt = prompt.strip()
+    if not normalized_prompt:
+        raise BusinessValidationError("测试文案不能为空")
+    normalized_size = normalize_image_generation_size(size, label="测试图片尺寸")
+    resource_group = require_generation_resource_group_for_user(
+        session,
+        user_id=owner_user_id,
+        is_admin=actor_is_admin,
+        resource_group_id=resource_group_id,
+    )
+    storage = storage or LocalStorage()
+    image_session = ImageSession(
+        owner_user_id=owner_user_id,
+        inspiration_id=None,
+        resource_group_id=resource_group.id,
+        title=_image_generation_config_test_session_title(provider_config),
+    )
+    session.add(image_session)
+    session.flush()
+
+    relative_path: str | None = None
+    start = perf_counter()
+    try:
+        result = ImageChatService(provider_config=provider_config).generate(
+            prompt=normalized_prompt,
+            size=normalized_size,
+            history=[],
+            manual_reference_images=[],
+        )
+        duration_ms = int((perf_counter() - start) * 1000)
+        relative_path = storage.save_image_session_generated(
+            image_session.id,
+            result.bytes_data,
+            suffix=infer_extension(result.mime_type),
+        )
+        asset = ImageSessionAsset(
+            owner_user_id=image_session.owner_user_id,
+            session_id=image_session.id,
+            kind=ImageSessionAssetKind.GENERATED_IMAGE,
+            original_filename=f"config-test-{now_utc().strftime('%Y%m%d-%H%M%S')}{infer_extension(result.mime_type)}",
+            mime_type=result.mime_type,
+            **storage.metadata_for(relative_path).as_model_kwargs(),
+        )
+        session.add(asset)
+        session.flush()
+        round_item = ImageSessionRound(
+            session_id=image_session.id,
+            prompt=normalized_prompt,
+            assistant_message="图片生成配置测试结果。",
+            size=normalized_size,
+            model_name=result.model_name,
+            provider_name=result.provider_name,
+            prompt_version=result.prompt_version,
+            provider_response_id=result.provider_response_id,
+            previous_response_id=None,
+            image_generation_call_id=result.image_generation_call_id,
+            provider_request_json=result.provider_request_json,
+            provider_output_json=provider_output_with_actual_size(
+                result.provider_output_json,
+                requested_size=normalized_size,
+                image_bytes=result.bytes_data,
+            ),
+            generation_group_id=new_id(),
+            candidate_index=1,
+            candidate_count=1,
+            base_asset_ids=[],
+            base_asset_id=None,
+            selected_reference_asset_ids=[],
+            generated_asset_id=asset.id,
+            generation_config_id=provider_config.generation_config_id,
+            resource_group_id=resource_group.id,
+        )
+        session.add(round_item)
+        image_session.updated_at = now_utc()
+        session.commit()
+    except BaseException:
+        session.rollback()
+        if relative_path is not None:
+            with suppress(ValueError, OSError):
+                storage.delete_image_with_variants(relative_path)
+        raise
+    session.expire_all()
+    return ImageGenerationConfigTestResult(
+        image_session=_get_image_session_or_raise(
+            session,
+            image_session.id,
+            actor_user_id=owner_user_id,
+            actor_is_admin=actor_is_admin,
+        ),
+        round_id=round_item.id,
+        duration_ms=duration_ms,
+        provider_kind=provider_config.provider_kind,
+    )
+
+
+def _image_generation_config_test_session_title(provider_config: ResolvedImageProviderConfig) -> str:
+    subject = provider_config.generation_config_name or provider_config.model or provider_config.provider_kind
+    return f"图片配置测试 - {subject}"[:255]
 
 
 def update_image_session(
@@ -1131,7 +1254,7 @@ def create_image_session_generation_task(
         generation_count=generation_count,
         max_generation_count=IMAGE_SESSION_GENERATION_MAX_COUNT,
     )
-    ensure_generation_capacity(session)
+    ensure_generation_capacity(session, pool="image")
     task = ImageSessionGenerationTask(
         session_id=image_session.id,
         status=JobStatus.QUEUED,
@@ -1625,7 +1748,7 @@ def _mark_image_generation_task_running(
     if not IMAGE_SESSION_GENERATION_TASK_CONTRACT.is_queued(task.status):
         return _ImageSessionGenerationTaskClaimResult(claimed=False)
     now = now_utc()
-    if not generation_running_capacity_available(session):
+    if not generation_running_capacity_available(session, pool="image"):
         task.progress_phase = "waiting_for_capacity"
         task.progress_updated_at = now
         session.commit()
@@ -1746,6 +1869,7 @@ def _handle_image_generation_task_failure(
         )
         return
     if task.attempts < IMAGE_SESSION_GENERATION_MAX_ATTEMPTS:
+        failed_attempt = task.attempts
         _reset_image_generation_task_for_retry(
             session,
             task=task,
@@ -1759,6 +1883,12 @@ def _handle_image_generation_task_failure(
                 "auto_retry_attempt": task.attempts,
                 "max_attempts": IMAGE_SESSION_GENERATION_MAX_ATTEMPTS,
             },
+        )
+        publish_image_session_generation_attempt_failed_notification_safely(
+            task,
+            reason=reason,
+            attempt=failed_attempt,
+            max_attempts=IMAGE_SESSION_GENERATION_MAX_ATTEMPTS,
         )
         try:
             enqueue_image_session_generation_task(task.id)

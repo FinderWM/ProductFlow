@@ -10,6 +10,24 @@
   initial-value: 0.22;
 }
 
+@property --orbit-x {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --orbit-y {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --pointer-tilt {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+
 .pf-login-orbit,
 .pf-login-orbit *,
 .pf-login-mist,
@@ -71,15 +89,21 @@
   --login-chip-x: 0px;
   --login-chip-y: 0px;
   --login-chip-tilt: 0deg;
+  --login-chip-scale: 1;
   --setkey-chip-x: 0px;
   --setkey-chip-y: 0px;
   --setkey-chip-tilt: 0deg;
+  --setkey-chip-scale: 1;
+  --primary-x: 0px;
+  --primary-y: 0px;
+  --primary-tilt: 0deg;
+  --primary-scale: 1;
   --pointer-tilt: 0deg;
   --orbit-scale: 1;
   --orbit-glow: 0.22;
   position: relative;
   min-height: 100dvh;
-  overflow-x: hidden;
+  overflow: hidden;
   background:
     linear-gradient(116deg, rgba(121, 214, 188, 0.13) 0 1px, transparent 1px 28%),
     linear-gradient(242deg, rgba(237, 189, 99, 0.12) 0 1px, transparent 1px 36%),
@@ -130,9 +154,9 @@
 .pf-login-orbit .stage {
   position: relative;
   z-index: 1;
-  width: calc(100% - 56px);
+  width: 100%;
   min-height: 100dvh;
-  margin: 0 auto;
+  margin: 0;
   padding: 28px 0;
 }
 
@@ -151,11 +175,12 @@
     radial-gradient(circle, rgba(237, 189, 99, 0.09), transparent 58%);
   transform: translate3d(calc(var(--cursor-x) - 260px), calc(var(--cursor-y) - 260px), 0);
   transition: opacity 900ms var(--ease);
+  animation: pointerGlowDrift 18s var(--ease) infinite alternate;
 }
 
 .pf-login-orbit .brand {
   position: absolute;
-  left: 0;
+  left: clamp(28px, 2.2vw, 42px);
   top: 34px;
   z-index: 3;
   display: inline-flex;
@@ -179,7 +204,7 @@
 
 .pf-login-orbit .vertical-title {
   position: absolute;
-  right: -18px;
+  right: clamp(-6px, 0.5vw, 14px);
   top: 72px;
   z-index: 1;
   color: rgba(247, 239, 226, 0.055);
@@ -209,7 +234,10 @@
     0 0 62px rgb(121 214 188 / calc(var(--orbit-glow) * 0.36));
   transform: translate(calc(-50% + var(--orbit-x)), calc(-50% + var(--orbit-y)))
     rotate(calc(-12deg + var(--pointer-tilt))) scale(var(--orbit-scale));
-  animation: orbitIn 1120ms var(--ease) 80ms both, orbitHeartbeat 3.2s var(--ease) 1300ms infinite;
+  animation:
+    orbitIn 1120ms var(--ease) 80ms both,
+    orbitAutonomousDrift 13s var(--ease) 1300ms infinite alternate,
+    orbitHeartbeat 3.2s var(--ease) 1300ms infinite;
 }
 
 .pf-login-orbit .orbit::before,
@@ -236,7 +264,7 @@
 
 .pf-login-orbit .headline {
   position: absolute;
-  left: 7%;
+  left: clamp(114px, 9vw, 172px);
   top: 23%;
   z-index: 4;
   width: min(460px, 34vw);
@@ -279,7 +307,7 @@
 
 .pf-login-orbit .auth-shell {
   position: absolute;
-  left: 58%;
+  left: 57.6%;
   top: 52%;
   z-index: 6;
   width: min(520px, 38vw);
@@ -289,6 +317,7 @@
   box-shadow: inset 0 1px 0 rgba(247, 239, 226, 0.12), var(--shadow), var(--glow);
   transform: translate(calc(-50% + var(--auth-card-x)), calc(-50% + var(--auth-card-y)))
     rotate(calc(7deg + var(--auth-card-tilt)));
+  transition: transform 260ms var(--ease), box-shadow 360ms var(--ease);
   animation: orbitCardIn 1120ms var(--ease) 240ms both;
 }
 
@@ -497,17 +526,19 @@
   box-shadow: 0 24px 54px rgba(1, 9, 8, 0.3), 0 0 44px rgba(237, 189, 99, 0.13);
   font-size: 14px;
   font-weight: 820;
+  transform: translate3d(var(--primary-x), var(--primary-y), 0) rotate(var(--primary-tilt))
+    scale(var(--primary-scale));
   transition: transform 720ms var(--ease), background 720ms var(--ease), box-shadow 720ms var(--ease);
+  will-change: transform;
 }
 
 .pf-login-orbit .primary:hover {
   background: #fff5df;
   box-shadow: 0 30px 68px rgba(1, 9, 8, 0.34), 0 0 58px rgba(237, 189, 99, 0.19);
-  transform: translateY(-2px) rotate(-1deg);
 }
 
 .pf-login-orbit .primary:active {
-  transform: scale(0.985);
+  filter: brightness(0.96);
 }
 
 .pf-login-orbit .primary span:last-child {
@@ -522,7 +553,7 @@
 
 .pf-login-orbit .primary:hover span:last-child {
   background: rgba(5, 5, 5, 0.16);
-  transform: translate(4px, -1px) scale(1.06);
+  transform: translate(8px, -2px) scale(1.12);
 }
 
 .pf-login-orbit .satellite {
@@ -573,7 +604,7 @@
 }
 
 .pf-login-orbit .satellite-b {
-  right: 1%;
+  right: clamp(-10px, -0.45vw, -4px);
   bottom: 12%;
   width: 260px;
   transform: translate3d(calc(var(--satellite-x) * -1), calc(var(--satellite-y) * -1), 0) rotate(5deg);
@@ -625,7 +656,12 @@
   color: var(--muted);
   font-size: 12px;
   font-weight: 780;
-  transition: transform 760ms var(--ease);
+  transition:
+    transform 260ms var(--ease),
+    background 260ms var(--ease),
+    box-shadow 260ms var(--ease),
+    color 260ms var(--ease);
+  will-change: transform;
 }
 
 .pf-login-orbit .rail-chip::after {
@@ -641,12 +677,23 @@
   color: var(--void);
 }
 
+.pf-login-orbit .rail-chip:hover {
+  background: rgba(247, 239, 226, 0.13);
+  box-shadow: inset 0 1px 0 rgba(247, 239, 226, 0.18), 0 18px 34px rgba(1, 9, 8, 0.22);
+}
+
+.pf-login-orbit .rail-chip.active:hover {
+  background: #fff5df;
+}
+
 .pf-login-orbit .rail-chip-login {
-  transform: translate3d(var(--login-chip-x), var(--login-chip-y), 0) rotate(var(--login-chip-tilt));
+  transform: translate3d(var(--login-chip-x), var(--login-chip-y), 0) rotate(var(--login-chip-tilt))
+    scale(var(--login-chip-scale));
 }
 
 .pf-login-orbit .rail-chip-setkey {
-  transform: translate3d(var(--setkey-chip-x), var(--setkey-chip-y), 0) rotate(var(--setkey-chip-tilt));
+  transform: translate3d(var(--setkey-chip-x), var(--setkey-chip-y), 0) rotate(var(--setkey-chip-tilt))
+    scale(var(--setkey-chip-scale));
 }
 
 @keyframes orbitEnter {
@@ -661,6 +708,20 @@
   }
 }
 
+@keyframes pointerGlowDrift {
+  0% {
+    transform: translate3d(calc(42vw - 260px), calc(42vh - 260px), 0);
+  }
+
+  45% {
+    transform: translate3d(calc(58vw - 260px), calc(38vh - 260px), 0);
+  }
+
+  100% {
+    transform: translate3d(calc(50vw - 260px), calc(56vh - 260px), 0);
+  }
+}
+
 @keyframes orbitAmbientDrift {
   from {
     opacity: 0.34;
@@ -670,6 +731,26 @@
   to {
     opacity: 0.56;
     transform: translate3d(3vw, 4vh, 0) rotate(2deg);
+  }
+}
+
+@keyframes orbitAutonomousDrift {
+  0% {
+    --orbit-x: -8px;
+    --orbit-y: 5px;
+    --pointer-tilt: -0.65deg;
+  }
+
+  50% {
+    --orbit-x: 9px;
+    --orbit-y: -6px;
+    --pointer-tilt: 0.8deg;
+  }
+
+  100% {
+    --orbit-x: -3px;
+    --orbit-y: 8px;
+    --pointer-tilt: -0.3deg;
   }
 }
 
@@ -1869,6 +1950,11 @@
 }
 
 @media (max-width: 1180px) {
+  .pf-login-orbit {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
   .pf-login-orbit .stage {
     display: grid;
     width: min(840px, calc(100% - 40px));

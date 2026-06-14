@@ -1,5 +1,6 @@
 import { Check, Image as ImageIcon, ImagePlus, Library, Loader2, Trash2 } from "lucide-react";
 
+import { ClipboardImageButton } from "../../components/ClipboardImageButton";
 import { ImageDropZone } from "../../components/ImageDropZone";
 import { ParameterHelpLabel } from "../../components/ParameterHelp";
 import {
@@ -15,6 +16,10 @@ import type { ImageChatTranslate } from "./display";
 
 const IMAGE_CHAT_GRADIENT_ACTION_CLASS =
   "inline-flex items-center justify-center rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500";
+const IMAGE_CHAT_SECONDARY_ACTION_CLASS =
+  "inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-slate-900 dark:hover:text-white";
+const IMAGE_CHAT_REFERENCE_LOAD_ACTION_CLASS =
+  "flex h-full min-h-11 w-full items-center justify-center rounded-xl px-3 py-2 text-center text-sm font-semibold leading-4 transition-colors disabled:cursor-not-allowed disabled:opacity-60";
 
 interface SessionReferencePanelProps {
   assets: ImageSessionAsset[];
@@ -26,6 +31,7 @@ interface SessionReferencePanelProps {
   selectionDisabled?: boolean;
   resourceLibraryDisabledTitle?: string | null;
   onFiles: (files: File[]) => void;
+  onClipboardError?: (message: string) => void;
   onOpenResourceLibrary?: () => void;
   onToggle: (assetId: string, checked: boolean) => void;
   onDelete: (assetId: string) => void;
@@ -43,6 +49,7 @@ export function SessionReferencePanel({
   selectionDisabled = disabled,
   resourceLibraryDisabledTitle = null,
   onFiles,
+  onClipboardError,
   onOpenResourceLibrary,
   onToggle,
   onDelete,
@@ -54,35 +61,51 @@ export function SessionReferencePanel({
       <div className="mb-2 text-sm font-semibold text-slate-950 dark:text-white">
         <ParameterHelpLabel label={t("chat.sessionReferences")} helpKey="imageSessionReferences" uiType="imageChat" />
       </div>
-      <ImageDropZone
-        ariaLabel={t("chat.uploadSessionReference")}
-        multiple
-        disabled={disabled || uploadBusy}
-        className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-slate-600/80 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10"
-        onFiles={onFiles}
-      >
-        {({ isDragging }) => (
-          <>
-            {uploadBusy ? <Loader2 size={16} className="mr-2 animate-spin" /> : <ImagePlus size={16} className="mr-2" />}
-            {isDragging ? t("chat.dropUpload") : t("chat.uploadReference")}
-          </>
-        )}
-      </ImageDropZone>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(8.75rem,1fr))] gap-2">
+        <ImageDropZone
+          ariaLabel={t("chat.uploadSessionReference")}
+          multiple
+          disabled={disabled || uploadBusy}
+          className={`${IMAGE_CHAT_REFERENCE_LOAD_ACTION_CLASS} cursor-pointer border border-dashed border-slate-300 bg-slate-50 text-slate-600 hover:border-indigo-300 hover:bg-indigo-50/40 dark:border-slate-600/80 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10`}
+          activeClassName="border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100"
+          onFiles={onFiles}
+        >
+          {({ isDragging }) => (
+            <span className="inline-flex items-center justify-center gap-2">
+              {uploadBusy ? <Loader2 size={16} className="shrink-0 animate-spin" /> : <ImagePlus size={16} className="shrink-0" />}
+              <span>{isDragging ? t("chat.dropUpload") : t("chat.uploadSessionReference")}</span>
+            </span>
+          )}
+        </ImageDropZone>
+        <ClipboardImageButton
+          rootClassName="min-w-0"
+          buttonClassName={`${IMAGE_CHAT_SECONDARY_ACTION_CLASS} h-full min-h-11 w-full whitespace-normal px-3 py-2 text-center leading-4`}
+          multiple
+          disabled={disabled || uploadBusy}
+          label={t("common.pasteImage")}
+          closeLabel={t("common.close")}
+          pasteAreaLabel={t("common.pasteImageTarget")}
+          pasteAreaPlaceholder={t("common.pasteImagePlaceholder")}
+          noImageMessage={t("common.clipboardNoImage")}
+          onFiles={onFiles}
+          onError={onClipboardError}
+        />
+        {onOpenResourceLibrary ? (
+          <button
+            type="button"
+            onClick={onOpenResourceLibrary}
+            disabled={Boolean(resourceLibraryDisabledTitle)}
+            title={resourceLibraryDisabledTitle ?? t("chat.resourceLibrary.addReference")}
+            className={`${IMAGE_CHAT_SECONDARY_ACTION_CLASS} h-full min-h-11 w-full whitespace-normal px-3 py-2 text-center leading-4`}
+          >
+            <Library size={15} className="mr-2 shrink-0" />
+            <span>{t("chat.resourceLibrary.addReference")}</span>
+          </button>
+        ) : null}
+      </div>
       <div className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
         {t("chat.selectedReferences", { selected: selectedAssetIds.length, max: maxSelectedCount })}
       </div>
-      {onOpenResourceLibrary ? (
-        <button
-          type="button"
-          onClick={onOpenResourceLibrary}
-          disabled={Boolean(resourceLibraryDisabledTitle)}
-          title={resourceLibraryDisabledTitle ?? t("chat.resourceLibrary.addReference")}
-          className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} mt-3 min-h-10 w-full px-3 text-sm`}
-        >
-          <Library size={15} className="mr-2" />
-          {t("chat.resourceLibrary.addReference")}
-        </button>
-      ) : null}
       {assets.length ? (
         <div className="mt-3 grid grid-cols-4 gap-2">
           {assets.map((asset) => {

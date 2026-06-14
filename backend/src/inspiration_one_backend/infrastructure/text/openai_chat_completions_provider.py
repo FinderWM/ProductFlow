@@ -29,6 +29,17 @@ from inspiration_one_backend.infrastructure.provider_config import (
     resolve_text_provider_config,
 )
 from inspiration_one_backend.infrastructure.text.base import TextProvider
+from inspiration_one_backend.infrastructure.text.structured_output import (
+    BRIEF_SCHEMA,
+    COPY_SCHEMA,
+    POLISHED_PROMPT_SCHEMA,
+    STRUCTURED_OUTPUT_TEST_SCHEMA,
+    TAIL_SPLIT_SCHEMA,
+    TextStructuredOutputSchema,
+    chat_response_format,
+    read_polished_prompt_from_payload,
+    structured_output_instructions,
+)
 
 DEFAULT_CHAT_COMPLETIONS_BASE_URL = "https://api.openai.com/v1"
 CHAT_COMPLETIONS_ENDPOINT_FAMILY = "chat/completions"
@@ -55,7 +66,7 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
         self.endpoint_url = normalize_chat_completions_url(self.base_url)
         self.brief_model = resolved_config.brief_model
         self.copy_model = resolved_config.copy_model
-        self.structured_json_response_format_enabled = resolved_config.structured_json_response_format_enabled
+        self.structured_output = resolved_config.structured_output
         self.brief_system_prompt = settings.prompt_brief_system
         self.copy_system_prompt = settings.prompt_copy_system
         self.image_prompt_polish_system_prompt = settings.prompt_image_prompt_polish_system
@@ -67,7 +78,7 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
         model: str,
         instructions: str,
         content: str,
-        response_format_json: bool = False,
+        structured_schema: TextStructuredOutputSchema,
     ) -> str:
         if not self.api_key:
             raise RuntimeError("文案供应商档案缺少 API Key")
@@ -79,13 +90,21 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
         payload: dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": instructions},
+                {
+                    "role": "system",
+                    "content": structured_output_instructions(
+                        instructions,
+                        self.structured_output,
+                        structured_schema,
+                    ),
+                },
                 {"role": "user", "content": content},
             ],
             "stream": False,
         }
-        if response_format_json:
-            payload["response_format"] = {"type": "json_object"}
+        response_format = chat_response_format(self.structured_output, structured_schema)
+        if response_format is not None:
+            payload["response_format"] = response_format
         with httpx.Client(timeout=OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS, headers=headers) as client:
             response = client.post(self.endpoint_url, json=payload)
             response.raise_for_status()
@@ -116,7 +135,7 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
                 "请输出字段：positioning、audience、selling_angles(3到5条)、"
                 "taboo_phrases、poster_style_hint。"
             ),
-            response_format_json=self.structured_json_response_format_enabled,
+            structured_schema=BRIEF_SCHEMA,
         )
         payload = CreativeBriefPayload.model_validate(self._read_output_json(response_text))
         return payload, self.brief_model
@@ -161,7 +180,7 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
                 "content.kind 必须是 freeform、blocks 或 layout_brief。"
                 "不要为了满足固定字段编造 CTA、海报标题或固定 3 到 5 条卖点。"
             ),
-            response_format_json=self.structured_json_response_format_enabled,
+            structured_schema=COPY_SCHEMA,
         )
         raw_payload = self._read_output_json(response_text)
         payload = normalize_copy_payload(
@@ -178,10 +197,16 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
                 "只输出润色后的中文画面描述，不要输出 markdown、标题或解释。",
             ),
             content=f"原始画面描述：\n{prompt.strip()}",
+            structured_schema=POLISHED_PROMPT_SCHEMA,
         ).strip()
-        if not response_text:
+        polished = (
+            read_polished_prompt_from_payload(self._read_output_json(response_text))
+            if self.structured_output.enabled
+            else response_text
+        )
+        if not polished:
             raise ValueError("文案 provider 未返回润色结果")
-        return response_text, self.copy_model
+        return polished, self.copy_model
 
     def generate_tail_split_plan(self, payload: TailSplitPlanInput) -> tuple[TailSplitPlanDraft, str]:
         reference_lines = [
@@ -220,24 +245,27 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
                 '5. source_refs 必须是字符串数组，例如 ["入口长文本：正视图", "参考图 1"]；'
                 "没有来源时输出 []。"
             ),
-            response_format_json=self.structured_json_response_format_enabled,
+            structured_schema=TAIL_SPLIT_SCHEMA,
         )
         return TailSplitPlanDraft.model_validate(self._read_output_json(response_text)), self.copy_model
 
-    def test_structured_json_response_format(self) -> tuple[dict[str, Any], str]:
+    def test_structured_output(self) -> tuple[dict[str, Any], str]:
         response_text = self._chat_completion(
             model=self.copy_model,
             instructions="只输出 JSON 对象，不要输出 markdown、标题或解释。",
             content=(
-                '请返回一个 JSON 对象，包含字段 ok=true、kind="structured_json_response_format_test"、'
-                'items=["response_format"]。'
+                '请返回一个 JSON 对象，包含字段 ok=true、kind="text_structured_output_test"、'
+                'items=["structured_output"]。'
             ),
-            response_format_json=True,
+            structured_schema=STRUCTURED_OUTPUT_TEST_SCHEMA,
         )
         payload = self._read_output_json(response_text)
         if not payload:
-            raise ValueError("结构化 JSON response_format 测试返回空 JSON 对象")
+            raise ValueError("文案结构化输出测试返回空 JSON 对象")
         return payload, self.copy_model
+
+    def test_structured_json_response_format(self) -> tuple[dict[str, Any], str]:
+        return self.test_structured_output()
 
 
 _LOOSE_COPY_META_KEYS = {

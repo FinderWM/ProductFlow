@@ -3,8 +3,10 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "vaul";
 import {
+  Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Download,
   GalleryHorizontalEnd,
   History,
@@ -26,6 +28,7 @@ import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDial
 import { ImageGenerationSettingsPanel } from "../components/ImageGenerationSettingsPanel";
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../components/ImageGenerationSettingsTabs";
 import { ImageToolControls } from "../components/ImageToolControls";
+import { ModalShell } from "../components/ModalShell";
 import { ParameterHelpLabel } from "../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../components/PromptPreviewDialog";
 import {
@@ -42,6 +45,7 @@ import {
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
+import { copyTextToClipboard } from "../lib/clipboard";
 import { formatDateTime } from "../lib/format";
 import {
   generationConfigOptionLabel,
@@ -341,6 +345,7 @@ function ImageChatWorkbenchPage() {
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const [polishedPrompt, setPolishedPrompt] = useState("");
   const [previewRound, setPreviewRound] = useState<ImageSessionRound | null>(null);
+  const [previewPromptCopyState, setPreviewPromptCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [referencePreview, setReferencePreview] = useState<ReferenceImagePreview | null>(null);
   const [resourceLibraryOpen, setResourceLibraryOpen] = useState(false);
   const [resourceLibrarySaveSource, setResourceLibrarySaveSource] = useState<ResourceLibrarySaveSource | null>(null);
@@ -975,6 +980,18 @@ function ImageChatWorkbenchPage() {
   const selectedGeneratedSavedToGallery = Boolean(selectedRound?.generated_asset.gallery_saved);
   const activePreviewRound =
     previewRound && imageSession?.rounds.some((round) => round.id === previewRound.id) ? previewRound : null;
+
+  useEffect(() => {
+    setPreviewPromptCopyState("idle");
+  }, [activePreviewRound?.id]);
+
+  useEffect(() => {
+    if (previewPromptCopyState === "idle") {
+      return;
+    }
+    const timer = window.setTimeout(() => setPreviewPromptCopyState("idle"), 1600);
+    return () => window.clearTimeout(timer);
+  }, [previewPromptCopyState]);
 
   const selectedRoundIsBase = Boolean(
     selectedRound && selectedBaseAssetIds.includes(selectedRound.generated_asset.id),
@@ -2336,6 +2353,7 @@ function ImageChatWorkbenchPage() {
               selectionDisabled={Boolean(generationSettingsBlockedTitle)}
               resourceLibraryDisabledTitle={resourceLibraryLoadReferenceBlockedTitle}
               onFiles={handleUploadReferenceFiles}
+              onClipboardError={(message) => setErrorMessage(message)}
               onOpenResourceLibrary={handleOpenResourceLibrary}
               onToggle={handleReferenceToggle}
               onDelete={handleDeleteSessionReference}
@@ -2505,6 +2523,124 @@ function ImageChatWorkbenchPage() {
     );
   }
 
+  const selectedSessionTitle = imageSession?.title ?? t("chat.workbench");
+  const selectedRoundSizeText = selectedRound
+    ? t("gallery.sizeActualRequested", {
+        actual: selectedRound.actual_size ?? selectedRound.size,
+        requested: selectedRound.size,
+      })
+    : "";
+  const selectedRoundCandidateText = selectedRound
+    ? t("chat.candidate", { index: selectedRound.candidate_index, count: selectedRound.candidate_count })
+    : "";
+  const selectedPlaceholderCandidateText = selectedPlaceholder
+    ? t("chat.candidate", { index: selectedPlaceholder.candidate_index, count: selectedPlaceholder.candidate_count })
+    : "";
+  const activePreviewPrompt = activePreviewRound?.prompt?.trim() ?? "";
+  const previewPromptCopyTitle =
+    previewPromptCopyState === "copied"
+      ? t("gallery.promptCopied")
+      : previewPromptCopyState === "failed"
+        ? t("gallery.promptCopyFailed")
+        : t("gallery.copyPrompt");
+  const handleCopyPreviewPrompt = async () => {
+    if (!activePreviewPrompt) {
+      return;
+    }
+    try {
+      await copyTextToClipboard(activePreviewPrompt);
+      setPreviewPromptCopyState("copied");
+    } catch {
+      setPreviewPromptCopyState("failed");
+    }
+  };
+  const stageInfoChipClass =
+    "inline-flex min-w-0 max-w-full items-center rounded-lg border border-slate-200/90 bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm shadow-slate-900/5 backdrop-blur-md dark:border-slate-600/70 dark:bg-slate-950/82 dark:text-slate-200";
+  const stageActionClass =
+    "inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm shadow-slate-900/5 backdrop-blur-md transition-colors hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600/70 dark:bg-slate-950/82 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400";
+  const headerGalleryActionClass =
+    "inline-flex h-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 px-2.5 text-[11px] font-semibold text-white shadow-sm shadow-indigo-500/20 ring-1 ring-indigo-500 transition-colors hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-violet-300/35 dark:focus-visible:ring-violet-400";
+  const headerResourceActionClass =
+    "pf-image-chat-action inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-2.5 text-[11px] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500";
+  const selectedRoundStageInfo = selectedRound ? (
+    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+      <span className={stageInfoChipClass} title={selectedRound.resource_group.name}>
+        <span className="max-w-[10rem] truncate">{selectedRound.resource_group.name}</span>
+      </span>
+      <span className={stageInfoChipClass}>{selectedRoundSizeText}</span>
+      <span className={stageInfoChipClass}>{selectedRoundCandidateText}</span>
+      <span
+        className={stageInfoChipClass}
+        title={`${selectedRound.provider_name} · ${selectedRound.model_name}`}
+      >
+        <span className="max-w-[12rem] truncate">{selectedRound.model_name}</span>
+      </span>
+    </div>
+  ) : selectedPlaceholder ? (
+    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+      <span className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold shadow-sm backdrop-blur-md ${placeholderStatusClass(selectedPlaceholder)}`}>
+        {placeholderStatusLabel(selectedPlaceholder, t)}
+      </span>
+      <span className={stageInfoChipClass}>{selectedPlaceholderCandidateText}</span>
+    </div>
+  ) : (
+    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+      <span className={stageInfoChipClass}>{t("chat.waitingFirstResult")}</span>
+    </div>
+  );
+  const selectedRoundStageActions = selectedRound ? (
+    <a
+      href={api.toApiUrl(selectedRound.generated_asset.download_url)}
+      target="_blank"
+      rel="noreferrer"
+      title={selectedResultResourceBlockedTitle ?? t("chat.downloadCurrent")}
+      aria-label={t("chat.downloadCurrent")}
+      onClick={(event) => {
+        if (selectedResultResourceBlockedTitle) {
+          event.preventDefault();
+          setErrorMessage(selectedResultResourceBlockedTitle);
+        }
+      }}
+      className={`${stageActionClass} w-8 px-0 aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
+      aria-disabled={Boolean(selectedResultResourceBlockedTitle)}
+    >
+      <Download size={14} />
+    </a>
+  ) : null;
+  const renderSelectedRoundHeaderActions = () =>
+    selectedRound ? (
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={handleSaveSelectedToGallery}
+          disabled={saveSelectedGalleryDisabled}
+          title={saveSelectedGalleryTitle}
+          aria-label={saveSelectedGalleryTitle}
+          className={headerGalleryActionClass}
+        >
+          {saveGalleryMutation.isPending ? (
+            <Loader2 size={13} className="mr-1.5 animate-spin" />
+          ) : (
+            <GalleryHorizontalEnd size={13} className="mr-1.5" />
+          )}
+          {selectedGeneratedSavedToGallery ? t("chat.alreadyInGallery") : t("chat.sendGallery")}
+        </button>
+        <button
+          type="button"
+          onClick={handleSaveSelectedToResourceLibrary}
+          disabled={saveSelectedResourceLibraryDisabled}
+          title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
+          aria-label={t("chat.resourceLibrary.saveGenerated")}
+          className={headerResourceActionClass}
+        >
+          <Save size={13} className="mr-1.5" />
+          {selectedGeneratedSavedToResourceLibrary
+            ? t("resourceLibrary.alreadyInLibrary")
+            : t("chat.resourceLibrary.saveGenerated")}
+        </button>
+      </div>
+    ) : null;
+
   const pendingDeleteDialog = pendingDeleteAction
     ? {
         title:
@@ -2627,9 +2763,12 @@ function ImageChatWorkbenchPage() {
                   />
                 ) : (
                   <>
-                    <div className="truncate text-sm font-semibold text-slate-950 dark:text-white">
-                      {imageSession?.title ?? t("chat.workbench")}
+                    <div className="truncate text-sm font-semibold text-slate-950 dark:text-white" title={selectedSessionTitle}>
+                      {selectedSessionTitle}
                     </div>
+                    {selectedRound ? (
+                      <div className="mt-1 flex justify-end">{renderSelectedRoundHeaderActions()}</div>
+                    ) : null}
                   </>
                 )}
               </div>
@@ -2667,96 +2806,22 @@ function ImageChatWorkbenchPage() {
                 </button>
               </div>
             </div>
-            <div className="mb-3 hidden flex-col gap-3 lg:flex lg:flex-row lg:items-center lg:justify-between">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-300">
-                  <span className="inline-flex h-7 items-center rounded-full bg-white px-3 shadow-sm ring-1 ring-slate-200 dark:border dark:border-violet-400/30 dark:bg-slate-950/70 dark:text-violet-100 dark:ring-violet-400/20">
-                    {t("chat.currentResult")}
-                  </span>
+            <div className="mb-3 flex flex-col gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="hidden min-w-0 flex-1 flex-wrap items-center gap-2 lg:flex">
+                  <h1
+                    className="max-w-[min(46rem,58vw)] truncate text-xl font-semibold tracking-tight text-slate-950 dark:text-white"
+                    title={selectedSessionTitle}
+                  >
+                    {selectedSessionTitle}
+                  </h1>
                   {selectedRoundIsBase ? (
-                    <span className="inline-flex h-7 items-center gap-1 rounded-full bg-indigo-600 px-3 text-white shadow-sm shadow-indigo-500/20 dark:bg-violet-500/20 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40">
+                    <span className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-indigo-600 px-3 text-xs font-semibold text-white shadow-sm shadow-indigo-500/20 dark:bg-violet-500/20 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40">
                       <Layers3 size={12} /> {t("chat.baseSelected")}
                     </span>
                   ) : null}
                 </div>
-                <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
-                  {imageSession?.title ?? t("chat.workbench")}
-                </h1>
-                <ResourceMetaBadges resource={imageSession} className="mt-1" showReason />
-                {selectedRound ? (
-                  <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400 md:hidden">
-                    {imageRoundSizeLabel(selectedRound, t)} · {t("chat.candidate", { index: selectedRound.candidate_index, count: selectedRound.candidate_count })}
-                    <span className="ml-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
-                      {selectedRound.resource_group.name}
-                    </span>
-                    <ResourceMetaBadges resource={selectedRound.generated_asset} className="mt-1" showReason />
-                  </div>
-                ) : selectedPlaceholder ? (
-                  <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400 md:hidden">
-                    {placeholderStatusLabel(selectedPlaceholder, t)} · {t("chat.candidate", { index: selectedPlaceholder.candidate_index, count: selectedPlaceholder.candidate_count })}
-                  </div>
-                ) : null}
-              </div>
-              <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
-                {selectedRound ? (
-                  <>
-                    <span className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 md:inline-flex">
-                      {imageRoundSizeLabel(selectedRound, t)} · {t("chat.candidate", { index: selectedRound.candidate_index, count: selectedRound.candidate_count })}
-                    </span>
-                    <span className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 md:inline-flex">
-                      {selectedRound.resource_group.name}
-                    </span>
-                    <a
-                      href={api.toApiUrl(selectedRound.generated_asset.download_url)}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={selectedResultResourceBlockedTitle ?? t("chat.downloadCurrent")}
-                      aria-label={t("chat.downloadCurrent")}
-                      onClick={(event) => {
-                        if (selectedResultResourceBlockedTitle) {
-                          event.preventDefault();
-                          setErrorMessage(selectedResultResourceBlockedTitle);
-                        }
-                      }}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100"
-                      aria-disabled={Boolean(selectedResultResourceBlockedTitle)}
-                    >
-                      <Download size={15} />
-                    </a>
-                    <button
-                      type="button"
-                      onClick={handleSaveSelectedToGallery}
-                      disabled={saveSelectedGalleryDisabled}
-                      title={saveSelectedGalleryTitle}
-                      aria-label={saveSelectedGalleryTitle}
-                      className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 ring-1 ring-indigo-500 transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-violet-300/35"
-                    >
-                      {saveGalleryMutation.isPending ? (
-                        <Loader2 size={16} className="mr-2 animate-spin" />
-                      ) : (
-                        <GalleryHorizontalEnd size={16} className="mr-2" />
-                      )}
-                      {selectedGeneratedSavedToGallery ? t("chat.alreadyInGallery") : t("chat.sendGallery")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveSelectedToResourceLibrary}
-                      disabled={saveSelectedResourceLibraryDisabled}
-                      title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
-                      aria-label={t("chat.resourceLibrary.saveGenerated")}
-                      className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} h-10 shrink-0 px-4 text-sm`}
-                    >
-                      <Save size={16} className="mr-2" />
-                      {selectedGeneratedSavedToResourceLibrary
-                        ? t("resourceLibrary.alreadyInLibrary")
-                        : t("chat.resourceLibrary.saveGenerated")}
-                    </button>
-                  </>
-                ) : selectedPlaceholder ? (
-                  <span className={`rounded-full border px-3 py-1.5 text-xs font-medium shadow-sm ${placeholderStatusClass(selectedPlaceholder)}`}>
-                    {placeholderStatusLabel(selectedPlaceholder, t)}
-                  </span>
-                ) : null}
+                <div className="hidden shrink-0 justify-end lg:flex">{renderSelectedRoundHeaderActions()}</div>
               </div>
             </div>
             {sessionOrInspirationBlockedResource ? (
@@ -2766,12 +2831,13 @@ function ImageChatWorkbenchPage() {
             <ImageChatMainStage
               selectedRound={selectedRound}
               selectedPlaceholder={selectedPlaceholder}
-              branchBaseRound={selectedRoundIsBase ? selectedRound : null}
               retryingTaskId={null}
               cancellingTaskId={cancelGenerationTaskMutation.isPending ? (cancelGenerationTaskMutation.variables?.taskId ?? null) : null}
               regenerating={generateMutation.isPending}
               maskSensitiveImages={maskSensitiveImages}
               generationBlockedTitle={selectedPlaceholderActionBlockedTitle}
+              stageInfo={selectedRoundStageInfo}
+              stageActions={selectedRoundStageActions}
               onPreviewRound={setPreviewRound}
               onRetryGenerationTask={handleRetryGenerationTask}
               onCancelGenerationTask={handleCancelGenerationTask}
@@ -2784,13 +2850,7 @@ function ImageChatWorkbenchPage() {
             {selectedResultBlockedResource ? (
               <ResourceBlockedNotice resource={selectedResultBlockedResource} className="mt-2" />
             ) : null}
-            {selectedRound?.provider_notes.length ? (
-              <div className="mt-2 flex flex-wrap gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                {selectedRound.provider_notes.map((note) => (
-                  <span key={note}>{note}</span>
-                ))}
-              </div>
-            ) : selectedPlaceholder?.failure_reason ? (
+            {selectedPlaceholder?.failure_reason ? (
               <div className="mt-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
                 {selectedPlaceholder.failure_reason}
               </div>
@@ -2932,9 +2992,26 @@ function ImageChatWorkbenchPage() {
         }}
       >
         <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden" />
+          <Drawer.Overlay
+            className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden"
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onTouchMove={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          />
           <Drawer.Content
-            onPointerDown={handleMobileSessionDrawerSwipeBackStart}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              handleMobileSessionDrawerSwipeBackStart(event);
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
             className="pf-workspace-tool-drawer pf-image-chat-session-drawer fixed inset-y-0 left-0 z-[71] flex w-[min(86vw,360px)] flex-col border-r border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden"
           >
             <Drawer.Title className="sr-only">{t("chat.mobileSessionDrawer")}</Drawer.Title>
@@ -3004,8 +3081,24 @@ function ImageChatWorkbenchPage() {
         }}
       >
         <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden" />
-          <Drawer.Content className="pf-workspace-tool-drawer fixed inset-y-0 right-0 z-[71] flex w-[7.75rem] flex-col border-l border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden">
+          <Drawer.Overlay
+            className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden"
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onTouchMove={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          />
+          <Drawer.Content
+            className="pf-workspace-tool-drawer fixed inset-y-0 right-0 z-[71] flex w-[7.75rem] flex-col border-l border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden"
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
             <Drawer.Title className="sr-only">{t("chat.mobileHistoryDrawer")}</Drawer.Title>
             <div className="flex items-center justify-between gap-1 border-b border-slate-200 px-2 py-3 dark:border-slate-800">
               <div className="min-w-0 px-1">
@@ -3046,54 +3139,6 @@ function ImageChatWorkbenchPage() {
 
       <div className="fixed inset-x-0 z-40 px-3 lg:hidden" style={{ bottom: "calc(4.1rem + env(safe-area-inset-bottom))" }}>
         <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_-6px_18px_rgba(15,23,42,0.12)] dark:border-slate-700 dark:bg-slate-950 dark:shadow-[0_-12px_28px_rgba(0,0,0,0.30)]">
-          {selectedRound ? (
-            <div className="flex shrink-0 items-center gap-1.5">
-              <a
-                href={api.toApiUrl(selectedRound.generated_asset.download_url)}
-                target="_blank"
-                rel="noreferrer"
-                title={selectedResultResourceBlockedTitle ?? t("chat.downloadCurrent")}
-                aria-label={t("chat.downloadCurrent")}
-                onClick={(event) => {
-                  if (selectedResultResourceBlockedTitle) {
-                    event.preventDefault();
-                    setErrorMessage(selectedResultResourceBlockedTitle);
-                  }
-                }}
-                aria-disabled={Boolean(selectedResultResourceBlockedTitle)}
-                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
-              >
-                <Download size={15} className="shrink-0" />
-                <span>{t("chat.downloadShort")}</span>
-              </a>
-              <button
-                type="button"
-                onClick={handleSaveSelectedToGallery}
-                disabled={saveSelectedGalleryDisabled}
-                title={saveSelectedGalleryTitle}
-                aria-label={saveSelectedGalleryTitle}
-                className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-indigo-200 bg-indigo-50 px-2.5 text-xs font-semibold text-indigo-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-300 hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25 dark:focus-visible:ring-violet-400"
-              >
-                {saveGalleryMutation.isPending ? <Loader2 size={15} className="shrink-0 animate-spin" /> : <GalleryHorizontalEnd size={15} className="shrink-0" />}
-                <span>{selectedGeneratedSavedToGallery ? t("chat.alreadyInGalleryShort") : t("chat.sendGalleryShort")}</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveSelectedToResourceLibrary}
-                disabled={saveSelectedResourceLibraryDisabled}
-                title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
-                aria-label={t("chat.resourceLibrary.saveGenerated")}
-                className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} min-h-11 min-w-11 shrink-0 gap-1.5 whitespace-nowrap px-2.5 text-xs`}
-              >
-                <Save size={15} className="shrink-0" />
-                <span>
-                  {selectedGeneratedSavedToResourceLibrary
-                    ? t("resourceLibrary.alreadyInLibrary")
-                    : t("resourceLibrary.title")}
-                </span>
-              </button>
-            </div>
-          ) : null}
           <button
             ref={mobileSettingsButtonRef}
             type="button"
@@ -3106,9 +3151,7 @@ function ImageChatWorkbenchPage() {
             }}
             disabled={!generationDraftOpen && newRoundDisabled}
             title={generationDraftOpen ? t("chat.openGenerationSheet") : (newRoundBlockedTitle || t("chat.newRound"))}
-            className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} min-h-11 min-w-0 text-left ${
-              selectedRound ? "flex-1 px-2.5" : "w-full px-3"
-            }`}
+            className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} min-h-11 w-full min-w-0 px-3 text-left`}
             aria-label={generationDraftOpen ? t("chat.openGenerationSheet") : t("chat.newRound")}
           >
             <Sparkles size={17} className="mr-2 shrink-0" />
@@ -3134,8 +3177,24 @@ function ImageChatWorkbenchPage() {
         }}
       >
         <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/42 lg:hidden" />
-          <Drawer.Content className="pf-workspace-tool-drawer mobile-generation-sheet fixed inset-x-0 bottom-0 z-[71] flex max-h-[80dvh] flex-col rounded-t-[1.5rem] border-t border-slate-200 bg-white shadow-[0_-12px_34px_rgba(15,23,42,0.16)] outline-none dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-[0_-18px_42px_rgba(0,0,0,0.34)] lg:hidden">
+          <Drawer.Overlay
+            className="fixed inset-0 z-[70] bg-slate-950/42 lg:hidden"
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onTouchMove={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          />
+          <Drawer.Content
+            className="pf-workspace-tool-drawer mobile-generation-sheet fixed inset-x-0 bottom-0 z-[71] flex max-h-[80dvh] flex-col rounded-t-[1.5rem] border-t border-slate-200 bg-white shadow-[0_-12px_34px_rgba(15,23,42,0.16)] outline-none dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-[0_-18px_42px_rgba(0,0,0,0.34)] lg:hidden"
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
             <Drawer.Title className="sr-only">{t("chat.mobileGenerationSheet")}</Drawer.Title>
             <Drawer.Handle className="mx-auto mt-2 flex h-7 w-24 items-center justify-center rounded-full text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-slate-500 dark:focus-visible:ring-violet-400">
               <span className="h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
@@ -3191,7 +3250,41 @@ function ImageChatWorkbenchPage() {
           imageAlt={activePreviewRound.prompt || t("chat.currentResultAlt")}
           title={t("gallery.prompt")}
           subtitle={activePreviewRound.generated_asset.original_filename}
-          body={activePreviewRound.prompt || t("gallery.noPrompt")}
+          body={
+            <section className="space-y-3 whitespace-normal">
+              <div className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800 dark:text-slate-200">
+                {activePreviewRound.prompt || t("gallery.noPrompt")}
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                {previewPromptCopyState !== "idle" ? (
+                  <span
+                    className={
+                      previewPromptCopyState === "copied"
+                        ? "text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
+                        : "text-[11px] font-semibold text-red-700 dark:text-red-300"
+                    }
+                  >
+                    {previewPromptCopyTitle}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleCopyPreviewPrompt}
+                  disabled={!activePreviewPrompt}
+                  title={previewPromptCopyTitle}
+                  aria-label={t("gallery.copyPrompt")}
+                  className="inline-flex h-7 items-center justify-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:bg-violet-500/12 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+                >
+                  {previewPromptCopyState === "copied" ? (
+                    <Check size={13} className="mr-1.5" />
+                  ) : (
+                    <Copy size={13} className="mr-1.5" />
+                  )}
+                  {t("common.copy")}
+                </button>
+              </div>
+            </section>
+          }
           metadataRows={[
             { label: t("gallery.meta.size"), value: imageRoundSizeLabel(activePreviewRound, t) },
             {
@@ -3258,21 +3351,14 @@ function ImageChatWorkbenchPage() {
         }}
       />
       {createSessionDialogOpen ? (
-        <div
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !createSessionMutation.isPending) {
-              setCreateSessionDialogOpen(false);
-            }
-          }}
+        <ModalShell
+          onClose={() => setCreateSessionDialogOpen(false)}
+          closeDisabled={createSessionMutation.isPending}
+          ariaLabelledBy={createSessionDialogTitleId}
+          ariaDescribedBy={createSessionDialogDescriptionId}
+          overlayClassName="z-[90] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+          panelClassName="w-full max-w-md overflow-visible rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={createSessionDialogTitleId}
-            aria-describedby={createSessionDialogDescriptionId}
-            className="w-full max-w-md overflow-visible rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
-          >
             <div className="flex items-start gap-3 px-5 pt-5">
               <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-violet-500/15 dark:text-violet-200">
                 <Sparkles size={18} />
@@ -3330,8 +3416,7 @@ function ImageChatWorkbenchPage() {
                 {t("chat.createSessionConfirm")}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       ) : null}
       <ConfirmDialog
         open={Boolean(pendingDeleteDialog)}

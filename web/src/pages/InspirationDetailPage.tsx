@@ -26,7 +26,6 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import { Drawer } from "vaul";
 
@@ -42,6 +41,7 @@ import {
   SaveToResourceLibraryDialog,
   type ResourceLibrarySaveSource,
 } from "../components/resource-library/SaveToResourceLibraryDialog";
+import { ModalShell } from "../components/ModalShell";
 import { SelectField } from "../components/SelectField";
 import { TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS, TopNav } from "../components/TopNav";
 import { ZoomableImage } from "../components/ZoomableImage";
@@ -3232,6 +3232,7 @@ export function InspirationDetailPage() {
           saveStatus={saveStatus}
           onUploadImage={(file) => uploadNodeImageMutation.mutate(file)}
           onUploadDocument={(file) => uploadNodeDocumentMutation.mutate(file)}
+          onClipboardError={(message) => setError(message)}
           onClearImage={() => clearNodeImageMutation.mutate()}
           onOpenResourceLibrary={handleOpenResourceLibrary}
           resourceLibraryDisabledTitle={resourceLibrarySelectDisabledTitle || null}
@@ -3724,9 +3725,23 @@ export function InspirationDetailPage() {
         onOpenChange={setMobileDetailsSheetOpen}
       >
         <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 z-[70] bg-slate-950/42 lg:hidden" />
+          <Drawer.Overlay
+            className="fixed inset-0 z-[70] bg-slate-950/42 lg:hidden"
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onTouchMove={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          />
           <Drawer.Content
             className="fixed inset-x-0 bottom-0 z-[71] flex h-[80dvh] max-h-[80dvh] flex-col overflow-hidden rounded-t-[1.5rem] border-t border-slate-200 bg-white shadow-[0_-12px_34px_rgba(15,23,42,0.16)] outline-none dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-[0_-18px_42px_rgba(0,0,0,0.34)] lg:hidden"
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
             onPointerDownOutside={(event) => {
               const target = event.target;
               if (target instanceof Element && target.closest("[data-template-preview-dialog]")) {
@@ -3841,14 +3856,20 @@ export function InspirationDetailPage() {
         }
       />
       {canvasTemplateSaveOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
-          <form
-            className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
-            onSubmit={(event) => {
+        <ModalShell
+          onClose={() => setCanvasTemplateSaveOpen(false)}
+          closeDisabled={createUserCanvasTemplateMutation.isPending}
+          ariaLabel={t("detail.saveCanvasTemplateTitle")}
+          overlayClassName="z-[90] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+          panelElement="form"
+          panelClassName="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
+          panelProps={{
+            onSubmit: (event) => {
               event.preventDefault();
               createUserCanvasTemplateMutation.mutate();
-            }}
-          >
+            },
+          }}
+        >
             <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
               <h2 className="text-base font-semibold text-slate-950 dark:text-white">
                 {t("detail.saveCanvasTemplateTitle")}
@@ -3926,8 +3947,7 @@ export function InspirationDetailPage() {
                 {t("detail.save")}
               </button>
             </div>
-          </form>
-        </div>
+        </ModalShell>
       ) : null}
       <ConfirmDialog
         open={Boolean(pendingDeleteDialog)}
@@ -4004,18 +4024,13 @@ function InspirationImagePreviewModal({
     : t("resourceLibrary.saveToLibrary");
   const resourceLibraryTitle = resourceLibraryDisabledTitle || resourceLibraryLabel;
 
-  const modal = (
-    <div
-      className="pointer-events-auto fixed inset-0 z-[80] flex items-center justify-center bg-zinc-950/70 p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-label={image.alt}
-      onClick={onClose}
+  return (
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={image.alt}
+      overlayClassName="pointer-events-auto z-[80] bg-zinc-950/70 p-6"
+      panelClassName="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#0f1726]"
     >
-      <div
-        className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#0f1726]"
-        onClick={(event) => event.stopPropagation()}
-      >
         <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-slate-800">
           <div className="min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-slate-100">{image.alt}</div>
           <div className="flex shrink-0 items-center gap-2">
@@ -4057,9 +4072,6 @@ function InspirationImagePreviewModal({
           resetLabel={t("imagePreview.reset")}
           className={`h-[calc(100vh-11rem)] p-4 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
         />
-      </div>
-    </div>
+    </ModalShell>
   );
-
-  return typeof document === "undefined" ? modal : createPortal(modal, document.body);
 }

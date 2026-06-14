@@ -20,6 +20,7 @@ import {
   Sparkles,
 } from "lucide-react";
 
+import { ClipboardImageButton } from "../../components/ClipboardImageButton";
 import { ImageDropZone } from "../../components/ImageDropZone";
 import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSettingsPanel";
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../../components/ImageGenerationSettingsTabs";
@@ -137,6 +138,8 @@ function FieldLabel({
 
 const INSPECTOR_TEXTAREA_LINE_HEIGHT_PX = 19;
 const INSPECTOR_TEXTAREA_VERTICAL_PADDING_PX = 16;
+const INSPECTOR_CLIPBOARD_IMAGE_BUTTON_CLASS =
+  "inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-slate-900 dark:hover:text-white";
 
 function InspectorTextArea({
   label,
@@ -215,6 +218,7 @@ interface InspectorPanelProps {
   onCancelRun: (() => void) | null;
   onUploadImage: (file: File) => void;
   onUploadDocument: (file: File) => void;
+  onClipboardError?: (message: string) => void;
   onClearImage: () => void;
   onOpenResourceLibrary?: () => void;
   resourceLibraryDisabledTitle?: string | null;
@@ -249,6 +253,7 @@ export function InspectorPanel({
   onCancelRun,
   onUploadImage,
   onUploadDocument,
+  onClipboardError,
   onClearImage,
   onOpenResourceLibrary,
   resourceLibraryDisabledTitle = null,
@@ -516,6 +521,7 @@ export function InspectorPanel({
             onPreviewImage={onPreviewImage}
             onUploadImage={onUploadImage}
             onUploadDocument={onUploadDocument}
+            onClipboardError={onClipboardError}
             sourceAsset={nodeImageSourceAsset}
             onSaveSourceAssetToResourceLibrary={onSaveSourceAssetToResourceLibrary}
             resourceLibrarySaveDisabledTitle={resourceLibrarySaveDisabledTitle}
@@ -530,6 +536,7 @@ export function InspectorPanel({
             draft={draft}
             onDraftChange={onDraftChange}
             onUploadImage={onUploadImage}
+            onClipboardError={onClipboardError}
             onClearImage={onClearImage}
             onOpenResourceLibrary={onOpenResourceLibrary}
             resourceLibraryDisabledTitle={resourceLibraryDisabledTitle}
@@ -582,6 +589,11 @@ export function InspectorPanel({
         ) : null}
         </fieldset>
       </section>
+      {node.attempt_count > 0 ? (
+        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
+          {t("detail.nodeAttemptSummary", { attempts: node.attempt_count, retries: node.retry_count })}
+        </section>
+      ) : null}
       {node.failure_reason ? (
         <section
           className={`rounded-2xl border p-4 text-xs leading-relaxed shadow-sm ${
@@ -597,11 +609,6 @@ export function InspectorPanel({
           ) : null}
           {node.status === "failed" && !node.is_retryable ? (
             <div className="mt-2 font-semibold text-red-700 dark:text-red-100">{t("detail.notRetryable")}</div>
-          ) : null}
-          {node.attempt_count > 0 ? (
-            <div className="mt-2 text-[11px] text-red-700/85 dark:text-red-100/85">
-              {t("detail.nodeAttemptSummary", { attempts: node.attempt_count, retries: node.retry_count })}
-            </div>
           ) : null}
           {node.status === "failed" && !node.is_retryable && node.non_retryable_reason ? (
             <div className="mt-1 text-[11px] text-red-700/85 dark:text-red-100/85">
@@ -630,6 +637,7 @@ function InspirationContextInspector({
   onPreviewImage,
   onUploadImage,
   onUploadDocument,
+  onClipboardError,
   sourceAsset,
   onSaveSourceAssetToResourceLibrary,
   resourceLibrarySaveDisabledTitle = null,
@@ -645,6 +653,7 @@ function InspirationContextInspector({
   onPreviewImage: (image: DownloadableImage) => void;
   onUploadImage: (file: File) => void;
   onUploadDocument: (file: File) => void;
+  onClipboardError?: (message: string) => void;
   sourceAsset: SourceAsset | null;
   onSaveSourceAssetToResourceLibrary?: (asset: SourceAsset) => void;
   resourceLibrarySaveDisabledTitle?: string | null;
@@ -746,6 +755,22 @@ function InspirationContextInspector({
           </div>
         )}
       </ImageDropZone>
+      <ClipboardImageButton
+        buttonClassName={INSPECTOR_CLIPBOARD_IMAGE_BUTTON_CLASS}
+        disabled={busy}
+        label={t("common.pasteImage")}
+        closeLabel={t("common.close")}
+        pasteAreaLabel={t("common.pasteImageTarget")}
+        pasteAreaPlaceholder={t("common.pasteImagePlaceholder")}
+        noImageMessage={t("common.clipboardNoImage")}
+        onFiles={(files) => {
+          const file = files[0];
+          if (file) {
+            onUploadImage(file);
+          }
+        }}
+        onError={onClipboardError}
+      />
       <label className="block">
         <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
           {t("detail.inspector.inspirationName")}
@@ -965,6 +990,7 @@ function ReferenceImageInspector({
   draft,
   onDraftChange,
   onUploadImage,
+  onClipboardError,
   onClearImage,
   onOpenResourceLibrary,
   resourceLibraryDisabledTitle = null,
@@ -982,6 +1008,7 @@ function ReferenceImageInspector({
   draft: NodeConfigDraft;
   onDraftChange: (draft: NodeConfigDraft) => void;
   onUploadImage: (file: File) => void;
+  onClipboardError?: (message: string) => void;
   onClearImage: () => void;
   onOpenResourceLibrary?: () => void;
   resourceLibraryDisabledTitle?: string | null;
@@ -1109,6 +1136,22 @@ function ReferenceImageInspector({
           </div>
         )}
       </ImageDropZone>
+      <ClipboardImageButton
+        buttonClassName={INSPECTOR_CLIPBOARD_IMAGE_BUTTON_CLASS}
+        disabled={busy}
+        label={t("common.pasteImage")}
+        closeLabel={t("common.close")}
+        pasteAreaLabel={t("common.pasteImageTarget")}
+        pasteAreaPlaceholder={t("common.pasteImagePlaceholder")}
+        noImageMessage={t("common.clipboardNoImage")}
+        onFiles={(files) => {
+          const file = files[0];
+          if (file) {
+            onUploadImage(file);
+          }
+        }}
+        onError={onClipboardError}
+      />
       {onOpenResourceLibrary ? (
         <button
           type="button"

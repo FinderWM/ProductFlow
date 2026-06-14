@@ -13,6 +13,7 @@ from sqlalchemy import select
 from inspiration_one_backend.config import (
     CONFIG_DEFINITION_BY_KEY,
     RUNTIME_CONFIG_KEYS,
+    build_settings_with_overrides,
     get_runtime_settings,
     get_settings,
     normalize_config_values,
@@ -25,6 +26,8 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationConfigResourceGroup,
     GenerationConfigState,
     GenerationResourceGroup,
+    ImageSession,
+    ImageSessionRound,
     ProviderBinding,
     ProviderProfile,
     UserUiPreference,
@@ -305,6 +308,13 @@ def test_runtime_config_registry_excludes_env_only_settings(configured_env: Path
     }.isdisjoint(RUNTIME_CONFIG_KEYS)
 
 
+def test_legacy_generation_capacity_setting_seeds_split_capacity_defaults(configured_env: Path) -> None:
+    settings = build_settings_with_overrides({"generation_max_concurrent_tasks": "7"})
+
+    assert settings.text_generation_max_concurrent_tasks == 7
+    assert settings.image_generation_max_concurrent_tasks == 7
+
+
 def test_runtime_config_ignores_database_rows_for_env_only_settings(configured_env: Path) -> None:
     session = get_session_factory()()
     try:
@@ -336,7 +346,7 @@ def test_settings_api_has_no_extra_unlock_dependency(
     assert config.status_code == 200
 
 
-def test_public_login_page_config_returns_selected_template_without_auth(configured_env: Path) -> None:
+def test_public_login_page_config_returns_configured_template_without_auth(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
@@ -347,10 +357,11 @@ def test_public_login_page_config_returns_selected_template_without_auth(configu
         "/api/settings",
         json={
             "values": {
-                "login_page_mode": "selected",
-                "login_page_selected_template_id": "image-lab",
-                "login_page_enabled_template_ids": ["image-lab"],
-                "login_page_image_lab_hero_description": "用一张视觉邀请函进入创作现场。",
+                "login_page_mode": "image-lab",
+                "login_page_image_lab_config": {
+                    "hero_description": "用一张视觉邀请函进入创作现场。",
+                    "hero_image_asset_id": "",
+                },
             }
         },
     )
@@ -367,29 +378,47 @@ def test_public_login_page_config_returns_selected_template_without_auth(configu
     }
 
 
-def test_public_login_page_config_falls_back_when_selected_template_disabled(configured_env: Path) -> None:
+def test_public_login_page_config_random_uses_all_templates(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from inspiration_one_backend.presentation.api import create_app
+    from inspiration_one_backend.presentation.routes import public
 
     app = create_app()
-    client = TestClient(app)
-    _login(client)
+    seen_candidates: dict[str, tuple[str, ...]] = {}
 
-    updated = client.patch(
-        "/api/settings",
-        json={
-            "values": {
-                "login_page_mode": "selected",
-                "login_page_selected_template_id": "image-lab",
-                "login_page_enabled_template_ids": ["codex-orbit"],
-            }
-        },
-    )
-    assert updated.status_code == 200
+    def choose_last(candidates: tuple[str, ...]) -> str:
+        seen_candidates["value"] = candidates
+        return candidates[-1]
+
+    monkeypatch.setattr(public.random, "choice", choose_last)
 
     response = TestClient(app).get("/api/public/login-page-config")
 
     assert response.status_code == 200
-    assert response.json()["template_id"] == "codex-orbit"
+    assert seen_candidates["value"] == ("command-orbit", "fluid-mist", "image-lab")
+    assert response.json()["template_id"] == "image-lab"
+
+
+def test_public_login_page_config_migrates_legacy_selected_template(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    session = get_session_factory()()
+    try:
+        session.add(AppSetting(key="login_page_mode", value="selected"))
+        session.add(AppSetting(key="login_page_selected_template_id", value="fluid-mist"))
+        session.add(AppSetting(key="login_page_fluid_mist_greeting_title", value="从旧字段迁移"))
+        session.commit()
+    finally:
+        session.close()
+
+    app = create_app()
+    response = TestClient(app).get("/api/public/login-page-config")
+
+    assert response.status_code == 200
+    assert response.json()["template_id"] == "fluid-mist"
+    assert response.json()["content"]["greeting_title"] == "从旧字段迁移"
 
 
 def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
@@ -416,8 +445,11 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
         "image_images_style",
         "image_responses_background_enabled",
     }.isdisjoint(initial_items)
-    assert initial_items["generation_max_concurrent_tasks"]["value"] == 3
-    assert initial_items["generation_max_concurrent_tasks"]["category"] == "全局生成配置 / 队列容量"
+    assert "generation_max_concurrent_tasks" not in initial_items
+    assert initial_items["text_generation_max_concurrent_tasks"]["value"] == 3
+    assert initial_items["text_generation_max_concurrent_tasks"]["category"] == "全局生成配置 / 队列容量"
+    assert initial_items["image_generation_max_concurrent_tasks"]["value"] == 3
+    assert initial_items["image_generation_max_concurrent_tasks"]["category"] == "全局生成配置 / 队列容量"
     assert initial_items["generation_tail_splitter_max_items"]["value"] == 36
     assert initial_items["generation_tail_splitter_max_items"]["category"] == "全局生成配置 / 工作流生成"
     assert initial_items["generation_tail_splitter_max_items"]["minimum"] == 1
@@ -455,6 +487,21 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert initial_items["gallery_show_generation_resource_group"]["value"] is True
     assert initial_items["gallery_show_generation_resource_group"]["category"] == "界面与外观"
     assert initial_items["gallery_show_generation_resource_group"]["input_type"] == "boolean"
+    assert initial_items["login_page_mode"]["value"] == "random"
+    assert initial_items["login_page_mode"]["category"] == "登录页"
+    assert initial_items["login_page_mode"]["input_type"] == "select"
+    assert initial_items["login_page_mode"]["options"] == [
+        {"value": "random", "label": "随机"},
+        {"value": "command-orbit", "label": "Command Orbit"},
+        {"value": "fluid-mist", "label": "Fluid Mist"},
+        {"value": "image-lab", "label": "Image Lab"},
+    ]
+    assert initial_items["login_page_command_orbit_config"]["input_type"] == "textarea"
+    assert "brand_subtitle" in initial_items["login_page_command_orbit_config"]["value"]
+    assert initial_items["login_page_image_lab_config"]["input_type"] == "textarea"
+    assert "hero_image_asset_id" in initial_items["login_page_image_lab_config"]["value"]
+    assert "login_page_selected_template_id" not in initial_items
+    assert "login_page_enabled_template_ids" not in initial_items
     assert "admin_access_required" not in initial_items
     assert initial_items["deletion_enabled"]["value"] is False
     assert initial_items["deletion_enabled"]["category"] == "安全与运维"
@@ -463,7 +510,8 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
         "/api/settings",
         json={
             "values": {
-                "generation_max_concurrent_tasks": 2,
+                "text_generation_max_concurrent_tasks": 2,
+                "image_generation_max_concurrent_tasks": 4,
                 "generation_tail_splitter_max_items": 48,
                 "image_session_max_base_images": 7,
                 "workflow_node_max_retry_count": 12,
@@ -472,12 +520,18 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
                 "workflow_image_generation_provider_timeout_seconds": 120,
                 "ui_layout_scheme": "workspace",
                 "gallery_show_generation_resource_group": False,
+                "login_page_mode": "fluid-mist",
+                "login_page_fluid_mist_config": {
+                    "greeting_title": "进入雾面工作台",
+                    "greeting_description": "继续整理灵感",
+                },
                 "deletion_enabled": True,
             }
         },
     )
     assert updated.status_code == 200
-    assert get_runtime_settings().generation_max_concurrent_tasks == 2
+    assert get_runtime_settings().text_generation_max_concurrent_tasks == 2
+    assert get_runtime_settings().image_generation_max_concurrent_tasks == 4
     assert get_runtime_settings().generation_tail_splitter_max_items == 48
     assert get_runtime_settings().image_session_max_base_images == 7
     assert get_runtime_settings().workflow_node_max_retry_count == 12
@@ -486,10 +540,13 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert get_runtime_settings().workflow_image_generation_provider_timeout_seconds == 120
     assert get_runtime_settings().ui_layout_scheme == "workspace"
     assert get_runtime_settings().gallery_show_generation_resource_group is False
+    assert get_runtime_settings().login_page_mode == "fluid-mist"
     assert get_runtime_settings().deletion_enabled is True
 
     session = get_session_factory()()
     try:
+        assert session.get(AppSetting, "text_generation_max_concurrent_tasks").value == "2"
+        assert session.get(AppSetting, "image_generation_max_concurrent_tasks").value == "4"
         assert session.get(AppSetting, "generation_tail_splitter_max_items").value == "48"
         assert session.get(AppSetting, "image_session_max_base_images").value == "7"
         assert session.get(AppSetting, "workflow_node_max_retry_count").value == "12"
@@ -498,6 +555,8 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
         assert session.get(AppSetting, "workflow_image_generation_provider_timeout_seconds").value == "120"
         assert session.get(AppSetting, "ui_layout_scheme").value == "workspace"
         assert session.get(AppSetting, "gallery_show_generation_resource_group").value == "false"
+        assert session.get(AppSetting, "login_page_mode").value == "fluid-mist"
+        assert "进入雾面工作台" in session.get(AppSetting, "login_page_fluid_mist_config").value
     finally:
         session.close()
 
@@ -514,6 +573,13 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     )
     assert invalid_layout.status_code == 400
     assert "默认 UI 布局 必须是以下之一" in invalid_layout.json()["detail"]
+
+    invalid_login_page = client.patch(
+        "/api/settings",
+        json={"values": {"login_page_mode": "selected"}},
+    )
+    assert invalid_login_page.status_code == 400
+    assert "登录页选择 必须是以下之一" in invalid_login_page.json()["detail"]
 
     invalid_workflow_timeout = client.patch(
         "/api/settings",
@@ -555,6 +621,79 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert "未知配置项: image_provider_kind" in legacy_provider_update.json()["detail"]
 
 
+def test_login_page_settings_endpoints_save_and_reset_independently(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    template_update = client.patch(
+        "/api/settings/login-page-template-config/image-lab",
+        json={"config": {"hero_description": "独立大图说明", "hero_image_asset_id": "asset-1"}},
+    )
+    assert template_update.status_code == 200
+    template_items = {item["key"]: item for item in template_update.json()["items"]}
+    assert template_items["login_page_mode"]["value"] == "random"
+    assert template_items["login_page_mode"]["source"] == "env_default"
+    assert "asset-1" in template_items["login_page_image_lab_config"]["value"]
+
+    selection_update = client.patch("/api/settings/login-page-selection", json={"value": "fluid-mist"})
+    assert selection_update.status_code == 200
+    selection_items = {item["key"]: item for item in selection_update.json()["items"]}
+    assert selection_items["login_page_mode"]["value"] == "fluid-mist"
+    assert "asset-1" in selection_items["login_page_image_lab_config"]["value"]
+
+    command_update = client.patch(
+        "/api/settings/login-page-template-config/command-orbit",
+        json={
+            "config": {
+                "brand_subtitle": "Orbit",
+                "hero_title": "Console",
+                "hero_description": "Command copy",
+            }
+        },
+    )
+    assert command_update.status_code == 200
+    command_items = {item["key"]: item for item in command_update.json()["items"]}
+    assert command_items["login_page_mode"]["value"] == "fluid-mist"
+    assert "Command copy" in command_items["login_page_command_orbit_config"]["value"]
+    assert "asset-1" in command_items["login_page_image_lab_config"]["value"]
+
+    reset_selection = client.post("/api/settings/login-page-selection/reset")
+    assert reset_selection.status_code == 200
+    reset_selection_items = {item["key"]: item for item in reset_selection.json()["items"]}
+    assert reset_selection_items["login_page_mode"]["value"] == "random"
+    assert reset_selection_items["login_page_mode"]["source"] == "env_default"
+    assert "asset-1" in reset_selection_items["login_page_image_lab_config"]["value"]
+
+    reset_template = client.post("/api/settings/login-page-template-config/image-lab/reset")
+    assert reset_template.status_code == 200
+    reset_template_items = {item["key"]: item for item in reset_template.json()["items"]}
+    assert reset_template_items["login_page_mode"]["value"] == "random"
+    assert reset_template_items["login_page_image_lab_config"]["source"] == "env_default"
+    assert "asset-1" not in reset_template_items["login_page_image_lab_config"]["value"]
+    assert "Command copy" in reset_template_items["login_page_command_orbit_config"]["value"]
+
+    invalid_selection = client.patch("/api/settings/login-page-selection", json={"value": "selected"})
+    assert invalid_selection.status_code == 400
+    assert "登录页选择 必须是以下之一" in invalid_selection.json()["detail"]
+
+    invalid_template = client.patch(
+        "/api/settings/login-page-template-config/unknown",
+        json={"config": {}},
+    )
+    assert invalid_template.status_code == 400
+    assert "登录页模板必须是以下之一" in invalid_template.json()["detail"]
+
+    invalid_config = client.patch(
+        "/api/settings/login-page-template-config/image-lab",
+        json={"config": {"hero_description": "说明", "hero_image_asset_id": "", "extra": "nope"}},
+    )
+    assert invalid_config.status_code == 400
+    assert "配置包含不支持字段" in invalid_config.json()["detail"]
+
+
 def test_settings_export_includes_migratable_runtime_config_provider_secrets_and_excludes_env_only(
     configured_env: Path,
 ) -> None:
@@ -568,7 +707,8 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
         "/api/settings",
         json={
             "values": {
-                "generation_max_concurrent_tasks": 2,
+                "text_generation_max_concurrent_tasks": 2,
+                "image_generation_max_concurrent_tasks": 5,
                 "gallery_show_generation_resource_group": False,
                 "deletion_enabled": True,
             }
@@ -609,7 +749,12 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
     assert payload["metadata"]["schema_version"] == 1
     assert payload["metadata"]["app"] == "Inspiration One"
     assert payload["metadata"]["app_version"]
-    assert payload["runtime_config"]["generation_max_concurrent_tasks"] == 2
+    assert payload["runtime_config"]["text_generation_max_concurrent_tasks"] == 2
+    assert payload["runtime_config"]["image_generation_max_concurrent_tasks"] == 5
+    assert "generation_max_concurrent_tasks" not in payload["runtime_config"]
+    assert "login_page_selected_template_id" not in payload["runtime_config"]
+    assert "login_page_enabled_template_ids" not in payload["runtime_config"]
+    assert "login_page_image_lab_config" in payload["runtime_config"]
     assert payload["runtime_config"]["gallery_show_generation_resource_group"] is False
     assert payload["runtime_config"]["deletion_enabled"] is True
     assert set(RUNTIME_CONFIG_KEYS).issubset(payload["runtime_config"])
@@ -647,7 +792,8 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     assert exported.status_code == 200
     document = exported.json()
     imported_profile_id = "11111111-1111-4111-8111-111111111111"
-    document["runtime_config"]["generation_max_concurrent_tasks"] = 4
+    document["runtime_config"]["text_generation_max_concurrent_tasks"] = 4
+    document["runtime_config"]["image_generation_max_concurrent_tasks"] = 6
     document["runtime_config"]["gallery_show_generation_resource_group"] = False
     document["runtime_config"]["deletion_enabled"] = True
     document["generation_resource_groups"][0]["blur_images_by_default"] = True
@@ -738,7 +884,8 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     assert imported.status_code == 200
     response_payload = imported.json()
     imported_items = {item["key"]: item for item in response_payload["config"]["items"]}
-    assert imported_items["generation_max_concurrent_tasks"]["value"] == 4
+    assert imported_items["text_generation_max_concurrent_tasks"]["value"] == 4
+    assert imported_items["image_generation_max_concurrent_tasks"]["value"] == 6
     assert imported_items["gallery_show_generation_resource_group"]["value"] is False
     assert imported_items["deletion_enabled"]["value"] is True
     assert imported_items["poster_generation_mode"]["value"] == "generated"
@@ -747,7 +894,8 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
 
     session = get_session_factory()()
     try:
-        assert session.get(AppSetting, "generation_max_concurrent_tasks").value == "4"
+        assert session.get(AppSetting, "text_generation_max_concurrent_tasks").value == "4"
+        assert session.get(AppSetting, "image_generation_max_concurrent_tasks").value == "6"
         assert session.get(AppSetting, "gallery_show_generation_resource_group").value == "false"
         assert session.get(AppSetting, "deletion_enabled").value == "true"
         assert session.get(AppSetting, "poster_generation_mode").value == "generated"
@@ -808,8 +956,32 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
     accepted_disabled_default_group = client.post("/api/settings/import/preview", json=disabled_default_group)
     assert accepted_disabled_default_group.status_code == 200
 
+    legacy_capacity_document = deepcopy(document)
+    legacy_capacity_document["runtime_config"].pop("text_generation_max_concurrent_tasks")
+    legacy_capacity_document["runtime_config"].pop("image_generation_max_concurrent_tasks")
+    legacy_capacity_document["runtime_config"]["generation_max_concurrent_tasks"] = 7
+    legacy_capacity_preview = client.post("/api/settings/import/preview", json=legacy_capacity_document)
+    assert legacy_capacity_preview.status_code == 200
+
+    legacy_login_page_document = deepcopy(document)
+    legacy_login_page_document["runtime_config"].pop("login_page_command_orbit_config")
+    legacy_login_page_document["runtime_config"].pop("login_page_fluid_mist_config")
+    legacy_login_page_document["runtime_config"].pop("login_page_image_lab_config")
+    legacy_login_page_document["runtime_config"]["login_page_mode"] = "selected"
+    legacy_login_page_document["runtime_config"]["login_page_selected_template_id"] = "image-lab"
+    legacy_login_page_document["runtime_config"]["login_page_enabled_template_ids"] = ["image-lab"]
+    legacy_login_page_document["runtime_config"]["login_page_command_orbit_brand_subtitle"] = "旧 Command"
+    legacy_login_page_document["runtime_config"]["login_page_command_orbit_hero_title"] = "旧标题"
+    legacy_login_page_document["runtime_config"]["login_page_command_orbit_hero_description"] = "旧说明"
+    legacy_login_page_document["runtime_config"]["login_page_fluid_mist_greeting_title"] = "旧欢迎"
+    legacy_login_page_document["runtime_config"]["login_page_fluid_mist_greeting_description"] = "旧欢迎说明"
+    legacy_login_page_document["runtime_config"]["login_page_image_lab_hero_description"] = "旧图像说明"
+    legacy_login_page_document["runtime_config"]["login_page_image_lab_hero_image_asset_id"] = ""
+    legacy_login_page_preview = client.post("/api/settings/import/preview", json=legacy_login_page_document)
+    assert legacy_login_page_preview.status_code == 200
+
     invalid_binding = dict(document)
-    invalid_binding["runtime_config"] = {**document["runtime_config"], "generation_max_concurrent_tasks": 5}
+    invalid_binding["runtime_config"] = {**document["runtime_config"], "text_generation_max_concurrent_tasks": 5}
     invalid_binding["provider_profiles"] = []
     invalid_binding["provider_bindings"] = [
         {
@@ -847,10 +1019,12 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
     assert rejected_owner.status_code == 400
     assert rejected_owner.json()["detail"] == "导入文件引用的用户不存在"
 
-    assert get_runtime_settings().generation_max_concurrent_tasks == 3
+    assert get_runtime_settings().text_generation_max_concurrent_tasks == 3
+    assert get_runtime_settings().image_generation_max_concurrent_tasks == 3
     session = get_session_factory()()
     try:
-        assert session.get(AppSetting, "generation_max_concurrent_tasks") is None
+        assert session.get(AppSetting, "text_generation_max_concurrent_tasks") is None
+        assert session.get(AppSetting, "image_generation_max_concurrent_tasks") is None
         bindings = {binding.purpose: binding for binding in session.scalars(select(ProviderBinding)).all()}
         assert {purpose: binding.provider_kind for purpose, binding in bindings.items()} == {
             "image": "mock",
@@ -1428,6 +1602,118 @@ def test_text_generation_config_test_api_reports_missing_real_provider_config(co
     assert "真实供应商必须选择供应商档案" in response.json()["detail"]
 
 
+def test_image_generation_config_test_api_runs_mock_and_returns_gallery_saveable_asset(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.post(
+        "/api/settings/generation-configs/test-image",
+        json={
+            "generation_config": {
+                "name": "测试图片配置",
+                "purpose": "image",
+                "provider_kind": "mock",
+                "provider_profile_id": None,
+                "model_settings": {"model": "mock-image"},
+                "config": {},
+                "priority": 100,
+                "max_concurrency": 1,
+                "enabled": True,
+            },
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成一张干净的测试图",
+            "size": "1024x1024",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generation_config_id"] is None
+    assert payload["provider_kind"] == "mock"
+    assert payload["model_name"] == "mock-image-chat-v1"
+    assert payload["provider_name"] == "mock"
+    assert payload["round"]["prompt"] == "生成一张干净的测试图"
+    assert payload["round"]["size"] == "1024x1024"
+    assert payload["round"]["actual_size"] == "1024x1024"
+    assert payload["round"]["resource_group"]["id"] == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+    assert payload["generated_asset"]["id"] == payload["round"]["generated_asset"]["id"]
+    assert payload["generated_asset"]["gallery_saved"] is False
+    assert payload["generated_asset"]["preview_url"].endswith("variant=preview")
+
+    saved = client.post("/api/gallery", json={"image_session_asset_id": payload["generated_asset"]["id"]})
+    assert saved.status_code == 201
+    assert saved.json()["image"]["id"] == payload["generated_asset"]["id"]
+    assert saved.json()["image"]["gallery_saved"] is True
+
+    session = get_session_factory()()
+    try:
+        configs = session.scalars(select(GenerationConfig).where(GenerationConfig.name == "测试图片配置")).all()
+        image_session = session.get(ImageSession, payload["image_session_id"])
+        round_item = session.get(ImageSessionRound, payload["round"]["id"])
+    finally:
+        session.close()
+    assert configs == []
+    assert image_session is not None
+    assert image_session.title.startswith("图片配置测试 - 测试图片配置")
+    assert round_item is not None
+    assert round_item.session_id == payload["image_session_id"]
+    assert round_item.generation_config_id is None
+
+
+def test_image_generation_config_test_api_reports_provider_failure_detail(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    def raise_provider_failure(self, **_: object) -> None:
+        raise ValueError("供应商测试失败：尺寸不支持")
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.image.chat_service.ImageChatService.generate",
+        raise_provider_failure,
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.post(
+        "/api/settings/generation-configs/test-image",
+        json={
+            "generation_config": {
+                "name": "失败图片配置",
+                "purpose": "image",
+                "provider_kind": "mock",
+                "provider_profile_id": None,
+                "model_settings": {"model": "mock-image"},
+                "config": {},
+                "priority": 100,
+                "max_concurrency": 1,
+                "enabled": True,
+            },
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成一张会失败的测试图",
+            "size": "1024x1024",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "供应商测试失败：尺寸不支持"
+
+    session = get_session_factory()()
+    try:
+        image_sessions = session.scalars(
+            select(ImageSession).where(ImageSession.title.like("图片配置测试 - 失败图片配置%"))
+        ).all()
+    finally:
+        session.close()
+    assert image_sessions == []
+
+
 def test_provider_config_supports_openai_chat_completions_text_profiles_and_bindings(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
@@ -1478,7 +1764,7 @@ def test_provider_config_supports_openai_chat_completions_text_profiles_and_bind
     )
     assert text_binding.status_code == 200
     assert text_binding.json()["provider_kind"] == "openai_chat_completions"
-    assert text_binding.json()["config"] == {"structured_json_response_format_enabled": False}
+    assert text_binding.json()["config"] == {"structured_output": {"enabled": False, "mode": "json_schema"}}
 
     text_config = resolve_text_provider_config()
     assert text_config.provider_kind == "openai_chat_completions"
@@ -1487,6 +1773,8 @@ def test_provider_config_supports_openai_chat_completions_text_profiles_and_bind
     assert text_config.brief_model == "grok-brief"
     assert text_config.copy_model == "grok-copy"
     assert text_config.structured_json_response_format_enabled is False
+    assert text_config.structured_output.enabled is False
+    assert text_config.structured_output.mode == "json_schema"
 
     exported = client.get("/api/settings/export")
     assert exported.status_code == 200
@@ -1495,7 +1783,7 @@ def test_provider_config_supports_openai_chat_completions_text_profiles_and_bind
     assert exported_profile["capabilities"] == ["text_chat_completions"]
     exported_text = next(item for item in document["provider_bindings"] if item["purpose"] == "text")
     assert exported_text["provider_kind"] == "openai_chat_completions"
-    assert exported_text["config"] == {"structured_json_response_format_enabled": False}
+    assert exported_text["config"] == {"structured_output": {"enabled": False, "mode": "json_schema"}}
 
 
 def test_chat_completions_generation_config_round_trips_structured_json_response_format(
@@ -1539,18 +1827,77 @@ def test_chat_completions_generation_config_round_trips_structured_json_response
     )
     assert generation_config.status_code == 200
     payload = generation_config.json()
-    assert payload["config"] == {"structured_json_response_format_enabled": True}
+    assert payload["config"] == {"structured_output": {"enabled": True, "mode": "json_object"}}
 
     text_config = resolve_text_provider_config(generation_config_id=payload["id"])
     assert text_config.provider_kind == "openai_chat_completions"
     assert text_config.structured_json_response_format_enabled is True
+    assert text_config.structured_output.enabled is True
+    assert text_config.structured_output.mode == "json_object"
 
     exported = client.get("/api/settings/export")
     assert exported.status_code == 200
     exported_generation_config = next(
         item for item in exported.json()["generation_configs"] if item["id"] == payload["id"]
     )
-    assert exported_generation_config["config"] == {"structured_json_response_format_enabled": True}
+    assert exported_generation_config["config"] == {"structured_output": {"enabled": True, "mode": "json_object"}}
+
+
+def test_responses_generation_config_round_trips_structured_output(
+    configured_env: Path,
+) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Responses JSON 网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://responses-json.example/v1",
+            "api_key": "responses-json-secret-key",
+            "capabilities": ["text_responses"],
+            "default_models": {"brief_model": "gpt-brief", "copy_model": "gpt-copy"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+
+    generation_config = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_ids": [],
+            "name": "Responses 结构化文案",
+            "purpose": "text",
+            "provider_kind": "openai",
+            "provider_profile_id": created.json()["id"],
+            "model_settings": {"brief_model": "gpt-brief", "copy_model": "gpt-copy"},
+            "config": {"structured_output": {"enabled": True, "mode": "json_schema"}},
+            "priority": 100,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert generation_config.status_code == 200
+    payload = generation_config.json()
+    assert payload["config"] == {"structured_output": {"enabled": True, "mode": "json_schema"}}
+
+    text_config = resolve_text_provider_config(generation_config_id=payload["id"])
+    assert text_config.provider_kind == "openai"
+    assert text_config.structured_json_response_format_enabled is True
+    assert text_config.structured_output.enabled is True
+    assert text_config.structured_output.mode == "json_schema"
+
+    exported = client.get("/api/settings/export")
+    assert exported.status_code == 200
+    exported_generation_config = next(
+        item for item in exported.json()["generation_configs"] if item["id"] == payload["id"]
+    )
+    assert exported_generation_config["config"] == {"structured_output": {"enabled": True, "mode": "json_schema"}}
 
 
 def test_text_generation_config_test_api_runs_openai_chat_completions_provider(
@@ -1659,7 +2006,7 @@ def test_text_generation_config_json_response_format_test_api_sends_response_for
         headers = {"content-type": "application/json"}
 
         def __init__(self) -> None:
-            content = '{"ok":true,"kind":"structured_json_response_format_test"}'
+            content = '{"ok":true,"kind":"text_structured_output_test","items":["structured_output"]}'
             self._payload = {"choices": [{"message": {"content": content}}]}
             self.text = str(self._payload)
 
@@ -1728,10 +2075,86 @@ def test_text_generation_config_json_response_format_test_api_sends_response_for
     payload = response.json()
     assert payload["provider_kind"] == "openai_chat_completions"
     assert payload["model"] == "grok-copy"
-    assert payload["parsed_json"] == {"ok": True, "kind": "structured_json_response_format_test"}
+    assert payload["parsed_json"] == {
+        "ok": True,
+        "kind": "text_structured_output_test",
+        "items": ["structured_output"],
+    }
     assert calls[0]["url"] == "https://chat-json-test.example/v1/chat/completions"
     assert calls[0]["json"]["stream"] is False
     assert calls[0]["json"]["response_format"] == {"type": "json_object"}
+
+
+def test_text_generation_config_structured_output_test_api_supports_responses(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    calls: list[dict] = []
+
+    class DummyResponse:
+        output_text = '{"ok":true,"kind":"text_structured_output_test","items":["structured_output"]}'
+
+    class DummyResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return DummyResponse()
+
+    class DummyOpenAI:
+        def __init__(self, **kwargs) -> None:
+            self.responses = DummyResponses()
+
+    monkeypatch.setattr("inspiration_one_backend.infrastructure.text.openai_provider.OpenAI", DummyOpenAI)
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Responses JSON 测试网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://responses-json-test.example/v1",
+            "api_key": "responses-json-test-secret-key",
+            "capabilities": ["text_responses"],
+            "default_models": {"brief_model": "gpt-brief", "copy_model": "gpt-copy"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+
+    response = client.post(
+        "/api/settings/generation-configs/test-json-response-format",
+        json={
+            "generation_config": {
+                "name": "Responses 结构化输出测试",
+                "purpose": "text",
+                "provider_kind": "openai",
+                "provider_profile_id": created.json()["id"],
+                "model_settings": {"brief_model": "gpt-brief", "copy_model": "gpt-copy"},
+                "config": {"structured_output": {"enabled": True, "mode": "json_schema"}},
+                "priority": 100,
+                "max_concurrency": 1,
+                "enabled": True,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider_kind"] == "openai"
+    assert payload["model"] == "gpt-copy"
+    assert payload["parsed_json"] == {
+        "ok": True,
+        "kind": "text_structured_output_test",
+        "items": ["structured_output"],
+    }
+    assert calls[0]["model"] == "gpt-copy"
+    assert calls[0]["text"]["format"]["type"] == "json_schema"
+    assert calls[0]["text"]["format"]["name"] == "text_structured_output_test"
 
 
 def test_real_image_binding_switches_visible_poster_mode_to_generated(configured_env: Path) -> None:
@@ -2479,6 +2902,8 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
             "input_fidelity",
             "partial_images",
         ],
+        "text_generation_max_concurrent_tasks": 3,
+        "image_generation_max_concurrent_tasks": 3,
         "generation_tail_splitter_max_items": 36,
         "workflow_node_max_retry_count": 10,
         "workflow_node_retry_delay_ms": 2000,

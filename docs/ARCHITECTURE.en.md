@@ -135,7 +135,9 @@ Shared principles:
 - Iterative image generation no longer treats a user-configurable hard total timeout as inspiration semantics. Running tasks persist `progress_updated_at`, completed candidate count, current candidate, and provider response state; stale-running recovery uses the latest progress heartbeat for idle detection and only falls back to `started_at` for older rows.
 - The iterative image worker's Dramatiq `time_limit` remains only as an internal failsafe, not as a user-tunable generation deadline.
 - Dramatiq actors should no-op on duplicate messages for terminal/currently-running records.
-- The global generation concurrency limit is enforced by counting active `WorkflowRun` and `ImageSessionGenerationTask` rows in the database.
+- Worker deployment is one Dramatiq process per container with multiple consumer threads. Scale out by adding worker container replicas.
+- Business generation concurrency is split between `text_generation_max_concurrent_tasks` and `image_generation_max_concurrent_tasks`. Text workflow nodes consume only the text pool; image workflow nodes and iterative image-generation tasks consume the image pool.
+- Both capacity pools serialize worker claims with PostgreSQL advisory transaction locks, so multi-thread and multi-container consumers do not over-claim.
 - `/api/generation-queue` returns the global durable queue overview; iterative image status responses include the current task's queue position.
 
 Related entrypoints:
@@ -186,7 +188,7 @@ Both modes target two artifact types:
 Configuration is split into two categories:
 
 1. Env-only infrastructure configuration: `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `ADMIN_ACCESS_KEY`, and similar values. These must be available before the application can access the database, or they are deployment-level access secrets, so runtime DB overrides are not supported.
-2. Runtime business configuration: provider, model, image size, upload limits, task retry, global generation concurrency limit, poster mode, prompt templates, login-gate switch, business deletion switch, and similar values. They can be provided as defaults by `.env` / `.env.dev`, or written to `app_settings` through `/api/settings` after login with the required RBAC settings permission.
+2. Runtime business configuration: provider, model, image size, upload limits, task retry, text/image generation concurrency limits, poster mode, prompt templates, login-gate switch, business deletion switch, and similar values. They can be provided as defaults by `.env` / `.env.dev`, or written to `app_settings` through `/api/settings` after login with the required RBAC settings permission.
 
 Secret configuration values are not echoed back in API responses.
 

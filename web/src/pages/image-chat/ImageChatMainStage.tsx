@@ -1,24 +1,24 @@
-import { Layers3, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { SensitiveImageOverlay, sensitiveImageClassName } from "../../components/SensitiveImageMask";
 import { api } from "../../lib/api";
-import { formatDateTime } from "../../lib/format";
 import { shouldMaskSensitiveImage } from "../../lib/sensitiveImages";
 import type { ImageSessionGenerationTask, ImageSessionRound } from "../../lib/types";
 import type { ImageHistoryPlaceholderCandidate } from "./branching";
 import { GenerationCanvasPlaceholder } from "./GenerationCanvasPlaceholder";
 import type { ImageChatTranslate } from "./display";
-import { placeholderSizeLabel, placeholderStatusLabel } from "./display";
 
 interface ImageChatMainStageProps {
   selectedRound: ImageSessionRound | null;
   selectedPlaceholder: ImageHistoryPlaceholderCandidate | null;
-  branchBaseRound: ImageSessionRound | null;
   retryingTaskId: string | null;
   cancellingTaskId: string | null;
   regenerating: boolean;
   maskSensitiveImages: boolean;
   generationBlockedTitle?: string | null;
+  stageInfo?: ReactNode;
+  stageActions?: ReactNode;
   onPreviewRound: (round: ImageSessionRound) => void;
   onRetryGenerationTask: (task: ImageSessionGenerationTask) => void;
   onCancelGenerationTask: (task: ImageSessionGenerationTask) => void;
@@ -29,12 +29,13 @@ interface ImageChatMainStageProps {
 export function ImageChatMainStage({
   selectedRound,
   selectedPlaceholder,
-  branchBaseRound,
   retryingTaskId,
   cancellingTaskId,
   regenerating,
   maskSensitiveImages,
   generationBlockedTitle = null,
+  stageInfo,
+  stageActions,
   onPreviewRound,
   onRetryGenerationTask,
   onCancelGenerationTask,
@@ -46,32 +47,19 @@ export function ImageChatMainStage({
   return (
     <div className="relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-600/80 dark:bg-[#121b2d] dark:shadow-[0_0_0_1px_rgba(139,92,246,0.10),0_24px_80px_rgba(0,0,0,0.35)] sm:min-h-[22rem] lg:min-h-[360px]">
       <div className="absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:20px_20px] dark:bg-[radial-gradient(rgba(148,163,184,0.26)_1px,transparent_1px)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 px-5 py-4">
-        {selectedRound ? (
-          <div className="hidden min-w-0 max-w-[calc(100%-5.5rem)] truncate rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur dark:bg-slate-950/82 dark:text-slate-200 dark:ring-slate-700 lg:block">
-            {formatDateTime(selectedRound.created_at)} · {selectedRound.model_name}
-          </div>
-        ) : selectedPlaceholder ? (
-          <div className="hidden min-w-0 max-w-[calc(100%-5.5rem)] truncate rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm ring-1 ring-slate-200 backdrop-blur dark:bg-slate-950/82 dark:text-slate-200 dark:ring-slate-700 lg:block">
-            {placeholderStatusLabel(selectedPlaceholder, t)} · {placeholderSizeLabel(selectedPlaceholder)}
-          </div>
-        ) : (
-          <div className="hidden rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-slate-500 shadow-sm ring-1 ring-slate-200 backdrop-blur dark:border dark:border-violet-400/35 dark:bg-slate-950/82 dark:text-violet-100 dark:ring-violet-400/20 lg:block">
-            {t("chat.waitingFirstResult")}
-          </div>
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {branchBaseRound ? (
-            <div className="hidden h-8 items-center gap-1.5 rounded-full bg-indigo-600 px-3 text-xs font-semibold text-white shadow-sm shadow-indigo-500/20 dark:bg-violet-500/20 dark:text-violet-100 dark:ring-1 dark:ring-violet-400/40 sm:inline-flex">
-              <Layers3 size={13} />
-              {t("chat.baseSelected")}
+      {stageInfo || stageActions ? (
+        <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex flex-wrap items-start justify-end gap-2 sm:inset-x-4 sm:top-4">
+          {stageInfo ? <div className="pointer-events-auto min-w-0 max-w-full">{stageInfo}</div> : null}
+          {stageActions ? (
+            <div className="pointer-events-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
+              {stageActions}
             </div>
           ) : null}
         </div>
-      </div>
+      ) : null}
 
       {selectedRound ? (
-        <div className="absolute inset-0 z-0 flex min-h-0 w-full items-center justify-center px-2 py-2 sm:px-3 sm:py-3 lg:pt-14">
+        <div className="absolute inset-0 z-0 flex min-h-0 w-full items-center justify-center px-2 py-2 sm:px-3 sm:py-3">
           <button
             type="button"
             onClick={() => onPreviewRound(selectedRound)}

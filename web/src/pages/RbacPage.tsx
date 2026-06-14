@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   KeyRound,
@@ -17,9 +18,9 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ModalShell } from "../components/ModalShell";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
-import { useNotifications } from "../lib/notifications";
 import { useI18n } from "../lib/preferences";
 import type {
   GenerationResourceGroup,
@@ -30,6 +31,32 @@ import type {
 } from "../lib/types";
 
 const RBAC_USER_PAGE_SIZE = 20;
+const RBAC_FEEDBACK_AUTO_DISMISS_MS = 1000;
+
+const RBAC_INPUT_CLASS =
+  "h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition-all " +
+  "placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 disabled:cursor-not-allowed disabled:opacity-60 " +
+  "dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20";
+const RBAC_PANEL_CLASS =
+  "pf-settings-bordered-module rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 " +
+  "dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25";
+const RBAC_FIELD_CARD_CLASS =
+  "pf-settings-field-card rounded-xl border border-slate-200 bg-slate-50/70 shadow-none dark:border-slate-700 dark:bg-[#0b1220]";
+const RBAC_MAIN_ACTION_CLASS =
+  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RBAC_SECONDARY_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RBAC_COMPACT_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RBAC_ICON_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RBAC_DANGER_ICON_ACTION_CLASS =
+  "pf-danger-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
+  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 
 type RbacSectionId = "users" | "roles";
 
@@ -138,7 +165,6 @@ export function rbacUserResourceGroupIds(user: RbacUser): string[] {
 
 export function RbacPage() {
   const { t } = useI18n();
-  const { notify } = useNotifications();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [activeSection, setActiveSection] = useState<RbacSectionId>("users");
@@ -157,9 +183,9 @@ export function RbacPage() {
   const [pendingUserAction, setPendingUserAction] = useState<PendingUserAction | null>(null);
   const [resourceGroupGrantUser, setResourceGroupGrantUser] = useState<RbacUser | null>(null);
   const [resourceGroupGrantDraft, setResourceGroupGrantDraft] = useState<string[]>([]);
-  const [message, setMessage] = useState("");
+  const [feedbackSuccess, setFeedbackSuccess] = useState("");
+  const [feedbackError, setFeedbackError] = useState("");
   const [passwordSetupToken, setPasswordSetupToken] = useState("");
-  const [error, setError] = useState("");
   const userListQueryKey = useMemo(
     () => rbacUserListQueryKey(userPage, userSearch, userRoleFilter),
     [userPage, userSearch, userRoleFilter],
@@ -302,12 +328,12 @@ export function RbacPage() {
     onSuccess: async (createdUser) => {
       setUsername("");
       setDisplayName("");
-      setMessage(t("rbac.userCreated"));
+      setFeedbackSuccess(t("rbac.userCreated"));
       setPasswordSetupToken(createdUser.password_setup_token ?? "");
-      setError("");
+      setFeedbackError("");
       await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
-    onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.createUserFailed"))),
+    onError: (mutationError) => setFeedbackError(errorMessage(mutationError, t("rbac.createUserFailed"))),
   });
 
   const createRoleMutation = useMutation({
@@ -316,23 +342,23 @@ export function RbacPage() {
       setRoleCode("");
       setRoleName("");
       setSelectedPermissionRoleId(createdRole.id);
-      setMessage(t("rbac.roleCreated"));
-      setError("");
+      setFeedbackSuccess(t("rbac.roleCreated"));
+      setFeedbackError("");
       await queryClient.invalidateQueries({ queryKey: ["rbac-roles"] });
     },
-    onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.createRoleFailed"))),
+    onError: (mutationError) => setFeedbackError(errorMessage(mutationError, t("rbac.createRoleFailed"))),
   });
 
   const resetPasswordMutation = useMutation({
     mutationFn: api.resetRbacUserPassword,
     onSuccess: async (updatedUser) => {
       setPendingUserAction(null);
-      setMessage(t("rbac.passwordReset"));
+      setFeedbackSuccess(t("rbac.passwordReset"));
       setPasswordSetupToken(updatedUser.password_setup_token ?? "");
-      setError("");
+      setFeedbackError("");
       await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
-    onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.resetPasswordFailed"))),
+    onError: (mutationError) => setFeedbackError(errorMessage(mutationError, t("rbac.resetPasswordFailed"))),
   });
 
   const updateUserMutation = useMutation({
@@ -340,12 +366,12 @@ export function RbacPage() {
       api.updateRbacUser(userId, { enabled }),
     onSuccess: async () => {
       setPendingUserAction(null);
-      setMessage(t("rbac.userUpdated"));
+      setFeedbackSuccess(t("rbac.userUpdated"));
       setPasswordSetupToken("");
-      setError("");
+      setFeedbackError("");
       await Promise.all([refreshCurrentUserList(), queryClient.invalidateQueries({ queryKey: ["rbac-roles"] })]);
     },
-    onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.updateUserFailed"))),
+    onError: (mutationError) => setFeedbackError(errorMessage(mutationError, t("rbac.updateUserFailed"))),
   });
 
   const saveRolePermissionsMutation = useMutation({
@@ -356,12 +382,12 @@ export function RbacPage() {
       }),
     onSuccess: async (payload) => {
       setRolePermissionDraft(rolePermissionDraftFromResponse(payload));
-      setMessage(t("rbac.permissionsSaved"));
+      setFeedbackSuccess(t("rbac.permissionsSaved"));
       setPasswordSetupToken("");
-      setError("");
+      setFeedbackError("");
       await queryClient.invalidateQueries({ queryKey: ["rbac-role-permissions", payload.role_id] });
     },
-    onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.savePermissionsFailed"))),
+    onError: (mutationError) => setFeedbackError(errorMessage(mutationError, t("rbac.savePermissionsFailed"))),
   });
 
   const saveResourceGroupGrantsMutation = useMutation({
@@ -372,30 +398,24 @@ export function RbacPage() {
     onSuccess: async (payload) => {
       setResourceGroupGrantDraft([...payload.resource_group_ids]);
       setResourceGroupGrantUser(null);
-      setMessage(t("rbac.resourceGroupsSaved"));
-      notify({
-        title: t("rbac.resourceGroupsSaved"),
-        variant: "success",
-        autoClose: true,
-        dedupeKey: "rbac-resource-group-grants-saved",
-      });
+      setFeedbackSuccess(t("rbac.resourceGroupsSaved"));
       setPasswordSetupToken("");
-      setError("");
+      setFeedbackError("");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["rbac-user-generation-resource-groups", payload.user_id] }),
         refreshCurrentUserList(),
       ]);
     },
-    onError: (mutationError) => setError(errorMessage(mutationError, t("rbac.saveResourceGroupsFailed"))),
+    onError: (mutationError) => setFeedbackError(errorMessage(mutationError, t("rbac.saveResourceGroupsFailed"))),
   });
 
   const handleCreateUser = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setMessage("");
+    setFeedbackSuccess("");
     setPasswordSetupToken("");
-    setError("");
+    setFeedbackError("");
     if (!username.trim()) {
-      setError(t("rbac.usernameRequired"));
+      setFeedbackError(t("rbac.usernameRequired"));
       return;
     }
     createUserMutation.mutate();
@@ -403,11 +423,11 @@ export function RbacPage() {
 
   const handleCreateRole = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setMessage("");
+    setFeedbackSuccess("");
     setPasswordSetupToken("");
-    setError("");
+    setFeedbackError("");
     if (!roleCode.trim() || !roleName.trim()) {
-      setError(t("rbac.roleRequired"));
+      setFeedbackError(t("rbac.roleRequired"));
       return;
     }
     createRoleMutation.mutate();
@@ -473,14 +493,14 @@ export function RbacPage() {
   const resourceGroupGrantDialogOpen = Boolean(resourceGroupGrantUser);
 
   return (
-    <div className="pf-app">
+    <div className="pf-app pf-settings-workspace">
       <TopNav
         breadcrumbs={t("rbac.breadcrumb")}
         onHome={() => navigate("/inspirations")}
         onLogout={() => logoutMutation.mutate()}
       />
 
-      <main className="pf-page flex flex-col gap-6">
+      <main className="pf-page pf-rbac-page flex flex-col gap-6">
         <section className="pf-page-header">
           <div>
             <div className="pf-eyebrow mb-2 gap-1.5">
@@ -492,18 +512,8 @@ export function RbacPage() {
           </div>
         </section>
 
-        {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-200">
-            {error}
-          </div>
-        ) : null}
-        {message ? (
-          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200">
-            {message}
-          </div>
-        ) : null}
         {passwordSetupToken ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
             <div className="mb-1 font-semibold">{t("rbac.passwordSetupToken")}</div>
             <code className="block break-all rounded border border-amber-200 bg-white px-2 py-1 font-mono text-xs text-amber-900 dark:border-amber-400/25 dark:bg-slate-950 dark:text-amber-100">
               {passwordSetupToken}
@@ -512,7 +522,7 @@ export function RbacPage() {
         ) : null}
 
         <div
-          className="inline-flex w-full gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:w-fit"
+          className="pf-settings-generation-tabs pf-workspace-horizontal-switch-tabs flex w-full max-w-md gap-3 sm:gap-6"
           role="tablist"
           aria-label={t("rbac.title")}
         >
@@ -524,12 +534,9 @@ export function RbacPage() {
                 type="button"
                 role="tab"
                 aria-selected={active}
+                aria-current={active ? "true" : undefined}
                 onClick={() => setActiveSection(section)}
-                className={`inline-flex h-9 flex-1 items-center justify-center rounded-md px-4 text-sm font-semibold transition-colors sm:flex-none ${
-                  active
-                    ? "bg-slate-950 text-white shadow-sm dark:bg-violet-500"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
-                }`}
+                className={`pf-settings-generation-tab flex-1 ${active ? "is-active" : ""}`}
               >
                 {section === "users" ? t("rbac.userManagement") : t("rbac.roleManagement")}
               </button>
@@ -538,7 +545,7 @@ export function RbacPage() {
         </div>
 
         {loading ? (
-          <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-8 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+          <div className={`${RBAC_PANEL_CLASS} flex items-center gap-2 py-8 text-sm text-slate-500 dark:text-slate-400`}>
             <Loader2 size={16} className="animate-spin" />
             {t("app.loading")}
           </div>
@@ -549,7 +556,7 @@ export function RbacPage() {
         ) : (
           <>
             {activeSection === "users" ? (
-              <section className="pf-panel p-4">
+              <section className={RBAC_PANEL_CLASS}>
                 <div className="mb-4 flex items-center gap-2">
                   <UserPlus size={18} className="text-slate-500 dark:text-slate-400" />
                   <h2 className="text-sm font-semibold">{t("rbac.createUser")}</h2>
@@ -559,18 +566,18 @@ export function RbacPage() {
                     value={username}
                     onChange={(event) => setUsername(event.target.value)}
                     placeholder={t("rbac.username")}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                    className={RBAC_INPUT_CLASS}
                   />
                   <input
                     value={displayName}
                     onChange={(event) => setDisplayName(event.target.value)}
                     placeholder={t("rbac.displayName")}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                    className={RBAC_INPUT_CLASS}
                   />
                   <select
                     value={selectedRoleId}
                     onChange={(event) => setRoleId(event.target.value)}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                    className={RBAC_INPUT_CLASS}
                   >
                     {assignableRoles.map((role) => (
                       <option key={role.id} value={role.id}>
@@ -581,7 +588,7 @@ export function RbacPage() {
                   <button
                     type="submit"
                     disabled={createUserMutation.isPending}
-                    className="inline-flex items-center justify-center rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                    className={RBAC_MAIN_ACTION_CLASS}
                   >
                     {createUserMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
                     <span className="ml-1.5">{t("rbac.add")}</span>
@@ -591,7 +598,7 @@ export function RbacPage() {
             ) : null}
             {activeSection === "roles" ? (
               <>
-                <section className="pf-panel p-4">
+                <section className={RBAC_PANEL_CLASS}>
                   <div className="mb-4 flex items-center gap-2">
                     <ShieldCheck size={18} className="text-slate-500 dark:text-slate-400" />
                     <h2 className="text-sm font-semibold">{t("rbac.createRole")}</h2>
@@ -601,18 +608,18 @@ export function RbacPage() {
                       value={roleCode}
                       onChange={(event) => setRoleCode(event.target.value)}
                       placeholder={t("rbac.roleCode")}
-                      className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                      className={RBAC_INPUT_CLASS}
                     />
                     <input
                       value={roleName}
                       onChange={(event) => setRoleName(event.target.value)}
                       placeholder={t("rbac.roleName")}
-                      className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                      className={RBAC_INPUT_CLASS}
                     />
                     <button
                       type="submit"
                       disabled={createRoleMutation.isPending}
-                      className="inline-flex items-center justify-center rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold transition-colors hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:hover:bg-slate-900"
+                      className={RBAC_MAIN_ACTION_CLASS}
                     >
                       {createRoleMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
                       <span className="ml-1.5">{t("rbac.add")}</span>
@@ -620,7 +627,7 @@ export function RbacPage() {
                   </form>
                 </section>
 
-                <section className="pf-panel p-4">
+                <section className={RBAC_PANEL_CLASS}>
                   <div className="mb-4 flex items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold">{t("rbac.roleManagement")}</h2>
                     <span className="text-xs text-slate-500 dark:text-slate-400">{roles.length}</span>
@@ -639,13 +646,13 @@ export function RbacPage() {
                       value={roleSearch}
                       onChange={(event) => setRoleSearch(event.target.value)}
                       placeholder={t("rbac.roleSearchPlaceholder")}
-                      className="h-10 w-full rounded-md border border-slate-200 bg-white pl-9 pr-9 text-sm outline-none transition-colors focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                      className={`${RBAC_INPUT_CLASS} pl-9 pr-9`}
                     />
                     {roleSearch ? (
                       <button
                         type="button"
                         onClick={() => setRoleSearch("")}
-                        className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                        className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:ring-violet-400/60"
                         aria-label={t("rbac.clearRoleSearch")}
                         title={t("rbac.clearRoleSearch")}
                       >
@@ -660,8 +667,9 @@ export function RbacPage() {
                       <button
                         key={role.id}
                         type="button"
+                        aria-pressed={active}
                         onClick={() => setSelectedPermissionRoleId(role.id)}
-                        className={`flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
+                        className={`pf-settings-provider-option flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left transition-all active:scale-[0.99] ${
                           active
                             ? "border-indigo-200 bg-indigo-50 text-indigo-950 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-50"
                             : "border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900"
@@ -686,7 +694,7 @@ export function RbacPage() {
                       </button>
                     );
                   }) : (
-                    <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                    <div className={`${RBAC_FIELD_CARD_CLASS} border-dashed px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400`}>
                       {t("rbac.noMatchingRoles")}
                     </div>
                   )}
@@ -709,7 +717,7 @@ export function RbacPage() {
                       saveRolePermissionsMutation.isPending
                     }
                     onClick={() => saveRolePermissionsMutation.mutate()}
-                    className="inline-flex items-center justify-center rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                    className={RBAC_MAIN_ACTION_CLASS}
                   >
                     {saveRolePermissionsMutation.isPending ? (
                       <Loader2 size={15} className="animate-spin" />
@@ -721,11 +729,11 @@ export function RbacPage() {
                 </div>
 
                 {!selectedPermissionRole ? (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                  <div className={`${RBAC_FIELD_CARD_CLASS} px-3 py-6 text-sm text-slate-500 dark:text-slate-400`}>
                     {emptyPermissionRoleMessage}
                   </div>
                 ) : permissionsLoading ? (
-                  <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                  <div className={`${RBAC_FIELD_CARD_CLASS} flex items-center gap-2 px-3 py-6 text-sm text-slate-500 dark:text-slate-400`}>
                     <Loader2 size={16} className="animate-spin" />
                     {t("app.loading")}
                   </div>
@@ -734,7 +742,7 @@ export function RbacPage() {
                     {t("rbac.permissionCatalogLoadFailed")}
                   </div>
                 ) : selectedPermissionRole.is_admin ? (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                  <div className={`${RBAC_FIELD_CARD_CLASS} px-3 py-6 text-sm text-slate-600 dark:text-slate-300`}>
                     {t("rbac.adminRoleReadonly")}
                   </div>
                 ) : (
@@ -743,25 +751,20 @@ export function RbacPage() {
                       <h3 className="mb-3 text-sm font-semibold">{t("rbac.menuPermissions")}</h3>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {permissionGroups.map((group) => (
-                          <label
+                          <RbacOptionToggle
                             key={group.menuCode}
-                            className="flex items-start gap-3 rounded-lg border border-slate-200 px-3 py-3 text-sm dark:border-slate-800"
+                            checked={rolePermissionDraft.menu_codes.includes(group.menuCode)}
+                            onChange={(checked) =>
+                              setRolePermissionDraft((current) =>
+                                current ? toggleMenuPermissionDraft(current, group, checked) : current,
+                              )
+                            }
                           >
-                            <input
-                              type="checkbox"
-                              checked={rolePermissionDraft.menu_codes.includes(group.menuCode)}
-                              onChange={(event) =>
-                                setRolePermissionDraft((current) =>
-                                  current ? toggleMenuPermissionDraft(current, group, event.target.checked) : current,
-                                )
-                              }
-                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400"
-                            />
-                            <div>
+                            <span>
                               <div className="font-medium">{group.menuTitle}</div>
                               <div className="text-xs text-slate-500 dark:text-slate-400">{group.menuCode}</div>
-                            </div>
-                          </label>
+                            </span>
+                          </RbacOptionToggle>
                         ))}
                       </div>
                     </div>
@@ -770,31 +773,21 @@ export function RbacPage() {
                       <h3 className="mb-3 text-sm font-semibold">{t("rbac.apiPermissions")}</h3>
                       <div className="space-y-4">
                         {permissionGroups.map((group) => (
-                          <div key={group.menuCode} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                          <div key={group.menuCode} className={`${RBAC_FIELD_CARD_CLASS} p-3`}>
                             <div className="mb-3 text-sm font-semibold">{group.menuTitle}</div>
                             <div className="space-y-2">
                               {group.apiPermissions.map((permission) => (
-                                <label
+                                <RbacOptionToggle
                                   key={permission.code}
-                                  className="flex items-start gap-3 rounded-md border border-slate-100 px-3 py-3 text-sm dark:border-slate-900"
+                                  checked={rolePermissionDraft.api_permission_codes.includes(permission.code)}
+                                  onChange={(checked) =>
+                                    setRolePermissionDraft((current) =>
+                                      current
+                                        ? toggleApiPermissionDraft(current, group.menuCode, permission.code, checked)
+                                        : current,
+                                    )
+                                  }
                                 >
-                                  <input
-                                    type="checkbox"
-                                    checked={rolePermissionDraft.api_permission_codes.includes(permission.code)}
-                                    onChange={(event) =>
-                                      setRolePermissionDraft((current) =>
-                                        current
-                                          ? toggleApiPermissionDraft(
-                                              current,
-                                              group.menuCode,
-                                              permission.code,
-                                              event.target.checked,
-                                            )
-                                          : current,
-                                      )
-                                    }
-                                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400"
-                                  />
                                   <div className="min-w-0">
                                     <div className="font-medium">{permission.title}</div>
                                     <div className="text-xs text-slate-500 dark:text-slate-400">{permission.code}</div>
@@ -802,7 +795,7 @@ export function RbacPage() {
                                       {permission.description}
                                     </div>
                                   </div>
-                                </label>
+                                </RbacOptionToggle>
                               ))}
                             </div>
                           </div>
@@ -845,7 +838,7 @@ export function RbacPage() {
                           value={userSearchDraft}
                           onChange={(event) => setUserSearchDraft(event.target.value)}
                           placeholder={t("rbac.userSearchPlaceholder")}
-                          className="h-10 w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none transition-colors focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                          className={`${RBAC_INPUT_CLASS} pl-9 pr-3`}
                         />
                       </div>
                     </label>
@@ -857,7 +850,7 @@ export function RbacPage() {
                           setUserRoleFilter(event.target.value);
                           setUserPage(1);
                         }}
-                        className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none transition-colors focus:border-slate-900 focus:ring-1 focus:ring-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:focus:border-violet-400 dark:focus:ring-violet-400/30"
+                        className={RBAC_INPUT_CLASS}
                       >
                         <option value="">{t("rbac.allRoles")}</option>
                         {roles.map((role) => (
@@ -870,7 +863,7 @@ export function RbacPage() {
                     <button
                       type="submit"
                       disabled={usersQuery.isFetching}
-                      className="inline-flex h-10 items-center justify-center rounded-md bg-slate-950 px-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                      className={RBAC_MAIN_ACTION_CLASS}
                     >
                       {usersQuery.isFetching ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : null}
                       {t("rbac.search")}
@@ -880,7 +873,7 @@ export function RbacPage() {
                         type="button"
                         onClick={handleClearUserFilters}
                         disabled={usersQuery.isFetching}
-                        className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+                        className={RBAC_SECONDARY_ACTION_CLASS}
                       >
                         {t("rbac.clearFilters")}
                       </button>
@@ -930,7 +923,7 @@ export function RbacPage() {
 	                                type="button"
 	                                onClick={() => openResourceGroupGrantDialog(user)}
 	                                disabled={pendingUserActionBusy}
-	                                className={`inline-flex max-w-md items-center rounded-full border px-2.5 py-1 text-left text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 ${
+	                                className={`inline-flex max-w-md items-center rounded-lg border px-2.5 py-1 text-left text-[11px] font-semibold transition-all active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 ${
 	                                  user.resource_groups.length
 	                                    ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100 dark:border-violet-400/40 dark:bg-violet-500/10 dark:text-violet-100 dark:hover:border-violet-300/60 dark:hover:bg-violet-500/16"
 	                                    : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-800"
@@ -955,7 +948,7 @@ export function RbacPage() {
                                   type="button"
                                   onClick={() => openResourceGroupGrantDialog(user)}
                                   disabled={pendingUserActionBusy}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-all hover:scale-[1.03] hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-violet-400/40 dark:hover:bg-violet-500/10 dark:hover:text-violet-100"
+                                  className={RBAC_ICON_ACTION_CLASS}
                                   aria-label={t("rbac.editResourceGroups")}
                                   title={t("rbac.editResourceGroups")}
                                 >
@@ -967,7 +960,7 @@ export function RbacPage() {
                                       type="button"
                                       onClick={() => setPendingUserAction({ kind: "reset-password", user })}
                                       disabled={pendingUserActionBusy}
-                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-all hover:scale-[1.03] hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-amber-400/40 dark:hover:bg-amber-500/10 dark:hover:text-amber-100"
+                                      className={RBAC_ICON_ACTION_CLASS}
                                       aria-label={t("rbac.resetPassword")}
                                       title={t("rbac.resetPassword")}
                                     >
@@ -979,7 +972,7 @@ export function RbacPage() {
                                         setPendingUserAction({ kind: "set-enabled", user, enabled: !user.enabled })
                                       }
                                       disabled={pendingUserActionBusy}
-                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition-all hover:scale-[1.03] hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-violet-400/40 dark:hover:bg-violet-500/10 dark:hover:text-violet-100"
+                                      className={user.enabled ? RBAC_DANGER_ICON_ACTION_CLASS : RBAC_ICON_ACTION_CLASS}
                                       aria-label={user.enabled ? t("rbac.disable") : t("rbac.enable")}
                                       title={user.enabled ? t("rbac.disable") : t("rbac.enable")}
                                     >
@@ -1065,6 +1058,12 @@ export function RbacPage() {
           });
         }}
       />
+      <RbacFeedbackDialog
+        successMessage={feedbackSuccess}
+        errorMessage={feedbackError}
+        onCloseSuccess={() => setFeedbackSuccess("")}
+        onCloseError={() => setFeedbackError("")}
+      />
     </div>
   );
 }
@@ -1082,6 +1081,82 @@ interface ResourceGroupGrantDialogProps {
   onToggleGroup: (groupId: string, checked: boolean) => void;
 }
 
+function RbacFeedbackDialog({
+  successMessage,
+  errorMessage,
+  onCloseSuccess,
+  onCloseError,
+}: {
+  successMessage: string;
+  errorMessage: string;
+  onCloseSuccess: () => void;
+  onCloseError: () => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+  const descriptionId = useId();
+  const open = Boolean(successMessage || errorMessage);
+  const isError = Boolean(errorMessage);
+  const message = errorMessage || successMessage;
+
+  useEffect(() => {
+    if (!successMessage || isError) {
+      return undefined;
+    }
+    const timer = window.setTimeout(onCloseSuccess, RBAC_FEEDBACK_AUTO_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [isError, onCloseSuccess, successMessage]);
+
+  if (!open) {
+    return null;
+  }
+
+  const Icon = isError ? X : CheckCircle2;
+
+  return (
+    <ModalShell
+      open={open}
+      role={isError ? "alertdialog" : "dialog"}
+      onClose={isError ? onCloseError : onCloseSuccess}
+      ariaLabelledBy={titleId}
+      ariaDescribedBy={descriptionId}
+      overlayClassName="z-[95] bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      panelClassName="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+    >
+        <div className="flex items-start gap-3 px-5 py-5">
+          <div
+            className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+              isError
+                ? "bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-200"
+                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-200"
+            }`}
+          >
+            <Icon size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
+              {isError ? t("settings.operationFailed") : t("settings.operationSucceeded")}
+            </h2>
+            <p id={descriptionId} className="mt-2 break-words text-sm leading-6 text-slate-600 dark:text-slate-300">
+              {message}
+            </p>
+          </div>
+          {isError ? (
+            <button
+              type="button"
+              onClick={onCloseError}
+              className={RBAC_ICON_ACTION_CLASS}
+              aria-label={t("common.close")}
+              title={t("common.close")}
+            >
+              <X size={15} />
+            </button>
+          ) : null}
+        </div>
+    </ModalShell>
+  );
+}
+
 function ResourceGroupGrantDialog({
   open,
   user,
@@ -1096,19 +1171,6 @@ function ResourceGroupGrantDialog({
 }: ResourceGroupGrantDialogProps) {
   const { t } = useI18n();
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busy) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [busy, onClose, open]);
-
   if (!open || !user) {
     return null;
   }
@@ -1116,20 +1178,14 @@ function ResourceGroupGrantDialog({
   const readonly = user.is_admin;
 
   return (
-    <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) {
-          onClose();
-        }
-      }}
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      closeDisabled={busy}
+      ariaLabel={t("rbac.resourceGroupGrants")}
+      overlayClassName="z-[90] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      panelClassName="flex w-full max-w-3xl max-h-[min(80vh,720px)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("rbac.resourceGroupGrants")}
-        className="flex w-full max-w-3xl max-h-[min(80vh,720px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
-      >
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("rbac.resourceGroupGrants")}</h2>
@@ -1141,7 +1197,7 @@ function ResourceGroupGrantDialog({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-white"
+            className={RBAC_ICON_ACTION_CLASS}
             aria-label={t("common.cancel")}
             title={t("common.cancel")}
           >
@@ -1151,11 +1207,11 @@ function ResourceGroupGrantDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {readonly ? (
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+            <div className={`${RBAC_FIELD_CARD_CLASS} px-4 py-6 text-sm text-slate-600 dark:text-slate-300`}>
               {t("rbac.adminResourceGroupsReadonly")}
             </div>
           ) : loading ? (
-            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+            <div className={`${RBAC_FIELD_CARD_CLASS} flex items-center gap-2 px-4 py-6 text-sm text-slate-500 dark:text-slate-400`}>
               <Loader2 size={16} className="animate-spin" />
               {t("app.loading")}
             </div>
@@ -1176,7 +1232,7 @@ function ResourceGroupGrantDialog({
               ))}
             </div>
           ) : (
-            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+            <div className={`${RBAC_FIELD_CARD_CLASS} border-dashed px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400`}>
               {t("rbac.noResourceGroups")}
             </div>
           )}
@@ -1187,7 +1243,7 @@ function ResourceGroupGrantDialog({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+            className={RBAC_SECONDARY_ACTION_CLASS}
           >
             {t("common.cancel")}
           </button>
@@ -1195,14 +1251,45 @@ function ResourceGroupGrantDialog({
             type="button"
             onClick={onSave}
             disabled={readonly || loading || busy}
-            className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+            className={RBAC_MAIN_ACTION_CLASS}
           >
             {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
             {t("rbac.saveResourceGroups")}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
+  );
+}
+
+function RbacOptionToggle({
+  checked,
+  disabled = false,
+  children,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  children: React.ReactNode;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      className={`pf-settings-option-toggle flex min-h-10 max-w-full items-start gap-2 rounded-xl border py-2 pl-2.5 pr-3 text-sm transition-all ${
+        checked
+          ? "border-indigo-300 bg-indigo-50 text-slate-950 dark:border-violet-400/45 dark:bg-violet-500/14 dark:text-white"
+          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-white"
+      } ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer active:scale-[0.99]"}`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="peer sr-only"
+      />
+      <span className="pf-settings-option-toggle-control mt-0.5" aria-hidden="true" />
+      <span className="min-w-0 leading-5">{children}</span>
+    </label>
   );
 }
 
@@ -1219,20 +1306,7 @@ function ResourceGroupGrantCheckbox({
 }) {
   const { t } = useI18n();
   return (
-    <label
-      className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm ${
-        group.enabled
-          ? "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
-          : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
-      }`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onToggle(event.target.checked)}
-        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400"
-      />
+    <RbacOptionToggle checked={checked} disabled={disabled} onChange={onToggle}>
       <span className="min-w-0">
         <span className="flex flex-wrap items-center gap-2 font-medium text-slate-900 dark:text-slate-100">
           {group.name}
@@ -1247,7 +1321,7 @@ function ResourceGroupGrantCheckbox({
           <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{group.description}</span>
         ) : null}
       </span>
-    </label>
+    </RbacOptionToggle>
   );
 }
 
@@ -1270,7 +1344,7 @@ function RbacPagination({
         type="button"
         onClick={() => onPageChange(Math.max(1, page - 1))}
         disabled={disabled || page <= 1}
-        className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-45 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+        className={RBAC_COMPACT_ACTION_CLASS}
       >
         <ChevronLeft size={14} className="mr-1" aria-hidden="true" />
         {t("pagination.previous")}
@@ -1282,7 +1356,7 @@ function RbacPagination({
         type="button"
         onClick={() => onPageChange(Math.min(totalPages, page + 1))}
         disabled={disabled || page >= totalPages}
-        className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-45 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+        className={RBAC_COMPACT_ACTION_CLASS}
       >
         {t("pagination.next")}
         <ChevronRight size={14} className="ml-1" aria-hidden="true" />

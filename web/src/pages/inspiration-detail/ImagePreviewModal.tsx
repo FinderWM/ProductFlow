@@ -1,9 +1,9 @@
 import { X } from "lucide-react";
-import { createPortal } from "react-dom";
 
+import { ModalShell } from "../../components/ModalShell";
+import { ZoomableImage } from "../../components/ZoomableImage";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
-import { ZoomableImage } from "../../components/ZoomableImage";
 import { IMAGE_PREVIEW_SURFACE_CLASS_NAME } from "./constants";
 import { DownloadLink } from "./ImageDownloadComponents";
 
@@ -15,18 +15,13 @@ interface ImagePreviewModalProps {
 export function ImagePreviewModal({ image, onClose }: ImagePreviewModalProps) {
   const { t } = useI18n();
 
-  const modal = (
-    <div
-      className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center bg-zinc-950/70 p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-label={image.alt}
-      onClick={onClose}
+  return (
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={image.alt}
+      overlayClassName="pointer-events-auto z-[100] bg-zinc-950/70 p-6"
+      panelClassName="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
     >
-      <div
-        className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
         <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
           <div className="min-w-0 truncate text-sm font-medium text-zinc-800">
             {image.alt}
@@ -51,9 +46,6 @@ export function ImagePreviewModal({ image, onClose }: ImagePreviewModalProps) {
           resetLabel={t("imagePreview.reset")}
           className={`h-[calc(100vh-11rem)] p-4 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
         />
-      </div>
-    </div>
+    </ModalShell>
   );
-
-  return typeof document === "undefined" ? modal : createPortal(modal, document.body);
 }

@@ -1,8 +1,9 @@
 import { Download, X } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { api } from "../lib/api";
 import { useI18n } from "../lib/preferences";
+import { ModalShell } from "./ModalShell";
 import { ZoomableImage } from "./ZoomableImage";
 
 export interface GalleryPreviewMetadataRow {
@@ -24,12 +25,15 @@ interface GalleryImagePreviewDialogProps {
   title: string;
   subtitle?: string;
   body: ReactNode;
+  imageInteractive?: boolean;
   metadataRows?: GalleryPreviewMetadataRow[];
   providerNotes?: string[];
   providerNotesTitle: string;
   downloadUrl: string;
   downloadLabel: string;
   closeLabel: string;
+  footerExtra?: ReactNode;
+  className?: string;
   onClose: () => void;
 }
 
@@ -40,46 +44,33 @@ export function GalleryImagePreviewDialog({
   title,
   subtitle,
   body,
+  imageInteractive = true,
   metadataRows = [],
   providerNotes = [],
   providerNotesTitle,
   downloadUrl,
   downloadLabel,
   closeLabel,
+  footerExtra,
+  className = "",
   onClose,
 }: GalleryImagePreviewDialogProps) {
   const { t } = useI18n();
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center overflow-hidden bg-slate-950/86 p-2 backdrop-blur-sm sm:p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={ariaLabel}
-      onClick={onClose}
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={ariaLabel}
+      overlayClassName={`z-[80] bg-slate-950/86 p-2 backdrop-blur-sm sm:p-4 ${className}`}
+      panelClassName="grid h-[calc(100svh-1rem)] max-h-[calc(100svh-1rem)] w-full max-w-[calc(100vw-1rem)] min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,42svh)] overflow-hidden rounded-lg bg-white shadow-2xl dark:bg-[#0f1726] sm:h-[calc(100svh-2rem)] sm:max-h-[calc(100svh-2rem)] sm:max-w-[calc(100vw-2rem)] lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] lg:grid-rows-1 xl:max-w-[92rem] animate-spring-pop-in"
     >
-      <div
-        className="grid h-[calc(100svh-1rem)] max-h-[calc(100svh-1rem)] w-full max-w-[calc(100vw-1rem)] min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,42svh)] overflow-hidden rounded-lg bg-white shadow-2xl dark:bg-[#0f1726] sm:h-[calc(100svh-2rem)] sm:max-h-[calc(100svh-2rem)] sm:max-w-[calc(100vw-2rem)] lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] lg:grid-rows-1 xl:max-w-[92rem] animate-spring-pop-in"
-        onClick={(event) => event.stopPropagation()}
-      >
         <ZoomableImage
           src={imageUrl}
           alt={imageAlt}
           zoomOutLabel={t("imagePreview.zoomOut")}
           zoomInLabel={t("imagePreview.zoomIn")}
           resetLabel={t("imagePreview.reset")}
+          interactive={imageInteractive}
           className="bg-slate-950"
         />
         <aside className="flex min-h-0 flex-col border-t border-slate-200 dark:border-slate-800 lg:border-l lg:border-t-0">
@@ -120,7 +111,8 @@ export function GalleryImagePreviewDialog({
               </div>
             ) : null}
           </div>
-          <div className="border-t border-slate-200 p-4 dark:border-slate-800">
+          <div className="space-y-2 border-t border-slate-200 p-4 dark:border-slate-800">
+            {footerExtra}
             <a
               href={api.toApiUrl(downloadUrl)}
               target="_blank"
@@ -132,7 +124,6 @@ export function GalleryImagePreviewDialog({
             </a>
           </div>
         </aside>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

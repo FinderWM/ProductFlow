@@ -79,6 +79,13 @@ interface SearchResult {
   score: number;
 }
 
+const HELP_PRIMARY_ACTION_CLASS =
+  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const HELP_SECONDARY_ACTION_CLASS =
+  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
+  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+
 const DOC_PAGES: DocPage[] = [
   {
     slug: "overview",
@@ -1064,7 +1071,8 @@ const DOC_PAGES: DocPage[] = [
               ["最多参考图数量", "限制参考图数量，文/图生图单轮上下文还会受到 6 张图片上下文限制。"],
               ["最大像素数", "限制上传图片的像素面积。"],
               ["允许图片 MIME", "逗号分隔，例如 `image/png,image/jpeg,image/webp`。"],
-              ["全局生成并发上限", "工作流和文/图生图共享的资源保护阈值。达到上限时页面会提示稍后重试。"],
+              ["文案生成并发上限", "限制文案工作流节点同时进入 provider 执行的数量。"],
+              ["图片生成并发上限", "限制图片工作流节点和文/图生图任务同时进入 provider 执行的数量。"],
               ["文/图生图进度闲置恢复阈值", "worker 启动恢复时，running 文/图生图任务会按最近 progress heartbeat 判断是否闲置。"],
               ["工作流生图 Provider 超时", "工作流 AI 生图节点单次 provider 调用的项目级超时上界。超时后任务安全失败并释放队列容量。"],
             ],
@@ -2117,9 +2125,12 @@ const HELP_DOC_JA_TRANSLATIONS: Record<string, string> = {
   "允许图片 MIME": "許可する画像 MIME",
   "逗号分隔，例如 `image/png,image/jpeg,image/webp`。":
     "カンマ区切りです。例：`image/png,image/jpeg,image/webp`。",
-  "全局生成并发上限": "全体生成並行数上限",
-  "工作流和文/图生图共享的资源保护阈值。达到上限时页面会提示稍后重试。":
-    "ワークフローと画像生成チャットで共有するリソース保護しきい値です。上限に達すると、ページは後で再試行するよう表示します。",
+  "文案生成并发上限": "テキスト生成並行数上限",
+  "限制文案工作流节点同时进入 provider 执行的数量。":
+    "テキストワークフローノードが同時に provider 実行へ入る数を制限します。",
+  "图片生成并发上限": "画像生成並行数上限",
+  "限制图片工作流节点和文/图生图任务同时进入 provider 执行的数量。":
+    "画像ワークフローノードと画像生成チャットタスクが同時に provider 実行へ入る数を制限します。",
   "文/图生图进度闲置恢复阈值": "画像生成チャット進捗アイドル復旧しきい値",
   "worker 启动恢复时，running 文/图生图任务会按最近 progress heartbeat 判断是否闲置。":
     "worker 起動時の復旧では、running の画像生成チャットタスクが直近の progress heartbeat によりアイドルかどうか判定されます。",
@@ -2483,7 +2494,7 @@ export function HelpPage() {
   };
 
   return (
-    <div className="pf-app flex flex-col dark:text-slate-100">
+    <div className="pf-app pf-settings-workspace flex flex-col dark:text-slate-100">
       <TopNav breadcrumbs={t("help.breadcrumb")} onHome={() => navigate("/inspirations")} />
 
       <main className="pf-side-shell pf-side-shell-with-toc flex-1">
@@ -2492,7 +2503,7 @@ export function HelpPage() {
             <button
               type="button"
               onClick={() => openPage("overview")}
-              className="flex items-center gap-2 text-left text-base font-semibold text-slate-950 dark:text-white"
+              className="inline-flex items-center gap-2 rounded-lg text-left text-base font-semibold text-slate-950 transition-colors hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:text-white dark:hover:text-violet-200 dark:focus-visible:ring-violet-400/60"
             >
               <BookOpen size={18} className="text-indigo-600 dark:text-violet-300" />
               {t("help.title")}
@@ -2521,7 +2532,7 @@ export function HelpPage() {
                     setSearchQuery("");
                   }
                 }}
-                className="flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700/80 dark:bg-[#151f33] dark:shadow-black/30"
+                className="pf-help-search-surface flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700/80 dark:bg-[#151f33] dark:shadow-black/30"
               >
                   {searchResults.length > 0 ? (
                     <div className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -2530,7 +2541,7 @@ export function HelpPage() {
                           key={result.page.slug}
                           type="button"
                           onClick={() => openPage(result.page.slug)}
-                          className="block w-full px-3 py-2.5 text-left transition-colors hover:bg-slate-50 dark:hover:bg-violet-500/12"
+                          className="block w-full px-3 py-2.5 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400 dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60"
                         >
                           <div className="flex items-center gap-2">
                             <span className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">
@@ -2638,7 +2649,7 @@ export function HelpPage() {
               <button
                 type="button"
                 onClick={() => openPage(previousPage.slug)}
-                className="rounded-lg border border-slate-200 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:border-slate-700/80 dark:bg-[#0f1726] dark:hover:bg-violet-500/12"
+                className="pf-help-page-link rounded-lg border border-slate-200 px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700/80 dark:bg-[#0f1726] dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60"
               >
                 <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("help.previous")}</div>
                 <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{previousPage.title}</div>
@@ -2650,7 +2661,7 @@ export function HelpPage() {
               <button
                 type="button"
                 onClick={() => openPage(nextPage.slug)}
-                className="rounded-lg border border-slate-200 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:border-slate-700/80 dark:bg-[#0f1726] dark:hover:bg-violet-500/12 sm:text-right"
+                className="pf-help-page-link rounded-lg border border-slate-200 px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700/80 dark:bg-[#0f1726] dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60 sm:text-right"
               >
                 <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("help.next")}</div>
                 <div className="mt-1 inline-flex items-center text-sm font-semibold text-indigo-700 dark:text-violet-200">
@@ -2685,14 +2696,14 @@ export function HelpPage() {
                 <button
                   type="button"
                   onClick={() => navigate("/inspirations")}
-                  className="rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-violet-500 dark:hover:bg-violet-400"
+                  className={HELP_PRIMARY_ACTION_CLASS}
                 >
                   {t("help.openInspirations")}
                 </button>
                 <button
                   type="button"
                   onClick={() => navigate("/image-chat")}
-                  className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:text-slate-950 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:bg-violet-500/12 dark:hover:text-white"
+                  className={HELP_SECONDARY_ACTION_CLASS}
                 >
                   {t("help.openImageChat")}
                 </button>

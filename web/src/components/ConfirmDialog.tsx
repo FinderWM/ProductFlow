@@ -1,5 +1,7 @@
-import { useEffect, useId } from "react";
+import { useId } from "react";
 import { Loader2, TriangleAlert } from "lucide-react";
+
+import { ModalShell } from "./ModalShell";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -30,19 +32,6 @@ export function ConfirmDialog({
   const descriptionId = useId();
   const errorId = useId();
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busy) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [busy, onClose, open]);
-
   if (!open) {
     return null;
   }
@@ -52,21 +41,15 @@ export function ConfirmDialog({
     : "bg-slate-950 text-white shadow-slate-950/15 hover:bg-slate-800 focus-visible:ring-slate-700 dark:bg-violet-500 dark:hover:bg-violet-400";
 
   return (
-    <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) {
-          onClose();
-        }
-      }}
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      closeDisabled={busy}
+      ariaLabelledBy={titleId}
+      ariaDescribedBy={error ? `${descriptionId} ${errorId}` : descriptionId}
+      overlayClassName="z-[90] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      panelClassName="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={error ? `${descriptionId} ${errorId}` : descriptionId}
-        className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
-      >
         <div className="flex items-start gap-3 px-5 pt-5">
           <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-200">
             <TriangleAlert size={18} />
@@ -107,7 +90,6 @@ export function ConfirmDialog({
             {confirmLabel}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

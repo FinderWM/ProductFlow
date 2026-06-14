@@ -10,7 +10,7 @@ from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
-from inspiration_one_backend.application.admission import generation_running_capacity_available
+from inspiration_one_backend.application.admission import GenerationCapacityPool, generation_running_capacity_available
 from inspiration_one_backend.application.inspiration_workflow import graph as inspiration_workflow_graph
 from inspiration_one_backend.application.task_notifications import publish_workflow_run_notification_safely
 from inspiration_one_backend.application.time import now_utc
@@ -212,11 +212,17 @@ def workflow_node_failed_run_is_retryable(
     return True
 
 
-def claim_workflow_node_run(session: Session, *, node_run_id: str, node_id: str) -> WorkflowNodeRunClaimResult:
+def claim_workflow_node_run(
+    session: Session,
+    *,
+    node_run_id: str,
+    node_id: str,
+    capacity_pool: GenerationCapacityPool | None = "image",
+) -> WorkflowNodeRunClaimResult:
     """Atomically claim one queued node run so duplicate Dramatiq messages do not execute it twice."""
 
     now = now_utc()
-    if not generation_running_capacity_available(session):
+    if capacity_pool is not None and not generation_running_capacity_available(session, pool=capacity_pool):
         session.commit()
         return WorkflowNodeRunClaimResult(claimed=False, should_requeue=True)
     result = cast(

@@ -1,11 +1,11 @@
 import { useEffect, useId, useState } from "react";
-import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCircle2, Image as ImageIcon, Loader2, Save, X } from "lucide-react";
 
 import { api, ApiError } from "../../lib/api";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup, ResourceLibrarySourceType } from "../../lib/types";
+import { ModalShell } from "../ModalShell";
 
 export interface ResourceLibrarySaveSource {
   source_type: ResourceLibrarySourceType;
@@ -51,23 +51,6 @@ function ResourceLibrarySaveFeedbackDialog({
   const isError = Boolean(errorMessage);
   const message = errorMessage || successMessage;
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        if (isError) {
-          onCloseError();
-          return;
-        }
-        onCloseSuccess();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isError, onCloseError, onCloseSuccess, open]);
-
   if (!open) {
     return null;
   }
@@ -75,26 +58,15 @@ function ResourceLibrarySaveFeedbackDialog({
   const Icon = isError ? X : CheckCircle2;
 
   return (
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target !== event.currentTarget) {
-          return;
-        }
-        if (isError) {
-          onCloseError();
-          return;
-        }
-        onCloseSuccess();
-      }}
+    <ModalShell
+      open={open}
+      role={isError ? "alertdialog" : "dialog"}
+      onClose={isError ? onCloseError : onCloseSuccess}
+      ariaLabelledBy={titleId}
+      ariaDescribedBy={descriptionId}
+      overlayClassName="z-[120] bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+      panelClassName="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
     >
-      <div
-        role={isError ? "alertdialog" : "dialog"}
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        className="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
-      >
         <div className="flex items-start gap-3 px-5 py-5">
           <div
             className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
@@ -125,8 +97,7 @@ function ResourceLibrarySaveFeedbackDialog({
             </button>
           ) : null}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -226,19 +197,6 @@ export function SaveToResourceLibraryDialog({
     return () => window.clearTimeout(timer);
   }, [onClose, successMessage]);
 
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !saveMutation.isPending && !successMessage && !feedbackError) {
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [feedbackError, onClose, open, saveMutation.isPending, successMessage]);
-
   function toggleGroup(groupId: string, checked: boolean) {
     setSelectedGroupIds((current) => {
       if (checked) {
@@ -263,20 +221,14 @@ export function SaveToResourceLibraryDialog({
 
   const dialog = (
     <>
-      <div
-        className="pf-settings-workspace fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm"
-        onMouseDown={(event) => {
-          if (event.target === event.currentTarget && !saveMutation.isPending) {
-            onClose();
-          }
-        }}
+      <ModalShell
+        open={open}
+        onClose={onClose}
+        closeDisabled={saveMutation.isPending || Boolean(successMessage || feedbackError)}
+        ariaLabelledBy={titleId}
+        overlayClassName="pf-settings-workspace z-[110] bg-slate-950/60 px-4 py-6 backdrop-blur-sm"
+        panelClassName="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
       >
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={titleId}
-          className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45"
-        >
           <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
             <div className="min-w-0">
               <div id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
@@ -403,8 +355,7 @@ export function SaveToResourceLibraryDialog({
             {t("resourceLibrary.saveToLibrary")}
           </button>
         </div>
-      </div>
-    </div>
+      </ModalShell>
     <ResourceLibrarySaveFeedbackDialog
       successMessage={successMessage}
       errorMessage={feedbackError}
@@ -417,5 +368,5 @@ export function SaveToResourceLibraryDialog({
     </>
   );
 
-  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
+  return dialog;
 }

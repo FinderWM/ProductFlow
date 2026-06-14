@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from inspiration_one_backend.presentation.schemas.image_sessions import (
+    ImageSessionAssetResponse,
+    ImageSessionRoundResponse,
+)
+from inspiration_one_backend.presentation.schemas.validators import validate_image_generation_size
 
 ConfigSource = Literal["database", "env_default"]
 ConfigInputType = Literal["text", "password", "number", "boolean", "select", "multi_select", "textarea"]
@@ -39,6 +45,8 @@ class RuntimeConfigResponse(BaseModel):
     image_generation_max_dimension: int
     image_session_max_base_images: int
     image_tool_allowed_fields: list[str]
+    text_generation_max_concurrent_tasks: int
+    image_generation_max_concurrent_tasks: int
     generation_tail_splitter_max_items: int
     workflow_node_max_retry_count: int
     workflow_node_retry_delay_ms: int
@@ -49,6 +57,14 @@ class RuntimeConfigResponse(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
     reset_keys: list[str] = Field(default_factory=list)
+
+
+class LoginPageSelectionUpdateRequest(BaseModel):
+    value: str
+
+
+class LoginPageTemplateConfigUpdateRequest(BaseModel):
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class UserUiPreferencesResponse(BaseModel):
@@ -359,6 +375,30 @@ class TextGenerationConfigJsonResponseFormatTestResponse(BaseModel):
     model: str
     parsed_json: dict[str, Any]
     duration_ms: int
+
+
+class ImageGenerationConfigTestRequest(BaseModel):
+    generation_config_id: str | None = Field(default=None, max_length=36)
+    generation_config: GenerationConfigCreateRequest | None = None
+    resource_group_id: str = Field(min_length=1, max_length=36)
+    prompt: str = Field(default="生成一张适合验证图片配置的产品展示图。", min_length=1, max_length=4000)
+    size: str = Field(default="1024x1024")
+
+    @field_validator("size")
+    @classmethod
+    def validate_size(cls, size: str) -> str:
+        return validate_image_generation_size(size)
+
+
+class ImageGenerationConfigTestResponse(BaseModel):
+    generation_config_id: str | None = None
+    provider_kind: str
+    model_name: str
+    provider_name: str
+    duration_ms: int
+    image_session_id: str
+    round: ImageSessionRoundResponse
+    generated_asset: ImageSessionAssetResponse
 
 
 class SettingsExportMetadataResponse(BaseModel):

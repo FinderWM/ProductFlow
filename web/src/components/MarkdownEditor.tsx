@@ -1,5 +1,4 @@
 import { Children, isValidElement, memo, useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { Columns2, Eye, FileText, Maximize2, PencilLine, X } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -7,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
 import { isMermaidCodeLanguage, markdownHasVisibleContent, markdownImageResourceUrl } from "../lib/markdown";
 import { useI18n, usePreferences } from "../lib/preferences";
+import { ModalShell } from "./ModalShell";
 
 type MarkdownViewMode = "edit" | "preview";
 type MarkdownDialogMode = "edit" | "preview" | "split";
@@ -500,22 +500,14 @@ export function MarkdownEditor({
         {characterCount ? <span className="shrink-0">{characterCount}</span> : null}
       </div>
 
-      {dialogOpen && typeof document !== "undefined" ? createPortal(
-        <div
-          data-vaul-no-drag
-          className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/55 p-2 backdrop-blur-sm sm:p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setDialogOpen(false);
-            }
-          }}
+      {dialogOpen ? (
+        <ModalShell
+          onClose={() => setDialogOpen(false)}
+          ariaLabelledBy={dialogTitleId}
+          overlayClassName="z-[1000] bg-slate-950/55 p-2 backdrop-blur-sm sm:p-4"
+          overlayProps={{ "data-vaul-no-drag": true }}
+          panelClassName="flex h-[94dvh] max-h-[94dvh] w-[min(96vw,1560px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 animate-spring-pop-in dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/50"
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={dialogTitleId}
-            className="flex h-[94dvh] max-h-[94dvh] w-[min(96vw,1560px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/25 animate-spring-pop-in dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/50"
-          >
             <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
               <div className="min-w-0">
                 <h2 id={dialogTitleId} className="truncate text-base font-semibold text-slate-950 dark:text-white">
@@ -587,9 +579,7 @@ export function MarkdownEditor({
                 {characterCount}
               </div>
             ) : null}
-          </div>
-        </div>,
-        document.body,
+        </ModalShell>
       ) : null}
     </div>
   );

@@ -6,7 +6,10 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
+  type TouchEvent,
+  type WheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
 
@@ -33,6 +36,11 @@ interface FloatingSurfaceProps {
   onOpenChange?: (open: boolean) => void;
 }
 
+interface TouchPoint {
+  x: number;
+  y: number;
+}
+
 function samePlacement(left: FloatingPlacementResult | null, right: FloatingPlacementResult): boolean {
   return (
     left?.left === right.left &&
@@ -41,6 +49,39 @@ function samePlacement(left: FloatingPlacementResult | null, right: FloatingPlac
     left.maxHeight === right.maxHeight &&
     left.placement === right.placement
   );
+}
+
+function canScrollInDirection(element: HTMLElement, deltaX: number, deltaY: number): boolean {
+  const canScrollY =
+    deltaY < 0
+      ? element.scrollTop > 0
+      : deltaY > 0
+        ? element.scrollTop + element.clientHeight < element.scrollHeight - 1
+        : false;
+  const canScrollX =
+    deltaX < 0
+      ? element.scrollLeft > 0
+      : deltaX > 0
+        ? element.scrollLeft + element.clientWidth < element.scrollWidth - 1
+        : false;
+  return canScrollX || canScrollY;
+}
+
+function shouldPreventScrollChain(root: HTMLElement | null, target: EventTarget | null, deltaX: number, deltaY: number): boolean {
+  if (!root || !(target instanceof Node)) {
+    return true;
+  }
+  let node: Node | null = target;
+  while (node && node !== root.parentNode) {
+    if (node instanceof HTMLElement && root.contains(node) && canScrollInDirection(node, deltaX, deltaY)) {
+      return false;
+    }
+    if (node === root) {
+      break;
+    }
+    node = node.parentNode;
+  }
+  return true;
 }
 
 export function FloatingSurface({
@@ -57,6 +98,7 @@ export function FloatingSurface({
   onOpenChange,
 }: FloatingSurfaceProps) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const lastTouchPointRef = useRef<TouchPoint | null>(null);
   const [placement, setPlacement] = useState<FloatingPlacementResult | null>(null);
 
   const close = useCallback(() => onOpenChange?.(false), [onOpenChange]);
@@ -115,7 +157,7 @@ export function FloatingSurface({
       close();
     }
 
-    function handleKeyDown(event: KeyboardEvent) {
+    function handleWindowKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
         close();
         triggerRef.current?.focus();
@@ -125,14 +167,14 @@ export function FloatingSurface({
     window.addEventListener("resize", updatePlacement);
     window.addEventListener("scroll", updatePlacement, true);
     window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleWindowKeyDown);
     window.visualViewport?.addEventListener("resize", updatePlacement);
     window.visualViewport?.addEventListener("scroll", updatePlacement);
     return () => {
       window.removeEventListener("resize", updatePlacement);
       window.removeEventListener("scroll", updatePlacement, true);
       window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleWindowKeyDown);
       window.visualViewport?.removeEventListener("resize", updatePlacement);
       window.visualViewport?.removeEventListener("scroll", updatePlacement);
     };
@@ -167,7 +209,46 @@ export function FloatingSurface({
     zIndex: FLOATING_LAYER_Z_INDEX[layer],
     visibility: placement ? "visible" : "hidden",
     boxSizing: "border-box",
+    overscrollBehavior: "contain",
   };
+
+  function handleWheel(event: WheelEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (shouldPreventScrollChain(surfaceRef.current, event.target, event.deltaX, event.deltaY)) {
+      event.preventDefault();
+    }
+  }
+
+  function handleTouchStart(event: TouchEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    const touch = event.touches[0];
+    lastTouchPointRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+  }
+
+  function handleTouchMove(event: TouchEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    const touch = event.touches[0];
+    const previous = lastTouchPointRef.current;
+    if (!touch || !previous) {
+      event.preventDefault();
+      return;
+    }
+    const deltaX = previous.x - touch.clientX;
+    const deltaY = previous.y - touch.clientY;
+    if (shouldPreventScrollChain(surfaceRef.current, event.target, deltaX, deltaY)) {
+      event.preventDefault();
+      return;
+    }
+    lastTouchPointRef.current = { x: touch.clientX, y: touch.clientY };
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      close();
+      triggerRef.current?.focus();
+    }
+  }
 
   return createPortal(
     <div
@@ -175,6 +256,18 @@ export function FloatingSurface({
       data-floating-placement={placement?.placement ?? preferredPlacement}
       className={className}
       style={style}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onWheel={handleWheel}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={() => {
+        lastTouchPointRef.current = null;
+      }}
+      onTouchCancel={() => {
+        lastTouchPointRef.current = null;
+      }}
+      onKeyDown={handleKeyDown}
     >
       {children}
     </div>,

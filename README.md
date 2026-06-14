@@ -383,7 +383,7 @@ just web-dev
 
 ```bash
 bash scripts/with_dev_env.sh bash -lc 'uv run --directory backend uvicorn inspiration_one_backend.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-29282}"'
-bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 inspiration_one_backend.workers
+bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 1 --threads 4 inspiration_one_backend.workers
 bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target="${VITE_DEV_PROXY_TARGET:-http://127.0.0.1:${APP_PORT:-29282}}"; VITE_API_BASE_URL= VITE_DEV_PROXY_TARGET="$api_target" pnpm --dir web dev -- --host 0.0.0.0 --port "$web_port" --strictPort'
 ```
 
@@ -424,6 +424,7 @@ Inspiration One 把文本和图片能力分开配置。基础设施配置（数�
 - `openai_images` 使用 OpenAI Images API 兼容接口，适合直接生成/编辑图片；连续生图由 Inspiration One 显式传入所选基图和参考图，不使用 `previous_response_id`。
 - 图片尺寸默认值仍可通过 `IMAGE_MAIN_IMAGE_SIZE`、`IMAGE_PROMO_POSTER_SIZE` 提供，并可在 `/settings` 中覆盖。
 - 高级 tool 参数：`IMAGE_TOOL_ALLOWED_FIELDS` 控制前端可展示、后端可持久化并发送给 provider 的 tool 字段；可选默认值还包括 `IMAGE_TOOL_MODEL`、`IMAGE_TOOL_QUALITY`、`IMAGE_TOOL_OUTPUT_FORMAT`、`IMAGE_TOOL_OUTPUT_COMPRESSION`、`IMAGE_TOOL_BACKGROUND`、`IMAGE_TOOL_MODERATION`、`IMAGE_TOOL_ACTION`、`IMAGE_TOOL_INPUT_FIDELITY`、`IMAGE_TOOL_PARTIAL_IMAGES`、`IMAGE_TOOL_N`。
+- worker 运行模型为单容器单 Dramatiq process，多线程消费；本地命令和 Compose 都显式使用 `--processes 1 --threads 4`。扩展算力时增加 worker 容器副本。`TEXT_GENERATION_MAX_CONCURRENT_TASKS` 和 `IMAGE_GENERATION_MAX_CONCURRENT_TASKS` 分别限制文案节点与图片生成任务的全局业务并发；历史 `GENERATION_MAX_CONCURRENT_TASKS` 只作为两个新配置未设置时的兼容默认值。
 
 海报模式：
 
@@ -443,7 +444,7 @@ Inspiration One 把文本和图片能力分开配置。基础设施配置（数�
 | 安装前端依赖 | `just web-install` | `pnpm --dir web install` |
 | 应用开发库迁移 | `just backend-migrate` | `bash scripts/with_dev_env.sh uv run --directory backend alembic upgrade head` |
 | 启动开发 API | `just backend-run` | `bash scripts/with_dev_env.sh bash -lc 'uv run --directory backend uvicorn inspiration_one_backend.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-29282}"'` |
-| 启动 Dramatiq worker | `just backend-worker` | `bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 2 --threads 4 inspiration_one_backend.workers` |
+| 启动 Dramatiq worker | `just backend-worker` | `bash scripts/with_dev_env.sh uv run --directory backend dramatiq --processes 1 --threads 4 inspiration_one_backend.workers` |
 | 运行 backend pytest | `just backend-test` | `uv run --directory backend pytest` |
 | 启动 Vite 开发服务器 | `just web-dev` | `bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target="${VITE_DEV_PROXY_TARGET:-http://127.0.0.1:${APP_PORT:-29282}}"; VITE_API_BASE_URL= VITE_DEV_PROXY_TARGET="$api_target" pnpm --dir web dev -- --host 0.0.0.0 --port "$web_port" --strictPort'` |
 | 运行前端 lint | 无 just 包装 | `pnpm --dir web lint` |

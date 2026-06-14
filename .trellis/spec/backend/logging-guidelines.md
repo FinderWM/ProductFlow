@@ -43,7 +43,7 @@ logging is needed, add it deliberately and consistently through `logging.getLogg
 ### Server and worker logs
 
 - `just backend-run` runs Uvicorn through `uv run --directory backend uvicorn inspiration_one_backend.main:app --reload ...`.
-- `just backend-worker` runs Dramatiq through `uv run --directory backend dramatiq --processes 2 --threads 4
+- `just backend-worker` runs Dramatiq through `uv run --directory backend dramatiq --processes 1 --threads 4
   inspiration_one_backend.workers`.
 
 Those tools provide process-level logs. ProductFlow configures the root Python logger once per process so application logs

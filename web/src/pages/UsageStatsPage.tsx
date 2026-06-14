@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
-  CalendarDays,
   CheckCircle2,
   Image,
   Loader2,
@@ -14,9 +13,15 @@ import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { TopNav } from "../components/TopNav";
+import {
+  WorkspaceDateTimeRangeField,
+  dateRangeFromDateTimeRange,
+  workspaceQuickDateTimeRange,
+  type WorkspaceDateTimeRange,
+  type WorkspaceQuickRangeId,
+} from "../components/WorkspaceDateTimeRangeField";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
-import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import { useSessionState } from "../lib/session";
 import type { UserUsageStat, UserUsageStatsSummary } from "../lib/types";
@@ -25,21 +30,6 @@ import {
   WorkspacePageFrame,
   WorkspaceUsageStatsContent,
 } from "./workspace/WorkspaceLandingPages";
-
-type QuickRangeId = "today" | "last7" | "last30" | "month";
-
-interface UsageDateRange {
-  start_date: string;
-  end_date: string;
-}
-
-const QUICK_RANGE_IDS: QuickRangeId[] = ["today", "last7", "last30", "month"];
-const QUICK_RANGE_LABEL_KEYS: Record<QuickRangeId, TranslationKey> = {
-  today: "statusPage.quick.today",
-  last7: "statusPage.quick.last7",
-  last30: "statusPage.quick.last30",
-  month: "statusPage.quick.month",
-};
 
 const INPUT_CLASS =
   "h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm " +
@@ -53,36 +43,6 @@ const PRIMARY_BUTTON_CLASS =
   "inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white " +
   "shadow-sm shadow-indigo-500/20 transition hover:bg-indigo-500 disabled:opacity-50 " +
   "dark:bg-violet-500 dark:hover:bg-violet-400";
-
-function toDateInputValue(value: Date): string {
-  const year = value.getFullYear();
-  const month = `${value.getMonth() + 1}`.padStart(2, "0");
-  const day = `${value.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function shiftedDate(days: number): Date {
-  const value = new Date();
-  value.setHours(0, 0, 0, 0);
-  value.setDate(value.getDate() + days);
-  return value;
-}
-
-function quickDateRange(id: QuickRangeId): UsageDateRange {
-  const today = shiftedDate(0);
-  if (id === "last7") {
-    return { start_date: toDateInputValue(shiftedDate(-6)), end_date: toDateInputValue(today) };
-  }
-  if (id === "last30") {
-    return { start_date: toDateInputValue(shiftedDate(-29)), end_date: toDateInputValue(today) };
-  }
-  if (id === "month") {
-    const monthStart = new Date(today);
-    monthStart.setDate(1);
-    return { start_date: toDateInputValue(monthStart), end_date: toDateInputValue(today) };
-  }
-  return { start_date: toDateInputValue(today), end_date: toDateInputValue(today) };
-}
 
 function successRate(summary: UserUsageStatsSummary | null | undefined): string {
   if (!summary || summary.attempt_count <= 0) {
@@ -209,16 +169,17 @@ function UsageStatsDetailPage() {
   const queryClient = useQueryClient();
   const session = useSessionState();
   const isAdmin = Boolean(session?.user?.is_admin);
-  const [range, setRange] = useState<UsageDateRange>(() => quickDateRange("today"));
-  const [activeQuickRange, setActiveQuickRange] = useState<QuickRangeId | null>("today");
+  const [range, setRange] = useState<WorkspaceDateTimeRange>(() => workspaceQuickDateTimeRange("today"));
+  const [activeQuickRange, setActiveQuickRange] = useState<WorkspaceQuickRangeId | null>("today");
   const [selectedUserId, setSelectedUserId] = useState("");
-  const rangeInvalid = range.start_date > range.end_date;
+  const rangeInvalid = Boolean(range.start_date && range.end_date && range.start_date > range.end_date);
+  const apiRange = dateRangeFromDateTimeRange(range);
 
   const usageQuery = useQuery({
-    queryKey: ["usage-stats", range.start_date, range.end_date, selectedUserId],
+    queryKey: ["usage-stats", apiRange.start_date, apiRange.end_date, selectedUserId],
     queryFn: () =>
       api.getUsageStats({
-        ...range,
+        ...apiRange,
         user_id: selectedUserId || undefined,
       }),
     enabled: !rangeInvalid,
@@ -271,31 +232,20 @@ function UsageStatsDetailPage() {
         <div className="space-y-5">
           <section className={`${PANEL_CLASS} p-5`}>
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-950 dark:text-white">
-                  <CalendarDays size={16} />
-                  {t("statusPage.rangeTitle")}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {QUICK_RANGE_IDS.map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        setRange(quickDateRange(id));
-                        setActiveQuickRange(id);
-                      }}
-                      className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-sm font-semibold transition ${
-                        activeQuickRange === id
-                          ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/18 dark:text-violet-100"
-                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:bg-slate-800"
-                      }`}
-                    >
-                      {t(QUICK_RANGE_LABEL_KEYS[id])}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <WorkspaceDateTimeRangeField
+                idPrefix="usage-stats-range"
+                value={range}
+                activeQuickRange={activeQuickRange}
+                onChange={(nextRange) => {
+                  setRange(nextRange);
+                  setActiveQuickRange(null);
+                }}
+                onQuickRangeChange={(id) => {
+                  setRange(workspaceQuickDateTimeRange(id));
+                  setActiveQuickRange(id);
+                }}
+                className="w-full xl:max-w-2xl"
+              />
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 {isAdmin ? (
                   <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">
@@ -316,34 +266,6 @@ function UsageStatsDetailPage() {
                     </select>
                   </label>
                 ) : null}
-                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                  {t("statusPage.startDate")}
-                  <input
-                    id="usage-stats-start-date"
-                    name="usage_stats_start_date"
-                    type="date"
-                    value={range.start_date}
-                    onChange={(event) => {
-                      setRange((current) => ({ ...current, start_date: event.target.value }));
-                      setActiveQuickRange(null);
-                    }}
-                    className={`${INPUT_CLASS} mt-1 w-full sm:w-40`}
-                  />
-                </label>
-                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                  {t("statusPage.endDate")}
-                  <input
-                    id="usage-stats-end-date"
-                    name="usage_stats_end_date"
-                    type="date"
-                    value={range.end_date}
-                    onChange={(event) => {
-                      setRange((current) => ({ ...current, end_date: event.target.value }));
-                      setActiveQuickRange(null);
-                    }}
-                    className={`${INPUT_CLASS} mt-1 w-full sm:w-40`}
-                  />
-                </label>
                 <button
                   type="button"
                   onClick={() => void usageQuery.refetch()}
@@ -410,8 +332,8 @@ function UsageStatsDetailPage() {
                 </h2>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   {t("usageStats.table.description", {
-                    start: usageQuery.data?.start_date ?? range.start_date,
-                    end: usageQuery.data?.end_date ?? range.end_date,
+                    start: usageQuery.data?.start_date ?? apiRange.start_date,
+                    end: usageQuery.data?.end_date ?? apiRange.end_date,
                   })}
                 </p>
               </div>

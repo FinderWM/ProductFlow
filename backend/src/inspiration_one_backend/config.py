@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,33 +21,102 @@ from inspiration_one_backend.domain.ui_layout import (
 
 ConfigInputType = Literal["text", "password", "number", "boolean", "select", "multi_select", "textarea"]
 IMAGE_SIZE_PATTERN = re.compile(r"^\d+x\d+$")
-DEFAULT_LOGIN_PAGE_TEMPLATE_ID = "codex-orbit"
-LOGIN_PAGE_TEMPLATE_IDS: tuple[str, ...] = ("codex-orbit", "fluid-mist", "image-lab")
+DEFAULT_LOGIN_PAGE_TEMPLATE_ID = "command-orbit"
+LOGIN_PAGE_TEMPLATE_IDS: tuple[str, ...] = ("command-orbit", "fluid-mist", "image-lab")
 LOGIN_PAGE_TEMPLATE_NAMES: dict[str, str] = {
-    "codex-orbit": "Command Orbit",
+    "command-orbit": "Command Orbit",
     "fluid-mist": "Fluid Mist",
     "image-lab": "Image Lab",
 }
-LOGIN_PAGE_MODE_VALUES: tuple[str, ...] = ("random", "selected")
+LOGIN_PAGE_MODE_VALUES: tuple[str, ...] = ("random", *LOGIN_PAGE_TEMPLATE_IDS)
 DEFAULT_LOGIN_PAGE_MODE = "random"
 DEFAULT_LOGIN_PAGE_ENABLED_TEMPLATE_IDS_TEXT = ",".join(LOGIN_PAGE_TEMPLATE_IDS)
 LOGIN_PAGE_CATEGORY = "登录页"
-DEFAULT_LOGIN_PAGE_CODEX_ORBIT_BRAND_SUBTITLE = "Orbital access concept"
-DEFAULT_LOGIN_PAGE_CODEX_ORBIT_HERO_TITLE = "进入你的创意工作台"
-DEFAULT_LOGIN_PAGE_CODEX_ORBIT_HERO_DESCRIPTION = (
+DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_BRAND_SUBTITLE = "Orbital access concept"
+DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_HERO_TITLE = "进入你的创意工作台"
+DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_HERO_DESCRIPTION = (
     "从灵感编排、图像会话到素材沉淀，Inspiration One 将创作链路收束成一座私有控制台。"
 )
 DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_TITLE = "欢迎回来，继续创作"
 DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_DESCRIPTION = "登录你的工作台，开启灵感之旅"
 DEFAULT_LOGIN_PAGE_IMAGE_LAB_HERO_DESCRIPTION = "登录页像一张摄影棚邀请函，先给情绪和记忆点，再承载最短的进入路径。"
-LOGIN_PAGE_TEXT_CONFIG_LIMITS: dict[str, int] = {
-    "login_page_codex_orbit_brand_subtitle": 48,
-    "login_page_codex_orbit_hero_title": 48,
-    "login_page_codex_orbit_hero_description": 180,
-    "login_page_fluid_mist_greeting_title": 48,
-    "login_page_fluid_mist_greeting_description": 120,
-    "login_page_image_lab_hero_description": 180,
+LOGIN_PAGE_TEMPLATE_CONFIG_KEYS: dict[str, str] = {
+    "command-orbit": "login_page_command_orbit_config",
+    "fluid-mist": "login_page_fluid_mist_config",
+    "image-lab": "login_page_image_lab_config",
 }
+LOGIN_PAGE_TEMPLATE_ID_BY_CONFIG_KEY: dict[str, str] = {
+    config_key: template_id for template_id, config_key in LOGIN_PAGE_TEMPLATE_CONFIG_KEYS.items()
+}
+LOGIN_PAGE_TEMPLATE_CONFIG_DEFAULTS: dict[str, dict[str, str]] = {
+    "command-orbit": {
+        "brand_subtitle": DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_BRAND_SUBTITLE,
+        "hero_title": DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_HERO_TITLE,
+        "hero_description": DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_HERO_DESCRIPTION,
+    },
+    "fluid-mist": {
+        "greeting_title": DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_TITLE,
+        "greeting_description": DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_DESCRIPTION,
+    },
+    "image-lab": {
+        "hero_description": DEFAULT_LOGIN_PAGE_IMAGE_LAB_HERO_DESCRIPTION,
+        "hero_image_asset_id": "",
+    },
+}
+LOGIN_PAGE_TEMPLATE_CONFIG_LIMITS: dict[str, dict[str, int]] = {
+    "command-orbit": {
+        "brand_subtitle": 48,
+        "hero_title": 48,
+        "hero_description": 180,
+    },
+    "fluid-mist": {
+        "greeting_title": 48,
+        "greeting_description": 120,
+    },
+    "image-lab": {
+        "hero_description": 180,
+        "hero_image_asset_id": 64,
+    },
+}
+LOGIN_PAGE_LEGACY_CONFIG_KEYS: dict[str, dict[str, str]] = {
+    "command-orbit": {
+        "login_page_command_orbit_brand_subtitle": "brand_subtitle",
+        "login_page_command_orbit_hero_title": "hero_title",
+        "login_page_command_orbit_hero_description": "hero_description",
+    },
+    "fluid-mist": {
+        "login_page_fluid_mist_greeting_title": "greeting_title",
+        "login_page_fluid_mist_greeting_description": "greeting_description",
+    },
+    "image-lab": {
+        "login_page_image_lab_hero_description": "hero_description",
+        "login_page_image_lab_hero_image_asset_id": "hero_image_asset_id",
+    },
+}
+LOGIN_PAGE_LEGACY_RUNTIME_CONFIG_KEYS: set[str] = {
+    "login_page_selected_template_id",
+    "login_page_enabled_template_ids",
+    *{
+        legacy_key
+        for legacy_keys in LOGIN_PAGE_LEGACY_CONFIG_KEYS.values()
+        for legacy_key in legacy_keys
+    },
+}
+DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_CONFIG = json.dumps(
+    LOGIN_PAGE_TEMPLATE_CONFIG_DEFAULTS["command-orbit"],
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
+DEFAULT_LOGIN_PAGE_FLUID_MIST_CONFIG = json.dumps(
+    LOGIN_PAGE_TEMPLATE_CONFIG_DEFAULTS["fluid-mist"],
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
+DEFAULT_LOGIN_PAGE_IMAGE_LAB_CONFIG = json.dumps(
+    LOGIN_PAGE_TEMPLATE_CONFIG_DEFAULTS["image-lab"],
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
 DEFAULT_IMAGE_GENERATION_MAX_DIMENSION = 3840
 IMAGE_GENERATION_MIN_DIMENSION = 512
 IMAGE_GENERATION_DIMENSION_MULTIPLE = 16
@@ -79,6 +149,9 @@ WORKFLOW_NODE_MAX_MAX_RETRY_COUNT = 100
 WORKFLOW_NODE_MIN_RETRY_DELAY_MS = 0
 WORKFLOW_NODE_MAX_RETRY_DELAY_MS = 60 * 60 * 1000
 GLOBAL_GENERATION_QUEUE_CAPACITY_CATEGORY = "全局生成配置 / 队列容量"
+LEGACY_GENERATION_MAX_CONCURRENT_TASKS_KEY = "generation_max_concurrent_tasks"
+TEXT_GENERATION_MAX_CONCURRENT_TASKS_KEY = "text_generation_max_concurrent_tasks"
+IMAGE_GENERATION_MAX_CONCURRENT_TASKS_KEY = "image_generation_max_concurrent_tasks"
 GLOBAL_GENERATION_SCHEDULER_DEFAULTS_CATEGORY = "全局生成配置 / 调度默认值"
 GLOBAL_GENERATION_RECOVERY_CATEGORY = "全局生成配置 / 任务恢复"
 GLOBAL_GENERATION_IMAGE_SESSION_CATEGORY = "全局生成配置 / 文/图生图"
@@ -165,6 +238,88 @@ class ConfigDefinition:
     minimum: int | None = None
     maximum: int | None = None
     optional: bool = False
+
+
+def parse_login_page_template_config(template_id: str, value: Any) -> dict[str, str]:
+    if template_id not in LOGIN_PAGE_TEMPLATE_CONFIG_DEFAULTS:
+        supported = ", ".join(LOGIN_PAGE_TEMPLATE_IDS)
+        raise ValueError(f"登录页模板必须是以下之一: {supported}")
+
+    defaults = LOGIN_PAGE_TEMPLATE_CONFIG_DEFAULTS[template_id]
+    if isinstance(value, Mapping):
+        raw_config = dict(value)
+    elif isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            raw_config = {}
+        else:
+            try:
+                decoded = json.loads(normalized)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{LOGIN_PAGE_TEMPLATE_NAMES[template_id]} 配置必须是 JSON 对象") from exc
+            if not isinstance(decoded, Mapping):
+                raise ValueError(f"{LOGIN_PAGE_TEMPLATE_NAMES[template_id]} 配置必须是 JSON 对象")
+            raw_config = dict(decoded)
+    elif value is None:
+        raw_config = {}
+    else:
+        raise ValueError(f"{LOGIN_PAGE_TEMPLATE_NAMES[template_id]} 配置必须是 JSON 对象")
+
+    unknown_fields = set(raw_config) - set(defaults)
+    if unknown_fields:
+        raise ValueError(
+            f"{LOGIN_PAGE_TEMPLATE_NAMES[template_id]} 配置包含不支持字段: {', '.join(sorted(unknown_fields))}"
+        )
+
+    limits = LOGIN_PAGE_TEMPLATE_CONFIG_LIMITS[template_id]
+    parsed: dict[str, str] = {}
+    for field_name, default_value in defaults.items():
+        raw_value = raw_config.get(field_name, default_value)
+        normalized_value = "" if raw_value is None else str(raw_value).strip()
+        maximum = limits.get(field_name)
+        if maximum is not None and len(normalized_value) > maximum:
+            raise ValueError(f"{LOGIN_PAGE_TEMPLATE_NAMES[template_id]} {field_name} 不能超过 {maximum} 个字符")
+        parsed[field_name] = normalized_value or default_value
+    return parsed
+
+
+def normalize_login_page_template_config(template_id: str, value: Any) -> str:
+    return json.dumps(
+        parse_login_page_template_config(template_id, value),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def normalize_login_page_template_config_by_key(key: str, value: Any) -> str:
+    template_id = LOGIN_PAGE_TEMPLATE_ID_BY_CONFIG_KEY.get(key)
+    if template_id is None:
+        raise ValueError(f"未知登录页配置项: {key}")
+    return normalize_login_page_template_config(template_id, value)
+
+
+def migrate_legacy_login_page_config_values(values: Mapping[str, Any]) -> dict[str, Any]:
+    migrated = dict(values)
+    legacy_selected_template_id = str(migrated.pop("login_page_selected_template_id", "") or "").strip()
+    migrated.pop("login_page_enabled_template_ids", None)
+
+    if migrated.get("login_page_mode") == "selected":
+        migrated["login_page_mode"] = (
+            legacy_selected_template_id
+            if legacy_selected_template_id in LOGIN_PAGE_TEMPLATE_IDS
+            else DEFAULT_LOGIN_PAGE_TEMPLATE_ID
+        )
+
+    for template_id, legacy_keys in LOGIN_PAGE_LEGACY_CONFIG_KEYS.items():
+        config_key = LOGIN_PAGE_TEMPLATE_CONFIG_KEYS[template_id]
+        legacy_config = {
+            field_name: migrated.pop(legacy_key)
+            for legacy_key, field_name in legacy_keys.items()
+            if legacy_key in migrated
+        }
+        if config_key not in migrated and legacy_config:
+            migrated[config_key] = normalize_login_page_template_config(template_id, legacy_config)
+    return migrated
 
 
 class Settings(BaseSettings):
@@ -261,6 +416,8 @@ class Settings(BaseSettings):
     upload_allowed_image_mime_types: str = "image/png,image/jpeg,image/webp"
 
     generation_max_concurrent_tasks: int = Field(default=3, ge=1, le=20)
+    text_generation_max_concurrent_tasks: int = Field(default=3, ge=1, le=20)
+    image_generation_max_concurrent_tasks: int = Field(default=3, ge=1, le=20)
     generation_config_default_availability_window_minutes: int = Field(default=5, ge=1, le=24 * 60)
     generation_config_default_failure_threshold: int = Field(default=3, ge=1, le=100)
     generation_config_default_cooldown_minutes: int = Field(default=10, ge=1, le=24 * 60)
@@ -304,15 +461,30 @@ class Settings(BaseSettings):
     login_page_mode: str = DEFAULT_LOGIN_PAGE_MODE
     login_page_selected_template_id: str = ""
     login_page_enabled_template_ids: str = DEFAULT_LOGIN_PAGE_ENABLED_TEMPLATE_IDS_TEXT
-    login_page_codex_orbit_brand_subtitle: str = DEFAULT_LOGIN_PAGE_CODEX_ORBIT_BRAND_SUBTITLE
-    login_page_codex_orbit_hero_title: str = DEFAULT_LOGIN_PAGE_CODEX_ORBIT_HERO_TITLE
-    login_page_codex_orbit_hero_description: str = DEFAULT_LOGIN_PAGE_CODEX_ORBIT_HERO_DESCRIPTION
+    login_page_command_orbit_config: str = DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_CONFIG
+    login_page_fluid_mist_config: str = DEFAULT_LOGIN_PAGE_FLUID_MIST_CONFIG
+    login_page_image_lab_config: str = DEFAULT_LOGIN_PAGE_IMAGE_LAB_CONFIG
+    login_page_command_orbit_brand_subtitle: str = DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_BRAND_SUBTITLE
+    login_page_command_orbit_hero_title: str = DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_HERO_TITLE
+    login_page_command_orbit_hero_description: str = DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_HERO_DESCRIPTION
     login_page_fluid_mist_greeting_title: str = DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_TITLE
     login_page_fluid_mist_greeting_description: str = DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_DESCRIPTION
     login_page_image_lab_hero_description: str = DEFAULT_LOGIN_PAGE_IMAGE_LAB_HERO_DESCRIPTION
     login_page_image_lab_hero_image_asset_id: str = ""
     admin_access_required: bool = True
     deletion_enabled: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_split_generation_capacity_defaults(cls, data: Any) -> Any:
+        if not isinstance(data, Mapping):
+            return data
+        values = migrate_legacy_login_page_config_values(data)
+        legacy_capacity = values.get("generation_max_concurrent_tasks")
+        if legacy_capacity is not None:
+            values.setdefault("text_generation_max_concurrent_tasks", legacy_capacity)
+            values.setdefault("image_generation_max_concurrent_tasks", legacy_capacity)
+        return values
 
     @field_validator("image_main_image_size", "image_promo_poster_size")
     @classmethod
@@ -340,6 +512,19 @@ class Settings(BaseSettings):
     @field_validator("image_tool_output_compression", "image_tool_partial_images", "image_tool_n", mode="before")
     @classmethod
     def _normalize_optional_image_tool_int(cls, value: Any) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return int(value)
+
+    @field_validator(
+        "text_generation_max_concurrent_tasks",
+        "image_generation_max_concurrent_tasks",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_generation_capacity(cls, value: Any) -> int | None:
         if value is None:
             return None
         if isinstance(value, str) and not value.strip():
@@ -384,7 +569,7 @@ class Settings(BaseSettings):
         if normalized in LOGIN_PAGE_MODE_VALUES:
             return normalized
         supported = ", ".join(LOGIN_PAGE_MODE_VALUES)
-        raise ValueError(f"登录页选择方式必须是以下之一: {supported}")
+        raise ValueError(f"登录页选择必须是以下之一: {supported}")
 
     @field_validator("login_page_selected_template_id", mode="before")
     @classmethod
@@ -401,21 +586,14 @@ class Settings(BaseSettings):
         return normalize_login_page_template_ids(value)
 
     @field_validator(
-        "login_page_codex_orbit_brand_subtitle",
-        "login_page_codex_orbit_hero_title",
-        "login_page_codex_orbit_hero_description",
-        "login_page_fluid_mist_greeting_title",
-        "login_page_fluid_mist_greeting_description",
-        "login_page_image_lab_hero_description",
+        "login_page_command_orbit_config",
+        "login_page_fluid_mist_config",
+        "login_page_image_lab_config",
         mode="before",
     )
     @classmethod
-    def _normalize_login_page_text(cls, value: Any, info: ValidationInfo) -> str:
-        normalized = "" if value is None else str(value).strip()
-        maximum = LOGIN_PAGE_TEXT_CONFIG_LIMITS.get(info.field_name)
-        if maximum is not None and len(normalized) > maximum:
-            raise ValueError(f"{info.field_name} 不能超过 {maximum} 个字符")
-        return normalized
+    def _normalize_login_page_config(cls, value: Any, info: ValidationInfo) -> str:
+        return normalize_login_page_template_config_by_key(info.field_name, value)
 
     @field_validator("login_page_image_lab_hero_image_asset_id", mode="before")
     @classmethod
@@ -725,11 +903,20 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         description="逗号分隔，例如 image/png,image/jpeg,image/webp。",
     ),
     ConfigDefinition(
-        key="generation_max_concurrent_tasks",
-        label="全局生成并发上限",
+        key=TEXT_GENERATION_MAX_CONCURRENT_TASKS_KEY,
+        label="文案生成并发上限",
         category=GLOBAL_GENERATION_QUEUE_CAPACITY_CATEGORY,
         input_type="number",
-        description="全局资源保护阈值；工作流和文/图生图达到上限时会提示稍后重试。",
+        description="文案工作流节点的全局运行上限；多容器 worker 共享该业务容量池。",
+        minimum=1,
+        maximum=20,
+    ),
+    ConfigDefinition(
+        key=IMAGE_GENERATION_MAX_CONCURRENT_TASKS_KEY,
+        label="图片生成并发上限",
+        category=GLOBAL_GENERATION_QUEUE_CAPACITY_CATEGORY,
+        input_type="number",
+        description="图片工作流节点和文/图生图任务的全局运行上限；多容器 worker 共享该业务容量池。",
         minimum=1,
         maximum=20,
     ),
@@ -837,95 +1024,38 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ),
     ConfigDefinition(
         key="login_page_mode",
-        label="登录页选择方式",
+        label="登录页选择",
         category=LOGIN_PAGE_CATEGORY,
         input_type="select",
         options=(
             ConfigOption("random", "随机"),
-            ConfigOption("selected", "指定"),
-        ),
-        description="随机模式会从启用模板中选择；指定模式使用下方指定模板，异常时回退到 Command Orbit。",
-    ),
-    ConfigDefinition(
-        key="login_page_selected_template_id",
-        label="指定登录页",
-        category=LOGIN_PAGE_CATEGORY,
-        input_type="select",
-        options=(
-            ConfigOption("", "未指定"),
             *(
                 ConfigOption(template_id, LOGIN_PAGE_TEMPLATE_NAMES[template_id])
                 for template_id in LOGIN_PAGE_TEMPLATE_IDS
             ),
         ),
-        description="仅在选择方式为指定时生效。",
-        optional=True,
+        description="随机会从全部登录页模板中选择；也可以固定使用某个模板。",
     ),
     ConfigDefinition(
-        key="login_page_enabled_template_ids",
-        label="随机候选模板",
-        category=LOGIN_PAGE_CATEGORY,
-        input_type="multi_select",
-        options=tuple(
-            ConfigOption(template_id, LOGIN_PAGE_TEMPLATE_NAMES[template_id]) for template_id in LOGIN_PAGE_TEMPLATE_IDS
-        ),
-        description="随机模式只会从这些模板中选择，至少保留一个。",
-    ),
-    ConfigDefinition(
-        key="login_page_codex_orbit_brand_subtitle",
-        label="Command Orbit 品牌副标题",
-        category=LOGIN_PAGE_CATEGORY,
-        input_type="text",
-        description="留空时使用模板默认文案；最多 48 个字符。",
-        optional=True,
-    ),
-    ConfigDefinition(
-        key="login_page_codex_orbit_hero_title",
-        label="Command Orbit 主标题",
-        category=LOGIN_PAGE_CATEGORY,
-        input_type="text",
-        description="留空时使用模板默认文案；最多 48 个字符。",
-        optional=True,
-    ),
-    ConfigDefinition(
-        key="login_page_codex_orbit_hero_description",
-        label="Command Orbit 主说明",
+        key="login_page_command_orbit_config",
+        label="Command Orbit 文案配置",
         category=LOGIN_PAGE_CATEGORY,
         input_type="textarea",
-        description="留空时使用模板默认文案；最多 180 个字符。",
-        optional=True,
+        description="Command Orbit 登录页独立 JSON 配置，由设置页按字段渲染。",
     ),
     ConfigDefinition(
-        key="login_page_fluid_mist_greeting_title",
-        label="Fluid Mist 欢迎标题",
-        category=LOGIN_PAGE_CATEGORY,
-        input_type="text",
-        description="留空时使用模板默认文案；最多 48 个字符。",
-        optional=True,
-    ),
-    ConfigDefinition(
-        key="login_page_fluid_mist_greeting_description",
-        label="Fluid Mist 欢迎说明",
-        category=LOGIN_PAGE_CATEGORY,
-        input_type="text",
-        description="留空时使用模板默认文案；最多 120 个字符。",
-        optional=True,
-    ),
-    ConfigDefinition(
-        key="login_page_image_lab_hero_description",
-        label="Image Lab 英雄图说明",
+        key="login_page_fluid_mist_config",
+        label="Fluid Mist 文案配置",
         category=LOGIN_PAGE_CATEGORY,
         input_type="textarea",
-        description="留空时使用模板默认文案；最多 180 个字符。",
-        optional=True,
+        description="Fluid Mist 登录页独立 JSON 配置，由设置页按字段渲染。",
     ),
     ConfigDefinition(
-        key="login_page_image_lab_hero_image_asset_id",
-        label="Image Lab 英雄图资源",
+        key="login_page_image_lab_config",
+        label="Image Lab 文案/图片配置",
         category=LOGIN_PAGE_CATEGORY,
-        input_type="text",
-        description="留空使用默认 /hero.png；也可在下方从资源库图片中选择。",
-        optional=True,
+        input_type="textarea",
+        description="Image Lab 登录页独立 JSON 配置；图片只能从资源库选择。",
     ),
     ConfigDefinition(
         key="deletion_enabled",
@@ -940,6 +1070,10 @@ CONFIG_DEFINITION_BY_KEY: dict[str, ConfigDefinition] = {
     definition.key: definition for definition in CONFIG_DEFINITIONS
 }
 RUNTIME_CONFIG_KEYS: set[str] = set(CONFIG_DEFINITION_BY_KEY)
+LEGACY_RUNTIME_CONFIG_KEYS: set[str] = {
+    LEGACY_GENERATION_MAX_CONCURRENT_TASKS_KEY,
+    *LOGIN_PAGE_LEGACY_RUNTIME_CONFIG_KEYS,
+}
 
 
 def normalize_image_size(value: Any, *, label: str = "图片尺寸") -> str:
@@ -1154,10 +1288,8 @@ def normalize_config_value(key: str, value: Any) -> str:
         if normalized not in allowed_values:
             allowed_text = ", ".join(sorted(allowed_values))
             raise ValueError(f"{definition.label} 必须是以下之一: {allowed_text}")
-    if key in LOGIN_PAGE_TEXT_CONFIG_LIMITS:
-        maximum = LOGIN_PAGE_TEXT_CONFIG_LIMITS[key]
-        if len(normalized) > maximum:
-            raise ValueError(f"{definition.label} 不能超过 {maximum} 个字符")
+    if key in LOGIN_PAGE_TEMPLATE_ID_BY_CONFIG_KEY:
+        return normalize_login_page_template_config_by_key(key, value)
     if key == "login_page_image_lab_hero_image_asset_id" and len(normalized) > 64:
         raise ValueError("登录页资源库图片 ID 不能超过 64 个字符")
     return normalized
@@ -1184,8 +1316,23 @@ def _load_database_config_overrides() -> dict[str, str]:
 
         session = get_session_factory()()
         try:
-            rows = session.scalars(select(AppSetting).where(AppSetting.key.in_(RUNTIME_CONFIG_KEYS))).all()
-            return {row.key: row.value for row in rows}
+            rows = session.scalars(
+                select(AppSetting).where(AppSetting.key.in_(RUNTIME_CONFIG_KEYS | LEGACY_RUNTIME_CONFIG_KEYS))
+            ).all()
+            row_values = {row.key: row.value for row in rows}
+            overrides = {
+                key: value
+                for key, value in migrate_legacy_login_page_config_values(row_values).items()
+                if key in RUNTIME_CONFIG_KEYS
+            }
+            legacy_capacity = next(
+                (row.value for row in rows if row.key == LEGACY_GENERATION_MAX_CONCURRENT_TASKS_KEY),
+                None,
+            )
+            if legacy_capacity is not None:
+                overrides.setdefault(TEXT_GENERATION_MAX_CONCURRENT_TASKS_KEY, legacy_capacity)
+                overrides.setdefault(IMAGE_GENERATION_MAX_CONCURRENT_TASKS_KEY, legacy_capacity)
+            return overrides
         finally:
             session.close()
     except Exception as exc:  # noqa: BLE001

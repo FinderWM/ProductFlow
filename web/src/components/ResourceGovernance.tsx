@@ -51,7 +51,10 @@ export function ResourceMetaBadges({
   return (
     <div className={`flex min-w-0 flex-wrap items-center gap-1.5 ${className}`}>
       {ownerUsername ? (
-        <span className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-300">
+        <span
+          className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-300"
+          title={t("resource.owner", { username: ownerUsername })}
+        >
           <UserRound size={11} className="mr-1 shrink-0" aria-hidden="true" />
           <span className="truncate">{t("resource.owner", { username: ownerUsername })}</span>
         </span>

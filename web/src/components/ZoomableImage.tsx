@@ -12,6 +12,7 @@ interface ZoomableImageProps {
   zoomInLabel: string;
   zoomOutLabel: string;
   resetLabel: string;
+  interactive?: boolean;
   className?: string;
   imageClassName?: string;
 }
@@ -45,6 +46,7 @@ export function ZoomableImage({
   zoomInLabel,
   zoomOutLabel,
   resetLabel,
+  interactive = true,
   className = "",
   imageClassName = "",
 }: ZoomableImageProps) {
@@ -60,7 +62,7 @@ export function ZoomableImage({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) {
+    if (!container || !interactive) {
       return;
     }
 
@@ -78,25 +80,31 @@ export function ZoomableImage({
 
     container.addEventListener("wheel", handleNativeWheel, { capture: true, passive: false });
     return () => container.removeEventListener("wheel", handleNativeWheel, { capture: true });
-  }, []);
+  }, [interactive]);
 
   function boundedOffset(next: Point, nextScale = scale): Point {
     return boundedOffsetForElement(containerRef.current, next, nextScale);
   }
 
   function updateScale(nextScale: number) {
+    if (!interactive) {
+      return;
+    }
     const resolvedScale = clamp(nextScale, MIN_SCALE, MAX_SCALE);
     setScale(resolvedScale);
     setOffset((currentOffset) => boundedOffset(currentOffset, resolvedScale));
   }
 
   function resetImage() {
+    if (!interactive) {
+      return;
+    }
     setScale(MIN_SCALE);
     setOffset({ x: 0, y: 0 });
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (scale <= MIN_SCALE) {
+    if (!interactive || scale <= MIN_SCALE) {
       return;
     }
     event.preventDefault();
@@ -132,9 +140,11 @@ export function ZoomableImage({
       className={`relative flex min-h-0 items-center justify-center overflow-hidden overscroll-contain ${className}`}
     >
       <div
-        className={`flex h-full w-full items-center justify-center ${scale > MIN_SCALE ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`}
+        className={`flex h-full w-full items-center justify-center ${
+          interactive ? (scale > MIN_SCALE ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in") : "cursor-default"
+        }`}
         style={{ touchAction: "none" }}
-        onDoubleClick={scale > MIN_SCALE ? resetImage : () => updateScale(MIN_SCALE + SCALE_STEP * 4)}
+        onDoubleClick={interactive ? (scale > MIN_SCALE ? resetImage : () => updateScale(MIN_SCALE + SCALE_STEP * 4)) : undefined}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
@@ -156,7 +166,7 @@ export function ZoomableImage({
         <button
           type="button"
           onClick={() => updateScale(scale - SCALE_STEP)}
-          disabled={scale <= MIN_SCALE}
+          disabled={!interactive || scale <= MIN_SCALE}
           title={zoomOutLabel}
           aria-label={zoomOutLabel}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/12 hover:text-white disabled:opacity-40"
@@ -166,7 +176,7 @@ export function ZoomableImage({
         <button
           type="button"
           onClick={resetImage}
-          disabled={scale <= MIN_SCALE && offset.x === 0 && offset.y === 0}
+          disabled={!interactive || (scale <= MIN_SCALE && offset.x === 0 && offset.y === 0)}
           title={resetLabel}
           aria-label={resetLabel}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/12 hover:text-white disabled:opacity-40"
@@ -176,7 +186,7 @@ export function ZoomableImage({
         <button
           type="button"
           onClick={() => updateScale(scale + SCALE_STEP)}
-          disabled={scale >= MAX_SCALE}
+          disabled={!interactive || scale >= MAX_SCALE}
           title={zoomInLabel}
           aria-label={zoomInLabel}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/12 hover:text-white disabled:opacity-40"

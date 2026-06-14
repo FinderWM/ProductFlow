@@ -351,10 +351,12 @@ ConfigDefinition(
   `provider_profiles.default_models_json`. If required model settings are absent after bootstrap, resolvers must fail
   with a clear configuration error instead of falling back to legacy `Settings.text_brief_model`,
   `Settings.text_copy_model`, or `Settings.image_generate_model`.
-- Text config is provider-kind scoped: `openai_chat_completions` owns
-  `config_json.structured_json_response_format_enabled` (`false` by default). When enabled, JSON-producing text provider
-  calls such as brief, copy, and tail split send Chat Completions `response_format={"type":"json_object"}` with
-  `stream=false`; non-JSON text calls such as image-prompt polishing must not send `response_format`.
+- Text structured output config is provider-kind scoped: `openai` and `openai_chat_completions` own
+  `config_json.structured_output` (`{"enabled": false, "mode": "json_schema"}` by default). Legacy
+  `config_json.structured_json_response_format_enabled=true` is still accepted as enabled `json_object`. When enabled,
+  Responses text calls send `text.format`, Chat Completions text calls send `response_format`, and Chat Completions keeps
+  `stream=false`. `json_schema` is the preferred mode; `json_object` remains available for compatible gateways that reject
+  schema mode. Image-prompt polishing may use structured output internally, but must still return plain text to callers.
 - Image config is provider-kind scoped: `openai_responses` owns `responses_background_enabled`, while
   `openai_images` owns `images_quality` and `images_style`, and `google_gemini_image` owns `gemini_api_version` plus
   optional `gemini_output_mime_type`. Do not require or persist Responses background config for `openai_images`, Google
@@ -419,10 +421,10 @@ ConfigDefinition(
   `400`.
 - Missing `responses_background_enabled` -> only `openai_responses` image bindings fail. `openai_images` and `mock` must
   not require that field.
-- `POST /api/settings/generation-configs/test-json-response-format` with a non-`openai_chat_completions` text config ->
-  `400`, Chat Completions-only detail.
+- `POST /api/settings/generation-configs/test-json-response-format` with a text config other than `openai` or
+  `openai_chat_completions` -> `400`, supported text provider detail.
 - `POST /api/settings/generation-configs/test-json-response-format` with
-  `structured_json_response_format_enabled=false` -> `400`, enable-config detail.
+  `structured_output.enabled=false` -> `400`, enable-config detail.
 - `POST /api/settings/generation-configs/test-json-response-format` provider output that cannot be parsed as a JSON
   object -> `400` validation detail or `502` provider-test failure, matching the settings test boundary.
 - `POST/PATCH /api/settings/generation-configs` with `resource_group_ids` present -> replace all group bindings and update
@@ -434,8 +436,9 @@ ConfigDefinition(
 
 - Good: one OpenAI-compatible gateway supports `text_responses`, `text_chat_completions`, `image_images`, or
   `image_chat`; multiple text/image generation configs point to the same profile and carry separate model settings.
-- Good: an `openai_chat_completions` text generation config stores
-  `structured_json_response_format_enabled=true`, and only its JSON-producing text calls send `response_format`.
+- Good: an `openai` or `openai_chat_completions` text generation config stores
+  `structured_output={"enabled": true, "mode": "json_schema"}`; Responses sends `text.format`, Chat Completions sends
+  `response_format`, and image-prompt polishing still returns a plain string after internal parsing.
 - Good: a text gateway and an image gateway use different keys or URLs; bootstrap creates two profiles and one default
   config per purpose.
 - Good: a Google Gemini profile has `provider_type="google_gemini"`, no `base_url`, capability
@@ -452,7 +455,8 @@ ConfigDefinition(
 - Bad: letting a failed task remain running because release/update stats raised on naive-vs-aware datetime comparison.
 - Bad: filtering runtime candidates only by the compatibility `generation_configs.resource_group_id` field after
   multi-group bindings exist.
-- Bad: sending Chat Completions `response_format` from image-prompt polishing, because that operation expects plain text.
+- Bad: returning the raw structured image-prompt polishing JSON to callers; that operation's downstream contract expects
+  plain text even when the provider request uses structured output internally.
 - Bad: treating frontend label removal or a shortened cooldown value as manual unfreeze while
   `generation_config_states.frozen_until` still blocks scheduler claims.
 
@@ -478,12 +482,12 @@ ConfigDefinition(
   capabilities across Google Gemini and OpenAI-compatible profiles.
 - Settings API test that `google_gemini_image` binding accepts only `v1` or `v1beta`, persists
   `gemini_output_mime_type` only when non-empty, and round-trips through config export/import.
-- Settings API test that `openai_chat_completions` generation config persists
-  `structured_json_response_format_enabled`, resolver exposes it, and export/import round-trips it.
+- Settings API test that `openai` and `openai_chat_completions` generation configs persist `structured_output`, resolver
+  exposes it, legacy `structured_json_response_format_enabled` is normalized, and export/import round-trips it.
 - Settings API test that `/api/settings/generation-configs/test-json-response-format` sends Chat Completions
-  `response_format={"type":"json_object"}` and returns parsed JSON without mutating generation configs.
-- Provider payload test that `openai_chat_completions` sends `response_format` for brief/copy/tail split only when the
-  per-config flag is enabled, and does not send it for image-prompt polishing.
+  `response_format` and Responses `text.format`, then returns parsed JSON without mutating generation configs.
+- Provider payload test that `openai` sends Responses `text.format` and `openai_chat_completions` sends Chat Completions
+  `response_format` only when per-config structured output is enabled; image-prompt polishing must still return text.
 - Provider payload test that `google_gemini_image` dispatches to the official `google-genai` client with text plus
   reference image parts, aspect-ratio mapping, sanitized request metadata, and generic provider errors.
 - Provider payload tests should set legacy provider kind explicitly when they rely on env bootstrap.
@@ -508,14 +512,14 @@ unfreeze_generation_config(session, config_id)
 Wrong:
 
 ```python
-payload["response_format"] = {"type": "json_object"}  # sent for every text call
+payload["response_format"] = {"type": "json_object"}  # sent even when structured output is disabled
 ```
 
 Correct:
 
 ```python
-if response_format_json:
-    payload["response_format"] = {"type": "json_object"}
+if structured_output.enabled:
+    payload["response_format"] = chat_response_format(structured_output, schema)
 ```
 
 Wrong:
@@ -1405,10 +1409,13 @@ When adding a runtime setting, update all of these together:
 - API schema/frontend types in `web/src/lib/types.ts` if the value appears in settings UI
 - tests for validation/persistence in `backend/tests/test_auth_settings_runtime_config.py`
 
-`generation_max_concurrent_tasks` is the public-demo global provider/worker running cap. It is a runtime setting backed
-by `app_settings` and must gate worker entry into provider execution or synchronous provider calls. Durable async submit
-paths should still persist queued work and enqueue delivery when the current running count is already at the cap; the cap
-is what makes workers wait, not a reason to reject backlog creation.
+`text_generation_max_concurrent_tasks` and `image_generation_max_concurrent_tasks` are the provider/worker running caps.
+They are runtime settings backed by `app_settings` and must gate worker entry into provider execution or synchronous
+provider calls. Text workflow nodes consume the text pool; image workflow nodes and continuous image-session generation
+tasks consume the image pool. Durable async submit paths should still persist queued work and enqueue delivery when the
+current running count is already at the cap; the cap is what makes workers wait, not a reason to reject backlog creation.
+`generation_max_concurrent_tasks` is a legacy compatibility input only and may seed the split settings when new keys are
+missing.
 `workflow_image_generation_provider_timeout_seconds` is the workflow AI image provider timeout cap. It is also backed by
 `app_settings` so operators can tune the timeout without redeploying; workflow execution must convert timeout/provider
 failures into safe persisted failure reasons instead of leaking provider details.
@@ -2522,6 +2529,97 @@ Correct:
 ```python
 stmt = stmt.where(ImageSession.resource_group_id == group_id)
 latest_group = image_session.resource_group
+```
+
+## Scenario: Settings generation config test APIs
+
+### 1. Scope / Trigger
+
+- Trigger: adding or changing Settings-page generation config test actions for text or image configs.
+- This is a cross-layer contract because SettingsPage submits unsaved generation config drafts, backend resolves provider
+  config without creating scheduler rows, image tests persist image-session assets, and the frontend may save the generated
+  asset through gallery APIs.
+
+### 2. Signatures
+
+- Text test API: `POST /api/settings/generation-configs/test-text`.
+- Structured-output test API: `POST /api/settings/generation-configs/test-json-response-format`.
+- Image test API: `POST /api/settings/generation-configs/test-image`.
+- Shared request fields:
+  - `generation_config_id?: str | null`
+  - `generation_config?: GenerationConfigCreateRequest | null`
+- Image test request fields:
+  - `resource_group_id: str`
+  - `prompt: str`
+  - `size: str`
+- Image test response fields:
+  - `generation_config_id`, `provider_kind`, `model_name`, `provider_name`, `duration_ms`
+  - `image_session_id`
+  - `round: ImageSessionRoundResponse`
+  - `generated_asset: ImageSessionAssetResponse`
+
+### 3. Contracts
+
+- All settings generation config test APIs require `settings:provider_write`.
+- If `generation_config` is present, resolve the draft through `resolve_*_provider_config_from_draft(...)` and do not
+  create a `GenerationConfig`, `GenerationConfigState`, daily stat row, or scheduler claim.
+- If only `generation_config_id` is present, load the non-archived config with the matching purpose and resolve it through
+  the same draft resolver path so persisted and unsaved configs share validation.
+- Image tests create a standalone `ImageSession`, generated `ImageSessionAsset`, and `ImageSessionRound` so the result can
+  be saved through `POST /api/gallery` without copying files or special-case gallery logic.
+- Image test sessions use an explicit test title prefix and the selected `resource_group_id`; they do not enqueue durable
+  image-generation tasks or update generation-config health/stat counters.
+- Frontend SettingsPage stores image test prompt and size in browser local storage only; do not add app settings or a new
+  table for these operator-local test inputs.
+- Save-to-gallery state for image test results still comes from `ImageSessionAssetResponse.gallery_saved` and
+  `gallery_entry_id`, not from scanning gallery pages.
+
+### 4. Validation & Error Matrix
+
+- Missing both `generation_config_id` and `generation_config` -> `400`, provide-config detail.
+- Draft with wrong/missing provider profile, missing model, unsupported provider kind, or invalid structured output mode ->
+  `400`, resolver validation detail.
+- Image test with blank prompt -> `400`, prompt-required detail.
+- Image test with invalid size -> `400`, image-size validation detail.
+- Image test with unauthorized or disabled `resource_group_id` -> resource-group validation error.
+- Provider/client validation failure raised as `ValueError` during a test -> `400`, preserve the failure detail.
+- Unexpected provider failure during image test -> `502`, sanitized `classify_image_generation_failure(...)` reason.
+- Gallery save for a returned generated asset -> first save `201`, repeated save `200`, with returned `GalleryEntry.image`
+  marking the same asset as saved.
+
+### 5. Good/Base/Bad Cases
+
+- Good: test an unsaved image config draft, preview the returned generated asset, then call `api.saveGalleryEntry(asset.id)`
+  and update the local result from `GalleryEntry.image`.
+- Good: test a saved config by id while still passing the current draft when the Settings form has unsaved edits.
+- Base: text tests run provider calls and return structured JSON but do not persist generation config drafts.
+- Bad: sending users to the image-chat page just to verify provider settings.
+- Bad: saving image test parameters in `app_settings` or adding a database migration for browser-local test defaults.
+- Bad: creating a gallery entry from a copied file or a second `ImageSessionAsset`.
+
+### 6. Tests Required
+
+- Backend API test: mock image config draft returns `ImageGenerationConfigTestResponse` with a generated asset and no
+  persisted `GenerationConfig`.
+- Backend API test: returned image test asset can be saved to gallery and keeps the same asset id.
+- Backend API test: provider `ValueError` from image testing preserves the detail and rolls back the test session.
+- Existing text test APIs keep coverage for draft resolution, missing real provider config, and structured-output mode.
+- Frontend build/type check must pass after adding or changing test request/response DTOs in `web/src/lib/types.ts` and
+  API helpers in `web/src/lib/api.ts`.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```tsx
+const saved = galleryEntries.some((entry) => entry.image_session_asset_id === result.generated_asset.id);
+```
+
+Correct:
+
+```tsx
+const entry = await api.saveGalleryEntry(result.generated_asset.id);
+setResult(imageGenerationConfigTestResultWithGalleryEntry(result, entry));
 ```
 
 ---

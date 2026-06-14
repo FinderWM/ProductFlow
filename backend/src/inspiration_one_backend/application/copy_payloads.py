@@ -118,6 +118,8 @@ def copy_payload_to_output(payload: CopyPayloadV2) -> dict[str, Any]:
 def _normalize_v2_payload_dict(raw_payload: dict[str, Any]) -> dict[str, Any]:
     payload = dict(raw_payload)
     payload.setdefault("version", 2)
+    if isinstance(payload.get("version"), str) and payload["version"].strip() == "2":
+        payload["version"] = 2
     visual_guidance = _string_or_none(payload.get("visual_guidance"))
     if visual_guidance:
         payload["visual_guidance"] = {"composition_hint": visual_guidance}

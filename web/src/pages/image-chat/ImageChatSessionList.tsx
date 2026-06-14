@@ -164,7 +164,10 @@ function ImageChatSessionCard({
           {active ? <div className="absolute inset-0 ring-2 ring-inset ring-indigo-500/60 dark:ring-violet-400/80" /> : null}
         </div>
         <div className="pf-workspace-latest-copy min-w-0 flex-1">
-          <div className={`pf-image-chat-session-title truncate text-sm font-semibold ${active ? "text-indigo-950 dark:text-white" : "text-slate-900 dark:text-slate-100"}`}>
+          <div
+            className={`pf-image-chat-session-title truncate text-sm font-semibold ${active ? "text-indigo-950 dark:text-white" : "text-slate-900 dark:text-slate-100"}`}
+            title={item.title}
+          >
             {item.title}
           </div>
           <div className="pf-image-chat-session-meta pf-workspace-muted mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
