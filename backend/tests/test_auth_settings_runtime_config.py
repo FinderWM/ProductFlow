@@ -25,6 +25,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationConfigDailyStat,
     GenerationConfigResourceGroup,
     GenerationConfigState,
+    GenerationConfigTestResult,
     GenerationResourceGroup,
     ImageSession,
     ImageSessionRound,
@@ -1569,9 +1570,74 @@ def test_text_generation_config_test_api_runs_mock_without_persistence(configure
     session = get_session_factory()()
     try:
         configs = session.scalars(select(GenerationConfig).where(GenerationConfig.name == "测试文案配置")).all()
+        test_results = session.scalars(select(GenerationConfigTestResult)).all()
     finally:
         session.close()
     assert configs == []
+    assert test_results == []
+
+
+def test_text_generation_config_test_api_persists_latest_result_for_saved_config(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "name": "已保存文案测试配置",
+            "purpose": "text",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+            "config": {},
+            "priority": 100,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    generation_config_id = created.json()["id"]
+
+    response = client.post(
+        "/api/settings/generation-configs/test-text",
+        json={
+            "generation_config_id": generation_config_id,
+            "inspiration": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
+            "copy_request": {"instruction": "突出保温和便携", "output_mode": "blocks"},
+        },
+    )
+
+    assert response.status_code == 200
+    session = get_session_factory()()
+    try:
+        test_results = session.scalars(
+            select(GenerationConfigTestResult).where(
+                GenerationConfigTestResult.generation_config_id == generation_config_id
+            )
+        ).all()
+    finally:
+        session.close()
+    assert len(test_results) == 1
+    assert test_results[0].test_type == "text"
+    assert test_results[0].status == "success"
+    assert test_results[0].provider_kind == "mock"
+    assert test_results[0].duration_ms is not None
+    assert test_results[0].model_summary_json == {"brief_model": "mock-brief-v1", "copy_model": "mock-copy-v2"}
+
+    provider_config = client.get("/api/settings/provider-config")
+    assert provider_config.status_code == 200
+    persisted_config = next(
+        item for item in provider_config.json()["generation_configs"] if item["id"] == generation_config_id
+    )
+    assert persisted_config["latest_test_result"]["test_type"] == "text"
+    assert persisted_config["latest_test_result"]["status"] == "success"
+    assert persisted_config["latest_test_result"]["model_summary"] == {
+        "brief_model": "mock-brief-v1",
+        "copy_model": "mock-copy-v2",
+    }
 
 
 def test_text_generation_config_test_api_reports_missing_real_provider_config(configured_env: Path) -> None:
@@ -1651,16 +1717,124 @@ def test_image_generation_config_test_api_runs_mock_and_returns_gallery_saveable
     session = get_session_factory()()
     try:
         configs = session.scalars(select(GenerationConfig).where(GenerationConfig.name == "测试图片配置")).all()
+        test_results = session.scalars(select(GenerationConfigTestResult)).all()
         image_session = session.get(ImageSession, payload["image_session_id"])
         round_item = session.get(ImageSessionRound, payload["round"]["id"])
     finally:
         session.close()
     assert configs == []
+    assert test_results == []
     assert image_session is not None
     assert image_session.title.startswith("图片配置测试 - 测试图片配置")
     assert round_item is not None
     assert round_item.session_id == payload["image_session_id"]
     assert round_item.generation_config_id is None
+
+
+def test_image_generation_config_test_api_persists_latest_result_for_saved_config(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "name": "已保存图片测试配置",
+            "purpose": "image",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"model": "mock-image"},
+            "config": {},
+            "priority": 100,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    generation_config_id = created.json()["id"]
+
+    response = client.post(
+        "/api/settings/generation-configs/test-image",
+        json={
+            "generation_config_id": generation_config_id,
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "生成一张干净的测试图",
+            "size": "1024x1024",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generation_config_id"] == generation_config_id
+    session = get_session_factory()()
+    try:
+        test_results = session.scalars(
+            select(GenerationConfigTestResult).where(
+                GenerationConfigTestResult.generation_config_id == generation_config_id
+            )
+        ).all()
+        round_item = session.get(ImageSessionRound, payload["round"]["id"])
+    finally:
+        session.close()
+    assert len(test_results) == 1
+    assert test_results[0].test_type == "image"
+    assert test_results[0].status == "success"
+    assert test_results[0].provider_kind == "mock"
+    assert test_results[0].model_summary_json == {
+        "model_name": "mock-image-chat-v1",
+        "provider_name": "mock",
+    }
+    assert round_item is not None
+    assert round_item.generation_config_id == generation_config_id
+
+
+def test_generation_config_test_api_persists_failure_for_saved_config(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "name": "失败记录文案配置",
+            "purpose": "text",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+            "config": {},
+            "priority": 100,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    generation_config_id = created.json()["id"]
+
+    response = client.post(
+        "/api/settings/generation-configs/test-json-response-format",
+        json={"generation_config_id": generation_config_id},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "文案结构化输出仅支持 OpenAI Responses 或 Chat Completions 文案接口"
+    session = get_session_factory()()
+    try:
+        test_result = session.scalar(
+            select(GenerationConfigTestResult).where(
+                GenerationConfigTestResult.generation_config_id == generation_config_id
+            )
+        )
+    finally:
+        session.close()
+    assert test_result is not None
+    assert test_result.test_type == "json_response_format"
+    assert test_result.status == "failed"
+    assert test_result.provider_kind == "mock"
+    assert test_result.error_detail == "文案结构化输出仅支持 OpenAI Responses 或 Chat Completions 文案接口"
 
 
 def test_image_generation_config_test_api_reports_provider_failure_detail(

@@ -178,6 +178,19 @@ class GenerationConfigStatAggregateResponse(BaseModel):
     last_failure_at: str | None = None
 
 
+class GenerationConfigTestResultResponse(BaseModel):
+    id: str
+    generation_config_id: str
+    test_type: str
+    status: str
+    tested_at: str
+    duration_ms: int | None = None
+    provider_kind: str | None = None
+    model_summary: dict[str, Any] = Field(default_factory=dict)
+    message: str | None = None
+    error_detail: str | None = None
+
+
 class GenerationConfigResponse(BaseModel):
     id: str
     resource_group_id: str | None = None
@@ -199,6 +212,7 @@ class GenerationConfigResponse(BaseModel):
     updated_at: str
     state: GenerationConfigStateResponse | None = None
     today_stat: GenerationConfigDailyStatResponse | None = None
+    latest_test_result: GenerationConfigTestResultResponse | None = None
 
 
 class GenerationConfigOptionResponse(BaseModel):

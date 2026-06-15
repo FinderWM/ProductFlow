@@ -49,6 +49,7 @@ import { ResourceLibraryModal } from "../components/resource-library/ResourceLib
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
+import { formatDateTime } from "../lib/format";
 import { DEFAULT_IMAGE_SIZE_OPTIONS, formatImageSizeValue } from "../lib/imageSizes";
 import type { TranslationKey } from "../lib/i18n";
 import {
@@ -59,7 +60,7 @@ import {
   writeNotificationAutoCloseMs,
 } from "../lib/notifications";
 import type { ParameterHelpKey } from "../lib/parameterHelp";
-import { useI18n } from "../lib/preferences";
+import { useI18n, type TranslateFunction } from "../lib/preferences";
 import {
   API_GLOBAL_TEMPLATES_MANAGE,
   API_GALLERY_WRITE,
@@ -79,6 +80,7 @@ import type {
   ProviderConfigResponse,
   GenerationConfig,
   GenerationConfigCreateRequest,
+  GenerationConfigTestResult,
   GenerationConfigUpdateRequest,
   GalleryEntry,
   GenerationResourceGroup,
@@ -489,6 +491,13 @@ const EMPTY_PROVIDER_FORM: ProviderProfileFormState = {
 };
 
 const DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
+  inspirationName: "蓝天白云青草地",
+  category: "自然风景场景",
+  price: "",
+  sourceNote: "画面包含明亮蓝天、轻盈白云和连片青草地，氛围清新开阔，适合表达户外自然与舒展感。",
+  instruction: "围绕蓝天白云青草地生成清晰、自然、适合画面展示的短文案。",
+};
+const LEGACY_DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
   inspirationName: "测试灵感产物",
   category: "电商灵感产物",
   price: "",
@@ -500,14 +509,31 @@ const TEXT_CONFIG_TEST_STORAGE_KEY = "inspiration-one.settings.text-config-test"
 const IMAGE_CONFIG_TEST_STORAGE_KEY = "inspiration-one.settings.image-config-test";
 const DEFAULT_IMAGE_CONFIG_TEST_DRAFT: ImageConfigTestDraft = {
   size: "1024x1024",
+  prompt: "蓝天白云下，一片开阔柔软的青草地延伸到远处，阳光明亮，画面清新自然，空气通透，构图干净。",
+};
+const LEGACY_DEFAULT_IMAGE_CONFIG_TEST_DRAFT: ImageConfigTestDraft = {
+  size: "1024x1024",
   prompt: "生成一张干净的产品展示图，主体清晰，背景简洁，适合验证当前图片生成配置。",
 };
+
+function isLegacyDefaultTextConfigTestDraft(record: Record<string, unknown>): boolean {
+  return (
+    record.inspirationName === LEGACY_DEFAULT_TEXT_CONFIG_TEST_DRAFT.inspirationName &&
+    record.category === LEGACY_DEFAULT_TEXT_CONFIG_TEST_DRAFT.category &&
+    record.price === LEGACY_DEFAULT_TEXT_CONFIG_TEST_DRAFT.price &&
+    record.sourceNote === LEGACY_DEFAULT_TEXT_CONFIG_TEST_DRAFT.sourceNote &&
+    record.instruction === LEGACY_DEFAULT_TEXT_CONFIG_TEST_DRAFT.instruction
+  );
+}
 
 export function normalizeTextConfigTestDraft(value: unknown): TextConfigTestDraft {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return DEFAULT_TEXT_CONFIG_TEST_DRAFT;
   }
   const record = value as Record<string, unknown>;
+  if (isLegacyDefaultTextConfigTestDraft(record)) {
+    return DEFAULT_TEXT_CONFIG_TEST_DRAFT;
+  }
   return {
     inspirationName:
       typeof record.inspirationName === "string"
@@ -553,7 +579,12 @@ export function normalizeImageConfigTestDraft(value: unknown): ImageConfigTestDr
     typeof record.size === "string" && record.size.trim()
       ? record.size.trim()
       : DEFAULT_IMAGE_CONFIG_TEST_DRAFT.size;
-  const prompt = typeof record.prompt === "string" ? record.prompt : DEFAULT_IMAGE_CONFIG_TEST_DRAFT.prompt;
+  const prompt =
+    typeof record.prompt === "string"
+      ? record.prompt === LEGACY_DEFAULT_IMAGE_CONFIG_TEST_DRAFT.prompt
+        ? DEFAULT_IMAGE_CONFIG_TEST_DRAFT.prompt
+        : record.prompt
+      : DEFAULT_IMAGE_CONFIG_TEST_DRAFT.prompt;
   return { size, prompt };
 }
 
@@ -3908,6 +3939,58 @@ function generationConfigSuccessRate(config: GenerationConfig): string {
   return `${Math.round((stat.success_count / stat.attempt_count) * 100)}%`;
 }
 
+function generationConfigLatestTestTypeLabelKey(testType: GenerationConfigTestResult["test_type"]): TranslationKey {
+  if (testType === "image") {
+    return "settings.generation.latestTestImage";
+  }
+  if (testType === "json_response_format") {
+    return "settings.generation.latestTestJsonResponseFormat";
+  }
+  return "settings.generation.latestTestText";
+}
+
+function generationConfigModelSummaryText(summary: Record<string, unknown>, key: string): string {
+  const value = summary[key];
+  return typeof value === "string" && value.trim() ? value : "--";
+}
+
+export function generationConfigLatestTestDetail(result: GenerationConfigTestResult, t: TranslateFunction): string {
+  const details: string[] = [];
+  if (result.status === "failed") {
+    const errorDetail = result.error_detail || result.message;
+    if (errorDetail) {
+      details.push(errorDetail);
+    }
+  } else if (result.test_type === "text") {
+    details.push(
+      t("settings.generation.latestTestTextModels", {
+        briefModel: generationConfigModelSummaryText(result.model_summary, "brief_model"),
+        copyModel: generationConfigModelSummaryText(result.model_summary, "copy_model"),
+      }),
+    );
+  } else if (result.test_type === "image") {
+    details.push(
+      t("settings.generation.latestTestImageModel", {
+        model: generationConfigModelSummaryText(result.model_summary, "model_name"),
+      }),
+    );
+  } else {
+    details.push(
+      t("settings.generation.latestTestJsonModel", {
+        model: generationConfigModelSummaryText(result.model_summary, "model"),
+      }),
+    );
+  }
+  if (result.duration_ms !== null) {
+    details.push(
+      t("settings.generation.latestTestDuration", {
+        duration: String(Math.max(1, Math.round(result.duration_ms))),
+      }),
+    );
+  }
+  return details.join(" · ");
+}
+
 function generationConfigTabClassName(active: boolean): string {
   return [
     "pf-settings-generation-tab inline-flex min-h-9 items-center px-3 py-2 text-sm font-semibold transition-all",
@@ -3923,6 +4006,59 @@ function isActiveFrozenUntil(value: string | null | undefined): boolean {
   return Number.isFinite(timestamp) && timestamp > Date.now();
 }
 
+function SettingsCollapsibleModule({
+  title,
+  description,
+  activitySignal,
+  children,
+}: {
+  title: string;
+  description: string;
+  activitySignal?: string;
+  children: ReactNode;
+}) {
+  const contentId = useId();
+  const [open, setOpen] = useState(false);
+  const previousActivitySignal = useRef(activitySignal);
+
+  useEffect(() => {
+    if (activitySignal === previousActivitySignal.current) {
+      return;
+    }
+    previousActivitySignal.current = activitySignal;
+    if (activitySignal) {
+      setOpen(true);
+    }
+  }, [activitySignal]);
+
+  return (
+    <section className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} overflow-hidden p-0`}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={() => setOpen((current) => !current)}
+        className="group flex w-full items-start gap-3 p-4 text-left outline-none transition-colors hover:bg-slate-50/80 focus-visible:ring-2 focus-visible:ring-indigo-500/25 dark:hover:bg-slate-800/20 dark:focus-visible:ring-violet-400/25 sm:p-5"
+      >
+        <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500 transition-colors group-hover:border-slate-300 group-hover:bg-white dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:group-hover:border-slate-600 dark:group-hover:bg-[#15233a]">
+          <ChevronDown size={16} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-base font-semibold text-slate-950 dark:text-white">{title}</span>
+          <span className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">
+            {description}
+          </span>
+        </span>
+      </button>
+      {open ? (
+        <div id={contentId} className="space-y-4 border-t border-slate-200 px-4 pb-4 pt-4 dark:border-slate-800 sm:px-5 sm:pb-5">
+          {children}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function TextConfigTestPanel({
   state,
   onDraftChange,
@@ -3935,17 +4071,19 @@ function TextConfigTestPanel({
   const latestResult = latestRecord?.result ?? null;
   const latestError = latestRecord?.error ?? "";
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
+  const activitySignal = state.latestKey
+    ? `${state.latestKey}:${runningCount}:${latestError ? "error" : latestResult ? "result" : "pending"}`
+    : "";
 
   return (
-    <section className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-4`}>
-      <div>
-        <h2 className="text-base font-semibold text-slate-950 dark:text-white">
-          {t("settings.generation.testTitle")}
-        </h2>
-        <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-          {t("settings.generation.testDescription")}
-        </p>
-      </div>
+    <SettingsCollapsibleModule
+      title={t("settings.generation.testTitle")}
+      description={t("settings.generation.testDescription")}
+      activitySignal={activitySignal}
+    >
+      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
+        {t("settings.generation.localTestDraftNote")}
+      </p>
       <div className="grid gap-3 md:grid-cols-2">
         <SettingsFormField label={t("settings.generation.testInspirationName")}>
           <input
@@ -4034,7 +4172,7 @@ function TextConfigTestPanel({
           </div>
         </div>
       ) : null}
-    </section>
+    </SettingsCollapsibleModule>
   );
 }
 
@@ -4052,18 +4190,20 @@ function ImageConfigTestPanel({
   const latestResult = latestRecord?.result ?? null;
   const latestError = latestRecord?.error ?? "";
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
+  const activitySignal = state.latestKey
+    ? `${state.latestKey}:${runningCount}:${latestError ? "error" : latestResult ? "result" : "pending"}`
+    : "";
 
   return (
-    <section className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-4`}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold text-slate-950 dark:text-white">
-            {t("settings.generation.imageTestTitle")}
-          </h2>
-          <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
-            {t("settings.generation.imageTestDescription")}
-          </p>
-        </div>
+    <SettingsCollapsibleModule
+      title={t("settings.generation.imageTestTitle")}
+      description={t("settings.generation.imageTestDescription")}
+      activitySignal={activitySignal}
+    >
+      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
+        {t("settings.generation.localTestDraftNote")}
+      </p>
+      <div className="flex justify-end">
         <button type="button" onClick={onSaveDraft} className={SETTINGS_COMPACT_ACTION_CLASS}>
           <Save size={14} className="mr-1.5" />
           {t("settings.generation.imageTestSaveDraft")}
@@ -4111,7 +4251,7 @@ function ImageConfigTestPanel({
           </div>
         </div>
       ) : null}
-    </section>
+    </SettingsCollapsibleModule>
   );
 }
 
@@ -4786,6 +4926,8 @@ function GenerationConfigCard({
       </pre>
     </div>
   ) : null;
+  const latestTestResult = config?.latest_test_result ?? null;
+  const latestTestDetail = latestTestResult ? generationConfigLatestTestDetail(latestTestResult, t) : "";
 
   return (
     <div className={`${SETTINGS_FIELD_CARD_CLASS} relative rounded-2xl border border-slate-200/70 bg-white/80 p-6 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0f1726]/80 ${onArchive ? "pr-16" : ""}`}>
@@ -4831,6 +4973,38 @@ function GenerationConfigCard({
                 successRate: generationConfigSuccessRate(config),
               })}
             </p>
+          ) : null}
+          {latestTestResult ? (
+            <div
+              className={`mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
+                latestTestResult.status === "failed"
+                  ? "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100"
+              }`}
+            >
+              {latestTestResult.status === "failed" ? (
+                <X size={14} className="mt-0.5 shrink-0" />
+              ) : (
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+              )}
+              <div className="min-w-0">
+                <div className="font-semibold">
+                  {[
+                    t("settings.generation.latestTest"),
+                    t(generationConfigLatestTestTypeLabelKey(latestTestResult.test_type)),
+                    t(
+                      latestTestResult.status === "failed"
+                        ? "settings.generation.latestTestFailed"
+                        : "settings.generation.latestTestPassed",
+                    ),
+                    formatDateTime(latestTestResult.tested_at),
+                  ].join(" · ")}
+                </div>
+                {latestTestDetail ? (
+                  <div className="mt-0.5 break-words opacity-80">{latestTestDetail}</div>
+                ) : null}
+              </div>
+            </div>
           ) : null}
         </div>
       </div>
@@ -5910,6 +6084,9 @@ export function SettingsPage() {
         ),
       );
     },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+    },
   });
 
   const testTextGenerationConfigJsonResponseFormatMutation = useMutation({
@@ -5934,9 +6111,12 @@ export function SettingsPage() {
           key,
           mutationError instanceof ApiError
             ? mutationError.detail
-            : t("settings.generation.jsonResponseFormatTestFailed"),
+          : t("settings.generation.jsonResponseFormatTestFailed"),
         ),
       );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
     },
   });
 
@@ -5960,6 +6140,9 @@ export function SettingsPage() {
           mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.imageTestFailed"),
         ),
       );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
     },
   });
 

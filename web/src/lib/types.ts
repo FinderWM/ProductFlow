@@ -1282,6 +1282,22 @@ export interface GenerationConfigStatAggregate {
   last_failure_at: string | null;
 }
 
+export type GenerationConfigTestType = "text" | "json_response_format" | "image";
+export type GenerationConfigTestStatus = "success" | "failed";
+
+export interface GenerationConfigTestResult {
+  id: string;
+  generation_config_id: string;
+  test_type: GenerationConfigTestType;
+  status: GenerationConfigTestStatus;
+  tested_at: string;
+  duration_ms: number | null;
+  provider_kind: string | null;
+  model_summary: Record<string, unknown>;
+  message: string | null;
+  error_detail: string | null;
+}
+
 export interface GenerationConfig {
   id: string;
   resource_group_id: string | null;
@@ -1303,6 +1319,7 @@ export interface GenerationConfig {
   updated_at: string;
   state: GenerationConfigState | null;
   today_stat: GenerationConfigDailyStat | null;
+  latest_test_result: GenerationConfigTestResult | null;
 }
 
 export interface GenerationConfigOption {

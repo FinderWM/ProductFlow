@@ -47,6 +47,7 @@ function generationConfig(
     updated_at: overrides.updated_at ?? "2026-06-12T00:00:00Z",
     state: overrides.state ?? null,
     today_stat: overrides.today_stat ?? null,
+    latest_test_result: overrides.latest_test_result ?? null,
   };
 }
 

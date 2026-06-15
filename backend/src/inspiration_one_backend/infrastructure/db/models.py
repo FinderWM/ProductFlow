@@ -536,6 +536,12 @@ class GenerationConfig(Base, TimestampMixin):
         primaryjoin=lambda: parent_child_join(GenerationConfig.id, GenerationConfigDailyStat.generation_config_id),
         foreign_keys=lambda: [GenerationConfigDailyStat.generation_config_id],
     )
+    test_results: Mapped[list[GenerationConfigTestResult]] = relationship(
+        back_populates="generation_config",
+        cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(GenerationConfig.id, GenerationConfigTestResult.generation_config_id),
+        foreign_keys=lambda: [GenerationConfigTestResult.generation_config_id],
+    )
 
 
 class GenerationConfigState(Base, TimestampMixin):
@@ -597,6 +603,38 @@ class GenerationConfigDailyStat(Base, TimestampMixin):
         back_populates="daily_stats",
         primaryjoin=lambda: child_parent_join(GenerationConfigDailyStat.generation_config_id, GenerationConfig.id),
         foreign_keys=lambda: [GenerationConfigDailyStat.generation_config_id],
+    )
+
+
+class GenerationConfigTestResult(Base, TimestampMixin):
+    """Latest-visible manual test history for generation config cards."""
+
+    __tablename__ = "generation_config_test_results"
+    __table_args__ = (
+        Index(
+            "ix_generation_config_test_results_config_tested_at",
+            "generation_config_id",
+            "tested_at",
+        ),
+        Index("ix_generation_config_test_results_test_type", "test_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    generation_config_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    test_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    tested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    model_summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    generation_config: Mapped[GenerationConfig] = relationship(
+        back_populates="test_results",
+        primaryjoin=lambda: child_parent_join(GenerationConfigTestResult.generation_config_id, GenerationConfig.id),
+        foreign_keys=lambda: [GenerationConfigTestResult.generation_config_id],
     )
 
 

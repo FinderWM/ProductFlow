@@ -222,6 +222,8 @@ def _layout_sections_from_object(content: dict[str, Any]) -> list[Any]:
 
 
 def _normalize_block_dict(raw_block: Any, *, fallback_id: str, index: int) -> Any:
+    if isinstance(raw_block, str):
+        return {"id": fallback_id, "text": raw_block.strip()}
     if not isinstance(raw_block, dict):
         return raw_block
     block = dict(raw_block)

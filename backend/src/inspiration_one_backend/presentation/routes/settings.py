@@ -59,6 +59,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationConfigDailyStat,
     GenerationConfigResourceGroup,
     GenerationConfigState,
+    GenerationConfigTestResult,
     GenerationResourceGroup,
     ProviderBinding,
     ProviderProfile,
@@ -131,6 +132,7 @@ from inspiration_one_backend.presentation.schemas.settings import (
     GenerationConfigStateResponse,
     GenerationConfigStatusConfigResponse,
     GenerationConfigStatusSummaryResponse,
+    GenerationConfigTestResultResponse,
     GenerationConfigUpdateRequest,
     GenerationResourceGroupCreateRequest,
     GenerationResourceGroupResponse,
@@ -421,6 +423,25 @@ def _serialize_generation_config_daily_stat(
     )
 
 
+def _serialize_generation_config_test_result(
+    test_result: GenerationConfigTestResult | None,
+) -> GenerationConfigTestResultResponse | None:
+    if test_result is None:
+        return None
+    return GenerationConfigTestResultResponse(
+        id=test_result.id,
+        generation_config_id=test_result.generation_config_id,
+        test_type=test_result.test_type,
+        status=test_result.status,
+        tested_at=test_result.tested_at.isoformat(),
+        duration_ms=test_result.duration_ms,
+        provider_kind=test_result.provider_kind,
+        model_summary=dict(test_result.model_summary_json or {}),
+        message=test_result.message,
+        error_detail=test_result.error_detail,
+    )
+
+
 def _serialize_generation_config_stat_aggregate(
     stat: _GenerationConfigStatAggregate,
 ) -> GenerationConfigStatAggregateResponse:
@@ -442,6 +463,85 @@ def _today_generation_config_stats(session: Session) -> dict[str, GenerationConf
     today = datetime.now().astimezone().date()
     rows = session.scalars(select(GenerationConfigDailyStat).where(GenerationConfigDailyStat.stat_date == today)).all()
     return {row.generation_config_id: row for row in rows}
+
+
+def _latest_generation_config_test_results(
+    session: Session,
+    generation_configs: list[GenerationConfig],
+) -> dict[str, GenerationConfigTestResult]:
+    generation_config_ids = [generation_config.id for generation_config in generation_configs]
+    if not generation_config_ids:
+        return {}
+    rows = session.scalars(
+        select(GenerationConfigTestResult)
+        .where(GenerationConfigTestResult.generation_config_id.in_(generation_config_ids))
+        .order_by(
+            GenerationConfigTestResult.generation_config_id,
+            GenerationConfigTestResult.tested_at.desc(),
+            GenerationConfigTestResult.created_at.desc(),
+        )
+    ).all()
+    latest: dict[str, GenerationConfigTestResult] = {}
+    for row in rows:
+        latest.setdefault(row.generation_config_id, row)
+    return latest
+
+
+def _persist_generation_config_test_result(
+    session: Session,
+    *,
+    generation_config_id: str | None,
+    test_type: str,
+    result_status: str,
+    provider_kind: str | None = None,
+    duration_ms: int | None = None,
+    model_summary: dict[str, Any] | None = None,
+    message: str | None = None,
+    error_detail: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if not generation_config_id:
+        return
+    generation_config = session.get(GenerationConfig, generation_config_id)
+    if generation_config is None or generation_config.archived_at is not None:
+        return
+    session.add(
+        GenerationConfigTestResult(
+            generation_config_id=generation_config.id,
+            test_type=test_type,
+            status=result_status,
+            tested_at=now_utc(),
+            duration_ms=duration_ms,
+            provider_kind=provider_kind,
+            model_summary_json=model_summary or {},
+            message=message,
+            error_detail=error_detail,
+            metadata_json=metadata or {},
+        )
+    )
+    session.commit()
+
+
+def _try_persist_generation_config_test_failure(
+    session: Session,
+    *,
+    generation_config_id: str | None,
+    test_type: str,
+    provider_kind: str | None = None,
+    error_detail: str,
+) -> None:
+    try:
+        _persist_generation_config_test_result(
+            session,
+            generation_config_id=generation_config_id,
+            test_type=test_type,
+            result_status="failed",
+            provider_kind=provider_kind,
+            error_detail=error_detail,
+        )
+    except Exception:  # noqa: BLE001
+        session.rollback()
+        logger.exception("生成配置测试失败记录持久化失败")
 
 
 def _filter_generation_config_stats_by_ids(
@@ -549,6 +649,7 @@ def _serialize_generation_config(
     generation_config: GenerationConfig,
     *,
     today_stats: dict[str, GenerationConfigDailyStat],
+    latest_test_results: dict[str, GenerationConfigTestResult] | None = None,
 ) -> GenerationConfigResponse:
     resource_group_ids = generation_config_resource_group_ids(generation_config)
     return GenerationConfigResponse(
@@ -572,6 +673,9 @@ def _serialize_generation_config(
         updated_at=generation_config.updated_at.isoformat(),
         state=_serialize_generation_config_state(generation_config.state),
         today_stat=_serialize_generation_config_daily_stat(today_stats.get(generation_config.id)),
+        latest_test_result=_serialize_generation_config_test_result(
+            (latest_test_results or {}).get(generation_config.id)
+        ),
     )
 
 
@@ -802,6 +906,7 @@ def _serialize_generation_config_status_summary(
 def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
     generation_configs = list_generation_configs(session)
     today_stats = _today_generation_config_stats(session)
+    latest_test_results = _latest_generation_config_test_results(session, generation_configs)
     return ProviderConfigResponse(
         profiles=[_serialize_provider_profile(profile) for profile in list_provider_profiles(session)],
         bindings=[_serialize_provider_binding(binding) for binding in list_provider_bindings(session)],
@@ -809,7 +914,11 @@ def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
             _serialize_generation_resource_group(group) for group in list_generation_resource_groups(session)
         ],
         generation_configs=[
-            _serialize_generation_config(generation_config, today_stats=today_stats)
+            _serialize_generation_config(
+                generation_config,
+                today_stats=today_stats,
+                latest_test_results=latest_test_results,
+            )
             for generation_config in generation_configs
         ],
         status_summary=_serialize_generation_config_status_summary(session, include_configs=False),
@@ -1676,10 +1785,16 @@ def get_generation_config_status_endpoint(
 )
 def list_generation_configs_endpoint(session: Session = Depends(get_session)) -> list[GenerationConfigResponse]:
     ensure_provider_config_bootstrapped(session)
+    generation_configs = list_generation_configs(session)
     today_stats = _today_generation_config_stats(session)
+    latest_test_results = _latest_generation_config_test_results(session, generation_configs)
     return [
-        _serialize_generation_config(generation_config, today_stats=today_stats)
-        for generation_config in list_generation_configs(session)
+        _serialize_generation_config(
+            generation_config,
+            today_stats=today_stats,
+            latest_test_results=latest_test_results,
+        )
+        for generation_config in generation_configs
     ]
 
 
@@ -1865,16 +1980,40 @@ def test_text_generation_config_endpoint(
         copy, copy_model = text_provider.generate_copy(inspiration_input, brief, copy_config)
         duration_ms = int((perf_counter() - brief_start) * 1000)
     except ValueError as exc:
+        error_detail = _safe_text_generation_test_error_detail(exc)
         logger.info(
             "文案生成配置测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
             payload.generation_config_id or "-",
             resolved_config.provider_kind if "resolved_config" in locals() else "-",
-            _safe_text_generation_test_error_detail(exc),
+            error_detail,
+        )
+        _try_persist_generation_config_test_failure(
+            session,
+            generation_config_id=payload.generation_config_id,
+            test_type="text",
+            provider_kind=resolved_config.provider_kind if "resolved_config" in locals() else None,
+            error_detail=error_detail,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("文案生成配置测试失败")
+        _try_persist_generation_config_test_failure(
+            session,
+            generation_config_id=payload.generation_config_id,
+            test_type="text",
+            provider_kind=resolved_config.provider_kind if "resolved_config" in locals() else None,
+            error_detail="文案生成配置测试失败，请稍后重试",
+        )
         raise HTTPException(status_code=502, detail="文案生成配置测试失败，请稍后重试") from exc
+    _persist_generation_config_test_result(
+        session,
+        generation_config_id=payload.generation_config_id,
+        test_type="text",
+        result_status="success",
+        provider_kind=resolved_config.provider_kind,
+        duration_ms=duration_ms,
+        model_summary={"brief_model": brief_model, "copy_model": copy_model},
+    )
     return TextGenerationConfigTestResponse(
         generation_config_id=payload.generation_config_id,
         provider_kind=resolved_config.provider_kind,
@@ -1914,16 +2053,40 @@ def test_text_generation_config_json_response_format_endpoint(
         parsed_json, model = test_method()
         duration_ms = int((perf_counter() - start) * 1000)
     except ValueError as exc:
+        error_detail = _safe_text_generation_test_error_detail(exc)
         logger.info(
             "文案结构化输出测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
             payload.generation_config_id or "-",
             resolved_config.provider_kind if "resolved_config" in locals() else "-",
-            _safe_text_generation_test_error_detail(exc),
+            error_detail,
+        )
+        _try_persist_generation_config_test_failure(
+            session,
+            generation_config_id=payload.generation_config_id,
+            test_type="json_response_format",
+            provider_kind=resolved_config.provider_kind if "resolved_config" in locals() else None,
+            error_detail=error_detail,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("文案结构化输出测试失败")
+        _try_persist_generation_config_test_failure(
+            session,
+            generation_config_id=payload.generation_config_id,
+            test_type="json_response_format",
+            provider_kind=resolved_config.provider_kind if "resolved_config" in locals() else None,
+            error_detail="文案结构化输出测试失败，请稍后重试",
+        )
         raise HTTPException(status_code=502, detail="文案结构化输出测试失败，请稍后重试") from exc
+    _persist_generation_config_test_result(
+        session,
+        generation_config_id=payload.generation_config_id,
+        test_type="json_response_format",
+        result_status="success",
+        provider_kind=resolved_config.provider_kind,
+        duration_ms=duration_ms,
+        model_summary={"model": model},
+    )
     return TextGenerationConfigJsonResponseFormatTestResponse(
         generation_config_id=payload.generation_config_id,
         provider_kind=resolved_config.provider_kind,
@@ -1959,11 +2122,19 @@ def test_image_generation_config_endpoint(
             actor_is_admin=current_user.is_admin,
         )
     except ValueError as exc:
+        error_detail = _safe_text_generation_test_error_detail(exc)
         logger.info(
             "图片生成配置测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
             payload.generation_config_id or "-",
             resolved_config.provider_kind if "resolved_config" in locals() else "-",
-            _safe_text_generation_test_error_detail(exc),
+            error_detail,
+        )
+        _try_persist_generation_config_test_failure(
+            session,
+            generation_config_id=payload.generation_config_id,
+            test_type="image",
+            provider_kind=resolved_config.provider_kind if "resolved_config" in locals() else None,
+            error_detail=error_detail,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -1972,11 +2143,28 @@ def test_image_generation_config_endpoint(
             exc,
             generic_message="图片生成配置测试失败，请检查供应商配置后重试",
         )
+        _try_persist_generation_config_test_failure(
+            session,
+            generation_config_id=payload.generation_config_id,
+            test_type="image",
+            provider_kind=resolved_config.provider_kind if "resolved_config" in locals() else None,
+            error_detail=failure.reason,
+        )
         raise HTTPException(status_code=502, detail=failure.reason) from exc
     round_item = next(item for item in result.image_session.rounds if item.id == result.round_id)
     round_response = serialize_image_session_round(round_item)
+    resolved_generation_config_id = resolved_config.generation_config_id or payload.generation_config_id
+    _persist_generation_config_test_result(
+        session,
+        generation_config_id=resolved_generation_config_id,
+        test_type="image",
+        result_status="success",
+        provider_kind=result.provider_kind,
+        duration_ms=result.duration_ms,
+        model_summary={"model_name": round_response.model_name, "provider_name": round_response.provider_name},
+    )
     return ImageGenerationConfigTestResponse(
-        generation_config_id=resolved_config.generation_config_id or payload.generation_config_id,
+        generation_config_id=resolved_generation_config_id,
         provider_kind=result.provider_kind,
         model_name=round_response.model_name,
         provider_name=round_response.provider_name,

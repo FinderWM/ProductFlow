@@ -16,6 +16,7 @@ import {
   loginPageTemplateIdFromConfigKey,
   type GenerationConfigDraft,
   generationConfigDraft as generationConfigDraftFromConfig,
+  generationConfigLatestTestDetail,
   generationConfigResourceGroupIds,
   generationConfigPayloadFromDraft,
   markTextConfigJsonResponseFormatTestFailed,
@@ -60,6 +61,7 @@ import type {
   ConfigItem,
   ConfigResponse,
   GenerationConfig,
+  GenerationConfigTestResult,
   GenerationResourceGroup,
   ProviderCapability,
   ProviderConfigResponse,
@@ -139,8 +141,29 @@ function generationConfig(overrides: Partial<GenerationConfig> & Pick<Generation
     updated_at: overrides.updated_at ?? "2026-05-13T00:00:00Z",
     state: overrides.state ?? null,
     today_stat: overrides.today_stat ?? null,
+    latest_test_result: overrides.latest_test_result ?? null,
   };
 }
+
+function generationConfigTestResult(overrides: Partial<GenerationConfigTestResult>): GenerationConfigTestResult {
+  return {
+    id: overrides.id ?? "test-result-1",
+    generation_config_id: overrides.generation_config_id ?? "text-config",
+    test_type: overrides.test_type ?? "text",
+    status: overrides.status ?? "success",
+    tested_at: overrides.tested_at ?? "2026-06-15T10:00:00Z",
+    duration_ms: "duration_ms" in overrides ? (overrides.duration_ms ?? null) : 820,
+    provider_kind: overrides.provider_kind ?? "mock",
+    model_summary: overrides.model_summary ?? {},
+    message: overrides.message ?? null,
+    error_detail: overrides.error_detail ?? null,
+  };
+}
+
+const zhT = Object.assign(
+  (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) => translate("zh-CN", key, params),
+  { locale: "zh-CN" as const },
+);
 
 function generationConfigDraft(overrides: Partial<GenerationConfigDraft> & Pick<GenerationConfigDraft, "purpose">): GenerationConfigDraft {
   return {
@@ -198,11 +221,11 @@ function providerConfigResponse(overrides: Partial<ProviderConfigResponse> = {})
 function textConfigTestState(): TextConfigTestState {
   return {
     draft: {
-      inspirationName: "测试灵感产物",
-      category: "电商灵感产物",
+      inspirationName: "蓝天白云青草地",
+      category: "自然风景场景",
       price: "",
-      sourceNote: "测试备注",
-      instruction: "输出短文案",
+      sourceNote: "画面包含蓝天、白云和青草地。",
+      instruction: "输出清新的短文案",
     },
     latestKey: null,
     records: {},
@@ -237,6 +260,50 @@ function textConfigJsonResponseFormatTestResponse(model: string): TextGeneration
     duration_ms: 300,
   };
 }
+
+describe("SettingsPage generation config latest test result helpers", () => {
+  it("summarizes successful text test models and duration", () => {
+    const detail = generationConfigLatestTestDetail(
+      generationConfigTestResult({
+        test_type: "text",
+        status: "success",
+        duration_ms: 421,
+        model_summary: { brief_model: "mock-brief-v1", copy_model: "mock-copy-v2" },
+      }),
+      zhT,
+    );
+
+    expect(detail).toBe("资料理解 mock-brief-v1 · 文案 mock-copy-v2 · 421ms");
+  });
+
+  it("summarizes failed test detail without model placeholders", () => {
+    const detail = generationConfigLatestTestDetail(
+      generationConfigTestResult({
+        test_type: "json_response_format",
+        status: "failed",
+        duration_ms: null,
+        error_detail: "请先启用文案结构化输出",
+      }),
+      zhT,
+    );
+
+    expect(detail).toBe("请先启用文案结构化输出");
+  });
+
+  it("summarizes image test model", () => {
+    const detail = generationConfigLatestTestDetail(
+      generationConfigTestResult({
+        test_type: "image",
+        status: "success",
+        duration_ms: 93,
+        model_summary: { model_name: "mock-image-chat-v1" },
+      }),
+      zhT,
+    );
+
+    expect(detail).toBe("模型 mock-image-chat-v1 · 93ms");
+  });
+});
 
 describe("SettingsPage draft helpers", () => {
   it("documents every supported prompt placeholder in settings help", () => {
@@ -369,6 +436,34 @@ describe("SettingsPage draft helpers", () => {
     expect(normalizeImageConfigTestDraft({ size: "", prompt: "" })).toEqual({
       size: "1024x1024",
       prompt: "",
+    });
+  });
+
+  it("migrates legacy default generation config test drafts to the current scene preset", () => {
+    expect(
+      normalizeTextConfigTestDraft({
+        inspirationName: "测试灵感产物",
+        category: "电商灵感产物",
+        price: "",
+        sourceNote: "用于验证当前文案生成配置的测试输入。",
+        instruction: "输出适合主图的短文案。",
+      }),
+    ).toEqual({
+      inspirationName: "蓝天白云青草地",
+      category: "自然风景场景",
+      price: "",
+      sourceNote: "画面包含明亮蓝天、轻盈白云和连片青草地，氛围清新开阔，适合表达户外自然与舒展感。",
+      instruction: "围绕蓝天白云青草地生成清晰、自然、适合画面展示的短文案。",
+    });
+
+    expect(
+      normalizeImageConfigTestDraft({
+        size: "1536x1024",
+        prompt: "生成一张干净的产品展示图，主体清晰，背景简洁，适合验证当前图片生成配置。",
+      }),
+    ).toEqual({
+      size: "1536x1024",
+      prompt: "蓝天白云下，一片开阔柔软的青草地延伸到远处，阳光明亮，画面清新自然，空气通透，构图干净。",
     });
   });
 

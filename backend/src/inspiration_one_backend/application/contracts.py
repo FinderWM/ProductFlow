@@ -62,6 +62,16 @@ class CreativeBriefPayload(BaseModel):
 
         return _normalize_ai_scalar_text(value, field_name=info.field_name)
 
+    @field_validator("taboo_phrases", mode="before")
+    @classmethod
+    def normalize_taboo_phrases(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else []
+        return value
+
 
 class CopySlotRequest(BaseModel):
     """文案节点可选槽位请求；不等于模型必须生成固定字段。"""

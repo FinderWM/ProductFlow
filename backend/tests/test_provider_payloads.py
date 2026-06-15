@@ -860,12 +860,13 @@ def test_ai_payload_normalizes_scalar_text_lists_without_swallowing_malformed_va
             "positioning": ["摄影入门工具", "桌面拍摄辅助"],
             "audience": ["摄影入门用户", "小红书图文内容创作者"],
             "selling_angles": ["上手快", "构图稳", "出片自然"],
-            "taboo_phrases": [],
+            "taboo_phrases": "避免使用真实商业品牌名称或机密信息",
             "poster_style_hint": ["干净明亮", "真实生活感"],
         }
     )
     assert brief.positioning == "摄影入门工具、桌面拍摄辅助"
     assert brief.audience == "摄影入门用户、小红书图文内容创作者"
+    assert brief.taboo_phrases == ["避免使用真实商业品牌名称或机密信息"]
     assert brief.poster_style_hint == "干净明亮、真实生活感"
 
     for bad_value in ([], ["摄影入门用户", ""], [{"label": "摄影入门用户"}]):
@@ -928,6 +929,7 @@ def test_copy_payload_v2_normalizes_provider_block_variants() -> None:
                         "type": "benefits",
                         "items": ["自动保存", "运行前同步", "展示和数据校验"],
                     },
+                    "测试灵感产物",
                 ],
             },
         }
@@ -940,10 +942,12 @@ def test_copy_payload_v2_normalizes_provider_block_variants() -> None:
         "benefit-3",
         "benefit-4",
         "benefits-5",
+        "block-6",
     ]
     assert payload.content.blocks[0].role == "title"
     assert payload.content.blocks[1].text == "覆盖上下架流程验收"
     assert payload.content.blocks[4].text == "自动保存；运行前同步；展示和数据校验"
+    assert payload.content.blocks[5].text == "测试灵感产物"
     assert [block.text for block in payload.content.blocks[1:3]] == ["覆盖上下架流程验收", "节点、区域功能测试"]
 
 
