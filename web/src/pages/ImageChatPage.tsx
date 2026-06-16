@@ -87,6 +87,7 @@ import {
   buildImageGenerationSubmitSignature,
   buildImageSessionHistoryTree,
   addImageBaseAssetIds,
+  canStartImageSessionNewRound,
   clampGenerationCount,
   clampImageGenerationTaskCandidateCount,
   compactImageToolOptions,
@@ -1004,6 +1005,8 @@ function ImageChatWorkbenchPage() {
         ? t("chat.newRoundRequired")
         : latestGenerationState.status === "failed"
           ? t("chat.retryCurrentFailedRoundRequired")
+          : latestGenerationState.status === "cancelled"
+            ? t("chat.taskCancelled")
           : latestGenerationState.status === "active" || latestGenerationState.status === "refreshing"
             ? t("chat.currentRoundActive")
             : t("chat.newRoundUnavailable");
@@ -1100,13 +1103,14 @@ function ImageChatWorkbenchPage() {
     lastExplicitHistoryAssetId &&
       imageSession?.rounds.some((round) => round.generated_asset.id === lastExplicitHistoryAssetId),
   );
-  const canStartNewRound =
-    latestGenerationState.status === "succeeded" || latestGenerationState.status === "failed";
+  const canStartNewRound = canStartImageSessionNewRound(latestGenerationState);
   const newRoundUnavailableTitle =
     latestGenerationState.status === "succeeded"
       ? ""
       : latestGenerationState.status === "failed"
         ? ""
+        : latestGenerationState.status === "cancelled"
+          ? ""
         : latestGenerationState.status === "active" || latestGenerationState.status === "refreshing"
           ? t("chat.currentRoundActive")
           : latestGenerationState.status === "empty"

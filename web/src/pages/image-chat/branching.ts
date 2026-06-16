@@ -658,8 +658,7 @@ export function isImageSessionGenerationTaskRetryable(task: ImageSessionGenerati
 }
 
 export function isImageSessionGenerationTaskRegeneratable(task: ImageSessionGenerationTask): boolean {
-  void task;
-  return false;
+  return task.status === "cancelled";
 }
 
 export function imageGenerationRetryMetadata(task: ImageSessionGenerationTask): ImageGenerationRetryMetadata | null {
@@ -699,6 +698,10 @@ export function isImageSessionGenerationTaskAutoRetrying(task: ImageSessionGener
 
 export function isImageSessionGenerationTaskCancelable(task: ImageSessionGenerationTask): boolean {
   return (task.status === "queued" || task.status === "running") && task.is_cancelable;
+}
+
+export function canStartImageSessionNewRound(state: LatestImageSessionGenerationState): boolean {
+  return state.status === "succeeded" || state.status === "failed" || state.status === "cancelled";
 }
 
 export function latestImageSessionGenerationState(

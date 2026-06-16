@@ -4,6 +4,7 @@ import type { ImageSessionAsset, ImageSessionDetail, ImageSessionGenerationTask,
 import {
   buildImageGenerationSubmitSignature,
   buildImageSessionHistoryTree,
+  canStartImageSessionNewRound,
   clampGenerationCount,
   clampImageGenerationTaskCandidateCount,
   effectiveImageGenerationSubmitCount,
@@ -651,6 +652,7 @@ describe("image chat branching helpers", () => {
   it("detects failed tasks that can be manually retried", () => {
     expect(isImageSessionGenerationTaskRetryable(task({ status: "failed", is_retryable: true }))).toBe(true);
     expect(isImageSessionGenerationTaskRetryable(task({ status: "failed", is_retryable: false }))).toBe(true);
+    expect(isImageSessionGenerationTaskRetryable(task({ status: "cancelled", is_retryable: false }))).toBe(false);
     expect(isImageSessionGenerationTaskRetryable(task({ status: "queued", is_retryable: true }))).toBe(false);
   });
 
@@ -685,9 +687,10 @@ describe("image chat branching helpers", () => {
     });
   });
 
-  it("does not allow cancelled or failed tasks through the direct regenerate path", () => {
-    expect(isImageSessionGenerationTaskRegeneratable(task({ status: "cancelled" }))).toBe(false);
+  it("allows cancelled tasks through the direct regenerate path", () => {
+    expect(isImageSessionGenerationTaskRegeneratable(task({ status: "cancelled" }))).toBe(true);
     expect(isImageSessionGenerationTaskRegeneratable(task({ status: "failed" }))).toBe(false);
+    expect(isImageSessionGenerationTaskRegeneratable(task({ status: "succeeded" }))).toBe(false);
   });
 
   it("detects the latest generation state so only the current round is actionable", () => {
@@ -735,6 +738,50 @@ describe("image chat branching helpers", () => {
       task: null,
     });
     expect(isCurrentImageSessionGenerationTask(olderFailedTask, [latestRound], [olderFailedTask])).toBe(false);
+  });
+
+  it("allows a cancelled latest generation state to start a new round", () => {
+    expect(
+      canStartImageSessionNewRound({
+        status: "cancelled",
+        round: null,
+        task: task({ status: "cancelled" }),
+      }),
+    ).toBe(true);
+    expect(
+      canStartImageSessionNewRound({
+        status: "failed",
+        round: null,
+        task: task({ status: "failed" }),
+      }),
+    ).toBe(true);
+    expect(
+      canStartImageSessionNewRound({
+        status: "active",
+        round: null,
+        task: task({ status: "running" }),
+      }),
+    ).toBe(false);
+  });
+
+  it("detects a cancelled task after a successful round as the current generation state", () => {
+    const firstRound = round({
+      id: "first-round",
+      generated_asset: asset("first-asset"),
+      created_at: "2026-04-27T00:01:00Z",
+    });
+    const cancelledTask = task({
+      id: "latest-cancelled",
+      status: "cancelled",
+      created_at: "2026-04-27T00:02:00Z",
+    });
+
+    expect(latestImageSessionGenerationState([firstRound], [cancelledTask])).toMatchObject({
+      status: "cancelled",
+      task: { id: "latest-cancelled" },
+      round: null,
+    });
+    expect(isCurrentImageSessionGenerationTask(cancelledTask, [firstRound], [cancelledTask])).toBe(true);
   });
 
   it("uses terminal task time when a multi-candidate generation fails after partial success", () => {
