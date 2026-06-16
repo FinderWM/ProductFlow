@@ -1330,23 +1330,23 @@ describe("SettingsPage provider profile helpers", () => {
     expect(translate("en-US", "settings.provider.deleteConfirmLabel")).toBe("Delete");
   });
 
-  it("localizes generation archive confirmation dialog copy", () => {
-    expect(translate("zh-CN", "settings.resourceGroup.archiveConfirmTitle")).toBe("归档生成分组");
+  it("localizes generation delete confirmation dialog copy", () => {
+    expect(translate("zh-CN", "settings.resourceGroup.archiveConfirmTitle")).toBe("删除生成分组");
     expect(translate("zh-CN", "settings.resourceGroup.archiveConfirm", { name: "default" })).toBe(
-      "确定归档生成分组「default」吗？归档后该分组不再出现在调度配置里。",
+      "确定删除生成分组「default」吗？删除后该分组不再出现在调度配置里。",
     );
-    expect(translate("zh-CN", "settings.generation.archiveConfirmTitle")).toBe("归档生成配置");
+    expect(translate("zh-CN", "settings.generation.archiveConfirmTitle")).toBe("删除生成配置");
     expect(translate("zh-CN", "settings.generation.archiveConfirm", { name: "main" })).toBe(
-      "确定归档生成配置「main」吗？归档后该配置不再参与调度。",
+      "确定删除生成配置「main」吗？删除后该配置不再参与调度。",
     );
     expect(translate("en-US", "settings.resourceGroup.archiveConfirm", { name: "default" })).toBe(
-      'Archive generation group "default"? It will no longer appear in scheduling settings.',
+      'Delete generation group "default"? It will no longer appear in scheduling settings.',
     );
     expect(translate("en-US", "settings.generation.archiveConfirm", { name: "main" })).toBe(
-      'Archive generation config "main"? It will no longer participate in scheduling.',
+      'Delete generation config "main"? It will no longer participate in scheduling.',
     );
-    expect(translate("ja-JP", "settings.resourceGroup.archiveConfirmTitle")).toBe("生成グループをアーカイブ");
-    expect(translate("ja-JP", "settings.generation.archiveConfirmTitle")).toBe("生成設定をアーカイブ");
+    expect(translate("ja-JP", "settings.resourceGroup.archiveConfirmTitle")).toBe("生成グループを削除");
+    expect(translate("ja-JP", "settings.generation.archiveConfirmTitle")).toBe("生成設定を削除");
   });
 
   it("localizes runtime reset confirmation and split migration module copy", () => {
@@ -1397,7 +1397,7 @@ describe("SettingsPage provider profile helpers", () => {
 
 describe("SettingsPage import/export helpers", () => {
   it("keeps archive API failure details for the confirmation dialog", () => {
-    const fallback = "生成配置归档失败";
+    const fallback = "生成配置删除失败";
 
     expect(archiveFailureMessage(new ApiError(409, "仍被默认配置引用"), fallback)).toBe("仍被默认配置引用");
     expect(archiveFailureMessage(new Error("network"), fallback)).toBe(fallback);

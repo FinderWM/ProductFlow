@@ -184,7 +184,7 @@ Draft contract:
 
 Cache contract:
 
-- Provider profile create/update/archive and generation config/resource group changes must update `provider-config`
+- Provider profile create/update/delete and generation config/resource group changes must update `provider-config`
   optimistically where current helper patterns exist, then invalidate affected dependent data.
 - At minimum, provider settings refresh must cover `provider-config`, `generation-config-options`,
   `generation-config-status`, and section-specific dependencies such as `provider-models`, `my-generation-resource-groups`,
@@ -341,7 +341,7 @@ Provider profile cards:
 
 - Use card surfaces for each active provider profile, with a clickable edit body and top-right icon actions.
 - The body click opens edit mode only when provider writes are allowed.
-- Edit and archive/delete actions are top-right `SETTINGS_ICON_ACTION_CLASS` / `SETTINGS_DANGER_ICON_ACTION_CLASS`
+- Edit and delete actions are top-right `SETTINGS_ICON_ACTION_CLASS` / `SETTINGS_DANGER_ICON_ACTION_CLASS`
   buttons.
 - Provider enablement uses a compact switch with `role="switch"` and `aria-checked`.
 - Disabling a provider that is still used by active text/image configs is blocked; show helper text and keep the switch
@@ -358,7 +358,7 @@ Provider create/edit drawer:
 - Capability choices use `pf-settings-provider-option` with clear selected state in `mist`, `sage`, and `dusk`.
 - Submit is disabled while pending or when required fields are missing.
 - Save success closes the drawer, refreshes provider-dependent caches, and shows the write feedback dialog.
-- Archive/delete provider requires `ConfirmDialog`; failure stays on the confirm/error surface.
+- Delete provider requires `ConfirmDialog`; failure stays on the confirm/error surface.
 
 ## Settings Resource Group and Generation Config Surfaces
 
@@ -366,8 +366,8 @@ Resource group panel:
 
 - The panel header has title/description and a compact "new group" action.
 - New group opens `GenerationResourceGroupCreateDialog`; it is not an inline card.
-- Resource group cards use `SETTINGS_FIELD_CARD_CLASS`, compact spacing, and top-right archive icon buttons.
-- Archive is icon-only and placed at the card's top-right corner.
+- Resource group cards use `SETTINGS_FIELD_CARD_CLASS`, compact spacing, and top-right delete icon buttons.
+- Delete is icon-only and placed at the card's top-right corner.
 - Cards show name, key, enabled/disabled badge, and text/image config counts for existing groups.
 - Fields use a three-column desktop grid for key/name/sort order, followed by description, then switches/actions.
 - Enabled uses `SettingsSwitchToggle`; blur images by default uses `SettingsOptionToggle`.
@@ -389,7 +389,7 @@ Generation config pool:
 
 Generation config cards:
 
-- Use `SETTINGS_FIELD_CARD_CLASS` with top-right icon-only archive.
+- Use `SETTINGS_FIELD_CARD_CLASS` with top-right icon-only delete.
 - The card header shows config name, enabled/disabled badge, frozen badge when applicable, and stats for existing configs.
 - The first field row includes name, resource group multi-select, and provider interface.
 - Non-mock provider configs show a searchable provider profile dropdown. Opening this dropdown must focus/select the search
@@ -442,7 +442,7 @@ Global templates:
   `pf-side-rail` filters/categories plus `pf-side-content` template cards.
 - The actual editor's search/category/title/description/sort inputs and `SelectField` triggers must inherit the workspace
   settings input gradient tokens in `mist`, `sage`, and `dusk`.
-- Global template create/update/archive/review/copy actions are persistent writes. They use compact settings action
+- Global template create/update/delete/review/copy actions are persistent writes. They use compact settings action
   classes, confirmation dialogs where destructive, and the same success/error feedback dialog behavior as other settings
   writes.
 - The action is disabled when template management permission is missing.
@@ -496,7 +496,7 @@ Desktop row contract:
 - Hover uses a light row tint.
 - Focus-visible uses an inset ring.
 - Pressed state uses a stronger row tint and a left accent inset line.
-- Row actions such as archive/delete are hidden until row hover/focus, and they must not trigger row open.
+- Row actions such as delete are hidden until row hover/focus, and they must not trigger row open.
 
 Desktop list layout:
 
@@ -521,12 +521,12 @@ Mobile card contract:
 
 Mobile swipe action contract:
 
-- Delete/archive action width is `MOBILE_DELETE_ACTION_WIDTH_PX` (`96px`).
+- Delete action width is `MOBILE_DELETE_ACTION_WIDTH_PX` (`96px`).
 - Open threshold is `MOBILE_DELETE_OPEN_THRESHOLD_PX` (`42px`).
 - Horizontal drag starts only when horizontal movement exceeds `PRESS_CANCEL_DISTANCE_PX` and is stronger than vertical movement.
 - Swipe movement uses `transform: translateX(...)`.
 - Delete action opacity follows the exposed offset.
-- Delete/archive buttons call `stopPropagation()` so they do not open the card.
+- Delete buttons call `stopPropagation()` so they do not open the card.
 
 Hover image preview contract:
 

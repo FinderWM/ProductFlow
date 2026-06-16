@@ -8,7 +8,7 @@
 
 Use this spec before changing any of these surfaces:
 
-- Resource library pages, modals, source save/load actions, and archive/group controls.
+- Resource library pages, modals, source save/load actions, and delete/group controls.
 - Gallery browsing, gallery management routes, save-to-gallery state, and admin remove/restore controls.
 - Frontend handling for `resources:moderate`, moderation DTOs, and disabled/effective-disabled resource fields.
 - Admin cross-user views for inspirations, image sessions, generated images, gallery entries, or resource-library derived assets.
@@ -54,7 +54,7 @@ Resource governance mutations can affect more than the page that issued them:
 
 - Gallery remove/restore must invalidate gallery queries and keep preview state from showing stale moderation fields.
 - Save-to-gallery must update the relevant image-session cache for the generated asset and invalidate gallery queries.
-- Resource-library save/archive/group changes must invalidate resource-library asset/group/source-status queries.
+- Resource-library save/delete/group changes must invalidate resource-library asset/group/source-status queries.
 - Upstream resource disable/restore can change downstream effective availability. Invalidate or refresh the visible detail,
   gallery, image-session, and resource-library queries that can display derived availability.
 

@@ -174,7 +174,7 @@ New workspace appearances must be visually checked against these areas:
   active session state, loading tasks, and error banners.
 - Gallery/media surfaces: image cards, preview modal, moderation labels/actions, sensitive-image masks, and download links.
 - Existing modal, drawer, and popover surfaces: `TopNav` weather, notification, profile, More menu, theme dock, compact
-  action panel, gallery preview, resource-library preview/archive dialogs, save-to-resource-library dialog, inspiration
+  action panel, gallery preview, resource-library preview/delete dialogs, save-to-resource-library dialog, inspiration
   image preview, tail split plan dialog, image-chat mobile session/history/action drawers, and inspiration-detail mobile
   bottom toolbar/sheets.
 - Special immersive tool states: ReactFlow canvas, minimap, workflow status strip, inspector controls, workflow run controls,

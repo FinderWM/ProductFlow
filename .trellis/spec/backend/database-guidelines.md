@@ -408,7 +408,8 @@ ConfigDefinition(
 - Removing a capability from a profile still used by an active config -> `400`, active config detail.
 - Disabling a profile still used by an active config -> `200`, profile `enabled=false`; referencing configs keep their own
   `enabled` value but serialize `effective_enabled=false` and are excluded from automatic/manual claims.
-- Archiving a provider profile still used by an active config -> `400`, active config detail.
+- Deleting a provider profile still used by an active config (implemented as an internal archive flag) -> `400`, active
+  config detail.
 - Manual config id missing while `generation_config_mode == "manual"` -> route/use case validation error.
 - Manual config over capacity or frozen -> durable task remains queued for retry, not a provider failure.
 - `POST /api/settings/generation-configs/{id}/unfreeze` for a missing/archived config -> `400`, generation config missing
@@ -928,8 +929,9 @@ def get_runtime_config_endpoint():
   - `DELETE /api/image-sessions/{image_session_id}`
 - When the guard allows deletion, these routes perform logical deletion only: set `deleted_at` and
   `deleted_by_user_id`, keep database rows, child rows, and storage files.
-- User-facing UI should call whole-record soft deletion "archive"/"archived"; backend route names, setting keys, and
-  database columns keep the existing deletion naming for API compatibility.
+- User-facing UI should call whole-record soft deletion "delete"/"deleted", not "archive"/"archived". This naming rule
+  does not change persistence: backend route names, setting keys, existing `archive*` helper names, `archived_at`
+  columns, and `deleted_at` columns keep their current names for API and database compatibility.
 - Ordinary users cannot list or read their own soft-deleted inspirations/sessions; they receive the same not-found behavior as
   for missing rows. Admin users may read soft-deleted rows for traceability.
 - Inspiration and image-session list APIs default to active rows only. Admin users may pass `only_deleted=true` to list only

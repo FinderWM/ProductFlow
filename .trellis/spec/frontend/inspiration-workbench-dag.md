@@ -451,7 +451,7 @@
 - Good: blank InspirationCreate entry shows the local blank canvas option plus any database templates returned for
   `initial_workflow_entry=blank`, grouped by entry.
 - Good: global template management lists global templates for editing and user templates for copy-to-global, without
-  enabling user-template save/archive controls in the global page.
+  enabling user-template save/delete controls in the global page.
 - Base: blank search, blank category, and scope `all` call `/api/workflow/canvas-templates` without a query string.
 - Bad: filtering only client-side after fetching all templates when backend `search`, `category_id`, and `scope` are
   already available.
