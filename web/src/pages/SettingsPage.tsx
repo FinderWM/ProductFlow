@@ -4144,6 +4144,20 @@ export async function runGenerationConfigBatchTests<T>(
   );
 }
 
+export function generationConfigBatchSelectableIds(
+  items: Array<{ config: Pick<GenerationConfig, "id">; disabled: boolean }>,
+): string[] {
+  return items.filter((item) => !item.disabled).map((item) => item.config.id);
+}
+
+export function generationConfigBatchFailedSelectableIds(
+  items: Array<{ config: Pick<GenerationConfig, "id" | "latest_test_result">; disabled: boolean }>,
+): string[] {
+  return items
+    .filter((item) => !item.disabled && item.config.latest_test_result?.status === "failed")
+    .map((item) => item.config.id);
+}
+
 function generationConfigSuccessRate(config: GenerationConfig): string {
   const stat = config.today_stat;
   if (!stat || stat.attempt_count <= 0) {
@@ -4537,6 +4551,8 @@ function GenerationConfigBatchTestDialog({
   const titleId = useId();
   const selectedSet = new Set(selectedIds);
   const selectedCount = selectedIds.length;
+  const selectableIds = generationConfigBatchSelectableIds(items);
+  const failedSelectableIds = generationConfigBatchFailedSelectableIds(items);
 
   if (!open) {
     return null;
@@ -4581,6 +4597,28 @@ function GenerationConfigBatchTestDialog({
         </button>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => onSelectedIdsChange(selectableIds)}
+            disabled={busy || selectableIds.length === 0}
+            className={SETTINGS_COMPACT_ACTION_CLASS}
+          >
+            <Check size={14} className="mr-1.5" />
+            {t("settings.generation.batchSelectAll")}
+          </button>
+          {failedSelectableIds.length ? (
+            <button
+              type="button"
+              onClick={() => onSelectedIdsChange(failedSelectableIds)}
+              disabled={busy}
+              className={SETTINGS_COMPACT_ACTION_CLASS}
+            >
+              <RotateCcw size={14} className="mr-1.5" />
+              {t("settings.generation.batchSelectFailed")}
+            </button>
+          ) : null}
+        </div>
         {items.length ? (
           items.map((item) => {
             const latestTestResult = item.config.latest_test_result;

@@ -17,6 +17,8 @@ import {
   type GenerationConfigDraft,
   generationConfigDraft as generationConfigDraftFromConfig,
   generationConfigDraftAfterProviderProfileSelection,
+  generationConfigBatchFailedSelectableIds,
+  generationConfigBatchSelectableIds,
   generationConfigsUsingProvider,
   generationConfigLatestTestDetail,
   generationConfigResourceGroupIds,
@@ -1204,6 +1206,47 @@ describe("SettingsPage provider profile helpers", () => {
 
     expect(executed.sort((left, right) => left - right)).toEqual(items);
     expect(maxActive).toBeLessThanOrEqual(2);
+  });
+
+  it("selects only testable generation configs for batch tests", () => {
+    const items = [
+      { config: generationConfig({ id: "available", purpose: "text" }), disabled: false },
+      { config: generationConfig({ id: "disabled", purpose: "text" }), disabled: true },
+    ];
+
+    expect(generationConfigBatchSelectableIds(items)).toEqual(["available"]);
+  });
+
+  it("selects only testable failed generation configs for batch tests", () => {
+    const items = [
+      {
+        config: generationConfig({
+          id: "failed",
+          purpose: "text",
+          latest_test_result: generationConfigTestResult({ status: "failed" }),
+        }),
+        disabled: false,
+      },
+      {
+        config: generationConfig({
+          id: "passed",
+          purpose: "text",
+          latest_test_result: generationConfigTestResult({ status: "success" }),
+        }),
+        disabled: false,
+      },
+      { config: generationConfig({ id: "untested", purpose: "text" }), disabled: false },
+      {
+        config: generationConfig({
+          id: "disabled-failed",
+          purpose: "text",
+          latest_test_result: generationConfigTestResult({ status: "failed" }),
+        }),
+        disabled: true,
+      },
+    ];
+
+    expect(generationConfigBatchFailedSelectableIds(items)).toEqual(["failed"]);
   });
 
   it("merges provider profile mutation responses into provider config cache", () => {
