@@ -39,6 +39,7 @@ function generationConfig(
     priority: overrides.priority ?? 100,
     max_concurrency: overrides.max_concurrency ?? 1,
     enabled: overrides.enabled ?? true,
+    effective_enabled: overrides.effective_enabled ?? overrides.enabled ?? true,
     availability_window_minutes: overrides.availability_window_minutes ?? 10,
     failure_threshold: overrides.failure_threshold ?? 3,
     cooldown_minutes: overrides.cooldown_minutes ?? 10,

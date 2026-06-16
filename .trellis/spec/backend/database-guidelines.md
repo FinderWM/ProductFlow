@@ -363,7 +363,7 @@ ConfigDefinition(
   Gemini, or `mock`.
 - `GET /api/settings/generation-config-options` requires a matching workbench/image-chat read permission or
   `settings:read`. It returns only non-secret fields (`id`, `resource_group_id`, `resource_group_ids`, `purpose`, `name`,
-  `provider_kind`, `enabled`, `priority`, `frozen_until`) for workflow and image-chat selectors.
+  `provider_kind`, `enabled`, `effective_enabled`, `priority`, `frozen_until`) for workflow and image-chat selectors.
 - Settings create/update APIs use `resource_group_ids: list[str]` as the owner field. Legacy `resource_group_id` is still
   accepted when `resource_group_ids` is absent and response `resource_group_id` mirrors the first binding. Empty
   `resource_group_ids` means the config is intentionally unbound in the settings workspace; it is not a fallback/default
@@ -389,8 +389,12 @@ ConfigDefinition(
   stored datetimes to aware UTC before comparing with `datetime.now(UTC)`.
 - API responses for provider profiles expose `has_api_key`; they never expose the raw `api_key`.
 - A blank API key update preserves the existing stored key. A non-blank API key update replaces it.
-- While a provider profile is referenced by an active real text/image generation config, profile updates must not disable
-  it or remove the capability required by that config.
+- While a provider profile is referenced by an active real text/image generation config, profile updates must not remove
+  the capability required by that config. Disabling a referenced profile is allowed; it leaves
+  `generation_configs.enabled` unchanged and makes `effective_enabled=false` for configs that depend on that profile.
+- Generation config serializers expose both user-managed `enabled` and computed `effective_enabled`. For mock configs,
+  `effective_enabled == enabled`; for real provider configs it also requires a present, unarchived, enabled provider
+  profile.
 - Docker Compose must continue passing legacy `TEXT_*` / `IMAGE_*` provider env values into backend and worker containers
   during the migration window, because containerized bootstrap cannot read the host `.env` file directly.
 
@@ -402,7 +406,8 @@ ConfigDefinition(
 - Config bound to a disabled or archived profile -> `400`, profile unavailable detail.
 - Config bound to a profile missing the required capability -> `400`, capability unsupported detail.
 - Removing a capability from a profile still used by an active config -> `400`, active config detail.
-- Disabling a profile still used by an active config -> `400`, active config detail.
+- Disabling a profile still used by an active config -> `200`, profile `enabled=false`; referencing configs keep their own
+  `enabled` value but serialize `effective_enabled=false` and are excluded from automatic/manual claims.
 - Archiving a provider profile still used by an active config -> `400`, active config detail.
 - Manual config id missing while `generation_config_mode == "manual"` -> route/use case validation error.
 - Manual config over capacity or frozen -> durable task remains queued for retry, not a provider failure.
@@ -472,7 +477,8 @@ ConfigDefinition(
 - Scheduler/API tests for manual unfreeze clearing `frozen_until` plus the failure window and allowing a later claim.
 - Scheduler tests cover one config bound to multiple resource groups and prove unbound configs are not automatic
   group-scoped candidates.
-- Profile update test that active configs prevent removing required capabilities and disabling the profile.
+- Profile update test that active configs prevent removing required capabilities, while disabling the profile is allowed
+  and makes referencing configs effectively unavailable.
 - Resolver test proving existing generation configs override stale legacy `app_settings` rows.
 - Resolver test proving missing binding/profile model settings do not fall back to stale legacy model rows or env values.
 - Settings API/import test proving real image configs switch visible `poster_generation_mode` to `generated`.

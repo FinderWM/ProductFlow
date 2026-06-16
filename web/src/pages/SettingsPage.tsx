@@ -270,6 +270,11 @@ interface ImageGenerationConfigTestMutationInput {
   payload: ImageGenerationConfigTestRequest;
 }
 
+interface PendingProviderDisable {
+  profile: ProviderProfile;
+  generationConfigs: GenerationConfig[];
+}
+
 type PendingGenerationArchive =
   | { kind: "resourceGroup"; id: string; name: string }
   | { kind: "generationConfig"; id: string; name: string };
@@ -289,6 +294,7 @@ type ImageProviderKind =
   | "google_gemini_image";
 type TextStructuredOutputMode = "json_schema" | "json_object";
 type ProviderModelKind = TextProviderKind | ImageProviderKind;
+type GenerationConfigProviderKind = TextProviderKind | ImageProviderKind;
 
 const INPUT_CLASS =
   "h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 " +
@@ -1106,6 +1112,93 @@ function isTextStructuredOutputProviderKind(providerKind: TextProviderKind | Ima
   return providerKind === "openai" || providerKind === "openai_chat_completions";
 }
 
+function normalizedGenerationConfigProviderKind(
+  purpose: "text" | "image",
+  value: string,
+): GenerationConfigProviderKind {
+  if (purpose === "text") {
+    return value === "openai" || value === "openai_chat_completions" ? value : "mock";
+  }
+  return value === "openai_responses" ||
+    value === "openai_images" ||
+    value === "openai_chat_image" ||
+    value === "google_gemini_image"
+    ? value
+    : "mock";
+}
+
+function providerCapabilityForGenerationConfig(
+  purpose: "text" | "image",
+  providerKind: GenerationConfigProviderKind,
+): ProviderCapability | null {
+  if (providerKind === "mock") {
+    return null;
+  }
+  if (purpose === "text") {
+    return providerKind === "openai_chat_completions" ? "text_chat_completions" : "text_responses";
+  }
+  if (providerKind === "openai_responses") {
+    return "image_responses";
+  }
+  if (providerKind === "openai_chat_image") {
+    return "image_chat";
+  }
+  if (providerKind === "google_gemini_image") {
+    return "image_google_gemini";
+  }
+  return "image_images";
+}
+
+function providerProfileSupportsGenerationConfig(profile: ProviderProfile, draft: GenerationConfigDraft): boolean {
+  const requiredCapability = providerCapabilityForGenerationConfig(draft.purpose, draft.provider_kind);
+  if (!requiredCapability) {
+    return false;
+  }
+  return profile.enabled && !profile.archived_at && profile.capabilities.includes(requiredCapability);
+}
+
+function providerProfileIdAfterKindChange(
+  profiles: ProviderProfile[],
+  draft: GenerationConfigDraft,
+  nextProviderKind: GenerationConfigProviderKind,
+): string {
+  if (nextProviderKind === "mock" || !draft.provider_profile_id) {
+    return "";
+  }
+  const nextDraft = { ...draft, provider_kind: nextProviderKind };
+  const selectedProfile = profiles.find((profile) => profile.id === draft.provider_profile_id);
+  return selectedProfile && providerProfileSupportsGenerationConfig(selectedProfile, nextDraft)
+    ? draft.provider_profile_id
+    : "";
+}
+
+function textStructuredOutputProviderInterfaceLabelKey(
+  providerKind: TextProviderKind | ImageProviderKind,
+): TranslationKey {
+  return providerKind === "openai"
+    ? "settings.provider.interface.openaiResponses"
+    : "settings.provider.interface.openaiChatCompletions";
+}
+
+function generationConfigProviderInterfaceLabelKey(providerKind: string): TranslationKey {
+  if (providerKind === "openai" || providerKind === "openai_responses") {
+    return "settings.provider.interface.openaiResponses";
+  }
+  if (providerKind === "openai_chat_completions") {
+    return "settings.provider.interface.openaiChatCompletions";
+  }
+  if (providerKind === "openai_images") {
+    return "settings.provider.interface.openaiImages";
+  }
+  if (providerKind === "openai_chat_image") {
+    return "settings.provider.interface.openaiChatImage";
+  }
+  if (providerKind === "google_gemini_image") {
+    return "settings.provider.interface.googleGeminiImage";
+  }
+  return "settings.provider.interface.mock";
+}
+
 function textStructuredOutputDraft(
   config: Record<string, unknown> | undefined,
 ): { enabled: boolean; mode: TextStructuredOutputMode } {
@@ -1203,7 +1296,18 @@ export function providerUsageLabelKeys(usage: ProviderProfileUsage): Translation
 }
 
 export function providerDisableBlocked(profile: ProviderProfile, usage: ProviderProfileUsage): boolean {
-  return profile.enabled && (usage.text || usage.image);
+  void profile;
+  void usage;
+  return false;
+}
+
+export function generationConfigsUsingProvider(
+  generationConfigs: GenerationConfig[],
+  profileId: string,
+): GenerationConfig[] {
+  return generationConfigs.filter(
+    (generationConfig) => generationConfig.provider_profile_id === profileId && !generationConfig.archived_at,
+  );
 }
 
 export function settingsGenerationResourceGroupsInApiOrder(
@@ -3564,6 +3668,72 @@ function ProviderProfileCard({
   );
 }
 
+function ProviderDisableConfirmDialog({
+  pendingDisable,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  pendingDisable: PendingProviderDisable | null;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+
+  if (!pendingDisable) {
+    return null;
+  }
+
+  return (
+    <ModalShell
+      open={Boolean(pendingDisable)}
+      onClose={onClose}
+      closeDisabled={busy}
+      ariaLabelledBy={titleId}
+      overlayClassName="z-[85] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      panelClassName="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
+    >
+      <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+        <h2 id={titleId} className="text-base font-semibold text-slate-950 dark:text-white">
+          {t("settings.provider.disableUsedConfirmTitle")}
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+          {t("settings.provider.disableUsedConfirmDescription", { name: pendingDisable.profile.name })}
+        </p>
+      </div>
+      <div className="max-h-[45dvh] overflow-y-auto px-5 py-4">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {t("settings.provider.disableUsedListTitle")}
+        </div>
+        <ul className="space-y-2">
+          {pendingDisable.generationConfigs.map((generationConfig) => (
+            <li
+              key={generationConfig.id}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/45 dark:text-slate-200"
+            >
+              <span className="font-medium">{generationConfig.name}</span>
+              <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+                {t(generationConfig.purpose === "text" ? "settings.section.text" : "settings.section.image")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-950/45">
+        <button type="button" onClick={onClose} disabled={busy} className={SETTINGS_COMPACT_ACTION_CLASS}>
+          {t("common.cancel")}
+        </button>
+        <button type="button" onClick={onConfirm} disabled={busy} className={SETTINGS_MAIN_ACTION_CLASS}>
+          {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
+          {t("settings.provider.disableUsedConfirmLabel")}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 interface ProviderCapabilityToggleProps {
   option: (typeof PROVIDER_CAPABILITY_OPTIONS)[number];
   selected: boolean;
@@ -3897,11 +4067,12 @@ interface GenerationConfigPoolSectionProps {
   onTextTestDraftChange?: (draft: TextConfigTestDraft) => void;
   onImageTestDraftChange?: (draft: ImageConfigTestDraft) => void;
   onSaveImageTestDraft?: () => void;
-  onTestTextConfig?: (key: string, draft: GenerationConfigDraft) => void;
-  onTestImageConfig?: (key: string, draft: GenerationConfigDraft, resourceGroupId: string) => void;
-  onTestJsonResponseFormatConfig?: (key: string, draft: GenerationConfigDraft) => void;
+  onTestTextConfig?: (key: string, draft: GenerationConfigDraft) => Promise<void> | void;
+  onTestImageConfig?: (key: string, draft: GenerationConfigDraft, resourceGroupId: string) => Promise<void> | void;
+  onTestJsonResponseFormatConfig?: (key: string, draft: GenerationConfigDraft) => Promise<void> | void;
   onResetTextConfigTests?: (key: string) => void;
   onResetImageConfigTests?: (key: string) => void;
+  onBeforeOpenCreate?: () => Promise<boolean> | boolean;
   onRefreshSort: () => void;
   unfreezingConfigId: string | null;
 }
@@ -3913,21 +4084,63 @@ interface GenerationConfigSaveOptions {
 export function providerProfilesForGenerationConfig(
   profiles: ProviderProfile[],
   draft: GenerationConfigDraft,
+  selectedProfileId = "",
 ): ProviderProfile[] {
-  const requiredCapability =
-    draft.purpose === "text"
-      ? draft.provider_kind === "openai_chat_completions"
-        ? "text_chat_completions"
-        : "text_responses"
-      : draft.provider_kind === "openai_responses"
-        ? "image_responses"
-        : draft.provider_kind === "openai_chat_image"
-          ? "image_chat"
-        : draft.provider_kind === "google_gemini_image"
-          ? "image_google_gemini"
-          : "image_images";
   return profiles.filter(
-    (profile) => profile.enabled && !profile.archived_at && profile.capabilities.includes(requiredCapability),
+    (profile) =>
+      providerProfileSupportsGenerationConfig(profile, draft) ||
+      (selectedProfileId && profile.id === selectedProfileId && !profile.archived_at),
+  );
+}
+
+function defaultGenerationConfigName(purpose: "text" | "image"): string {
+  return purpose === "text" ? "Text config" : "Image config";
+}
+
+function generationConfigNameUnedited(draft: GenerationConfigDraft, profiles: ProviderProfile[]): boolean {
+  if (draft.name === defaultGenerationConfigName(draft.purpose)) {
+    return true;
+  }
+  return profiles.some((profile) => draft.name === `${profile.name}-`);
+}
+
+export function generationConfigDraftAfterProviderProfileSelection(
+  draft: GenerationConfigDraft,
+  profiles: ProviderProfile[],
+  providerProfileId: string,
+  options: { isNew: boolean },
+): GenerationConfigDraft {
+  const selectedProfile = profiles.find((profile) => profile.id === providerProfileId);
+  return {
+    ...draft,
+    provider_profile_id: providerProfileId,
+    name:
+      options.isNew && selectedProfile && generationConfigNameUnedited(draft, profiles)
+        ? `${selectedProfile.name}-`
+        : draft.name,
+  };
+}
+
+export async function runGenerationConfigBatchTests<T>(
+  items: T[],
+  concurrency: number,
+  run: (item: T) => Promise<void> | void,
+): Promise<void> {
+  const limit = Math.max(1, Math.floor(concurrency) || 1);
+  let nextIndex = 0;
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const item = items[nextIndex];
+        nextIndex += 1;
+        try {
+          await run(item);
+        } catch {
+          // Individual test mutations own per-card failure state.
+        }
+      }
+    }),
   );
 }
 
@@ -4067,13 +4280,8 @@ function TextConfigTestPanel({
   onDraftChange: (draft: TextConfigTestDraft) => void;
 }) {
   const { t } = useI18n();
-  const latestRecord = state.latestKey ? state.records[state.latestKey] : null;
-  const latestResult = latestRecord?.result ?? null;
-  const latestError = latestRecord?.error ?? "";
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
-  const activitySignal = state.latestKey
-    ? `${state.latestKey}:${runningCount}:${latestError ? "error" : latestResult ? "result" : "pending"}`
-    : "";
+  const activitySignal = runningCount > 0 ? `running:${runningCount}` : "";
 
   return (
     <SettingsCollapsibleModule
@@ -4132,46 +4340,6 @@ function TextConfigTestPanel({
           </div>
         </div>
       ) : null}
-      {latestError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-          {latestError}
-        </div>
-      ) : null}
-      {runningCount === 0 && latestResult ? (
-        <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100">
-          <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
-          <div>
-            <div className="font-semibold">{t("settings.generation.testPassed")}</div>
-            <div className="mt-0.5 text-xs text-emerald-700/80 dark:text-emerald-100/75">
-              {t("settings.generation.testPassedDetail", {
-                duration: String(Math.max(1, Math.round(latestResult.duration_ms))),
-                briefModel: latestResult.brief_model,
-                copyModel: latestResult.copy_model,
-              })}
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {latestResult ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              {t("settings.generation.testBriefResult", { model: latestResult.brief_model })}
-            </div>
-            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
-              {JSON.stringify(latestResult.brief, null, 2)}
-            </pre>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              {t("settings.generation.testCopyResult", { model: latestResult.copy_model })}
-            </div>
-            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
-              {JSON.stringify(latestResult.copy_result, null, 2)}
-            </pre>
-          </div>
-        </div>
-      ) : null}
     </SettingsCollapsibleModule>
   );
 }
@@ -4186,13 +4354,8 @@ function ImageConfigTestPanel({
   onSaveDraft: () => void;
 }) {
   const { t } = useI18n();
-  const latestRecord = state.latestKey ? state.records[state.latestKey] : null;
-  const latestResult = latestRecord?.result ?? null;
-  const latestError = latestRecord?.error ?? "";
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
-  const activitySignal = state.latestKey
-    ? `${state.latestKey}:${runningCount}:${latestError ? "error" : latestResult ? "result" : "pending"}`
-    : "";
+  const activitySignal = runningCount > 0 ? `running:${runningCount}` : "";
 
   return (
     <SettingsCollapsibleModule
@@ -4228,25 +4391,6 @@ function ImageConfigTestPanel({
             <div className="font-semibold">{t("settings.generation.imageTestRunning")}</div>
             <div className="mt-0.5 text-xs text-indigo-700/80 dark:text-violet-100/75">
               {t("settings.generation.imageTestRunningDetail")}
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {latestError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-          {latestError}
-        </div>
-      ) : null}
-      {runningCount === 0 && latestResult ? (
-        <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-100">
-          <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
-          <div>
-            <div className="font-semibold">{t("settings.generation.imageTestPassed")}</div>
-            <div className="mt-0.5 text-xs text-emerald-700/80 dark:text-emerald-100/75">
-              {t("settings.generation.imageTestPassedDetail", {
-                duration: String(Math.max(1, Math.round(latestResult.duration_ms))),
-                model: latestResult.model_name,
-              })}
             </div>
           </div>
         </div>
@@ -4351,6 +4495,202 @@ interface GenerationConfigCreateDialogProps {
   onTest?: () => void;
   onImageTest?: () => void;
   onTestJsonResponseFormat?: () => void;
+}
+
+interface GenerationConfigBatchTestItem {
+  key: string;
+  config: GenerationConfig;
+  draft: GenerationConfigDraft;
+  providerName: string;
+  resourceGroupId: string;
+  disabled: boolean;
+}
+
+interface GenerationConfigBatchTestDialogProps {
+  open: boolean;
+  purpose: "text" | "image";
+  resourceGroupName: string;
+  items: GenerationConfigBatchTestItem[];
+  selectedIds: string[];
+  concurrency: string;
+  busy: boolean;
+  onSelectedIdsChange: (selectedIds: string[]) => void;
+  onConcurrencyChange: (concurrency: string) => void;
+  onClose: () => void;
+  onRun: () => void;
+}
+
+function GenerationConfigBatchTestDialog({
+  open,
+  purpose,
+  resourceGroupName,
+  items,
+  selectedIds,
+  concurrency,
+  busy,
+  onSelectedIdsChange,
+  onConcurrencyChange,
+  onClose,
+  onRun,
+}: GenerationConfigBatchTestDialogProps) {
+  const { t } = useI18n();
+  const titleId = useId();
+  const selectedSet = new Set(selectedIds);
+  const selectedCount = selectedIds.length;
+
+  if (!open) {
+    return null;
+  }
+
+  const toggleItem = (itemId: string) => {
+    onSelectedIdsChange(
+      selectedSet.has(itemId) ? selectedIds.filter((id) => id !== itemId) : [...selectedIds, itemId],
+    );
+  };
+
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      closeDisabled={busy}
+      ariaLabelledBy={titleId}
+      overlayClassName="z-[85] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      panelClassName="flex max-h-[calc(100dvh-3rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
+    >
+      <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
+        <div className="min-w-0">
+          <h2 id={titleId} className="truncate text-lg font-semibold text-slate-950 dark:text-white">
+            {t("settings.generation.batchTestTitle")}
+          </h2>
+          <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+            {t("settings.generation.batchTestSubtitle", {
+              purpose: t(purpose === "text" ? "settings.section.text" : "settings.section.image"),
+              group: resourceGroupName,
+            })}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className={SETTINGS_ICON_ACTION_CLASS}
+          aria-label={t("create.close")}
+          title={t("create.close")}
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+        {items.length ? (
+          items.map((item) => {
+            const latestTestResult = item.config.latest_test_result;
+            const latestDetail = latestTestResult ? generationConfigLatestTestDetail(latestTestResult, t) : "";
+            const selected = selectedSet.has(item.config.id);
+            return (
+              <label
+                key={item.config.id}
+                className={`flex gap-3 rounded-xl border p-3 transition ${
+                  item.disabled
+                    ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900/45 dark:text-slate-400"
+                    : selected
+                      ? "border-indigo-300 bg-indigo-50/70 dark:border-violet-400/45 dark:bg-violet-500/12"
+                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-[#111b2d] dark:hover:border-slate-600"
+                } ${busy || item.disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={busy || item.disabled}
+                  onChange={() => toggleItem(item.config.id)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-violet-400"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-slate-950 dark:text-white">{item.config.name}</span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                        item.config.effective_enabled
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200"
+                          : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200"
+                      }`}
+                    >
+                      {item.config.effective_enabled
+                        ? t("settings.generation.effectiveEnabled")
+                        : t("settings.generation.effectiveDisabled")}
+                    </span>
+                    {!item.config.enabled ? (
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                        {t("settings.provider.disabled")}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                    {t("settings.generation.batchProviderLine", {
+                      provider: item.providerName,
+                      interfaceName: t(generationConfigProviderInterfaceLabelKey(item.config.provider_kind)),
+                    })}
+                  </span>
+                  <span className="mt-2 block text-xs leading-5 text-slate-600 dark:text-slate-300">
+                    {latestTestResult
+                      ? [
+                          t(generationConfigLatestTestTypeLabelKey(latestTestResult.test_type)),
+                          t(
+                            latestTestResult.status === "failed"
+                              ? "settings.generation.latestTestFailed"
+                              : "settings.generation.latestTestPassed",
+                          ),
+                          formatDateTime(latestTestResult.tested_at),
+                          latestDetail,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : t("settings.generation.batchNoLatestTest")}
+                  </span>
+                </span>
+              </label>
+            );
+          })
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/45 dark:text-slate-400">
+            {t("settings.generation.batchEmpty")}
+          </div>
+        )}
+      </div>
+      <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-950/45 sm:flex-row sm:items-center sm:justify-between">
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+          <span>{t("settings.generation.batchConcurrency")}</span>
+          <input
+            type="number"
+            min={1}
+            max={20}
+            value={concurrency}
+            disabled={busy}
+            onChange={(event) => onConcurrencyChange(event.target.value)}
+            className="h-9 w-20 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+          />
+        </label>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className={SETTINGS_COMPACT_ACTION_CLASS}
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={onRun}
+            disabled={busy || selectedCount === 0}
+            className={SETTINGS_MAIN_ACTION_CLASS}
+          >
+            {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Check size={14} className="mr-1.5" />}
+            {t("settings.generation.batchRun", { count: String(selectedCount) })}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  );
 }
 
 function GenerationConfigCreateDialog({
@@ -4463,6 +4803,7 @@ function GenerationConfigPoolSection({
   onTestJsonResponseFormatConfig,
   onResetTextConfigTests,
   onResetImageConfigTests,
+  onBeforeOpenCreate,
   onRefreshSort,
   unfreezingConfigId,
 }: GenerationConfigPoolSectionProps) {
@@ -4473,7 +4814,14 @@ function GenerationConfigPoolSection({
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
   const [configSearch, setConfigSearch] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [openingCreateDialog, setOpeningCreateDialog] = useState(false);
+  const [batchDialogOpen, setBatchDialogOpen] = useState(false);
+  const [batchSelectedIds, setBatchSelectedIds] = useState<string[]>([]);
+  const [batchConcurrency, setBatchConcurrency] = useState("4");
+  const [batchRunning, setBatchRunning] = useState(false);
   const activeResourceGroupId = selectedResourceGroupId ?? firstEnabledGroupId;
+  const activeResourceGroup = resourceGroups.find((group) => group.id === activeResourceGroupId) ?? null;
+  const activeResourceGroupName = activeResourceGroup?.name ?? t("settings.generation.unboundResourceGroup");
   useEffect(() => {
     if (selectedResourceGroupId === null || selectedResourceGroupId === "") {
       return;
@@ -4500,6 +4848,66 @@ function GenerationConfigPoolSection({
       draft: drafts[config.id] ?? generationConfigDraft(config),
     })),
   ];
+  const batchItems: GenerationConfigBatchTestItem[] = cards.map(({ key, config, draft }) => {
+    const testRecord = textConfigTestRecordForKey(textTestState, key);
+    const imageTestRecord = imageConfigTestRecordForKey(imageTestState, key);
+    const providerProfile = profiles.find((profile) => profile.id === (draft.provider_profile_id || config.provider_profile_id));
+    const resourceGroupId =
+      activeResourceGroupId && draft.resource_group_ids.includes(activeResourceGroupId)
+        ? activeResourceGroupId
+        : draft.resource_group_ids[0] ?? activeResourceGroupId;
+    const providerMissing = draft.provider_kind !== "mock" && !draft.provider_profile_id;
+    const modelMissing = purpose === "image" && !draft.model.trim();
+    const imageGroupMissing = purpose === "image" && !resourceGroupId;
+    const alreadyTesting = purpose === "text" ? Boolean(testRecord?.testing) : Boolean(imageTestRecord?.testing);
+    return {
+      key,
+      config,
+      draft,
+      providerName:
+        draft.provider_kind === "mock"
+          ? t("settings.provider.interface.mock")
+          : providerProfile?.name ?? t("settings.provider.selectProfile"),
+      resourceGroupId,
+      disabled:
+        !config.effective_enabled ||
+        alreadyTesting ||
+        !draft.name.trim() ||
+        providerMissing ||
+        modelMissing ||
+        imageGroupMissing,
+    };
+  });
+  const openBatchDialog = () => {
+    if (!canWrite) {
+      return;
+    }
+    setBatchSelectedIds([]);
+    setBatchConcurrency("4");
+    setBatchDialogOpen(true);
+  };
+  const runBatchTests = async () => {
+    const selectedItems = batchItems.filter((item) => batchSelectedIds.includes(item.config.id) && !item.disabled);
+    if (!selectedItems.length) {
+      return;
+    }
+    const concurrency = Math.min(20, Math.max(1, Math.floor(Number(batchConcurrency)) || 4));
+    setBatchConcurrency(String(concurrency));
+    setBatchRunning(true);
+    try {
+      await runGenerationConfigBatchTests(selectedItems, concurrency, async (item) => {
+        if (purpose === "text") {
+          await onTestTextConfig?.(item.key, item.draft);
+          return;
+        }
+        await onTestImageConfig?.(item.key, item.draft, item.resourceGroupId);
+      });
+      setBatchDialogOpen(false);
+      setBatchSelectedIds([]);
+    } finally {
+      setBatchRunning(false);
+    }
+  };
   const newDraftTestRecord = textConfigTestRecordForKey(textTestState, newDraftKey);
   const newDraftJsonResponseFormatTestRecord = textConfigJsonResponseFormatTestRecordForKey(
     jsonResponseFormatTestState,
@@ -4513,6 +4921,20 @@ function GenerationConfigPoolSection({
     }
     if (purpose === "image") {
       onResetImageConfigTests?.(newDraftKey);
+    }
+  };
+  const openCreateDialog = async () => {
+    if (!canWrite || openingCreateDialog) {
+      return;
+    }
+    setOpeningCreateDialog(true);
+    try {
+      const canOpen = onBeforeOpenCreate ? await onBeforeOpenCreate() : true;
+      if (canOpen !== false) {
+        setCreateDialogOpen(true);
+      }
+    } finally {
+      setOpeningCreateDialog(false);
     }
   };
 
@@ -4557,11 +4979,30 @@ function GenerationConfigPoolSection({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setCreateDialogOpen(true)}
-                disabled={!canWrite}
+                onClick={openBatchDialog}
+                disabled={!canWrite || batchRunning || (purpose === "text" ? !onTestTextConfig : !onTestImageConfig)}
+                className={SETTINGS_COMPACT_ACTION_CLASS}
+              >
+                {batchRunning ? (
+                  <Loader2 size={14} className="mr-2 animate-spin" />
+                ) : (
+                  <Check size={14} className="mr-2" />
+                )}
+                {t("settings.generation.batchTest")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void openCreateDialog();
+                }}
+                disabled={!canWrite || openingCreateDialog}
                 className={SETTINGS_MAIN_ACTION_CLASS}
               >
-                <Plus size={14} className="mr-2" />
+                {openingCreateDialog ? (
+                  <Loader2 size={14} className="mr-2 animate-spin" />
+                ) : (
+                  <Plus size={14} className="mr-2" />
+                )}
                 {t("settings.generation.newConfig")}
               </button>
               <button
@@ -4617,7 +5058,7 @@ function GenerationConfigPoolSection({
                   config={config}
                   draft={draft}
                   resourceGroups={resourceGroups}
-                  profiles={providerProfilesForGenerationConfig(profiles, draft)}
+                  profiles={providerProfilesForGenerationConfig(profiles, draft, draft.provider_profile_id)}
                   pending={pending || archivingConfigId === config?.id}
                   canWrite={canWrite}
                   onChange={(next) => onChange(draftKey, next)}
@@ -4654,12 +5095,33 @@ function GenerationConfigPoolSection({
             {t("settings.generation.searchEmpty")}
           </div>
         )}
+        <GenerationConfigBatchTestDialog
+          open={batchDialogOpen}
+          purpose={purpose}
+          resourceGroupName={activeResourceGroupName}
+          items={batchItems}
+          selectedIds={batchSelectedIds.filter((id) =>
+            batchItems.some((item) => item.config.id === id && !item.disabled),
+          )}
+          concurrency={batchConcurrency}
+          busy={batchRunning}
+          onSelectedIdsChange={setBatchSelectedIds}
+          onConcurrencyChange={setBatchConcurrency}
+          onClose={() => {
+            if (!batchRunning) {
+              setBatchDialogOpen(false);
+            }
+          }}
+          onRun={() => {
+            void runBatchTests();
+          }}
+        />
         <GenerationConfigCreateDialog
           open={createDialogOpen}
           title={t("settings.generation.newConfig")}
           draft={newDraft}
           resourceGroups={resourceGroups}
-          profiles={providerProfilesForGenerationConfig(profiles, newDraft)}
+          profiles={providerProfilesForGenerationConfig(profiles, newDraft, newDraft.provider_profile_id)}
           pending={pending}
           canWrite={canWrite}
           testing={Boolean(newDraftTestRecord?.testing)}
@@ -4911,7 +5373,9 @@ function GenerationConfigCard({
                     duration: String(Math.max(1, Math.round(jsonResponseFormatTestResult.duration_ms))),
                     model: jsonResponseFormatTestResult.model,
                   })
-                : t("settings.generation.jsonResponseFormatTestRunningDetail"))}
+                : t("settings.generation.jsonResponseFormatTestRunningDetail", {
+                    interfaceName: t(textStructuredOutputProviderInterfaceLabelKey(draft.provider_kind)),
+                  }))}
           </div>
         </div>
       </div>
@@ -4928,6 +5392,7 @@ function GenerationConfigCard({
   ) : null;
   const latestTestResult = config?.latest_test_result ?? null;
   const latestTestDetail = latestTestResult ? generationConfigLatestTestDetail(latestTestResult, t) : "";
+  const effectiveDisabled = Boolean(config && !config.effective_enabled);
 
   return (
     <div className={`${SETTINGS_FIELD_CARD_CLASS} relative rounded-2xl border border-slate-200/70 bg-white/80 p-6 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0f1726]/80 ${onArchive ? "pr-16" : ""}`}>
@@ -4958,6 +5423,19 @@ function GenerationConfigCard({
             >
               {draft.enabled ? t("settings.provider.enabled") : t("settings.provider.disabled")}
             </span>
+            {config ? (
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                  config.effective_enabled
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200"
+                    : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200"
+                }`}
+              >
+                {config.effective_enabled
+                  ? t("settings.generation.effectiveEnabled")
+                  : t("settings.generation.effectiveDisabled")}
+              </span>
+            ) : null}
             {activeFrozen ? (
               <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200">
                 {t("settings.generation.frozen")}
@@ -5036,23 +5514,14 @@ function GenerationConfigCard({
           <SelectField
             value={draft.provider_kind}
             options={providerKindOptions}
-            onChange={(value) =>
+            onChange={(value) => {
+              const provider_kind = normalizedGenerationConfigProviderKind(draft.purpose, value);
               onChange({
                 ...draft,
-                provider_kind:
-                  draft.purpose === "text"
-                    ? value === "openai" || value === "openai_chat_completions"
-                      ? value
-                      : "mock"
-                    : value === "openai_responses" ||
-                        value === "openai_images" ||
-                        value === "openai_chat_image" ||
-                        value === "google_gemini_image"
-                      ? value
-                      : "mock",
-                provider_profile_id: "",
-              })
-            }
+                provider_kind,
+                provider_profile_id: providerProfileIdAfterKindChange(profiles, draft, provider_kind),
+              });
+            }}
             disabled={controlsDisabled}
             radius="lg"
           />
@@ -5068,7 +5537,11 @@ function GenerationConfigCard({
               ...selectableProfiles.map((profile) => ({ value: profile.id, label: profile.name })),
             ]}
             onChange={(value) => {
-              onChange({ ...draft, provider_profile_id: value });
+              onChange(
+                generationConfigDraftAfterProviderProfileSelection(draft, profiles, value, {
+                  isNew,
+                }),
+              );
               setProviderProfileSearch("");
             }}
             searchValue={providerProfileSearch}
@@ -5193,6 +5666,7 @@ function GenerationConfigCard({
               disabled={
                 controlsDisabled ||
                 jsonResponseFormatTesting ||
+                effectiveDisabled ||
                 !draft.structured_output_enabled ||
                 !draft.name.trim() ||
                 !draft.provider_profile_id
@@ -5214,6 +5688,7 @@ function GenerationConfigCard({
               disabled={
                 controlsDisabled ||
                 testing ||
+                effectiveDisabled ||
                 !draft.name.trim() ||
                 (draft.provider_kind !== "mock" && !draft.provider_profile_id)
               }
@@ -5230,6 +5705,7 @@ function GenerationConfigCard({
               disabled={
                 controlsDisabled ||
                 imageTesting ||
+                effectiveDisabled ||
                 !draft.name.trim() ||
                 !draft.model.trim() ||
                 (draft.provider_kind !== "mock" && !draft.provider_profile_id)
@@ -5547,6 +6023,7 @@ export function SettingsPage() {
   const [editingProviderProfileId, setEditingProviderProfileId] = useState<string | null>(null);
   const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
   const [pendingDeleteProviderProfile, setPendingDeleteProviderProfile] = useState<ProviderProfile | null>(null);
+  const [pendingProviderDisable, setPendingProviderDisable] = useState<PendingProviderDisable | null>(null);
   const [pendingGenerationArchive, setPendingGenerationArchive] = useState<PendingGenerationArchive | null>(null);
   const [pendingGenerationArchiveError, setPendingGenerationArchiveError] = useState("");
   const [togglingProviderProfileId, setTogglingProviderProfileId] = useState<string | null>(null);
@@ -5684,6 +6161,21 @@ export function SettingsPage() {
     },
     [queryClient],
   );
+  const refreshProviderConfigFromApi = useCallback(async (): Promise<ProviderConfigResponse | null> => {
+    setError("");
+    setSavedMessage("");
+    try {
+      const result = await providerConfigQuery.refetch();
+      if (result.error) {
+        setError(result.error instanceof ApiError ? result.error.detail : t("settings.provider.saveFailed"));
+        return null;
+      }
+      return result.data ?? null;
+    } catch (fetchError) {
+      setError(fetchError instanceof ApiError ? fetchError.detail : t("settings.provider.saveFailed"));
+      return null;
+    }
+  }, [providerConfigQuery, t]);
   const reconcileProviderProfileCache = useCallback(
     async (profile: ProviderProfile, options: ProviderSettingsRefreshOptions = {}) => {
       await queryClient.cancelQueries({ queryKey: ["provider-config"] });
@@ -5693,6 +6185,32 @@ export function SettingsPage() {
       await refreshProviderSettingsQueries(options);
       queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
         providerConfigWithProviderProfile(current, profile),
+      );
+    },
+    [queryClient, refreshProviderSettingsQueries],
+  );
+  const reconcileGenerationConfigCache = useCallback(
+    async (generationConfig: GenerationConfig, options: ProviderSettingsRefreshOptions = {}) => {
+      await queryClient.cancelQueries({ queryKey: ["provider-config"] });
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationConfig(current, generationConfig),
+      );
+      await refreshProviderSettingsQueries(options);
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationConfig(current, generationConfig),
+      );
+    },
+    [queryClient, refreshProviderSettingsQueries],
+  );
+  const reconcileGenerationResourceGroupCache = useCallback(
+    async (group: GenerationResourceGroup, options: ProviderSettingsRefreshOptions = {}) => {
+      await queryClient.cancelQueries({ queryKey: ["provider-config"] });
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationResourceGroup(current, group),
+      );
+      await refreshProviderSettingsQueries(options);
+      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
+        providerConfigWithGenerationResourceGroup(current, group),
       );
     },
     [queryClient, refreshProviderSettingsQueries],
@@ -5935,10 +6453,12 @@ export function SettingsPage() {
     },
     onSuccess: async (profile) => {
       await reconcileProviderProfileCache(profile);
+      setPendingProviderDisable(null);
       setError("");
       setSavedMessage(t("settings.provider.saved"));
     },
     onError: (mutationError) => {
+      setPendingProviderDisable(null);
       setSavedMessage("");
       setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.provider.saveFailed"));
     },
@@ -5953,10 +6473,7 @@ export function SettingsPage() {
         : api.createGenerationConfig(payload as GenerationConfigCreateRequest);
     },
     onSuccess: async (generationConfig) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationConfig(current, generationConfig),
-      );
-      await refreshProviderSettingsQueries({ includeRuntimeConfig: true });
+      await reconcileGenerationConfigCache(generationConfig, { includeRuntimeConfig: true });
       setError("");
       setSavedMessage(t("settings.generation.saved"));
     },
@@ -5975,10 +6492,7 @@ export function SettingsPage() {
       setSavedMessage("");
     },
     onSuccess: async (generationConfig) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationConfig(current, generationConfig),
-      );
-      await refreshProviderSettingsQueries({ includeRuntimeConfig: true });
+      await reconcileGenerationConfigCache(generationConfig, { includeRuntimeConfig: true });
       setPendingGenerationArchive(null);
       setPendingGenerationArchiveError("");
       setError("");
@@ -6001,10 +6515,7 @@ export function SettingsPage() {
       setSavedMessage("");
     },
     onSuccess: async (generationConfig) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationConfig(current, generationConfig),
-      );
-      await refreshProviderSettingsQueries();
+      await reconcileGenerationConfigCache(generationConfig);
       setError("");
       setSavedMessage(t("settings.generation.unfrozen"));
     },
@@ -6023,10 +6534,7 @@ export function SettingsPage() {
         : api.createGenerationResourceGroup(payload as GenerationResourceGroupCreateRequest);
     },
     onSuccess: async (group) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationResourceGroup(current, group),
-      );
-      await refreshProviderSettingsQueries({ includeResourceGroups: true });
+      await reconcileGenerationResourceGroupCache(group, { includeResourceGroups: true });
       setError("");
       setSavedMessage(t("settings.resourceGroup.saved"));
     },
@@ -6045,10 +6553,7 @@ export function SettingsPage() {
       setSavedMessage("");
     },
     onSuccess: async (group) => {
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationResourceGroup(current, group),
-      );
-      await refreshProviderSettingsQueries({ includeResourceGroups: true });
+      await reconcileGenerationResourceGroupCache(group, { includeResourceGroups: true });
       setPendingGenerationArchive(null);
       setPendingGenerationArchiveError("");
       setError("");
@@ -6485,11 +6990,22 @@ export function SettingsPage() {
                           setError("");
                           setSavedMessage("");
                         }}
-                        onEditProfile={(profile) => {
+                        onEditProfile={async (profile) => {
                           if (!canWriteProviderSettings) {
                             return;
                           }
-                          const next = providerDrawerEditState(profile);
+                          const latestProviderConfig = await refreshProviderConfigFromApi();
+                          if (!latestProviderConfig) {
+                            return;
+                          }
+                          const latestProfile = latestProviderConfig.profiles.find(
+                            (candidate) => candidate.id === profile.id && !candidate.archived_at,
+                          );
+                          if (!latestProfile) {
+                            setError(t("settings.provider.saveFailed"));
+                            return;
+                          }
+                          const next = providerDrawerEditState(latestProfile);
                           setEditingProviderProfileId(next.editingProfileId);
                           setProviderProfileForm(next.form);
                           setProviderDrawerOpen(next.open);
@@ -6524,6 +7040,19 @@ export function SettingsPage() {
                         onToggleProfileEnabled={(profileId, enabled) => {
                           if (!canWriteProviderSettings) {
                             return;
+                          }
+                          if (!enabled) {
+                            const usedGenerationConfigs = generationConfigsUsingProvider(
+                              providerConfigQuery.data?.generation_configs ?? [],
+                              profileId,
+                            );
+                            const profile = providerConfigQuery.data?.profiles.find((item) => item.id === profileId);
+                            if (profile && usedGenerationConfigs.length) {
+                              setError("");
+                              setSavedMessage("");
+                              setPendingProviderDisable({ profile, generationConfigs: usedGenerationConfigs });
+                              return;
+                            }
                           }
                           updateProviderProfileEnabledMutation.mutate({ profileId, enabled });
                         }}
@@ -6607,11 +7136,11 @@ export function SettingsPage() {
                           writeTextConfigTestDraft(normalizedDraft);
                           setTextConfigTestState((current) => ({ ...current, draft: normalizedDraft }));
                         }}
-                        onTestTextConfig={(key, draft) => {
+                        onTestTextConfig={async (key, draft) => {
                           if (!canWriteProviderSettings) {
                             return;
                           }
-                          testTextGenerationConfigMutation.mutate({
+                          await testTextGenerationConfigMutation.mutateAsync({
                             key,
                             payload: textGenerationConfigTestPayload(draft, textConfigTestState.draft),
                           });
@@ -6631,6 +7160,7 @@ export function SettingsPage() {
                             clearTextConfigJsonResponseFormatTestRecord(current, key),
                           );
                         }}
+                        onBeforeOpenCreate={async () => Boolean(await refreshProviderConfigFromApi())}
                         onRefreshSort={() => {
                           void refreshProviderSettingsQueries();
                         }}
@@ -6687,11 +7217,11 @@ export function SettingsPage() {
                           setError("");
                           setSavedMessage(t("settings.generation.imageTestDraftSaved"));
                         }}
-                        onTestImageConfig={(key, draft, resourceGroupId) => {
+                        onTestImageConfig={async (key, draft, resourceGroupId) => {
                           if (!canWriteProviderSettings) {
                             return;
                           }
-                          testImageGenerationConfigMutation.mutate({
+                          await testImageGenerationConfigMutation.mutateAsync({
                             key,
                             payload: imageGenerationConfigTestPayload(
                               draft,
@@ -6703,6 +7233,7 @@ export function SettingsPage() {
                         onResetImageConfigTests={(key) => {
                           setImageConfigTestState((current) => clearImageConfigTestRecord(current, key));
                         }}
+                        onBeforeOpenCreate={async () => Boolean(await refreshProviderConfigFromApi())}
                         onRefreshSort={() => {
                           void refreshProviderSettingsQueries();
                         }}
@@ -6956,6 +7487,23 @@ export function SettingsPage() {
           onConfirm={() => {
             if (canWriteProviderSettings && pendingDeleteProviderProfile) {
               deleteProviderProfileMutation.mutate(pendingDeleteProviderProfile.id);
+            }
+          }}
+        />
+        <ProviderDisableConfirmDialog
+          pendingDisable={pendingProviderDisable}
+          busy={updateProviderProfileEnabledMutation.isPending}
+          onClose={() => {
+            if (!updateProviderProfileEnabledMutation.isPending) {
+              setPendingProviderDisable(null);
+            }
+          }}
+          onConfirm={() => {
+            if (canWriteProviderSettings && pendingProviderDisable) {
+              updateProviderProfileEnabledMutation.mutate({
+                profileId: pendingProviderDisable.profile.id,
+                enabled: false,
+              });
             }
           }}
         />

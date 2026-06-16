@@ -14,6 +14,7 @@ function option(input: Partial<GenerationConfigOption> & Pick<GenerationConfigOp
     purpose: "text",
     provider_kind: "mock",
     enabled: true,
+    effective_enabled: input.effective_enabled ?? input.enabled ?? true,
     priority: 100,
     frozen_until: null,
     ...input,

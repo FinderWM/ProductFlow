@@ -1438,7 +1438,19 @@ def _default_generation_config(
         ).where(GenerationConfigResourceGroup.resource_group_id == resolved_resource_group_id)
     if not include_disabled:
         statement = statement.where(GenerationConfig.enabled.is_(True))
-    return session.scalar(statement)
+    for generation_config in session.scalars(statement).all():
+        if include_disabled or generation_config_effective_enabled(generation_config):
+            return generation_config
+    return None
+
+
+def generation_config_effective_enabled(generation_config: GenerationConfig) -> bool:
+    if not generation_config.enabled:
+        return False
+    if generation_config.provider_kind == "mock":
+        return True
+    profile = generation_config.provider_profile
+    return bool(profile is not None and profile.enabled and profile.archived_at is None)
 
 
 def _select_generation_config_for_resolution(
@@ -1472,6 +1484,8 @@ def _select_generation_config_for_resolution(
         raise RuntimeError("生成配置未初始化")
     if not generation_config.enabled:
         raise RuntimeError("生成配置已停用")
+    if not generation_config_effective_enabled(generation_config):
+        raise RuntimeError("生成配置供应商不可用")
     return generation_config
 
 
@@ -1740,8 +1754,6 @@ def _validate_profile_update_keeps_active_configs(
     )
     if not active_configs:
         return
-    if enabled is False:
-        raise ValueError("供应商仍被文案或图片配置使用，不能停用")
     if capabilities is None:
         return
     capability_set = set(capabilities)
@@ -1805,12 +1817,10 @@ def _generation_config_candidate_available(
         if manual:
             raise ValueError("手动指定的生成配置已停用")
         return False
-    if generation_config.provider_kind != "mock":
-        profile = generation_config.provider_profile
-        if profile is None or not profile.enabled or profile.archived_at is not None:
-            if manual:
-                raise ValueError("手动指定的生成配置供应商不可用")
-            return False
+    if not generation_config_effective_enabled(generation_config):
+        if manual:
+            raise ValueError("手动指定的生成配置供应商不可用")
+        return False
     state = generation_config.state
     if state is None:
         return True

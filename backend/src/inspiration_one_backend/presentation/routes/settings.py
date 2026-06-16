@@ -88,6 +88,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     capability_for_provider_kind,
     create_provider_profile,
     ensure_provider_config_bootstrapped,
+    generation_config_effective_enabled,
     generation_config_resource_group_ids,
     is_real_image_provider_kind,
     list_generation_configs,
@@ -665,6 +666,7 @@ def _serialize_generation_config(
         priority=generation_config.priority,
         max_concurrency=generation_config.max_concurrency,
         enabled=generation_config.enabled,
+        effective_enabled=generation_config_effective_enabled(generation_config),
         availability_window_minutes=generation_config.availability_window_minutes,
         failure_threshold=generation_config.failure_threshold,
         cooldown_minutes=generation_config.cooldown_minutes,
@@ -700,6 +702,7 @@ def _serialize_generation_config_status_config(
         priority=generation_config.priority,
         max_concurrency=generation_config.max_concurrency,
         enabled=generation_config.enabled,
+        effective_enabled=generation_config_effective_enabled(generation_config),
         state=_serialize_generation_config_state(generation_config.state),
         today_stat=_serialize_generation_config_daily_stat(today_stats.get(generation_config.id)),
         range_stat=_serialize_generation_config_stat_aggregate(
@@ -812,6 +815,7 @@ def _serialize_generation_config_option(generation_config: GenerationConfig) -> 
         name=generation_config.name,
         provider_kind=generation_config.provider_kind,
         enabled=generation_config.enabled,
+        effective_enabled=generation_config_effective_enabled(generation_config),
         priority=generation_config.priority,
         frozen_until=_serialize_dt(state.frozen_until) if state else None,
     )

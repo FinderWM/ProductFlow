@@ -1311,6 +1311,7 @@ export interface GenerationConfig {
   priority: number;
   max_concurrency: number;
   enabled: boolean;
+  effective_enabled: boolean;
   availability_window_minutes: number;
   failure_threshold: number;
   cooldown_minutes: number;
@@ -1330,6 +1331,7 @@ export interface GenerationConfigOption {
   name: string;
   provider_kind: string;
   enabled: boolean;
+  effective_enabled: boolean;
   priority: number;
   frozen_until: string | null;
 }
@@ -1344,6 +1346,7 @@ export interface GenerationConfigStatusConfig {
   priority: number;
   max_concurrency: number;
   enabled: boolean;
+  effective_enabled: boolean;
   state: GenerationConfigState | null;
   today_stat: GenerationConfigDailyStat | null;
   range_stat: GenerationConfigStatAggregate;

@@ -1498,8 +1498,26 @@ def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bin
         f"/api/settings/provider-profiles/{profile_id}",
         json={"enabled": False},
     )
-    assert disable_active_profile.status_code == 400
-    assert "不能停用" in disable_active_profile.json()["detail"]
+    assert disable_active_profile.status_code == 200
+    assert disable_active_profile.json()["enabled"] is False
+
+    provider_config_after_disable = client.get("/api/settings/provider-config")
+    assert provider_config_after_disable.status_code == 200
+    disabled_generation_configs = [
+        item
+        for item in provider_config_after_disable.json()["generation_configs"]
+        if item["provider_profile_id"] == profile_id
+    ]
+    assert disabled_generation_configs
+    assert all(item["enabled"] is True for item in disabled_generation_configs)
+    assert all(item["effective_enabled"] is False for item in disabled_generation_configs)
+
+    reenable_active_profile = client.patch(
+        f"/api/settings/provider-profiles/{profile_id}",
+        json={"enabled": True},
+    )
+    assert reenable_active_profile.status_code == 200
+    assert reenable_active_profile.json()["enabled"] is True
 
     archive_active = client.delete(f"/api/settings/provider-profiles/{profile_id}")
     assert archive_active.status_code == 400

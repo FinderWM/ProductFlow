@@ -204,6 +204,7 @@ class GenerationConfigResponse(BaseModel):
     priority: int
     max_concurrency: int
     enabled: bool
+    effective_enabled: bool
     availability_window_minutes: int
     failure_threshold: int
     cooldown_minutes: int
@@ -223,6 +224,7 @@ class GenerationConfigOptionResponse(BaseModel):
     name: str
     provider_kind: str
     enabled: bool
+    effective_enabled: bool
     priority: int
     frozen_until: str | None = None
 
@@ -237,6 +239,7 @@ class GenerationConfigStatusConfigResponse(BaseModel):
     priority: int
     max_concurrency: int
     enabled: bool
+    effective_enabled: bool
     state: GenerationConfigStateResponse | None = None
     today_stat: GenerationConfigDailyStatResponse | None = None
     range_stat: GenerationConfigStatAggregateResponse

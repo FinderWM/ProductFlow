@@ -16,6 +16,8 @@ import {
   loginPageTemplateIdFromConfigKey,
   type GenerationConfigDraft,
   generationConfigDraft as generationConfigDraftFromConfig,
+  generationConfigDraftAfterProviderProfileSelection,
+  generationConfigsUsingProvider,
   generationConfigLatestTestDetail,
   generationConfigResourceGroupIds,
   generationConfigPayloadFromDraft,
@@ -45,6 +47,7 @@ import {
   settingsSectionIds,
   settingsGenerationResourceGroupsInApiOrder,
   shouldShowSettingsMigrationPanel,
+  runGenerationConfigBatchTests,
   textConfigJsonResponseFormatTestRecordForKey,
   type TextConfigJsonResponseFormatTestState,
   textConfigTestRecordForKey,
@@ -133,6 +136,7 @@ function generationConfig(overrides: Partial<GenerationConfig> & Pick<Generation
     priority: overrides.priority ?? 100,
     max_concurrency: overrides.max_concurrency ?? 1,
     enabled: overrides.enabled ?? true,
+    effective_enabled: overrides.effective_enabled ?? overrides.enabled ?? true,
     availability_window_minutes: overrides.availability_window_minutes ?? 10,
     failure_threshold: overrides.failure_threshold ?? 3,
     cooldown_minutes: overrides.cooldown_minutes ?? 10,
@@ -1049,6 +1053,17 @@ describe("SettingsPage provider profile helpers", () => {
         }),
       ).map((profile) => profile.id),
     ).toEqual(["chat"]);
+    expect(
+      providerProfilesForGenerationConfig(
+        profiles,
+        generationConfigDraft({
+          purpose: "text",
+          provider_kind: "openai_chat_completions",
+          provider_profile_id: "disabled-chat",
+        }),
+        "disabled-chat",
+      ).map((profile) => profile.id),
+    ).toEqual(["chat", "disabled-chat"]);
   });
 
   it("allows generation configs without a resource group", () => {
@@ -1111,10 +1126,84 @@ describe("SettingsPage provider profile helpers", () => {
     ).toEqual(["legacy-group"]);
   });
 
-  it("blocks disabling an enabled provider that is currently used by a generation config", () => {
-    expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: true, image: false })).toBe(true);
+  it("allows disabling a provider that is currently used by generation configs", () => {
+    expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: true, image: false })).toBe(false);
     expect(providerDisableBlocked(providerProfile({ enabled: true }), { text: false, image: false })).toBe(false);
     expect(providerDisableBlocked(providerProfile({ enabled: false }), { text: true, image: true })).toBe(false);
+    expect(
+      generationConfigsUsingProvider(
+        [
+          generationConfig({ id: "text-a", purpose: "text", provider_profile_id: "profile-1" }),
+          generationConfig({ id: "image-a", purpose: "image", provider_profile_id: "profile-1" }),
+          generationConfig({
+            id: "archived",
+            purpose: "text",
+            provider_profile_id: "profile-1",
+            archived_at: "2026-06-16T00:00:00Z",
+          }),
+          generationConfig({ id: "other", purpose: "text", provider_profile_id: "profile-2" }),
+        ],
+        "profile-1",
+      ).map((config) => config.id),
+    ).toEqual(["text-a", "image-a"]);
+  });
+
+  it("auto-names new generation configs after provider selection while the name is unedited", () => {
+    const profiles = [
+      providerProfile({ id: "openrouter", name: "OpenRouter" }),
+      providerProfile({ id: "packy", name: "Packy" }),
+    ];
+
+    expect(
+      generationConfigDraftAfterProviderProfileSelection(
+        generationConfigDraft({ purpose: "text", name: "Text config" }),
+        profiles,
+        "openrouter",
+        { isNew: true },
+      ).name,
+    ).toBe("OpenRouter-");
+    expect(
+      generationConfigDraftAfterProviderProfileSelection(
+        generationConfigDraft({ purpose: "text", name: "OpenRouter-" }),
+        profiles,
+        "packy",
+        { isNew: true },
+      ).name,
+    ).toBe("Packy-");
+    expect(
+      generationConfigDraftAfterProviderProfileSelection(
+        generationConfigDraft({ purpose: "text", name: "Custom" }),
+        profiles,
+        "openrouter",
+        { isNew: true },
+      ).name,
+    ).toBe("Custom");
+    expect(
+      generationConfigDraftAfterProviderProfileSelection(
+        generationConfigDraft({ purpose: "text", name: "Text config" }),
+        profiles,
+        "openrouter",
+        { isNew: false },
+      ).name,
+    ).toBe("Text config");
+  });
+
+  it("runs batch generation config tests with a bounded concurrency", async () => {
+    const items = [1, 2, 3, 4, 5, 6];
+    const executed: number[] = [];
+    let active = 0;
+    let maxActive = 0;
+
+    await runGenerationConfigBatchTests(items, 2, async (item) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await Promise.resolve();
+      executed.push(item);
+      active -= 1;
+    });
+
+    expect(executed.sort((left, right) => left - right)).toEqual(items);
+    expect(maxActive).toBeLessThanOrEqual(2);
   });
 
   it("merges provider profile mutation responses into provider config cache", () => {

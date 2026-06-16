@@ -22,12 +22,14 @@ from inspiration_one_backend.infrastructure.provider_config import (
     add_generation_config,
     add_generation_resource_group,
     claim_generation_config,
+    create_provider_profile,
     ensure_provider_config_bootstrapped,
     list_generation_configs,
     list_generation_resource_groups,
     release_generation_config_claim,
     unfreeze_generation_config,
     update_generation_config,
+    update_provider_profile,
 )
 
 
@@ -211,6 +213,42 @@ def test_manual_disabled_config_raises_clear_error(db_session: Session) -> None:
     update_generation_config(db_session, config.id, enabled=False)
 
     with pytest.raises(ValueError, match="手动指定的生成配置已停用"):
+        claim_generation_config(db_session, purpose=TEXT_PURPOSE, generation_config_id=config.id)
+
+
+def test_disabled_provider_makes_generation_config_effectively_unavailable(db_session: Session) -> None:
+    ensure_provider_config_bootstrapped(db_session)
+    profile = create_provider_profile(
+        db_session,
+        name="停用供应商",
+        base_url=None,
+        api_key="secret",
+        capabilities=["text_responses"],
+    )
+    config = add_generation_config(
+        db_session,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        name="真实文案",
+        purpose=TEXT_PURPOSE,
+        provider_kind="openai",
+        provider_profile_id=profile.id,
+        model_settings={"brief_model": "gpt-4.1", "copy_model": "gpt-4.1"},
+        config={},
+        priority=1000,
+        max_concurrency=1,
+        enabled=True,
+        availability_window_minutes=5,
+        failure_threshold=3,
+        cooldown_minutes=10,
+    )
+
+    update_provider_profile(db_session, profile.id, enabled=False)
+
+    auto_claim = claim_generation_config(db_session, purpose=TEXT_PURPOSE)
+    assert auto_claim is None or auto_claim.generation_config_id != config.id
+    db_session.refresh(config)
+    assert config.enabled is True
+    with pytest.raises(ValueError, match="手动指定的生成配置供应商不可用"):
         claim_generation_config(db_session, purpose=TEXT_PURPOSE, generation_config_id=config.id)
 
 

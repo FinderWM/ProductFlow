@@ -361,8 +361,8 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   `['config']`, `['provider-config']`, `['runtime-config']`, `['canvas-templates']`, and
   `['canvas-template-categories']`.
 - `GET /api/settings/generation-config-options` requires backend RBAC and intentionally returns only non-secret selection
-  fields: `id`, `resource_group_id`, `resource_group_ids`, `purpose`, `name`, `provider_kind`, `enabled`, `priority`,
-  `frozen_until`.
+  fields: `id`, `resource_group_id`, `resource_group_ids`, `purpose`, `name`, `provider_kind`, `enabled`,
+  `effective_enabled`, `priority`, `frozen_until`.
 - `frozen_until` is a timestamp, not a durable boolean. UI labels and badges should show frozen state only when
   `Date.parse(frozen_until) > Date.now()`. Expired timestamps may remain in API payloads because backend auto-unfreezes by
   scheduler comparison instead of clearing the column.
@@ -503,7 +503,8 @@ resource_group_ids: draft.resource_group_ids,
   - `GenerationResourceGroupCreateRequest` may include `blur_images_by_default?: boolean`.
   - `GenerationResourceGroupUpdateRequest` may include `blur_images_by_default?: boolean | null`.
   - `GenerationConfig`, `GenerationConfigOption`, `GenerationConfigStatus`, and `SettingsGenerationConfigExport` include
-    `resource_group_ids: string[]` plus compatibility `resource_group_id?: string | null`.
+    `resource_group_ids: string[]` plus compatibility `resource_group_id?: string | null`; runtime DTOs also include
+    computed `effective_enabled: boolean` when returned by provider-config/options/status APIs.
   - `UserGenerationResourceGroupGrants`
 - API methods in `web/src/lib/api.ts`:
   - `listGenerationResourceGroups()`
