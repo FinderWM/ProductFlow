@@ -13,6 +13,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     GenerationResourceGroup,
     ImageGalleryEntry,
+    ImageGalleryEntryTag,
     ImageGalleryEntryViewEvent,
     ImageSession,
     ImageSessionAsset,
@@ -478,6 +479,250 @@ def _seed_gallery_entry(db_session, *, prompt: str = "点击计数图") -> str:
     db_session.add(entry)
     db_session.commit()
     return entry.id
+
+
+def _seed_gallery_entry_with_created_at(db_session, *, prompt: str, created_at: datetime) -> ImageGalleryEntry:
+    image_session = ImageSession(title=f"{prompt} 会话")
+    db_session.add(image_session)
+    db_session.flush()
+    asset = ImageSessionAsset(
+        session_id=image_session.id,
+        kind=ImageSessionAssetKind.GENERATED_IMAGE,
+        original_filename=f"{prompt}.png",
+        mime_type="image/png",
+        storage_path=f"image-sessions/{prompt}.png",
+    )
+    db_session.add(asset)
+    db_session.flush()
+    round_item = ImageSessionRound(
+        session_id=image_session.id,
+        prompt=prompt,
+        assistant_message="ok",
+        size="1024x1024",
+        model_name="mock",
+        provider_name="mock",
+        prompt_version="v1",
+        generated_asset_id=asset.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    )
+    db_session.add(round_item)
+    db_session.flush()
+    entry = ImageGalleryEntry(
+        image_session_asset_id=asset.id,
+        image_session_round_id=round_item.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        created_at=created_at,
+    )
+    db_session.add(entry)
+    db_session.flush()
+    return entry
+
+
+def _create_member_client_with_permissions(app, admin_client: TestClient, *, username: str, permissions: list[str]):
+    role = admin_client.post("/api/rbac/roles", json={"code": f"{username}_role", "name": f"{username} Role"})
+    assert role.status_code == 201
+    role_id = role.json()["id"]
+    role_permissions = admin_client.put(
+        f"/api/rbac/roles/{role_id}/permissions",
+        json={"menu_codes": ["gallery"], "api_permission_codes": permissions},
+    )
+    assert role_permissions.status_code == 200
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": username, "display_name": username, "role_id": role_id},
+    )
+    assert created_user.status_code == 201
+    user_client = TestClient(app)
+    set_password = user_client.post(
+        "/api/auth/password",
+        json={
+            "username": username,
+            "password": f"{username}-password",
+            "setup_token": created_user.json()["password_setup_token"],
+        },
+    )
+    assert set_password.status_code == 200
+    return user_client
+
+
+def test_gallery_tag_crud_and_entry_relation_require_admin_even_with_permission(
+    configured_env: Path,
+    db_session,
+) -> None:
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created = admin_client.post(
+        "/api/gallery/tags",
+        json={"name": "新品 2", "description": "可见标签", "priority": 20},
+    )
+    assert created.status_code == 201
+    tag_id = created.json()["id"]
+    disabled = admin_client.post("/api/gallery/tags", json={"name": "隐藏标签", "priority": 30, "enabled": False})
+    assert disabled.status_code == 201
+
+    entry_id = _seed_gallery_entry(db_session, prompt="标签权限图")
+    updated_entry = admin_client.patch(f"/api/gallery/{entry_id}/tags", json={"tag_ids": [tag_id]})
+    assert updated_entry.status_code == 200
+    assert [tag["name"] for tag in updated_entry.json()["tags"]] == ["新品 2"]
+
+    member_client = _create_member_client_with_permissions(
+        app,
+        admin_client,
+        username="tag-manager-member",
+        permissions=["gallery:read", "gallery:tags_manage"],
+    )
+    rejected_create = member_client.post("/api/gallery/tags", json={"name": "误授权新增"})
+    assert rejected_create.status_code == 403
+    assert rejected_create.json()["detail"] == "需要管理员权限"
+    rejected_update = member_client.patch(f"/api/gallery/{entry_id}/tags", json={"tag_ids": []})
+    assert rejected_update.status_code == 403
+    assert rejected_update.json()["detail"] == "需要管理员权限"
+
+    public_tags = member_client.get("/api/gallery/tags")
+    assert public_tags.status_code == 200
+    assert [tag["name"] for tag in public_tags.json()] == ["新品 2"]
+    assert "隐藏标签" not in {tag["name"] for tag in public_tags.json()}
+
+    managed_tags = admin_client.get("/api/gallery/tags", params={"include_disabled": True})
+    assert managed_tags.status_code == 200
+    assert [tag["name"] for tag in managed_tags.json()] == ["隐藏标签", "新品 2"]
+
+
+def test_gallery_save_with_tags_required_setting_and_serializes_enabled_tags(configured_env: Path, db_session) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    visible_tag = client.post("/api/gallery/tags", json={"name": "可见标签", "priority": 10})
+    assert visible_tag.status_code == 201
+    hidden_tag = client.post("/api/gallery/tags", json={"name": "禁用标签", "priority": 20, "enabled": False})
+    assert hidden_tag.status_code == 201
+
+    created_session = client.post("/api/image-sessions", json={"title": "标签保存会话"})
+    assert created_session.status_code == 201
+    generated = client.post(
+        f"/api/image-sessions/{created_session.json()['id']}/generate",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "带标签保存",
+            "size": "1024x1024",
+        },
+    )
+    assert generated.status_code == 202
+    asset_id = generated.json()["rounds"][0]["generated_asset"]["id"]
+
+    enabled_required = client.patch("/api/settings", json={"values": {"gallery_tag_required_on_save": True}})
+    assert enabled_required.status_code == 200
+    missing_tags = client.post("/api/gallery", json={"image_session_asset_id": asset_id})
+    assert missing_tags.status_code == 400
+    assert missing_tags.json()["detail"] == "请选择画廊标签"
+
+    disabled_tag_save = client.post(
+        "/api/gallery",
+        json={"image_session_asset_id": asset_id, "tag_ids": [hidden_tag.json()["id"]]},
+    )
+    assert disabled_tag_save.status_code == 400
+    assert disabled_tag_save.json()["detail"] == "画廊标签不存在或已禁用"
+
+    saved = client.post(
+        "/api/gallery",
+        json={"image_session_asset_id": asset_id, "tag_ids": [visible_tag.json()["id"]]},
+    )
+    assert saved.status_code == 201
+    assert [tag["name"] for tag in saved.json()["tags"]] == ["可见标签"]
+
+
+def test_gallery_tag_filter_matches_any_and_orders_by_match_count(configured_env: Path, db_session) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    tag_a = client.post("/api/gallery/tags", json={"name": "A1", "priority": 1}).json()
+    tag_b = client.post("/api/gallery/tags", json={"name": "A2", "priority": 1}).json()
+    tag_c = client.post("/api/gallery/tags", json={"name": "C", "priority": 1}).json()
+    base_time = datetime(2026, 1, 1, tzinfo=UTC)
+    entry_a = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="仅 A",
+        created_at=base_time + timedelta(minutes=1),
+    )
+    entry_both = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="A B",
+        created_at=base_time,
+    )
+    entry_b = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="仅 B",
+        created_at=base_time + timedelta(minutes=2),
+    )
+    entry_c = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="仅 C",
+        created_at=base_time + timedelta(minutes=3),
+    )
+    db_session.add_all(
+        [
+            ImageGalleryEntryTag(gallery_entry_id=entry_a.id, tag_id=tag_a["id"]),
+            ImageGalleryEntryTag(gallery_entry_id=entry_both.id, tag_id=tag_a["id"]),
+            ImageGalleryEntryTag(gallery_entry_id=entry_both.id, tag_id=tag_b["id"]),
+            ImageGalleryEntryTag(gallery_entry_id=entry_b.id, tag_id=tag_b["id"]),
+            ImageGalleryEntryTag(gallery_entry_id=entry_c.id, tag_id=tag_c["id"]),
+        ]
+    )
+    db_session.commit()
+
+    filtered = client.get("/api/gallery", params=[("tag_ids", tag_a["id"]), ("tag_ids", tag_b["id"])])
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["items"]] == [entry_both.id, entry_b.id, entry_a.id]
+    assert filtered.json()["total"] == 3
+
+
+def test_disabled_and_deleted_gallery_tags_are_hidden_and_delete_soft_deletes_relations(
+    configured_env: Path,
+    db_session,
+) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    tag = client.post("/api/gallery/tags", json={"name": "可删除标签", "priority": 10})
+    assert tag.status_code == 201
+    tag_id = tag.json()["id"]
+    entry = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="删除标签图",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    db_session.add(ImageGalleryEntryTag(gallery_entry_id=entry.id, tag_id=tag_id))
+    db_session.commit()
+
+    disabled = client.patch(f"/api/gallery/tags/{tag_id}", json={"enabled": False})
+    assert disabled.status_code == 200
+    tags_after_disable = client.get("/api/gallery/tags")
+    assert tags_after_disable.status_code == 200
+    assert tags_after_disable.json() == []
+    listed_after_disable = client.get("/api/gallery")
+    assert listed_after_disable.status_code == 200
+    assert listed_after_disable.json()["items"][0]["tags"] == []
+    filtered_after_disable = client.get("/api/gallery", params={"tag_ids": tag_id})
+    assert filtered_after_disable.status_code == 200
+    assert filtered_after_disable.json()["items"] == []
+
+    client.patch(f"/api/gallery/tags/{tag_id}", json={"enabled": True})
+    deleted = client.delete(f"/api/gallery/tags/{tag_id}")
+    assert deleted.status_code == 200
+    link = db_session.query(ImageGalleryEntryTag).filter_by(gallery_entry_id=entry.id, tag_id=tag_id).one()
+    assert link.deleted_at is not None
+    recreated = client.post("/api/gallery/tags", json={"name": "可删除标签", "priority": 10})
+    assert recreated.status_code == 201
+    assert recreated.json()["id"] != tag_id
+
+    filtered_old = client.get("/api/gallery", params={"tag_ids": tag_id})
+    assert filtered_old.status_code == 200
+    assert filtered_old.json()["items"] == []
 
 
 def test_gallery_view_dedups_within_window_and_counts_after_window(configured_env: Path, db_session) -> None:

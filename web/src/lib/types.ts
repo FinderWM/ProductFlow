@@ -1045,6 +1045,30 @@ export interface ResourceLibrarySourceStatusListResponse {
   items: ResourceLibrarySourceStatus[];
 }
 
+export interface GalleryTag {
+  id: string;
+  name: string;
+  description: string | null;
+  priority: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GalleryTagCreateInput {
+  name: string;
+  description?: string | null;
+  priority?: number;
+  enabled?: boolean;
+}
+
+export interface GalleryTagUpdateInput {
+  name?: string | null;
+  description?: string | null;
+  priority?: number | null;
+  enabled?: boolean | null;
+}
+
 export interface GalleryEntry extends ModerationFields {
   id: string;
   owner_user_id?: string;
@@ -1074,6 +1098,7 @@ export interface GalleryEntry extends ModerationFields {
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
   provider_notes: string[];
+  tags: GalleryTag[];
   view_count: number;
   created_at: string;
 }
@@ -1130,6 +1155,8 @@ export interface RuntimeConfig {
   workflow_node_max_retry_count: number;
   workflow_node_retry_delay_ms: number;
   gallery_show_generation_resource_group: boolean;
+  gallery_tag_filter_max_selection: number;
+  gallery_tag_required_on_save: boolean;
   deletion_enabled: boolean;
 }
 

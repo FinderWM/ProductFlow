@@ -21,6 +21,9 @@ import type {
   GalleryEntry,
   GalleryEntryListResponse,
   GalleryEntryViewResponse,
+  GalleryTag,
+  GalleryTagCreateInput,
+  GalleryTagUpdateInput,
   GenerationConfig,
   GenerationConfigCreateRequest,
   GenerationConfigOption,
@@ -921,6 +924,7 @@ export const api = {
   },
   listGalleryEntries(input?: {
     resource_group_id?: string | null;
+    tag_ids?: string[];
     include_disabled?: boolean;
     limit?: number;
     offset?: number;
@@ -929,6 +933,11 @@ export const api = {
     if (input?.resource_group_id) {
       params.set("resource_group_id", input.resource_group_id);
     }
+    input?.tag_ids?.forEach((tagId) => {
+      if (tagId) {
+        params.append("tag_ids", tagId);
+      }
+    });
     if (input?.include_disabled) {
       params.set("include_disabled", "true");
     }
@@ -941,10 +950,39 @@ export const api = {
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/gallery${suffix}`);
   },
-  saveGalleryEntry(imageSessionAssetId: string): Promise<GalleryEntry> {
+  listGalleryTags(input?: { include_disabled?: boolean }): Promise<GalleryTag[]> {
+    const params = new URLSearchParams();
+    if (input?.include_disabled) {
+      params.set("include_disabled", "true");
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/gallery/tags${suffix}`);
+  },
+  createGalleryTag(payload: GalleryTagCreateInput): Promise<GalleryTag> {
+    return request("/api/gallery/tags", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateGalleryTag(tagId: string, payload: GalleryTagUpdateInput): Promise<GalleryTag> {
+    return request(`/api/gallery/tags/${encodeURIComponent(tagId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteGalleryTag(tagId: string): Promise<GalleryTag> {
+    return request(`/api/gallery/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" });
+  },
+  replaceGalleryEntryTags(galleryEntryId: string, tagIds: string[]): Promise<GalleryEntry> {
+    return request(`/api/gallery/${encodeURIComponent(galleryEntryId)}/tags`, {
+      method: "PATCH",
+      body: JSON.stringify({ tag_ids: tagIds }),
+    });
+  },
+  saveGalleryEntry(imageSessionAssetId: string, input?: { tag_ids?: string[] }): Promise<GalleryEntry> {
     return request("/api/gallery", {
       method: "POST",
-      body: JSON.stringify({ image_session_asset_id: imageSessionAssetId }),
+      body: JSON.stringify({ image_session_asset_id: imageSessionAssetId, tag_ids: input?.tag_ids ?? [] }),
     });
   },
   recordGalleryEntryView(galleryEntryId: string): Promise<GalleryEntryViewResponse> {

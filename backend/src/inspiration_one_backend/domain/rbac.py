@@ -40,6 +40,7 @@ API_IMAGE_CHAT_WRITE = "image_chat:write"
 API_IMAGE_CHAT_GENERATE = "image_chat:generate"
 API_GALLERY_READ = "gallery:read"
 API_GALLERY_WRITE = "gallery:write"
+API_GALLERY_TAGS_MANAGE = "gallery:tags_manage"
 API_STATUS_READ = "status:read"
 API_USAGE_STATS_READ = "usage_stats:read"
 API_SETTINGS_READ = "settings:read"
@@ -69,6 +70,13 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
     ApiPermissionDefinition(API_IMAGE_CHAT_GENERATE, MENU_IMAGE_CHAT, "连续生图生成", "发起连续生图生成任务", 30),
     ApiPermissionDefinition(API_GALLERY_READ, MENU_GALLERY, "查看画廊", "查看画廊条目", 10),
     ApiPermissionDefinition(API_GALLERY_WRITE, MENU_GALLERY, "保存画廊", "将生成图保存到画廊", 20),
+    ApiPermissionDefinition(
+        API_GALLERY_TAGS_MANAGE,
+        MENU_GALLERY,
+        "管理画廊标签",
+        "新增、编辑、禁用或删除画廊标签",
+        30,
+    ),
     ApiPermissionDefinition(API_STATUS_READ, MENU_STATUS, "查看状态", "查看生成队列和配置状态", 10),
     ApiPermissionDefinition(API_USAGE_STATS_READ, MENU_USAGE_STATS, "查看个人统计", "查看用户维度使用统计", 10),
     ApiPermissionDefinition(API_SETTINGS_READ, MENU_SETTINGS, "查看设置", "查看系统设置和供应商配置", 10),

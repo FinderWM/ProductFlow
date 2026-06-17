@@ -38,6 +38,7 @@ import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { FloatingSurface } from "../components/FloatingSurface";
+import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { ImageSizePicker } from "../components/ImageSizePicker";
 import { ModalShell } from "../components/ModalShell";
@@ -6092,10 +6093,22 @@ export function SettingsPage() {
     records: {},
   }));
   const [imageConfigTestPreview, setImageConfigTestPreview] = useState<ImageGenerationConfigTestResponse | null>(null);
+  const [imageConfigTestGalleryAssetId, setImageConfigTestGalleryAssetId] = useState<string | null>(null);
+  const [imageConfigTestGalleryTagError, setImageConfigTestGalleryTagError] = useState("");
 
   const configQuery = useQuery({
     queryKey: ["config"],
     queryFn: api.getConfig,
+  });
+
+  const runtimeConfigQuery = useQuery({
+    queryKey: ["runtime-config"],
+    queryFn: api.getRuntimeConfig,
+  });
+
+  const galleryTagsQuery = useQuery({
+    queryKey: ["gallery-tags", "active"],
+    queryFn: () => api.listGalleryTags(),
   });
 
   const providerConfigQuery = useQuery({
@@ -6108,6 +6121,12 @@ export function SettingsPage() {
     queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
     enabled: activeSection === "loginPage",
   });
+  const galleryTagFilterMaxSelection = Math.max(
+    1,
+    Math.floor(runtimeConfigQuery.data?.gallery_tag_filter_max_selection ?? 10),
+  );
+  const galleryTagRequiredOnSave = runtimeConfigQuery.data?.gallery_tag_required_on_save ?? false;
+  const galleryTags = galleryTagsQuery.data ?? [];
 
   const resetDraftsFromConfig = useCallback((config: ConfigResponse | undefined) => {
     if (!config) {
@@ -6690,31 +6709,36 @@ export function SettingsPage() {
   });
 
   const saveImageConfigTestGalleryMutation = useMutation({
-    mutationFn: (assetId: string) => api.saveGalleryEntry(assetId),
-    onSuccess: async (entry, assetId) => {
+    mutationFn: ({ assetId, tagIds }: { assetId: string; tagIds: string[] }) =>
+      api.saveGalleryEntry(assetId, { tag_ids: tagIds }),
+    onSuccess: async (entry, variables) => {
       setImageConfigTestPreview((current) =>
         current ? imageGenerationConfigTestResultWithGalleryEntry(current, entry) : current,
       );
       setImageConfigTestState((current) => {
         const recordResult = Object.values(current.records).find(
-          (record) => record.result?.generated_asset.id === assetId,
+          (record) => record.result?.generated_asset.id === variables.assetId,
         )?.result;
         if (!recordResult) {
           return current;
         }
         return markImageConfigTestAssetSaved(
           current,
-          assetId,
+          variables.assetId,
           imageGenerationConfigTestResultWithGalleryEntry(recordResult, entry),
         );
       });
+      setImageConfigTestGalleryAssetId(null);
+      setImageConfigTestGalleryTagError("");
       setError("");
       await queryClient.invalidateQueries({ queryKey: ["gallery"] });
       await queryClient.invalidateQueries({ queryKey: ["image-session", entry.image_session_id] });
       await queryClient.invalidateQueries({ queryKey: ["image-sessions"] });
     },
     onError: (mutationError) => {
-      setError(mutationError instanceof ApiError ? mutationError.detail : t("chat.saveGalleryFailed"));
+      const message = mutationError instanceof ApiError ? mutationError.detail : t("chat.saveGalleryFailed");
+      setImageConfigTestGalleryTagError(message);
+      setError(message);
     },
   });
 
@@ -7469,11 +7493,33 @@ export function SettingsPage() {
               if (!canSaveImageConfigTestGallery || imageConfigTestPreview.generated_asset.gallery_saved) {
                 return;
               }
-              saveImageConfigTestGalleryMutation.mutate(imageConfigTestPreview.generated_asset.id);
+              setImageConfigTestGalleryAssetId(imageConfigTestPreview.generated_asset.id);
+              setImageConfigTestGalleryTagError("");
             }}
             onClose={() => setImageConfigTestPreview(null)}
           />
         ) : null}
+        <GalleryTagPickerDialog
+          open={Boolean(imageConfigTestGalleryAssetId)}
+          tags={galleryTags}
+          initialSelectedTagIds={[]}
+          maxSelection={galleryTagFilterMaxSelection}
+          required={galleryTagRequiredOnSave}
+          busy={saveImageConfigTestGalleryMutation.isPending}
+          error={imageConfigTestGalleryTagError}
+          onConfirm={(tagIds) => {
+            if (!imageConfigTestGalleryAssetId) {
+              return;
+            }
+            saveImageConfigTestGalleryMutation.mutate({ assetId: imageConfigTestGalleryAssetId, tagIds });
+          }}
+          onClose={() => {
+            if (!saveImageConfigTestGalleryMutation.isPending) {
+              setImageConfigTestGalleryAssetId(null);
+              setImageConfigTestGalleryTagError("");
+            }
+          }}
+        />
         <ConfirmDialog
           open={exportConfirmOpen}
           title={t("settings.migration.exportConfirmTitle")}

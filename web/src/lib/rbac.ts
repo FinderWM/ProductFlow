@@ -8,6 +8,7 @@ export const API_IMAGE_CHAT_WRITE = "image_chat:write";
 export const API_IMAGE_CHAT_GENERATE = "image_chat:generate";
 export const API_GALLERY_READ = "gallery:read";
 export const API_GALLERY_WRITE = "gallery:write";
+export const API_GALLERY_TAGS_MANAGE = "gallery:tags_manage";
 export const API_STATUS_READ = "status:read";
 export const API_USAGE_STATS_READ = "usage_stats:read";
 export const API_SETTINGS_READ = "settings:read";

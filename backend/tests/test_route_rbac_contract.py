@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
 from inspiration_one_backend.config import get_settings
-from inspiration_one_backend.domain.rbac import API_RBAC_MANAGE, API_RESOURCES_MODERATE
+from inspiration_one_backend.domain.rbac import API_GALLERY_TAGS_MANAGE, API_RBAC_MANAGE, API_RESOURCES_MODERATE
 from inspiration_one_backend.presentation import deps
 
 PUBLIC_ROUTES = frozenset(
@@ -30,6 +30,12 @@ ADMIN_ROUTE_PREFIX_PERMISSIONS: Mapping[str, str] = {
     "/api/rbac": API_RBAC_MANAGE,
     "/api/resources": API_RESOURCES_MODERATE,
     "/api/resource-moderation": API_RESOURCES_MODERATE,
+}
+ADMIN_ROUTE_METHOD_PATH_PERMISSIONS: Mapping[tuple[str, str], str] = {
+    ("POST", "/api/gallery/tags"): API_GALLERY_TAGS_MANAGE,
+    ("PATCH", "/api/gallery/tags/{tag_id}"): API_GALLERY_TAGS_MANAGE,
+    ("DELETE", "/api/gallery/tags/{tag_id}"): API_GALLERY_TAGS_MANAGE,
+    ("PATCH", "/api/gallery/{gallery_entry_id}/tags"): API_GALLERY_TAGS_MANAGE,
 }
 
 AUTHENTICATED_DEFAULT_ROUTE_PREFIXES = frozenset({"/api/resource-library"})
@@ -110,7 +116,7 @@ def _validate_private_route(method: str, path: str, gate: RouteGate) -> list[str
     if not gate.api_permissions:
         failures.append(_format_failure(method, path, gate, "missing API permission dependency"))
 
-    required_admin_permission = _required_admin_permission(path)
+    required_admin_permission = _required_admin_permission(method, path)
     if required_admin_permission is None:
         return failures
 
@@ -128,7 +134,10 @@ def _validate_private_route(method: str, path: str, gate: RouteGate) -> list[str
     return failures
 
 
-def _required_admin_permission(path: str) -> str | None:
+def _required_admin_permission(method: str, path: str) -> str | None:
+    exact_permission = ADMIN_ROUTE_METHOD_PATH_PERMISSIONS.get((method, path))
+    if exact_permission is not None:
+        return exact_permission
     for prefix, permission in ADMIN_ROUTE_PREFIX_PERMISSIONS.items():
         if path == prefix or path.startswith(f"{prefix}/"):
             return permission

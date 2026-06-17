@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login
 from sqlalchemy import select
 
+from inspiration_one_backend.domain.rbac import API_GALLERY_TAGS_MANAGE
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AuthRole,
@@ -208,6 +209,7 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     }
     assert "resource_library:read" not in payload["api_permissions"]
     assert "resource_library:write" not in payload["api_permissions"]
+    assert API_GALLERY_TAGS_MANAGE not in payload["api_permissions"]
     assert "settings:read" not in payload["api_permissions"]
     assert "settings:provider_write" not in payload["api_permissions"]
     assert "settings:migrate" not in payload["api_permissions"]

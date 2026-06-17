@@ -51,6 +51,8 @@ class RuntimeConfigResponse(BaseModel):
     workflow_node_max_retry_count: int
     workflow_node_retry_delay_ms: int
     gallery_show_generation_resource_group: bool
+    gallery_tag_filter_max_selection: int
+    gallery_tag_required_on_save: bool
     deletion_enabled: bool
 
 

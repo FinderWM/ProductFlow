@@ -25,8 +25,10 @@ from inspiration_one_backend.infrastructure.db.models import (
     CanvasTemplate,
     CanvasTemplateCategory,
     CopySet,
+    GalleryTag,
     GenerationConfigResourceGroup,
     ImageGalleryEntry,
+    ImageGalleryEntryTag,
     ImageSessionAsset,
     ImageSessionGenerationTask,
     InspirationWorkflow,
@@ -143,6 +145,48 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
         "ix_image_gallery_entries_group_enabled_created",
     }
     assert not table.foreign_keys
+
+
+def test_gallery_tag_models_match_migration_contract() -> None:
+    tag_table = GalleryTag.__table__
+    assert tag_table.c.id.type.length == 36
+    assert not tag_table.c.id.nullable
+    assert tag_table.c.id.default is not None
+    assert tag_table.c.id.default.arg.__name__ == new_id.__name__
+    assert tag_table.c.name.type.length == 120
+    assert not tag_table.c.name.nullable
+    assert tag_table.c.description.nullable
+    assert not tag_table.c.priority.nullable
+    assert not tag_table.c.enabled.nullable
+    assert tag_table.c.deleted_at.nullable
+    assert not tag_table.c.created_at.nullable
+    assert not tag_table.c.updated_at.nullable
+    assert {index.name for index in tag_table.indexes} == {
+        "uq_gallery_tags_name_active",
+        "ix_gallery_tags_deleted_enabled_priority_name",
+    }
+    assert not tag_table.foreign_keys
+    assert not [constraint for constraint in tag_table.constraints if isinstance(constraint, sa.CheckConstraint)]
+
+    link_table = ImageGalleryEntryTag.__table__
+    assert link_table.c.id.type.length == 36
+    assert not link_table.c.id.nullable
+    assert link_table.c.id.default is not None
+    assert link_table.c.id.default.arg.__name__ == new_id.__name__
+    assert link_table.c.gallery_entry_id.type.length == 36
+    assert link_table.c.tag_id.type.length == 36
+    assert not link_table.c.gallery_entry_id.nullable
+    assert not link_table.c.tag_id.nullable
+    assert link_table.c.deleted_at.nullable
+    assert not link_table.c.created_at.nullable
+    assert not link_table.c.updated_at.nullable
+    assert {index.name for index in link_table.indexes} == {
+        "uq_image_gallery_entry_tags_active",
+        "ix_image_gallery_entry_tags_entry_deleted",
+        "ix_image_gallery_entry_tags_tag_deleted",
+    }
+    assert not link_table.foreign_keys
+    assert not [constraint for constraint in link_table.constraints if isinstance(constraint, sa.CheckConstraint)]
 
 
 def test_resource_library_models_match_migration_contract() -> None:

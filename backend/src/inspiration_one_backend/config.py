@@ -139,6 +139,9 @@ DEFAULT_GENERATION_CONFIG_COOLDOWN_MINUTES = 10
 DEFAULT_GALLERY_VIEW_DEDUP_WINDOW_MINUTES = 60
 GALLERY_VIEW_DEDUP_WINDOW_MIN_MINUTES = 1
 GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES = 7 * 24 * 60
+DEFAULT_GALLERY_TAG_FILTER_MAX_SELECTION = 10
+GALLERY_TAG_FILTER_MIN_MAX_SELECTION = 1
+GALLERY_TAG_FILTER_MAX_MAX_SELECTION = 50
 DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS = 36
 DEFAULT_WORKFLOW_NODE_MAX_RETRY_COUNT = 10
 DEFAULT_WORKFLOW_NODE_RETRY_DELAY_MS = 2000
@@ -458,6 +461,12 @@ class Settings(BaseSettings):
         ge=GALLERY_VIEW_DEDUP_WINDOW_MIN_MINUTES,
         le=GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES,
     )
+    gallery_tag_filter_max_selection: int = Field(
+        default=DEFAULT_GALLERY_TAG_FILTER_MAX_SELECTION,
+        ge=GALLERY_TAG_FILTER_MIN_MAX_SELECTION,
+        le=GALLERY_TAG_FILTER_MAX_MAX_SELECTION,
+    )
+    gallery_tag_required_on_save: bool = False
     login_page_mode: str = DEFAULT_LOGIN_PAGE_MODE
     login_page_selected_template_id: str = ""
     login_page_enabled_template_ids: str = DEFAULT_LOGIN_PAGE_ENABLED_TEMPLATE_IDS_TEXT
@@ -1021,6 +1030,22 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         description="同一用户在该时间窗口内多次点击同一画廊作品只计一次浏览；超过窗口再次点击重新计数。",
         minimum=GALLERY_VIEW_DEDUP_WINDOW_MIN_MINUTES,
         maximum=GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES,
+    ),
+    ConfigDefinition(
+        key="gallery_tag_filter_max_selection",
+        label="画廊标签最多选择数",
+        category="界面与外观",
+        input_type="number",
+        description="控制画廊筛选和保存到画廊时一次最多选择的标签数量。",
+        minimum=GALLERY_TAG_FILTER_MIN_MAX_SELECTION,
+        maximum=GALLERY_TAG_FILTER_MAX_MAX_SELECTION,
+    ),
+    ConfigDefinition(
+        key="gallery_tag_required_on_save",
+        label="保存画廊必须选择标签",
+        category="界面与外观",
+        input_type="boolean",
+        description="开启后，保存生成图到画廊时至少需要选择一个启用标签。",
     ),
     ConfigDefinition(
         key="login_page_mode",

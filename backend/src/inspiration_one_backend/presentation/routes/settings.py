@@ -2496,6 +2496,8 @@ def get_runtime_config_endpoint() -> RuntimeConfigResponse:
         workflow_node_max_retry_count=settings.workflow_node_max_retry_count,
         workflow_node_retry_delay_ms=settings.workflow_node_retry_delay_ms,
         gallery_show_generation_resource_group=settings.gallery_show_generation_resource_group,
+        gallery_tag_filter_max_selection=settings.gallery_tag_filter_max_selection,
+        gallery_tag_required_on_save=settings.gallery_tag_required_on_save,
         deletion_enabled=settings.deletion_enabled,
     )
 

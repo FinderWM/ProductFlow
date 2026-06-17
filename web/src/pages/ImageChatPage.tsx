@@ -24,6 +24,7 @@ import {
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { ImageGenerationSettingsPanel } from "../components/ImageGenerationSettingsPanel";
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../components/ImageGenerationSettingsTabs";
@@ -362,6 +363,8 @@ function ImageChatWorkbenchPage() {
   const [mobileGenerationSheetOpen, setMobileGenerationSheetOpen] = useState(false);
   const [generationDraftMode, setGenerationDraftMode] = useState<ImageChatGenerationDraftMode | null>(null);
   const [retryGenerationTaskId, setRetryGenerationTaskId] = useState<string | null>(null);
+  const [galleryTagPickerAsset, setGalleryTagPickerAsset] = useState<ImageSessionAsset | null>(null);
+  const [galleryTagPickerError, setGalleryTagPickerError] = useState("");
 
   const leftPanelStyle = {
     "--image-chat-left-panel-width": `${leftPanelWidth}px`,
@@ -526,6 +529,11 @@ function ImageChatWorkbenchPage() {
     queryFn: api.listGenerationConfigOptions,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
+  const galleryTagsQuery = useQuery({
+    queryKey: ["gallery-tags", "active"],
+    queryFn: () => api.listGalleryTags(),
+    staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
+  });
   const rbacUsersQuery = useQuery({
     queryKey: ["rbac-users", "image-session-owner-filter", deferredSessionOwnerSearch],
     queryFn: () => api.listRbacUsers({ page_size: 30, query: deferredSessionOwnerSearch || undefined }),
@@ -544,6 +552,12 @@ function ImageChatWorkbenchPage() {
   );
   const imageToolAllowedFields = runtimeConfigQuery.data?.image_tool_allowed_fields ?? DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS;
   const deletionEnabled = runtimeConfigQuery.data?.deletion_enabled ?? false;
+  const galleryTagFilterMaxSelection = Math.max(
+    1,
+    Math.floor(runtimeConfigQuery.data?.gallery_tag_filter_max_selection ?? 10),
+  );
+  const galleryTagRequiredOnSave = runtimeConfigQuery.data?.gallery_tag_required_on_save ?? false;
+  const galleryTags = galleryTagsQuery.data ?? [];
   const sizeOptions = useMemo(
     () => buildImageSizeOptions(imageGenerationMaxDimension),
     [imageGenerationMaxDimension],
@@ -1349,17 +1363,17 @@ function ImageChatWorkbenchPage() {
   });
 
   const saveGalleryMutation = useMutation({
-    mutationFn: (assetId: string) => {
+    mutationFn: ({ assetId, tagIds }: { assetId: string; tagIds: string[] }) => {
       assertImageChatActionAllowed(selectedResultBlockedTitle);
-      return api.saveGalleryEntry(assetId);
+      return api.saveGalleryEntry(assetId, { tag_ids: tagIds });
     },
-    onSuccess: async (entry, assetId) => {
+    onSuccess: async (entry, variables) => {
       queryClient.setQueryData<ImageSessionDetail>(["image-session", entry.image_session_id], (current) => {
         if (!current) {
           return current;
         }
         const markAssetSavedToGallery = (asset: ImageSessionAsset): ImageSessionAsset =>
-          asset.id === assetId
+          asset.id === variables.assetId
             ? {
                 ...asset,
                 gallery_saved: true,
@@ -1370,7 +1384,7 @@ function ImageChatWorkbenchPage() {
           ...current,
           assets: current.assets.map(markAssetSavedToGallery),
           rounds: current.rounds.map((round) =>
-            round.generated_asset.id === assetId
+            round.generated_asset.id === variables.assetId
               ? {
                   ...round,
                   generated_asset: markAssetSavedToGallery(round.generated_asset),
@@ -1379,13 +1393,17 @@ function ImageChatWorkbenchPage() {
           ),
         };
       });
+      setGalleryTagPickerAsset(null);
+      setGalleryTagPickerError("");
       setSuccessMessage(t("chat.savedGallery"));
       setErrorMessage("");
       await queryClient.invalidateQueries({ queryKey: ["gallery"] });
       await queryClient.invalidateQueries({ queryKey: ["image-session", entry.image_session_id] });
     },
     onError: (error) => {
-      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.saveGalleryFailed"));
+      const message = error instanceof ApiError ? error.detail : t("chat.saveGalleryFailed");
+      setGalleryTagPickerError(message);
+      setErrorMessage(message);
     },
   });
 
@@ -1725,7 +1743,8 @@ function ImageChatWorkbenchPage() {
       setErrorMessage(selectedResultBlockedTitle);
       return;
     }
-    saveGalleryMutation.mutate(selectedRound.generated_asset.id);
+    setGalleryTagPickerAsset(selectedRound.generated_asset);
+    setGalleryTagPickerError("");
   }
 
   function handleOpenResourceLibrary() {
@@ -3352,6 +3371,27 @@ function ImageChatWorkbenchPage() {
         onSaved={() => {
           setSuccessMessage(t("resourceLibrary.saved"));
           setErrorMessage("");
+        }}
+      />
+      <GalleryTagPickerDialog
+        open={Boolean(galleryTagPickerAsset)}
+        tags={galleryTags}
+        initialSelectedTagIds={[]}
+        maxSelection={galleryTagFilterMaxSelection}
+        required={galleryTagRequiredOnSave}
+        busy={saveGalleryMutation.isPending}
+        error={galleryTagPickerError}
+        onConfirm={(tagIds) => {
+          if (!galleryTagPickerAsset) {
+            return;
+          }
+          saveGalleryMutation.mutate({ assetId: galleryTagPickerAsset.id, tagIds });
+        }}
+        onClose={() => {
+          if (!saveGalleryMutation.isPending) {
+            setGalleryTagPickerAsset(null);
+            setGalleryTagPickerError("");
+          }
         }}
       />
       {createSessionDialogOpen ? (

@@ -1571,6 +1571,74 @@ class ImageGalleryEntry(Base):
         primaryjoin=lambda: child_parent_join(ImageGalleryEntry.resource_group_id, GenerationResourceGroup.id),
         foreign_keys=lambda: [ImageGalleryEntry.resource_group_id],
     )
+    tag_links: Mapped[list[ImageGalleryEntryTag]] = relationship(
+        back_populates="entry",
+        primaryjoin=lambda: parent_child_join(ImageGalleryEntry.id, ImageGalleryEntryTag.gallery_entry_id),
+        foreign_keys=lambda: [ImageGalleryEntryTag.gallery_entry_id],
+    )
+
+
+class GalleryTag(Base, TimestampMixin):
+    """全局画廊标签，只服务画廊筛选和画廊条目归类。"""
+
+    __tablename__ = "gallery_tags"
+    __table_args__ = (
+        Index(
+            "uq_gallery_tags_name_active",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+        Index("ix_gallery_tags_deleted_enabled_priority_name", "deleted_at", "enabled", "priority", "name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    entry_links: Mapped[list[ImageGalleryEntryTag]] = relationship(
+        back_populates="tag",
+        primaryjoin=lambda: parent_child_join(GalleryTag.id, ImageGalleryEntryTag.tag_id),
+        foreign_keys=lambda: [ImageGalleryEntryTag.tag_id],
+    )
+
+
+class ImageGalleryEntryTag(Base, TimestampMixin):
+    """画廊条目到全局画廊标签的逻辑删除关联。"""
+
+    __tablename__ = "image_gallery_entry_tags"
+    __table_args__ = (
+        Index(
+            "uq_image_gallery_entry_tags_active",
+            "gallery_entry_id",
+            "tag_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+        Index("ix_image_gallery_entry_tags_entry_deleted", "gallery_entry_id", "deleted_at"),
+        Index("ix_image_gallery_entry_tags_tag_deleted", "tag_id", "deleted_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    gallery_entry_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    tag_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    entry: Mapped[ImageGalleryEntry] = relationship(
+        back_populates="tag_links",
+        primaryjoin=lambda: child_parent_join(ImageGalleryEntryTag.gallery_entry_id, ImageGalleryEntry.id),
+        foreign_keys=lambda: [ImageGalleryEntryTag.gallery_entry_id],
+    )
+    tag: Mapped[GalleryTag] = relationship(
+        back_populates="entry_links",
+        primaryjoin=lambda: child_parent_join(ImageGalleryEntryTag.tag_id, GalleryTag.id),
+        foreign_keys=lambda: [ImageGalleryEntryTag.tag_id],
+    )
 
 
 class ImageGalleryEntryViewEvent(Base):

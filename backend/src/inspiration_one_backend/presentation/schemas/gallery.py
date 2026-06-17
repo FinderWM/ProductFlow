@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from inspiration_one_backend.infrastructure.db.models import ImageGalleryEntry
+from inspiration_one_backend.infrastructure.db.models import GalleryTag, ImageGalleryEntry
 from inspiration_one_backend.presentation.schemas.generation_resource_groups import (
     GenerationResourceGroupTagResponse,
     serialize_generation_resource_group_tag,
@@ -24,6 +24,35 @@ from inspiration_one_backend.presentation.schemas.moderation import (
 
 class SaveGalleryEntryRequest(BaseModel):
     image_session_asset_id: str
+    tag_ids: list[str] = Field(default_factory=list)
+
+
+class GalleryTagResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    priority: int
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class GalleryTagCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = None
+    priority: int = 100
+    enabled: bool = True
+
+
+class GalleryTagUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = None
+    priority: int | None = None
+    enabled: bool | None = None
+
+
+class GalleryEntryTagsUpdateRequest(BaseModel):
+    tag_ids: list[str] = Field(default_factory=list)
 
 
 class GalleryEntryResponse(ResourceModerationFields):
@@ -55,6 +84,7 @@ class GalleryEntryResponse(ResourceModerationFields):
     base_asset_id: str | None = None
     selected_reference_asset_ids: list[str]
     provider_notes: list[str]
+    tags: list[GalleryTagResponse] = Field(default_factory=list)
     view_count: int = 0
     created_at: datetime
 
@@ -70,6 +100,31 @@ class GalleryEntryViewResponse(BaseModel):
     id: str
     view_count: int
     counted: bool
+
+
+def serialize_gallery_tag(tag: GalleryTag) -> GalleryTagResponse:
+    return GalleryTagResponse(
+        id=tag.id,
+        name=tag.name,
+        description=tag.description,
+        priority=tag.priority,
+        enabled=tag.enabled,
+        created_at=tag.created_at,
+        updated_at=tag.updated_at,
+    )
+
+
+def _gallery_entry_tags(entry: ImageGalleryEntry) -> list[GalleryTagResponse]:
+    tags = [
+        link.tag
+        for link in entry.tag_links
+        if link.deleted_at is None
+        and link.tag is not None
+        and link.tag.deleted_at is None
+        and link.tag.enabled
+    ]
+    tags.sort(key=lambda tag: (-tag.priority, tag.name.casefold(), tag.id))
+    return [serialize_gallery_tag(tag) for tag in tags]
 
 
 def _gallery_entry_base_assets(
@@ -127,6 +182,7 @@ def serialize_gallery_entry(entry: ImageGalleryEntry, *, view_count: int = 0) ->
         base_asset_id=round_item.base_asset_id if round_item else None,
         selected_reference_asset_ids=round_item.selected_reference_asset_ids or [] if round_item else [],
         provider_notes=extract_provider_notes(round_item.provider_output_json) if round_item else [],
+        tags=_gallery_entry_tags(entry),
         view_count=view_count,
         **serialize_moderation_fields(entry).model_dump(),
         created_at=entry.created_at,
