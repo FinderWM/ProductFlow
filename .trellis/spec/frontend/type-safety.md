@@ -90,8 +90,12 @@ multipart boundary.
 - Backend response: `ImageSessionAssetResponse.gallery_saved: bool = False`.
 - Backend response: `ImageSessionAssetResponse.gallery_entry_id: str | None = None`.
 - Frontend mirror: `ImageSessionAsset.gallery_saved: boolean` and `gallery_entry_id: string | null`.
-- Gallery save API: `api.saveGalleryEntry(imageSessionAssetId): Promise<GalleryEntry>` posts
-  `{ image_session_asset_id }` to `POST /api/gallery`.
+- Gallery save API: `api.saveGalleryEntry(imageSessionAssetId, { tag_ids? }): Promise<GalleryEntry>` posts
+  `{ image_session_asset_id, tag_ids }` to `POST /api/gallery`.
+- Gallery tag mirrors:
+  - `GalleryTag { id, name, description, priority, enabled, created_at, updated_at }`.
+  - `GalleryEntry.tags: GalleryTag[]`.
+  - `RuntimeConfig.gallery_tag_filter_max_selection` and `RuntimeConfig.gallery_tag_required_on_save`.
 
 #### 3. Contracts
 
@@ -103,6 +107,8 @@ multipart boundary.
   equal to the entry id.
 - Image chat controls use `selectedRound.generated_asset.gallery_saved` as the source of truth for disabling
   send-to-gallery actions in desktop and mobile layouts.
+- Save-to-gallery callers should pass selected gallery tag ids through the API helper. Do not overload
+  `resource_group_id`; gallery tags and generation resource groups are separate backend concepts.
 
 #### 4. Validation & Error Matrix
 
@@ -112,6 +118,8 @@ multipart boundary.
 - Repeated `POST /api/gallery` for the same asset -> returns existing entry with HTTP 200 and does not create another
   `ImageGalleryEntry` or `ImageSessionAsset`.
 - Missing/non-generated/sessionless asset -> backend validation remains the source of truth through `ApiError.detail`.
+- Required gallery tags with no selected ids -> backend returns the validation detail; frontend pickers should block this
+  locally using runtime config where possible.
 
 #### 5. Good/Base/Bad Cases
 
@@ -128,6 +136,8 @@ multipart boundary.
   `ImageSessionAsset` count is unchanged.
 - Backend session-detail test path asserts the saved generated asset later returns `gallery_saved=true` and the saved
   `gallery_entry_id`.
+- Backend gallery tag tests assert `GalleryEntry.tags` contains only active tags, and frontend build catches missing `tags`
+  in test factories.
 - Frontend build and tests must pass after any DTO field change.
 
 #### 7. Wrong vs Correct
@@ -142,6 +152,18 @@ const saved = galleryEntries.some((entry) => entry.image_session_asset_id === se
 
 ```tsx
 const saved = selectedRound.generated_asset.gallery_saved;
+```
+
+#### Wrong
+
+```tsx
+api.saveGalleryEntry(selectedRound.generated_asset.id);
+```
+
+#### Correct
+
+```tsx
+api.saveGalleryEntry(selectedRound.generated_asset.id, { tag_ids: selectedTagIds });
 ```
 
 ### Scenario: Create-inspiration API input typing

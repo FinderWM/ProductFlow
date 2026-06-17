@@ -1226,7 +1226,8 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 - Response metadata should include prompt, requested size, actual size, provider/model, candidate metadata, session ID/title,
   inspiration ID/name when available, owner, resource group, moderation fields, `view_count`, and `created_at`.
 - The visual gallery remains image-led. Compact admin remove/restore controls are compatible with this contract when they
-  use `resources:moderate`; table-first management, bulk moderation, tags, and search belong to a separate workflow.
+  use `resources:moderate`; table-first management and bulk moderation belong to a separate workflow. Gallery tags are a
+  separate global-tag contract and must not be mixed with generation resource groups.
 
 ### 4. Validation & Error Matrix
 
@@ -1248,7 +1249,7 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 - Base: inspiration-scoped and standalone image sessions both appear in the same global gallery list.
 - Bad: copying generated image bytes into `source_assets` or inspiration storage when the user only chose "save to gallery".
 - Bad: implementing gallery list visibility by fetching all rows and filtering disabled/group state in Python or React.
-- Bad: adding table-first bulk management, inspiration-level grouping, tags, or search inside this global gallery task.
+- Bad: adding table-first bulk management, inspiration-level grouping, or search inside this global gallery task.
 
 ### 6. Tests Required
 
@@ -1277,6 +1278,109 @@ ImageGalleryEntry(image_session_asset_id=asset.id, image_session_round_id=round_
 ```
 
 The gallery keeps a curated pointer to the generated asset and reuses existing download URLs.
+
+---
+
+## Scenario: Global gallery tags
+
+### 1. Scope / Trigger
+
+- Trigger: changing gallery tags, gallery list filtering by tags, save-to-gallery tag assignment, or tag management RBAC.
+- Gallery tags are global system tags for the gallery only. They are distinct from generation resource groups, which remain
+  generation-source metadata and permission scopes.
+
+### 2. Signatures
+
+- DB table: `gallery_tags(id, name, description, priority, enabled, deleted_at, created_at, updated_at)`.
+- DB table: `image_gallery_entry_tags(id, gallery_entry_id, tag_id, deleted_at, created_at, updated_at)`.
+- Unique partial indexes:
+  - active `gallery_tags.name` is unique only while `deleted_at IS NULL`.
+  - active `(gallery_entry_id, tag_id)` is unique only while `deleted_at IS NULL`.
+- API:
+  - `GET /api/gallery/tags?include_disabled=<bool>` -> `GalleryTagResponse[]`.
+  - `POST /api/gallery/tags` -> create tag.
+  - `PATCH /api/gallery/tags/{tag_id}` -> edit name, description, priority, enabled.
+  - `DELETE /api/gallery/tags/{tag_id}` -> logically delete tag and active relations.
+  - `PATCH /api/gallery/{gallery_entry_id}/tags` with `{tag_ids: string[]}` -> replace entry tag relations.
+  - `GET /api/gallery?tag_ids=<id>&tag_ids=<id>` -> any-tag match, sorted by match count descending then saved time
+    descending.
+  - `POST /api/gallery` accepts `{image_session_asset_id: string, tag_ids?: string[]}`.
+- Runtime config:
+  - `gallery_tag_filter_max_selection: int` in `CONFIG_DEFINITIONS`.
+  - `gallery_tag_required_on_save: bool` in `CONFIG_DEFINITIONS`.
+
+### 3. Contracts
+
+- Tag management writes require both `gallery:tags_manage` and `require_admin`; a non-admin role with a misconfigured
+  permission bit must still be rejected.
+- Default member roles must not include `gallery:tags_manage`.
+- `GET /api/gallery/tags` is read permission gated and returns only enabled, non-deleted tags unless
+  `include_disabled=true` is requested by an admin manager.
+- Tag list order is `priority DESC`, then natural/name ascending. Frontend selectors preserve API order for first load.
+- Disabled tags remain in the database and relations, but must not appear in filters, save pickers, cards, or serialized
+  `GalleryEntry.tags`.
+- Deleted tags set `deleted_at`; delete must also bulk-set `deleted_at` on all active `image_gallery_entry_tags` rows for
+  that tag. A later tag with the same name is a new ID and must not restore old relations.
+- Saving to gallery validates `tag_ids` against active tags, enforces `gallery_tag_filter_max_selection`, and requires at
+  least one tag only when `gallery_tag_required_on_save=true`.
+- Existing idempotent gallery saves return the existing entry and do not mutate tags; later assignment changes use the
+  admin-only replace endpoint.
+
+### 4. Validation & Error Matrix
+
+- Non-admin calls create/update/delete/replace tags -> `403`, `"需要管理员权限"` even when the role has the permission code.
+- Missing `gallery:tags_manage` on a management write -> `403`, `"没有接口权限"`.
+- Disabled or deleted tag id in save/replace -> `400`, tag validation detail.
+- More than `gallery_tag_filter_max_selection` tag ids -> `400`, max-selection detail.
+- Required-on-save enabled and no valid tag ids -> `400`, required-tag detail.
+- Delete tag -> tag and active relations are logically deleted in the same transaction.
+- Filter with disabled/deleted tag ids -> no disabled/deleted matches; active matches still use SQL-level any-hit behavior.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a gallery entry tagged with A and B appears when filtering by A or B, and entries matching two selected tags sort
+  before entries matching one selected tag.
+- Good: disabling tag A hides it from UI filters and serialized cards while preserving relation rows for possible re-enable.
+- Good: deleting tag A removes active relation rows logically, then creating a new tag named A creates a new ID with no old
+  entry assignments.
+- Base: saving an image without tags is allowed when `gallery_tag_required_on_save=false`.
+- Bad: reusing `generation_resource_groups` for gallery tags.
+- Bad: allowing `gallery:write` or `resources:moderate` to edit tag definitions or entry tag assignments.
+
+### 6. Tests Required
+
+- API tests for create/update/disable/delete/replace permission gates, including the non-admin-with-permission case.
+- API tests for required-on-save, max selection, disabled tag validation, deletion relation cleanup, and same-name recreate.
+- Gallery list tests for any-hit filtering and sort by tag match count descending plus `created_at DESC`.
+- Migration tests for tag tables, partial unique indexes, and relation indexes.
+- Runtime config tests for defaults, metadata, save/reset, export/import, and `/api/settings/runtime`.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+entry.resource_group_id = selected_gallery_tag_id
+```
+
+Correct:
+
+```python
+session.add(ImageGalleryEntryTag(gallery_entry_id=entry.id, tag_id=tag.id))
+```
+
+Wrong:
+
+```python
+Depends(require_api_permission(API_GALLERY_WRITE))
+```
+
+Correct:
+
+```python
+Depends(require_api_permission(API_GALLERY_TAGS_MANAGE))
+Depends(require_admin)
+```
 
 ---
 
