@@ -4079,7 +4079,7 @@ interface GenerationConfigPoolSectionProps {
 }
 
 interface GenerationConfigSaveOptions {
-  onSuccess?: () => void;
+  onSuccess?: (generationConfig: GenerationConfig) => void;
 }
 
 export function providerProfilesForGenerationConfig(
@@ -5177,7 +5177,13 @@ function GenerationConfigPoolSection({
           }}
           onSave={() => {
             onSave(newDraft, {
-              onSuccess: () => {
+              onSuccess: (generationConfig) => {
+                const savedResourceGroupIds = generationConfigResourceGroupIds(generationConfig);
+                const savedResourceGroupId = savedResourceGroupIds.includes(activeResourceGroupId)
+                  ? activeResourceGroupId
+                  : savedResourceGroupIds[0] ?? "";
+                setSelectedResourceGroupId(savedResourceGroupId);
+                setConfigSearch("");
                 setCreateDialogOpen(false);
                 resetNewDraft();
               },

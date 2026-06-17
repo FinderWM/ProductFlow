@@ -170,19 +170,24 @@ function UsageStatsDetailPage() {
   const session = useSessionState();
   const isAdmin = Boolean(session?.user?.is_admin);
   const [range, setRange] = useState<WorkspaceDateTimeRange>(() => workspaceQuickDateTimeRange("today"));
+  const [appliedRange, setAppliedRange] = useState<WorkspaceDateTimeRange>(range);
   const [activeQuickRange, setActiveQuickRange] = useState<WorkspaceQuickRangeId | null>("today");
   const [selectedUserId, setSelectedUserId] = useState("");
+  const [appliedUserId, setAppliedUserId] = useState("");
   const rangeInvalid = Boolean(range.start_date && range.end_date && range.start_date > range.end_date);
-  const apiRange = dateRangeFromDateTimeRange(range);
+  const appliedRangeInvalid = Boolean(
+    appliedRange.start_date && appliedRange.end_date && appliedRange.start_date > appliedRange.end_date,
+  );
+  const apiRange = dateRangeFromDateTimeRange(appliedRange);
 
   const usageQuery = useQuery({
-    queryKey: ["usage-stats", apiRange.start_date, apiRange.end_date, selectedUserId],
+    queryKey: ["usage-stats", apiRange.start_date, apiRange.end_date, appliedUserId],
     queryFn: () =>
       api.getUsageStats({
         ...apiRange,
-        user_id: selectedUserId || undefined,
+        user_id: appliedUserId || undefined,
       }),
-    enabled: !rangeInvalid,
+    enabled: !appliedRangeInvalid,
     retry: false,
   });
 
@@ -203,6 +208,18 @@ function UsageStatsDetailPage() {
     image: summary?.image_attempt_count ?? 0,
   });
   const isWorkspaceSubpage = activeScheme === "workspace";
+  const refreshUsageStats = () => {
+    if (
+      range.start_date === appliedRange.start_date &&
+      range.end_date === appliedRange.end_date &&
+      selectedUserId === appliedUserId
+    ) {
+      void usageQuery.refetch();
+      return;
+    }
+    setAppliedRange(range);
+    setAppliedUserId(selectedUserId);
+  };
 
   return (
     <div className={`${isWorkspaceSubpage ? "pf-workspace" : "pf-app"} flex flex-col`}>
@@ -248,14 +265,14 @@ function UsageStatsDetailPage() {
               />
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 {isAdmin ? (
-                  <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                    {t("usageStats.userFilter")}
+                  <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    <span>{t("usageStats.userFilter")}</span>
                     <select
                       id="usage-stats-user-filter"
                       name="usage_stats_user_filter"
                       value={selectedUserId}
                       onChange={(event) => setSelectedUserId(event.target.value)}
-                      className={`${INPUT_CLASS} mt-1 w-full sm:w-48`}
+                      className={`${INPUT_CLASS} w-full sm:w-48`}
                     >
                       <option value="">{t("usageStats.allUsers")}</option>
                       {users.map((user) => (
@@ -268,7 +285,7 @@ function UsageStatsDetailPage() {
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => void usageQuery.refetch()}
+                  onClick={refreshUsageStats}
                   disabled={usageQuery.isFetching || rangeInvalid}
                   className={PRIMARY_BUTTON_CLASS}
                 >

@@ -2838,19 +2838,22 @@ textarea {
   box-shadow: 0 8px 18px -16px color-mix(in srgb, var(--pf-accent) 70%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell {
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-clear {
   border-color: var(--pf-settings-input-border);
   background: var(--pf-settings-input-bg);
   color: var(--pf-settings-input-color);
   box-shadow: var(--pf-settings-input-shadow);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-trigger:hover {
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-trigger:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-clear:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--pf-accent) 42%, var(--pf-settings-input-border));
   background: var(--pf-settings-input-bg-hover);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-trigger:focus-visible {
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-trigger:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-clear:focus-visible {
   outline: none;
   border-color: var(--pf-settings-input-border-focus);
   background: var(--pf-settings-input-bg-focus);
@@ -2863,6 +2866,12 @@ textarea {
   box-shadow: var(--pf-settings-input-shadow-focus);
 }
 
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-clear:disabled {
+  background: var(--pf-settings-input-bg-disabled);
+  color: var(--pf-settings-input-disabled-color);
+  opacity: 1;
+}
+
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-popover {
   border-color: var(--pf-settings-input-border);
   background: color-mix(in srgb, var(--pf-panel) 92%, transparent);
@@ -2872,7 +2881,6 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-time-card,
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-date-nav {
   border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent);
   background: color-mix(in srgb, var(--pf-panel-soft) 84%, transparent);
@@ -2888,6 +2896,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary-button:focus-visible,
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-date-nav:focus-visible,
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day:focus-visible {
   outline: none;
@@ -2907,6 +2916,39 @@ textarea {
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 18%, transparent), transparent 54%),
     color-mix(in srgb, var(--pf-panel) 90%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger {
+  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent);
+  background: var(--pf-settings-input-bg);
+  color: var(--pf-settings-input-color);
+  box-shadow: var(--pf-settings-input-shadow);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger:hover:not(:disabled) {
+  border-color: var(--pf-settings-input-border-hover);
+  background: var(--pf-settings-input-bg-hover);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger[aria-expanded="true"] {
+  border-color: var(--pf-settings-input-border-focus);
+  background: var(--pf-settings-input-bg-focus);
+  box-shadow: var(--pf-settings-input-shadow-focus);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger:disabled {
+  background: var(--pf-settings-input-bg-disabled);
+  color: var(--pf-settings-input-disabled-color);
+  opacity: 1;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-popover {
+  border-color: var(--pf-settings-input-border);
+  background: color-mix(in srgb, var(--pf-panel) 94%, transparent);
+  color: var(--pf-settings-input-color);
+  box-shadow: 0 18px 40px -28px var(--pf-shadow), inset 0 1px 0 rgb(255 255 255 / 0.16);
+  backdrop-filter: blur(18px);
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day {
@@ -2947,75 +2989,66 @@ textarea {
     0 10px 22px -20px color-mix(in srgb, var(--pf-accent) 72%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-time-input {
-  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent) !important;
-  background: var(--pf-settings-input-bg) !important;
-  color: var(--pf-settings-input-color) !important;
-  box-shadow: var(--pf-settings-input-shadow) !important;
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-columns {
+  position: relative;
+  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent);
+  background: color-mix(in srgb, var(--pf-panel-soft) 86%, transparent);
+  color: var(--pf-settings-input-color);
+  box-shadow: var(--pf-settings-input-shadow);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-time-input:focus {
-  border-color: var(--pf-settings-input-border-focus) !important;
-  background: var(--pf-settings-input-bg-focus) !important;
-  box-shadow: var(--pf-settings-input-shadow-focus) !important;
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-columns::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  z-index: 0;
+  height: 2.25rem;
+  transform: translateY(-50%);
+  background: color-mix(in srgb, var(--pf-accent) 18%, var(--pf-panel));
+  pointer-events: none;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-time-input:disabled {
-  background: var(--pf-settings-input-bg-disabled) !important;
-  color: var(--pf-settings-input-disabled-color) !important;
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-column {
+  position: relative;
+  z-index: 1;
+  border-color: color-mix(in srgb, var(--pf-settings-input-border) 68%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-column-scroll {
+  scrollbar-width: none;
+  scroll-snap-type: y mandatory;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-column-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option {
+  position: relative;
+  z-index: 1;
+  color: color-mix(in srgb, var(--pf-muted) 74%, transparent);
+  scroll-snap-align: center;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option:hover:not(:disabled) {
+  color: var(--pf-text);
+  background: color-mix(in srgb, var(--pf-accent) 10%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option:focus-visible {
+  color: var(--pf-text);
+  box-shadow: inset 0 0 0 1px var(--pf-settings-input-border-focus);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option[data-selected="true"] {
+  background: transparent;
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option:disabled {
+  color: var(--pf-settings-input-disabled-color);
   opacity: 1;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-segment {
-  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent) !important;
-  background: var(--pf-settings-input-bg) !important;
-  color: var(--pf-settings-input-color) !important;
-  box-shadow: var(--pf-settings-input-shadow) !important;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-segment:hover:not(:disabled) {
-  border-color: var(--pf-settings-input-border-hover) !important;
-  background: var(--pf-settings-input-bg-hover) !important;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-segment:focus {
-  border-color: var(--pf-settings-input-border-focus) !important;
-  background: var(--pf-settings-input-bg-focus) !important;
-  box-shadow: var(--pf-settings-input-shadow-focus) !important;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-segment:disabled {
-  background: var(--pf-settings-input-bg-disabled) !important;
-  color: var(--pf-settings-input-disabled-color) !important;
-  opacity: 1;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-popover .pf-workspace-date-input {
-  border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent) !important;
-  background: var(--pf-settings-input-bg) !important;
-  color: var(--pf-settings-input-color) !important;
-  box-shadow: var(--pf-settings-input-shadow) !important;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-popover .pf-workspace-date-input:focus {
-  border-color: var(--pf-settings-input-border-focus) !important;
-  background: var(--pf-settings-input-bg-focus) !important;
-  box-shadow: var(--pf-settings-input-shadow-focus) !important;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell .pf-workspace-date-input {
-  border-color: transparent !important;
-  background: transparent !important;
-  color: var(--pf-settings-input-color) !important;
-  box-shadow: none !important;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell .pf-workspace-date-input:focus {
-  background: color-mix(in srgb, var(--pf-accent) 9%, transparent) !important;
-}
-
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell .pf-workspace-date-input:disabled {
-  color: var(--pf-settings-input-disabled-color) !important;
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-side-content textarea.pf-settings-prompt-textarea {
@@ -4147,6 +4180,10 @@ textarea {
   transform: translateX(-50%) translateY(-12px);
 }
 
+.pf-shell-workspace-shell.is-collapsed .pf-shell-workspace-handle.is-hover-pending {
+  transform: translateX(-50%) translateY(0) scale(1.08);
+}
+
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] .pf-shell-workspace-handle {
   background: rgb(41 45 35 / 0.88);
   box-shadow: 0 18px 44px rgb(0 0 0 / 0.2), inset 0 1px 0 rgb(255 245 224 / 0.08);
@@ -4448,6 +4485,10 @@ textarea {
   filter: saturate(0.92);
   transform: translate3d(0, 0, 0) scale(1);
   pointer-events: auto;
+}
+
+.pf-shell-theme-dock.is-collapsed.is-hover-pending {
+  transform: translate3d(0, 0, 0) scale(1.08);
 }
 
 .pf-shell-theme-dock.is-collapsed .pf-shell-theme-option:not([aria-pressed="true"]) {
@@ -7201,6 +7242,18 @@ textarea {
 @keyframes shimmer {
   100% {
     transform: translateX(100%);
+  }
+}
+
+@keyframes gallery-grid-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

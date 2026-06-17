@@ -87,6 +87,7 @@ interface InspirationListRestoreState {
   page: number;
   searchDraft: InspirationSearchFilters;
   activeSearch: InspirationSearchFilters;
+  resourceGroupDraftId?: string | null;
   selectedResourceGroupId: string | null;
   ownerSearch: string;
   mobileSearchOpen: boolean;
@@ -142,6 +143,10 @@ function restoredInspirationListState(value: unknown): InspirationListRestoreSta
     page: Number.isFinite(state.page) ? Math.max(1, Math.floor(state.page)) : 1,
     searchDraft: state.searchDraft,
     activeSearch: state.activeSearch,
+    resourceGroupDraftId:
+      typeof state.resourceGroupDraftId === "string" || state.resourceGroupDraftId === null
+        ? state.resourceGroupDraftId
+        : undefined,
     selectedResourceGroupId:
       typeof state.selectedResourceGroupId === "string" || state.selectedResourceGroupId === null
         ? state.selectedResourceGroupId
@@ -272,6 +277,9 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(
     () => restoredListStateRef.current?.selectedResourceGroupId ?? null,
   );
+  const [resourceGroupDraftId, setResourceGroupDraftId] = useState<string | null>(
+    () => restoredListStateRef.current?.resourceGroupDraftId ?? restoredListStateRef.current?.selectedResourceGroupId ?? null,
+  );
   const [ownerSearch, setOwnerSearch] = useState(() => restoredListStateRef.current?.ownerSearch ?? "");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(
     () => restoredListStateRef.current?.mobileSearchOpen ?? false,
@@ -354,6 +362,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
     if (!resourceGroups.length) {
       if (selectedResourceGroupId === null) {
         setSelectedResourceGroupId("");
+        setResourceGroupDraftId("");
         if (!hasRestoredListState) {
           setPage(1);
         }
@@ -361,12 +370,17 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
       return;
     }
     if (selectedResourceGroupId === null || (selectedResourceGroupId && !resourceGroups.some((group) => group.id === selectedResourceGroupId))) {
-      setSelectedResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
+      const firstResourceGroupId = firstActiveGenerationResourceGroupId(resourceGroups);
+      setSelectedResourceGroupId(firstResourceGroupId);
+      setResourceGroupDraftId(firstResourceGroupId);
       if (!hasRestoredListState) {
         setPage(1);
       }
     }
-  }, [generationResourceGroupsQuery.isFetched, hasRestoredListState, resourceGroups, selectedResourceGroupId]);
+    if (resourceGroupDraftId && !resourceGroups.some((group) => group.id === resourceGroupDraftId)) {
+      setResourceGroupDraftId(firstActiveGenerationResourceGroupId(resourceGroups));
+    }
+  }, [generationResourceGroupsQuery.isFetched, hasRestoredListState, resourceGroupDraftId, resourceGroups, selectedResourceGroupId]);
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -421,6 +435,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
     const nextSearch = normalizeInspirationSearchFilters(searchDraft);
     setSearchDraft(nextSearch);
     setActiveSearch(nextSearch);
+    setSelectedResourceGroupId(resourceGroupDraftId ?? "");
     setPage(1);
     setMobileSearchOpen(false);
   };
@@ -428,6 +443,8 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
   const clearSearch = () => {
     setSearchDraft(EMPTY_INSPIRATION_SEARCH);
     setActiveSearch(EMPTY_INSPIRATION_SEARCH);
+    setResourceGroupDraftId("");
+    setSelectedResourceGroupId("");
     setPage(1);
     setMobileSearchOpen(false);
   };
@@ -439,6 +456,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
       page,
       searchDraft,
       activeSearch,
+      resourceGroupDraftId,
       selectedResourceGroupId,
       ownerSearch,
       mobileSearchOpen,
@@ -540,7 +558,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
         onOwnerSearchChange={setOwnerSearch}
         resourceGroups={resourceGroups}
         resourceGroupsLoading={generationResourceGroupsQuery.isLoading}
-        selectedResourceGroupId={selectedResourceGroupId ?? ""}
+        selectedResourceGroupId={resourceGroupDraftId ?? ""}
         maskSensitiveImages={maskSensitiveImages}
         active={searchDraftActive || searchActive}
         activeCount={searchFilterCount}
@@ -549,10 +567,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
         onChange={setSearchDraft}
         onClear={clearSearch}
         onMobileToggle={() => setMobileSearchOpen((current) => !current)}
-        onResourceGroupChange={(value) => {
-          setSelectedResourceGroupId(value);
-          setPage(1);
-        }}
+        onResourceGroupChange={setResourceGroupDraftId}
         onMaskSensitiveImagesChange={setMaskSensitiveImages}
         onQuickRange={applyQuickRange}
         onSubmit={submitSearch}

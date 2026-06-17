@@ -163,15 +163,19 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [range, setRange] = useState<WorkspaceDateTimeRange>(() => workspaceQuickDateTimeRange("today"));
+  const [appliedRange, setAppliedRange] = useState<WorkspaceDateTimeRange>(range);
   const [activeQuickRange, setActiveQuickRange] = useState<WorkspaceQuickRangeId | null>("today");
   const [configSearch, setConfigSearch] = useState("");
   const rangeInvalid = Boolean(range.start_date && range.end_date && range.start_date > range.end_date);
-  const apiRange = dateRangeFromDateTimeRange(range);
+  const appliedRangeInvalid = Boolean(
+    appliedRange.start_date && appliedRange.end_date && appliedRange.start_date > appliedRange.end_date,
+  );
+  const apiRange = dateRangeFromDateTimeRange(appliedRange);
 
   const statusQuery = useQuery({
     queryKey: ["generation-config-status", apiRange.start_date, apiRange.end_date],
     queryFn: () => api.getGenerationConfigStatus(apiRange),
-    enabled: !rangeInvalid,
+    enabled: !appliedRangeInvalid,
     retry: false,
   });
 
@@ -198,6 +202,13 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
     image: summary?.today_image_attempt_count ?? 0,
   });
   const isWorkspaceSubpage = activeScheme === "workspace" && mode === "detail";
+  const refreshStatus = () => {
+    if (range.start_date === appliedRange.start_date && range.end_date === appliedRange.end_date) {
+      void statusQuery.refetch();
+      return;
+    }
+    setAppliedRange(range);
+  };
 
   return (
     <div className={`${isWorkspaceSubpage ? "pf-workspace" : "pf-app"} flex flex-col`}>
@@ -244,7 +255,7 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
               <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-end">
                   <button
                     type="button"
-                    onClick={() => void statusQuery.refetch()}
+                    onClick={refreshStatus}
                     disabled={statusQuery.isFetching || rangeInvalid}
                     className={PRIMARY_BUTTON_CLASS}
                   >

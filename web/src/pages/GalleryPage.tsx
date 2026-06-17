@@ -50,6 +50,7 @@ import { galleryAdminRemovedLabel } from "./gallery/moderation";
 
 const TAG_FILTER_MORE_BUTTON_WIDTH = 104;
 const TAG_FILTER_ROW_GAP = 8;
+const GALLERY_GRID_ENTER_MS = 260;
 
 interface GalleryTagFormState {
   name: string;
@@ -83,6 +84,10 @@ function galleryTagChipClass(selected: boolean): string {
   return selected
     ? "inline-flex h-8 max-w-full shrink-0 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-800 transition hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
     : "inline-flex h-8 max-w-full shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/90 px-3 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-200 dark:hover:border-violet-400/45 dark:hover:bg-violet-500/10";
+}
+
+function stringArraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
 function galleryTagFormFromTag(tag?: GalleryTag | null): GalleryTagFormState {
@@ -182,6 +187,10 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   const [deleteTagTarget, setDeleteTagTarget] = useState<GalleryTag | null>(null);
   const [entryTagEditorEntry, setEntryTagEditorEntry] = useState<GalleryEntry | null>(null);
   const [entryTagEditError, setEntryTagEditError] = useState("");
+  const [galleryLoadedOnce, setGalleryLoadedOnce] = useState(false);
+  const [galleryRevealReady, setGalleryRevealReady] = useState(true);
+  const [galleryVisibleTotal, setGalleryVisibleTotal] = useState(0);
+  const [galleryGridHoldHeight, setGalleryGridHoldHeight] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const tagFilterRef = useRef<HTMLDivElement | null>(null);
   const tagManageTitleId = useId();
@@ -216,9 +225,20 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
         include_disabled: canViewDisabledGallery,
         tag_ids: selectedTagIds,
       }),
+    gcTime: 0,
   });
   const entries = galleryQuery.data?.items ?? [];
   const galleryTotal = galleryQuery.data?.total ?? entries.length;
+  const visibleEntries = galleryRevealReady ? entries : [];
+  const displayedGalleryTotal = galleryRevealReady ? galleryTotal : galleryVisibleTotal;
+  const galleryGridEntering = galleryRevealReady && galleryGridHoldHeight != null;
+  const galleryGridStageStyle: CSSProperties | undefined = galleryGridHoldHeight
+    ? { minHeight: galleryGridHoldHeight }
+    : undefined;
+  const galleryInitialLoading = galleryQuery.isPending && !galleryLoadedOnce;
+  const galleryInitialError = galleryQuery.isError && !galleryLoadedOnce;
+  const galleryGridLoading = galleryLoadedOnce && (galleryQuery.isPending || !galleryRevealReady);
+  const galleryRefreshError = galleryQuery.isError && galleryLoadedOnce;
   const galleryTags = galleryTagsQuery.data ?? [];
   const manageableGalleryTags = manageGalleryTagsQuery.data ?? [];
   const galleryTagsById = useMemo(() => new Map(galleryTags.map((tag) => [tag.id, tag])), [galleryTags]);
@@ -232,6 +252,29 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   }, [galleryTags, selectedTagIds, selectedTags]);
   const visibleFilterTags = visibleGalleryFilterTags(orderedFilterTags, tagFilterWidth);
   const hiddenFilterTagCount = Math.max(0, galleryTags.length - visibleFilterTags.length);
+
+  const captureGalleryGridHeight = () => {
+    if (!galleryRevealReady && galleryGridHoldHeight != null) {
+      return;
+    }
+    setGalleryGridHoldHeight(gridRef.current?.getBoundingClientRect().height ?? null);
+  };
+
+  const beginGalleryGridTransition = () => {
+    if (!galleryLoadedOnce) {
+      return;
+    }
+    captureGalleryGridHeight();
+    setGalleryRevealReady(false);
+  };
+
+  const applyGalleryFilterTagIds = (tagIds: string[]) => {
+    if (stringArraysEqual(selectedTagIds, tagIds)) {
+      return;
+    }
+    beginGalleryGridTransition();
+    setSelectedTagIds(tagIds);
+  };
 
   useEffect(() => {
     const updateGridMetrics = () => {
@@ -285,8 +328,52 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       return;
     }
     const activeTagIds = new Set(galleryTags.map((tag) => tag.id));
-    setSelectedTagIds((current) => current.filter((tagId) => activeTagIds.has(tagId)).slice(0, maxGalleryTagSelection));
-  }, [galleryTags, galleryTagsQuery.data, maxGalleryTagSelection]);
+    const nextSelectedTagIds = selectedTagIds
+      .filter((tagId) => activeTagIds.has(tagId))
+      .slice(0, maxGalleryTagSelection);
+    applyGalleryFilterTagIds(nextSelectedTagIds);
+  }, [galleryTags, galleryTagsQuery.data, maxGalleryTagSelection, selectedTagIds]);
+
+  useEffect(() => {
+    if (galleryQuery.isSuccess && galleryRevealReady) {
+      setGalleryVisibleTotal(galleryTotal);
+    }
+  }, [galleryQuery.isSuccess, galleryRevealReady, galleryTotal]);
+
+  useEffect(() => {
+    if (galleryQuery.isError && galleryLoadedOnce) {
+      setGalleryRevealReady(true);
+      setGalleryGridHoldHeight(null);
+      return;
+    }
+
+    if (!galleryQuery.isSuccess) {
+      return;
+    }
+
+    if (!galleryLoadedOnce) {
+      setGalleryLoadedOnce(true);
+      setGalleryRevealReady(true);
+      setGalleryGridHoldHeight(null);
+      return;
+    }
+
+    if (galleryRevealReady) {
+      return;
+    }
+
+    setGalleryRevealReady(true);
+  }, [entries, galleryLoadedOnce, galleryQuery.isError, galleryQuery.isSuccess, galleryRevealReady]);
+
+  useEffect(() => {
+    if (!galleryGridEntering) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setGalleryGridHoldHeight(null);
+    }, GALLERY_GRID_ENTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [galleryGridEntering]);
 
   useEffect(() => {
     setPromptCopyState("idle");
@@ -475,18 +562,17 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   };
 
   const toggleFilterTag = (tag: GalleryTag) => {
-    setSelectedTagIds((current) => {
-      if (current.includes(tag.id)) {
-        setTagFilterError("");
-        return current.filter((tagId) => tagId !== tag.id);
-      }
-      if (current.length >= maxGalleryTagSelection) {
-        setTagFilterError(t("gallery.tags.maxSelected", { count: maxGalleryTagSelection }));
-        return current;
-      }
+    if (selectedTagIds.includes(tag.id)) {
       setTagFilterError("");
-      return [...current, tag.id];
-    });
+      applyGalleryFilterTagIds(selectedTagIds.filter((tagId) => tagId !== tag.id));
+      return;
+    }
+    if (selectedTagIds.length >= maxGalleryTagSelection) {
+      setTagFilterError(t("gallery.tags.maxSelected", { count: maxGalleryTagSelection }));
+      return;
+    }
+    setTagFilterError("");
+    applyGalleryFilterTagIds([...selectedTagIds, tag.id]);
   };
 
   const openTagManageDialog = () => {
@@ -712,11 +798,11 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       <main className={isWorkspaceManage ? "pf-workspace-subpage flex-1" : "w-full"}>
         <div className={isWorkspaceManage ? "pf-workspace-subpage-frame-shell" : "contents"}>
           <div className={isWorkspaceManage ? "pf-workspace-subpage-frame" : "contents"}>
-        {galleryQuery.isLoading ? (
+        {galleryInitialLoading ? (
           <div className="flex min-h-[calc(100svh-80px)] items-center justify-center bg-[#f3eadc] text-slate-500">
             <Loader2 size={28} className="animate-spin" />
           </div>
-        ) : galleryQuery.isError ? (
+        ) : galleryInitialError ? (
           <div className="flex min-h-[calc(100svh-80px)] items-center justify-center bg-[#f3eadc] px-6 text-sm font-medium text-red-700">
             {t("gallery.loadFailed")}
           </div>
@@ -730,7 +816,9 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                   <p className="mt-2 max-w-3xl text-sm leading-6">{t("gallery.description")}</p>
                 </div>
                 <div className="flex flex-col gap-3 sm:items-end">
-                  <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{t("gallery.count", { count: galleryTotal })}</div>
+                  <div className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                    {t("gallery.count", { count: displayedGalleryTotal })}
+                  </div>
                   {manageTagButton}
                 </div>
               </section>
@@ -783,7 +871,9 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                   <h2 className="mt-2 text-2xl font-black text-white">{t("gallery.works")}</h2>
                 </div>
                 <div className="flex flex-col gap-3 sm:items-end">
-                  <div className="text-sm font-medium text-white/55">{t("gallery.count", { count: galleryTotal })}</div>
+                  <div className="text-sm font-medium text-white/55">
+                    {t("gallery.count", { count: displayedGalleryTotal })}
+                  </div>
                   {manageTagButton}
                 </div>
               </div>
@@ -841,99 +931,123 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                   {moderationError}
                 </div>
               ) : null}
+              {galleryRefreshError ? (
+                <div className="mx-auto mb-4 max-w-7xl rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-400/30 dark:bg-red-500/15 dark:text-red-100">
+                  {t("gallery.loadFailed")}
+                </div>
+              ) : null}
 
-              {entries.length ? (
+              {visibleEntries.length ? (
+                <div className="relative mx-auto max-w-7xl" style={galleryGridStageStyle}>
+                    <div
+                      ref={gridRef}
+                      className={`relative grid grid-flow-dense grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-12 lg:auto-rows-[8px] ${
+                        galleryGridEntering ? "motion-safe:animate-[gallery-grid-enter_260ms_cubic-bezier(0,0,0.2,1)_both]" : ""
+                      }`}
+                    >
+                    {visibleEntries.map((entry, index) => {
+                      const tileLayout = galleryTileLayout(entry, index, gridContentWidth ?? undefined);
+                      const adminRemovedLabel = galleryAdminRemovedLabel(entry, t);
+                      const moderationEnabled = entry.enabled !== false;
+                      const moderationActionLabel = moderationEnabled ? t("gallery.removeEntry") : t("gallery.restoreEntry");
+                      const isModeratingEntry = moderationMutation.isPending && moderationMutation.variables?.entry.id === entry.id;
+                      const tileStyle: CSSProperties = {
+                        aspectRatio: tileLayout.aspectRatio,
+                        ...(isDesktopGrid ? { gridRowEnd: `span ${tileLayout.rowSpan}` } : {}),
+                      };
+                      const imageAspectRatio = galleryEntryAspectRatio(entry);
+                      const tileAspectRatio = Number(tileLayout.aspectRatio);
+                      const imageFrameStyle: CSSProperties = {
+                        aspectRatio: imageAspectRatio.toFixed(4),
+                        ...(imageAspectRatio >= tileAspectRatio ? { width: "100%" } : { height: "100%", width: "auto" }),
+                      };
+                      const handleModerationClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
+                        event.stopPropagation();
+                        moderationMutation.mutate({ enabled: !moderationEnabled, entry });
+                      };
+                      return (
+                        <article
+                          key={entry.id}
+                          className={`group relative min-w-0 overflow-hidden rounded-md bg-transparent text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-[#0b4eea]/20 ${tileLayout.className}`}
+                          style={tileStyle}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleEntryClick(entry)}
+                            className="block h-full w-full text-left"
+                          >
+                            <div className="flex h-full w-full items-center justify-center overflow-hidden bg-transparent">
+                              <div className="relative max-h-full max-w-full overflow-hidden bg-transparent" style={imageFrameStyle}>
+                                <img
+                                  src={api.toApiUrl(entry.image.thumbnail_url)}
+                                  alt={entry.prompt ?? entry.image.original_filename}
+                                  loading="lazy"
+                                  decoding="async"
+                                  className={`h-full w-full object-cover transition duration-300 ${adminRemovedLabel ? "opacity-55 grayscale" : ""}`}
+                                />
+                                {adminRemovedLabel ? (
+                                  <div
+                                    className="absolute left-3 top-3 z-10 inline-flex max-w-[calc(100%-1.5rem)] items-center rounded-md border border-red-200 bg-red-50/95 px-2 py-1 text-[11px] font-semibold text-red-700 shadow-sm dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-100"
+                                    title={adminRemovedLabel}
+                                  >
+                                    <Ban size={12} className="mr-1.5 shrink-0" aria-hidden="true" />
+                                    <span className="truncate">{adminRemovedLabel}</span>
+                                  </div>
+                                ) : null}
+                                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[56%] bg-gradient-to-t from-slate-950/82 via-slate-950/12 to-transparent opacity-80 transition-opacity group-hover:opacity-95" />
+                                <div className="absolute inset-x-0 bottom-0 p-4 text-white">
+                                  <div className="line-clamp-2 text-sm font-semibold leading-5">
+                                    {entry.prompt ?? entry.image.original_filename}
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/70">
+                                    <span>{galleryEntrySizeLabel(entry, locale)}</span>
+                                    {showGenerationResourceGroup ? <span>{entry.resource_group.name}</span> : null}
+                                    <span>{formatDateTime(entry.created_at)}</span>
+                                    <span>{t("gallery.views", { count: entry.view_count })}</span>
+                                  </div>
+                                  {renderEntryTags(entry.tags, "mt-2")}
+                                  <ResourceMetaBadges resource={entry} className="mt-2" showReason={Boolean(adminRemovedLabel)} />
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                          {canModerateGallery ? (
+                            <button
+                              type="button"
+                              aria-label={moderationActionLabel}
+                              title={moderationActionLabel}
+                              onClick={handleModerationClick}
+                              disabled={isModeratingEntry}
+                              className="absolute right-3 top-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/20 bg-slate-950/82 text-white shadow-sm backdrop-blur transition-colors hover:bg-slate-800 disabled:opacity-60 dark:border-white/15"
+                            >
+                              {isModeratingEntry ? (
+                                <Loader2 size={15} className="animate-spin" />
+                              ) : moderationEnabled ? (
+                                <Ban size={15} />
+                              ) : (
+                                <RotateCcw size={15} />
+                              )}
+                            </button>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                    </div>
+                </div>
+              ) : galleryGridLoading && galleryGridHoldHeight ? (
                 <div
                   ref={gridRef}
-                  className="mx-auto grid max-w-7xl grid-flow-dense grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-12 lg:auto-rows-[8px]"
+                  className="mx-auto max-w-7xl"
+                  style={galleryGridStageStyle}
+                  aria-busy="true"
+                  aria-live="polite"
                 >
-                {entries.map((entry, index) => {
-                  const tileLayout = galleryTileLayout(entry, index, gridContentWidth ?? undefined);
-                  const adminRemovedLabel = galleryAdminRemovedLabel(entry, t);
-                  const moderationEnabled = entry.enabled !== false;
-                  const moderationActionLabel = moderationEnabled ? t("gallery.removeEntry") : t("gallery.restoreEntry");
-                  const isModeratingEntry = moderationMutation.isPending && moderationMutation.variables?.entry.id === entry.id;
-                  const tileStyle: CSSProperties = {
-                    aspectRatio: tileLayout.aspectRatio,
-                    ...(isDesktopGrid ? { gridRowEnd: `span ${tileLayout.rowSpan}` } : {}),
-                  };
-                  const imageAspectRatio = galleryEntryAspectRatio(entry);
-                  const tileAspectRatio = Number(tileLayout.aspectRatio);
-                  const imageFrameStyle: CSSProperties = {
-                    aspectRatio: imageAspectRatio.toFixed(4),
-                    ...(imageAspectRatio >= tileAspectRatio ? { width: "100%" } : { height: "100%", width: "auto" }),
-                  };
-                  const handleModerationClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
-                    event.stopPropagation();
-                    moderationMutation.mutate({ enabled: !moderationEnabled, entry });
-                  };
-                  return (
-                    <article
-                      key={entry.id}
-                      className={`group relative min-w-0 overflow-hidden rounded-md bg-transparent text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-[#0b4eea]/20 ${tileLayout.className}`}
-                      style={tileStyle}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleEntryClick(entry)}
-                        className="block h-full w-full text-left"
-                      >
-                        <div className="flex h-full w-full items-center justify-center overflow-hidden bg-transparent">
-                          <div className="relative max-h-full max-w-full overflow-hidden bg-transparent" style={imageFrameStyle}>
-                            <img
-                              src={api.toApiUrl(entry.image.thumbnail_url)}
-                              alt={entry.prompt ?? entry.image.original_filename}
-                              loading="lazy"
-                              decoding="async"
-                              className={`h-full w-full object-cover transition duration-300 ${adminRemovedLabel ? "opacity-55 grayscale" : ""}`}
-                            />
-                            {adminRemovedLabel ? (
-                              <div
-                                className="absolute left-3 top-3 z-10 inline-flex max-w-[calc(100%-1.5rem)] items-center rounded-md border border-red-200 bg-red-50/95 px-2 py-1 text-[11px] font-semibold text-red-700 shadow-sm dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-100"
-                                title={adminRemovedLabel}
-                              >
-                                <Ban size={12} className="mr-1.5 shrink-0" aria-hidden="true" />
-                                <span className="truncate">{adminRemovedLabel}</span>
-                              </div>
-                            ) : null}
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[56%] bg-gradient-to-t from-slate-950/82 via-slate-950/12 to-transparent opacity-80 transition-opacity group-hover:opacity-95" />
-                            <div className="absolute inset-x-0 bottom-0 p-4 text-white">
-                              <div className="line-clamp-2 text-sm font-semibold leading-5">
-                                {entry.prompt ?? entry.image.original_filename}
-                              </div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-white/70">
-                                <span>{galleryEntrySizeLabel(entry, locale)}</span>
-                                {showGenerationResourceGroup ? <span>{entry.resource_group.name}</span> : null}
-                                <span>{formatDateTime(entry.created_at)}</span>
-                                <span>{t("gallery.views", { count: entry.view_count })}</span>
-                              </div>
-                              {renderEntryTags(entry.tags, "mt-2")}
-                              <ResourceMetaBadges resource={entry} className="mt-2" showReason={Boolean(adminRemovedLabel)} />
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                      {canModerateGallery ? (
-                        <button
-                          type="button"
-                          aria-label={moderationActionLabel}
-                          title={moderationActionLabel}
-                          onClick={handleModerationClick}
-                          disabled={isModeratingEntry}
-                          className="absolute right-3 top-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/20 bg-slate-950/82 text-white shadow-sm backdrop-blur transition-colors hover:bg-slate-800 disabled:opacity-60 dark:border-white/15"
-                        >
-                          {isModeratingEntry ? (
-                            <Loader2 size={15} className="animate-spin" />
-                          ) : moderationEnabled ? (
-                            <Ban size={15} />
-                          ) : (
-                            <RotateCcw size={15} />
-                          )}
-                        </button>
-                      ) : null}
-                    </article>
-                  );
-                })}
+                  <span className="sr-only">{t("app.loading")}</span>
+                </div>
+              ) : galleryGridLoading ? (
+                <div className="mx-auto flex min-h-[320px] max-w-7xl items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-sm font-semibold text-white/70 dark:border-slate-700 dark:bg-slate-950/25 dark:text-slate-300">
+                  <Loader2 size={18} className="mr-2 animate-spin" />
+                  {t("app.loading")}
                 </div>
               ) : (
                 <div className="mx-auto flex min-h-[320px] max-w-7xl flex-col items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-center text-sm text-white/65 dark:border-slate-700 dark:bg-slate-950/25 dark:text-slate-400">
@@ -962,7 +1076,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
         maxSelection={maxGalleryTagSelection}
         error={tagFilterError}
         onConfirm={(tagIds) => {
-          setSelectedTagIds(tagIds);
+          applyGalleryFilterTagIds(tagIds);
           setTagFilterError("");
           setTagFilterDialogOpen(false);
         }}

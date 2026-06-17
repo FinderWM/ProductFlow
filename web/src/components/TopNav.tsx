@@ -158,6 +158,8 @@ const DESKTOP_NAV_HORIZONTAL_CHROME_PX = 36;
 const WORKSPACE_NAV_HORIZONTAL_CHROME_PX = 36;
 const WORKSPACE_BRAND_NAV_GAP_PX = 14;
 const NAV_AUTO_HIDE_DELAY_MS = 5_000;
+const NAV_HOVER_REVEAL_DELAY_MS = 500;
+const WORKSPACE_THEME_DOCK_REVEAL_DELAY_MS = 500;
 const WORKSPACE_THEME_DOCK_REVEAL_MARGIN_PX = 16;
 const CURTAIN_EASING = "cubic-bezier(0.18, 0.9, 0.2, 1.12)";
 export const TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS = "h-[4.5rem] md:h-[4.65rem]";
@@ -685,10 +687,11 @@ function curtainPanelClassName(open: boolean) {
   ].join(" ");
 }
 
-function curtainHandleClassName(open: boolean) {
+function curtainHandleClassName(open: boolean, hoverRevealPending: boolean) {
   return [
     "pf-shell-curtain-handle absolute left-1/2 z-[55] inline-flex h-7 w-16 -translate-x-1/2 items-center justify-center rounded-b-xl border border-t-0 border-slate-200 bg-white/95 text-slate-500 shadow-lg shadow-slate-950/10 backdrop-blur transition-[transform,opacity] duration-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-[#070b13]/95 dark:text-slate-300 dark:shadow-black/30 dark:focus-visible:ring-violet-400",
     open ? "pointer-events-none top-0 -translate-y-3 opacity-0" : "top-0 translate-y-0 opacity-100",
+    !open && hoverRevealPending ? "scale-[1.08]" : "scale-100",
   ].join(" ");
 }
 
@@ -1496,14 +1499,18 @@ export function TopNav({ onLogout }: TopNavProps) {
   const mobileMorePanelRef = useRef<HTMLDivElement | null>(null);
   const curtainRef = useRef<HTMLDivElement | null>(null);
   const curtainAutoHideTimerRef = useRef<number | null>(null);
+  const curtainHoverRevealTimerRef = useRef<number | null>(null);
   const workspaceThemeDockRef = useRef<HTMLDivElement | null>(null);
   const workspaceThemeDockAutoHideTimerRef = useRef<number | null>(null);
+  const workspaceThemeDockHoverRevealTimerRef = useRef<number | null>(null);
   const [desktopOverflowKeys, setDesktopOverflowKeys] = useState<string[]>([]);
   const [workspaceOverflowKeys, setWorkspaceOverflowKeys] = useState<string[]>([]);
   const [desktopMoreOpen, setDesktopMoreOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [curtainOpen, setCurtainOpen] = useState(true);
+  const [curtainHoverRevealPending, setCurtainHoverRevealPending] = useState(false);
   const [workspaceThemeDockOpen, setWorkspaceThemeDockOpen] = useState(true);
+  const [workspaceThemeDockHoverRevealPending, setWorkspaceThemeDockHoverRevealPending] = useState(false);
   const location = useLocation();
   const {
     locale,
@@ -1631,6 +1638,32 @@ export function TopNav({ onLogout }: TopNavProps) {
     scheduleCurtainAutoHide();
   }, [scheduleCurtainAutoHide]);
 
+  const clearCurtainHoverRevealTimer = useCallback(() => {
+    if (curtainHoverRevealTimerRef.current !== null) {
+      window.clearTimeout(curtainHoverRevealTimerRef.current);
+      curtainHoverRevealTimerRef.current = null;
+    }
+    setCurtainHoverRevealPending(false);
+  }, []);
+
+  const scheduleCurtainHoverReveal = useCallback(() => {
+    clearCurtainHoverRevealTimer();
+    if (curtainOpen) {
+      return;
+    }
+    setCurtainHoverRevealPending(true);
+    curtainHoverRevealTimerRef.current = window.setTimeout(() => {
+      setCurtainHoverRevealPending(false);
+      keepCurtainOpen();
+      curtainHoverRevealTimerRef.current = null;
+    }, NAV_HOVER_REVEAL_DELAY_MS);
+  }, [clearCurtainHoverRevealTimer, curtainOpen, keepCurtainOpen]);
+
+  const openCurtainImmediately = useCallback(() => {
+    clearCurtainHoverRevealTimer();
+    keepCurtainOpen();
+  }, [clearCurtainHoverRevealTimer, keepCurtainOpen]);
+
   const clearWorkspaceThemeDockAutoHideTimer = useCallback(() => {
     if (workspaceThemeDockAutoHideTimerRef.current !== null) {
       window.clearTimeout(workspaceThemeDockAutoHideTimerRef.current);
@@ -1638,18 +1671,46 @@ export function TopNav({ onLogout }: TopNavProps) {
     }
   }, []);
 
+  const clearWorkspaceThemeDockHoverRevealTimer = useCallback(() => {
+    if (workspaceThemeDockHoverRevealTimerRef.current !== null) {
+      window.clearTimeout(workspaceThemeDockHoverRevealTimerRef.current);
+      workspaceThemeDockHoverRevealTimerRef.current = null;
+    }
+    setWorkspaceThemeDockHoverRevealPending(false);
+  }, []);
+
+  const scheduleWorkspaceThemeDockHoverReveal = useCallback(() => {
+    clearWorkspaceThemeDockHoverRevealTimer();
+    clearWorkspaceThemeDockAutoHideTimer();
+    if (workspaceThemeDockOpen) {
+      return;
+    }
+    setWorkspaceThemeDockHoverRevealPending(true);
+    workspaceThemeDockHoverRevealTimerRef.current = window.setTimeout(() => {
+      setWorkspaceThemeDockHoverRevealPending(false);
+      setWorkspaceThemeDockOpen(true);
+      workspaceThemeDockHoverRevealTimerRef.current = null;
+    }, WORKSPACE_THEME_DOCK_REVEAL_DELAY_MS);
+  }, [
+    clearWorkspaceThemeDockAutoHideTimer,
+    clearWorkspaceThemeDockHoverRevealTimer,
+    workspaceThemeDockOpen,
+  ]);
+
   const scheduleWorkspaceThemeDockAutoHide = useCallback(() => {
+    clearWorkspaceThemeDockHoverRevealTimer();
     clearWorkspaceThemeDockAutoHideTimer();
     workspaceThemeDockAutoHideTimerRef.current = window.setTimeout(() => {
       setWorkspaceThemeDockOpen(false);
       workspaceThemeDockAutoHideTimerRef.current = null;
     }, NAV_AUTO_HIDE_DELAY_MS);
-  }, [clearWorkspaceThemeDockAutoHideTimer]);
+  }, [clearWorkspaceThemeDockAutoHideTimer, clearWorkspaceThemeDockHoverRevealTimer]);
 
   const keepWorkspaceThemeDockOpen = useCallback(() => {
+    clearWorkspaceThemeDockHoverRevealTimer();
     clearWorkspaceThemeDockAutoHideTimer();
     setWorkspaceThemeDockOpen(true);
-  }, [clearWorkspaceThemeDockAutoHideTimer]);
+  }, [clearWorkspaceThemeDockAutoHideTimer, clearWorkspaceThemeDockHoverRevealTimer]);
 
   const clearDesktopMoreCloseTimer = useCallback(() => {
     if (desktopMoreCloseTimerRef.current !== null) {
@@ -1789,9 +1850,17 @@ export function TopNav({ onLogout }: TopNavProps) {
     () => () => {
       clearDesktopMoreCloseTimer();
       clearCurtainAutoHideTimer();
+      clearCurtainHoverRevealTimer();
+      clearWorkspaceThemeDockHoverRevealTimer();
       clearWorkspaceThemeDockAutoHideTimer();
     },
-    [clearCurtainAutoHideTimer, clearDesktopMoreCloseTimer, clearWorkspaceThemeDockAutoHideTimer],
+    [
+      clearCurtainAutoHideTimer,
+      clearCurtainHoverRevealTimer,
+      clearDesktopMoreCloseTimer,
+      clearWorkspaceThemeDockHoverRevealTimer,
+      clearWorkspaceThemeDockAutoHideTimer,
+    ],
   );
 
   useEffect(() => {
@@ -2082,6 +2151,7 @@ export function TopNav({ onLogout }: TopNavProps) {
         className={[
           "pf-shell-theme-dock",
           workspaceThemeDockOpen ? "is-open" : "is-collapsed",
+          workspaceThemeDockHoverRevealPending ? "is-hover-pending" : "",
         ].filter(Boolean).join(" ")}
         onBlurCapture={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -2089,7 +2159,7 @@ export function TopNav({ onLogout }: TopNavProps) {
           }
         }}
         onFocusCapture={keepWorkspaceThemeDockOpen}
-        onPointerEnter={keepWorkspaceThemeDockOpen}
+        onPointerEnter={scheduleWorkspaceThemeDockHoverReveal}
         onPointerLeave={scheduleWorkspaceThemeDockAutoHide}
       >
         {WORKSPACE_APPEARANCE_METADATA.map((appearance) => {
@@ -2267,9 +2337,14 @@ export function TopNav({ onLogout }: TopNavProps) {
             type="button"
             aria-label={t("nav.more")}
             aria-expanded={curtainOpen}
-            className="pf-shell-workspace-handle"
+            className={[
+              "pf-shell-workspace-handle",
+              curtainHoverRevealPending ? "is-hover-pending" : "",
+            ].filter(Boolean).join(" ")}
             style={{ transitionTimingFunction: CURTAIN_EASING }}
-            onClick={keepCurtainOpen}
+            onPointerEnter={scheduleCurtainHoverReveal}
+            onPointerLeave={clearCurtainHoverRevealTimer}
+            onClick={openCurtainImmediately}
           >
             <ChevronDown size={17} aria-hidden="true" />
           </button>
@@ -2537,9 +2612,11 @@ export function TopNav({ onLogout }: TopNavProps) {
           type="button"
           aria-label={t("nav.more")}
           aria-expanded={curtainOpen}
-          className={curtainHandleClassName(curtainOpen)}
+          className={curtainHandleClassName(curtainOpen, curtainHoverRevealPending)}
           style={{ transitionTimingFunction: CURTAIN_EASING }}
-          onClick={keepCurtainOpen}
+          onPointerEnter={scheduleCurtainHoverReveal}
+          onPointerLeave={clearCurtainHoverRevealTimer}
+          onClick={openCurtainImmediately}
         >
           <ChevronDown size={17} aria-hidden="true" />
         </button>

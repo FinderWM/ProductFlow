@@ -139,6 +139,10 @@ def _normalize_v2_payload_dict(raw_payload: dict[str, Any]) -> dict[str, Any]:
                 for index, block in enumerate(blocks, start=1)
             ]
             content["blocks"] = [block for block in normalized_blocks if _normalized_block_has_text(block)]
+            if not content["blocks"]:
+                fallback_text = _fallback_block_text(payload, content)
+                if fallback_text:
+                    content["blocks"] = [{"id": "summary-1", "role": "summary", "label": "摘要", "text": fallback_text}]
     elif content.get("kind") == "layout_brief":
         sections = content.get("sections")
         if isinstance(sections, list):
@@ -249,6 +253,14 @@ def _normalize_block_dict(raw_block: Any, *, fallback_id: str, index: int) -> An
 
 def _normalized_block_has_text(block: Any) -> bool:
     return not isinstance(block, dict) or bool(_string_or_none(block.get("text")))
+
+
+def _fallback_block_text(payload: dict[str, Any], content: dict[str, Any]) -> str:
+    for key in ("text", "copy", "body", "description", "items"):
+        text = _text_from_any(content.get(key), pair_separator="；")
+        if text:
+            return text
+    return _string_or_empty(payload.get("summary"))
 
 
 def _freeform_text_from_content(content: dict[str, Any]) -> str:

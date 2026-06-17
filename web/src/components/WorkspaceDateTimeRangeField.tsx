@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock, RotateCcw } from "lucide-react";
 
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
@@ -124,6 +124,9 @@ function formatDateTimeRangeDisplayValue(value: string): string {
     return "";
   }
   const [datePart, timePart = ""] = value.split("T");
+  if (!timePart) {
+    return datePart.replaceAll("-", "/");
+  }
   const normalizedTime = timePart.length === 5 ? `${timePart}:00` : timePart;
   return `${datePart.replaceAll("-", "/")} ${normalizedTime}`;
 }
@@ -142,18 +145,24 @@ function timePartFromDateTimeLocal(value: string, fallback: string): string {
   return fallback;
 }
 
+function hasTimePartFromDateTimeLocal(value: string): boolean {
+  const [, timePart = ""] = value.split("T");
+  return /^\d{2}:\d{2}(:\d{2})?$/.test(timePart);
+}
+
+function formatTimePartDisplayValue(value: string): string {
+  return hasTimePartFromDateTimeLocal(value) ? timePartFromDateTimeLocal(value, "") : "";
+}
+
+export function removeWorkspaceTimePart(value: string): string {
+  return datePartFromDateTimeLocal(value);
+}
+
 export function composeDateTimeLocalSecondValue(datePart: string, timePart: string, fallbackTime: string): string {
   if (!datePart) {
     return "";
   }
   return `${datePart}T${timePartFromDateTimeLocal(`2000-01-01T${timePart}`, fallbackTime)}`;
-}
-
-function splitDateTimeLocalValue(value: string, fallbackTime: string): { date: string; time: string } {
-  return {
-    date: datePartFromDateTimeLocal(value),
-    time: timePartFromDateTimeLocal(value, fallbackTime),
-  };
 }
 
 function splitTimeParts(value: string): [string, string, string] {
@@ -185,6 +194,10 @@ export function shiftWorkspaceTimePart(time: string, part: WorkspaceTimePart, de
   return parts.join(":");
 }
 
+export function workspaceTimePartOptions(part: WorkspaceTimePart): string[] {
+  return Array.from({ length: WORKSPACE_TIME_PART_MAX[part] + 1 }, (_, value) => padDatePart(value));
+}
+
 function clampDraftRange(range: WorkspaceDateTimeRange, changedBoundary: WorkspaceRangeBoundary): WorkspaceDateTimeRange {
   if (!range.start_date || !range.end_date || range.start_date <= range.end_date) {
     return range;
@@ -192,6 +205,28 @@ function clampDraftRange(range: WorkspaceDateTimeRange, changedBoundary: Workspa
   return changedBoundary === "start"
     ? { start_date: range.start_date, end_date: range.start_date }
     : { start_date: range.end_date, end_date: range.end_date };
+}
+
+export function selectWorkspaceDateRangeDay(
+  range: WorkspaceDateTimeRange,
+  activeBoundary: WorkspaceRangeBoundary,
+  datePart: string,
+): { range: WorkspaceDateTimeRange; activeBoundary: WorkspaceRangeBoundary } {
+  const field = rangeBoundaryField(activeBoundary);
+  const fallbackTime = activeBoundary === "start" ? "00:00:00" : "23:59:59";
+  const currentTime = timePartFromDateTimeLocal(range[field], fallbackTime);
+  const hasTime = hasTimePartFromDateTimeLocal(range[field]);
+  const nextRange = clampDraftRange(
+    {
+      ...range,
+      [field]: hasTime ? composeDateTimeLocalSecondValue(datePart, currentTime, fallbackTime) : datePart,
+    },
+    activeBoundary,
+  );
+  return {
+    range: nextRange,
+    activeBoundary: activeBoundary === "start" ? "end" : "start",
+  };
 }
 
 function parseDatePart(value: string): { year: number; monthIndex: number; day: number } | null {
@@ -252,7 +287,7 @@ function rangeBoundaryField(boundary: WorkspaceRangeBoundary): keyof WorkspaceDa
   return boundary === "start" ? "start_date" : "end_date";
 }
 
-interface WorkspaceTimeSegmentsProps {
+interface WorkspaceTimeColumnsProps {
   idPrefix: string;
   boundary: WorkspaceRangeBoundary;
   value: string;
@@ -262,7 +297,7 @@ interface WorkspaceTimeSegmentsProps {
   onChange: (boundary: WorkspaceRangeBoundary, part: WorkspaceTimePart, value: string) => void;
 }
 
-function WorkspaceTimeSegments({
+function WorkspaceTimeColumns({
   idPrefix,
   boundary,
   value,
@@ -270,50 +305,87 @@ function WorkspaceTimeSegments({
   label,
   onFocus,
   onChange,
-}: WorkspaceTimeSegmentsProps) {
+}: WorkspaceTimeColumnsProps) {
   const { t } = useI18n();
-  const parts = splitTimeParts(value);
+  const [hour, minute, second] = splitTimeParts(value);
+  const selectedValues: Record<WorkspaceTimePart, string> = { hour, minute, second };
+  const selectedButtonRefs = useRef<Partial<Record<WorkspaceTimePart, HTMLButtonElement | null>>>({});
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>, part: WorkspaceTimePart) => {
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+  useEffect(() => {
+    WORKSPACE_TIME_PARTS.forEach((part) => {
+      selectedButtonRefs.current[part]?.scrollIntoView?.({ block: "center" });
+    });
+  }, [hour, minute, second]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, part: WorkspaceTimePart) => {
+    if (disabled) {
       return;
     }
-    event.preventDefault();
-    onChange(boundary, part, shiftWorkspaceTimePart(value, part, event.key === "ArrowUp" ? 1 : -1).split(":")[
-      WORKSPACE_TIME_PART_INDEX[part]
-    ]);
+    const partIndex = WORKSPACE_TIME_PART_INDEX[part];
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      onChange(
+        boundary,
+        part,
+        shiftWorkspaceTimePart(value, part, event.key === "ArrowDown" ? 1 : -1).split(":")[partIndex],
+      );
+      return;
+    }
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      onChange(boundary, part, event.key === "Home" ? "00" : padDatePart(WORKSPACE_TIME_PART_MAX[part]));
+    }
   };
 
   return (
-    <div className="pf-workspace-time-segments mt-2 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-1">
-      {WORKSPACE_TIME_PARTS.map((part, index) => (
-        <Fragment key={part}>
-          {index > 0 ? (
-            <span className="text-center text-sm font-semibold text-[color:var(--pf-subtle)]">
-              :
-            </span>
-          ) : null}
-          <input
-            id={`${idPrefix}-${boundary}-${part}`}
-            name={`${idPrefix}_${boundary}_${part}`}
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={parts[WORKSPACE_TIME_PART_INDEX[part]]}
-            disabled={disabled}
-            aria-label={`${label} ${t(WORKSPACE_TIME_PART_LABEL_KEYS[part])}`}
-            onFocus={(event) => {
-              onFocus();
-              event.currentTarget.select();
-            }}
-            onClick={(event) => event.currentTarget.select()}
-            onMouseUp={(event) => event.preventDefault()}
-            onChange={(event) => onChange(boundary, part, event.target.value)}
-            onKeyDown={(event) => handleKeyDown(event, part)}
-            className="pf-workspace-time-segment h-8 min-w-0 rounded-lg border px-1 text-center text-sm font-semibold tabular-nums outline-none transition disabled:cursor-not-allowed"
-          />
-        </Fragment>
-      ))}
+    <div
+      className="pf-workspace-time-columns grid grid-cols-3 overflow-hidden rounded-xl border bg-white/80 text-zinc-900 dark:bg-slate-950/70 dark:text-slate-100"
+      role="group"
+      aria-label={`${label} ${t("statusPage.time")}`}
+    >
+      {WORKSPACE_TIME_PARTS.map((part) => {
+        const partLabel = t(WORKSPACE_TIME_PART_LABEL_KEYS[part]);
+        return (
+          <div
+            key={part}
+            className="pf-workspace-time-column min-w-0 border-r border-zinc-200/70 last:border-r-0 dark:border-slate-700/80"
+          >
+            <div className="pf-workspace-time-column-scroll h-64 overflow-y-auto overscroll-contain py-[6.875rem]">
+              {workspaceTimePartOptions(part).map((option) => {
+                const selected = option === selectedValues[part];
+                return (
+                  <button
+                    key={option}
+                    ref={(element) => {
+                      if (selected) {
+                        selectedButtonRefs.current[part] = element;
+                      }
+                    }}
+                    id={`${idPrefix}-${boundary}-${part}-${option}`}
+                    type="button"
+                    disabled={disabled}
+                    aria-pressed={selected}
+                    aria-label={`${label} ${partLabel} ${option}`}
+                    data-selected={selected ? "true" : undefined}
+                    onFocus={onFocus}
+                    onClick={() => {
+                      onFocus();
+                      onChange(boundary, part, option);
+                    }}
+                    onKeyDown={(event) => handleKeyDown(event, part)}
+                    className="pf-workspace-time-option flex h-9 w-full items-center justify-center gap-0.5 px-1 text-sm font-semibold tabular-nums outline-none transition data-[selected=true]:bg-zinc-100 data-[selected=true]:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-50 dark:data-[selected=true]:bg-slate-800 dark:data-[selected=true]:text-slate-50"
+                  >
+                    <span>{option}</span>
+                    {selected ? (
+                      <span className="text-[10px] font-semibold leading-none opacity-80">{partLabel}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -339,17 +411,19 @@ export function WorkspaceDateTimeRangeField({
 }: WorkspaceDateTimeRangeFieldProps) {
   const { locale, t } = useI18n();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [timePickerBoundary, setTimePickerBoundary] = useState<WorkspaceRangeBoundary | null>(null);
   const [draftRange, setDraftRange] = useState<WorkspaceDateTimeRange>(value);
   const [activeBoundary, setActiveBoundary] = useState<WorkspaceRangeBoundary>("start");
   const [visibleMonth, setVisibleMonth] = useState<Date>(() => monthDateFromRange(value));
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const startBoundaryRef = useRef<HTMLButtonElement | null>(null);
   const endBoundaryRef = useRef<HTMLButtonElement | null>(null);
+  const startTimeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const endTimeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const rangePanelId = `${idPrefix}-range-panel`;
+  const timePanelId = `${idPrefix}-time-panel`;
   const displayStart = formatDateTimeRangeDisplayValue(value.start_date);
   const displayEnd = formatDateTimeRangeDisplayValue(value.end_date);
-  const draftStart = splitDateTimeLocalValue(draftRange.start_date, "00:00:00");
-  const draftEnd = splitDateTimeLocalValue(draftRange.end_date, "23:59:59");
   const calendarDays = useMemo(() => workspaceCalendarMonthDays(visibleMonth), [visibleMonth]);
   const weekdayLabels = useMemo(() => {
     const monday = new Date(2026, 5, 1);
@@ -368,12 +442,23 @@ export function WorkspaceDateTimeRangeField({
   const activeDatePart = datePartFromDateTimeLocal(draftRange[rangeBoundaryField(activeBoundary)]);
   const startDatePart = datePartFromDateTimeLocal(draftRange.start_date);
   const endDatePart = datePartFromDateTimeLocal(draftRange.end_date);
+  const timeBoundary = timePickerBoundary ?? activeBoundary;
+  const timeBoundaryField = rangeBoundaryField(timeBoundary);
+  const timeBoundaryDatePart = datePartFromDateTimeLocal(draftRange[timeBoundaryField]);
+  const timeBoundaryFallback = timeBoundary === "start" ? "00:00:00" : "23:59:59";
+  const timeBoundaryValue = timePartFromDateTimeLocal(draftRange[timeBoundaryField], timeBoundaryFallback);
+  const timeBoundaryTriggerRef = timeBoundary === "start" ? startTimeTriggerRef : endTimeTriggerRef;
+  const clearRangeLabel = `${t("inspirations.search.clear")} ${t("statusPage.rangeTitle")}`;
+  const canClearRange = Boolean(!disabled && (value.start_date || value.end_date));
 
-  const setLinkedDraftRange = (nextRange: WorkspaceDateTimeRange, changedBoundary: WorkspaceRangeBoundary) => {
-    setDraftRange(clampDraftRange(nextRange, changedBoundary));
+  const commitLinkedRange = (nextRange: WorkspaceDateTimeRange, changedBoundary: WorkspaceRangeBoundary) => {
+    const linkedRange = clampDraftRange(nextRange, changedBoundary);
+    setDraftRange(linkedRange);
+    onChange(linkedRange);
   };
 
   const handleBoundarySelect = (boundary: WorkspaceRangeBoundary) => {
+    setTimePickerBoundary(null);
     setActiveBoundary(boundary);
     const nextMonth = monthDateFromValue(draftRange[rangeBoundaryField(boundary)]);
     if (nextMonth) {
@@ -381,21 +466,24 @@ export function WorkspaceDateTimeRangeField({
     }
   };
 
-  const handleDaySelect = (datePart: string) => {
-    const field = rangeBoundaryField(activeBoundary);
-    const fallbackTime = activeBoundary === "start" ? "00:00:00" : "23:59:59";
-    const currentTime = timePartFromDateTimeLocal(draftRange[field], fallbackTime);
-    setLinkedDraftRange(
-      {
-        ...draftRange,
-        [field]: composeDateTimeLocalSecondValue(datePart, currentTime, fallbackTime),
-      },
-      activeBoundary,
-    );
-    if (activeBoundary === "start") {
-      setActiveBoundary("end");
-      window.setTimeout(() => endBoundaryRef.current?.focus(), 0);
+  const handleTimeTriggerSelect = (boundary: WorkspaceRangeBoundary) => {
+    setActiveBoundary(boundary);
+    const nextMonth = monthDateFromValue(draftRange[rangeBoundaryField(boundary)]);
+    if (nextMonth) {
+      setVisibleMonth(nextMonth);
     }
+    setTimePickerBoundary((current) => (current === boundary ? null : boundary));
+  };
+
+  const handleDaySelect = (datePart: string) => {
+    setTimePickerBoundary(null);
+    const nextSelection = selectWorkspaceDateRangeDay(draftRange, activeBoundary, datePart);
+    commitLinkedRange(nextSelection.range, activeBoundary);
+    setActiveBoundary(nextSelection.activeBoundary);
+    window.setTimeout(() => {
+      const nextRef = nextSelection.activeBoundary === "start" ? startBoundaryRef : endBoundaryRef;
+      nextRef.current?.focus();
+    }, 0);
   };
 
   const handleTimeChange = (boundary: WorkspaceRangeBoundary, nextTime: string) => {
@@ -405,7 +493,7 @@ export function WorkspaceDateTimeRangeField({
     if (!datePart) {
       return;
     }
-    setLinkedDraftRange(
+    commitLinkedRange(
       {
         ...draftRange,
         [field]: composeDateTimeLocalSecondValue(datePart, nextTime, fallbackTime),
@@ -421,38 +509,33 @@ export function WorkspaceDateTimeRangeField({
     handleTimeChange(boundary, replaceWorkspaceTimePart(currentTime, part, nextValue));
   };
 
-  const handleApply = () => {
-    onChange(draftRange);
+  const handleRangeClear = () => {
+    const emptyRange = { start_date: "", end_date: "" };
     setPickerOpen(false);
-    triggerRef.current?.focus();
-  };
-
-  const handleCancel = () => {
-    setDraftRange(value);
-    setPickerOpen(false);
-    triggerRef.current?.focus();
+    setTimePickerBoundary(null);
+    setActiveBoundary("start");
+    setDraftRange(emptyRange);
+    onChange(emptyRange);
   };
 
   useEffect(() => {
     if (!pickerOpen) {
       return;
     }
-    setDraftRange(value);
+    setTimePickerBoundary(null);
     setActiveBoundary("start");
     setVisibleMonth(monthDateFromRange(value));
     window.setTimeout(() => startBoundaryRef.current?.focus(), 0);
-  }, [pickerOpen, value.end_date, value.start_date]);
+  }, [pickerOpen]);
 
   useEffect(() => {
-    if (pickerOpen) {
-      return;
-    }
     setDraftRange(value);
-  }, [pickerOpen, value.end_date, value.start_date]);
+  }, [value]);
 
   useEffect(() => {
     if (disabled) {
       setPickerOpen(false);
+      setTimePickerBoundary(null);
     }
   }, [disabled]);
 
@@ -477,26 +560,38 @@ export function WorkspaceDateTimeRangeField({
           ))}
         </div>
       </div>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={pickerOpen}
-        aria-controls={rangePanelId}
-        disabled={disabled}
-        onClick={() => setPickerOpen((current) => !current)}
-        className="pf-workspace-date-range-shell pf-workspace-date-range-trigger flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2.5 text-left shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-          {displayStart || t("statusPage.startDate")}
-        </span>
-        <span className="shrink-0 text-xs font-semibold text-[color:var(--pf-subtle)]" aria-hidden="true">
-          -
-        </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-          {displayEnd || t("statusPage.endDate")}
-        </span>
-      </button>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={pickerOpen}
+          aria-controls={rangePanelId}
+          disabled={disabled}
+          onClick={() => setPickerOpen((current) => !current)}
+          className="pf-workspace-date-range-shell pf-workspace-date-range-trigger flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-3 py-2.5 text-left shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+            {displayStart || t("statusPage.startDate")}
+          </span>
+          <span className="shrink-0 text-xs font-semibold text-[color:var(--pf-subtle)]" aria-hidden="true">
+            -
+          </span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+            {displayEnd || t("statusPage.endDate")}
+          </span>
+        </button>
+        <button
+          type="button"
+          disabled={!canClearRange}
+          aria-label={clearRangeLabel}
+          title={clearRangeLabel}
+          onClick={handleRangeClear}
+          className="pf-workspace-date-range-clear inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-zinc-600 shadow-sm outline-none transition hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-300 dark:hover:text-slate-50"
+        >
+          <RotateCcw size={15} aria-hidden="true" />
+        </button>
+      </div>
       <FloatingSurface
         open={pickerOpen}
         triggerRef={triggerRef}
@@ -519,7 +614,7 @@ export function WorkspaceDateTimeRangeField({
                   type="button"
                   aria-pressed={activeBoundary === "start"}
                   onClick={() => handleBoundarySelect("start")}
-                  className="w-full text-left outline-none"
+                  className="pf-workspace-date-boundary-button w-full text-left outline-none"
                 >
                   <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--pf-muted)]">
                     <CalendarDays size={14} aria-hidden="true" />
@@ -529,21 +624,21 @@ export function WorkspaceDateTimeRangeField({
                     {formatDateTimeRangeDisplayValue(draftRange.start_date) || t("statusPage.startDate")}
                   </span>
                 </button>
-                <label className="mt-2 block">
-                  <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--pf-muted)]">
-                    <Clock size={14} aria-hidden="true" />
-                    {t("statusPage.time")}
+                <button
+                  ref={startTimeTriggerRef}
+                  type="button"
+                  disabled={disabled || !startDatePart}
+                  aria-haspopup="dialog"
+                  aria-expanded={timePickerBoundary === "start"}
+                  aria-controls={timePanelId}
+                  onClick={() => handleTimeTriggerSelect("start")}
+                  className="pf-workspace-time-trigger mt-2 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 text-left text-sm font-semibold outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Clock size={14} className="shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate tabular-nums">
+                    {formatTimePartDisplayValue(draftRange.start_date) || (startDatePart ? "00:00:00" : t("statusPage.time"))}
                   </span>
-                  <WorkspaceTimeSegments
-                    idPrefix={idPrefix}
-                    boundary="start"
-                    value={draftStart.time}
-                    disabled={disabled || !draftStart.date}
-                    label={t("statusPage.startDate")}
-                    onFocus={() => handleBoundarySelect("start")}
-                    onChange={handleTimePartChange}
-                  />
-                </label>
+                </button>
               </div>
               <div
                 className="pf-workspace-date-boundary rounded-xl border p-3 transition"
@@ -554,7 +649,7 @@ export function WorkspaceDateTimeRangeField({
                   type="button"
                   aria-pressed={activeBoundary === "end"}
                   onClick={() => handleBoundarySelect("end")}
-                  className="w-full text-left outline-none"
+                  className="pf-workspace-date-boundary-button w-full text-left outline-none"
                 >
                   <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--pf-muted)]">
                     <CalendarDays size={14} aria-hidden="true" />
@@ -564,37 +659,20 @@ export function WorkspaceDateTimeRangeField({
                     {formatDateTimeRangeDisplayValue(draftRange.end_date) || t("statusPage.endDate")}
                   </span>
                 </button>
-                <label className="mt-2 block">
-                  <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--pf-muted)]">
-                    <Clock size={14} aria-hidden="true" />
-                    {t("statusPage.time")}
+                <button
+                  ref={endTimeTriggerRef}
+                  type="button"
+                  disabled={disabled || !endDatePart}
+                  aria-haspopup="dialog"
+                  aria-expanded={timePickerBoundary === "end"}
+                  aria-controls={timePanelId}
+                  onClick={() => handleTimeTriggerSelect("end")}
+                  className="pf-workspace-time-trigger mt-2 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 text-left text-sm font-semibold outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Clock size={14} className="shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate tabular-nums">
+                    {formatTimePartDisplayValue(draftRange.end_date) || (endDatePart ? "23:59:59" : t("statusPage.time"))}
                   </span>
-                  <WorkspaceTimeSegments
-                    idPrefix={idPrefix}
-                    boundary="end"
-                    value={draftEnd.time}
-                    disabled={disabled || !draftEnd.date}
-                    label={t("statusPage.endDate")}
-                    onFocus={() => handleBoundarySelect("end")}
-                    onChange={handleTimePartChange}
-                  />
-                </label>
-              </div>
-              <div className="flex flex-wrap justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={handleCancel}
-                  className="pf-workspace-action-secondary h-9 rounded-xl px-3.5 text-xs font-semibold"
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApply}
-                  disabled={disabled}
-                  className="pf-workspace-action-primary h-9 rounded-xl px-3.5 text-xs font-semibold"
-                >
-                  {t("common.apply")}
                 </button>
               </div>
             </div>
@@ -603,7 +681,10 @@ export function WorkspaceDateTimeRangeField({
               <div className="mb-2 flex items-center justify-between gap-2 px-1">
                 <button
                   type="button"
-                  onClick={() => setVisibleMonth((current) => addCalendarMonths(current, -1))}
+                  onClick={() => {
+                    setTimePickerBoundary(null);
+                    setVisibleMonth((current) => addCalendarMonths(current, -1));
+                  }}
                   className="pf-workspace-date-nav inline-flex h-8 w-8 items-center justify-center rounded-lg border transition"
                   aria-label={t("statusPage.previousMonth")}
                 >
@@ -612,7 +693,10 @@ export function WorkspaceDateTimeRangeField({
                 <div className="text-sm font-semibold text-[color:var(--pf-text)]">{monthLabel}</div>
                 <button
                   type="button"
-                  onClick={() => setVisibleMonth((current) => addCalendarMonths(current, 1))}
+                  onClick={() => {
+                    setTimePickerBoundary(null);
+                    setVisibleMonth((current) => addCalendarMonths(current, 1));
+                  }}
                   className="pf-workspace-date-nav inline-flex h-8 w-8 items-center justify-center rounded-lg border transition"
                   aria-label={t("statusPage.nextMonth")}
                 >
@@ -653,6 +737,37 @@ export function WorkspaceDateTimeRangeField({
             </div>
           </div>
         </div>
+        <FloatingSurface
+          open={Boolean(pickerOpen && timePickerBoundary)}
+          triggerRef={timeBoundaryTriggerRef}
+          preferredPlacement="bottom-start"
+          matchTriggerWidth={false}
+          minWidth={252}
+          margin={12}
+          onOpenChange={(open) => {
+            if (!open) {
+              setTimePickerBoundary(null);
+            }
+          }}
+          className="pf-workspace-time-popover w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border p-2 shadow-xl"
+        >
+          <div
+            id={timePanelId}
+            role="dialog"
+            aria-modal="false"
+            aria-label={`${timeBoundary === "start" ? t("statusPage.startDate") : t("statusPage.endDate")} ${t("statusPage.time")}`}
+          >
+            <WorkspaceTimeColumns
+              idPrefix={idPrefix}
+              boundary={timeBoundary}
+              value={timeBoundaryValue}
+              disabled={disabled || !timeBoundaryDatePart}
+              label={timeBoundary === "start" ? t("statusPage.startDate") : t("statusPage.endDate")}
+              onFocus={() => setActiveBoundary(timeBoundary)}
+              onChange={handleTimePartChange}
+            />
+          </div>
+        </FloatingSurface>
       </FloatingSurface>
     </div>
   );

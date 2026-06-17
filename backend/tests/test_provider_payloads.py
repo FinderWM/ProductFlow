@@ -71,6 +71,7 @@ from inspiration_one_backend.infrastructure.openai_client import (
     OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
     build_openai_client_kwargs,
 )
+from inspiration_one_backend.infrastructure.openai_response_parsing import read_json_object_from_response
 from inspiration_one_backend.infrastructure.provider_config import (
     ResolvedImageProviderConfig,
     ResolvedTextProviderConfig,
@@ -97,6 +98,39 @@ def test_openai_client_kwargs_include_default_timeout() -> None:
     assert kwargs["timeout"] == OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS
     assert kwargs["default_headers"] == OPENAI_COMPATIBLE_DEFAULT_HEADERS
     assert kwargs["base_url"] == "https://openai.example/v1"
+
+
+def test_openai_response_json_parser_reports_provider_error_envelope() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        read_json_object_from_response(
+            '{"error":{"message":"Connection failed","code":"upstream_error"}}',
+            error_label="文案 provider",
+        )
+
+    assert str(exc_info.value) == "文案 provider 返回错误：Connection failed (upstream_error)"
+    assert "positioning" not in str(exc_info.value)
+
+
+def test_openai_response_json_parser_unwraps_creative_brief_schema_name() -> None:
+    payload = read_json_object_from_response(
+        json.dumps(
+            {
+                "creative_brief": {
+                    "positioning": "桌面香薰灯",
+                    "audience": "喜欢治愈氛围的租房用户",
+                    "selling_angles": ["小夜灯氛围", "香薰扩香", "桌面装饰"],
+                    "taboo_phrases": [],
+                    "poster_style_hint": "暖色调，氛围温暖治愈。",
+                }
+            },
+            ensure_ascii=False,
+        ),
+        error_label="文案 provider",
+    )
+    brief = CreativeBriefPayload.model_validate(payload)
+
+    assert brief.positioning == "桌面香薰灯"
+    assert brief.poster_style_hint == "暖色调，氛围温暖治愈。"
 
 
 def test_responses_background_poll_has_deadline(configured_env: Path) -> None:
@@ -1125,6 +1159,32 @@ def test_copy_payload_v2_drops_empty_provider_blocks() -> None:
 
     assert payload.content.kind == "blocks"
     assert [block.text for block in payload.content.blocks] == ["免打孔安装", "304 不锈钢"]
+
+
+def test_copy_payload_v2_uses_summary_when_provider_returns_empty_blocks() -> None:
+    payload = normalize_copy_payload(
+        {
+            "version": 2,
+            "summary": "轻便保温，通勤随手带",
+            "content": {"kind": "blocks", "blocks": []},
+        }
+    )
+
+    assert payload.content.kind == "blocks"
+    assert len(payload.content.blocks) == 1
+    assert payload.content.blocks[0].role == "summary"
+    assert payload.content.blocks[0].text == "轻便保温，通勤随手带"
+
+
+def test_copy_payload_v2_rejects_empty_blocks_without_copy_text() -> None:
+    with pytest.raises(ValidationError):
+        normalize_copy_payload(
+            {
+                "version": 2,
+                "summary": "",
+                "content": {"kind": "blocks", "blocks": []},
+            }
+        )
 
 
 def test_copy_payload_v2_drops_empty_layout_items() -> None:

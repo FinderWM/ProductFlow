@@ -872,7 +872,7 @@ export const zhCN = {
   "settings.section.queueDescription": "全局并发、调度默认值、任务恢复和工作流拆分限制。",
   "settings.section.globalTemplates": "模板配置",
   "settings.section.globalTemplatesDescription": "维护全局模板分类、模板排序，并把用户模板复制为全局模板。",
-  "settings.section.layoutAppearance": "布局与外观",
+  "settings.section.layoutAppearance": "布局与参数",
   "settings.section.layoutAppearanceDescription": "设置全局默认 UI 布局方案，并为后续外观方案预留切换位置。",
   "settings.section.loginPage": "登录页",
   "settings.section.loginPageDescription": "选择登录页，并分别调整每个登录页的文案/图片配置。",

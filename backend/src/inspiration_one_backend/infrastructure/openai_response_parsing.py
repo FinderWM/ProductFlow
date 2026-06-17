@@ -4,6 +4,14 @@ import json
 from json import JSONDecodeError
 from typing import Any
 
+STRUCTURED_OUTPUT_WRAPPER_KEYS = {
+    "creative_brief",
+    "copy_payload",
+    "copy_payload_v2",
+    "tail_split_plan",
+    "text_structured_output_test",
+}
+
 
 def read_json_object_from_response(response: object, *, error_label: str) -> dict[str, Any]:
     text = response_output_text(response)
@@ -26,6 +34,30 @@ def read_json_object_from_response(response: object, *, error_label: str) -> dic
     if not isinstance(payload, dict):
         snippet = text[:200] if text else "<empty>"
         raise ValueError(f"{error_label} 未返回 JSON 对象：{snippet}")
+    if "error" in payload:
+        raise ValueError(f"{error_label} 返回错误：{provider_error_message(payload['error'])}")
+    return unwrap_structured_output_payload(payload)
+
+
+def provider_error_message(error: object) -> str:
+    if isinstance(error, str):
+        return error.strip() or "供应商返回错误"
+    if not isinstance(error, dict):
+        return "供应商返回错误"
+    message = error.get("message")
+    code = error.get("code")
+    text = message.strip() if isinstance(message, str) else "供应商返回错误"
+    if isinstance(code, str) and code.strip():
+        return f"{text} ({code.strip()})"
+    return text
+
+
+def unwrap_structured_output_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if len(payload) != 1:
+        return payload
+    key, value = next(iter(payload.items()))
+    if key in STRUCTURED_OUTPUT_WRAPPER_KEYS and isinstance(value, dict):
+        return value
     return payload
 
 
