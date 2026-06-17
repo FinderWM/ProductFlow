@@ -597,6 +597,8 @@ def test_gallery_save_with_tags_required_setting_and_serializes_enabled_tags(con
 
     visible_tag = client.post("/api/gallery/tags", json={"name": "可见标签", "priority": 10})
     assert visible_tag.status_code == 201
+    another_visible_tag = client.post("/api/gallery/tags", json={"name": "第二标签", "priority": 9})
+    assert another_visible_tag.status_code == 201
     hidden_tag = client.post("/api/gallery/tags", json={"name": "禁用标签", "priority": 20, "enabled": False})
     assert hidden_tag.status_code == 201
 
@@ -613,11 +615,24 @@ def test_gallery_save_with_tags_required_setting_and_serializes_enabled_tags(con
     assert generated.status_code == 202
     asset_id = generated.json()["rounds"][0]["generated_asset"]["id"]
 
-    enabled_required = client.patch("/api/settings", json={"values": {"gallery_tag_required_on_save": True}})
+    enabled_required = client.patch(
+        "/api/settings",
+        json={"values": {"gallery_tag_required_on_save": True, "gallery_entry_tag_max_selection": 1}},
+    )
     assert enabled_required.status_code == 200
     missing_tags = client.post("/api/gallery", json={"image_session_asset_id": asset_id})
     assert missing_tags.status_code == 400
     assert missing_tags.json()["detail"] == "请选择画廊标签"
+
+    too_many_tags_save = client.post(
+        "/api/gallery",
+        json={
+            "image_session_asset_id": asset_id,
+            "tag_ids": [visible_tag.json()["id"], another_visible_tag.json()["id"]],
+        },
+    )
+    assert too_many_tags_save.status_code == 400
+    assert too_many_tags_save.json()["detail"] == "最多选择 1 个画廊标签"
 
     disabled_tag_save = client.post(
         "/api/gallery",
@@ -632,6 +647,28 @@ def test_gallery_save_with_tags_required_setting_and_serializes_enabled_tags(con
     )
     assert saved.status_code == 201
     assert [tag["name"] for tag in saved.json()["tags"]] == ["可见标签"]
+
+
+def test_gallery_entry_tag_admin_edit_ignores_entry_tag_max_selection(configured_env: Path, db_session) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    first_tag = client.post("/api/gallery/tags", json={"name": "管理标签一", "priority": 10})
+    assert first_tag.status_code == 201
+    second_tag = client.post("/api/gallery/tags", json={"name": "管理标签二", "priority": 9})
+    assert second_tag.status_code == 201
+    configured_limit = client.patch("/api/settings", json={"values": {"gallery_entry_tag_max_selection": 1}})
+    assert configured_limit.status_code == 200
+
+    entry_id = _seed_gallery_entry(db_session, prompt="管理员不限量标签图")
+    updated = client.patch(
+        f"/api/gallery/{entry_id}/tags",
+        json={"tag_ids": [first_tag.json()["id"], second_tag.json()["id"]]},
+    )
+
+    assert updated.status_code == 200
+    assert {tag["name"] for tag in updated.json()["tags"]} == {"管理标签一", "管理标签二"}
 
 
 def test_gallery_tag_filter_matches_any_and_orders_by_match_count(configured_env: Path, db_session) -> None:
@@ -678,6 +715,22 @@ def test_gallery_tag_filter_matches_any_and_orders_by_match_count(configured_env
     assert filtered.status_code == 200
     assert [item["id"] for item in filtered.json()["items"]] == [entry_both.id, entry_b.id, entry_a.id]
     assert filtered.json()["total"] == 3
+
+
+def test_gallery_tag_filter_uses_filter_selection_limit(configured_env: Path) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    tag_a = client.post("/api/gallery/tags", json={"name": "筛选 A", "priority": 1}).json()
+    tag_b = client.post("/api/gallery/tags", json={"name": "筛选 B", "priority": 1}).json()
+    configured_limit = client.patch("/api/settings", json={"values": {"gallery_tag_filter_max_selection": 1}})
+    assert configured_limit.status_code == 200
+
+    filtered = client.get("/api/gallery", params=[("tag_ids", tag_a["id"]), ("tag_ids", tag_b["id"])])
+
+    assert filtered.status_code == 400
+    assert filtered.json()["detail"] == "最多选择 1 个画廊标签"
 
 
 def test_disabled_and_deleted_gallery_tags_are_hidden_and_delete_soft_deletes_relations(

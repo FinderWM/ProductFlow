@@ -6121,9 +6121,9 @@ export function SettingsPage() {
     queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
     enabled: activeSection === "loginPage",
   });
-  const galleryTagFilterMaxSelection = Math.max(
+  const galleryEntryTagMaxSelection = Math.max(
     1,
-    Math.floor(runtimeConfigQuery.data?.gallery_tag_filter_max_selection ?? 10),
+    Math.floor(runtimeConfigQuery.data?.gallery_entry_tag_max_selection ?? 10),
   );
   const galleryTagRequiredOnSave = runtimeConfigQuery.data?.gallery_tag_required_on_save ?? false;
   const galleryTags = galleryTagsQuery.data ?? [];
@@ -7503,7 +7503,7 @@ export function SettingsPage() {
           open={Boolean(imageConfigTestGalleryAssetId)}
           tags={galleryTags}
           initialSelectedTagIds={[]}
-          maxSelection={galleryTagFilterMaxSelection}
+          maxSelection={galleryEntryTagMaxSelection}
           required={galleryTagRequiredOnSave}
           busy={saveImageConfigTestGalleryMutation.isPending}
           error={imageConfigTestGalleryTagError}

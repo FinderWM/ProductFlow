@@ -12,7 +12,7 @@ interface GalleryTagPickerDialogProps {
   title?: string;
   description?: string;
   confirmLabel?: string;
-  maxSelection: number;
+  maxSelection?: number | null;
   required?: boolean;
   busy?: boolean;
   error?: string;
@@ -52,7 +52,8 @@ export function GalleryTagPickerDialog({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [unselectedTagIds, setUnselectedTagIds] = useState<string[]>([]);
   const [localError, setLocalError] = useState("");
-  const normalizedMaxSelection = Math.max(1, Math.floor(maxSelection || 1));
+  const normalizedMaxSelection =
+    typeof maxSelection === "number" && Number.isFinite(maxSelection) ? Math.max(1, Math.floor(maxSelection)) : null;
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
   const selectedTags = selectedTagIds.flatMap((tagId) => {
     const tag = tagsById.get(tagId);
@@ -67,9 +68,11 @@ export function GalleryTagPickerDialog({
     if (!open) {
       return;
     }
-    const initialSelected = uniqueExistingTagIds(initialSelectedTagIds, tags).slice(0, normalizedMaxSelection);
-    const initialSelectedSet = new Set(initialSelected);
-    setSelectedTagIds(initialSelected);
+    const initialSelected = uniqueExistingTagIds(initialSelectedTagIds, tags);
+    const boundedInitialSelected =
+      normalizedMaxSelection === null ? initialSelected : initialSelected.slice(0, normalizedMaxSelection);
+    const initialSelectedSet = new Set(boundedInitialSelected);
+    setSelectedTagIds(boundedInitialSelected);
     setUnselectedTagIds(tags.filter((tag) => !initialSelectedSet.has(tag.id)).map((tag) => tag.id));
     setLocalError("");
   }, [initialSelectedTagIds, normalizedMaxSelection, open, tags]);
@@ -82,7 +85,7 @@ export function GalleryTagPickerDialog({
     if (selectedTagIds.includes(tag.id)) {
       return;
     }
-    if (selectedTagIds.length >= normalizedMaxSelection) {
+    if (normalizedMaxSelection !== null && selectedTagIds.length >= normalizedMaxSelection) {
       setLocalError(t("gallery.tags.maxSelected", { count: normalizedMaxSelection }));
       return;
     }
@@ -125,7 +128,11 @@ export function GalleryTagPickerDialog({
 
   const visibleError = localError || error;
   const dialogTitle = title ?? t("gallery.tags.saveDialogTitle");
-  const dialogDescription = description ?? t("gallery.tags.saveDialogDescription", { count: normalizedMaxSelection });
+  const dialogDescription =
+    description ??
+    (normalizedMaxSelection === null
+      ? t("gallery.tags.saveDialogDescriptionUnlimited")
+      : t("gallery.tags.saveDialogDescription", { count: normalizedMaxSelection }));
   const dialogConfirmLabel = confirmLabel ?? t("common.save");
 
   return (
@@ -164,7 +171,9 @@ export function GalleryTagPickerDialog({
               {t("gallery.tags.selected")}
             </div>
             <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-              {selectedTagIds.length}/{normalizedMaxSelection}
+              {normalizedMaxSelection === null
+                ? selectedTagIds.length
+                : `${selectedTagIds.length}/${normalizedMaxSelection}`}
             </div>
           </div>
           <div className="flex min-h-12 flex-wrap content-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-950/35">

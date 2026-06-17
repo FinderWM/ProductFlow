@@ -552,9 +552,9 @@ function ImageChatWorkbenchPage() {
   );
   const imageToolAllowedFields = runtimeConfigQuery.data?.image_tool_allowed_fields ?? DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS;
   const deletionEnabled = runtimeConfigQuery.data?.deletion_enabled ?? false;
-  const galleryTagFilterMaxSelection = Math.max(
+  const galleryEntryTagMaxSelection = Math.max(
     1,
-    Math.floor(runtimeConfigQuery.data?.gallery_tag_filter_max_selection ?? 10),
+    Math.floor(runtimeConfigQuery.data?.gallery_entry_tag_max_selection ?? 10),
   );
   const galleryTagRequiredOnSave = runtimeConfigQuery.data?.gallery_tag_required_on_save ?? false;
   const galleryTags = galleryTagsQuery.data ?? [];
@@ -3377,7 +3377,7 @@ function ImageChatWorkbenchPage() {
         open={Boolean(galleryTagPickerAsset)}
         tags={galleryTags}
         initialSelectedTagIds={[]}
-        maxSelection={galleryTagFilterMaxSelection}
+        maxSelection={galleryEntryTagMaxSelection}
         required={galleryTagRequiredOnSave}
         busy={saveGalleryMutation.isPending}
         error={galleryTagPickerError}

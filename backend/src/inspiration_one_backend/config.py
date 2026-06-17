@@ -142,6 +142,9 @@ GALLERY_VIEW_DEDUP_WINDOW_MAX_MINUTES = 7 * 24 * 60
 DEFAULT_GALLERY_TAG_FILTER_MAX_SELECTION = 10
 GALLERY_TAG_FILTER_MIN_MAX_SELECTION = 1
 GALLERY_TAG_FILTER_MAX_MAX_SELECTION = 50
+DEFAULT_GALLERY_ENTRY_TAG_MAX_SELECTION = 10
+GALLERY_ENTRY_TAG_MIN_MAX_SELECTION = 1
+GALLERY_ENTRY_TAG_MAX_MAX_SELECTION = 50
 DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS = 36
 DEFAULT_WORKFLOW_NODE_MAX_RETRY_COUNT = 10
 DEFAULT_WORKFLOW_NODE_RETRY_DELAY_MS = 2000
@@ -465,6 +468,11 @@ class Settings(BaseSettings):
         default=DEFAULT_GALLERY_TAG_FILTER_MAX_SELECTION,
         ge=GALLERY_TAG_FILTER_MIN_MAX_SELECTION,
         le=GALLERY_TAG_FILTER_MAX_MAX_SELECTION,
+    )
+    gallery_entry_tag_max_selection: int = Field(
+        default=DEFAULT_GALLERY_ENTRY_TAG_MAX_SELECTION,
+        ge=GALLERY_ENTRY_TAG_MIN_MAX_SELECTION,
+        le=GALLERY_ENTRY_TAG_MAX_MAX_SELECTION,
     )
     gallery_tag_required_on_save: bool = False
     login_page_mode: str = DEFAULT_LOGIN_PAGE_MODE
@@ -1033,12 +1041,21 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
     ),
     ConfigDefinition(
         key="gallery_tag_filter_max_selection",
-        label="画廊标签最多选择数",
+        label="画廊标签筛选最多选择数",
         category="界面与外观",
         input_type="number",
-        description="控制画廊筛选和保存到画廊时一次最多选择的标签数量。",
+        description="控制画廊页标签筛选时一次最多选择的标签数量。",
         minimum=GALLERY_TAG_FILTER_MIN_MAX_SELECTION,
         maximum=GALLERY_TAG_FILTER_MAX_MAX_SELECTION,
+    ),
+    ConfigDefinition(
+        key="gallery_entry_tag_max_selection",
+        label="单张画廊图片最多绑定标签数",
+        category="界面与外观",
+        input_type="number",
+        description="控制保存生成图到画廊时单张图片最多绑定的标签数量；管理员编辑图片标签不受该限制。",
+        minimum=GALLERY_ENTRY_TAG_MIN_MAX_SELECTION,
+        maximum=GALLERY_ENTRY_TAG_MAX_MAX_SELECTION,
     ),
     ConfigDefinition(
         key="gallery_tag_required_on_save",

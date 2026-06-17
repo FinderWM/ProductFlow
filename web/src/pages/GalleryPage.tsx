@@ -511,20 +511,37 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
     saveGalleryTagMutation.mutate(tagForm);
   };
 
-  const renderEntryTags = (tags: GalleryTag[], className = "") =>
-    tags.length ? (
-      <div className={`flex flex-wrap gap-1.5 ${className}`}>
-        {tags.map((tag) => (
+  const renderEntryTags = (tags: GalleryTag[], className = "") => {
+    if (!tags.length) {
+      return null;
+    }
+    const visibleTags = tags.slice(0, 3);
+    const hiddenCount = Math.max(0, tags.length - visibleTags.length);
+    return (
+      <div
+        className={`flex h-5 max-w-full min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap ${className}`}
+        title={tags.map((tag) => tag.name).join(" / ")}
+      >
+        {visibleTags.map((tag) => (
           <span
             key={tag.id}
-            className="inline-flex max-w-full items-center rounded-md border border-white/15 bg-white/12 px-2 py-0.5 text-[10px] font-semibold text-white/85 backdrop-blur dark:border-violet-400/25 dark:bg-violet-500/15 dark:text-violet-100"
+            className="inline-flex min-w-0 max-w-[7rem] shrink items-center rounded-md border border-white/15 bg-white/12 px-2 py-0.5 text-[10px] font-semibold text-white/85 backdrop-blur dark:border-violet-400/25 dark:bg-violet-500/15 dark:text-violet-100"
             title={tag.description || tag.name}
           >
             <span className="truncate">{tag.name}</span>
           </span>
         ))}
+        {hiddenCount > 0 ? (
+          <span
+            className="inline-flex h-5 shrink-0 items-center px-0.5 text-[11px] font-bold leading-none text-white/75"
+            aria-hidden="true"
+          >
+            ...
+          </span>
+        ) : null}
       </div>
-    ) : null;
+    );
+  };
 
   const manageTagButton = canManageGalleryTags ? (
     <button
@@ -956,8 +973,8 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
         tags={galleryTags}
         initialSelectedTagIds={entryTagEditorEntry?.tags.map((tag) => tag.id) ?? []}
         title={t("gallery.tags.editEntry")}
-        description={t("gallery.tags.editEntryDescription", { count: maxGalleryTagSelection })}
-        maxSelection={maxGalleryTagSelection}
+        description={t("gallery.tags.editEntryDescriptionUnlimited")}
+        maxSelection={null}
         busy={replaceEntryTagsMutation.isPending}
         error={entryTagEditError}
         onConfirm={(tagIds) => {

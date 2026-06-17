@@ -133,12 +133,11 @@ def _normalize_active_gallery_tag_ids(
     tag_ids: Iterable[str] | None,
     *,
     require_non_empty: bool,
+    max_selection: int | None = None,
 ) -> list[str]:
     normalized_ids = _dedupe_ids(tag_ids)
-    settings = get_runtime_settings()
-    max_selection = int(settings.gallery_tag_filter_max_selection)
-    if len(normalized_ids) > max_selection:
-        raise BusinessValidationError(f"最多选择 {max_selection} 个画廊标签")
+    if max_selection is not None and len(normalized_ids) > max_selection:
+        raise BusinessValidationError(f"最多选择 {int(max_selection)} 个画廊标签")
     if require_non_empty and not normalized_ids:
         raise BusinessValidationError("请选择画廊标签")
     tags_by_id = _active_gallery_tags_by_ids(session, normalized_ids)
@@ -356,8 +355,9 @@ def list_gallery_entries(
     offset: int = 0,
 ) -> GalleryEntryListResult:
     raw_tag_ids = _dedupe_ids(tag_ids)
-    if len(raw_tag_ids) > int(get_runtime_settings().gallery_tag_filter_max_selection):
-        raise BusinessValidationError(f"最多选择 {get_runtime_settings().gallery_tag_filter_max_selection} 个画廊标签")
+    max_filter_selection = int(get_runtime_settings().gallery_tag_filter_max_selection)
+    if len(raw_tag_ids) > max_filter_selection:
+        raise BusinessValidationError(f"最多选择 {max_filter_selection} 个画廊标签")
     active_tag_ids = list(_active_gallery_tags_by_ids(session, raw_tag_ids))
     if raw_tag_ids and not active_tag_ids:
         return GalleryEntryListResult(items=[], view_counts={}, total=0, has_more=False, next_offset=None)
@@ -461,6 +461,7 @@ def save_generated_asset_to_gallery(
         session,
         tag_ids,
         require_non_empty=bool(get_runtime_settings().gallery_tag_required_on_save),
+        max_selection=int(get_runtime_settings().gallery_entry_tag_max_selection),
     )
 
     round_item = session.scalar(select(ImageSessionRound).where(ImageSessionRound.generated_asset_id == asset.id))

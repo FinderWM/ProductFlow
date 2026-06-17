@@ -1156,6 +1156,7 @@ export interface RuntimeConfig {
   workflow_node_retry_delay_ms: number;
   gallery_show_generation_resource_group: boolean;
   gallery_tag_filter_max_selection: number;
+  gallery_entry_tag_max_selection: number;
   gallery_tag_required_on_save: boolean;
   deletion_enabled: boolean;
 }

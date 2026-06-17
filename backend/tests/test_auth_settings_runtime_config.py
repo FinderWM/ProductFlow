@@ -493,6 +493,11 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert initial_items["gallery_tag_filter_max_selection"]["input_type"] == "number"
     assert initial_items["gallery_tag_filter_max_selection"]["minimum"] == 1
     assert initial_items["gallery_tag_filter_max_selection"]["maximum"] == 50
+    assert initial_items["gallery_entry_tag_max_selection"]["value"] == 10
+    assert initial_items["gallery_entry_tag_max_selection"]["category"] == "界面与外观"
+    assert initial_items["gallery_entry_tag_max_selection"]["input_type"] == "number"
+    assert initial_items["gallery_entry_tag_max_selection"]["minimum"] == 1
+    assert initial_items["gallery_entry_tag_max_selection"]["maximum"] == 50
     assert initial_items["gallery_tag_required_on_save"]["value"] is False
     assert initial_items["gallery_tag_required_on_save"]["category"] == "界面与外观"
     assert initial_items["gallery_tag_required_on_save"]["input_type"] == "boolean"
@@ -530,6 +535,7 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
                 "ui_layout_scheme": "workspace",
                 "gallery_show_generation_resource_group": False,
                 "gallery_tag_filter_max_selection": 6,
+                "gallery_entry_tag_max_selection": 12,
                 "gallery_tag_required_on_save": True,
                 "login_page_mode": "fluid-mist",
                 "login_page_fluid_mist_config": {
@@ -552,6 +558,7 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
     assert get_runtime_settings().ui_layout_scheme == "workspace"
     assert get_runtime_settings().gallery_show_generation_resource_group is False
     assert get_runtime_settings().gallery_tag_filter_max_selection == 6
+    assert get_runtime_settings().gallery_entry_tag_max_selection == 12
     assert get_runtime_settings().gallery_tag_required_on_save is True
     assert get_runtime_settings().login_page_mode == "fluid-mist"
     assert get_runtime_settings().deletion_enabled is True
@@ -569,6 +576,7 @@ def test_settings_api_persists_database_overrides(configured_env: Path) -> None:
         assert session.get(AppSetting, "ui_layout_scheme").value == "workspace"
         assert session.get(AppSetting, "gallery_show_generation_resource_group").value == "false"
         assert session.get(AppSetting, "gallery_tag_filter_max_selection").value == "6"
+        assert session.get(AppSetting, "gallery_entry_tag_max_selection").value == "12"
         assert session.get(AppSetting, "gallery_tag_required_on_save").value == "true"
         assert session.get(AppSetting, "login_page_mode").value == "fluid-mist"
         assert "进入雾面工作台" in session.get(AppSetting, "login_page_fluid_mist_config").value
@@ -726,6 +734,7 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
                 "image_generation_max_concurrent_tasks": 5,
                 "gallery_show_generation_resource_group": False,
                 "gallery_tag_filter_max_selection": 8,
+                "gallery_entry_tag_max_selection": 9,
                 "gallery_tag_required_on_save": True,
                 "deletion_enabled": True,
             }
@@ -774,6 +783,7 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
     assert "login_page_image_lab_config" in payload["runtime_config"]
     assert payload["runtime_config"]["gallery_show_generation_resource_group"] is False
     assert payload["runtime_config"]["gallery_tag_filter_max_selection"] == 8
+    assert payload["runtime_config"]["gallery_entry_tag_max_selection"] == 9
     assert payload["runtime_config"]["gallery_tag_required_on_save"] is True
     assert payload["runtime_config"]["deletion_enabled"] is True
     assert set(RUNTIME_CONFIG_KEYS).issubset(payload["runtime_config"])
@@ -815,6 +825,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     document["runtime_config"]["image_generation_max_concurrent_tasks"] = 6
     document["runtime_config"]["gallery_show_generation_resource_group"] = False
     document["runtime_config"]["gallery_tag_filter_max_selection"] = 7
+    document["runtime_config"]["gallery_entry_tag_max_selection"] = 11
     document["runtime_config"]["gallery_tag_required_on_save"] = True
     document["runtime_config"]["deletion_enabled"] = True
     document["generation_resource_groups"][0]["blur_images_by_default"] = True
@@ -909,6 +920,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
     assert imported_items["image_generation_max_concurrent_tasks"]["value"] == 6
     assert imported_items["gallery_show_generation_resource_group"]["value"] is False
     assert imported_items["gallery_tag_filter_max_selection"]["value"] == 7
+    assert imported_items["gallery_entry_tag_max_selection"]["value"] == 11
     assert imported_items["gallery_tag_required_on_save"]["value"] is True
     assert imported_items["deletion_enabled"]["value"] is True
     assert imported_items["poster_generation_mode"]["value"] == "generated"
@@ -921,6 +933,7 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
         assert session.get(AppSetting, "image_generation_max_concurrent_tasks").value == "6"
         assert session.get(AppSetting, "gallery_show_generation_resource_group").value == "false"
         assert session.get(AppSetting, "gallery_tag_filter_max_selection").value == "7"
+        assert session.get(AppSetting, "gallery_entry_tag_max_selection").value == "11"
         assert session.get(AppSetting, "gallery_tag_required_on_save").value == "true"
         assert session.get(AppSetting, "deletion_enabled").value == "true"
         assert session.get(AppSetting, "poster_generation_mode").value == "generated"
@@ -3125,6 +3138,7 @@ def test_image_generation_max_dimension_runtime_config_controls_size_bounds(conf
         "workflow_node_retry_delay_ms": 2000,
         "gallery_show_generation_resource_group": True,
         "gallery_tag_filter_max_selection": 10,
+        "gallery_entry_tag_max_selection": 10,
         "gallery_tag_required_on_save": False,
         "deletion_enabled": False,
     }
