@@ -1307,6 +1307,7 @@ The gallery keeps a curated pointer to the generated asset and reuses existing d
   - `POST /api/gallery` accepts `{image_session_asset_id: string, tag_ids?: string[]}`.
 - Runtime config:
   - `gallery_tag_filter_max_selection: int` in `CONFIG_DEFINITIONS`.
+  - `gallery_entry_tag_max_selection: int` in `CONFIG_DEFINITIONS`.
   - `gallery_tag_required_on_save: bool` in `CONFIG_DEFINITIONS`.
 
 ### 3. Contracts
@@ -1321,17 +1322,21 @@ The gallery keeps a curated pointer to the generated asset and reuses existing d
   `GalleryEntry.tags`.
 - Deleted tags set `deleted_at`; delete must also bulk-set `deleted_at` on all active `image_gallery_entry_tags` rows for
   that tag. A later tag with the same name is a new ID and must not restore old relations.
-- Saving to gallery validates `tag_ids` against active tags, enforces `gallery_tag_filter_max_selection`, and requires at
+- Gallery filtering validates `tag_ids` against active tags and enforces `gallery_tag_filter_max_selection`.
+- Saving to gallery validates `tag_ids` against active tags, enforces `gallery_entry_tag_max_selection`, and requires at
   least one tag only when `gallery_tag_required_on_save=true`.
 - Existing idempotent gallery saves return the existing entry and do not mutate tags; later assignment changes use the
   admin-only replace endpoint.
+- Admin-only entry tag replacement validates active tags but does not enforce either max-selection runtime limit.
 
 ### 4. Validation & Error Matrix
 
 - Non-admin calls create/update/delete/replace tags -> `403`, `"需要管理员权限"` even when the role has the permission code.
 - Missing `gallery:tags_manage` on a management write -> `403`, `"没有接口权限"`.
 - Disabled or deleted tag id in save/replace -> `400`, tag validation detail.
-- More than `gallery_tag_filter_max_selection` tag ids -> `400`, max-selection detail.
+- Filter with more than `gallery_tag_filter_max_selection` tag ids -> `400`, max-selection detail.
+- Save with more than `gallery_entry_tag_max_selection` tag ids -> `400`, max-selection detail.
+- Admin replace with more than `gallery_entry_tag_max_selection` tag ids -> allowed when every tag is active.
 - Required-on-save enabled and no valid tag ids -> `400`, required-tag detail.
 - Delete tag -> tag and active relations are logically deleted in the same transaction.
 - Filter with disabled/deleted tag ids -> no disabled/deleted matches; active matches still use SQL-level any-hit behavior.
@@ -1343,6 +1348,8 @@ The gallery keeps a curated pointer to the generated asset and reuses existing d
 - Good: disabling tag A hides it from UI filters and serialized cards while preserving relation rows for possible re-enable.
 - Good: deleting tag A removes active relation rows logically, then creating a new tag named A creates a new ID with no old
   entry assignments.
+- Good: an admin manager can assign all active tags to one gallery entry even when `gallery_entry_tag_max_selection` is
+  lower; this limit only protects save-to-gallery selection.
 - Base: saving an image without tags is allowed when `gallery_tag_required_on_save=false`.
 - Bad: reusing `generation_resource_groups` for gallery tags.
 - Bad: allowing `gallery:write` or `resources:moderate` to edit tag definitions or entry tag assignments.

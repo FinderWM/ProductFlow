@@ -105,6 +105,7 @@ For admin cross-user views:
   - `api.replaceGalleryEntryTags(entryId, tagIds)`.
 - Runtime config fields:
   - `RuntimeConfig.gallery_tag_filter_max_selection`.
+  - `RuntimeConfig.gallery_entry_tag_max_selection`.
   - `RuntimeConfig.gallery_tag_required_on_save`.
 - RBAC helper constant: `API_GALLERY_TAGS_MANAGE = "gallery:tags_manage"`.
 
@@ -115,10 +116,13 @@ For admin cross-user views:
   when opening the dialog and when they are hidden behind overflow.
 - The "More" dialog has two sections: selected and unselected. Moving a tag appends it to the target section tail. Closing
   and reopening rebuilds unselected order from the API tag order.
-- Selection count is capped by `gallery_tag_filter_max_selection` for filters, save dialogs, and entry tag edits.
+- Filter selection count is capped by `gallery_tag_filter_max_selection`.
+- Save-to-gallery tag selection count is capped by `gallery_entry_tag_max_selection`.
+- Admin-manager entry tag editing is intentionally unlimited; the picker should pass no max selection for
+  `replaceGalleryEntryTags`.
 - Save-to-gallery actions must open a tag picker first. Empty selection is valid unless `gallery_tag_required_on_save=true`.
 - Cards and preview metadata render only `entry.tags` from the API; disabled/deleted tags must not be reconstructed from
-  cached tag lists.
+  cached tag lists. Gallery cards keep tags to a single ellipsized line; full tag lists belong in the image preview dialog.
 - Entry tag editing is an admin-manager-only preview action and calls `replaceGalleryEntryTags`.
 
 ### 4. Validation & Error Matrix
@@ -126,7 +130,10 @@ For admin cross-user views:
 - No active tags -> filter row shows a no-tags state, and save dialog can still submit an empty list when tags are not
   required.
 - Required-on-save plus empty selection -> picker shows local required error and does not call the API.
-- Max selection reached -> picker/filter shows max-selection error and does not append another tag.
+- Filter max selection reached -> picker/filter shows max-selection error and does not append another tag.
+- Save-to-gallery max selection reached -> picker shows the image-binding max-selection error and does not append another
+  tag.
+- Entry tag edit with many active tags -> allowed for admin managers and submitted to `replaceGalleryEntryTags`.
 - Tag delete/disable while selected -> active tag refetch removes the stale id from `selectedTagIds`.
 - API error during management or entry edit -> error is shown inside the modal near the action.
 

@@ -95,7 +95,8 @@ multipart boundary.
 - Gallery tag mirrors:
   - `GalleryTag { id, name, description, priority, enabled, created_at, updated_at }`.
   - `GalleryEntry.tags: GalleryTag[]`.
-  - `RuntimeConfig.gallery_tag_filter_max_selection` and `RuntimeConfig.gallery_tag_required_on_save`.
+  - `RuntimeConfig.gallery_tag_filter_max_selection`,
+    `RuntimeConfig.gallery_entry_tag_max_selection`, and `RuntimeConfig.gallery_tag_required_on_save`.
 
 #### 3. Contracts
 
