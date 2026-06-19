@@ -4,7 +4,6 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.auth import (
-    ensure_auth_bootstrapped,
     user_has_any_api_permission,
     user_has_api_permission,
 )
@@ -19,9 +18,10 @@ def get_session(session: Session = Depends(get_db_session)) -> Session:
 
 
 def get_current_user(request: Request) -> AuthUser:
+    # 鉴权热路径只校验会话并加载当前用户。RBAC 注册表与管理员账号在应用启动 (lifespan) 以及
+    # 登录/设密入口已完成初始化，无需在每个认证请求重复执行 ensure_auth_bootstrapped（一次约 34 次 SELECT）。
     factory = get_session_factory()
     with factory() as session:
-        ensure_auth_bootstrapped(session)
         validation = validate_auth_session(request, session)
         if validation.disabled:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已停用")

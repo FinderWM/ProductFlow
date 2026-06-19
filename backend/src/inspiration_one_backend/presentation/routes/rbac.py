@@ -8,6 +8,7 @@ from inspiration_one_backend.application.auth import (
     archive_role,
     create_role,
     create_trusted_user,
+    ensure_auth_bootstrapped,
     get_role_permissions,
     get_user_generation_resource_group_grant_ids,
     list_roles_with_user_counts,
@@ -61,6 +62,9 @@ router = APIRouter(
 
 @router.get("/permissions", response_model=RbacPermissionCatalogResponse)
 def list_permission_catalog_endpoint(session: Session = Depends(get_session)) -> RbacPermissionCatalogResponse:
+    # RBAC 管理目录按代码定义自愈：补齐缺失项并停用过期菜单/权限。鉴权热路径已不再每请求 bootstrap，
+    # 故在此 admin-only 低频端点显式 reconcile，保证目录展示与当前代码注册表一致。
+    ensure_auth_bootstrapped(session)
     menus = list(session.scalars(select(RbacMenu).where(RbacMenu.enabled.is_(True)).order_by(RbacMenu.sort_order)))
     api_permissions = list(
         session.scalars(
