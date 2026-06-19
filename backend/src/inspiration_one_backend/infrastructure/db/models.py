@@ -195,7 +195,6 @@ class RbacApiPermission(Base):
     __tablename__ = "rbac_api_permissions"
     __table_args__ = (
         Index("ix_rbac_api_permissions_menu_code", "menu_code"),
-        Index("ix_rbac_api_permissions_enabled", "enabled"),
     )
 
     code: Mapped[str] = mapped_column(String(120), primary_key=True)
@@ -273,7 +272,6 @@ class GenerationResourceGroup(Base, TimestampMixin):
     __tablename__ = "generation_resource_groups"
     __table_args__ = (
         Index("uq_generation_resource_groups_key", "key", unique=True),
-        Index("ix_generation_resource_groups_enabled", "enabled"),
         Index("ix_generation_resource_groups_archived_at", "archived_at"),
         Index("ix_generation_resource_groups_sort", "sort_order", "created_at"),
     )
@@ -344,7 +342,6 @@ class CanvasTemplateCategory(Base, TimestampMixin):
             sqlite_where=text("scope = 'user'"),
         ),
         Index("ix_canvas_template_categories_scope", "scope"),
-        Index("ix_canvas_template_categories_enabled", "enabled"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -383,7 +380,6 @@ class CanvasTemplate(Base, TimestampMixin):
         Index("ix_canvas_templates_scope", "scope"),
         Index("ix_canvas_templates_entry_mode", "entry_mode"),
         Index("ix_canvas_templates_category_id", "category_id"),
-        Index("ix_canvas_templates_enabled", "enabled"),
         Index("ix_canvas_templates_archived_at", "archived_at"),
         Index("ix_canvas_templates_review_status", "review_status"),
         Index("ix_canvas_templates_sort_order", "sort_order"),
@@ -455,7 +451,6 @@ class ProviderProfile(Base, TimestampMixin):
 
     __tablename__ = "provider_profiles"
     __table_args__ = (
-        Index("ix_provider_profiles_enabled", "enabled"),
         Index("ix_provider_profiles_archived_at", "archived_at"),
     )
 
@@ -482,7 +477,6 @@ class GenerationConfig(Base, TimestampMixin):
     __tablename__ = "generation_configs"
     __table_args__ = (
         Index("ix_generation_configs_purpose", "purpose"),
-        Index("ix_generation_configs_enabled", "enabled"),
         Index("ix_generation_configs_archived_at", "archived_at"),
         Index("ix_generation_configs_sort", "purpose", "priority", "created_at"),
         Index("ix_generation_configs_resource_group", "resource_group_id", "purpose", "enabled"),
@@ -721,7 +715,6 @@ class ResourceLibraryAsset(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_resource_library_assets_owner_user_id", "owner_user_id"),
         Index("ix_resource_library_assets_kind", "kind"),
-        Index("ix_resource_library_assets_enabled", "enabled"),
         Index("ix_resource_library_assets_owner_archived", "owner_user_id", "archived_at"),
         Index(
             "uq_resource_library_assets_owner_source",
@@ -794,7 +787,6 @@ class Inspiration(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_inspirations_owner_user_id", "owner_user_id"),
         Index("ix_inspirations_resource_group_id", "resource_group_id"),
-        Index("ix_inspirations_enabled", "enabled"),
         Index("ix_inspirations_deleted_at", "deleted_at"),
     )
 
@@ -937,6 +929,7 @@ class WorkflowNode(Base, TimestampMixin):
     """工作流节点配置与最近一次输出。"""
 
     __tablename__ = "workflow_nodes"
+    __table_args__ = (Index("ix_workflow_nodes_workflow_id", "workflow_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workflow_id: Mapped[str] = mapped_column(String(36))
@@ -981,6 +974,11 @@ class WorkflowEdge(Base):
     """工作流有向边，表达节点间数据依赖。"""
 
     __tablename__ = "workflow_edges"
+    __table_args__ = (
+        Index("ix_workflow_edges_workflow_id", "workflow_id"),
+        Index("ix_workflow_edges_source_node_id", "source_node_id"),
+        Index("ix_workflow_edges_target_node_id", "target_node_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workflow_id: Mapped[str] = mapped_column(String(36))
@@ -1011,6 +1009,7 @@ class WorkflowRun(Base):
     """一次工作流执行记录。"""
 
     __tablename__ = "workflow_runs"
+    __table_args__ = (Index("ix_workflow_runs_workflow_id", "workflow_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workflow_id: Mapped[str] = mapped_column(String(36))
@@ -1103,7 +1102,6 @@ class SourceAsset(Base):
             postgresql_where=text("kind = 'original_image'"),
             sqlite_where=text("kind = 'original_image'"),
         ),
-        Index("ix_source_assets_enabled", "enabled"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -1140,6 +1138,7 @@ class CreativeBrief(Base):
     """AI 对灵感产物的理解结果：定位/受众/卖点/禁忌词。"""
 
     __tablename__ = "creative_briefs"
+    __table_args__ = (Index("ix_creative_briefs_inspiration_id", "inspiration_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     inspiration_id: Mapped[str] = mapped_column(String(36))
@@ -1170,6 +1169,7 @@ class CopySet(Base, TimestampMixin):
     """文案版本，记录 AI 原始输出与人工编辑历史。"""
 
     __tablename__ = "copy_sets"
+    __table_args__ = (Index("ix_copy_sets_inspiration_id", "inspiration_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     inspiration_id: Mapped[str] = mapped_column(String(36))
@@ -1214,7 +1214,10 @@ class PosterVariant(Base):
     """已生成的海报变体，关联文案和存储路径。"""
 
     __tablename__ = "poster_variants"
-    __table_args__ = (Index("ix_poster_variants_enabled", "enabled"),)
+    __table_args__ = (
+        Index("ix_poster_variants_inspiration_id", "inspiration_id"),
+        Index("ix_poster_variants_copy_set_id", "copy_set_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     inspiration_id: Mapped[str] = mapped_column(String(36))
@@ -1265,7 +1268,6 @@ class ImageSession(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_image_sessions_owner_user_id", "owner_user_id"),
         Index("ix_image_sessions_resource_group_id", "resource_group_id"),
-        Index("ix_image_sessions_enabled", "enabled"),
         Index("ix_image_sessions_deleted_at", "deleted_at"),
     )
 
@@ -1343,7 +1345,7 @@ class ImageSessionAsset(Base):
     __tablename__ = "image_session_assets"
     __table_args__ = (
         Index("ix_image_session_assets_owner_user_id", "owner_user_id"),
-        Index("ix_image_session_assets_enabled", "enabled"),
+        Index("ix_image_session_assets_session_id", "session_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -1526,7 +1528,6 @@ class ImageGalleryEntry(Base):
         Index("uq_image_gallery_entries_asset_id", "image_session_asset_id", unique=True),
         Index("ix_image_gallery_entries_round_id", "image_session_round_id"),
         Index("ix_image_gallery_entries_created_at", "created_at"),
-        Index("ix_image_gallery_entries_enabled", "enabled"),
         Index("ix_image_gallery_entries_enabled_created", "enabled", "created_at"),
         Index("ix_image_gallery_entries_group_enabled_created", "resource_group_id", "enabled", "created_at"),
     )

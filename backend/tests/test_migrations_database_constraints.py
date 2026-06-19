@@ -140,7 +140,6 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
         "uq_image_gallery_entries_asset_id",
         "ix_image_gallery_entries_round_id",
         "ix_image_gallery_entries_created_at",
-        "ix_image_gallery_entries_enabled",
         "ix_image_gallery_entries_enabled_created",
         "ix_image_gallery_entries_group_enabled_created",
     }
@@ -228,7 +227,6 @@ def test_resource_library_models_match_migration_contract() -> None:
     assert asset_table.c.disabled_reason.nullable
     assert asset_table.c.archived_at.nullable
     assert {index.name for index in asset_table.indexes} == {
-        "ix_resource_library_assets_enabled",
         "ix_resource_library_assets_kind",
         "ix_resource_library_assets_owner_archived",
         "ix_resource_library_assets_owner_user_id",
@@ -288,7 +286,6 @@ def test_canvas_template_models_match_migration_contract() -> None:
     assert category_table.c.disabled_by_user_id.nullable
     assert category_table.c.disabled_reason.nullable
     assert {index.name for index in category_table.indexes} == {
-        "ix_canvas_template_categories_enabled",
         "ix_canvas_template_categories_scope",
         "uq_canvas_template_categories_global_name",
         "uq_canvas_template_categories_user_owner_name",
@@ -321,7 +318,6 @@ def test_canvas_template_models_match_migration_contract() -> None:
     assert {index.name for index in template_table.indexes} == {
         "ix_canvas_templates_archived_at",
         "ix_canvas_templates_category_id",
-        "ix_canvas_templates_enabled",
         "ix_canvas_templates_entry_mode",
         "ix_canvas_templates_review_status",
         "ix_canvas_templates_scope",
