@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import itsdangerous.timed
@@ -275,6 +275,56 @@ def test_admin_access_required_setting_no_longer_bypasses_account_login(configur
     assert required_session.status_code == 200
     assert required_session.json()["authenticated"] is False
     assert required_session.json()["access_required"] is True
+
+
+def test_session_ttl_update_invalidates_existing_sessions(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    session_before = client.get("/api/auth/session")
+    assert session_before.status_code == 200
+    assert session_before.json()["authenticated"] is True
+
+    updated = client.patch("/api/settings", json={"values": {"auth_session_ttl_minutes": 60}})
+    assert updated.status_code == 200
+
+    session_after = client.get("/api/auth/session")
+    assert session_after.status_code == 200
+    assert session_after.json()["authenticated"] is False
+
+    protected = client.get("/api/settings")
+    assert protected.status_code == 401
+    assert protected.json()["detail"] == "请先登录"
+
+
+def test_expired_auth_session_is_unauthenticated(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.config import get_settings
+    from inspiration_one_backend.presentation.api import create_app
+
+    current_time = datetime(2026, 1, 1, tzinfo=UTC)
+    monkeypatch.setenv("AUTH_SESSION_TTL_MINUTES", "5")
+    monkeypatch.setattr("inspiration_one_backend.presentation.auth_session.now_utc", lambda: current_time)
+    get_settings.cache_clear()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    current_time = current_time + timedelta(minutes=6)
+
+    session_after_expiry = client.get("/api/auth/session")
+    assert session_after_expiry.status_code == 200
+    assert session_after_expiry.json()["authenticated"] is False
+
+    protected = client.get("/api/settings")
+    assert protected.status_code == 401
+    assert protected.json()["detail"] == "请先登录"
 
 
 def test_settings_api_uses_rbac_without_extra_unlock(configured_env: Path) -> None:

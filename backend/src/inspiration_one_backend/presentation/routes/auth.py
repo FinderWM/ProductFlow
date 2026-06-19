@@ -10,6 +10,7 @@ from inspiration_one_backend.application.auth import (
     set_initial_password,
 )
 from inspiration_one_backend.infrastructure.db.models import AuthUser, RbacMenu
+from inspiration_one_backend.presentation.auth_session import validate_auth_session, write_login_session
 from inspiration_one_backend.presentation.deps import get_session
 from inspiration_one_backend.presentation.schemas.auth import (
     AuthUserResponse,
@@ -42,7 +43,7 @@ def create_session(
     )
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码不正确")
-    _write_login_session(request, user)
+    write_login_session(request, session, user)
     return SessionResponse()
 
 
@@ -56,7 +57,7 @@ def login(payload: LoginRequest, request: Request, session: Session = Depends(ge
     )
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码不正确")
-    _write_login_session(request, user)
+    write_login_session(request, session, user)
     return SessionResponse()
 
 
@@ -73,20 +74,17 @@ def set_password(
         password=payload.password,
         client_password_md5=payload.client_password_md5,
     )
-    _write_login_session(request, user)
+    write_login_session(request, session, user)
     return SessionResponse()
 
 
 @router.get("/session", response_model=SessionStateResponse)
 def get_session_state(request: Request, session: Session = Depends(get_session)) -> SessionStateResponse:
     ensure_auth_bootstrapped(session)
-    user_id = request.session.get("user_id")
-    if not user_id:
+    validation = validate_auth_session(request, session)
+    if not validation.authenticated or validation.user is None:
         return SessionStateResponse(authenticated=False, access_required=True)
-    user = session.get(AuthUser, user_id)
-    if user is None or not user.enabled or user.archived_at is not None:
-        request.session.clear()
-        return SessionStateResponse(authenticated=False, access_required=True)
+    user = validation.user
     permission_state = get_user_permission_state(session, user)
     return SessionStateResponse(
         authenticated=True,
@@ -102,14 +100,6 @@ def destroy_session(request: Request, response: Response) -> SessionResponse:
     request.session.clear()
     response.delete_cookie("session")
     return SessionResponse()
-
-
-def _write_login_session(request: Request, user: AuthUser) -> None:
-    request.session.clear()
-    request.session["user_id"] = user.id
-    request.session["username"] = user.username
-    request.session["role_id"] = user.role_id
-    request.session["is_admin"] = user.is_admin
 
 
 def _serialize_user(user: AuthUser) -> AuthUserResponse:

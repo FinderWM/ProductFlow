@@ -66,6 +66,10 @@ function rbacUser(overrides: Partial<RbacUser> = {}): RbacUser {
     is_admin: overrides.is_admin ?? false,
     enabled: overrides.enabled ?? true,
     password_pending: overrides.password_pending ?? false,
+    last_login_at: overrides.last_login_at ?? null,
+    last_seen_at: overrides.last_seen_at ?? null,
+    session_revoked_after: overrides.session_revoked_after ?? null,
+    possibly_online: overrides.possibly_online ?? false,
     resource_groups: overrides.resource_groups ?? [],
     archived_at: overrides.archived_at,
   };

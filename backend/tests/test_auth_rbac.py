@@ -254,6 +254,117 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
     assert rbac_users.json()["detail"] == "需要管理员权限"
 
 
+def test_reset_password_invalidates_existing_user_session(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "reset-session-user", "display_name": "Reset Session User"},
+    )
+    assert created_user.status_code == 201
+    user_id = created_user.json()["id"]
+
+    user_client = TestClient(app)
+    set_password = _set_password(
+        user_client,
+        username="reset-session-user",
+        password="initial-password",
+        setup_token=created_user.json()["password_setup_token"],
+    )
+    assert set_password.status_code == 200
+    assert user_client.get("/api/auth/session").json()["authenticated"] is True
+
+    reset = admin_client.post(f"/api/rbac/users/{user_id}/reset-password")
+    assert reset.status_code == 200
+
+    stale_session = user_client.get("/api/auth/session")
+    assert stale_session.status_code == 200
+    assert stale_session.json()["authenticated"] is False
+
+    protected = user_client.get("/api/settings/my-generation-resource-groups")
+    assert protected.status_code == 401
+    assert protected.json()["detail"] == "请先登录"
+
+    new_password = _set_password(
+        user_client,
+        username="reset-session-user",
+        password="new-password",
+        setup_token=reset.json()["password_setup_token"],
+    )
+    assert new_password.status_code == 200
+    assert user_client.get("/api/auth/session").json()["authenticated"] is True
+
+
+def test_disabling_user_rejects_existing_user_session(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "disabled-session-user", "display_name": "Disabled Session User"},
+    )
+    assert created_user.status_code == 201
+    user_id = created_user.json()["id"]
+
+    user_client = TestClient(app)
+    set_password = _set_password(
+        user_client,
+        username="disabled-session-user",
+        password="user-password",
+        setup_token=created_user.json()["password_setup_token"],
+    )
+    assert set_password.status_code == 200
+
+    disabled = admin_client.patch(f"/api/rbac/users/{user_id}", json={"enabled": False})
+    assert disabled.status_code == 200
+
+    protected = user_client.get("/api/settings/my-generation-resource-groups")
+    assert protected.status_code == 403
+    assert protected.json()["detail"] == "账号已停用"
+
+    stale_session = user_client.get("/api/auth/session")
+    assert stale_session.status_code == 200
+    assert stale_session.json()["authenticated"] is False
+
+
+def test_rbac_user_list_exposes_login_metadata(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    created_user = admin_client.post(
+        "/api/rbac/users",
+        json={"username": "metadata-user", "display_name": "Metadata User"},
+    )
+    assert created_user.status_code == 201
+
+    user_client = TestClient(app)
+    set_password = _set_password(
+        user_client,
+        username="metadata-user",
+        password="metadata-password",
+        setup_token=created_user.json()["password_setup_token"],
+    )
+    assert set_password.status_code == 200
+
+    user_page = admin_client.get("/api/rbac/users", params={"username": "metadata-user", "page": 1, "page_size": 10})
+    assert user_page.status_code == 200
+    listed_user = user_page.json()["items"][0]
+    assert listed_user["last_login_at"] is not None
+    assert listed_user["last_seen_at"] is not None
+    assert listed_user["session_revoked_after"] is None
+    assert listed_user["possibly_online"] is True
+
+
 def test_resource_library_is_not_rbac_menu_even_when_legacy_row_exists(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 

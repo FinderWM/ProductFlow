@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from inspiration_one_backend import __version__
 from inspiration_one_backend.application.auth import list_available_generation_resource_groups_for_user
+from inspiration_one_backend.application.auth_sessions import revoke_all_auth_sessions
 from inspiration_one_backend.application.canvas_templates import CanvasTemplate as CanvasTemplatePayload
 from inspiration_one_backend.application.contracts import CopyNodeConfigV2, InspirationInput
 from inspiration_one_backend.application.image_generation_failures import classify_image_generation_failure
@@ -184,6 +185,7 @@ READ_STATUS_PERMISSION = Depends(require_api_permission(API_STATUS_READ))
 READ_GENERATION_RUNTIME_PERMISSION = Depends(
     require_any_api_permission(API_INSPIRATIONS_READ, API_IMAGE_CHAT_READ, API_SETTINGS_READ)
 )
+AUTH_SESSION_TTL_CONFIG_KEY = "auth_session_ttl_minutes"
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,12 +262,17 @@ def _apply_runtime_config_update(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    auth_session_policy_changed = (
+        AUTH_SESSION_TTL_CONFIG_KEY in normalized_values or AUTH_SESSION_TTL_CONFIG_KEY in reset_keys
+    )
     for key in reset_keys:
         existing = session.get(AppSetting, key)
         if existing is not None:
             session.delete(existing)
     for key, value in normalized_values.items():
         _upsert_app_setting(session, key=key, value=value)
+    if auth_session_policy_changed:
+        revoke_all_auth_sessions(session)
     session.commit()
     return _serialize_config(session)
 
@@ -1675,6 +1682,8 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
                 session.add(AppSetting(key=key, value=value))
             else:
                 existing.value = value
+        if AUTH_SESSION_TTL_CONFIG_KEY in bundle.normalized_runtime_config:
+            revoke_all_auth_sessions(session)
 
         session.execute(delete(GenerationConfigDailyStat))
         session.execute(delete(GenerationConfigState))

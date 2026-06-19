@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from inspiration_one_backend.application.auth_sessions import auth_user_possibly_online
 from inspiration_one_backend.infrastructure.db.models import (
     AuthRole,
     AuthUser,
@@ -55,6 +56,10 @@ class RbacUserResponse(BaseModel):
     enabled: bool
     password_pending: bool
     password_setup_token: str | None = None
+    last_login_at: str | None = None
+    last_seen_at: str | None = None
+    session_revoked_after: str | None = None
+    possibly_online: bool = False
     resource_groups: list[GenerationResourceGroupTagResponse] = Field(default_factory=list)
     archived_at: str | None
 
@@ -152,6 +157,10 @@ def serialize_user(
         enabled=user.enabled,
         password_pending=not bool(user.password_hash),
         password_setup_token=password_setup_token,
+        last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
+        last_seen_at=user.last_seen_at.isoformat() if user.last_seen_at else None,
+        session_revoked_after=user.session_revoked_after.isoformat() if user.session_revoked_after else None,
+        possibly_online=auth_user_possibly_online(user),
         resource_groups=[
             serialize_generation_resource_group_tag(group, resource_group_id=group.id)
             for group in (resource_groups or [])

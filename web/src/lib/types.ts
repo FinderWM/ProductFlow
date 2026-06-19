@@ -179,6 +179,10 @@ export interface RbacUser {
   enabled: boolean;
   password_pending: boolean;
   password_setup_token?: string | null;
+  last_login_at?: string | null;
+  last_seen_at?: string | null;
+  session_revoked_after?: string | null;
+  possibly_online: boolean;
   resource_groups: GenerationResourceGroupTag[];
   archived_at?: string | null;
 }

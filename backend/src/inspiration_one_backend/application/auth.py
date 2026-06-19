@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, inspect, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from inspiration_one_backend.application.auth_sessions import mark_user_sessions_revoked, record_user_login
 from inspiration_one_backend.config import get_settings
 from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
 from inspiration_one_backend.domain.rbac import (
@@ -244,7 +245,7 @@ def set_initial_password(
     user.password_salt = None
     user.password_hash = password_hash(credential.secret)
     _clear_password_setup_token(user)
-    user.updated_at = utcnow()
+    record_user_login(user)
     session.commit()
     session.refresh(user)
     return user
@@ -272,6 +273,9 @@ def authenticate_user(
         user.updated_at = utcnow()
         session.commit()
         session.refresh(user)
+    record_user_login(user)
+    session.commit()
+    session.refresh(user)
     return user
 
 
@@ -386,7 +390,7 @@ def reset_user_password(session: Session, *, user_id: str, actor: AuthUser) -> P
     user.password_hash = None
     user.password_salt = None
     setup_token = _issue_password_setup_token(user)
-    user.updated_at = utcnow()
+    mark_user_sessions_revoked(user)
     session.commit()
     session.refresh(user)
     return PasswordSetupIssue(user=user, setup_token=setup_token)
@@ -398,7 +402,10 @@ def set_user_enabled(session: Session, *, user_id: str, enabled: bool) -> AuthUs
     if user.is_admin and not enabled:
         raise BusinessValidationError("不能禁用管理员")
     user.enabled = enabled
-    user.updated_at = utcnow()
+    if not enabled:
+        mark_user_sessions_revoked(user)
+    else:
+        user.updated_at = utcnow()
     session.commit()
     session.refresh(user)
     return user

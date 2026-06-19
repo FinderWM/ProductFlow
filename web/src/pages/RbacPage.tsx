@@ -21,6 +21,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ModalShell } from "../components/ModalShell";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
+import { formatDateTime } from "../lib/format";
 import { useI18n } from "../lib/preferences";
 import type {
   GenerationResourceGroup,
@@ -937,10 +938,25 @@ export function RbacPage() {
 	                              </button>
 	                            </td>
 	                            <td className="px-4 py-3">
-	                              <span className={rbacUserStatusBadgeClassName(user)}>
-	                                {disabled ? <Power size={12} aria-hidden="true" /> : null}
-                                {statusLabel}
-                              </span>
+	                              <div className="flex flex-col items-start gap-1">
+	                                <span className={rbacUserStatusBadgeClassName(user)}>
+	                                  {disabled ? <Power size={12} aria-hidden="true" /> : null}
+                                  {statusLabel}
+                                </span>
+                                {user.possibly_online ? (
+                                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200">
+                                    {t("rbac.possiblyOnline")}
+                                  </span>
+                                ) : null}
+                                <div className="space-y-0.5 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                                  <div>
+                                    {t("rbac.lastLogin")} {formatDateTime(user.last_login_at)}
+                                  </div>
+                                  <div>
+                                    {t("rbac.lastSeen")} {formatDateTime(user.last_seen_at)}
+                                  </div>
+                                </div>
+                              </div>
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex justify-end gap-2">

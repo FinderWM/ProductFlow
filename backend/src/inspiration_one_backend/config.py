@@ -40,6 +40,9 @@ DEFAULT_LOGIN_PAGE_COMMAND_ORBIT_HERO_DESCRIPTION = (
 DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_TITLE = "欢迎回来，继续创作"
 DEFAULT_LOGIN_PAGE_FLUID_MIST_GREETING_DESCRIPTION = "登录你的工作台，开启灵感之旅"
 DEFAULT_LOGIN_PAGE_IMAGE_LAB_HERO_DESCRIPTION = "登录页像一张摄影棚邀请函，先给情绪和记忆点，再承载最短的进入路径。"
+DEFAULT_AUTH_SESSION_TTL_MINUTES = 7 * 24 * 60
+AUTH_SESSION_MIN_TTL_MINUTES = 5
+AUTH_SESSION_MAX_TTL_MINUTES = 30 * 24 * 60
 LOGIN_PAGE_TEMPLATE_CONFIG_KEYS: dict[str, str] = {
     "command-orbit": "login_page_command_orbit_config",
     "fluid-mist": "login_page_fluid_mist_config",
@@ -346,6 +349,11 @@ class Settings(BaseSettings):
     app_port: int = 29280
     backend_cors_origins: str = "http://localhost:29281,http://127.0.0.1:29281"
     session_cookie_secure: bool = False
+    auth_session_ttl_minutes: int = Field(
+        default=DEFAULT_AUTH_SESSION_TTL_MINUTES,
+        ge=AUTH_SESSION_MIN_TTL_MINUTES,
+        le=AUTH_SESSION_MAX_TTL_MINUTES,
+    )
 
     admin_access_key: str = Field(min_length=8)
     session_secret: str = Field(min_length=16)
@@ -1098,6 +1106,15 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         category=LOGIN_PAGE_CATEGORY,
         input_type="textarea",
         description="Image Lab 登录页独立 JSON 配置；图片只能从资源库选择。",
+    ),
+    ConfigDefinition(
+        key="auth_session_ttl_minutes",
+        label="登录态有效期（分钟）",
+        category="安全与运维",
+        input_type="number",
+        description="调整后会让所有已有登录态失效，用户需要重新登录。",
+        minimum=AUTH_SESSION_MIN_TTL_MINUTES,
+        maximum=AUTH_SESSION_MAX_TTL_MINUTES,
     ),
     ConfigDefinition(
         key="deletion_enabled",

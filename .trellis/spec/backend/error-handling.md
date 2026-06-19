@@ -282,6 +282,92 @@ look future-dated and unauthenticated. Large clock jumps are not retained after 
 does not keep signing cookies with a stale future timestamp. Keep rollback regression tests green when touching this
 middleware.
 
+### Scenario: Lightweight auth-session invalidation
+
+#### 1. Scope / Trigger
+
+- Trigger: changing login/logout/session-state routes, `presentation/deps.py` auth dependencies, RBAC user management,
+  runtime settings, or auth-user schema fields.
+- Goal: keep browser login state stateless while still allowing user-level and global invalidation without storing every
+  browser session.
+
+#### 2. Signatures
+
+- Cookie payload, signed by `ClockStableSessionMiddleware`:
+  - `user_id: str`
+  - `issued_at: ISO datetime`
+  - `expires_at: ISO datetime`
+  - `policy_version: int`
+- DB fields on `auth_users`:
+  - `session_revoked_after: datetime | null`
+  - `last_login_at: datetime | null`
+  - `last_seen_at: datetime | null`
+- Runtime config key: `auth_session_ttl_minutes`.
+- Internal `app_settings` keys:
+  - `auth_sessions_revoked_after`
+  - `auth_session_policy_version`
+
+#### 3. Contracts
+
+- The cookie stores only the minimum login claim. Do not persist username, role, menu, or API permission claims in the
+  cookie as trusted long-lived state.
+- Auth dependencies must reload `AuthUser` from an independent DB session, then check current enabled/archive state,
+  user watermark, global watermark, and policy version.
+- `GET /api/auth/session` uses the same validation path but returns `authenticated=false` for ordinary missing, expired,
+  revoked, or disabled sessions.
+- Resetting a user's password sets `session_revoked_after`; disabling a user rejects existing sessions and also sets the
+  user watermark.
+- Updating, resetting, or importing `auth_session_ttl_minutes` must set the global watermark and increment policy version.
+- `SESSION_SECRET`, `DATABASE_URL`, `REDIS_URL`, and other infrastructure secrets remain env-only and must not be added to
+  runtime config.
+
+#### 4. Validation & Error Matrix
+
+- Missing/malformed/legacy cookie payload -> `401`, `{"detail": "请先登录"}` for protected APIs.
+- Expired cookie payload -> `401`, `{"detail": "请先登录"}` for protected APIs.
+- User missing or archived -> `401`, `{"detail": "请先登录"}`.
+- User disabled -> `403`, `{"detail": "账号已停用"}` for protected APIs.
+- `issued_at <= auth_users.session_revoked_after` -> `401`, `{"detail": "请先登录"}`.
+- `issued_at <= app_settings.auth_sessions_revoked_after` -> `401`, `{"detail": "请先登录"}`.
+- Cookie `policy_version` differs from `app_settings.auth_session_policy_version` -> `401`, `{"detail": "请先登录"}`.
+
+#### 5. Good/Base/Bad Cases
+
+- Good: one account can have multiple valid signed cookies; resetting that account's password invalidates all old cookies
+  through one user watermark.
+- Good: changing session TTL invalidates all existing cookies through global watermark plus policy version.
+- Base: existing/legacy signed session cookies without the new payload are treated as unauthenticated after deployment.
+- Bad: storing per-browser session rows only to support this coarse invalidation model.
+- Bad: trusting role, menu, or API permission fields from the cookie instead of recomputing current permission state.
+
+#### 6. Tests Required
+
+- Route test: login/session-state still returns current user, menus, and API permissions.
+- Regression test: password reset invalidates the user's existing cookie and a new setup/login succeeds.
+- Regression test: disabling a user rejects the existing cookie with `账号已停用`.
+- Settings test: updating `auth_session_ttl_minutes` invalidates the current cookie.
+- RBAC list test: user rows expose `last_login_at`, `last_seen_at`, `session_revoked_after`, and `possibly_online`.
+- Migration test: auth-user watermark columns exist in both SQLite metadata tests and Alembic upgrade path.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+request.session["username"] = user.username
+request.session["role_id"] = user.role_id
+request.session["is_admin"] = user.is_admin
+```
+
+Correct:
+
+```python
+request.session["user_id"] = user.id
+request.session["issued_at"] = issued_at.isoformat()
+request.session["expires_at"] = expires_at.isoformat()
+request.session["policy_version"] = policy_version
+```
+
 ---
 
 ## Upload and Resource Boundary Errors

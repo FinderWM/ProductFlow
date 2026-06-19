@@ -11,6 +11,7 @@ from inspiration_one_backend.application.auth import (
 from inspiration_one_backend.config import get_runtime_settings
 from inspiration_one_backend.infrastructure.db.models import AuthUser
 from inspiration_one_backend.infrastructure.db.session import get_db_session, get_session_factory
+from inspiration_one_backend.presentation.auth_session import validate_auth_session
 
 
 def get_session(session: Session = Depends(get_db_session)) -> Session:
@@ -18,18 +19,15 @@ def get_session(session: Session = Depends(get_db_session)) -> Session:
 
 
 def get_current_user(request: Request) -> AuthUser:
-    user_id = request.session.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     factory = get_session_factory()
     with factory() as session:
         ensure_auth_bootstrapped(session)
-        user = session.get(AuthUser, user_id)
-        if user is None or user.archived_at is not None:
-            request.session.clear()
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
-        if not user.enabled:
+        validation = validate_auth_session(request, session)
+        if validation.disabled:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已停用")
+        if validation.user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
+        user = validation.user
         session.expunge(user)
         return user
 
