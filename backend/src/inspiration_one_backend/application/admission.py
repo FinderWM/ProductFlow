@@ -13,8 +13,9 @@ from inspiration_one_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
     WORKFLOW_RUN_GENERATION_TASK_CONTRACT,
 )
-from inspiration_one_backend.domain.enums import WorkflowNodeStatus, WorkflowNodeType
+from inspiration_one_backend.domain.enums import DeckSlideStatus, WorkflowNodeStatus, WorkflowNodeType
 from inspiration_one_backend.infrastructure.db.models import (
+    DeckSlide,
     ImageSessionGenerationTask,
     WorkflowNode,
     WorkflowNodeRun,
@@ -115,8 +116,13 @@ def _running_image_generation_task_count(session: Session) -> int:
         .select_from(ImageSessionGenerationTask)
         .where(ImageSessionGenerationTask.status.in_(IMAGE_SESSION_GENERATION_TASK_CONTRACT.running_statuses))
     )
-    return _running_workflow_node_count(session, node_types=IMAGE_GENERATION_NODE_TYPES) + int(
-        running_image_session_tasks or 0
+    running_deck_slides = session.scalar(
+        select(func.count()).select_from(DeckSlide).where(DeckSlide.slide_status == DeckSlideStatus.RUNNING)
+    )
+    return (
+        _running_workflow_node_count(session, node_types=IMAGE_GENERATION_NODE_TYPES)
+        + int(running_image_session_tasks or 0)
+        + int(running_deck_slides or 0)
     )
 
 

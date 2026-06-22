@@ -23,7 +23,7 @@ These files document the frontend conventions that are actually present in this 
 | [Type Safety](./type-safety.md) | Strict TS, DTO mirroring, ApiError, runtime validation reality | Filled |
 | [Inspiration Workbench DAG](./inspiration-workbench-dag.md) | Inspiration detail DAG workbench UI, API DTOs, and cache contracts | Filled |
 | [Resource Governance Guidelines](./resource-governance-guidelines.md) | Resource library, gallery governance, admin readonly, moderation UI contracts | Filled |
-| [UI Layout Guidelines](./ui-layout-guidelines.md) | Layout scheme, workspace appearance, navigation, shell, and verification contracts | Filled |
+| [UI Layout Guidelines](./ui-layout-guidelines.md) | Layout scheme, workspace appearance, navigation, shell, component color contract (dusk leak prevention), and verification contracts | Filled |
 
 ---
 

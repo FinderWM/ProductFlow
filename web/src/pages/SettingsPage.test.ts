@@ -217,7 +217,6 @@ function generationResourceGroup(overrides: Partial<GenerationResourceGroup> = {
 function providerConfigResponse(overrides: Partial<ProviderConfigResponse> = {}): ProviderConfigResponse {
   return {
     profiles: overrides.profiles ?? [providerProfile()],
-    bindings: overrides.bindings ?? [],
     generation_resource_groups: overrides.generation_resource_groups ?? [generationResourceGroup()],
     generation_configs: overrides.generation_configs ?? [generationConfig({ purpose: "text" })],
     status_summary: overrides.status_summary ?? null,
@@ -1425,13 +1424,11 @@ describe("SettingsPage import/export helpers", () => {
       schema_version: 1,
       runtime_config_count: 14,
       provider_profile_count: 2,
-      provider_binding_count: 2,
       generation_resource_group_count: 1,
       generation_config_count: 2,
       canvas_template_category_count: 3,
       canvas_template_count: 7,
       provider_profile_names: ["主供应商", "备用供应商"],
-      provider_binding_purposes: ["image", "text"],
       includes_api_keys: true,
       provider_profiles_with_api_key_count: 1,
       canvas_template_keys: ["global:one"],
@@ -1441,7 +1438,6 @@ describe("SettingsPage import/export helpers", () => {
     expect(settingsImportSummaryCounts(preview)).toEqual({
       runtimeConfigCount: 14,
       providerProfileCount: 2,
-      providerBindingCount: 2,
       generationResourceGroupCount: 1,
       generationConfigCount: 2,
       canvasTemplateCategoryCount: 3,
@@ -1455,7 +1451,6 @@ describe("SettingsPage import/export helpers", () => {
       metadata: { exported_at: "2026-05-14T01:02:03Z" },
       runtime_config: {},
       provider_profiles: [],
-      provider_bindings: [],
       generation_resource_groups: [],
       generation_configs: [],
       canvas_template_categories: [],

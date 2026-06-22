@@ -219,6 +219,70 @@ Record the evidence with the URL, viewport, layout scheme, theme or appearance, 
 class, and at least one visible DOM or interaction proof for the route. A screenshot without those state fields is not enough
 for layout/theme verification.
 
+## Component Color Contract (dusk Leak Prevention)
+
+### Trigger
+
+Any component-layer styling that paints a surface, border, or text color in `web/src/pages/` or `web/src/components/`.
+
+### Why This Contract Exists
+
+The theme axis (`light` / `dark`, via the root `dark` class) and the workspace appearance axis
+(`data-workspace-appearance="mist|sage|dusk"`) are **independent**. A bare Tailwind neutral class such as
+`border-slate-300` only understands the default value and its `dark:` variant. It does **not** know about the appearance
+axis. `index.css` carries a `:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]` override block that
+re-maps a fixed allow-list of bare neutral classes (for example `.border-slate-200`, `.bg-white`, `.text-slate-900`) onto
+dusk tokens. Any bare neutral class **not** in that allow-list "leaks": under the dusk appearance it renders its light value,
+producing a bright edge or panel on the warm-brown surface. This is the only color defect a user can actually see; it is not
+caught by `tsc`, `pnpm build`, or unit tests.
+
+### Convention: consume `pf-*` semantic classes, not bare neutral utilities
+
+Semantic classes are defined in `web/src/index.css` after `.pf-table-panel` and resolve through `--pf-*` tokens in every
+appearance:
+
+| Semantic class | Token | light value (equals bare class) |
+|---|---|---|
+| `pf-surface` | `--pf-panel` | `bg-white` |
+| `pf-surface-soft` | `--pf-panel-soft` | `bg-slate-50` / `bg-zinc-50` |
+| `pf-ink` | `--pf-text` | `text-slate-900` / `text-slate-950` |
+| `pf-ink-muted` | `--pf-muted` | `text-slate-500` |
+| `pf-hairline` | `--pf-border-soft` | `border-slate-200` / `border-zinc-200` |
+| `pf-hairline-strong` | `--pf-border` | `border-slate-300` |
+
+**Key property**: in `light` these tokens are pixel-equal to the listed bare class, so a bare→`pf-*` swap is visually neutral
+in `light` and `dark` while it makes `dusk` (and `mist` / `sage`) resolve correctly. When you swap a bare class that has a
+paired `dark:` variant (for example `border-slate-300 dark:border-slate-700`), **keep the `dark:` variant**: it still wins on
+the theme axis so dark chrome is unchanged, and the `pf-*` base only repaints under the appearance axis.
+
+### Migration Recipe (incremental, per-file verified)
+
+- Map: `text-slate-950/900/800` → `pf-ink`; `text-slate-700/600/500/400` → `pf-ink-muted`; solid `bg-white` → `pf-surface`;
+  `bg-slate-50` / `bg-zinc-50` → `pf-surface-soft`; `border-slate-200` / `border-zinc-200` → `pf-hairline`;
+  `border-slate-300` → `pf-hairline-strong`. Delete the paired `dark:` variant **only** for surface/ink classes that the
+  `pf-*` token already covers; keep `dark:` border variants when their value differs from `--pf-border`'s dark value.
+- **Leave alone** (not clean leaks; converting hurts more than it helps): translucent variants (`bg-white/80`, `/55` scrims —
+  going solid loses the frosted effect), non-neutral semantic colors (`emerald`/`indigo`/`violet`/`rose`/`amber`), decorative
+  hairline separators / drag handles, `bg-slate-950` intentional dark code blocks, status dots like `bg-zinc-400`, skeleton
+  fills `bg-slate-200`, and high-contrast active states like `bg-slate-900 text-white`.
+- A bare neutral class lives in a shared class-constant `.ts` file too (for example `web/src/pages/settings/components/styles.ts`).
+  Scan `.ts`, not only `.tsx`, or the constant leaks across every page that reuses it.
+- After each file: `just web-build` + `node web/scripts/check-bare-colors.mjs --update`. Once a page reaches zero leaks, the
+  matching dusk override selector in `index.css` may be removed.
+
+### Ratchet Guard
+
+`web/scripts/check-bare-colors.mjs` counts bare neutral classes per file against `web/scripts/bare-colors-baseline.json`.
+Run `node web/scripts/check-bare-colors.mjs` to verify (fails if any file exceeds its baseline) and
+`node web/scripts/check-bare-colors.mjs --update` to re-tighten the baseline after a migration. The guard is branch-agnostic:
+it blocks net-new bare colors and records reductions. It is not yet wired into `package.json` / CI.
+
+### How To Detect A True Leak
+
+A true leak is a bare neutral class that is **not** in the dusk override allow-list, after stripping `dark:` / `hover:` /
+`focus:` variants. Extract the allow-list from the `data-workspace-appearance="dusk"` block in `index.css` and diff against
+the classes a component actually uses; do not rely on memory of which classes are covered.
+
 ## Adding A New UI Layout Scheme
 
 ### Signatures
@@ -391,6 +455,10 @@ Add more focused backend or frontend tests when route gates, DTOs, or page behav
 - New visible UI text without every locale key -> failed implementation.
 - Workspace dark appearance without `resolvedTheme: "dark"` -> failed contrast implementation.
 - Theme or layout visual change without independent-browser screenshot review -> incomplete verification.
+- Bare neutral class (for example `border-slate-300`) outside the dusk override allow-list -> dusk leak: bright edge/panel on
+  warm chrome; use the matching `pf-*` semantic class instead.
+- `node web/scripts/check-bare-colors.mjs` reports a file above its baseline -> net-new bare color; convert to `pf-*` before
+  merge.
 
 ## Good / Base / Bad Cases
 
@@ -405,6 +473,10 @@ Add more focused backend or frontend tests when route gates, DTOs, or page behav
 - Bad: adding a workspace appearance only to `WORKSPACE_APPEARANCE_METADATA` without root CSS tokens.
 - Bad: mapping first-level nav to `/inspirations#...` while the scheme expects real business pages.
 - Bad: hard-coding new labels in page JSX or CSS `content` when the text belongs in i18n.
+- Bad: a component paints a structural surface/border/text with a bare neutral class outside the dusk allow-list (for example
+  `border-slate-300`), so the element leaks bright under the dusk appearance.
+- Good: a structural border uses `pf-hairline-strong` and keeps its paired `dark:border-slate-700`, so `light`/`dark` are
+  unchanged and `dusk` resolves to the warm token.
 
 ## Review Checklist
 
@@ -418,6 +490,8 @@ Before reporting layout/theme work complete:
 - [ ] Root `data-*` attributes and CSS selectors match the provider behavior.
 - [ ] Light/dark/appearance contrast is checked for hover, focus, active, disabled, expanded, loading, empty, error, and
   destructive states.
+- [ ] New/changed components consume `pf-*` semantic classes for structural surface/border/text; any remaining bare neutral
+  class is an intentional exception (translucent, non-neutral, decorative, or high-contrast) and `node web/scripts/check-bare-colors.mjs` does not exceed baseline.
 - [ ] Desktop and mobile screenshots come from an independent browser window/profile or isolated context.
 - [ ] `pnpm --dir web lint`, `pnpm --dir web test:run`, and `just web-build` pass or any unrelated pre-existing failure is
   documented with a narrower validation that covers the change.

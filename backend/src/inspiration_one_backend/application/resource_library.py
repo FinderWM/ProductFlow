@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +23,8 @@ from inspiration_one_backend.domain.enums import (
 )
 from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
 from inspiration_one_backend.infrastructure.db.models import (
+    Deck,
+    DeckSlide,
     ImageSession,
     ImageSessionAsset,
     Inspiration,
@@ -382,10 +385,7 @@ def upload_resource_library_assets(
 
     session.commit()
     session.expire_all()
-    return [
-        _get_asset_or_raise(session, asset_id, actor_user_id=actor_user_id)
-        for asset_id in asset_ids
-    ]
+    return [_get_asset_or_raise(session, asset_id, actor_user_id=actor_user_id) for asset_id in asset_ids]
 
 
 def update_resource_library_asset_groups(
@@ -618,6 +618,34 @@ def _load_source_image(
             filename=asset.original_filename,
             mime_type=asset.mime_type,
             storage_object=asset,
+        )
+
+    if source_type == ResourceLibrarySourceType.DECK_SLIDE:
+        slide = session.get(DeckSlide, source_id)
+        if slide is None or not slide.image_storage_path:
+            raise NotFoundError("幻灯片不存在")
+        deck = session.get(Deck, slide.deck_id)
+        inspiration = session.get(Inspiration, deck.inspiration_id) if deck is not None else None
+        owner_user_id = inspiration.owner_user_id if inspiration is not None else actor_user_id
+        ensure_actor_can_mutate_owner(
+            owner_user_id=owner_user_id,
+            actor_user_id=actor_user_id,
+            actor_is_admin=actor_is_admin,
+            missing_message="幻灯片不存在",
+        )
+        storage_object = SimpleNamespace(
+            storage_path=slide.image_storage_path,
+            storage_object_key=slide.image_storage_object_key,
+            storage_backend=slide.image_storage_backend,
+            storage_bucket=slide.image_storage_bucket,
+        )
+        return _SourceImage(
+            source_type=source_type,
+            source_resource_id=slide.id,
+            owner_user_id=owner_user_id,
+            filename=f"deck-slide-{slide.order_index + 1}.png",
+            mime_type=slide.image_mime_type or "image/png",
+            storage_object=storage_object,
         )
 
     raise BusinessValidationError("暂不支持该资源来源")

@@ -23,6 +23,7 @@ These files document the backend conventions that are actually present in this r
 | [Logging Guidelines](./logging-guidelines.md) | Current minimal logging reality and safe logging extension rules | Filled |
 | [Realtime Task Notifications](./realtime-task-notifications.md) | WebSocket + Redis pub/sub task-result notification contract | Filled |
 | [Inspiration Workbench DAG](./inspiration-workflow-dag.md) | Canvas/workflow DAG templates, validation, and user-template contracts | Filled |
+| [Deck (PPT) Generation](./deck-generation.md) | Deck/DeckSlide schema, generation pipeline, image capacity pool, RBAC, runtime config, pptx export | Filled |
 
 ---
 
@@ -42,6 +43,8 @@ Use this map when the change is feature-driven rather than file-driven:
   `./error-handling.md`, and `./directory-structure.md`.
 - Inspiration workbench DAG, canvas templates, workflow nodes/edges, or user templates: read
   `./inspiration-workflow-dag.md`.
+- Deck/PPT generation (deck schema, outline/style/batch generation, image capacity pool, deck RBAC, deck
+  runtime config, pptx export): read `./deck-generation.md` and `./database-guidelines.md`.
 
 If a feature is not represented here, update this map in the same change that adds or changes the feature contract.
 

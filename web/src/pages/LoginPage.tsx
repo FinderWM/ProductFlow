@@ -5,11 +5,12 @@ import { useNavigate } from "react-router-dom";
 
 import { api, ApiError } from "../lib/api";
 import { useI18n } from "../lib/preferences";
-import type { LoginPageConfig } from "../lib/types";
+import type { LoginPageConfig, LoginPageTemplateId } from "../lib/types";
 import "./LoginPage.css";
 
 interface LoginPageProps {
   authenticated: boolean;
+  templateId?: LoginPageTemplateId;
 }
 
 interface LoginFormModel {
@@ -125,7 +126,7 @@ function clearCommandOrbitPointerEffect(event: PointerEvent<HTMLElement>, effect
   }
 }
 
-export function LoginPage({ authenticated }: LoginPageProps) {
+export function LoginPage({ authenticated, templateId }: LoginPageProps) {
   const { t } = useI18n();
   const [mode, setModeState] = useState<"login" | "password">("login");
   const [username, setUsername] = useState("");
@@ -143,8 +144,8 @@ export function LoginPage({ authenticated }: LoginPageProps) {
   }, [authenticated, navigate]);
 
   const loginPageConfigQuery = useQuery({
-    queryKey: ["public-login-page-config"],
-    queryFn: api.getLoginPageConfig,
+    queryKey: ["public-login-page-config", templateId ?? "selected"],
+    queryFn: () => api.getLoginPageConfig(templateId),
     retry: false,
   });
 
@@ -434,40 +435,55 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
 
 function FluidMistLogin({ config, form }: { config: LoginPageConfig; form: LoginFormModel }) {
   const [showPassword, setShowPassword] = useState(false);
-  const backgroundRef = useRef<HTMLDivElement | null>(null);
+  const mistRootRef = useRef<HTMLDivElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const greetingTitle = textOrDefault(config.content.greeting_title, "欢迎回来，继续创作");
   const greetingDescription = textOrDefault(config.content.greeting_description, "登录你的工作台，开启灵感之旅");
 
   useEffect(() => {
-    const background = backgroundRef.current;
-    if (
-      !background ||
-      !window.matchMedia("(pointer: fine)").matches ||
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
+    const root = mistRootRef.current;
+    if (!root || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return undefined;
     }
 
-    const blobs = Array.from(background.querySelectorAll<HTMLElement>(".mesh-blob"));
-    let pointerX = window.innerWidth / 2;
-    let pointerY = window.innerHeight / 2;
+    const blobs = Array.from(root.querySelectorAll<HTMLElement>(".mesh-blob"));
+    const sparkles = Array.from(root.querySelectorAll<HTMLElement>(".sparkle-dot"));
+    let pointer: { x: number; y: number } | null = null;
     let motionFrame = 0;
-    let motionTargets: Array<{
+    let blobTargets: Array<{
       el: HTMLElement;
       factor: number;
       radius: number;
       centerX: number;
       centerY: number;
     }> = [];
+    let sparkleTargets: Array<{
+      el: HTMLElement;
+      factor: number;
+      radius: number;
+      scale: number;
+      centerX: number;
+      centerY: number;
+    }> = [];
 
     const measureTargets = () => {
-      motionTargets = blobs.map((el) => {
+      blobTargets = blobs.map((el, index) => {
         const rect = el.getBoundingClientRect();
         return {
           el,
-          factor: 0.4,
-          radius: 1000,
+          factor: 0.62 - index * 0.04,
+          radius: 1180,
+          centerX: rect.left + rect.width / 2,
+          centerY: rect.top + rect.height / 2,
+        };
+      });
+      sparkleTargets = sparkles.map((el, index) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          el,
+          factor: 0.46 + (index % 3) * 0.03,
+          radius: 80 + (index % 2) * 8,
+          scale: 0.12 + (index % 2) * 0.04,
           centerX: rect.left + rect.width / 2,
           centerY: rect.top + rect.height / 2,
         };
@@ -476,12 +492,62 @@ function FluidMistLogin({ config, form }: { config: LoginPageConfig; form: Login
 
     const applyPointerMotion = () => {
       motionFrame = 0;
-      motionTargets.forEach((target) => {
-        const distance = Math.hypot(pointerX - target.centerX, pointerY - target.centerY);
+      const activePointer = pointer;
+      if (!activePointer) {
+        blobTargets.forEach((target) => {
+          target.el.style.setProperty("--blob-pointer-x", "0px");
+          target.el.style.setProperty("--blob-pointer-y", "0px");
+          target.el.style.setProperty("--blob-pointer-scale", "0");
+          target.el.style.setProperty("--blob-pointer-glow", "0");
+        });
+        sparkleTargets.forEach((target) => {
+          target.el.style.setProperty("--spark-pointer-x", "0px");
+          target.el.style.setProperty("--spark-pointer-y", "0px");
+          target.el.style.setProperty("--spark-pointer-scale", "0");
+          target.el.style.setProperty("--spark-pointer-glow", "0");
+        });
+        return;
+      }
+      blobTargets.forEach((target) => {
+        const distance = Math.hypot(activePointer.x - target.centerX, activePointer.y - target.centerY);
         const influence = Math.max(0, 1 - distance / target.radius);
-        const deltaX = (pointerX - target.centerX) * target.factor * influence;
-        const deltaY = (pointerY - target.centerY) * target.factor * influence;
-        target.el.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+        const deltaX = (activePointer.x - target.centerX) * target.factor * influence;
+        const deltaY = (activePointer.y - target.centerY) * target.factor * influence;
+        target.el.style.setProperty("--blob-pointer-x", `${deltaX}px`);
+        target.el.style.setProperty("--blob-pointer-y", `${deltaY}px`);
+        target.el.style.setProperty("--blob-pointer-scale", `${influence * 0.09}`);
+        target.el.style.setProperty("--blob-pointer-glow", `${influence * 0.16}`);
+      });
+      let closestSparkle: (typeof sparkleTargets)[number] | null = null;
+      let closestSparkleDistance = Number.POSITIVE_INFINITY;
+      sparkleTargets.forEach((target) => {
+        const distanceX = activePointer.x - target.centerX;
+        const distanceY = activePointer.y - target.centerY;
+        const distance = Math.hypot(distanceX, distanceY);
+        if (distance <= target.radius && distance < closestSparkleDistance) {
+          closestSparkle = target;
+          closestSparkleDistance = distance;
+        }
+      });
+      sparkleTargets.forEach((target) => {
+        if (target !== closestSparkle) {
+          target.el.style.setProperty("--spark-pointer-x", "0px");
+          target.el.style.setProperty("--spark-pointer-y", "0px");
+          target.el.style.setProperty("--spark-pointer-scale", "0");
+          target.el.style.setProperty("--spark-pointer-glow", "0");
+          return;
+        }
+        const distanceX = activePointer.x - target.centerX;
+        const distanceY = activePointer.y - target.centerY;
+        const distance = closestSparkleDistance;
+        const influence = Math.max(0, 1 - distance / target.radius);
+        const easedInfluence = influence * influence;
+        const deltaX = distanceX * target.factor * easedInfluence;
+        const deltaY = distanceY * target.factor * easedInfluence;
+        target.el.style.setProperty("--spark-pointer-x", `${deltaX}px`);
+        target.el.style.setProperty("--spark-pointer-y", `${deltaY}px`);
+        target.el.style.setProperty("--spark-pointer-scale", `${easedInfluence * target.scale}`);
+        target.el.style.setProperty("--spark-pointer-glow", `${easedInfluence * 0.26}`);
       });
     };
 
@@ -491,10 +557,23 @@ function FluidMistLogin({ config, form }: { config: LoginPageConfig; form: Login
       }
     };
 
-    const handlePointerMove = (event: globalThis.PointerEvent) => {
-      pointerX = event.clientX;
-      pointerY = event.clientY;
+    const setPointer = (clientX: number, clientY: number) => {
+      pointer = { x: clientX, y: clientY };
       requestPointerMotion();
+    };
+
+    const clearSparklePointer = () => {
+      pointer = null;
+      requestPointerMotion();
+    };
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => setPointer(event.clientX, event.clientY);
+
+    const handleTouchMove = (event: globalThis.TouchEvent) => {
+      const touch = event.touches.item(0);
+      if (touch) {
+        setPointer(touch.clientX, touch.clientY);
+      }
     };
 
     const handleResize = () => {
@@ -503,16 +582,35 @@ function FluidMistLogin({ config, form }: { config: LoginPageConfig; form: Login
     };
 
     measureTargets();
+    document.addEventListener("pointerdown", handlePointerMove, { passive: true });
     document.addEventListener("pointermove", handlePointerMove, { passive: true });
+    document.addEventListener("pointerleave", clearSparklePointer, { passive: true });
+    document.addEventListener("touchmove", handleTouchMove, { passive: true });
+    document.addEventListener("touchend", clearSparklePointer, { passive: true });
     window.addEventListener("resize", handleResize, { passive: true });
 
     return () => {
+      document.removeEventListener("pointerdown", handlePointerMove);
       document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerleave", clearSparklePointer);
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", clearSparklePointer);
       window.removeEventListener("resize", handleResize);
       if (motionFrame) {
         window.cancelAnimationFrame(motionFrame);
       }
-      blobs.forEach((blob) => blob.style.removeProperty("transform"));
+      blobs.forEach((blob) => {
+        blob.style.removeProperty("--blob-pointer-x");
+        blob.style.removeProperty("--blob-pointer-y");
+        blob.style.removeProperty("--blob-pointer-scale");
+        blob.style.removeProperty("--blob-pointer-glow");
+      });
+      sparkles.forEach((sparkle) => {
+        sparkle.style.removeProperty("--spark-pointer-x");
+        sparkle.style.removeProperty("--spark-pointer-y");
+        sparkle.style.removeProperty("--spark-pointer-scale");
+        sparkle.style.removeProperty("--spark-pointer-glow");
+      });
     };
   }, []);
 
@@ -536,8 +634,8 @@ function FluidMistLogin({ config, form }: { config: LoginPageConfig; form: Login
   };
 
   return (
-    <div className="pf-login-mist text-ink antialiased relative">
-      <div ref={backgroundRef} aria-hidden="true" className="background-layer">
+    <div ref={mistRootRef} className="pf-login-mist text-ink antialiased relative">
+      <div aria-hidden="true" className="background-layer">
         <div className="mesh-blob blob-1" />
         <div className="mesh-blob blob-2" />
         <div className="mesh-blob blob-3" />

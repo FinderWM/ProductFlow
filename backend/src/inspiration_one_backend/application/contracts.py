@@ -354,6 +354,99 @@ class TailSplitPlanDraft(BaseModel):
         return value
 
 
+class DeckOutlineInput(BaseModel):
+    """演示文稿大纲生成入参：灵感素材摘要 + 可选粘贴长文。"""
+
+    inspiration_name: str
+    category: str | None = None
+    source_note: str | None = None
+    material_summary: str = ""
+    source_input: str = ""
+    max_slides: int = 20
+
+
+class DeckSlideOutlineDraft(BaseModel):
+    """大纲中的单页：标题 + 要点 + 可选配图意图。"""
+
+    title: str
+    points: list[str] = Field(default_factory=list)
+    material_hint: str | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def normalize_title(cls, value: Any) -> Any:
+        return _normalize_ai_scalar_text(value, field_name="title")
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("幻灯片标题不能为空")
+        return value
+
+    @field_validator("points", mode="before")
+    @classmethod
+    def normalize_points_input(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else []
+        return value
+
+    @field_validator("points")
+    @classmethod
+    def clean_points(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item.strip()]
+
+    @field_validator("material_hint")
+    @classmethod
+    def normalize_material_hint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class DeckOutlinePayload(BaseModel):
+    """大纲生成结果：演示标题 + 有序页面列表。"""
+
+    title: str
+    slides: list[DeckSlideOutlineDraft] = Field(min_length=1)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def normalize_title(cls, value: Any) -> Any:
+        return _normalize_ai_scalar_text(value, field_name="title")
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("演示文稿标题不能为空")
+        return value
+
+
+class SpeakerNotesInput(BaseModel):
+    """单页演讲备注生成入参。"""
+
+    deck_title: str
+    slide_title: str
+    points: list[str] = Field(default_factory=list)
+
+
+class SpeakerNotesPayload(BaseModel):
+    """单页演讲备注生成结果。"""
+
+    notes: str
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def normalize_notes(cls, value: Any) -> Any:
+        return _normalize_ai_scalar_text(value, field_name="notes")
+
+
 class TailSplitPlanItem(BaseModel):
     id: str
     order: int

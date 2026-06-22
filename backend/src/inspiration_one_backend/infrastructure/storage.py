@@ -333,6 +333,41 @@ class StorageService:
         self._warm_image_variants(relative.as_posix())
         return relative.as_posix()
 
+    def save_deck_slide_image(
+        self,
+        deck_id: str,
+        slide_index: int,
+        content: bytes,
+        suffix: str = ".png",
+    ) -> str:
+        relative = Path("decks") / deck_id / "slides" / f"slide-{slide_index}-{uuid4()}{suffix}"
+        self._write_relative(relative, content)
+        self._warm_image_variants(relative.as_posix())
+        return relative.as_posix()
+
+    def save_deck_slide_material(
+        self,
+        deck_id: str,
+        slide_index: int,
+        content: bytes,
+        suffix: str = ".png",
+    ) -> str:
+        relative = Path("decks") / deck_id / "materials" / f"slide-{slide_index}-{uuid4()}{suffix}"
+        self._write_relative(relative, content)
+        self._warm_image_variants(relative.as_posix())
+        return relative.as_posix()
+
+    def save_deck_pptx(self, deck_id: str, content: bytes) -> str:
+        relative = Path("decks") / deck_id / "exports" / f"{uuid4()}.pptx"
+        self._write_relative(relative, content)
+        return relative.as_posix()
+
+    def save_deck_style_reference(self, deck_id: str, content: bytes, suffix: str = ".png") -> str:
+        relative = Path("decks") / deck_id / "style" / f"{uuid4()}{suffix}"
+        self._write_relative(relative, content)
+        self._warm_image_variants(relative.as_posix())
+        return relative.as_posix()
+
     def resolve(self, relative_path: str) -> Path:
         """相对路径转可读的本地路径，防路径穿越攻击。"""
 

@@ -47,7 +47,6 @@ from inspiration_one_backend.domain.enums import (
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
-    ProviderBinding,
     ProviderProfile,
 )
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
@@ -2730,14 +2729,18 @@ def test_google_gemini_provider_factory_and_client_generate_payload(
         )
         session.add(profile)
         session.flush()
-        session.add(
-            ProviderBinding(
-                purpose="image",
-                provider_kind="google_gemini_image",
-                provider_profile_id=profile.id,
-                model_settings_json={"model": "gemini-3.1-flash-image-preview"},
-                config_json={"gemini_api_version": "v1beta", "gemini_output_mime_type": "image/png"},
-            )
+        from inspiration_one_backend.infrastructure.provider_config import add_generation_config
+
+        add_generation_config(
+            session,
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            name="Gemini 图片配置",
+            purpose="image",
+            provider_kind="google_gemini_image",
+            provider_profile_id=profile.id,
+            model_settings={"model": "gemini-3.1-flash-image-preview"},
+            config={"gemini_api_version": "v1beta", "gemini_output_mime_type": "image/png"},
+            commit=False,
         )
         session.commit()
     finally:

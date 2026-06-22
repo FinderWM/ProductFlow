@@ -181,7 +181,7 @@ export function SelectField({
       >
         <span className="block truncate">{selectedOption?.label ?? ""}</span>
         <span
-          className={`pointer-events-none absolute top-1/2 h-5 -translate-y-1/2 border-l border-slate-300 dark:border-slate-700 ${dividerRightClassName}`}
+          className={`pointer-events-none absolute top-1/2 h-5 -translate-y-1/2 border-l pf-hairline-strong dark:border-slate-700 ${dividerRightClassName}`}
         />
         <ChevronDown
           size={iconSize}

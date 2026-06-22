@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import and_, desc, func, or_, select, update
+from sqlalchemy import and_, desc, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, contains_eager, selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.application.ownership import ensure_actor_can_mutate_owner
@@ -25,6 +26,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     ImageSessionAsset,
     ImageSessionRound,
     Inspiration,
+    new_id,
     utcnow,
 )
 
@@ -54,6 +56,7 @@ class GalleryEntryListResult:
 _NATURAL_SORT_TOKEN_RE = re.compile(r"(\d+)")
 GALLERY_TAG_NAME_MAX_LENGTH = 120
 GALLERY_TAG_DESCRIPTION_MAX_LENGTH = 500
+GALLERY_TAG_DELETE_LINK_BATCH_SIZE = 500
 
 
 def _natural_name_key(value: str) -> tuple[int | str, ...]:
@@ -66,6 +69,13 @@ def _natural_name_key(value: str) -> tuple[int | str, ...]:
 
 def _gallery_tag_sort_key(tag: GalleryTag) -> tuple[int, tuple[int | str, ...], str]:
     return (-int(tag.priority or 0), _natural_name_key(tag.name), tag.id)
+
+
+def _gallery_entry_tag_link_sort_key(link: ImageGalleryEntryTag) -> tuple[int, tuple[int | str, ...], str]:
+    tag = link.tag
+    if tag is None:
+        return (0, (), link.tag_id)
+    return _gallery_tag_sort_key(tag)
 
 
 def _dedupe_ids(values: Iterable[str] | None) -> list[str]:
@@ -204,14 +214,57 @@ def delete_gallery_tag(session: Session, *, tag_id: str) -> GalleryTag:
     deleted_at = utcnow()
     tag.deleted_at = deleted_at
     tag.updated_at = deleted_at
-    session.execute(
-        update(ImageGalleryEntryTag)
-        .where(ImageGalleryEntryTag.tag_id == tag.id, ImageGalleryEntryTag.deleted_at.is_(None))
-        .values(deleted_at=deleted_at, updated_at=deleted_at)
-    )
+    _soft_delete_gallery_tag_links_in_batches(session, tag_id=tag.id, deleted_at=deleted_at)
     session.commit()
     session.refresh(tag)
     return tag
+
+
+def _soft_delete_gallery_tag_links_in_batches(
+    session: Session,
+    *,
+    tag_id: str,
+    deleted_at,
+    batch_size: int = GALLERY_TAG_DELETE_LINK_BATCH_SIZE,
+) -> None:
+    normalized_batch_size = max(1, int(batch_size))
+    while True:
+        link_ids = list(
+            session.scalars(
+                select(ImageGalleryEntryTag.id)
+                .where(ImageGalleryEntryTag.tag_id == tag_id, ImageGalleryEntryTag.deleted_at.is_(None))
+                .order_by(ImageGalleryEntryTag.id)
+                .limit(normalized_batch_size)
+            ).all()
+        )
+        if not link_ids:
+            return
+        session.execute(
+            update(ImageGalleryEntryTag)
+            .where(ImageGalleryEntryTag.id.in_(link_ids), ImageGalleryEntryTag.tag_id == tag_id)
+            .values(deleted_at=deleted_at, updated_at=deleted_at)
+            .execution_options(synchronize_session=False)
+        )
+
+
+def _bulk_insert_gallery_entry_tags(session: Session, *, gallery_entry_id: str, tag_ids: Iterable[str]) -> None:
+    normalized_ids = _dedupe_ids(tag_ids)
+    if not normalized_ids:
+        return
+    now = utcnow()
+    session.execute(
+        insert(ImageGalleryEntryTag),
+        [
+            {
+                "id": new_id(),
+                "gallery_entry_id": gallery_entry_id,
+                "tag_id": tag_id,
+                "created_at": now,
+                "updated_at": now,
+            }
+            for tag_id in normalized_ids
+        ],
+    )
 
 
 def replace_gallery_entry_tags(
@@ -224,60 +277,68 @@ def replace_gallery_entry_tags(
     if entry is None:
         raise NotFoundError("画廊条目不存在")
     normalized_ids = _normalize_active_gallery_tag_ids(session, tag_ids, require_non_empty=False)
-    active_links = {
-        link.tag_id: link
-        for link in session.scalars(
-            select(ImageGalleryEntryTag).where(
+    active_tag_ids = set(
+        session.scalars(
+            select(ImageGalleryEntryTag.tag_id).where(
                 ImageGalleryEntryTag.gallery_entry_id == entry.id,
                 ImageGalleryEntryTag.deleted_at.is_(None),
             )
         ).all()
-    }
+    )
     desired_ids = set(normalized_ids)
     now = utcnow()
-    for tag_id, link in active_links.items():
-        if tag_id not in desired_ids:
-            link.deleted_at = now
-            link.updated_at = now
-    for tag_id in normalized_ids:
-        if tag_id not in active_links:
-            session.add(ImageGalleryEntryTag(gallery_entry_id=entry.id, tag_id=tag_id))
+    removed_ids = active_tag_ids - desired_ids
+    if removed_ids:
+        session.execute(
+            update(ImageGalleryEntryTag)
+            .where(
+                ImageGalleryEntryTag.gallery_entry_id == entry.id,
+                ImageGalleryEntryTag.tag_id.in_(removed_ids),
+                ImageGalleryEntryTag.deleted_at.is_(None),
+            )
+            .values(deleted_at=now, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+    added_ids = [tag_id for tag_id in normalized_ids if tag_id not in active_tag_ids]
+    _bulk_insert_gallery_entry_tags(session, gallery_entry_id=entry.id, tag_ids=added_ids)
     session.commit()
     session.expire_all()
-    return session.scalar(_gallery_entry_query().where(ImageGalleryEntry.id == entry.id)) or entry
+    return session.scalar(_gallery_entry_query(include_tags=True).where(ImageGalleryEntry.id == entry.id)) or entry
 
 
-def _gallery_entry_query():
+def _gallery_entry_query(*, include_tags: bool = False):
+    options = [
+        selectinload(ImageGalleryEntry.disabled_by),
+        selectinload(ImageGalleryEntry.asset)
+        .selectinload(ImageSessionAsset.session)
+        .selectinload(ImageSession.inspiration),
+        selectinload(ImageGalleryEntry.asset)
+        .selectinload(ImageSessionAsset.session)
+        .selectinload(ImageSession.assets)
+        .selectinload(ImageSessionAsset.gallery_entry),
+        selectinload(ImageGalleryEntry.asset)
+        .selectinload(ImageSessionAsset.session)
+        .selectinload(ImageSession.assets)
+        .selectinload(ImageSessionAsset.disabled_by),
+        selectinload(ImageGalleryEntry.asset)
+        .selectinload(ImageSessionAsset.session)
+        .selectinload(ImageSession.disabled_by),
+        selectinload(ImageGalleryEntry.asset)
+        .selectinload(ImageSessionAsset.session)
+        .selectinload(ImageSession.inspiration)
+        .selectinload(Inspiration.disabled_by),
+        selectinload(ImageGalleryEntry.owner),
+        selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.owner),
+        selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.disabled_by),
+        selectinload(ImageGalleryEntry.round),
+        selectinload(ImageGalleryEntry.resource_group),
+        selectinload(ImageGalleryEntry.round).selectinload(ImageSessionRound.resource_group),
+    ]
+    if include_tags:
+        options.append(selectinload(ImageGalleryEntry.tag_links).selectinload(ImageGalleryEntryTag.tag))
     return (
         select(ImageGalleryEntry)
-        .options(
-            selectinload(ImageGalleryEntry.disabled_by),
-            selectinload(ImageGalleryEntry.asset)
-            .selectinload(ImageSessionAsset.session)
-            .selectinload(ImageSession.inspiration),
-            selectinload(ImageGalleryEntry.asset)
-            .selectinload(ImageSessionAsset.session)
-            .selectinload(ImageSession.assets)
-            .selectinload(ImageSessionAsset.gallery_entry),
-            selectinload(ImageGalleryEntry.asset)
-            .selectinload(ImageSessionAsset.session)
-            .selectinload(ImageSession.assets)
-            .selectinload(ImageSessionAsset.disabled_by),
-            selectinload(ImageGalleryEntry.asset)
-            .selectinload(ImageSessionAsset.session)
-            .selectinload(ImageSession.disabled_by),
-            selectinload(ImageGalleryEntry.asset)
-            .selectinload(ImageSessionAsset.session)
-            .selectinload(ImageSession.inspiration)
-            .selectinload(Inspiration.disabled_by),
-            selectinload(ImageGalleryEntry.owner),
-            selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.owner),
-            selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.disabled_by),
-            selectinload(ImageGalleryEntry.round),
-            selectinload(ImageGalleryEntry.resource_group),
-            selectinload(ImageGalleryEntry.round).selectinload(ImageSessionRound.resource_group),
-            selectinload(ImageGalleryEntry.tag_links).selectinload(ImageGalleryEntryTag.tag),
-        )
+        .options(*options)
         .order_by(desc(ImageGalleryEntry.created_at))
     )
 
@@ -343,6 +404,32 @@ def _view_counts_for_entries(session: Session, entry_ids: list[str]) -> dict[str
     return counts
 
 
+def _load_gallery_tag_links_for_entries(session: Session, entries: list[ImageGalleryEntry]) -> None:
+    entry_ids = [entry.id for entry in entries]
+    if not entry_ids:
+        return
+    links = list(
+        session.scalars(
+            select(ImageGalleryEntryTag)
+            .join(GalleryTag, ImageGalleryEntryTag.tag_id == GalleryTag.id)
+            .options(contains_eager(ImageGalleryEntryTag.tag))
+            .where(
+                ImageGalleryEntryTag.gallery_entry_id.in_(entry_ids),
+                ImageGalleryEntryTag.deleted_at.is_(None),
+                GalleryTag.deleted_at.is_(None),
+                GalleryTag.enabled.is_(True),
+            )
+        ).all()
+    )
+    links_by_entry_id: dict[str, list[ImageGalleryEntryTag]] = {entry_id: [] for entry_id in entry_ids}
+    for link in links:
+        links_by_entry_id.setdefault(link.gallery_entry_id, []).append(link)
+    for entry in entries:
+        entry_links = links_by_entry_id.get(entry.id, [])
+        entry_links.sort(key=_gallery_entry_tag_link_sort_key)
+        set_committed_value(entry, "tag_links", entry_links)
+
+
 def list_gallery_entries(
     session: Session,
     *,
@@ -358,7 +445,8 @@ def list_gallery_entries(
     max_filter_selection = int(get_runtime_settings().gallery_tag_filter_max_selection)
     if len(raw_tag_ids) > max_filter_selection:
         raise BusinessValidationError(f"最多选择 {max_filter_selection} 个画廊标签")
-    active_tag_ids = list(_active_gallery_tags_by_ids(session, raw_tag_ids))
+    active_tags_by_id = _active_gallery_tags_by_ids(session, raw_tag_ids)
+    active_tag_ids = [tag_id for tag_id in raw_tag_ids if tag_id in active_tags_by_id]
     if raw_tag_ids and not active_tag_ids:
         return GalleryEntryListResult(items=[], view_counts={}, total=0, has_more=False, next_offset=None)
 
@@ -378,11 +466,8 @@ def list_gallery_entries(
                 ImageGalleryEntryTag.gallery_entry_id.label("gallery_entry_id"),
                 func.count(func.distinct(ImageGalleryEntryTag.tag_id)).label("tag_match_count"),
             )
-            .join(GalleryTag, ImageGalleryEntryTag.tag_id == GalleryTag.id)
             .where(
                 ImageGalleryEntryTag.deleted_at.is_(None),
-                GalleryTag.deleted_at.is_(None),
-                GalleryTag.enabled.is_(True),
                 ImageGalleryEntryTag.tag_id.in_(active_tag_ids),
             )
             .group_by(ImageGalleryEntryTag.gallery_entry_id)
@@ -399,6 +484,7 @@ def list_gallery_entries(
     start = max(offset, 0)
     if limit is None:
         page = list(session.scalars(statement.offset(start)).all())
+        _load_gallery_tag_links_for_entries(session, page)
         return GalleryEntryListResult(
             items=page,
             view_counts=_view_counts_for_entries(session, [entry.id for entry in page]),
@@ -409,6 +495,7 @@ def list_gallery_entries(
 
     end = start + limit
     page = list(session.scalars(statement.offset(start).limit(limit)).all())
+    _load_gallery_tag_links_for_entries(session, page)
     return GalleryEntryListResult(
         items=page,
         view_counts=_view_counts_for_entries(session, [entry.id for entry in page]),
@@ -420,7 +507,9 @@ def list_gallery_entries(
 
 def _get_gallery_entry_by_asset_id(session: Session, image_session_asset_id: str) -> ImageGalleryEntry | None:
     return session.scalar(
-        _gallery_entry_query().where(ImageGalleryEntry.image_session_asset_id == image_session_asset_id)
+        _gallery_entry_query(include_tags=True).where(
+            ImageGalleryEntry.image_session_asset_id == image_session_asset_id
+        )
     )
 
 
@@ -477,8 +566,7 @@ def save_generated_asset_to_gallery(
     session.add(entry)
     try:
         session.flush()
-        for tag_id in normalized_tag_ids:
-            session.add(ImageGalleryEntryTag(gallery_entry_id=entry.id, tag_id=tag_id))
+        _bulk_insert_gallery_entry_tags(session, gallery_entry_id=entry.id, tag_ids=normalized_tag_ids)
         entry_id = entry.id
         session.commit()
     except IntegrityError:
@@ -489,7 +577,7 @@ def save_generated_asset_to_gallery(
         raise
     session.expire_all()
     return GallerySaveResult(
-        entry=session.scalar(_gallery_entry_query().where(ImageGalleryEntry.id == entry_id)) or entry,
+        entry=session.scalar(_gallery_entry_query(include_tags=True).where(ImageGalleryEntry.id == entry_id)) or entry,
         created=True,
     )
 

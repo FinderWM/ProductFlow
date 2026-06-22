@@ -2424,7 +2424,7 @@ function renderBlock(block: SectionBlock) {
       <ol className="space-y-3">
         {block.items.map((item, index) => (
           <li key={item} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3 text-[15px] leading-7 text-slate-700 dark:text-slate-300">
-            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 bg-white text-xs font-semibold text-slate-600 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
+            <span className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full border pf-hairline-strong bg-white text-xs font-semibold text-slate-600 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
               {index + 1}
             </span>
             <span>{item}</span>

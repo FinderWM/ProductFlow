@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from http.cookies import SimpleCookie
 from pathlib import Path
 
 import itsdangerous.timed
@@ -11,6 +12,7 @@ from helpers import _login
 from sqlalchemy import select
 
 from inspiration_one_backend.config import (
+    AUTH_SESSION_MAX_TTL_MINUTES,
     CONFIG_DEFINITION_BY_KEY,
     RUNTIME_CONFIG_KEYS,
     build_settings_with_overrides,
@@ -29,7 +31,6 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationResourceGroup,
     ImageSession,
     ImageSessionRound,
-    ProviderBinding,
     ProviderProfile,
     UserUiPreference,
 )
@@ -210,6 +211,25 @@ def test_auth_session_survives_small_wall_clock_rollback(
 
     assert authorized.status_code == 200
     assert authorized.json()["items"] == []
+
+
+def test_auth_session_cookie_uses_supported_max_ttl(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    password = client.post(
+        "/api/auth/password",
+        json={"username": "libow", "password": "super-secret-admin-key", "setup_token": "super-secret-admin-key"},
+    )
+    assert password.status_code in {200, 400}
+
+    login = client.post("/api/auth/login", json={"username": "libow", "password": "super-secret-admin-key"})
+
+    assert login.status_code == 200
+    cookie = SimpleCookie()
+    cookie.load(login.headers["set-cookie"])
+    assert int(cookie["session"]["max-age"]) == AUTH_SESSION_MAX_TTL_MINUTES * 60
 
 
 def test_session_signer_does_not_keep_large_future_timestamp_after_clock_recovers(
@@ -450,6 +470,50 @@ def test_public_login_page_config_random_uses_all_templates(
     assert response.status_code == 200
     assert seen_candidates["value"] == ("command-orbit", "fluid-mist", "image-lab")
     assert response.json()["template_id"] == "image-lab"
+
+
+def test_public_login_page_config_can_be_forced_by_path(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    admin_client = TestClient(app)
+    _login(admin_client)
+
+    updated = admin_client.patch(
+        "/api/settings",
+        json={
+            "values": {
+                "login_page_mode": "image-lab",
+                "login_page_fluid_mist_config": {
+                    "greeting_title": "路径指定模板",
+                    "greeting_description": "不受当前登录页选择影响",
+                },
+            }
+        },
+    )
+    assert updated.status_code == 200
+
+    response = TestClient(app).get("/api/public/login-page-config/fluid-mist")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "template_id": "fluid-mist",
+        "template_name": "Fluid Mist",
+        "content": {
+            "greeting_title": "路径指定模板",
+            "greeting_description": "不受当前登录页选择影响",
+        },
+        "assets": {},
+    }
+
+
+def test_public_login_page_config_rejects_unknown_path_template(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    response = TestClient(create_app()).get("/api/public/login-page-config/not-a-template")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "登录页模板不存在"
 
 
 def test_public_login_page_config_migrates_legacy_selected_template(configured_env: Path) -> None:
@@ -807,17 +871,6 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
     assert created_profile.status_code == 200
     profile_id = created_profile.json()["id"]
 
-    text_binding = client.patch(
-        "/api/settings/provider-bindings/text",
-        json={
-            "provider_kind": "openai",
-            "provider_profile_id": profile_id,
-            "model_settings": {"brief_model": "brief-export", "copy_model": "copy-export"},
-            "config": {},
-        },
-    )
-    assert text_binding.status_code == 200
-
     exported = client.get("/api/settings/export")
 
     assert exported.status_code == 200
@@ -855,9 +908,6 @@ def test_settings_export_includes_migratable_runtime_config_provider_secrets_and
     assert exported_profile["api_key"] == "export-secret-key"
     assert exported_profile["base_url"] == "https://export.example/v1"
     assert exported_profile["capabilities"] == ["text_responses", "image_images"]
-    exported_bindings = {binding["purpose"]: binding for binding in payload["provider_bindings"]}
-    assert exported_bindings["text"]["provider_kind"] == "openai"
-    assert exported_bindings["text"]["provider_profile_id"] == profile_id
 
 
 def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config(configured_env: Path) -> None:
@@ -896,22 +946,6 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
             "enabled": True,
         }
     ]
-    document["provider_bindings"] = [
-        {
-            "purpose": "text",
-            "provider_kind": "openai",
-            "provider_profile_id": imported_profile_id,
-            "model_settings": {"brief_model": "brief-import", "copy_model": "copy-import"},
-            "config": {},
-        },
-        {
-            "purpose": "image",
-            "provider_kind": "openai_responses",
-            "provider_profile_id": imported_profile_id,
-            "model_settings": {"model": "image-import"},
-            "config": {"responses_background_enabled": True, "images_quality": "high"},
-        },
-    ]
     document["generation_configs"] = [
         {
             "name": "导入文案配置",
@@ -949,13 +983,11 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
         "schema_version": 1,
         "runtime_config_count": len(RUNTIME_CONFIG_KEYS),
         "provider_profile_count": 1,
-        "provider_binding_count": 2,
         "generation_resource_group_count": 1,
         "generation_config_count": 2,
         "canvas_template_category_count": len(document["canvas_template_categories"]),
         "canvas_template_count": len(document["canvas_templates"]),
         "provider_profile_names": ["导入网关"],
-        "provider_binding_purposes": ["image", "text"],
         "includes_api_keys": True,
         "provider_profiles_with_api_key_count": 1,
         "canvas_template_keys": [template["key"] for template in document["canvas_templates"]],
@@ -990,10 +1022,6 @@ def test_settings_import_preview_and_commit_replaces_runtime_and_provider_config
         profiles = session.scalars(select(ProviderProfile)).all()
         assert [profile.id for profile in profiles] == [imported_profile_id]
         assert profiles[0].api_key == "import-secret-key"
-        bindings = {binding.purpose: binding for binding in session.scalars(select(ProviderBinding)).all()}
-        assert bindings["text"].provider_profile_id == imported_profile_id
-        assert bindings["image"].provider_kind == "openai_responses"
-        assert bindings["image"].config_json == {"responses_background_enabled": True}
         default_group = session.get(GenerationResourceGroup, DEFAULT_GENERATION_RESOURCE_GROUP_ID)
         assert default_group is not None
         assert default_group.blur_images_by_default is True
@@ -1068,29 +1096,6 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
     legacy_login_page_preview = client.post("/api/settings/import/preview", json=legacy_login_page_document)
     assert legacy_login_page_preview.status_code == 200
 
-    invalid_binding = dict(document)
-    invalid_binding["runtime_config"] = {**document["runtime_config"], "text_generation_max_concurrent_tasks": 5}
-    invalid_binding["provider_profiles"] = []
-    invalid_binding["provider_bindings"] = [
-        {
-            "purpose": "text",
-            "provider_kind": "openai",
-            "provider_profile_id": "missing-profile",
-            "model_settings": {"brief_model": "brief", "copy_model": "copy"},
-            "config": {},
-        },
-        {
-            "purpose": "image",
-            "provider_kind": "mock",
-            "provider_profile_id": None,
-            "model_settings": {"model": "mock-image"},
-            "config": {},
-        },
-    ]
-    rejected_import = client.post("/api/settings/import", json=invalid_binding)
-    assert rejected_import.status_code == 400
-    assert "供应商不存在" in rejected_import.json()["detail"]
-
     missing_owner = deepcopy(document)
     missing_owner["canvas_template_categories"].append(
         {
@@ -1113,11 +1118,6 @@ def test_settings_import_rejects_unknown_version_and_rolls_back_invalid_bindings
     try:
         assert session.get(AppSetting, "text_generation_max_concurrent_tasks") is None
         assert session.get(AppSetting, "image_generation_max_concurrent_tasks") is None
-        bindings = {binding.purpose: binding for binding in session.scalars(select(ProviderBinding)).all()}
-        assert {purpose: binding.provider_kind for purpose, binding in bindings.items()} == {
-            "image": "mock",
-            "text": "mock",
-        }
     finally:
         session.close()
 
@@ -1146,13 +1146,13 @@ def test_provider_bootstrap_runs_on_app_startup(configured_env: Path) -> None:
         session = get_session_factory()()
         try:
             profiles = session.scalars(select(ProviderProfile)).all()
-            bindings = session.scalars(select(ProviderBinding)).all()
+            generation_configs = session.scalars(select(GenerationConfig)).all()
         finally:
             session.close()
 
     assert len(profiles) == 1
     assert set(profiles[0].capabilities_json) == {"text_responses", "image_responses"}
-    assert {binding.purpose for binding in bindings} == {"text", "image"}
+    assert {generation_config.purpose for generation_config in generation_configs} == {"text", "image"}
 
 
 def test_provider_bootstrap_merges_matching_legacy_text_and_image_config(configured_env: Path) -> None:
@@ -1193,14 +1193,14 @@ def test_provider_bootstrap_merges_matching_legacy_text_and_image_config(configu
     assert profile["has_api_key"] is True
     assert "shared-key" not in str(payload)
     assert set(profile["capabilities"]) == {"text_responses", "image_images"}
-    bindings = {binding["purpose"]: binding for binding in payload["bindings"]}
-    assert bindings["text"]["provider_kind"] == "openai"
-    assert bindings["text"]["provider_profile_id"] == profile["id"]
-    assert bindings["text"]["model_settings"] == {"brief_model": "brief-model", "copy_model": "copy-model"}
-    assert bindings["image"]["provider_kind"] == "openai_images"
-    assert bindings["image"]["provider_profile_id"] == profile["id"]
-    assert bindings["image"]["model_settings"] == {"model": "gpt-image-2"}
-    assert bindings["image"]["config"] == {
+    configs_by_purpose = {config["purpose"]: config for config in payload["generation_configs"]}
+    assert configs_by_purpose["text"]["provider_kind"] == "openai"
+    assert configs_by_purpose["text"]["provider_profile_id"] == profile["id"]
+    assert configs_by_purpose["text"]["model_settings"] == {"brief_model": "brief-model", "copy_model": "copy-model"}
+    assert configs_by_purpose["image"]["provider_kind"] == "openai_images"
+    assert configs_by_purpose["image"]["provider_profile_id"] == profile["id"]
+    assert configs_by_purpose["image"]["model_settings"] == {"model": "gpt-image-2"}
+    assert configs_by_purpose["image"]["config"] == {
         "images_quality": "high",
         "images_style": "natural",
     }
@@ -1254,9 +1254,9 @@ def test_provider_bootstrap_splits_different_legacy_connections(configured_env: 
     profiles_by_base_url = {profile["base_url"]: profile for profile in payload["profiles"]}
     assert set(profiles_by_base_url["https://text.example/v1"]["capabilities"]) == {"text_responses"}
     assert set(profiles_by_base_url["https://image.example/v1"]["capabilities"]) == {"image_responses"}
-    bindings = {binding["purpose"]: binding for binding in payload["bindings"]}
-    assert bindings["text"]["provider_profile_id"] == profiles_by_base_url["https://text.example/v1"]["id"]
-    assert bindings["image"]["provider_profile_id"] == profiles_by_base_url["https://image.example/v1"]["id"]
+    configs_by_purpose = {config["purpose"]: config for config in payload["generation_configs"]}
+    assert configs_by_purpose["text"]["provider_profile_id"] == profiles_by_base_url["https://text.example/v1"]["id"]
+    assert configs_by_purpose["image"]["provider_profile_id"] == profiles_by_base_url["https://image.example/v1"]["id"]
 
 
 def test_generation_config_status_filters_date_range_and_splits_purpose_stats(configured_env: Path) -> None:
@@ -1437,204 +1437,6 @@ def test_generation_config_api_accepts_multiple_resource_groups(configured_env: 
     assert explicit_null_groups.status_code == 200
     assert explicit_null_groups.json()["resource_group_id"] is None
     assert explicit_null_groups.json()["resource_group_ids"] == []
-
-
-def test_provider_config_api_masks_keys_preserves_blank_update_and_validates_bindings(configured_env: Path) -> None:
-    from inspiration_one_backend.presentation.api import create_app
-
-    app = create_app()
-    client = TestClient(app)
-    _login(client)
-
-    initial = client.get("/api/settings/provider-config")
-    assert initial.status_code == 200
-    initial_payload = initial.json()
-    assert initial_payload["profiles"] == []
-    assert {binding["purpose"]: binding["provider_kind"] for binding in initial_payload["bindings"]} == {
-        "image": "mock",
-        "text": "mock",
-    }
-
-    created = client.post(
-        "/api/settings/provider-profiles",
-        json={
-            "name": "本地 3000 网关",
-            "base_url": "http://localhost:3000/v1",
-            "api_key": "chatgpt2api",
-            "capabilities": ["text_responses", "image_responses", "image_images"],
-            "default_models": {"brief_model": "gpt-4.1", "copy_model": "gpt-4.1", "image_model": "gpt-image-2"},
-            "config": {},
-            "enabled": True,
-        },
-    )
-    assert created.status_code == 200
-    profile = created.json()
-    profile_id = profile["id"]
-    assert profile["has_api_key"] is True
-    assert "chatgpt2api" not in str(profile)
-
-    updated_blank_key = client.patch(
-        f"/api/settings/provider-profiles/{profile_id}",
-        json={
-            "name": "本地 3000 网关",
-            "base_url": None,
-            "api_key": "",
-            "capabilities": ["text_responses", "image_images"],
-            "default_models": {"brief_model": "gpt-4.1-mini", "copy_model": "gpt-4.1-mini"},
-            "config": {},
-            "enabled": True,
-        },
-    )
-    assert updated_blank_key.status_code == 200
-    assert updated_blank_key.json()["base_url"] is None
-
-    session = get_session_factory()()
-    try:
-        db_profile = session.get(ProviderProfile, profile_id)
-        assert db_profile is not None
-        assert db_profile.api_key == "chatgpt2api"
-        assert db_profile.base_url is None
-    finally:
-        session.close()
-
-    text_binding = client.patch(
-        "/api/settings/provider-bindings/text",
-        json={
-            "provider_kind": "openai",
-            "provider_profile_id": profile_id,
-            "model_settings": {
-                "brief_model": "brief-model",
-                "copy_model": "copy-model",
-            },
-            "config": {},
-        },
-    )
-    assert text_binding.status_code == 200
-    assert text_binding.json()["provider_kind"] == "openai"
-    assert text_binding.json()["model_settings"] == {
-        "brief_model": "brief-model",
-        "copy_model": "copy-model",
-    }
-
-    image_binding = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "openai_images",
-            "provider_profile_id": profile_id,
-            "model_settings": {"model": "gpt-image-2"},
-            "config": {"images_quality": "high", "images_style": "natural", "responses_background_enabled": True},
-        },
-    )
-    assert image_binding.status_code == 200
-    assert image_binding.json()["provider_kind"] == "openai_images"
-    assert image_binding.json()["config"] == {"images_quality": "high", "images_style": "natural"}
-
-    invalid_binding = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "openai_responses",
-            "provider_profile_id": profile_id,
-            "model_settings": {"model": "gpt-image-2"},
-            "config": {"responses_background_enabled": True},
-        },
-    )
-    assert invalid_binding.status_code == 400
-    assert "不支持当前接口能力" in invalid_binding.json()["detail"]
-
-    missing_text_model = client.patch(
-        "/api/settings/provider-bindings/text",
-        json={"provider_kind": "mock", "provider_profile_id": None, "model_settings": {}, "config": {}},
-    )
-    assert missing_text_model.status_code == 400
-    assert "文案灵感产物理解模型未配置" in missing_text_model.json()["detail"]
-
-    missing_image_model = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "mock",
-            "provider_profile_id": None,
-            "model_settings": {},
-            "config": {},
-        },
-    )
-    assert missing_image_model.status_code == 400
-    assert "图片模型未配置" in missing_image_model.json()["detail"]
-
-    missing_responses_background = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "openai_responses",
-            "provider_profile_id": profile_id,
-            "model_settings": {"model": "gpt-5.4"},
-            "config": {},
-        },
-    )
-    assert missing_responses_background.status_code == 400
-    assert "图片 Responses 后台响应模式未配置" in missing_responses_background.json()["detail"]
-
-    remove_active_capability = client.patch(
-        f"/api/settings/provider-profiles/{profile_id}",
-        json={
-            "capabilities": ["text_responses"],
-        },
-    )
-    assert remove_active_capability.status_code == 400
-    assert "不能移除当前接口能力" in remove_active_capability.json()["detail"]
-
-    disable_active_profile = client.patch(
-        f"/api/settings/provider-profiles/{profile_id}",
-        json={"enabled": False},
-    )
-    assert disable_active_profile.status_code == 200
-    assert disable_active_profile.json()["enabled"] is False
-
-    provider_config_after_disable = client.get("/api/settings/provider-config")
-    assert provider_config_after_disable.status_code == 200
-    disabled_generation_configs = [
-        item
-        for item in provider_config_after_disable.json()["generation_configs"]
-        if item["provider_profile_id"] == profile_id
-    ]
-    assert disabled_generation_configs
-    assert all(item["enabled"] is True for item in disabled_generation_configs)
-    assert all(item["effective_enabled"] is False for item in disabled_generation_configs)
-
-    reenable_active_profile = client.patch(
-        f"/api/settings/provider-profiles/{profile_id}",
-        json={"enabled": True},
-    )
-    assert reenable_active_profile.status_code == 200
-    assert reenable_active_profile.json()["enabled"] is True
-
-    archive_active = client.delete(f"/api/settings/provider-profiles/{profile_id}")
-    assert archive_active.status_code == 400
-    assert "仍被文案或图片配置使用" in archive_active.json()["detail"]
-
-    reset_image = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "mock",
-            "provider_profile_id": profile_id,
-            "model_settings": {"model": "mock-image"},
-            "config": {"images_quality": "high", "responses_background_enabled": True},
-        },
-    )
-    assert reset_image.status_code == 200
-    assert reset_image.json()["provider_profile_id"] is None
-    assert reset_image.json()["config"] == {}
-    reset_text = client.patch(
-        "/api/settings/provider-bindings/text",
-        json={
-            "provider_kind": "mock",
-            "provider_profile_id": None,
-            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
-            "config": {},
-        },
-    )
-    assert reset_text.status_code == 200
-    archived = client.delete(f"/api/settings/provider-profiles/{profile_id}")
-    assert archived.status_code == 200
-    assert archived.json()["archived_at"] is not None
 
 
 def test_text_generation_config_test_api_runs_mock_without_persistence(configured_env: Path) -> None:
@@ -1991,78 +1793,6 @@ def test_image_generation_config_test_api_reports_provider_failure_detail(
     finally:
         session.close()
     assert image_sessions == []
-
-
-def test_provider_config_supports_openai_chat_completions_text_profiles_and_bindings(configured_env: Path) -> None:
-    from inspiration_one_backend.presentation.api import create_app
-
-    app = create_app()
-    client = TestClient(app)
-    _login(client)
-
-    created = client.post(
-        "/api/settings/provider-profiles",
-        json={
-            "name": "Chat Completions 文案网关",
-            "provider_type": "openai_compatible",
-            "base_url": "https://chat-text.example/v1",
-            "api_key": "chat-text-secret-key",
-            "capabilities": ["text_chat_completions"],
-            "default_models": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
-            "config": {},
-            "enabled": True,
-        },
-    )
-    assert created.status_code == 200
-    profile = created.json()
-    profile_id = profile["id"]
-    assert profile["provider_type"] == "openai_compatible"
-    assert profile["capabilities"] == ["text_chat_completions"]
-    assert "chat-text-secret-key" not in str(profile)
-
-    rejected_binding = client.patch(
-        "/api/settings/provider-bindings/text",
-        json={
-            "provider_kind": "openai",
-            "provider_profile_id": profile_id,
-            "model_settings": {"brief_model": "gpt-4.1", "copy_model": "gpt-4.1"},
-            "config": {},
-        },
-    )
-    assert rejected_binding.status_code == 400
-    assert "不支持当前接口能力" in rejected_binding.json()["detail"]
-
-    text_binding = client.patch(
-        "/api/settings/provider-bindings/text",
-        json={
-            "provider_kind": "openai_chat_completions",
-            "provider_profile_id": profile_id,
-            "model_settings": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
-            "config": {},
-        },
-    )
-    assert text_binding.status_code == 200
-    assert text_binding.json()["provider_kind"] == "openai_chat_completions"
-    assert text_binding.json()["config"] == {"structured_output": {"enabled": False, "mode": "json_schema"}}
-
-    text_config = resolve_text_provider_config()
-    assert text_config.provider_kind == "openai_chat_completions"
-    assert text_config.api_key == "chat-text-secret-key"
-    assert text_config.base_url == "https://chat-text.example/v1"
-    assert text_config.brief_model == "grok-brief"
-    assert text_config.copy_model == "grok-copy"
-    assert text_config.structured_json_response_format_enabled is False
-    assert text_config.structured_output.enabled is False
-    assert text_config.structured_output.mode == "json_schema"
-
-    exported = client.get("/api/settings/export")
-    assert exported.status_code == 200
-    document = exported.json()
-    exported_profile = next(item for item in document["provider_profiles"] if item["id"] == profile_id)
-    assert exported_profile["capabilities"] == ["text_chat_completions"]
-    exported_text = next(item for item in document["provider_bindings"] if item["purpose"] == "text")
-    assert exported_text["provider_kind"] == "openai_chat_completions"
-    assert exported_text["config"] == {"structured_output": {"enabled": False, "mode": "json_schema"}}
 
 
 def test_chat_completions_generation_config_round_trips_structured_json_response_format(
@@ -2436,211 +2166,6 @@ def test_text_generation_config_structured_output_test_api_supports_responses(
     assert calls[0]["text"]["format"]["name"] == "text_structured_output_test"
 
 
-def test_real_image_binding_switches_visible_poster_mode_to_generated(configured_env: Path) -> None:
-    from inspiration_one_backend.presentation.api import create_app
-
-    app = create_app()
-    client = TestClient(app)
-    _login(client)
-
-    initial_config = client.get("/api/settings")
-    assert initial_config.status_code == 200
-    initial_items = {item["key"]: item for item in initial_config.json()["items"]}
-    assert initial_items["poster_generation_mode"]["value"] == "template"
-    assert initial_items["poster_generation_mode"]["source"] == "env_default"
-
-    created = client.post(
-        "/api/settings/provider-profiles",
-        json={
-            "name": "图片网关",
-            "base_url": "https://image.example/v1",
-            "api_key": "image-secret-key",
-            "capabilities": ["image_images"],
-            "default_models": {"image_model": "gpt-image-2"},
-            "config": {},
-            "enabled": True,
-        },
-    )
-    assert created.status_code == 200
-    profile_id = created.json()["id"]
-
-    image_binding = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "openai_images",
-            "provider_profile_id": profile_id,
-            "model_settings": {"model": "gpt-image-2"},
-            "config": {"images_quality": "high", "images_style": "natural"},
-        },
-    )
-    assert image_binding.status_code == 200
-    assert image_binding.json()["provider_kind"] == "openai_images"
-
-    updated_config = client.get("/api/settings")
-    assert updated_config.status_code == 200
-    updated_items = {item["key"]: item for item in updated_config.json()["items"]}
-    assert updated_items["poster_generation_mode"]["value"] == "generated"
-    assert updated_items["poster_generation_mode"]["source"] == "database"
-    assert get_runtime_settings().poster_generation_mode == "generated"
-
-    session = get_session_factory()()
-    try:
-        app_setting = session.get(AppSetting, "poster_generation_mode")
-        assert app_setting is not None
-        assert app_setting.value == "generated"
-    finally:
-        session.close()
-
-
-def test_provider_config_supports_google_gemini_profiles_bindings_and_import(configured_env: Path) -> None:
-    from inspiration_one_backend.presentation.api import create_app
-
-    app = create_app()
-    client = TestClient(app)
-    _login(client)
-
-    created = client.post(
-        "/api/settings/provider-profiles",
-        json={
-            "name": "Gemini 图片",
-            "provider_type": "google_gemini",
-            "base_url": None,
-            "api_key": "google-secret-key",
-            "capabilities": ["image_google_gemini"],
-            "default_models": {"image_model": "gemini-2.5-flash-image"},
-            "config": {},
-            "enabled": True,
-        },
-    )
-    assert created.status_code == 200
-    profile = created.json()
-    profile_id = profile["id"]
-    assert profile["provider_type"] == "google_gemini"
-    assert profile["capabilities"] == ["image_google_gemini"]
-    assert profile["base_url"] is None
-    assert profile["has_api_key"] is True
-    assert "google-secret-key" not in str(profile)
-
-    rejected_base_url = client.post(
-        "/api/settings/provider-profiles",
-        json={
-            "name": "Gemini 自定义地址",
-            "provider_type": "google_gemini",
-            "base_url": "https://example.invalid",
-            "api_key": "google-secret-key",
-            "capabilities": ["image_google_gemini"],
-            "default_models": {},
-            "config": {},
-            "enabled": True,
-        },
-    )
-    assert rejected_base_url.status_code == 400
-    assert "暂不支持自定义 Base URL" in rejected_base_url.json()["detail"]
-
-    image_binding = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "google_gemini_image",
-            "provider_profile_id": profile_id,
-            "model_settings": {"model": "gemini-2.5-flash-image"},
-            "config": {"gemini_api_version": "v1beta", "gemini_output_mime_type": "image/png"},
-        },
-    )
-    assert image_binding.status_code == 200
-    assert image_binding.json()["provider_kind"] == "google_gemini_image"
-    assert image_binding.json()["config"] == {
-        "gemini_api_version": "v1beta",
-        "gemini_output_mime_type": "image/png",
-    }
-
-    image_config = resolve_image_provider_config()
-    assert image_config.provider_kind == "google_gemini_image"
-    assert image_config.api_key == "google-secret-key"
-    assert image_config.base_url is None
-    assert image_config.model == "gemini-2.5-flash-image"
-    assert image_config.gemini_api_version == "v1beta"
-    assert image_config.gemini_output_mime_type == "image/png"
-
-    exported = client.get("/api/settings/export")
-    assert exported.status_code == 200
-    document = exported.json()
-    exported_profile = next(item for item in document["provider_profiles"] if item["id"] == profile_id)
-    assert exported_profile["provider_type"] == "google_gemini"
-    assert exported_profile["api_key"] == "google-secret-key"
-    exported_image = next(item for item in document["provider_bindings"] if item["purpose"] == "image")
-    assert exported_image["provider_kind"] == "google_gemini_image"
-
-    preview = client.post("/api/settings/import/preview", json=document)
-    assert preview.status_code == 200
-    assert preview.json()["provider_profile_count"] >= 1
-
-
-def test_provider_config_supports_openai_chat_image_profiles_and_bindings(configured_env: Path) -> None:
-    from inspiration_one_backend.presentation.api import create_app
-
-    app = create_app()
-    client = TestClient(app)
-    _login(client)
-
-    created = client.post(
-        "/api/settings/provider-profiles",
-        json={
-            "name": "Packy Banana",
-            "provider_type": "openai_compatible",
-            "base_url": "https://www.packyapi.com",
-            "api_key": "packy-secret-key",
-            "capabilities": ["image_chat"],
-            "default_models": {"image_model": "gemini-3-pro-image-preview-16-9-4K"},
-            "config": {},
-            "enabled": True,
-        },
-    )
-    assert created.status_code == 200
-    profile = created.json()
-    profile_id = profile["id"]
-    assert profile["provider_type"] == "openai_compatible"
-    assert profile["capabilities"] == ["image_chat"]
-    assert "packy-secret-key" not in str(profile)
-
-    rejected_binding = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "openai_images",
-            "provider_profile_id": profile_id,
-            "model_settings": {"model": "gpt-image-1"},
-            "config": {},
-        },
-    )
-    assert rejected_binding.status_code == 400
-    assert "不支持当前接口能力" in rejected_binding.json()["detail"]
-
-    image_binding = client.patch(
-        "/api/settings/provider-bindings/image",
-        json={
-            "provider_kind": "openai_chat_image",
-            "provider_profile_id": profile_id,
-            "model_settings": {"model": "gemini-3-pro-image-preview-16-9-4K"},
-            "config": {"images_quality": "high", "responses_background_enabled": True},
-        },
-    )
-    assert image_binding.status_code == 200
-    assert image_binding.json()["provider_kind"] == "openai_chat_image"
-    assert image_binding.json()["config"] == {}
-
-    image_config = resolve_image_provider_config()
-    assert image_config.provider_kind == "openai_chat_image"
-    assert image_config.api_key == "packy-secret-key"
-    assert image_config.base_url == "https://www.packyapi.com"
-    assert image_config.model == "gemini-3-pro-image-preview-16-9-4K"
-
-    exported = client.get("/api/settings/export")
-    assert exported.status_code == 200
-    document = exported.json()
-    exported_image = next(item for item in document["provider_bindings"] if item["purpose"] == "image")
-    assert exported_image["provider_kind"] == "openai_chat_image"
-    assert exported_image["config"] == {}
-
-
 def test_provider_model_list_endpoint_fetches_openai_compatible_models(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2810,69 +2335,6 @@ def test_provider_model_list_endpoint_validates_profile_and_maps_provider_failur
     assert "Google Gemini 暂不支持" in gemini_models.json()["detail"]
 
 
-def test_resolvers_ignore_legacy_rows_after_provider_bindings_exist(configured_env: Path) -> None:
-    session = get_session_factory()()
-    try:
-        legacy_rows = [
-            AppSetting(key="text_provider_kind", value="openai"),
-            AppSetting(key="text_api_key", value="legacy-text-key"),
-            AppSetting(key="text_base_url", value="https://legacy-text.example/v1"),
-            AppSetting(key="image_provider_kind", value="openai_images"),
-            AppSetting(key="image_api_key", value="legacy-image-key"),
-            AppSetting(key="image_base_url", value="https://legacy-image.example/v1"),
-        ]
-        profile = ProviderProfile(
-            name="新供应商",
-            provider_type="openai_compatible",
-            base_url="https://new.example/v1",
-            api_key="new-key",
-            capabilities_json=["text_responses", "image_images"],
-            default_models_json={},
-            config_json={},
-            enabled=True,
-        )
-        session.add_all([*legacy_rows, profile])
-        session.flush()
-        session.add_all(
-            [
-                ProviderBinding(
-                    purpose="text",
-                    provider_kind="openai",
-                    provider_profile_id=profile.id,
-                    model_settings_json={"brief_model": "new-brief", "copy_model": "new-copy"},
-                    config_json={},
-                ),
-                ProviderBinding(
-                    purpose="image",
-                    provider_kind="openai_images",
-                    provider_profile_id=profile.id,
-                    model_settings_json={"model": "new-image"},
-                    config_json={
-                        "images_quality": "high",
-                        "images_style": "natural",
-                        "responses_background_enabled": True,
-                    },
-                ),
-            ]
-        )
-        session.commit()
-    finally:
-        session.close()
-
-    text_config = resolve_text_provider_config()
-    assert text_config.api_key == "new-key"
-    assert text_config.base_url == "https://new.example/v1"
-    assert text_config.brief_model == "new-brief"
-
-    image_config = resolve_image_provider_config()
-    assert image_config.api_key == "new-key"
-    assert image_config.base_url == "https://new.example/v1"
-    assert image_config.model == "new-image"
-    assert image_config.images_quality == "high"
-    assert image_config.images_style == "natural"
-    assert image_config.responses_background_enabled is False
-
-
 def test_resolvers_reject_missing_models_instead_of_using_legacy_defaults(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2903,22 +2365,45 @@ def test_resolvers_reject_missing_models_instead_of_using_legacy_defaults(
         )
         session.add_all([*legacy_rows, profile])
         session.flush()
+        from inspiration_one_backend.infrastructure.db.models import (
+            GenerationConfigResourceGroup,
+            GenerationConfigState,
+        )
+
+        text_config = GenerationConfig(
+            name="无模型文案配置",
+            purpose="text",
+            provider_kind="openai",
+            provider_profile_id=profile.id,
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            model_settings_json={},
+            config_json={},
+            enabled=True,
+        )
+        image_config = GenerationConfig(
+            name="无模型图片配置",
+            purpose="image",
+            provider_kind="openai_images",
+            provider_profile_id=profile.id,
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            model_settings_json={},
+            config_json={},
+            enabled=True,
+        )
+        session.add_all([text_config, image_config])
+        session.flush()
         session.add_all(
             [
-                ProviderBinding(
-                    purpose="text",
-                    provider_kind="openai",
-                    provider_profile_id=profile.id,
-                    model_settings_json={},
-                    config_json={},
+                GenerationConfigResourceGroup(
+                    generation_config_id=text_config.id,
+                    resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
                 ),
-                ProviderBinding(
-                    purpose="image",
-                    provider_kind="openai_images",
-                    provider_profile_id=profile.id,
-                    model_settings_json={},
-                    config_json={},
+                GenerationConfigResourceGroup(
+                    generation_config_id=image_config.id,
+                    resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
                 ),
+                GenerationConfigState(generation_config_id=text_config.id),
+                GenerationConfigState(generation_config_id=image_config.id),
             ]
         )
         session.commit()

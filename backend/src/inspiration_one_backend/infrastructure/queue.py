@@ -15,8 +15,9 @@ from inspiration_one_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
     WORKFLOW_RUN_GENERATION_TASK_CONTRACT,
 )
-from inspiration_one_backend.domain.enums import JobStatus, WorkflowNodeStatus
+from inspiration_one_backend.domain.enums import DeckSlideStatus, JobStatus, WorkflowNodeStatus
 from inspiration_one_backend.infrastructure.db.models import (
+    DeckSlide,
     ImageSessionGenerationTask,
     WorkflowNode,
     WorkflowRun,
@@ -55,6 +56,15 @@ class ImageSessionGenerationTaskRecoverySummary:
     queued_tasks: int = 0
     stale_running_tasks: int = 0
     enqueued_tasks: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class DeckSlideRecoverySummary:
+    """启动恢复结果：把演示文稿幻灯片生成任务补回队列。"""
+
+    queued_slides: int = 0
+    stale_running_slides: int = 0
+    enqueued_slides: int = 0
 
 
 @lru_cache(maxsize=1)
@@ -106,6 +116,81 @@ def enqueue_image_session_generation_task_later(task_id: str, *, delay_ms: int) 
 
     get_broker()
     run_image_session_generation_task.send_with_options(args=(task_id,), delay=delay_ms)
+
+
+def enqueue_deck_slide_generation_task(slide_id: str) -> None:
+    from inspiration_one_backend.workers import run_deck_slide_generation_task
+
+    get_broker()
+    run_deck_slide_generation_task.send(slide_id)
+
+
+def enqueue_deck_slide_generation_task_later(slide_id: str, *, delay_ms: int) -> None:
+    from inspiration_one_backend.workers import run_deck_slide_generation_task
+
+    get_broker()
+    run_deck_slide_generation_task.send_with_options(args=(slide_id,), delay=delay_ms)
+
+
+def recover_unfinished_deck_slides(
+    *,
+    reset_stale_running: bool = False,
+    stale_running_after: timedelta = DEFAULT_STALE_RUNNING_AFTER,
+) -> DeckSlideRecoverySummary:
+    """启动恢复：把仍排队/滞留运行的 deck 幻灯片补回队列。"""
+    cutoff = utcnow() - stale_running_after
+    session = get_session_factory()()
+    slide_ids: list[str] = []
+    queued = 0
+    stale_running = 0
+    try:
+        slides = list(
+            session.scalars(
+                select(DeckSlide).where(DeckSlide.slide_status.in_((DeckSlideStatus.QUEUED, DeckSlideStatus.RUNNING)))
+            ).all()
+        )
+        for slide in slides:
+            if slide.slide_status == DeckSlideStatus.RUNNING:
+                if not reset_stale_running:
+                    continue
+                updated_at = _as_aware_utc(slide.updated_at) if slide.updated_at else None
+                if updated_at is not None and updated_at > cutoff:
+                    continue
+                slide.slide_status = DeckSlideStatus.QUEUED
+                slide.last_error = None
+                stale_running += 1
+                slide_ids.append(slide.id)
+            else:
+                queued += 1
+                slide_ids.append(slide.id)
+        if stale_running:
+            session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("恢复滞留 deck 幻灯片时读取数据库失败")
+        return DeckSlideRecoverySummary()
+    finally:
+        session.close()
+
+    enqueued = 0
+    for slide_id in slide_ids:
+        try:
+            enqueue_deck_slide_generation_task(slide_id)
+            enqueued += 1
+        except Exception:
+            logger.exception("恢复滞留 deck 幻灯片入队失败: slide_id=%s", slide_id)
+    if slide_ids:
+        logger.info(
+            "已恢复滞留 deck 幻灯片: queued=%s stale_running=%s enqueued=%s",
+            queued,
+            stale_running,
+            enqueued,
+        )
+    return DeckSlideRecoverySummary(
+        queued_slides=queued,
+        stale_running_slides=stale_running,
+        enqueued_slides=enqueued,
+    )
 
 
 def recover_unfinished_workflow_runs(

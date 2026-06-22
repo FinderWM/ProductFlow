@@ -628,7 +628,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-xl border border-dashed border-slate-300 px-3 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                  <div className="rounded-xl border border-dashed pf-hairline-strong px-3 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
                     {t("templateManage.categoryEmpty")}
                   </div>
                 )}
@@ -648,7 +648,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
             </div>
 
             {!templates.length && !loading ? (
-              <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 text-center dark:border-slate-700 dark:bg-[#0b1220]">
+              <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed pf-hairline-strong bg-slate-50 px-6 text-center dark:border-slate-700 dark:bg-[#0b1220]">
                 <Layers3 size={34} className="text-slate-400" />
                 <div className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{t("templateManage.templateEmpty")}</div>
               </div>

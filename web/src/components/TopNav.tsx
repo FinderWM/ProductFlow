@@ -813,7 +813,7 @@ function preferenceBadgeClassName(active: boolean) {
   return [
     "pf-shell-badge inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md border px-1.5 text-[11px] font-bold leading-none",
     active
-      ? "border-slate-300 bg-white text-slate-950 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
+      ? "pf-hairline-strong bg-white text-slate-950 dark:border-slate-600 dark:bg-slate-950 dark:text-white"
       : "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
   ].join(" ");
 }

@@ -3,7 +3,6 @@ import type { SettingsExportPayload, SettingsImportPreviewResponse } from "../..
 export interface SettingsImportSummaryCounts {
   runtimeConfigCount: number;
   providerProfileCount: number;
-  providerBindingCount: number;
   generationResourceGroupCount: number;
   generationConfigCount: number;
   canvasTemplateCategoryCount: number;
@@ -26,7 +25,6 @@ export function settingsImportSummaryCounts(preview: SettingsImportPreviewRespon
   return {
     runtimeConfigCount: preview.runtime_config_count,
     providerProfileCount: preview.provider_profile_count,
-    providerBindingCount: preview.provider_binding_count,
     generationResourceGroupCount: preview.generation_resource_group_count,
     generationConfigCount: preview.generation_config_count,
     canvasTemplateCategoryCount: preview.canvas_template_category_count,
@@ -55,7 +53,6 @@ export function isSettingsExportPayload(value: unknown): value is SettingsExport
     isRecord(value.metadata) &&
     isRecord(value.runtime_config) &&
     Array.isArray(value.provider_profiles) &&
-    Array.isArray(value.provider_bindings) &&
     Array.isArray(value.generation_resource_groups) &&
     Array.isArray(value.generation_configs) &&
     Array.isArray(value.canvas_template_categories) &&

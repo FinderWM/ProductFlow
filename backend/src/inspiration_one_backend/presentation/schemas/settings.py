@@ -100,17 +100,6 @@ class ProviderProfileResponse(BaseModel):
     updated_at: str
 
 
-class ProviderBindingResponse(BaseModel):
-    id: str
-    purpose: str
-    provider_kind: str
-    provider_profile_id: str | None = None
-    model_settings: dict[str, Any] = Field(default_factory=dict)
-    config: dict[str, Any] = Field(default_factory=dict)
-    created_at: str
-    updated_at: str
-
-
 class GenerationResourceGroupResponse(BaseModel):
     id: str
     key: str
@@ -270,7 +259,6 @@ class GenerationConfigStatusSummaryResponse(BaseModel):
 
 class ProviderConfigResponse(BaseModel):
     profiles: list[ProviderProfileResponse]
-    bindings: list[ProviderBindingResponse]
     generation_resource_groups: list[GenerationResourceGroupResponse] = Field(default_factory=list)
     generation_configs: list[GenerationConfigResponse] = Field(default_factory=list)
     status_summary: GenerationConfigStatusSummaryResponse | None = None
@@ -307,13 +295,6 @@ class ProviderProfileUpdateRequest(BaseModel):
     default_models: dict[str, Any] | None = None
     config: dict[str, Any] | None = None
     enabled: bool | None = None
-
-
-class ProviderBindingUpdateRequest(BaseModel):
-    provider_kind: str
-    provider_profile_id: str | None = None
-    model_settings: dict[str, Any] = Field(default_factory=dict)
-    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class GenerationConfigCreateRequest(BaseModel):
@@ -441,14 +422,6 @@ class SettingsProviderProfileExport(BaseModel):
     enabled: bool = True
 
 
-class SettingsProviderBindingExport(BaseModel):
-    purpose: str = Field(min_length=1, max_length=40)
-    provider_kind: str = Field(min_length=1, max_length=40)
-    provider_profile_id: str | None = Field(default=None, max_length=36)
-    model_settings: dict[str, Any] = Field(default_factory=dict)
-    config: dict[str, Any] = Field(default_factory=dict)
-
-
 class SettingsGenerationResourceGroupExport(BaseModel):
     id: str = Field(min_length=1, max_length=36)
     key: str = Field(min_length=2, max_length=80)
@@ -510,7 +483,6 @@ class SettingsExportDocument(BaseModel):
     metadata: SettingsExportMetadataResponse
     runtime_config: dict[str, Any]
     provider_profiles: list[SettingsProviderProfileExport] = Field(default_factory=list)
-    provider_bindings: list[SettingsProviderBindingExport] = Field(default_factory=list)
     generation_resource_groups: list[SettingsGenerationResourceGroupExport] = Field(default_factory=list)
     generation_configs: list[SettingsGenerationConfigExport] = Field(default_factory=list)
     canvas_template_categories: list[SettingsCanvasTemplateCategoryExport] = Field(default_factory=list)
@@ -521,13 +493,11 @@ class SettingsImportPreviewResponse(BaseModel):
     schema_version: int
     runtime_config_count: int
     provider_profile_count: int
-    provider_binding_count: int
     generation_resource_group_count: int = 0
     generation_config_count: int = 0
     canvas_template_category_count: int = 0
     canvas_template_count: int = 0
     provider_profile_names: list[str]
-    provider_binding_purposes: list[str]
     includes_api_keys: bool
     provider_profiles_with_api_key_count: int
     canvas_template_keys: list[str] = Field(default_factory=list)

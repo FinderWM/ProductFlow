@@ -972,7 +972,7 @@ function InspirationContextInspector({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          <div className="rounded-lg border border-dashed pf-hairline-strong px-3 py-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
             {t("detail.inspector.noDynamicFields")}
           </div>
         )}

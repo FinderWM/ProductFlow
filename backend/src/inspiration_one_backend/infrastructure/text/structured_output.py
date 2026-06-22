@@ -242,3 +242,42 @@ STRUCTURED_OUTPUT_TEST_SCHEMA = TextStructuredOutputSchema(
         },
     },
 )
+
+DECK_OUTLINE_SCHEMA = TextStructuredOutputSchema(
+    name="deck_outline",
+    description="Structured outline for an image-based slide deck.",
+    schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title", "slides"],
+        "properties": {
+            "title": {"type": "string"},
+            "slides": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["title", "points", "material_hint"],
+                    "properties": {
+                        "title": {"type": "string"},
+                        "points": {"type": "array", "items": {"type": "string"}},
+                        "material_hint": {"type": ["string", "null"]},
+                    },
+                },
+            },
+        },
+    },
+)
+
+SPEAKER_NOTES_SCHEMA = TextStructuredOutputSchema(
+    name="deck_speaker_notes",
+    description="Structured speaker notes for a single slide.",
+    schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["notes"],
+        "properties": {"notes": {"type": "string"}},
+    },
+)
+

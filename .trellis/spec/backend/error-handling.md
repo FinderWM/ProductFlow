@@ -282,6 +282,11 @@ look future-dated and unauthenticated. Large clock jumps are not retained after 
 does not keep signing cookies with a stale future timestamp. Keep rollback regression tests green when touching this
 middleware.
 
+The app registration must pass `max_age=AUTH_SESSION_MAX_TTL_MINUTES * 60` to `ClockStableSessionMiddleware`. Starlette's
+default session `max_age` is 14 days, while the admin-facing `auth_session_ttl_minutes` may allow a longer business TTL.
+The signed cookie transport lifetime should cover the maximum supported runtime TTL; the payload `expires_at` remains the
+source of truth for the effective login expiry.
+
 ### Scenario: Lightweight auth-session invalidation
 
 #### 1. Scope / Trigger
@@ -302,10 +307,14 @@ middleware.
   - `session_revoked_after: datetime | null`
   - `last_login_at: datetime | null`
   - `last_seen_at: datetime | null`
+- DB indexes on `auth_users`:
+  - `ix_auth_users_session_revoked_after`
+  - `ix_auth_users_last_seen_at`
 - Runtime config key: `auth_session_ttl_minutes`.
 - Internal `app_settings` keys:
   - `auth_sessions_revoked_after`
   - `auth_session_policy_version`
+- Cookie transport lifetime: `ClockStableSessionMiddleware(max_age=AUTH_SESSION_MAX_TTL_MINUTES * 60)`.
 
 #### 3. Contracts
 
@@ -318,6 +327,12 @@ middleware.
 - Resetting a user's password sets `session_revoked_after`; disabling a user rejects existing sessions and also sets the
   user watermark.
 - Updating, resetting, or importing `auth_session_ttl_minutes` must set the global watermark and increment policy version.
+- The physical signed-cookie `max_age` must be the maximum supported TTL, not Starlette's default and not the current
+  runtime value. Business expiry still comes from the signed payload `expires_at`, so runtime TTL updates can invalidate
+  existing cookies without an app restart.
+- Alembic migrations and `AuthUser.__table_args__` must declare the same auth-session watermark indexes. Metadata drift is
+  a bug because tests using `Base.metadata.create_all(...)` and databases upgraded through Alembic would then have
+  different query/index contracts.
 - `SESSION_SECRET`, `DATABASE_URL`, `REDIS_URL`, and other infrastructure secrets remain env-only and must not be added to
   runtime config.
 
@@ -330,15 +345,21 @@ middleware.
 - `issued_at <= auth_users.session_revoked_after` -> `401`, `{"detail": "请先登录"}`.
 - `issued_at <= app_settings.auth_sessions_revoked_after` -> `401`, `{"detail": "请先登录"}`.
 - Cookie `policy_version` differs from `app_settings.auth_session_policy_version` -> `401`, `{"detail": "请先登录"}`.
+- Admin configures `auth_session_ttl_minutes` above 14 days -> cookie signing layer must still accept the cookie until the
+  payload `expires_at` or a watermark/policy invalidation rejects it.
 
 #### 5. Good/Base/Bad Cases
 
 - Good: one account can have multiple valid signed cookies; resetting that account's password invalidates all old cookies
   through one user watermark.
 - Good: changing session TTL invalidates all existing cookies through global watermark plus policy version.
+- Good: a 30-day configured TTL issues a cookie whose `Max-Age` covers `AUTH_SESSION_MAX_TTL_MINUTES`, while the signed
+  payload still carries the exact effective `expires_at`.
 - Base: existing/legacy signed session cookies without the new payload are treated as unauthenticated after deployment.
 - Bad: storing per-browser session rows only to support this coarse invalidation model.
 - Bad: trusting role, menu, or API permission fields from the cookie instead of recomputing current permission state.
+- Bad: relying on Starlette's default 14-day session `max_age`; it silently shortens longer admin-configured TTL values.
+- Bad: adding auth-session indexes in Alembic without mirroring them in `AuthUser.__table_args__`.
 
 #### 6. Tests Required
 
@@ -346,8 +367,11 @@ middleware.
 - Regression test: password reset invalidates the user's existing cookie and a new setup/login succeeds.
 - Regression test: disabling a user rejects the existing cookie with `账号已停用`.
 - Settings test: updating `auth_session_ttl_minutes` invalidates the current cookie.
+- Settings test: login `Set-Cookie` has `Max-Age == AUTH_SESSION_MAX_TTL_MINUTES * 60`.
 - RBAC list test: user rows expose `last_login_at`, `last_seen_at`, `session_revoked_after`, and `possibly_online`.
 - Migration test: auth-user watermark columns exist in both SQLite metadata tests and Alembic upgrade path.
+- Migration metadata test: `AuthUser.__table__.indexes` includes `ix_auth_users_session_revoked_after` and
+  `ix_auth_users_last_seen_at`.
 
 #### 7. Wrong vs Correct
 
@@ -366,6 +390,22 @@ request.session["user_id"] = user.id
 request.session["issued_at"] = issued_at.isoformat()
 request.session["expires_at"] = expires_at.isoformat()
 request.session["policy_version"] = policy_version
+```
+
+Wrong:
+
+```python
+app.add_middleware(ClockStableSessionMiddleware, secret_key=settings.session_secret)
+```
+
+Correct:
+
+```python
+app.add_middleware(
+    ClockStableSessionMiddleware,
+    secret_key=settings.session_secret,
+    max_age=AUTH_SESSION_MAX_TTL_MINUTES * 60,
+)
 ```
 
 ---

@@ -10,6 +10,7 @@ import {
   workspaceGalleryArtImageUrl,
   workspaceGalleryRetainedOffsets,
   workspaceHomeAnchorPath,
+  workspaceHomeGreetingKey,
   workspaceHomeVisibleAnchorIds,
   workspaceImageChatWorkbenchPath,
   workspaceImageSessionArtImageUrl,
@@ -162,6 +163,13 @@ describe("workspace landing privacy filters", () => {
         usageStats: false,
       }),
     ).toEqual(["resource-library", "chat", "status"]);
+  });
+
+  it("selects the greeting by local hour", () => {
+    expect(workspaceHomeGreetingKey(new Date(2026, 0, 1, 8))).toBe("workspaceHome.greeting.morning");
+    expect(workspaceHomeGreetingKey(new Date(2026, 0, 1, 12))).toBe("workspaceHome.greeting.afternoon");
+    expect(workspaceHomeGreetingKey(new Date(2026, 0, 1, 18))).toBe("workspaceHome.greeting.evening");
+    expect(workspaceHomeGreetingKey(new Date(2026, 0, 1, 3))).toBe("workspaceHome.greeting.evening");
   });
 
   it("uses thumbnail images for the workspace gallery strip before heavier previews or downloads", () => {

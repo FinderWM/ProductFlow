@@ -1304,7 +1304,7 @@ function PreviewNodeCard({ node, portUsage }: { node: PreviewNode; portUsage: Pr
       {showInputPort ? (
         <span
           aria-hidden="true"
-          className="absolute left-[-5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm dark:border-slate-500 dark:bg-[#0b1220]"
+          className="absolute left-[-5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border pf-hairline-strong bg-white shadow-sm dark:border-slate-500 dark:bg-[#0b1220]"
         />
       ) : null}
       {showOutputPort ? (

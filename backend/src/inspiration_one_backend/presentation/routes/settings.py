@@ -13,10 +13,8 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
-from inspiration_one_backend import __version__
 from inspiration_one_backend.application.auth import list_available_generation_resource_groups_for_user
 from inspiration_one_backend.application.auth_sessions import revoke_all_auth_sessions
-from inspiration_one_backend.application.canvas_templates import CanvasTemplate as CanvasTemplatePayload
 from inspiration_one_backend.application.contracts import CopyNodeConfigV2, InspirationInput
 from inspiration_one_backend.application.image_generation_failures import classify_image_generation_failure
 from inspiration_one_backend.application.image_sessions import (
@@ -52,8 +50,6 @@ from inspiration_one_backend.domain.rbac import (
 )
 from inspiration_one_backend.domain.ui_layout import is_supported_ui_layout_scheme, resolve_ui_layout_scheme
 from inspiration_one_backend.infrastructure.db.models import (
-    DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-    DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
     AppSetting,
     AuthUser,
     GenerationConfig,
@@ -62,7 +58,6 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationConfigState,
     GenerationConfigTestResult,
     GenerationResourceGroup,
-    ProviderBinding,
     ProviderProfile,
     UserGenerationResourceGroupGrant,
     UserUiPreference,
@@ -75,8 +70,6 @@ from inspiration_one_backend.infrastructure.db.models import (
 )
 from inspiration_one_backend.infrastructure.provider_config import (
     IMAGE_PROVIDER_KINDS,
-    PROVIDER_PURPOSES,
-    PROVIDER_TYPES,
     TEXT_PROVIDER_KINDS,
     UNSET_PROVIDER_FIELD,
     ResolvedImageProviderConfig,
@@ -94,19 +87,13 @@ from inspiration_one_backend.infrastructure.provider_config import (
     is_real_image_provider_kind,
     list_generation_configs,
     list_generation_resource_groups,
-    list_provider_bindings,
     list_provider_profiles,
-    normalize_provider_binding_model_settings,
-    normalize_provider_binding_runtime_config,
     resolve_image_provider_config_from_draft,
     resolve_text_provider_config_from_draft,
     unfreeze_generation_config,
     update_generation_config,
     update_generation_resource_group,
-    update_provider_binding,
     update_provider_profile,
-    validate_provider_capabilities,
-    validate_provider_profile_contract,
 )
 from inspiration_one_backend.infrastructure.provider_models import (
     ProviderModelDiscoveryError,
@@ -120,6 +107,27 @@ from inspiration_one_backend.presentation.deps import (
     require_any_api_permission,
     require_api_permission,
 )
+from inspiration_one_backend.presentation.routes.settings_constants import (
+    SETTINGS_EXPORT_COMPATIBILITY,
+    SETTINGS_EXPORT_SCHEMA_VERSION,
+)
+from inspiration_one_backend.presentation.routes.settings_export import _build_settings_export_document
+from inspiration_one_backend.presentation.routes.settings_import_normalizers import (
+    _normalize_import_canvas_template_categories,
+    _normalize_import_canvas_templates,
+    _normalize_import_generation_configs,
+    _normalize_import_generation_resource_groups,
+    _normalize_import_profiles,
+)
+from inspiration_one_backend.presentation.routes.settings_serializers import (
+    _serialize_dt,
+    _serialize_generation_config_daily_stat,
+    _serialize_generation_config_state,
+    _serialize_generation_config_test_result,
+    _serialize_generation_resource_group,
+    _serialize_provider_profile,
+    _serialize_user_ui_preferences,
+)
 from inspiration_one_backend.presentation.schemas.image_sessions import serialize_image_session_round
 from inspiration_one_backend.presentation.schemas.settings import (
     ConfigItemResponse,
@@ -127,14 +135,11 @@ from inspiration_one_backend.presentation.schemas.settings import (
     ConfigResponse,
     ConfigUpdateRequest,
     GenerationConfigCreateRequest,
-    GenerationConfigDailyStatResponse,
     GenerationConfigOptionResponse,
     GenerationConfigResponse,
     GenerationConfigStatAggregateResponse,
-    GenerationConfigStateResponse,
     GenerationConfigStatusConfigResponse,
     GenerationConfigStatusSummaryResponse,
-    GenerationConfigTestResultResponse,
     GenerationConfigUpdateRequest,
     GenerationResourceGroupCreateRequest,
     GenerationResourceGroupResponse,
@@ -143,8 +148,6 @@ from inspiration_one_backend.presentation.schemas.settings import (
     ImageGenerationConfigTestResponse,
     LoginPageSelectionUpdateRequest,
     LoginPageTemplateConfigUpdateRequest,
-    ProviderBindingResponse,
-    ProviderBindingUpdateRequest,
     ProviderConfigResponse,
     ProviderModelListResponse,
     ProviderModelResponse,
@@ -152,16 +155,9 @@ from inspiration_one_backend.presentation.schemas.settings import (
     ProviderProfileResponse,
     ProviderProfileUpdateRequest,
     RuntimeConfigResponse,
-    SettingsCanvasTemplateCategoryExport,
-    SettingsCanvasTemplateExport,
     SettingsExportDocument,
-    SettingsExportMetadataResponse,
-    SettingsGenerationConfigExport,
-    SettingsGenerationResourceGroupExport,
     SettingsImportCommitResponse,
     SettingsImportPreviewResponse,
-    SettingsProviderBindingExport,
-    SettingsProviderProfileExport,
     TextGenerationConfigJsonResponseFormatTestRequest,
     TextGenerationConfigJsonResponseFormatTestResponse,
     TextGenerationConfigTestRequest,
@@ -175,8 +171,6 @@ router = APIRouter(
     tags=["settings"],
 )
 logger = logging.getLogger(__name__)
-SETTINGS_EXPORT_SCHEMA_VERSION = 1
-SETTINGS_EXPORT_COMPATIBILITY = "inspiration-one-settings-v1"
 READ_SETTINGS_PERMISSION = Depends(require_api_permission(API_SETTINGS_READ))
 WRITE_SETTINGS_PERMISSION = Depends(require_api_permission(API_SETTINGS_WRITE))
 WRITE_PROVIDER_SETTINGS_PERMISSION = Depends(require_api_permission(API_SETTINGS_PROVIDER_WRITE))
@@ -192,7 +186,6 @@ AUTH_SESSION_TTL_CONFIG_KEY = "auth_session_ttl_minutes"
 class _SettingsImportBundle:
     normalized_runtime_config: dict[str, str]
     provider_profiles: list[dict[str, Any]]
-    provider_bindings: list[dict[str, Any]]
     generation_resource_groups: list[dict[str, Any]]
     generation_configs: list[dict[str, Any]]
     canvas_template_categories: list[dict[str, Any]]
@@ -319,51 +312,6 @@ def _serialize_config(session: Session) -> ConfigResponse:
     return ConfigResponse(items=items)
 
 
-def _serialize_provider_profile(profile) -> ProviderProfileResponse:
-    return ProviderProfileResponse(
-        id=profile.id,
-        name=profile.name,
-        provider_type=profile.provider_type,
-        base_url=profile.base_url,
-        capabilities=list(profile.capabilities_json or []),
-        default_models=dict(profile.default_models_json or {}),
-        config=dict(profile.config_json or {}),
-        enabled=profile.enabled,
-        archived_at=profile.archived_at.isoformat() if profile.archived_at is not None else None,
-        has_api_key=bool(profile.api_key),
-        created_at=profile.created_at.isoformat(),
-        updated_at=profile.updated_at.isoformat(),
-    )
-
-
-def _serialize_provider_binding(binding) -> ProviderBindingResponse:
-    return ProviderBindingResponse(
-        id=binding.id,
-        purpose=binding.purpose,
-        provider_kind=binding.provider_kind,
-        provider_profile_id=binding.provider_profile_id,
-        model_settings=dict(binding.model_settings_json or {}),
-        config=dict(binding.config_json or {}),
-        created_at=binding.created_at.isoformat(),
-        updated_at=binding.updated_at.isoformat(),
-    )
-
-
-def _serialize_generation_resource_group(group: GenerationResourceGroup) -> GenerationResourceGroupResponse:
-    return GenerationResourceGroupResponse(
-        id=group.id,
-        key=group.key,
-        name=group.name,
-        description=group.description,
-        sort_order=group.sort_order,
-        enabled=group.enabled,
-        blur_images_by_default=group.blur_images_by_default,
-        archived_at=_serialize_dt(group.archived_at),
-        created_at=group.created_at.isoformat(),
-        updated_at=group.updated_at.isoformat(),
-    )
-
-
 def _get_or_create_user_ui_preferences(session: Session, user_id: str, *, commit: bool) -> UserUiPreference:
     preferences = session.get(UserUiPreference, user_id)
     if preferences is not None:
@@ -378,76 +326,6 @@ def _get_or_create_user_ui_preferences(session: Session, user_id: str, *, commit
         session.commit()
         session.refresh(preferences)
     return preferences
-
-
-def _serialize_user_ui_preferences(preferences: UserUiPreference) -> UserUiPreferencesResponse:
-    return UserUiPreferencesResponse(
-        user_id=preferences.user_id,
-        ui_layout_scheme=resolve_ui_layout_scheme(preferences.ui_layout_scheme),
-        mask_sensitive_images_in_inspirations=preferences.mask_sensitive_images_in_inspirations,
-        mask_sensitive_images_in_image_chat=preferences.mask_sensitive_images_in_image_chat,
-        created_at=preferences.created_at.isoformat(),
-        updated_at=preferences.updated_at.isoformat(),
-    )
-
-
-def _serialize_dt(value: datetime | None) -> str | None:
-    return value.isoformat() if value is not None else None
-
-
-def _serialize_generation_config_state(state) -> GenerationConfigStateResponse | None:
-    if state is None:
-        return None
-    return GenerationConfigStateResponse(
-        current_concurrency=state.current_concurrency,
-        frozen_until=_serialize_dt(state.frozen_until),
-        failure_window_started_at=_serialize_dt(state.failure_window_started_at),
-        failure_count_in_window=state.failure_count_in_window,
-        last_used_at=_serialize_dt(state.last_used_at),
-        last_success_at=_serialize_dt(state.last_success_at),
-        last_failure_at=_serialize_dt(state.last_failure_at),
-        last_failure_reason=state.last_failure_reason,
-        updated_at=_serialize_dt(state.updated_at),
-    )
-
-
-def _serialize_generation_config_daily_stat(
-    stat: GenerationConfigDailyStat | None,
-) -> GenerationConfigDailyStatResponse | None:
-    if stat is None:
-        return None
-    return GenerationConfigDailyStatResponse(
-        stat_date=stat.stat_date.isoformat(),
-        attempt_count=stat.attempt_count,
-        success_count=stat.success_count,
-        failure_count=stat.failure_count,
-        timeout_count=stat.timeout_count,
-        throttled_count=stat.throttled_count,
-        generated_unit_count=stat.generated_unit_count,
-        total_latency_ms=stat.total_latency_ms,
-        freeze_count=stat.freeze_count,
-        last_success_at=_serialize_dt(stat.last_success_at),
-        last_failure_at=_serialize_dt(stat.last_failure_at),
-    )
-
-
-def _serialize_generation_config_test_result(
-    test_result: GenerationConfigTestResult | None,
-) -> GenerationConfigTestResultResponse | None:
-    if test_result is None:
-        return None
-    return GenerationConfigTestResultResponse(
-        id=test_result.id,
-        generation_config_id=test_result.generation_config_id,
-        test_type=test_result.test_type,
-        status=test_result.status,
-        tested_at=test_result.tested_at.isoformat(),
-        duration_ms=test_result.duration_ms,
-        provider_kind=test_result.provider_kind,
-        model_summary=dict(test_result.model_summary_json or {}),
-        message=test_result.message,
-        error_detail=test_result.error_detail,
-    )
 
 
 def _serialize_generation_config_stat_aggregate(
@@ -847,17 +725,13 @@ def _serialize_generation_config_status_summary(
     )
     generation_config_ids = {generation_config.id for generation_config in generation_configs}
     config_purposes = {generation_config.id: generation_config.purpose for generation_config in generation_configs}
-    today_stats = (
-        _filter_generation_config_stats_by_ids(
-            _today_generation_config_stats(session),
-            generation_config_ids=generation_config_ids,
-        )
+    today_stats = _filter_generation_config_stats_by_ids(
+        _today_generation_config_stats(session),
+        generation_config_ids=generation_config_ids,
     )
-    range_stats = (
-        _filter_generation_config_stat_aggregates_by_ids(
-            _generation_config_stat_aggregates(session, start_date=range_start, end_date=range_end),
-            generation_config_ids=generation_config_ids,
-        )
+    range_stats = _filter_generation_config_stat_aggregates_by_ids(
+        _generation_config_stat_aggregates(session, start_date=range_start, end_date=range_end),
+        generation_config_ids=generation_config_ids,
     )
     return GenerationConfigStatusSummaryResponse(
         total_count=len(generation_configs),
@@ -878,27 +752,19 @@ def _serialize_generation_config_status_summary(
         range_success_count=sum(stat.success_count for stat in range_stats.values()),
         range_failure_count=sum(stat.failure_count for stat in range_stats.values()),
         range_text_attempt_count=sum(
-            stat.attempt_count
-            for config_id, stat in range_stats.items()
-            if config_purposes.get(config_id) == "text"
+            stat.attempt_count for config_id, stat in range_stats.items() if config_purposes.get(config_id) == "text"
         ),
         range_image_attempt_count=sum(
-            stat.attempt_count
-            for config_id, stat in range_stats.items()
-            if config_purposes.get(config_id) == "image"
+            stat.attempt_count for config_id, stat in range_stats.items() if config_purposes.get(config_id) == "image"
         ),
         today_attempt_count=sum(stat.attempt_count for stat in today_stats.values()),
         today_success_count=sum(stat.success_count for stat in today_stats.values()),
         today_failure_count=sum(stat.failure_count for stat in today_stats.values()),
         today_text_attempt_count=sum(
-            stat.attempt_count
-            for config_id, stat in today_stats.items()
-            if config_purposes.get(config_id) == "text"
+            stat.attempt_count for config_id, stat in today_stats.items() if config_purposes.get(config_id) == "text"
         ),
         today_image_attempt_count=sum(
-            stat.attempt_count
-            for config_id, stat in today_stats.items()
-            if config_purposes.get(config_id) == "image"
+            stat.attempt_count for config_id, stat in today_stats.items() if config_purposes.get(config_id) == "image"
         ),
         configs=[
             _serialize_generation_config_status_config(
@@ -920,7 +786,6 @@ def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
     latest_test_results = _latest_generation_config_test_results(session, generation_configs)
     return ProviderConfigResponse(
         profiles=[_serialize_provider_profile(profile) for profile in list_provider_profiles(session)],
-        bindings=[_serialize_provider_binding(binding) for binding in list_provider_bindings(session)],
         generation_resource_groups=[
             _serialize_generation_resource_group(group) for group in list_generation_resource_groups(session)
         ],
@@ -964,163 +829,6 @@ def _load_profile_for_model_discovery(session: Session, profile_id: str, provide
     return profile
 
 
-def _export_config_value(key: str, value: Any, *, input_type: str) -> str | int | bool | list[str] | None:
-    if isinstance(value, Path):
-        return str(value)
-    if input_type == "multi_select":
-        return list(parse_config_multi_select(key, value))
-    return value
-
-
-def _serialize_canvas_template_category_export(
-    category: DbCanvasTemplateCategory,
-) -> SettingsCanvasTemplateCategoryExport:
-    return SettingsCanvasTemplateCategoryExport(
-        id=category.id,
-        scope=category.scope,
-        owner_user_id=category.owner_user_id,
-        name=category.name,
-        sort_order=category.sort_order,
-        enabled=category.enabled,
-        disabled_reason=category.disabled_reason,
-    )
-
-
-def _serialize_canvas_template_export(template: DbCanvasTemplate) -> SettingsCanvasTemplateExport:
-    return SettingsCanvasTemplateExport(
-        id=template.id,
-        key=template.key,
-        scope=template.scope,
-        owner_user_id=template.owner_user_id,
-        category_id=template.category_id,
-        title=template.title,
-        description=template.description,
-        kind=template.kind,
-        entry_mode=template.entry_mode,
-        sort_order=template.sort_order,
-        schema_version=template.schema_version,
-        template_json=dict(template.template_json or {}),
-        enabled=template.enabled,
-        disabled_reason=template.disabled_reason,
-        review_status=template.review_status,
-        review_note=template.review_note,
-    )
-
-
-def _settings_generation_resource_group_export(group: GenerationResourceGroup) -> SettingsGenerationResourceGroupExport:
-    return SettingsGenerationResourceGroupExport(
-        id=group.id,
-        key=group.key,
-        name=group.name,
-        description=group.description,
-        sort_order=group.sort_order,
-        enabled=group.enabled,
-        blur_images_by_default=group.blur_images_by_default,
-    )
-
-
-def _settings_generation_config_export(generation_config: GenerationConfig) -> SettingsGenerationConfigExport:
-    resource_group_ids = generation_config_resource_group_ids(generation_config)
-    return SettingsGenerationConfigExport(
-        id=generation_config.id,
-        resource_group_id=resource_group_ids[0] if resource_group_ids else None,
-        resource_group_ids=resource_group_ids,
-        name=generation_config.name,
-        purpose=generation_config.purpose,
-        provider_kind=generation_config.provider_kind,
-        provider_profile_id=generation_config.provider_profile_id,
-        model_settings=dict(generation_config.model_settings_json or {}),
-        config=dict(generation_config.config_json or {}),
-        priority=generation_config.priority,
-        max_concurrency=generation_config.max_concurrency,
-        enabled=generation_config.enabled,
-        availability_window_minutes=generation_config.availability_window_minutes,
-        failure_threshold=generation_config.failure_threshold,
-        cooldown_minutes=generation_config.cooldown_minutes,
-    )
-
-
-def _build_settings_export_document(session: Session) -> SettingsExportDocument:
-    ensure_provider_config_bootstrapped(session)
-    settings = get_runtime_settings()
-    runtime_config = {
-        definition.key: _export_config_value(
-            definition.key,
-            getattr(settings, definition.key),
-            input_type=definition.input_type,
-        )
-        for definition in CONFIG_DEFINITIONS
-    }
-    profiles = session.scalars(
-        select(ProviderProfile)
-        .where(ProviderProfile.archived_at.is_(None))
-        .order_by(ProviderProfile.created_at, ProviderProfile.name)
-    ).all()
-    bindings = session.scalars(select(ProviderBinding).order_by(ProviderBinding.purpose)).all()
-    generation_resource_groups = list_generation_resource_groups(session)
-    generation_configs = list_generation_configs(session)
-    template_categories = session.scalars(
-        select(DbCanvasTemplateCategory)
-        .where(DbCanvasTemplateCategory.archived_at.is_(None))
-        .order_by(DbCanvasTemplateCategory.scope, DbCanvasTemplateCategory.sort_order, DbCanvasTemplateCategory.name)
-    ).all()
-    templates = session.scalars(
-        select(DbCanvasTemplate)
-        .where(DbCanvasTemplate.archived_at.is_(None))
-        .order_by(
-            DbCanvasTemplate.scope,
-            DbCanvasTemplate.entry_mode,
-            DbCanvasTemplate.sort_order,
-            DbCanvasTemplate.title,
-            DbCanvasTemplate.created_at,
-        )
-    ).all()
-    return SettingsExportDocument(
-        metadata=SettingsExportMetadataResponse(
-            schema_version=SETTINGS_EXPORT_SCHEMA_VERSION,
-            exported_at=now_utc(),
-            app="Inspiration One",
-            app_version=__version__,
-            compatibility=SETTINGS_EXPORT_COMPATIBILITY,
-        ),
-        runtime_config=runtime_config,
-        provider_profiles=[
-            SettingsProviderProfileExport(
-                id=profile.id,
-                name=profile.name,
-                provider_type=profile.provider_type,
-                base_url=profile.base_url,
-                api_key=profile.api_key,
-                capabilities=list(profile.capabilities_json or []),
-                default_models=dict(profile.default_models_json or {}),
-                config=dict(profile.config_json or {}),
-                enabled=profile.enabled,
-            )
-            for profile in profiles
-        ],
-        provider_bindings=[
-            SettingsProviderBindingExport(
-                purpose=binding.purpose,
-                provider_kind=binding.provider_kind,
-                provider_profile_id=binding.provider_profile_id,
-                model_settings=dict(binding.model_settings_json or {}),
-                config=dict(binding.config_json or {}),
-            )
-            for binding in bindings
-        ],
-        generation_resource_groups=[
-            _settings_generation_resource_group_export(group) for group in generation_resource_groups
-        ],
-        generation_configs=[
-            _settings_generation_config_export(generation_config) for generation_config in generation_configs
-        ],
-        canvas_template_categories=[
-            _serialize_canvas_template_category_export(category) for category in template_categories
-        ],
-        canvas_templates=[_serialize_canvas_template_export(template) for template in templates],
-    )
-
-
 def _parse_settings_import_document(payload: Any) -> SettingsExportDocument:
     try:
         document = SettingsExportDocument.model_validate(payload)
@@ -1151,411 +859,12 @@ def _normalize_runtime_import_config(document: SettingsExportDocument) -> dict[s
     return normalized_values
 
 
-def _dedupe_ordered(values: list[str]) -> list[str]:
-    result: list[str] = []
-    for value in values:
-        if value not in result:
-            result.append(value)
-    return result
-
-
-def _normalize_optional_text(value: str | None) -> str | None:
-    normalized = "" if value is None else str(value).strip()
-    return normalized or None
-
-
-def _normalize_import_generation_resource_groups(document: SettingsExportDocument) -> list[dict[str, Any]]:
-    groups: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    seen_keys: set[str] = set()
-    source_groups = document.generation_resource_groups or [
-        SettingsGenerationResourceGroupExport(
-            id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            key=DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
-            name="default",
-            description="default 供应商生成能力分组",
-            sort_order=0,
-            enabled=True,
-            blur_images_by_default=False,
-        )
-    ]
-    for group in source_groups:
-        group_id = group.id.strip()
-        key = group.key.strip().lower()
-        name = group.name.strip()
-        if not group_id:
-            raise ValueError("生成分组 id 不能为空")
-        if not key:
-            raise ValueError("生成分组 key 不能为空")
-        if not name:
-            raise ValueError("生成分组名称不能为空")
-        if group_id in seen_ids or key in seen_keys:
-            raise ValueError("生成分组不能重复")
-        seen_ids.add(group_id)
-        seen_keys.add(key)
-        groups.append(
-            {
-                "id": group_id,
-                "key": key,
-                "name": name,
-                "description": _normalize_optional_text(group.description),
-                "sort_order": group.sort_order,
-                "enabled": group.enabled,
-                "blur_images_by_default": group.blur_images_by_default,
-            }
-        )
-    if DEFAULT_GENERATION_RESOURCE_GROUP_ID not in seen_ids and DEFAULT_GENERATION_RESOURCE_GROUP_KEY not in seen_keys:
-        groups.insert(
-            0,
-            {
-                "id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-                "key": DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
-                "name": "default",
-                "description": "default 供应商生成能力分组",
-                "sort_order": 0,
-                "enabled": True,
-                "blur_images_by_default": False,
-            },
-        )
-    return groups
-
-
-def _normalize_import_profiles(document: SettingsExportDocument) -> list[dict[str, Any]]:
-    seen_profile_ids: set[str] = set()
-    profiles: list[dict[str, Any]] = []
-    for profile in document.provider_profiles:
-        if profile.id in seen_profile_ids:
-            raise ValueError("供应商档案不能重复")
-        seen_profile_ids.add(profile.id)
-        if profile.provider_type not in PROVIDER_TYPES:
-            raise ValueError("供应商类型不支持")
-        capabilities = _dedupe_ordered([str(capability).strip() for capability in profile.capabilities])
-        validate_provider_capabilities(capabilities)
-        name = profile.name.strip()
-        if not name:
-            raise ValueError("供应商名称不能为空")
-        base_url = _normalize_optional_text(profile.base_url)
-        validate_provider_profile_contract(
-            provider_type=profile.provider_type,
-            capabilities=capabilities,
-            base_url=base_url,
-        )
-        profiles.append(
-            {
-                "id": profile.id,
-                "name": name,
-                "provider_type": profile.provider_type,
-                "base_url": base_url,
-                "api_key": _normalize_optional_text(profile.api_key),
-                "capabilities_json": capabilities,
-                "default_models_json": dict(profile.default_models),
-                "config_json": dict(profile.config),
-                "enabled": profile.enabled,
-            }
-        )
-    return profiles
-
-
-def _normalize_import_bindings(
-    document: SettingsExportDocument,
-    profiles: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    profiles_by_id = {profile["id"]: profile for profile in profiles}
-    seen_purposes: set[str] = set()
-    bindings: list[dict[str, Any]] = []
-    for binding in document.provider_bindings:
-        if binding.purpose in seen_purposes:
-            raise ValueError("供应商用途绑定不能重复")
-        seen_purposes.add(binding.purpose)
-        if binding.purpose not in PROVIDER_PURPOSES:
-            raise ValueError("用途必须是 text 或 image")
-        allowed_kinds = TEXT_PROVIDER_KINDS if binding.purpose == "text" else IMAGE_PROVIDER_KINDS
-        if binding.provider_kind not in allowed_kinds:
-            raise ValueError("供应商接口类型不支持当前用途")
-        normalized_config = normalize_provider_binding_runtime_config(
-            purpose=binding.purpose,
-            provider_kind=binding.provider_kind,
-            model_settings=binding.model_settings,
-            config=binding.config,
-        )
-        normalized_model_settings = normalize_provider_binding_model_settings(
-            purpose=binding.purpose,
-            model_settings=binding.model_settings,
-        )
-        provider_profile_id = binding.provider_profile_id
-        if binding.provider_kind == "mock":
-            provider_profile_id = None
-        else:
-            if not provider_profile_id:
-                raise ValueError("真实供应商必须选择供应商档案")
-            profile = profiles_by_id.get(provider_profile_id)
-            if profile is None:
-                raise ValueError("供应商不存在")
-            if not profile["enabled"]:
-                raise ValueError("供应商已停用")
-            capability = capability_for_provider_kind(binding.provider_kind)
-            if capability not in set(profile["capabilities_json"]):
-                raise ValueError("供应商档案不支持当前接口能力")
-        bindings.append(
-            {
-                "purpose": binding.purpose,
-                "provider_kind": binding.provider_kind,
-                "provider_profile_id": provider_profile_id,
-                "model_settings_json": normalized_model_settings,
-                "config_json": normalized_config,
-            }
-        )
-    missing_purposes = PROVIDER_PURPOSES - seen_purposes
-    if missing_purposes:
-        raise ValueError(f"配置文件缺少供应商绑定: {', '.join(sorted(missing_purposes))}")
-    return bindings
-
-
-def _normalize_import_generation_configs(
-    document: SettingsExportDocument,
-    profiles: list[dict[str, Any]],
-    bindings: list[dict[str, Any]],
-    generation_resource_groups: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    resource_group_ids = {group["id"] for group in generation_resource_groups}
-    fallback_resource_group_id = generation_resource_groups[0]["id"]
-    if not document.generation_configs:
-        return [
-            {
-                "id": None,
-                "resource_group_id": fallback_resource_group_id,
-                "resource_group_ids": [fallback_resource_group_id],
-                "name": "默认文案配置" if binding["purpose"] == "text" else "默认图片配置",
-                "purpose": binding["purpose"],
-                "provider_kind": binding["provider_kind"],
-                "provider_profile_id": binding["provider_profile_id"],
-                "model_settings": dict(binding["model_settings_json"]),
-                "config": dict(binding["config_json"]),
-                "priority": 100,
-                "max_concurrency": 1,
-                "enabled": True,
-                "availability_window_minutes": None,
-                "failure_threshold": None,
-                "cooldown_minutes": None,
-            }
-            for binding in bindings
-        ]
-
-    profiles_by_id = {profile["id"]: profile for profile in profiles}
-    seen_ids: set[str] = set()
-    generation_configs: list[dict[str, Any]] = []
-    for item in document.generation_configs:
-        config_id = item.id.strip() if item.id else None
-        if config_id is not None:
-            if config_id in seen_ids:
-                raise ValueError("生成配置不能重复")
-            seen_ids.add(config_id)
-        if item.purpose not in PROVIDER_PURPOSES:
-            raise ValueError("用途必须是 text 或 image")
-        allowed_kinds = TEXT_PROVIDER_KINDS if item.purpose == "text" else IMAGE_PROVIDER_KINDS
-        if item.provider_kind not in allowed_kinds:
-            raise ValueError("供应商接口类型不支持当前用途")
-        normalized_config = normalize_provider_binding_runtime_config(
-            purpose=item.purpose,
-            provider_kind=item.provider_kind,
-            model_settings=item.model_settings,
-            config=item.config,
-        )
-        normalized_model_settings = normalize_provider_binding_model_settings(
-            purpose=item.purpose,
-            model_settings=item.model_settings,
-        )
-        provider_profile_id = item.provider_profile_id
-        if "resource_group_ids" in item.model_fields_set and item.resource_group_ids is not None:
-            item_resource_group_ids = _dedupe_ordered(
-                [
-                    resource_group_id.strip()
-                    for resource_group_id in item.resource_group_ids
-                    if resource_group_id.strip()
-                ]
-            )
-        elif "resource_group_id" in item.model_fields_set:
-            resource_group_id = item.resource_group_id.strip() if item.resource_group_id else None
-            item_resource_group_ids = [resource_group_id] if resource_group_id is not None else []
-        else:
-            item_resource_group_ids = [fallback_resource_group_id]
-        if any(resource_group_id not in resource_group_ids for resource_group_id in item_resource_group_ids):
-            raise ValueError("生成配置引用的分组不存在")
-        if item.provider_kind == "mock":
-            provider_profile_id = None
-        else:
-            if not provider_profile_id:
-                raise ValueError("真实供应商必须选择供应商档案")
-            profile = profiles_by_id.get(provider_profile_id)
-            if profile is None:
-                raise ValueError("供应商不存在")
-            if not profile["enabled"]:
-                raise ValueError("供应商已停用")
-            capability = capability_for_provider_kind(item.provider_kind)
-            if capability not in set(profile["capabilities_json"]):
-                raise ValueError("供应商档案不支持当前接口能力")
-        generation_configs.append(
-            {
-                "id": config_id,
-                "resource_group_id": item_resource_group_ids[0] if item_resource_group_ids else None,
-                "resource_group_ids": item_resource_group_ids,
-                "name": item.name.strip(),
-                "purpose": item.purpose,
-                "provider_kind": item.provider_kind,
-                "provider_profile_id": provider_profile_id,
-                "model_settings": normalized_model_settings,
-                "config": normalized_config,
-                "priority": item.priority,
-                "max_concurrency": item.max_concurrency,
-                "enabled": item.enabled,
-                "availability_window_minutes": item.availability_window_minutes,
-                "failure_threshold": item.failure_threshold,
-                "cooldown_minutes": item.cooldown_minutes,
-            }
-        )
-    if not any(item["purpose"] == "text" for item in generation_configs):
-        raise ValueError("配置文件缺少文案生成配置")
-    if not any(item["purpose"] == "image" for item in generation_configs):
-        raise ValueError("配置文件缺少图片生成配置")
-    return generation_configs
-
-
-def _normalize_import_canvas_template_categories(document: SettingsExportDocument) -> list[dict[str, Any]]:
-    seen_ids: set[str] = set()
-    seen_global_names: set[str] = set()
-    seen_user_names: set[tuple[str, str]] = set()
-    categories: list[dict[str, Any]] = []
-    for item in document.canvas_template_categories:
-        category_id = item.id.strip()
-        if category_id in seen_ids:
-            raise ValueError("画布模板分类不能重复")
-        seen_ids.add(category_id)
-        if item.scope not in {"global", "user"}:
-            raise ValueError("画布模板分类范围不支持")
-        owner_user_id = _normalize_optional_text(item.owner_user_id)
-        if item.scope == "global":
-            owner_user_id = None
-            normalized_name_key = item.name.strip()
-            if normalized_name_key in seen_global_names:
-                raise ValueError("全局画布模板分类名称不能重复")
-            seen_global_names.add(normalized_name_key)
-        elif owner_user_id is None:
-            raise ValueError("用户画布模板分类缺少 owner_user_id")
-        else:
-            user_name_key = (owner_user_id, item.name.strip())
-            if user_name_key in seen_user_names:
-                raise ValueError("用户画布模板分类名称不能重复")
-            seen_user_names.add(user_name_key)
-        name = item.name.strip()
-        if not name:
-            raise ValueError("画布模板分类名称不能为空")
-        categories.append(
-            {
-                "id": category_id,
-                "scope": item.scope,
-                "owner_user_id": owner_user_id,
-                "name": name,
-                "sort_order": item.sort_order,
-                "enabled": item.enabled,
-                "disabled_reason": _normalize_optional_text(item.disabled_reason),
-            }
-        )
-    return categories
-
-
-def _normalize_import_canvas_templates(
-    document: SettingsExportDocument,
-    categories: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    category_ids = {category["id"] for category in categories}
-    seen_ids: set[str] = set()
-    seen_keys: set[str] = set()
-    templates: list[dict[str, Any]] = []
-    for item in document.canvas_templates:
-        template_id = item.id.strip()
-        if template_id in seen_ids:
-            raise ValueError("画布模板不能重复")
-        seen_ids.add(template_id)
-        key = item.key.strip()
-        if key in seen_keys:
-            raise ValueError("画布模板 key 不能重复")
-        seen_keys.add(key)
-        if item.scope not in {"global", "user"}:
-            raise ValueError("画布模板范围不支持")
-        owner_user_id = _normalize_optional_text(item.owner_user_id)
-        if item.scope == "global":
-            owner_user_id = None
-        elif owner_user_id is None:
-            raise ValueError("用户画布模板缺少 owner_user_id")
-        category_id = _normalize_optional_text(item.category_id)
-        if category_id is not None and category_id not in category_ids:
-            raise ValueError("画布模板分类不存在")
-        if item.kind not in {"full_canvas", "node_group"}:
-            raise ValueError("画布模板类型不支持")
-        if item.entry_mode not in {"image", "copy", "tail"}:
-            raise ValueError("画布模板入口类型不支持")
-        title = item.title.strip()
-        if not title:
-            raise ValueError("画布模板名称不能为空")
-        payload = dict(item.template_json)
-        try:
-            CanvasTemplatePayload.model_validate(
-                {
-                    **payload,
-                    "key": key,
-                    "template_id": template_id,
-                    "version": item.schema_version,
-                    "kind": item.kind,
-                    "entry_mode": item.entry_mode,
-                    "sort_order": item.sort_order,
-                    "title": title,
-                    "description": item.description or "",
-                    "source": "user" if item.scope == "user" else "builtin",
-                    "user_template_id": template_id if item.scope == "user" else None,
-                    "scope": item.scope,
-                    "owner_user_id": owner_user_id,
-                    "category_id": category_id,
-                    "enabled": item.enabled,
-                    "effective_enabled": item.enabled,
-                    "disabled_reason": item.disabled_reason,
-                    "review_status": item.review_status,
-                    "review_note": item.review_note,
-                }
-            )
-        except ValueError as exc:
-            raise ValueError(f"画布模板 {title} 格式不正确") from exc
-        templates.append(
-            {
-                "id": template_id,
-                "key": key,
-                "scope": item.scope,
-                "owner_user_id": owner_user_id,
-                "category_id": category_id,
-                "title": title,
-                "description": _normalize_optional_text(item.description),
-                "kind": item.kind,
-                "entry_mode": item.entry_mode,
-                "sort_order": item.sort_order,
-                "schema_version": item.schema_version,
-                "template_json": payload,
-                "enabled": item.enabled,
-                "disabled_reason": _normalize_optional_text(item.disabled_reason),
-                "review_status": (
-                    item.review_status if item.review_status in {"none", "pending", "approved", "rejected"} else "none"
-                ),
-                "review_note": _normalize_optional_text(item.review_note),
-            }
-        )
-    return templates
-
-
 def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
     document = _parse_settings_import_document(payload)
     normalized_runtime_config = _normalize_runtime_import_config(document)
     profiles = _normalize_import_profiles(document)
-    bindings = _normalize_import_bindings(document, profiles)
     generation_resource_groups = _normalize_import_generation_resource_groups(document)
-    generation_configs = _normalize_import_generation_configs(document, profiles, bindings, generation_resource_groups)
+    generation_configs = _normalize_import_generation_configs(document, profiles, generation_resource_groups)
     canvas_template_categories = _normalize_import_canvas_template_categories(document)
     canvas_templates = _normalize_import_canvas_templates(document, canvas_template_categories)
     if any(
@@ -1567,13 +876,11 @@ def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
         schema_version=document.metadata.schema_version,
         runtime_config_count=len(normalized_runtime_config),
         provider_profile_count=len(profiles),
-        provider_binding_count=len(bindings),
         generation_resource_group_count=len(generation_resource_groups),
         generation_config_count=len(generation_configs),
         canvas_template_category_count=len(canvas_template_categories),
         canvas_template_count=len(canvas_templates),
         provider_profile_names=[profile["name"] for profile in profiles],
-        provider_binding_purposes=sorted({generation_config["purpose"] for generation_config in generation_configs}),
         includes_api_keys=any(bool(profile["api_key"]) for profile in profiles),
         provider_profiles_with_api_key_count=sum(1 for profile in profiles if profile["api_key"]),
         canvas_template_keys=[template["key"] for template in canvas_templates],
@@ -1582,7 +889,6 @@ def _build_settings_import_bundle(payload: Any) -> _SettingsImportBundle:
     return _SettingsImportBundle(
         normalized_runtime_config=normalized_runtime_config,
         provider_profiles=profiles,
-        provider_bindings=bindings,
         generation_resource_groups=generation_resource_groups,
         generation_configs=generation_configs,
         canvas_template_categories=canvas_template_categories,
@@ -1691,7 +997,6 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
         session.execute(delete(GenerationConfig))
         session.execute(delete(UserGenerationResourceGroupGrant))
         session.execute(delete(GenerationResourceGroup))
-        session.execute(delete(ProviderBinding))
         session.execute(delete(ProviderProfile))
         session.flush()
 
@@ -2458,37 +1763,6 @@ def archive_provider_profile_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _serialize_provider_profile(profile)
-
-
-@router.patch(
-    "/provider-bindings/{purpose}",
-    response_model=ProviderBindingResponse,
-    dependencies=[WRITE_PROVIDER_SETTINGS_PERMISSION],
-)
-def update_provider_binding_endpoint(
-    purpose: str,
-    payload: ProviderBindingUpdateRequest,
-    session: Session = Depends(get_session),
-) -> ProviderBindingResponse:
-    try:
-        ensure_provider_config_bootstrapped(session)
-        binding = update_provider_binding(
-            session,
-            purpose=purpose,
-            provider_kind=payload.provider_kind,
-            provider_profile_id=payload.provider_profile_id,
-            model_settings=payload.model_settings,
-            config=payload.config,
-            commit=False,
-        )
-        if binding.purpose == "image" and is_real_image_provider_kind(binding.provider_kind):
-            _upsert_app_setting(session, key="poster_generation_mode", value="generated")
-        session.commit()
-        session.refresh(binding)
-    except (RuntimeError, ValueError) as exc:
-        session.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_provider_binding(binding)
 
 
 @router.get("/runtime", response_model=RuntimeConfigResponse, dependencies=[READ_GENERATION_RUNTIME_PERMISSION])

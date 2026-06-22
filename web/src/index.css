@@ -30,6 +30,26 @@
   --pf-motion-standard: cubic-bezier(0.32, 0.72, 0, 1);
   --pf-motion-soft: cubic-bezier(0.22, 1, 0.36, 1);
   --pf-motion-snap: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* 字体族与字阶（U1：纳入设计 token，与 --pf-* 同源管理） */
+  --pf-font-sans: var(--font-sans);
+  --pf-font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, "Geist Mono", monospace;
+  --pf-text-xs: 0.75rem;   --pf-leading-xs: 1.1rem;
+  --pf-text-sm: 0.875rem;  --pf-leading-sm: 1.25rem;
+  --pf-text-base: 1rem;    --pf-leading-base: 1.5rem;
+  --pf-text-lg: 1.125rem;  --pf-leading-lg: 1.75rem;
+  --pf-text-xl: 1.5rem;    --pf-leading-xl: 2rem;
+
+  /* 圆角档位（U2：收敛为 radius scale，组件就近消费） */
+  --pf-radius-sm: 8px;     /* 输入框、chip 内元素 */
+  --pf-radius-md: 14px;    /* 默认卡片、面板 */
+  --pf-radius-lg: 24px;    /* 大卡片、对话框 */
+  --pf-radius-xl: 32px;    /* 落地页大容器 */
+  --pf-radius-pill: 999px; /* 胶囊按钮、徽标 */
+  /* workspace 外观专属更大圆角（U2 步骤3：appearance 独立 token，原值收敛 Δ≤4px） */
+  --pf-radius-workspace-frame: 38px; /* workspace 外壳框架 */
+  --pf-radius-workspace-card: 28px;  /* workspace 卡片/面板/文档容器 */
+  --pf-radius-workspace-inset: 18px; /* workspace 小内嵌元素 */
 }
 
 :root.dark {
@@ -162,7 +182,7 @@ html::-webkit-scrollbar-track {
 
 html::-webkit-scrollbar-thumb {
   border: 3px solid rgb(241 245 249);
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: rgb(100 116 139 / 0.8);
 }
 
@@ -172,6 +192,7 @@ html::-webkit-scrollbar-thumb:hover {
 
 body {
   margin: 0;
+  font-family: var(--pf-font-sans);
   background: var(--pf-bg);
   color: rgb(24 24 27);
 }
@@ -479,7 +500,7 @@ textarea {
   width: fit-content;
   align-items: center;
   border: 1px solid color-mix(in srgb, var(--pf-border) 78%, transparent);
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: color-mix(in srgb, var(--pf-panel-soft) 84%, transparent);
   padding: 0.25rem 0.7rem;
   color: var(--pf-muted);
@@ -489,23 +510,46 @@ textarea {
 
 .pf-panel {
   border: 1px solid var(--pf-border);
-  border-radius: 0.75rem;
+  border-radius: var(--pf-radius-md);
   background: color-mix(in srgb, var(--pf-panel) 96%, transparent);
   box-shadow: var(--pf-shadow);
 }
 
 .pf-panel-soft {
   border: 1px solid var(--pf-border-soft);
-  border-radius: 0.75rem;
+  border-radius: var(--pf-radius-md);
   background: color-mix(in srgb, var(--pf-panel-soft) 92%, transparent);
 }
 
 .pf-table-panel {
   overflow: hidden;
   border: 1px solid var(--pf-border);
-  border-radius: 0.75rem;
+  border-radius: var(--pf-radius-md);
   background: var(--pf-panel);
   box-shadow: var(--pf-shadow);
+}
+
+/* U3：原子语义工具类——组件消费 pf-* 而非裸 Tailwind 色，主题切换零特例。
+   light 模式下各 token 与对应 slate 裸色等值（--pf-panel=#fff=bg-white、--pf-panel-soft=slate-50、
+   --pf-text=slate-900、--pf-muted=slate-500、--pf-border-soft=slate-200），故替换零视觉变化，
+   并自动适配 dark/mist/sage/dusk（各主题已定义同名 token），无需 dusk 裸色覆盖兜底。 */
+.pf-surface {
+  background-color: var(--pf-panel);
+}
+.pf-surface-soft {
+  background-color: var(--pf-panel-soft);
+}
+.pf-ink {
+  color: var(--pf-text);
+}
+.pf-ink-muted {
+  color: var(--pf-muted);
+}
+.pf-hairline {
+  border-color: var(--pf-border-soft);
+}
+.pf-hairline-strong {
+  border-color: var(--pf-border);
 }
 
 .pf-side-shell {
@@ -639,14 +683,14 @@ textarea {
 }
 
 .pf-workspace-card {
-  border-radius: 28px;
+  border-radius: var(--pf-radius-workspace-card);
   border: 0;
   background: rgb(255 255 255 / 0.54);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
 }
 
 .pf-workspace-card-soft {
-  border-radius: 24px;
+  border-radius: var(--pf-radius-lg);
   border: 0;
   background: rgb(18 21 18 / 0.045);
 }
@@ -900,7 +944,7 @@ textarea {
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace
   :is(input[type="email"], input[type="number"], input[type="password"], input[type="search"], input[type="text"], input[type="url"], textarea, button[aria-haspopup="listbox"]) {
-  border-radius: 1rem;
+  border-radius: var(--pf-radius-md);
   box-shadow: none;
 }
 
@@ -988,7 +1032,7 @@ textarea {
   flex-shrink: 0;
   align-items: center;
   border: 1px solid rgb(203 213 225);
-  border-radius: 9999px;
+  border-radius: var(--pf-radius-pill);
   background: rgb(226 232 240);
   transition:
     border-color 180ms ease,
@@ -1002,7 +1046,7 @@ textarea {
   left: 0.125rem;
   width: 0.875rem;
   height: 0.875rem;
-  border-radius: 9999px;
+  border-radius: var(--pf-radius-pill);
   background: rgb(255 255 255);
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.22);
   transform: translateX(0);
@@ -1205,7 +1249,7 @@ textarea {
   align-items: center;
   justify-content: center;
   border: 1px solid rgb(203 213 225);
-  border-radius: 9999px;
+  border-radius: var(--pf-radius-pill);
   background: rgb(255 255 255 / 0.92);
   color: rgb(15 23 42);
   transition:
@@ -1219,7 +1263,7 @@ textarea {
   content: "";
   width: 0.375rem;
   height: 0.375rem;
-  border-radius: 9999px;
+  border-radius: var(--pf-radius-pill);
   background: currentColor;
   opacity: 0;
   transform: scale(0.65);
@@ -1275,7 +1319,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-option-toggle input[type="checkbox"] {
-  border-radius: 9999px;
+  border-radius: var(--pf-radius-pill);
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-option-toggle-control {
@@ -1609,7 +1653,7 @@ textarea {
   gap: 6px;
   border: 1px solid var(--pf-line);
   border-left: 0;
-  border-radius: 0 14px 14px 0;
+  border-radius: 0 var(--pf-radius-md) var(--pf-radius-md) 0;
   padding: 0 7px 0 9px;
   background: color-mix(in srgb, var(--pf-panel) 90%, transparent);
   box-shadow: 0 8px 22px rgb(37 43 46 / 0.1);
@@ -1654,7 +1698,7 @@ textarea {
   height: 28px;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: color-mix(in srgb, var(--pf-accent) 14%, transparent);
   color: var(--pf-accent);
 }
@@ -1670,8 +1714,19 @@ textarea {
   scroll-margin-top: 112px;
 }
 
-.pf-workspace-home-top-anchor + .pf-workspace-home-section {
+.pf-workspace-home-greeting {
+  max-width: min(920px, 100%);
   margin-top: clamp(34px, 6vw, 78px);
+  color: var(--pf-text);
+  font-size: clamp(34px, 5.2vw, 76px);
+  font-weight: 740;
+  line-height: 1.02;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.pf-workspace-home-greeting + .pf-workspace-home-section {
+  margin-top: clamp(46px, 7vw, 86px);
 }
 
 .pf-workspace-intro {
@@ -1738,7 +1793,7 @@ textarea {
 }
 
 .pf-workspace-frame-shell {
-  border-radius: 38px;
+  border-radius: var(--pf-radius-workspace-frame);
   padding: 9px;
   background: rgb(255 255 255 / 0.38);
   box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 255 255 / 0.86);
@@ -1747,7 +1802,7 @@ textarea {
 .pf-workspace-frame {
   min-height: clamp(560px, 54vw, 690px);
   overflow: hidden;
-  border-radius: 29px;
+  border-radius: var(--pf-radius-workspace-card);
   background:
     linear-gradient(180deg, rgb(255 255 255 / 0.88), color-mix(in srgb, var(--pf-bg) 92%, white)),
     var(--pf-panel);
@@ -1761,7 +1816,7 @@ textarea {
 }
 
 .pf-workspace-subpage-frame-shell {
-  border-radius: 38px;
+  border-radius: var(--pf-radius-workspace-frame);
   padding: 9px;
   background: rgb(255 255 255 / 0.38);
   box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 255 255 / 0.86);
@@ -1770,7 +1825,7 @@ textarea {
 .pf-workspace-subpage-frame {
   min-height: min(760px, calc(100dvh - 112px));
   overflow: visible;
-  border-radius: 29px;
+  border-radius: var(--pf-radius-workspace-card);
   padding: clamp(20px, 2.4vw, 34px);
   background:
     linear-gradient(180deg, rgb(255 255 255 / 0.86), color-mix(in srgb, var(--pf-bg) 91%, white)),
@@ -1781,7 +1836,7 @@ textarea {
 .pf-workspace-subpage-frame > .pf-page-header:first-child,
 .pf-workspace-subpage-header {
   margin-bottom: 20px;
-  border-radius: 28px;
+  border-radius: var(--pf-radius-workspace-card);
   padding: clamp(20px, 2.4vw, 28px);
   background: rgb(255 255 255 / 0.54);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
@@ -1815,7 +1870,7 @@ textarea {
 
 .pf-workspace-subpage :is(.pf-panel, .pf-table-panel) {
   border: 0;
-  border-radius: 24px;
+  border-radius: var(--pf-radius-lg);
   background: rgb(255 255 255 / 0.54);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
 }
@@ -1869,11 +1924,11 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody tr[role="button"] > td:first-child {
-  border-radius: 16px 0 0 16px;
+  border-radius: var(--pf-radius-md) 0 0 var(--pf-radius-md);
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody tr[role="button"] > td:last-child {
-  border-radius: 0 16px 16px 0;
+  border-radius: 0 var(--pf-radius-md) var(--pf-radius-md) 0;
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel tbody tr[role="button"]:hover,
@@ -1906,7 +1961,7 @@ textarea {
 :root[data-ui-layout-scheme="workspace"] .pf-workspace-subpage .pf-table-panel + .hidden.justify-end {
   margin-top: -0.35rem;
   border: 1px solid color-mix(in srgb, var(--pf-border) 72%, transparent);
-  border-radius: 22px;
+  border-radius: var(--pf-radius-lg);
   background: color-mix(in srgb, var(--pf-panel) 70%, transparent);
   padding: 0.75rem 1rem;
   box-shadow:
@@ -1929,7 +1984,7 @@ textarea {
 .pf-workspace-subpage .pf-side-shell {
   max-width: none;
   overflow: hidden;
-  border-radius: 24px;
+  border-radius: var(--pf-radius-lg);
   background: rgb(255 255 255 / 0.44);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.72), 0 8px 22px rgb(37 43 46 / 0.032);
 }
@@ -1956,7 +2011,7 @@ textarea {
   width: min(1440px, calc(100% - clamp(28px, 6vw, 120px)));
   max-width: 1440px;
   margin: clamp(72px, 8vw, 92px) auto 112px;
-  border-radius: 29px;
+  border-radius: var(--pf-radius-workspace-card);
   padding: clamp(20px, 2.4vw, 34px);
   background:
     linear-gradient(180deg, rgb(255 255 255 / 0.86), color-mix(in srgb, var(--pf-bg) 91%, white)),
@@ -1968,7 +2023,7 @@ textarea {
   content: "Inspiration One 文档";
   grid-column: 1 / -1;
   margin-bottom: 20px;
-  border-radius: 28px;
+  border-radius: var(--pf-radius-workspace-card);
   padding: clamp(20px, 2.4vw, 28px);
   background: rgb(255 255 255 / 0.54);
   color: var(--pf-text);
@@ -1997,7 +2052,7 @@ textarea {
   width: min(1440px, calc(100% - clamp(28px, 6vw, 120px)));
   max-width: 1440px;
   margin: clamp(30px, 4vw, 58px) auto 112px;
-  border-radius: 29px;
+  border-radius: var(--pf-radius-workspace-card);
   padding: clamp(20px, 2.4vw, 34px);
   background:
     linear-gradient(180deg, rgb(255 255 255 / 0.86), color-mix(in srgb, var(--pf-bg) 91%, white)),
@@ -2009,7 +2064,7 @@ textarea {
 :root[data-ui-layout-scheme="workspace"] .pf-app > main[class*="max-w-[1440px]"] > div:first-child {
   margin-bottom: 20px;
   border: 0;
-  border-radius: 28px;
+  border-radius: var(--pf-radius-workspace-card);
   padding: clamp(20px, 2.4vw, 28px);
   background: rgb(255 255 255 / 0.54);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
@@ -2042,7 +2097,7 @@ textarea {
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   :is(.pf-side-rail, .pf-side-content, .pf-side-toc) {
   border: 0;
-  border-radius: 24px;
+  border-radius: var(--pf-radius-lg);
   background: rgb(255 255 255 / 0.54);
   color: var(--pf-text);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
@@ -2069,7 +2124,7 @@ textarea {
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   .pf-side-rail::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: color-mix(in srgb, var(--pf-accent) 24%, transparent);
   background-clip: content-box;
 }
@@ -2144,7 +2199,7 @@ textarea {
     button[aria-haspopup="listbox"]
   ) {
   border-color: var(--pf-line-strong);
-  border-radius: 16px;
+  border-radius: var(--pf-radius-md);
   background:
     linear-gradient(135deg, rgb(255 255 255 / 0.18), transparent 48%),
     color-mix(in srgb, var(--pf-panel) 64%, transparent);
@@ -3231,7 +3286,7 @@ textarea {
   height: 28px;
   flex: 0 0 auto;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background:
     radial-gradient(circle at 42% 38%, rgb(255 246 196 / 0.95) 0 18%, transparent 19%),
     radial-gradient(circle at 62% 62%, rgb(177 213 195 / 0.8) 0 24%, transparent 25%),
@@ -3248,7 +3303,7 @@ textarea {
   content: "";
   position: absolute;
   pointer-events: none;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
 }
 
 .pf-workspace-weather-logo::before {
@@ -3299,7 +3354,7 @@ textarea {
 
 .pf-workspace-menu-summary {
   min-height: 500px;
-  border-radius: 28px;
+  border-radius: var(--pf-radius-workspace-card);
   padding: 28px;
   background: rgb(255 255 255 / 0.54);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.82), 0 8px 22px rgb(37 43 46 / 0.032);
@@ -3310,7 +3365,7 @@ textarea {
   width: max-content;
   align-items: center;
   gap: 8px;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   padding: 6px 11px;
   background: rgb(18 21 18 / 0.06);
   color: var(--pf-accent);
@@ -3351,7 +3406,7 @@ textarea {
 
 .pf-workspace-menu-summary-card {
   min-height: 156px;
-  border-radius: 24px;
+  border-radius: var(--pf-radius-lg);
   padding: 20px;
   background: rgb(18 21 18 / 0.045);
 }
@@ -3374,7 +3429,7 @@ textarea {
   gap: 14px;
   align-items: center;
   min-height: 72px;
-  border-radius: 22px;
+  border-radius: var(--pf-radius-lg);
   padding: 12px;
   background: rgb(18 21 18 / 0.045);
   color: var(--pf-text);
@@ -3393,7 +3448,7 @@ textarea {
   height: 54px;
   place-items: center;
   overflow: hidden;
-  border-radius: 17px;
+  border-radius: var(--pf-radius-workspace-inset);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 18%, transparent), transparent 52%),
     rgb(18 21 18 / 0.08);
@@ -3435,7 +3490,7 @@ textarea {
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: rgb(18 21 18 / 0.07);
   color: var(--pf-muted);
   transition: transform 680ms var(--pf-motion-standard), background 680ms var(--pf-motion-standard);
@@ -3469,7 +3524,7 @@ textarea {
   gap: 12px;
   min-height: 46px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   padding: 12px 14px 12px 18px;
   background: rgb(18 21 18 / 0.055);
   color: var(--pf-muted);
@@ -3489,7 +3544,7 @@ textarea {
   isolation: isolate;
   min-height: 500px;
   overflow: hidden;
-  border-radius: 28px;
+  border-radius: var(--pf-radius-workspace-card);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 18%, transparent), transparent 48%),
     linear-gradient(320deg, color-mix(in srgb, var(--pf-accent-2) 14%, transparent), transparent 48%),
@@ -3533,7 +3588,7 @@ textarea {
   left: -52%;
   z-index: 1;
   width: 46%;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: linear-gradient(
     90deg,
     transparent,
@@ -3556,7 +3611,7 @@ textarea {
   position: absolute;
   display: block;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: linear-gradient(
     90deg,
     transparent,
@@ -3606,7 +3661,7 @@ textarea {
   width: calc(100% - 16px);
   height: calc(100% - 16px);
   border: 1px solid rgb(255 255 255 / 0.22);
-  border-radius: 22px;
+  border-radius: var(--pf-radius-lg);
   object-fit: cover;
   object-position: center;
   background: color-mix(in srgb, var(--pf-panel) 62%, transparent);
@@ -3711,7 +3766,7 @@ textarea {
   min-height: 290px;
   padding: 8px;
   overflow: hidden;
-  border-radius: 28px;
+  border-radius: var(--pf-radius-workspace-card);
   background: rgb(18 21 18 / 0.045);
 }
 
@@ -3719,7 +3774,7 @@ textarea {
   height: 100%;
   min-height: 274px;
   overflow: hidden;
-  border-radius: 22px;
+  border-radius: var(--pf-radius-lg);
   background:
     linear-gradient(155deg, rgb(252 249 241 / 0.94), rgb(228 232 218 / 0.72)),
     linear-gradient(35deg, rgb(18 21 18 / 0.08), transparent);
@@ -3739,7 +3794,7 @@ textarea {
 
 .pf-workspace-system-card {
   min-height: 270px;
-  border-radius: 34px;
+  border-radius: var(--pf-radius-xl);
   padding: 8px;
   background: rgb(255 255 255 / 0.4);
   box-shadow: var(--pf-shadow), inset 0 1px 0 rgb(255 255 255 / 0.8);
@@ -3747,7 +3802,7 @@ textarea {
 
 .pf-workspace-system-core {
   height: 100%;
-  border-radius: 26px;
+  border-radius: var(--pf-radius-lg);
   padding: 24px;
   background: rgb(251 251 248 / 0.82);
 }
@@ -3765,7 +3820,7 @@ textarea {
 
 .pf-workspace-system-lines span {
   height: 26px;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: rgb(18 21 18 / 0.08);
 }
 
@@ -3913,29 +3968,29 @@ textarea {
   }
 
   .pf-workspace-frame-shell {
-    border-radius: 30px;
+    border-radius: var(--pf-radius-xl);
     padding: 6px;
   }
 
   .pf-workspace-subpage-frame-shell {
-    border-radius: 30px;
+    border-radius: var(--pf-radius-xl);
     padding: 6px;
   }
 
   .pf-workspace-frame {
     min-height: auto;
-    border-radius: 24px;
+    border-radius: var(--pf-radius-lg);
   }
 
   .pf-workspace-subpage-frame {
     min-height: auto;
-    border-radius: 24px;
+    border-radius: var(--pf-radius-lg);
     padding: 14px;
   }
 
   .pf-workspace-subpage-frame > .pf-page-header:first-child,
   .pf-workspace-subpage-header {
-    border-radius: 22px;
+    border-radius: var(--pf-radius-lg);
     padding: 18px;
   }
 
@@ -3944,13 +3999,13 @@ textarea {
     width: min(100% - 24px, 520px);
     margin-top: 72px;
     margin-bottom: 96px;
-    border-radius: 24px;
+    border-radius: var(--pf-radius-lg);
     padding: 14px;
   }
 
   :root[data-ui-layout-scheme="workspace"] .pf-app > main.pf-page > .pf-page-header:first-child,
   :root[data-ui-layout-scheme="workspace"] .pf-app > main[class*="max-w-[1440px]"] > div:first-child {
-    border-radius: 22px;
+    border-radius: var(--pf-radius-lg);
     padding: 18px;
   }
 
@@ -3965,7 +4020,7 @@ textarea {
 
   .pf-workspace-menu-summary {
     min-height: auto;
-    border-radius: 24px;
+    border-radius: var(--pf-radius-lg);
     padding: 20px;
   }
 
@@ -4010,7 +4065,7 @@ textarea {
   display: block;
   width: min(286px, calc(100vw - 32px));
   border: 1px solid color-mix(in srgb, var(--pf-line) 58%, transparent);
-  border-radius: 24px;
+  border-radius: var(--pf-radius-lg);
   padding: 6px;
   background: color-mix(in srgb, var(--pf-panel) 30%, transparent);
   box-shadow: 0 14px 38px rgb(35 40 42 / 0.06), inset 0 1px 0 rgb(255 255 255 / 0.7);
@@ -4021,7 +4076,7 @@ textarea {
 }
 
 .pf-shell-workspace-notification-core {
-  border-radius: 19px;
+  border-radius: var(--pf-radius-workspace-inset);
   padding: 12px;
   background: color-mix(in srgb, var(--pf-panel) 72%, transparent);
   color: var(--pf-text);
@@ -4073,7 +4128,7 @@ textarea {
 
 .pf-shell-workspace-notification-empty {
   margin: 12px 0 0;
-  border-radius: 15px;
+  border-radius: var(--pf-radius-md);
   padding: 10px 11px;
   background: color-mix(in srgb, var(--pf-deep) 5%, transparent);
   color: var(--pf-muted);
@@ -4083,7 +4138,7 @@ textarea {
 
 :root[data-ui-layout-scheme="workspace"] .pf-shell-workspace-notification-popover .pf-shell-notification-card {
   border: 0;
-  border-radius: 15px;
+  border-radius: var(--pf-radius-md);
   background: color-mix(in srgb, var(--pf-deep) 5%, transparent);
   box-shadow: none;
 }
@@ -4126,7 +4181,7 @@ textarea {
   overflow: hidden;
   padding: 8px;
   border: 1px solid color-mix(in srgb, var(--pf-line) 68%, transparent);
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: color-mix(in srgb, var(--pf-panel) 80%, transparent);
   box-shadow: 0 14px 42px rgb(35 40 42 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.72);
   backdrop-filter: blur(24px);
@@ -4162,7 +4217,7 @@ textarea {
   justify-content: center;
   border: 1px solid color-mix(in srgb, var(--pf-line) 72%, transparent);
   border-top: 0;
-  border-radius: 0 0 16px 16px;
+  border-radius: 0 0 var(--pf-radius-md) var(--pf-radius-md);
   background: color-mix(in srgb, var(--pf-panel) 88%, transparent);
   color: var(--pf-muted);
   box-shadow: 0 14px 36px rgb(35 40 42 / 0.1), inset 0 1px 0 rgb(255 255 255 / 0.62);
@@ -4256,7 +4311,7 @@ textarea {
   gap: 10px;
   padding: 10px 16px 10px 10px;
   border: 1px solid var(--pf-brand-border, color-mix(in srgb, var(--pf-line-strong) 86%, transparent));
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background:
     linear-gradient(135deg, rgb(255 255 255 / 0.3), transparent 46%),
     var(--pf-brand-panel, color-mix(in srgb, var(--pf-panel) 72%, transparent));
@@ -4301,7 +4356,7 @@ textarea {
 }
 
 .pf-shell-brand-chip a:focus-visible {
-  border-radius: 9px;
+  border-radius: var(--pf-radius-sm);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 22%, transparent);
 }
 
@@ -4324,7 +4379,7 @@ textarea {
   height: 38px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--pf-accent) 26%, rgb(255 255 255 / 0.22));
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background:
     radial-gradient(circle at 34% 30%, rgb(255 255 255 / 0.62) 0 11%, transparent 12%),
     radial-gradient(circle at 66% 74%, color-mix(in srgb, var(--pf-accent-2) 78%, transparent) 0 27%, transparent 28%),
@@ -4348,7 +4403,7 @@ textarea {
   content: "";
   position: absolute;
   pointer-events: none;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::before {
@@ -4379,7 +4434,7 @@ textarea {
   align-items: center;
   gap: 5px;
   padding: 5px;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: color-mix(in srgb, var(--pf-deep) 6%, transparent);
 }
 
@@ -4394,7 +4449,7 @@ textarea {
   overflow-x: auto;
   padding: 7px;
   border: 1px solid color-mix(in srgb, var(--pf-line) 58%, transparent);
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: color-mix(in srgb, var(--pf-panel) 78%, transparent);
   box-shadow: 0 14px 38px rgb(35 40 42 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.72);
   backdrop-filter: blur(24px);
@@ -4422,7 +4477,7 @@ textarea {
   align-items: center;
   gap: 7px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   padding: 8px 11px;
   background: transparent;
   color: var(--pf-muted);
@@ -4467,7 +4522,7 @@ textarea {
   max-width: min(360px, calc(100vw - 48px));
   padding: 7px;
   border-right-width: 1px;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   opacity: 0.92;
   transform: translate3d(0, 0, 0) scale(1);
   filter: none;
@@ -4480,7 +4535,7 @@ textarea {
   overflow: hidden;
   padding: 4px 3px 4px 6px;
   border-right-width: 0;
-  border-radius: 999px 0 0 999px;
+  border-radius: var(--pf-radius-pill) 0 0 var(--pf-radius-pill);
   opacity: 0.96;
   filter: saturate(0.92);
   transform: translate3d(0, 0, 0) scale(1);
@@ -4530,7 +4585,7 @@ textarea {
 .pf-shell-locale-option {
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: transparent;
   color: var(--pf-muted);
   font-family: inherit;
@@ -4559,7 +4614,7 @@ textarea {
 .pf-shell-concept-link {
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: transparent;
   padding: 10px 14px;
   color: var(--pf-muted);
@@ -4608,7 +4663,7 @@ textarea {
   gap: 7px;
   min-height: 38px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   padding: 9px 12px;
   background: color-mix(in srgb, var(--pf-deep) 6%, transparent);
   color: var(--pf-muted);
@@ -4640,7 +4695,7 @@ textarea {
 .pf-shell-profile-panel {
   width: min(260px, calc(100vw - 24px));
   border: 1px solid color-mix(in srgb, var(--pf-line) 70%, transparent);
-  border-radius: 24px;
+  border-radius: var(--pf-radius-lg);
   padding: 7px;
   background: color-mix(in srgb, var(--pf-panel) 86%, transparent);
   color: var(--pf-text);
@@ -4651,7 +4706,7 @@ textarea {
 .pf-shell-profile-summary {
   display: grid;
   gap: 4px;
-  border-radius: 18px;
+  border-radius: var(--pf-radius-workspace-inset);
   padding: 12px;
   background: color-mix(in srgb, var(--pf-deep) 5%, transparent);
 }
@@ -4689,7 +4744,7 @@ textarea {
   min-height: 40px;
   margin-top: 6px;
   border: 0;
-  border-radius: 17px;
+  border-radius: var(--pf-radius-workspace-inset);
   padding: 10px 12px;
   background: transparent;
   color: var(--pf-muted);
@@ -4710,7 +4765,7 @@ textarea {
 .pf-shell-more-panel {
   width: min(218px, calc(100vw - 24px));
   border: 1px solid color-mix(in srgb, var(--pf-line) 70%, transparent);
-  border-radius: 24px;
+  border-radius: var(--pf-radius-lg);
   padding: 7px;
   background: color-mix(in srgb, var(--pf-panel) 84%, transparent);
   color: var(--pf-text);
@@ -4745,7 +4800,7 @@ textarea {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  border-radius: 17px;
+  border-radius: var(--pf-radius-workspace-inset);
   padding: 11px 12px;
   background: transparent;
   color: var(--pf-muted);
@@ -4775,7 +4830,7 @@ textarea {
   height: 58px;
   place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   appearance: none;
   background:
     radial-gradient(circle at 38% 30%, rgb(255 255 255 / 0.44), transparent 28%),
@@ -4809,7 +4864,7 @@ textarea {
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid color-mix(in srgb, var(--pf-line) 68%, transparent);
-  border-radius: 28px;
+  border-radius: var(--pf-radius-workspace-card);
   padding: 8px;
   background: var(--pf-panel);
   color: var(--pf-text);
@@ -4854,7 +4909,7 @@ textarea {
 .pf-shell-compact-system {
   justify-content: center;
   min-height: 34px;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   padding: 8px 11px;
   background: color-mix(in srgb, var(--pf-deep) 6%, transparent);
   color: var(--pf-muted);
@@ -4901,7 +4956,7 @@ textarea {
 
 .pf-shell-compact-profile-summary {
   min-width: 0;
-  border-radius: 18px;
+  border-radius: var(--pf-radius-workspace-inset);
   padding: 10px 12px;
   background: color-mix(in srgb, var(--pf-deep) 5%, transparent);
 }
@@ -4934,7 +4989,7 @@ textarea {
   gap: 6px;
   min-height: 38px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   padding: 9px 12px;
   background: color-mix(in srgb, var(--pf-danger) 10%, transparent);
   color: var(--pf-danger);
@@ -5386,7 +5441,7 @@ textarea {
   :root[data-ui-layout-scheme="workspace"] [data-ui-layout-scheme="workspace"] .pf-shell-nav-frame {
     min-height: 50px;
     border: 1px solid color-mix(in srgb, var(--pf-line-strong) 82%, transparent);
-    border-radius: 999px;
+    border-radius: var(--pf-radius-pill);
     padding: 5px;
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--pf-panel) 82%, transparent), color-mix(in srgb, var(--pf-panel-soft) 68%, transparent));
@@ -5407,14 +5462,14 @@ textarea {
   :root[data-ui-layout-scheme="workspace"] [data-ui-layout-scheme="workspace"] .pf-shell-nav-item {
     height: 40px;
     min-width: max-content;
-    border-radius: 999px;
+    border-radius: var(--pf-radius-pill);
     padding-inline: 13px;
     white-space: nowrap;
   }
 
   :root[data-ui-layout-scheme="workspace"] [data-ui-layout-scheme="workspace"] .pf-shell-preference-trigger {
     height: 40px;
-    border-radius: 999px;
+    border-radius: var(--pf-radius-pill);
     background: color-mix(in srgb, var(--pf-panel) 78%, transparent);
   }
 
@@ -5428,17 +5483,17 @@ textarea {
   :root[data-ui-layout-scheme="workspace"] .pf-shell-weather-trigger {
     width: 40px;
     height: 40px;
-    border-radius: 999px;
+    border-radius: var(--pf-radius-pill);
   }
 
   :root[data-ui-layout-scheme="workspace"] .pf-workspace-frame-shell {
-    border-radius: 42px;
+    border-radius: var(--pf-radius-workspace-frame);
     padding: 10px;
   }
 
   :root[data-ui-layout-scheme="workspace"] .pf-workspace-frame {
     min-height: min(760px, calc(100dvh - 88px));
-    border-radius: 32px;
+    border-radius: var(--pf-radius-xl);
   }
 }
 
@@ -6947,7 +7002,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-image-chat-session-card-button:focus-visible {
-  border-radius: 22px;
+  border-radius: var(--pf-radius-lg);
   outline: 2px solid color-mix(in srgb, var(--pf-accent) 42%, transparent);
   outline-offset: -2px;
 }
@@ -7091,13 +7146,13 @@ textarea {
 }
 
 .inspiration-create-scrollbar::-webkit-scrollbar-track {
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: rgb(226 232 240 / 0.7);
 }
 
 .inspiration-create-scrollbar::-webkit-scrollbar-thumb {
   border: 3px solid rgb(226 232 240 / 0.7);
-  border-radius: 999px;
+  border-radius: var(--pf-radius-pill);
   background: rgb(100 116 139 / 0.78);
 }
 
@@ -7134,7 +7189,7 @@ textarea {
 .workflow-canvas-controls {
   overflow: hidden;
   border: 1px solid rgb(228 228 231 / 0.95);
-  border-radius: 8px;
+  border-radius: var(--pf-radius-sm);
   background: rgb(255 255 255 / 0.9);
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.1);
   backdrop-filter: blur(12px);
@@ -7161,7 +7216,7 @@ textarea {
 .workflow-canvas-minimap {
   overflow: hidden;
   border: 1px solid rgb(228 228 231 / 0.95);
-  border-radius: 8px;
+  border-radius: var(--pf-radius-sm);
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.1);
 }
 
@@ -7261,7 +7316,7 @@ textarea {
   position: relative;
   overflow: hidden;
   background-color: #e2e8f0;
-  border-radius: 6px;
+  border-radius: var(--pf-radius-sm);
 }
 
 :root.dark .animate-shimmer {
@@ -7608,7 +7663,7 @@ textarea {
   color: rgb(15 23 42);
   background-color: white;
   border: 1px solid rgb(226 232 240);
-  border-radius: 12px;
+  border-radius: var(--pf-radius-md);
   box-shadow: inset 0 1px 2px rgb(15 23 42 / 0.02);
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
@@ -7650,7 +7705,7 @@ textarea {
   background-color: rgb(255 255 255 / 0.92);
   border: 1px solid rgb(226 232 240);
   border-left: 2px solid #6366f1;
-  border-radius: 14px;
+  border-radius: var(--pf-radius-md);
   box-shadow: 0 1px 4px rgb(15 23 42 / 0.03);
 }
 
@@ -8246,7 +8301,7 @@ textarea {
   :root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace-main > .pf-workspace-tool-rail,
   :root[data-ui-layout-scheme="workspace"] .pf-image-chat-workspace-main > .pf-workspace-stage {
     overflow: hidden;
-    border-radius: 26px;
+    border-radius: var(--pf-radius-lg);
   }
 }
 

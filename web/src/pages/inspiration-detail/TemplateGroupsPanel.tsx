@@ -400,7 +400,7 @@ export function TemplateGraphPreview({
               height: `${(metrics.nodeHeight / metrics.viewBoxHeight) * 100}%`,
             }}
           >
-            <span className="absolute left-[-4px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full border border-slate-300 bg-white shadow-sm dark:border-slate-500 dark:bg-[#0b1220]" />
+            <span className="absolute left-[-4px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full border pf-hairline-strong bg-white shadow-sm dark:border-slate-500 dark:bg-[#0b1220]" />
             <span className="absolute right-[-5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border-2 border-indigo-600 bg-white shadow-sm dark:border-violet-400 dark:bg-[#0b1220]" />
             <div className="flex items-start gap-1.5">
               <div className="flex min-w-0 flex-1 gap-1.5">

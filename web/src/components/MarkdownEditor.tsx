@@ -262,7 +262,7 @@ const MarkdownPreview = memo(function MarkdownPreview({ value }: { value: string
 
   if (!markdownHasVisibleContent(value)) {
     return (
-      <div className="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-400">
+      <div className="flex min-h-32 items-center justify-center rounded-xl border border-dashed pf-hairline-strong bg-slate-50 px-4 py-8 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-400">
         {t("markdown.emptyPreview")}
       </div>
     );

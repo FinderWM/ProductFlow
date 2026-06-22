@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
@@ -19,72 +18,46 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationConfigResourceGroup,
     GenerationConfigState,
     GenerationResourceGroup,
-    ProviderBinding,
     ProviderProfile,
 )
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
-
-TEXT_PURPOSE = "text"
-IMAGE_PURPOSE = "image"
-PROVIDER_TYPE_OPENAI_COMPATIBLE = "openai_compatible"
-PROVIDER_TYPE_GOOGLE_GEMINI = "google_gemini"
-PROVIDER_TYPES = {PROVIDER_TYPE_OPENAI_COMPATIBLE, PROVIDER_TYPE_GOOGLE_GEMINI}
-
-TEXT_PROVIDER_KINDS = {"mock", "openai", "openai_chat_completions"}
-IMAGE_PROVIDER_KINDS = {"mock", "openai_responses", "openai_images", "openai_chat_image", "google_gemini_image"}
-REAL_IMAGE_PROVIDER_KINDS = IMAGE_PROVIDER_KINDS - {"mock"}
-PROVIDER_PURPOSES = {TEXT_PURPOSE, IMAGE_PURPOSE}
-CAPABILITY_TEXT_RESPONSES = "text_responses"
-CAPABILITY_TEXT_CHAT_COMPLETIONS = "text_chat_completions"
-CAPABILITY_IMAGE_RESPONSES = "image_responses"
-CAPABILITY_IMAGE_IMAGES = "image_images"
-CAPABILITY_IMAGE_CHAT = "image_chat"
-CAPABILITY_IMAGE_GOOGLE_GEMINI = "image_google_gemini"
-PROVIDER_CAPABILITIES = {
-    CAPABILITY_TEXT_RESPONSES,
-    CAPABILITY_TEXT_CHAT_COMPLETIONS,
-    CAPABILITY_IMAGE_RESPONSES,
-    CAPABILITY_IMAGE_IMAGES,
+from inspiration_one_backend.infrastructure.provider_config_constants import (
     CAPABILITY_IMAGE_CHAT,
     CAPABILITY_IMAGE_GOOGLE_GEMINI,
-}
-TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY = "structured_json_response_format_enabled"
-TEXT_STRUCTURED_OUTPUT_KEY = "structured_output"
-TEXT_STRUCTURED_OUTPUT_ENABLED_KEY = "enabled"
-TEXT_STRUCTURED_OUTPUT_MODE_KEY = "mode"
-TEXT_STRUCTURED_OUTPUT_MODE_JSON_OBJECT = "json_object"
-TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA = "json_schema"
-TEXT_STRUCTURED_OUTPUT_MODES = {
+    CAPABILITY_IMAGE_IMAGES,
+    CAPABILITY_IMAGE_RESPONSES,
+    CAPABILITY_TEXT_CHAT_COMPLETIONS,
+    CAPABILITY_TEXT_RESPONSES,
+    DEFAULT_GENERATION_CONFIG_MAX_CONCURRENCY,
+    DEFAULT_GENERATION_CONFIG_PRIORITY,
+    DEFAULT_GENERATION_RESOURCE_GROUP_NAME,
+    IMAGE_PROVIDER_KINDS,
+    IMAGE_PURPOSE,
+    LEGACY_PROVIDER_CONFIG_KEYS,
+    PROVIDER_CAPABILITIES,
+    PROVIDER_PURPOSES,
+    PROVIDER_TYPE_GOOGLE_GEMINI,
+    PROVIDER_TYPE_OPENAI_COMPATIBLE,
+    PROVIDER_TYPES,
+    REAL_IMAGE_PROVIDER_KINDS,
+    RESOURCE_GROUP_KEY_RE,
+    TEXT_PROVIDER_KINDS,
+    TEXT_PURPOSE,
+    TEXT_STRUCTURED_JSON_RESPONSE_FORMAT_ENABLED_KEY,
+    TEXT_STRUCTURED_OUTPUT_ENABLED_KEY,
+    TEXT_STRUCTURED_OUTPUT_KEY,
     TEXT_STRUCTURED_OUTPUT_MODE_JSON_OBJECT,
     TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA,
-}
-UNSET_PROVIDER_FIELD = object()
-DEFAULT_GENERATION_CONFIG_PRIORITY = 100
-DEFAULT_GENERATION_CONFIG_MAX_CONCURRENCY = 1
-DEFAULT_GENERATION_RESOURCE_GROUP_NAME = "default"
-RESOURCE_GROUP_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]{1,79}$")
+    TEXT_STRUCTURED_OUTPUT_MODE_KEY,
+    TEXT_STRUCTURED_OUTPUT_MODES,
+    UNSET_PROVIDER_FIELD,
+)
 
 
 def _as_aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value
-
-
-LEGACY_PROVIDER_CONFIG_KEYS = {
-    "text_provider_kind",
-    "text_api_key",
-    "text_base_url",
-    "text_brief_model",
-    "text_copy_model",
-    "image_provider_kind",
-    "image_api_key",
-    "image_base_url",
-    "image_generate_model",
-    "image_images_quality",
-    "image_images_style",
-    "image_responses_background_enabled",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,17 +153,6 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
             session.flush()
         return
 
-    existing_bindings = list(session.scalars(select(ProviderBinding).order_by(ProviderBinding.purpose)).all())
-    if existing_bindings:
-        for binding in existing_bindings:
-            _add_generation_config_from_binding(session, binding)
-        _ensure_generation_config_states(session)
-        if commit:
-            session.commit()
-        else:
-            session.flush()
-        return
-
     settings = _load_effective_legacy_settings(session)
     profiles_by_connection: dict[tuple[str, str], ProviderProfile] = {}
     default_group_id = default_generation_resource_group_id(session)
@@ -273,7 +235,6 @@ def ensure_provider_config_bootstrapped(session: Session | None = None, *, commi
             commit=False,
         )
 
-    _sync_compat_provider_bindings(session)
     if commit:
         session.commit()
     else:
@@ -292,17 +253,6 @@ def list_provider_profiles(session: Session) -> list[ProviderProfile]:
             )
         ).all()
     )
-
-
-def list_provider_bindings(session: Session) -> list[ProviderBinding]:
-    """Compatibility view for the old settings UI.
-
-    It mirrors the highest priority active generation config per purpose.
-    """
-
-    ensure_provider_config_bootstrapped(session)
-    _sync_compat_provider_bindings(session)
-    return list(session.scalars(select(ProviderBinding).order_by(ProviderBinding.purpose)).all())
 
 
 def list_generation_configs(session: Session) -> list[GenerationConfig]:
@@ -632,7 +582,6 @@ def add_generation_config(
     session.flush()
     _sync_generation_config_resource_groups(session, generation_config, normalized_resource_group_ids)
     _ensure_generation_config_state(session, generation_config.id)
-    _sync_compat_provider_bindings(session)
     if commit:
         session.commit()
         session.refresh(generation_config)
@@ -724,7 +673,6 @@ def update_generation_config(
     generation_config.cooldown_minutes = next_cooldown
     _sync_generation_config_resource_groups(session, generation_config, next_resource_group_ids)
     _ensure_generation_config_state(session, generation_config.id)
-    _sync_compat_provider_bindings(session)
     if commit:
         session.commit()
         session.refresh(generation_config)
@@ -737,61 +685,9 @@ def archive_generation_config(session: Session, generation_config_id: str) -> Ge
     generation_config = _require_generation_config(session, generation_config_id)
     generation_config.archived_at = datetime.now(UTC)
     generation_config.enabled = False
-    _sync_compat_provider_bindings(session)
     session.commit()
     session.refresh(generation_config)
     return generation_config
-
-
-def update_provider_binding(
-    session: Session,
-    *,
-    purpose: str,
-    provider_kind: str,
-    provider_profile_id: str | None,
-    model_settings: dict[str, Any],
-    config: dict[str, Any],
-    commit: bool = True,
-) -> ProviderBinding:
-    """Compatibility write path for the old settings UI.
-
-    Updates the first active generation config for the purpose, or creates one.
-    """
-
-    ensure_provider_config_bootstrapped(session)
-    default_group_id = default_generation_resource_group_id(session)
-    existing = _default_generation_config(session, purpose, resource_group_id=default_group_id, include_disabled=True)
-    if existing is None:
-        add_generation_config(
-            session,
-            resource_group_id=default_group_id,
-            name="默认文案配置" if purpose == TEXT_PURPOSE else "默认图片配置",
-            purpose=purpose,
-            provider_kind=provider_kind,
-            provider_profile_id=provider_profile_id,
-            model_settings=model_settings,
-            config=config,
-            commit=False,
-        )
-    else:
-        update_generation_config(
-            session,
-            existing.id,
-            purpose=purpose,
-            provider_kind=provider_kind,
-            provider_profile_id=provider_profile_id,
-            model_settings=model_settings,
-            config=config,
-            commit=False,
-        )
-    _sync_compat_provider_bindings(session)
-    binding = _require_binding(session, purpose)
-    if commit:
-        session.commit()
-        session.refresh(binding)
-    else:
-        session.flush()
-    return binding
 
 
 def capability_for_provider_kind(provider_kind: str) -> str:
@@ -1125,6 +1021,32 @@ def release_generation_config_claim(
     )
 
 
+def reconcile_generation_config_concurrency(session: Session | None = None) -> int:
+    """启动时把所有生成配置的 current_concurrency 归零，解除硬杀导致的并发计数泄漏。
+
+    current_concurrency 仅在 worker 持有 claim 期间有意义（claim +1 / release -1）。进程被
+    SIGKILL/OOM 杀于 claim 与 release 之间会泄漏计数且不自愈；max_concurrency 默认 1 时，一次
+    泄漏即让该配置永久 `current_concurrency < max_concurrency` 不成立而停止调度。
+    真实总并发由全局运行中任务数上限（pg_advisory_xact_lock + 运行计数）兜底，因此启动归零即便
+    短暂多算单个配置的并发也不会突破全局上限。假设：生成 worker 与应用进程同生命周期重启
+    （单实例自托管部署）。
+    """
+    if session is None:
+        owned_session = get_session_factory()()
+        try:
+            reset_count = reconcile_generation_config_concurrency(owned_session)
+            owned_session.commit()
+            return reset_count
+        finally:
+            owned_session.close()
+    result = session.execute(
+        update(GenerationConfigState)
+        .where(GenerationConfigState.current_concurrency != 0)
+        .values(current_concurrency=0)
+    )
+    return int(result.rowcount or 0)
+
+
 def unfreeze_generation_config(
     session: Session,
     generation_config_id: str,
@@ -1350,7 +1272,6 @@ def _provider_config_exists(session: Session) -> bool:
     return bool(
         session.scalar(select(ProviderProfile.id).limit(1))
         or session.scalar(select(GenerationConfig.id).limit(1))
-        or session.scalar(select(ProviderBinding.id).limit(1))
     )
 
 
@@ -1387,29 +1308,6 @@ def _profile_for_legacy_connection(
     else:
         profile.capabilities_json = _dedupe_ordered([*profile.capabilities_json, capability])
     return profile
-
-
-def _add_generation_config_from_binding(session: Session, binding: ProviderBinding) -> None:
-    default_group_id = default_generation_resource_group_id(session)
-    generation_config = GenerationConfig(
-        name="默认文案配置" if binding.purpose == TEXT_PURPOSE else "默认图片配置",
-        purpose=binding.purpose,
-        provider_kind=binding.provider_kind,
-        provider_profile_id=None if binding.provider_kind == "mock" else binding.provider_profile_id,
-        resource_group_id=default_group_id,
-        model_settings_json=dict(binding.model_settings_json or {}),
-        config_json=dict(binding.config_json or {}),
-        priority=DEFAULT_GENERATION_CONFIG_PRIORITY,
-        max_concurrency=DEFAULT_GENERATION_CONFIG_MAX_CONCURRENCY,
-        enabled=True,
-        availability_window_minutes=get_runtime_settings().generation_config_default_availability_window_minutes,
-        failure_threshold=get_runtime_settings().generation_config_default_failure_threshold,
-        cooldown_minutes=get_runtime_settings().generation_config_default_cooldown_minutes,
-    )
-    session.add(generation_config)
-    session.flush()
-    _sync_generation_config_resource_groups(session, generation_config, [default_group_id])
-    _ensure_generation_config_state(session, generation_config.id)
 
 
 def _default_generation_config(
@@ -1564,29 +1462,6 @@ def _ensure_generation_config_state(session: Session, generation_config_id: str)
     return state
 
 
-def _sync_compat_provider_bindings(session: Session) -> None:
-    """Mirror default generation configs into legacy provider_bindings rows."""
-
-    default_group_id = default_generation_resource_group_id(session)
-    for purpose in sorted(PROVIDER_PURPOSES):
-        generation_config = _default_generation_config(
-            session,
-            purpose,
-            resource_group_id=default_group_id,
-            include_disabled=True,
-        )
-        if generation_config is None:
-            continue
-        binding = _get_binding(session, purpose)
-        if binding is None:
-            binding = ProviderBinding(purpose=purpose, provider_kind=generation_config.provider_kind)
-            session.add(binding)
-        binding.provider_kind = generation_config.provider_kind
-        binding.provider_profile_id = generation_config.provider_profile_id
-        binding.model_settings_json = dict(generation_config.model_settings_json or {})
-        binding.config_json = dict(generation_config.config_json or {})
-
-
 def generation_config_resource_group_ids(generation_config: GenerationConfig) -> list[str]:
     links = list(generation_config.resource_group_links or [])
     if links:
@@ -1658,17 +1533,6 @@ def _sync_generation_config_resource_groups(
             )
     generation_config.resource_group_id = _compat_resource_group_id(resource_group_ids)
     session.flush()
-
-
-def _get_binding(session: Session, purpose: str) -> ProviderBinding | None:
-    return session.scalar(select(ProviderBinding).where(ProviderBinding.purpose == purpose))
-
-
-def _require_binding(session: Session, purpose: str) -> ProviderBinding:
-    binding = _get_binding(session, purpose)
-    if binding is None:
-        raise RuntimeError("供应商用途绑定未初始化")
-    return binding
 
 
 def _validate_generation_config_payload(
@@ -1798,11 +1662,13 @@ def _candidate_generation_configs(
     else:
         statement = statement.where(GenerationConfig.enabled.is_(True))
     configs = list(session.scalars(statement).all())
+    today_stats_by_config = _today_stats_by_config(session, [config.id for config in configs], now=now)
     candidates: list[tuple[GenerationConfig, float]] = []
     for generation_config in configs:
         if not _generation_config_candidate_available(generation_config, now=now, manual=bool(generation_config_id)):
             continue
-        candidates.append((generation_config, _generation_config_score(session, generation_config, now=now)))
+        score = _generation_config_score(generation_config, stat=today_stats_by_config.get(generation_config.id))
+        candidates.append((generation_config, score))
     candidates.sort(key=lambda item: (item[1], item[0].priority, item[0].created_at), reverse=True)
     return candidates
 
@@ -1829,7 +1695,33 @@ def _generation_config_candidate_available(
     return int(state.current_concurrency or 0) < generation_config.max_concurrency
 
 
-def _generation_config_score(session: Session, generation_config: GenerationConfig, *, now: datetime) -> float:
+def _today_stats_by_config(
+    session: Session,
+    generation_config_ids: list[str],
+    *,
+    now: datetime,
+) -> dict[str, GenerationConfigDailyStat]:
+    """一次性预取当日生成统计，避免打分阶段对每个候选各发 2 次日表查询。"""
+
+    if not generation_config_ids:
+        return {}
+    today = _local_stat_date(now)
+    return {
+        stat.generation_config_id: stat
+        for stat in session.scalars(
+            select(GenerationConfigDailyStat).where(
+                GenerationConfigDailyStat.generation_config_id.in_(generation_config_ids),
+                GenerationConfigDailyStat.stat_date == today,
+            )
+        ).all()
+    }
+
+
+def _generation_config_score(
+    generation_config: GenerationConfig,
+    *,
+    stat: GenerationConfigDailyStat | None,
+) -> float:
     state = generation_config.state
     capacity_score = 1.0
     if state is not None:
@@ -1838,34 +1730,20 @@ def _generation_config_score(session: Session, generation_config: GenerationConf
             (generation_config.max_concurrency - int(state.current_concurrency or 0))
             / max(1, generation_config.max_concurrency),
         )
-    availability_score = _recent_availability_score(session, generation_config.id, now=now)
-    latency_score = _latency_score(session, generation_config.id, now=now)
+    availability_score = _recent_availability_score(stat)
+    latency_score = _latency_score(stat)
     priority_score = max(0.0, min(1.0, generation_config.priority / 100.0))
     return priority_score * 0.5 + availability_score * 0.3 + capacity_score * 0.15 + latency_score * 0.05
 
 
-def _recent_availability_score(session: Session, generation_config_id: str, *, now: datetime) -> float:
-    today = _local_stat_date(now)
-    stat = session.scalar(
-        select(GenerationConfigDailyStat).where(
-            GenerationConfigDailyStat.generation_config_id == generation_config_id,
-            GenerationConfigDailyStat.stat_date == today,
-        )
-    )
+def _recent_availability_score(stat: GenerationConfigDailyStat | None) -> float:
     if stat is None:
         return 0.95
     # Laplace smoothing keeps new/low-volume configs schedulable.
     return (stat.success_count + 2) / max(1, stat.success_count + stat.failure_count + 4)
 
 
-def _latency_score(session: Session, generation_config_id: str, *, now: datetime) -> float:
-    today = _local_stat_date(now)
-    stat = session.scalar(
-        select(GenerationConfigDailyStat).where(
-            GenerationConfigDailyStat.generation_config_id == generation_config_id,
-            GenerationConfigDailyStat.stat_date == today,
-        )
-    )
+def _latency_score(stat: GenerationConfigDailyStat | None) -> float:
     if stat is None or stat.success_count <= 0:
         return 0.8
     average_ms = stat.total_latency_ms / max(1, stat.success_count)

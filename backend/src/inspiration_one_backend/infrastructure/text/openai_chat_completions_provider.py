@@ -8,8 +8,12 @@ from inspiration_one_backend.application.contracts import (
     CopyNodeConfigV2,
     CopyPayloadV2,
     CreativeBriefPayload,
+    DeckOutlineInput,
+    DeckOutlinePayload,
     InspirationInput,
     ReferenceImageInput,
+    SpeakerNotesInput,
+    SpeakerNotesPayload,
     TailSplitPlanDraft,
     TailSplitPlanInput,
 )
@@ -32,7 +36,9 @@ from inspiration_one_backend.infrastructure.text.base import TextProvider
 from inspiration_one_backend.infrastructure.text.structured_output import (
     BRIEF_SCHEMA,
     COPY_SCHEMA,
+    DECK_OUTLINE_SCHEMA,
     POLISHED_PROMPT_SCHEMA,
+    SPEAKER_NOTES_SCHEMA,
     STRUCTURED_OUTPUT_TEST_SCHEMA,
     TAIL_SPLIT_SCHEMA,
     TextStructuredOutputSchema,
@@ -248,6 +254,43 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
             structured_schema=TAIL_SPLIT_SCHEMA,
         )
         return TailSplitPlanDraft.model_validate(self._read_output_json(response_text)), self.copy_model
+
+    def generate_outline(self, payload: DeckOutlineInput) -> tuple[DeckOutlinePayload, str]:
+        response_text = self._chat_completion(
+            model=self.copy_model,
+            instructions=(
+                "你是演示文稿策划。基于灵感素材与补充输入，整理成整页图片式幻灯片大纲。"
+                "每页文字精炼（标题 + 不超过 4 条要点），控制文字量以便图像模型生成整页图。只输出 JSON 对象。"
+            ),
+            content=(
+                f"灵感产物名：{payload.inspiration_name}\n"
+                f"类目：{payload.category or '未提供'}\n"
+                f"补充说明：{payload.source_note or '未提供'}\n"
+                f"灵感素材摘要：\n{payload.material_summary or '未提供'}\n"
+                f"用户补充长文/要点：\n{payload.source_input or '未提供'}\n"
+                f"最多页数：{payload.max_slides}\n"
+                "请输出字段：title、slides。slides 为有序数组，每项含 title、points(字符串数组)、"
+                "material_hint(可空)。\n"
+                "要求：1) 页数不超过最多页数，按内容合理取值；2) 每页要点精炼、控制文字量；"
+                "3) 首页为封面/概览；4) material_hint 指出该页适合插入的真实配图意图，没有则为 null。"
+            ),
+            structured_schema=DECK_OUTLINE_SCHEMA,
+        )
+        return DeckOutlinePayload.model_validate(self._read_output_json(response_text)), self.copy_model
+
+    def generate_speaker_notes(self, payload: SpeakerNotesInput) -> tuple[SpeakerNotesPayload, str]:
+        response_text = self._chat_completion(
+            model=self.copy_model,
+            instructions="为演示文稿单页写简洁、口语化的中文演讲备注。只输出 JSON 对象。",
+            content=(
+                f"演示主题：{payload.deck_title}\n"
+                f"本页标题：{payload.slide_title}\n"
+                f"本页要点：{'；'.join(payload.points) or '未提供'}\n"
+                "请输出字段：notes（一段演讲备注文本）。"
+            ),
+            structured_schema=SPEAKER_NOTES_SCHEMA,
+        )
+        return SpeakerNotesPayload.model_validate(self._read_output_json(response_text)), self.copy_model
 
     def test_structured_output(self) -> tuple[dict[str, Any], str]:
         response_text = self._chat_completion(

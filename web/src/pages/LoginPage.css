@@ -28,6 +28,90 @@
   initial-value: 0deg;
 }
 
+@property --blob-pointer-x {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --blob-pointer-y {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --blob-pointer-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --blob-pointer-glow {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --blob-drift-x {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --blob-drift-y {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --blob-drift-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --spark-pointer-x {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --spark-pointer-y {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --spark-pointer-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --spark-pointer-glow {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --spark-drift-y {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --spark-drift-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --spark-alpha {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.4;
+}
+
 .pf-login-orbit,
 .pf-login-orbit *,
 .pf-login-mist,
@@ -81,6 +165,11 @@
   --cursor-y: 50vh;
   --orbit-x: 0px;
   --orbit-y: 0px;
+  --auth-center-x: 57.6%;
+  --auth-center-y: 52%;
+  --auth-half-width: min(260px, 19vw);
+  --control-surface-gap: clamp(48px, 3.8vw, 72px);
+  --control-surface-y-offset: clamp(118px, 14vh, 176px);
   --auth-card-x: 0px;
   --auth-card-y: 0px;
   --auth-card-tilt: 0deg;
@@ -218,7 +307,7 @@
 }
 
 .pf-login-orbit .orbit {
-  position: absolute;
+  position: fixed;
   left: 50%;
   top: 50%;
   width: min(880px, 62vw);
@@ -307,8 +396,8 @@
 
 .pf-login-orbit .auth-shell {
   position: absolute;
-  left: 57.6%;
-  top: 52%;
+  left: var(--auth-center-x);
+  top: var(--auth-center-y);
   z-index: 6;
   width: min(520px, 38vw);
   padding: 8px;
@@ -322,6 +411,8 @@
 }
 
 .pf-login-orbit .auth-core {
+  position: relative;
+  isolation: isolate;
   min-height: 560px;
   overflow: hidden;
   border: 1px solid rgba(247, 239, 226, 0.13);
@@ -332,6 +423,41 @@
     #080a09;
   box-shadow: inset 0 1px 1px rgba(247, 239, 226, 0.1);
   transform: rotate(-7deg);
+}
+
+.pf-login-orbit .auth-core::before,
+.pf-login-orbit .auth-core::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  content: "";
+}
+
+.pf-login-orbit .auth-core::before {
+  opacity: 0.16;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 7px, rgba(121, 214, 188, 0.16) 7px 8px, transparent 8px 15px),
+    linear-gradient(90deg, transparent, rgba(247, 239, 226, 0.12), transparent);
+  transform: translate3d(0, -100%, 0);
+  animation: authSignalSweep 4.8s steps(9, end) infinite;
+}
+
+.pf-login-orbit .auth-core::after {
+  opacity: 0;
+  background:
+    linear-gradient(96deg, transparent 0 18%, rgba(121, 214, 188, 0.22) 18.2% 18.8%, transparent 19% 58%),
+    linear-gradient(276deg, transparent 0 42%, rgba(237, 189, 99, 0.18) 42.2% 42.8%, transparent 43% 100%);
+  mix-blend-mode: screen;
+  transform: translate3d(-18%, 0, 0) skewX(-9deg);
+  animation: authElectricJitter 6.4s var(--ease) infinite;
+}
+
+.pf-login-orbit .auth-head,
+.pf-login-orbit .switch-shell,
+.pf-login-orbit .form {
+  position: relative;
+  z-index: 2;
 }
 
 .pf-login-orbit .auth-head {
@@ -575,9 +701,10 @@
 }
 
 .pf-login-orbit .satellite-a {
-  left: 56%;
-  top: 16%;
-  width: 250px;
+  left: clamp(44px, 8vw, 128px);
+  top: auto;
+  bottom: clamp(46px, 8vh, 86px);
+  width: clamp(218px, 15vw, 250px);
   transform: translate3d(var(--satellite-x), var(--satellite-y), 0) rotate(-7deg);
   animation-delay: 320ms;
 }
@@ -604,9 +731,9 @@
 }
 
 .pf-login-orbit .satellite-b {
-  right: clamp(-10px, -0.45vw, -4px);
-  bottom: 12%;
-  width: 260px;
+  left: calc(var(--auth-center-x) + var(--auth-half-width) + var(--control-surface-gap));
+  top: calc(var(--auth-center-y) + var(--control-surface-y-offset));
+  width: clamp(212px, 18vw, 260px);
   transform: translate3d(calc(var(--satellite-x) * -1), calc(var(--satellite-y) * -1), 0) rotate(5deg);
   animation-delay: 400ms;
 }
@@ -635,8 +762,8 @@
 
 .pf-login-orbit .mode-rail {
   position: absolute;
-  left: calc(58% - 390px);
-  top: calc(52% + 170px);
+  left: calc(var(--auth-center-x) - var(--auth-half-width) - 166px);
+  top: calc(52% + 80px);
   z-index: 7;
   display: grid;
   gap: 9px;
@@ -694,6 +821,58 @@
 .pf-login-orbit .rail-chip-setkey {
   transform: translate3d(var(--setkey-chip-x), var(--setkey-chip-y), 0) rotate(var(--setkey-chip-tilt))
     scale(var(--setkey-chip-scale));
+}
+
+@keyframes authSignalSweep {
+  0%,
+  68%,
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -100%, 0);
+  }
+
+  72% {
+    opacity: 0.18;
+  }
+
+  82% {
+    opacity: 0.1;
+    transform: translate3d(0, 22%, 0);
+  }
+
+  86% {
+    opacity: 0.2;
+    transform: translate3d(0, 118%, 0);
+  }
+}
+
+@keyframes authElectricJitter {
+  0%,
+  66%,
+  100% {
+    opacity: 0;
+    transform: translate3d(-18%, 0, 0) skewX(-9deg);
+  }
+
+  68% {
+    opacity: 0.22;
+    transform: translate3d(5%, -2%, 0) skewX(-12deg);
+  }
+
+  70% {
+    opacity: 0.05;
+    transform: translate3d(-4%, 1%, 0) skewX(-6deg);
+  }
+
+  72% {
+    opacity: 0.18;
+    transform: translate3d(12%, 0, 0) skewX(-10deg);
+  }
+
+  75% {
+    opacity: 0;
+    transform: translate3d(24%, 1%, 0) skewX(-8deg);
+  }
 }
 
 @keyframes orbitEnter {
@@ -845,12 +1024,23 @@
 }
 
 .pf-login-mist .mesh-blob {
+  --blob-pointer-x: 0px;
+  --blob-pointer-y: 0px;
+  --blob-pointer-scale: 0;
+  --blob-pointer-glow: 0;
+  --blob-drift-x: 0px;
+  --blob-drift-y: 0px;
+  --blob-drift-scale: 1;
   position: absolute;
   border-radius: 50%;
   contain: paint;
   filter: blur(100px);
-  opacity: 0.55;
-  transition: transform 0.35s ease-out;
+  opacity: calc(0.48 + var(--blob-pointer-glow));
+  transform: translate3d(calc(var(--blob-drift-x) + var(--blob-pointer-x)), calc(var(--blob-drift-y) + var(--blob-pointer-y)), 0)
+    scale(calc(var(--blob-drift-scale) + var(--blob-pointer-scale)));
+  animation: mistBlobFloat 13s ease-in-out infinite alternate;
+  transition: opacity 220ms ease-out;
+  will-change: transform;
 }
 
 .pf-login-mist .blob-1 {
@@ -859,6 +1049,7 @@
   width: 600px;
   height: 600px;
   background: radial-gradient(circle at 30% 40%, #e85d4a, #f5a89f 60%, transparent);
+  animation-duration: 14s;
 }
 
 .pf-login-mist .blob-2 {
@@ -867,6 +1058,8 @@
   width: 560px;
   height: 560px;
   background: radial-gradient(circle at 60% 50%, #4a92bd, #9bc4e0 65%, transparent);
+  animation-delay: -4s;
+  animation-duration: 16s;
 }
 
 .pf-login-mist .blob-3 {
@@ -875,6 +1068,8 @@
   width: 480px;
   height: 480px;
   background: radial-gradient(circle at 50% 50%, #e8b74a, #f5d89f 70%, transparent);
+  animation-delay: -7s;
+  animation-duration: 12s;
 }
 
 .pf-login-mist .blob-4 {
@@ -883,6 +1078,8 @@
   width: 440px;
   height: 440px;
   background: radial-gradient(circle at 40% 60%, #e87a6a, #f5b8af 60%, transparent);
+  animation-delay: -2s;
+  animation-duration: 15s;
 }
 
 .pf-login-mist .mist-main {
@@ -896,12 +1093,31 @@
 }
 
 .pf-login-mist .sparkle-dot {
+  --spark-pointer-x: 0px;
+  --spark-pointer-y: 0px;
+  --spark-pointer-scale: 0;
+  --spark-pointer-glow: 0;
+  --spark-drift-y: 0px;
+  --spark-drift-scale: 1;
+  --spark-alpha: 0.4;
+  --spark-glow-rgb: 232 93 74;
   position: absolute;
   border-radius: 50%;
+  pointer-events: none;
+  opacity: calc(var(--spark-alpha) + var(--spark-pointer-glow));
+  transform: translate3d(var(--spark-pointer-x), calc(var(--spark-drift-y) + var(--spark-pointer-y)), 0)
+    scale(calc(var(--spark-drift-scale) + var(--spark-pointer-scale)));
+  box-shadow: 0 0 calc(6px + var(--spark-pointer-glow) * 26px)
+    rgb(var(--spark-glow-rgb) / calc(0.16 + var(--spark-pointer-glow) * 0.44));
+  filter: saturate(calc(1 + var(--spark-pointer-glow) * 0.55))
+    brightness(calc(1 + var(--spark-pointer-glow) * 0.28));
   animation: mistSparkle 3s ease-in-out infinite;
+  transition: box-shadow 180ms ease-out, filter 180ms ease-out;
+  will-change: transform, opacity;
 }
 
 .pf-login-mist .dot-1 {
+  --spark-glow-rgb: 232 93 74;
   top: 5rem;
   left: 15%;
   width: 0.75rem;
@@ -911,6 +1127,7 @@
 }
 
 .pf-login-mist .dot-2 {
+  --spark-glow-rgb: 74 146 189;
   top: 8rem;
   right: 20%;
   width: 0.625rem;
@@ -920,6 +1137,7 @@
 }
 
 .pf-login-mist .dot-3 {
+  --spark-glow-rgb: 232 183 74;
   top: 11rem;
   left: 25%;
   width: 0.5rem;
@@ -929,6 +1147,7 @@
 }
 
 .pf-login-mist .dot-4 {
+  --spark-glow-rgb: 240 117 96;
   right: 15%;
   bottom: 25%;
   width: 0.625rem;
@@ -938,6 +1157,7 @@
 }
 
 .pf-login-mist .dot-5 {
+  --spark-glow-rgb: 106 168 204;
   bottom: 33.333333%;
   left: 18%;
   width: 0.5rem;
@@ -947,6 +1167,7 @@
 }
 
 .pf-login-mist .dot-6 {
+  --spark-glow-rgb: 232 122 106;
   top: 33.333333%;
   right: 30%;
   width: 0.5rem;
@@ -956,6 +1177,7 @@
 }
 
 .pf-login-mist .dot-7 {
+  --spark-glow-rgb: 232 93 74;
   top: 15rem;
   left: 40%;
   width: 0.75rem;
@@ -965,6 +1187,7 @@
 }
 
 .pf-login-mist .dot-8 {
+  --spark-glow-rgb: 74 146 189;
   right: 25%;
   bottom: 10rem;
   width: 0.625rem;
@@ -974,6 +1197,7 @@
 }
 
 .pf-login-mist .dot-9 {
+  --spark-glow-rgb: 245 168 159;
   top: 15%;
   right: 12%;
   width: 0.5rem;
@@ -983,6 +1207,7 @@
 }
 
 .pf-login-mist .dot-10 {
+  --spark-glow-rgb: 155 196 224;
   bottom: 20%;
   left: 35%;
   width: 0.625rem;
@@ -1198,16 +1423,38 @@
   }
 }
 
+@keyframes mistBlobFloat {
+  0% {
+    --blob-drift-x: 0px;
+    --blob-drift-y: 0px;
+    --blob-drift-scale: 1;
+  }
+
+  45% {
+    --blob-drift-x: 28px;
+    --blob-drift-y: -22px;
+    --blob-drift-scale: 1.045;
+  }
+
+  100% {
+    --blob-drift-x: -18px;
+    --blob-drift-y: 18px;
+    --blob-drift-scale: 0.98;
+  }
+}
+
 @keyframes mistSparkle {
   0%,
   100% {
-    opacity: 0.4;
-    transform: translateY(0) scale(1);
+    --spark-alpha: 0.4;
+    --spark-drift-y: 0px;
+    --spark-drift-scale: 1;
   }
 
   50% {
-    opacity: 1;
-    transform: translateY(-10px) scale(1.4);
+    --spark-alpha: 1;
+    --spark-drift-y: -10px;
+    --spark-drift-scale: 1.4;
   }
 }
 
@@ -1951,72 +2198,139 @@
 
 @media (max-width: 1180px) {
   .pf-login-orbit {
+    --auth-center-x: clamp(430px, 58vw, calc(100vw - 270px));
+    --auth-center-y: 54%;
+    --auth-half-width: clamp(180px, 21vw, 230px);
+    --control-surface-gap: clamp(22px, 2.6vw, 34px);
+    --control-surface-y-offset: clamp(96px, 13vh, 140px);
     overflow-x: hidden;
     overflow-y: auto;
   }
 
   .pf-login-orbit .stage {
-    display: grid;
-    width: min(840px, calc(100% - 40px));
-    gap: 22px;
-    padding: 28px 0 56px;
-  }
-
-  .pf-login-orbit .brand,
-  .pf-login-orbit .vertical-title,
-  .pf-login-orbit .orbit,
-  .pf-login-orbit .headline,
-  .pf-login-orbit .auth-shell,
-  .pf-login-orbit .satellite,
-  .pf-login-orbit .mode-rail {
-    position: relative;
-    inset: auto;
-    transform: none;
-  }
-
-  .pf-login-orbit .vertical-title {
-    display: none;
+    min-height: max(100dvh, 884px);
+    padding: 24px 0 56px;
   }
 
   .pf-login-orbit .orbit {
-    order: 2;
-    justify-self: center;
-    width: min(620px, 86vw);
-    margin: 18px 0 -240px;
-    opacity: 0.38;
-    animation: orbitEnter 980ms var(--ease) both;
+    width: min(660px, 72vw);
+    opacity: 0.58;
+  }
+
+  .pf-login-orbit .vertical-title {
+    right: clamp(-4px, 1vw, 14px);
+    top: 88px;
+    font-size: clamp(58px, 8.5vw, 96px);
   }
 
   .pf-login-orbit .headline {
-    order: 3;
-    width: min(620px, 100%);
-    padding-top: 12px;
+    left: clamp(34px, 5.2vw, 76px);
+    top: clamp(132px, 18%, 160px);
+    width: min(292px, 30vw);
   }
 
   .pf-login-orbit h1 {
-    max-width: 620px;
-    font-size: 58px;
+    max-width: 7.4ch;
+    font-size: clamp(38px, 4.8vw, 54px);
+  }
+
+  .pf-login-orbit .headline p {
+    max-width: 13em;
+    font-size: 15px;
   }
 
   .pf-login-orbit .auth-shell {
-    order: 4;
-    justify-self: stretch;
-    width: 100%;
-    animation: orbitEnter 980ms var(--ease) both;
+    width: clamp(360px, 42vw, 460px);
   }
 
   .pf-login-orbit .auth-core {
-    transform: none;
+    min-height: auto;
   }
 
-  .pf-login-orbit .satellite-a,
+  .pf-login-orbit .auth-head {
+    padding: 28px 28px 0;
+  }
+
+  .pf-login-orbit .auth-head h2 {
+    margin-top: 28px;
+    font-size: clamp(32px, 3.7vw, 40px);
+  }
+
+  .pf-login-orbit .switch-shell {
+    margin: 24px 28px 0;
+  }
+
+  .pf-login-orbit .form {
+    gap: 12px;
+    padding: 20px 28px 28px;
+  }
+
+  .pf-login-orbit .field {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+
+  .pf-login-orbit .field-core {
+    min-height: 46px;
+  }
+
+  .pf-login-orbit .primary {
+    min-height: 54px;
+  }
+
+  .pf-login-orbit .satellite-a {
+    left: clamp(28px, 5vw, 56px);
+    top: auto;
+    bottom: clamp(56px, 8vh, 78px);
+    width: clamp(168px, 22vw, 230px);
+  }
+
+  .pf-login-orbit .satellite-a .satellite-inner {
+    gap: 6px;
+    padding: 14px;
+  }
+
+  .pf-login-orbit .satellite-a span {
+    min-height: clamp(24px, 3.4vw, 34px);
+    border-radius: 11px;
+  }
+
   .pf-login-orbit .satellite-b {
-    display: none;
+    right: clamp(16px, 2vw, 26px);
+    left: auto;
+    width: clamp(160px, 16vw, 220px);
+  }
+
+  .pf-login-orbit .satellite-b .satellite-inner {
+    padding: 18px;
+  }
+
+  .pf-login-orbit .satellite-b strong {
+    margin-top: 16px;
+    font-size: clamp(22px, 2.35vw, 28px);
+    line-height: 0.96;
   }
 
   .pf-login-orbit .mode-rail {
-    order: 5;
-    grid-template-columns: repeat(2, max-content);
+    left: calc(var(--auth-center-x) - var(--auth-half-width) - 154px);
+    top: calc(var(--auth-center-y) + 50px);
+    grid-template-columns: 1fr;
+  }
+
+  .pf-login-orbit .rail-chip {
+    min-width: 104px;
+  }
+
+  .pf-login-orbit.is-setup .mode-rail {
+    top: calc(var(--auth-center-y) + 274px);
+  }
+
+  .pf-login-orbit.is-setup .stage {
+    min-height: max(100dvh, 1120px);
+  }
+
+  .pf-login-orbit.is-setup .satellite-b {
+    top: calc(var(--auth-center-y) + 350px);
+    right: clamp(8px, 1vw, 16px);
   }
 }
 
@@ -2024,6 +2338,7 @@
   .pf-login-lab .page {
     grid-template-columns: 1fr;
     gap: 24px;
+    justify-items: end;
     padding: 18px;
   }
 
@@ -2045,6 +2360,7 @@
   }
 
   .pf-login-lab .gallery {
+    width: 100%;
     min-height: auto;
     padding-top: 0;
   }
@@ -2054,68 +2370,161 @@
   }
 
   .pf-login-lab .login-panel {
-    align-items: stretch;
+    align-items: flex-end;
     min-height: auto;
     padding-top: 0;
   }
 
-  .pf-login-lab .entry-frame,
+  .pf-login-lab .entry-frame {
+    width: min(92vw, 460px);
+    margin-left: auto;
+    padding: 8px 0 0 clamp(18px, 3vw, 26px);
+  }
+
+  .pf-login-lab .entry-frame::before {
+    inset: -22px -10px -28px -30px;
+    border-radius: 34px;
+  }
+
+  .pf-login-lab .entry-frame::after {
+    inset: -11px 4px -14px -20px;
+    border-radius: 28px;
+  }
+
+  .pf-login-lab .panel-kicker {
+    width: min(100%, 284px);
+  }
+
+  .pf-login-lab .panel-kicker h2 {
+    font-size: clamp(32px, 5vw, 42px);
+  }
+
   .pf-login-lab .states {
-    width: 100%;
+    width: min(92vw, 388px);
+    margin-left: auto;
   }
 
   .pf-login-lab .scan-card {
-    width: min(100%, 462px);
+    width: min(100%, 420px);
+    padding: 16px 16px 16px 30px;
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 960px) {
+  .pf-login-orbit {
+    --auth-card-x: 0px;
+    --auth-card-y: 0px;
+    --auth-card-tilt: 0deg;
+    --login-chip-x: 0px;
+    --login-chip-y: 0px;
+    --login-chip-tilt: 0deg;
+    --login-chip-scale: 1;
+    --setkey-chip-x: 0px;
+    --setkey-chip-y: 0px;
+    --setkey-chip-tilt: 0deg;
+    --setkey-chip-scale: 1;
+  }
+
   .pf-login-orbit .stage {
-    width: 100%;
-    padding: 22px 16px 40px;
+    display: grid;
+    min-height: 100dvh;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 18px;
+    row-gap: 22px;
+    align-items: start;
+    padding: 112px 16px 44px;
   }
 
   .pf-login-orbit .brand {
-    order: 1;
+    left: 18px;
+    top: 22px;
+    max-width: calc(100% - 84px);
   }
 
   .pf-login-orbit .orbit {
-    width: 420px;
-    margin: 6px auto -230px;
+    top: 42%;
+    width: min(520px, 108vw);
+    opacity: 0.5;
+  }
+
+  .pf-login-orbit .vertical-title {
+    right: -10px;
+    top: 88px;
+    font-size: clamp(46px, 12vw, 62px);
+    opacity: 0.86;
   }
 
   .pf-login-orbit .headline {
-    padding-top: 0;
+    position: relative;
+    left: auto;
+    top: auto;
+    grid-column: 1 / -1;
+    order: 1;
+    width: min(360px, 74vw);
+    margin: 0;
   }
 
   .pf-login-orbit h1 {
     max-width: 340px;
-    font-size: 40px;
+    margin-top: 16px;
+    font-size: clamp(34px, 9.4vw, 42px);
     line-height: 1.04;
   }
 
   .pf-login-orbit .headline p {
     max-width: 330px;
+    margin-top: 18px;
     font-size: 15px;
+  }
+
+  .pf-login-orbit .auth-shell {
+    position: relative;
+    left: auto;
+    top: auto;
+    grid-column: 1 / -1;
+    order: 2;
+    justify-self: center;
+    width: min(430px, 82vw);
+    margin-top: 8px;
+    border-radius: 40px;
+    opacity: 1;
+    transform: rotate(calc(6deg + var(--auth-card-tilt))) translate3d(var(--auth-card-x), var(--auth-card-y), 0);
+    animation: none;
+  }
+
+  .pf-login-orbit .auth-core {
+    border-radius: 32px;
+    transform: rotate(-5deg);
   }
 
   .pf-login-orbit .auth-head,
   .pf-login-orbit .form {
-    padding-right: 22px;
-    padding-left: 22px;
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .pf-login-orbit .auth-head {
+    padding-top: 24px;
+  }
+
+  .pf-login-orbit .form {
+    gap: 10px;
+    padding-bottom: 24px;
   }
 
   .pf-login-orbit .switch-shell {
-    margin-right: 22px;
-    margin-left: 22px;
+    margin-top: 20px;
+    margin-right: 20px;
+    margin-left: 20px;
   }
 
-  .pf-login-orbit .auth-core {
-    min-height: auto;
+  .pf-login-orbit .switch-core button {
+    min-height: 40px;
   }
 
   .pf-login-orbit .auth-head h2 {
-    font-size: 34px;
+    margin-top: 22px;
+    font-size: 30px;
   }
 
   .pf-login-orbit .access-row {
@@ -2141,12 +2550,74 @@
     transform: translateY(-1px);
   }
 
+  .pf-login-orbit .field-core {
+    min-height: 44px;
+  }
+
+  .pf-login-orbit .notice {
+    min-height: 36px;
+  }
+
+  .pf-login-orbit .primary {
+    min-height: 52px;
+  }
+
+  .pf-login-orbit .satellite-a {
+    position: relative;
+    left: auto;
+    top: auto;
+    bottom: auto;
+    grid-column: 1;
+    order: 4;
+    justify-self: start;
+    align-self: start;
+    width: min(156px, 40vw);
+    opacity: 0.78;
+    transform: none;
+  }
+
+  .pf-login-orbit .satellite-b {
+    position: relative;
+    left: auto;
+    right: auto;
+    top: auto;
+    bottom: auto;
+    grid-column: 2;
+    order: 4;
+    justify-self: end;
+    align-self: start;
+    width: min(188px, 44vw);
+    transform: none;
+  }
+
+  .pf-login-orbit .satellite-b .satellite-inner {
+    padding: 15px;
+  }
+
+  .pf-login-orbit .satellite-b small {
+    font-size: 10px;
+  }
+
+  .pf-login-orbit .satellite-b strong {
+    margin-top: 14px;
+    font-size: clamp(20px, 5.2vw, 22px);
+  }
+
   .pf-login-orbit .mode-rail {
+    position: relative;
+    left: auto;
+    top: auto;
+    grid-column: 1 / -1;
+    order: 3;
+    width: min(430px, 82vw);
+    justify-self: center;
     grid-template-columns: 1fr 1fr;
+    animation: none;
   }
 
   .pf-login-orbit .rail-chip {
     min-width: 0;
+    padding: 9px 10px;
   }
 }
 
@@ -2160,7 +2631,7 @@
   }
 
   .pf-login-lab .page {
-    padding: 16px;
+    padding: 16px 12px;
   }
 
   .pf-login-lab .page::before {
@@ -2203,24 +2674,36 @@
   }
 
   .pf-login-lab .panel-kicker {
-    width: min(100%, 290px);
+    justify-self: end;
+    width: min(100%, 248px);
     padding: 8px 0 0;
   }
 
   .pf-login-lab .entry-frame {
-    padding-left: 0;
+    width: min(92vw, 348px);
+    padding-left: 12px;
+  }
+
+  .pf-login-lab .entry-frame::before {
+    inset: -16px -8px -20px -16px;
+    border-radius: 30px;
+  }
+
+  .pf-login-lab .entry-frame::after {
+    inset: -8px 2px -10px -9px;
+    border-radius: 24px;
   }
 
   .pf-login-lab .panel-kicker h2 {
-    max-width: 12ch;
-    font-size: clamp(29px, 7.6vw, 34px);
+    max-width: 10ch;
+    font-size: clamp(25px, 6.7vw, 31px);
   }
 
   .pf-login-lab .scan-card {
-    justify-self: start;
-    width: calc(100% - 16px);
+    justify-self: end;
+    width: min(100%, 336px);
     border-radius: 26px;
-    padding: 16px 16px 16px 22px;
+    padding: 14px 14px 14px 18px;
   }
 
   .pf-login-lab .scan-head,
@@ -2244,6 +2727,11 @@
   .pf-login-lab .submit-row,
   .pf-login-lab .states {
     grid-template-columns: 1fr;
+  }
+
+  .pf-login-lab .states {
+    width: min(92vw, 336px);
+    margin-left: auto;
   }
 
   .pf-login-lab .icon-button {

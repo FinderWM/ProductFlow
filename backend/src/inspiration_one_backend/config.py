@@ -432,6 +432,9 @@ class Settings(BaseSettings):
     generation_max_concurrent_tasks: int = Field(default=3, ge=1, le=20)
     text_generation_max_concurrent_tasks: int = Field(default=3, ge=1, le=20)
     image_generation_max_concurrent_tasks: int = Field(default=3, ge=1, le=20)
+    deck_max_slides: int = Field(default=20, ge=1, le=50)
+    deck_default_style: str = "clean_business"
+    deck_slide_size: str = "2048x1152"
     generation_config_default_availability_window_minutes: int = Field(default=5, ge=1, le=24 * 60)
     generation_config_default_failure_threshold: int = Field(default=3, ge=1, le=100)
     generation_config_default_cooldown_minutes: int = Field(default=10, ge=1, le=24 * 60)
@@ -1122,6 +1125,39 @@ CONFIG_DEFINITIONS: tuple[ConfigDefinition, ...] = (
         category="安全与运维",
         input_type="boolean",
         description="默认关闭，用于体验站禁止整条灵感产物和文/图生图会话被删除，保留溯源证据。",
+    ),
+    ConfigDefinition(
+        key="deck_max_slides",
+        label="演示文稿最大页数",
+        category="PPT/演示文稿生成",
+        input_type="number",
+        description="单套演示文稿可生成的最大幻灯片数，控制批量生图成本。",
+        minimum=1,
+        maximum=50,
+    ),
+    ConfigDefinition(
+        key="deck_default_style",
+        label="演示文稿默认风格",
+        category="PPT/演示文稿生成",
+        input_type="select",
+        options=(
+            ConfigOption("clean_business", "简洁商务"),
+            ConfigOption("tech_dark", "科技深色"),
+            ConfigOption("magazine", "杂志排版"),
+            ConfigOption("data_dashboard", "数据看板"),
+            ConfigOption("hand_drawn", "手绘草图"),
+        ),
+    ),
+    ConfigDefinition(
+        key="deck_slide_size",
+        label="演示文稿幻灯片尺寸",
+        category="PPT/演示文稿生成",
+        input_type="select",
+        options=(
+            ConfigOption("2048x1152", "2K 16:9 (2048×1152)"),
+            ConfigOption("1920x1080", "FHD 16:9 (1920×1080)"),
+            ConfigOption("1280x720", "HD 16:9 (1280×720)"),
+        ),
     ),
 )
 

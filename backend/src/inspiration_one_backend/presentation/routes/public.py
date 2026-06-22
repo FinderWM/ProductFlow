@@ -33,6 +33,20 @@ def get_login_page_config_endpoint(
     session: Session = Depends(get_session),
 ) -> LoginPageConfigResponse:
     template_id = _resolve_login_page_template_id()
+    return _build_login_page_config(template_id, session=session)
+
+
+@router.get("/login-page-config/{template_id}", response_model=LoginPageConfigResponse)
+def get_login_page_template_config_endpoint(
+    template_id: str,
+    session: Session = Depends(get_session),
+) -> LoginPageConfigResponse:
+    if template_id not in LOGIN_PAGE_TEMPLATE_NAMES:
+        raise HTTPException(status_code=404, detail="登录页模板不存在")
+    return _build_login_page_config(template_id, session=session)
+
+
+def _build_login_page_config(template_id: str, *, session: Session) -> LoginPageConfigResponse:
     return LoginPageConfigResponse(
         template_id=template_id,
         template_name=LOGIN_PAGE_TEMPLATE_NAMES[template_id],

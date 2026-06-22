@@ -8,8 +8,13 @@ from inspiration_one_backend.application.contracts import (
     CopyNodeConfigV2,
     CopyPayloadV2,
     CreativeBriefPayload,
+    DeckOutlineInput,
+    DeckOutlinePayload,
+    DeckSlideOutlineDraft,
     InspirationInput,
     ReferenceImageInput,
+    SpeakerNotesInput,
+    SpeakerNotesPayload,
     TailSplitPlanDraft,
     TailSplitPlanDraftItem,
     TailSplitPlanInput,
@@ -161,6 +166,39 @@ class MockTextProvider(TextProvider):
                 refs.append(description_ref)
             item.source_refs = refs
         return TailSplitPlanDraft(source_summary=summary, items=base_candidates[:item_count]), "mock-tail-split-v1"
+
+    def generate_outline(self, payload: DeckOutlineInput) -> tuple[DeckOutlinePayload, str]:
+        seen: set[str] = set()
+        signals: list[str] = []
+        for text in (payload.source_input, payload.material_summary):
+            if not text:
+                continue
+            for part in re.split(r"[、，,；;。.\n\r]+", text):
+                signal = part.strip()
+                if len(signal) < 4 or signal in seen:
+                    continue
+                seen.add(signal)
+                signals.append(signal)
+        max_slides = max(1, payload.max_slides)
+        slides = [
+            DeckSlideOutlineDraft(
+                title=f"{payload.inspiration_name}｜概览",
+                points=[payload.source_note.strip()] if payload.source_note else ["主题与背景介绍"],
+                material_hint="灵感主图",
+            )
+        ]
+        for index, signal in enumerate(signals[: max_slides - 1], start=1):
+            slides.append(DeckSlideOutlineDraft(title=f"要点 {index}", points=[signal]))
+        if len(slides) == 1:
+            slides.append(DeckSlideOutlineDraft(title="核心价值", points=["核心卖点一", "核心卖点二"]))
+            slides.append(DeckSlideOutlineDraft(title="总结", points=["回顾与行动建议"]))
+        outline = DeckOutlinePayload(title=f"{payload.inspiration_name}演示文稿", slides=slides[:max_slides])
+        return outline, "mock-deck-outline-v1"
+
+    def generate_speaker_notes(self, payload: SpeakerNotesInput) -> tuple[SpeakerNotesPayload, str]:
+        points = "；".join(payload.points) if payload.points else "本页要点"
+        notes = f"本页《{payload.slide_title}》围绕「{points}」展开，结合《{payload.deck_title}》整体叙事讲解。"
+        return SpeakerNotesPayload(notes=notes), "mock-deck-speaker-notes-v1"
 
 
 def _mock_tail_split_item_count(payload: TailSplitPlanInput, candidate_count: int) -> int:

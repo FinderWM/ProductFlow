@@ -135,6 +135,17 @@ function workspaceHasMenuAccess(
   return hasSessionMenuApiPermission(session, menuCode, permissionCode);
 }
 
+export function workspaceHomeGreetingKey(date = new Date()): TranslationKey {
+  const hour = date.getHours();
+  if (hour >= 18 || hour < 5) {
+    return "workspaceHome.greeting.evening";
+  }
+  if (hour >= 12) {
+    return "workspaceHome.greeting.afternoon";
+  }
+  return "workspaceHome.greeting.morning";
+}
+
 function resourceLibrarySourceLabelKey(sourceType: ResourceLibrarySourceType) {
   switch (sourceType) {
     case "source_asset":
@@ -1499,6 +1510,8 @@ export function WorkspaceHomePage() {
   const canReadGallery = workspaceHasMenuAccess(session, "gallery", API_GALLERY_READ);
   const canReadStatus = workspaceHasMenuAccess(session, "status", API_STATUS_READ);
   const canReadUsageStats = workspaceHasMenuAccess(session, "usage_stats", API_USAGE_STATS_READ);
+  const accountName = session?.user?.display_name || session?.user?.username || t("workspaceHome.greeting.defaultName");
+  const greeting = t(workspaceHomeGreetingKey(), { name: accountName });
   const quickNavAnchorIds = workspaceHomeVisibleAnchorIds({
     resourceLibrary: canUseResourceLibrary,
     inspirations: canReadInspirations,
@@ -1514,6 +1527,9 @@ export function WorkspaceHomePage() {
       <main className="pf-workspace-home-page">
         <WorkspaceHomeQuickNav anchorIds={quickNavAnchorIds} />
         <span id="top" className="pf-workspace-home-top-anchor" aria-hidden="true" />
+        <div className="pf-workspace-home-greeting" aria-label={greeting}>
+          {greeting}
+        </div>
 
         {canUseResourceLibrary ? (
           <WorkspaceHomeSection
