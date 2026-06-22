@@ -3106,6 +3106,221 @@ textarea {
   opacity: 1;
 }
 
+/* ===== 经典 UI 布局：日期时间范围控件配色 =====
+   仅在 [data-ui-layout-scheme="classic"] 下生效。
+   不引入 workspace 的 settings-input 玻璃渐变与 mist/sage/dusk 分支，
+   全部走 base :root / :root.dark 的 --pf-* token，与 .pf-panel / .pf-eyebrow 同源。 */
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-quick {
+  border-color: var(--pf-border-soft);
+  background: color-mix(in srgb, var(--pf-panel-soft) 90%, transparent);
+  color: var(--pf-muted);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-quick:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 38%, var(--pf-border));
+  background: color-mix(in srgb, var(--pf-accent) 8%, var(--pf-panel-soft));
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-quick[aria-current="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
+  background: color-mix(in srgb, var(--pf-accent) 14%, var(--pf-panel));
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-shell,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-clear {
+  border-color: var(--pf-border);
+  background: var(--pf-panel);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-trigger:hover,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-clear:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--pf-accent) 40%, var(--pf-border));
+  background: color-mix(in srgb, var(--pf-accent) 6%, var(--pf-panel));
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-trigger:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-clear:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-shell:focus-within {
+  border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-clear:disabled {
+  background: var(--pf-panel-soft);
+  color: var(--pf-subtle);
+  opacity: 1;
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-popover {
+  border-color: var(--pf-border);
+  background: var(--pf-panel);
+  color: var(--pf-text);
+  box-shadow: var(--pf-shadow);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-nav {
+  border-color: var(--pf-border-soft);
+  background: var(--pf-panel-soft);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary:hover,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-nav:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 38%, var(--pf-border));
+  background: color-mix(in srgb, var(--pf-accent) 6%, var(--pf-panel-soft));
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary-button:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-nav:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary[aria-pressed="true"],
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary[data-active-boundary="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 52%, var(--pf-border));
+  background: color-mix(in srgb, var(--pf-accent) 10%, var(--pf-panel));
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger {
+  border-color: var(--pf-border-soft);
+  background: var(--pf-panel);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--pf-accent) 38%, var(--pf-border));
+  background: color-mix(in srgb, var(--pf-accent) 6%, var(--pf-panel));
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger:disabled {
+  background: var(--pf-panel-soft);
+  color: var(--pf-subtle);
+  opacity: 1;
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-popover {
+  border-color: var(--pf-border);
+  background: var(--pf-panel);
+  color: var(--pf-text);
+  box-shadow: var(--pf-shadow);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day {
+  border: 1px solid transparent;
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 34%, transparent);
+  background: color-mix(in srgb, var(--pf-accent) 8%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-outside-month="true"] {
+  color: var(--pf-subtle);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-today="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent-2) 55%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-in-range="true"] {
+  background: color-mix(in srgb, var(--pf-accent) 10%, transparent);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-range-start="true"],
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-range-end="true"] {
+  border-color: color-mix(in srgb, var(--pf-accent) 62%, var(--pf-border));
+  background: color-mix(in srgb, var(--pf-accent) 22%, var(--pf-panel));
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-active="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 60%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-columns {
+  position: relative;
+  border-color: var(--pf-border-soft);
+  background: var(--pf-panel-soft);
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-columns::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  z-index: 0;
+  height: 2.25rem;
+  transform: translateY(-50%);
+  background: color-mix(in srgb, var(--pf-accent) 12%, var(--pf-panel));
+  pointer-events: none;
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-column {
+  position: relative;
+  z-index: 1;
+  border-color: var(--pf-border-soft);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-column-scroll {
+  scrollbar-width: none;
+  scroll-snap-type: y mandatory;
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-column-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option {
+  position: relative;
+  z-index: 1;
+  color: var(--pf-muted);
+  scroll-snap-align: center;
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option:hover:not(:disabled) {
+  color: var(--pf-text);
+  background: color-mix(in srgb, var(--pf-accent) 8%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option:focus-visible {
+  color: var(--pf-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 55%, transparent);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option[data-selected="true"] {
+  background: transparent;
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option:disabled {
+  color: var(--pf-subtle);
+  opacity: 1;
+}
+
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-side-content textarea.pf-settings-prompt-textarea {
   border-color: color-mix(in srgb, var(--pf-line-strong) 88%, transparent) !important;
   background:

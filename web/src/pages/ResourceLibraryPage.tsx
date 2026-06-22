@@ -9,6 +9,7 @@ import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDial
 import { ImageDropZone } from "../components/ImageDropZone";
 import { ModalShell } from "../components/ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../components/ResourceGovernance";
+import { ResourceGroupChipEditor } from "../components/ResourceGroupChipEditor";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
@@ -571,14 +572,6 @@ function ResourceLibraryManagePage({
     updateGroupMutation.mutate({ groupId, name });
   }
 
-  function setAssetGroupChecked(asset: ResourceLibraryAsset, groupId: string, checked: boolean) {
-    setAssetGroupDrafts((current) => {
-      const existing = current[asset.id] ?? groupIdsForAsset(asset, groups);
-      const next = checked ? [...new Set([...existing, groupId])] : existing.filter((id) => id !== groupId);
-      return { ...current, [asset.id]: next };
-    });
-  }
-
   function handleSaveAssetGroups(asset: ResourceLibraryAsset) {
     const draft = assetGroupDrafts[asset.id] ?? [];
     if (!draft.length) {
@@ -869,28 +862,22 @@ function ResourceLibraryManagePage({
                           </div>
                         </div>
                         <ResourceMetaBadges resource={asset} showReason />
-                        <div className="grid gap-2">
-                          {groups.map((group) => {
-                            const checkboxId = `resource-library-asset-${asset.id}-group-${group.id}`;
-                            return (
-                              <label
-                                key={group.id}
-                                htmlFor={checkboxId}
-                                className="flex min-h-9 min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950/55 dark:text-slate-200"
-                              >
-                                <input
-                                  id={checkboxId}
-                                  name={`resource-library-asset-${asset.id}-groups`}
-                                  type="checkbox"
-                                  checked={draftGroupIds.includes(group.id)}
-                                  onChange={(event) => setAssetGroupChecked(asset, group.id, event.target.checked)}
-                                  className="h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
-                                />
-                                <span className="min-w-0 flex-1 whitespace-normal break-words leading-5">{group.name}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
+                        <ResourceGroupChipEditor
+                          groups={groups}
+                          selectedIds={draftGroupIds}
+                          disabled={assetBlocked || (updateAssetGroupsMutation.isPending && updateAssetGroupsMutation.variables?.assetId === asset.id)}
+                          editLabel={t("resourceLibrary.editAssetGroups")}
+                          ungroupedLabel={t("resourceLibrary.ungrouped")}
+                          moreLabel={(count) => t("resourceLibrary.moreGroups", { count })}
+                          listboxAriaLabel={t("resourceLibrary.selectGroups")}
+                          noGroupsLabel={t("resourceLibrary.noGroups")}
+                          onChange={(nextIds) => {
+                            setAssetGroupDrafts((current) => ({
+                              ...current,
+                              [asset.id]: nextIds,
+                            }));
+                          }}
+                        />
                         <div className="flex items-center gap-2">
                           <button
                             type="button"

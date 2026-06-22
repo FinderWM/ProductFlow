@@ -1228,8 +1228,8 @@ function InspirationSearchPanel({
   const fieldsOpen = singleRowLayoutAvailable || mobileOpen;
   const gridClassName = singleRowLayoutAvailable
     ? isAdmin
-      ? "grid-cols-[minmax(13rem,1fr)_minmax(30rem,1.45fr)_minmax(10rem,0.75fr)_minmax(10rem,0.75fr)_minmax(8.5rem,auto)_auto] items-end"
-      : "grid-cols-[minmax(13rem,1fr)_minmax(30rem,1.45fr)_minmax(10rem,0.75fr)_auto] items-end"
+      ? "grid-cols-[minmax(13rem,1fr)_minmax(30rem,1.45fr)_minmax(10rem,0.75fr)_minmax(10rem,0.75fr)_minmax(8.5rem,auto)] items-end"
+      : "grid-cols-[minmax(13rem,1fr)_minmax(30rem,1.45fr)_minmax(10rem,0.75fr)] items-end"
     : "md:grid-cols-2";
 
   useEffect(() => {
@@ -1397,28 +1397,24 @@ function InspirationSearchPanel({
               <span className="truncate">{t("inspirations.search.onlyDeleted")}</span>
             </label>
           ) : null}
+        </div>
 
-          <div
-            className={`flex shrink-0 flex-wrap items-center gap-2 ${
-              singleRowLayoutAvailable ? "justify-start" : "md:col-span-2 md:justify-end"
-            }`}
+        <div className="mt-4 flex shrink-0 justify-end gap-2">
+          <button
+            type="submit"
+            disabled={fetching}
+            className="inline-flex h-11 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-500 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-400"
           >
-            <button
-              type="submit"
-              disabled={fetching}
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-500 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-400"
-            >
-              <Search size={16} className="mr-1.5" /> {t("inspirations.search.submit")}
-            </button>
-            <button
-              type="button"
-              onClick={onClear}
-              disabled={!active || fetching}
-              className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-violet-500/10"
-            >
-              <X size={16} className="mr-1.5" /> {t("inspirations.search.clear")}
-            </button>
-          </div>
+            <Search size={16} className="mr-1.5" /> {t("inspirations.search.submit")}
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={!active || fetching}
+            className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-violet-500/10"
+          >
+            <X size={16} className="mr-1.5" /> {t("inspirations.search.clear")}
+          </button>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">

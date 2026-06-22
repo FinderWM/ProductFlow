@@ -189,6 +189,80 @@ api.saveGalleryEntry(asset.id, { tag_ids: selectedTagIds });
   behavior; do not describe that path as the same as source save.
 - Group changes should use the typed API helper and refresh the asset list/source status surfaces that show membership.
 
+### Resource Library Card Group Chip Editor
+
+**Problem**: Rendering every available group as a vertical checkbox list inside each library card made card height scale
+with group total. At 10+ groups the grid broke and cards grew unevenly.
+
+**Solution**: Card group area is now height-constant and decoupled from group total. Selected groups render as compact
+chips; editing happens in a popover listbox. Component: `web/src/components/ResourceGroupChipEditor.tsx`.
+
+**Contracts**:
+
+- Chip display uses `VISIBLE_CHIP_LIMIT = 3`. Groups beyond the limit collapse into a single `+N more` chip whose count
+  is `selectedGroups.length - visibleGroups.length`. Clicking `+N more` expands all chips and opens the popover.
+- Selected chips render in `groups` original order (not draft order) so badges do not jump as the user toggles groups.
+- Empty selection renders an `ungrouped` placeholder chip; it is display-only and must not be submitted as a group id.
+- The `+N more` chip is a `<button>` (actionable, focusable), regular chips are `<span>` (read-only).
+- Editing opens a `FloatingSurface` popover (`preferredPlacement="bottom-end"`, `matchTriggerWidth={false}`,
+  `minWidth={220}`) with a multi-select listbox. Toggling an option calls `onChange(nextIds)` — the component is
+  controlled; it never owns the selection.
+- Draft state, dirty check, empty-selection `groupRequired` validation, and `updateResourceLibraryAssetGroups` mutation
+  stay in the page. The editor only reports selection changes.
+- Closing the popover does not reset `showAll`, so already-expanded badges stay visible without flicker.
+- App mode (`pf-app`) and workspace subpage mode (`workspaceSubpage`) share the same card JSX; only the outer shell
+  differs. Both must be tested when changing chip/popover styling.
+
+**Component boundary — do not reuse the settings form selector here**:
+
+- `GenerationResourceGroupMultiSelect` is an `h-11` full-width button built for settings forms. Card slots are narrow;
+  reuse caused layout drift. The chip editor is a deliberately separate compact variant built on `FloatingSurface`.
+  When a third compact multi-select surface is needed, extract shared listbox internals rather than re-importing either
+  component wholesale.
+
+**Accessibility contract**:
+
+- Trigger button: `aria-haspopup="listbox"`, `aria-expanded`, `aria-controls` pointing at the listbox id.
+- Listbox container: `role="listbox"`, `aria-multiselectable="true"`, `aria-label`.
+- Each option: `role="option"`, `aria-selected`.
+- Esc close, outside-click close, and focus return to trigger are handled centrally by `FloatingSurface`; do not
+  duplicate window-level Esc listeners inside the editor (the existing inner Esc handler is retained only for parity
+  with `GenerationResourceGroupMultiSelect` and calls the same `setOpen(false)`).
+
+**Example**:
+
+```tsx
+<ResourceGroupChipEditor
+  groups={groups}
+  selectedIds={draftGroupIds}
+  disabled={isAdminReadonly}
+  editLabel={t("resourceLibrary.editAssetGroups")}
+  ungroupedLabel={t("resourceLibrary.ungrouped")}
+  moreLabel={(count) => t("resourceLibrary.moreGroups", { count })}
+  listboxAriaLabel={t("resourceLibrary.selectGroups")}
+  noGroupsLabel={t("resourceLibrary.noGroups")}
+  onChange={(nextIds) => setAssetGroupDrafts((prev) => ({ ...prev, [asset.id]: nextIds }))}
+/>
+```
+
+**Wrong vs Correct**:
+
+Wrong — let card height grow with group count:
+
+```tsx
+{groups.map((g) => (
+  <label className="flex items-center gap-2">
+    <input type="checkbox" /> {g.name}
+  </label>
+))}
+```
+
+Correct — height-constant chips plus popover editor:
+
+```tsx
+<ResourceGroupChipEditor groups={groups} selectedIds={draft} ... />
+```
+
 ## Tests Required
 
 - Frontend build/type-check after DTO or API helper changes.
