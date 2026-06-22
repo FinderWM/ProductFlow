@@ -22,6 +22,7 @@ from inspiration_one_backend.domain.enums import (
     WorkflowRunStatus,
 )
 from inspiration_one_backend.infrastructure.db.models import (
+    AuthUser,
     CanvasTemplate,
     CanvasTemplateCategory,
     CopySet,
@@ -104,6 +105,17 @@ def test_user_ui_preferences_model_matches_layout_scheme_contract() -> None:
     assert not table.c.mask_sensitive_images_in_image_chat.nullable
     assert not table.foreign_keys
     assert not [constraint for constraint in table.constraints if isinstance(constraint, sa.CheckConstraint)]
+
+
+def test_auth_user_model_matches_session_watermark_indexes() -> None:
+    table = AuthUser.__table__
+    assert table.c.session_revoked_after.nullable
+    assert table.c.last_login_at.nullable
+    assert table.c.last_seen_at.nullable
+    assert {
+        "ix_auth_users_session_revoked_after",
+        "ix_auth_users_last_seen_at",
+    }.issubset({index.name for index in table.indexes})
 
 
 def test_generation_config_resource_group_model_matches_migration_contract() -> None:

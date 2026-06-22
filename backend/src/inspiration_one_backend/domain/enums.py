@@ -34,6 +34,7 @@ class ResourceLibrarySourceType(StrEnum):
     SOURCE_ASSET = "source_asset"
     POSTER_VARIANT = "poster_variant"
     IMAGE_SESSION_ASSET = "image_session_asset"
+    DECK_SLIDE = "deck_slide"
     UPLOAD = "upload"
 
 
@@ -98,3 +99,33 @@ class WorkflowRunStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class DeckStatus(StrEnum):
+    """演示文稿(deck)状态：草稿 -> 大纲确认 -> 风格确认 -> 生成中 -> 完成/失败。"""
+
+    DRAFT = "draft"
+    OUTLINE_CONFIRMED = "outline_confirmed"
+    STYLE_CONFIRMED = "style_confirmed"
+    GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DeckSlideStatus(StrEnum):
+    """单页幻灯片生成状态：待生成 -> 排队 -> 运行中 -> 完成/失败。"""
+
+    PENDING = "pending"
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DeckMaterialSource(StrEnum):
+    """单页配图来源：资源库 / 上传 / 灵感源图 / 编辑增强生成结果。"""
+
+    RESOURCE_LIBRARY = "resource_library"
+    UPLOAD = "upload"
+    SOURCE_ASSET = "source_asset"
+    ENHANCED = "enhanced"

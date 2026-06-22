@@ -12,7 +12,7 @@ from inspiration_one_backend.application.inspiration_workflow.user_templates imp
     canvas_template_tables_available,
     ensure_canvas_templates_bootstrapped,
 )
-from inspiration_one_backend.config import get_settings
+from inspiration_one_backend.config import AUTH_SESSION_MAX_TTL_MINUTES, get_settings
 from inspiration_one_backend.infrastructure.logging import (
     cleanup_old_logs,
     configure_logging,
@@ -23,6 +23,7 @@ from inspiration_one_backend.infrastructure.logging import (
 from inspiration_one_backend.infrastructure.provider_config import (
     ensure_provider_config_bootstrapped,
     provider_config_tables_available,
+    reconcile_generation_config_concurrency,
 )
 from inspiration_one_backend.infrastructure.queue import (
     recover_unfinished_image_session_generation_tasks,
@@ -30,6 +31,7 @@ from inspiration_one_backend.infrastructure.queue import (
 )
 from inspiration_one_backend.presentation.errors import register_exception_handlers
 from inspiration_one_backend.presentation.routes.auth import router as auth_router
+from inspiration_one_backend.presentation.routes.decks import router as decks_router
 from inspiration_one_backend.presentation.routes.gallery import router as gallery_router
 from inspiration_one_backend.presentation.routes.generation_queue import router as generation_queue_router
 from inspiration_one_backend.presentation.routes.image_sessions import router as image_sessions_router
@@ -67,6 +69,7 @@ def create_app() -> FastAPI:
             ensure_canvas_templates_bootstrapped()
         if provider_config_tables_available():
             ensure_provider_config_bootstrapped()
+            reconcile_generation_config_concurrency()
         recover_unfinished_workflow_runs()
         recover_unfinished_image_session_generation_tasks()
         task_notification_listener = start_task_notification_listener()
@@ -87,6 +90,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         ClockStableSessionMiddleware,
         secret_key=settings.session_secret,
+        max_age=AUTH_SESSION_MAX_TTL_MINUTES * 60,
         same_site="lax",
         https_only=settings.session_cookie_secure,
     )
@@ -102,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(gallery_router)
     app.include_router(inspirations_router)
     app.include_router(inspiration_workflows_router)
+    app.include_router(decks_router)
     app.include_router(image_sessions_router)
     app.include_router(resource_library_router)
     app.include_router(moderation_router)

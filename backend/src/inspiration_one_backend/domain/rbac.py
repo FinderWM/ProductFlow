@@ -35,6 +35,9 @@ MENU_RBAC = "rbac"
 API_INSPIRATIONS_READ = "inspirations:read"
 API_INSPIRATIONS_WRITE = "inspirations:write"
 API_INSPIRATIONS_GENERATE = "inspirations:generate"
+API_DECK_READ = "deck:read"
+API_DECK_WRITE = "deck:write"
+API_DECK_GENERATE = "deck:generate"
 API_IMAGE_CHAT_READ = "image_chat:read"
 API_IMAGE_CHAT_WRITE = "image_chat:write"
 API_IMAGE_CHAT_GENERATE = "image_chat:generate"
@@ -65,6 +68,15 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
     ApiPermissionDefinition(API_INSPIRATIONS_READ, MENU_INSPIRATIONS, "查看灵感", "查看灵感列表、详情和历史", 10),
     ApiPermissionDefinition(API_INSPIRATIONS_WRITE, MENU_INSPIRATIONS, "维护灵感", "创建、编辑、归档灵感资源", 20),
     ApiPermissionDefinition(API_INSPIRATIONS_GENERATE, MENU_INSPIRATIONS, "灵感生成", "发起灵感工作流生成", 30),
+    ApiPermissionDefinition(
+        API_DECK_READ, MENU_INSPIRATIONS, "查看演示文稿", "查看灵感下的演示文稿与幻灯片", 40
+    ),
+    ApiPermissionDefinition(
+        API_DECK_WRITE, MENU_INSPIRATIONS, "维护演示文稿", "编辑大纲、风格、配图与演示文稿管理", 50
+    ),
+    ApiPermissionDefinition(
+        API_DECK_GENERATE, MENU_INSPIRATIONS, "演示文稿生成", "发起大纲、整页生图、配图增强与备注生成", 60
+    ),
     ApiPermissionDefinition(API_IMAGE_CHAT_READ, MENU_IMAGE_CHAT, "查看连续生图", "查看连续生图会话和图片", 10),
     ApiPermissionDefinition(API_IMAGE_CHAT_WRITE, MENU_IMAGE_CHAT, "维护连续生图", "创建和编辑连续生图会话", 20),
     ApiPermissionDefinition(API_IMAGE_CHAT_GENERATE, MENU_IMAGE_CHAT, "连续生图生成", "发起连续生图生成任务", 30),

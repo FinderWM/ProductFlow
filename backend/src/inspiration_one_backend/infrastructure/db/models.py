@@ -22,6 +22,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, foreign, mapped_column, rela
 
 from inspiration_one_backend.domain.enums import (
     CopyStatus,
+    DeckMaterialSource,
+    DeckSlideStatus,
+    DeckStatus,
     ImageSessionAssetKind,
     JobStatus,
     PosterKind,
@@ -118,6 +121,8 @@ class AuthUser(Base, TimestampMixin):
         Index("uq_auth_users_username", "username", unique=True),
         Index("ix_auth_users_role_id", "role_id"),
         Index("ix_auth_users_archived_at", "archived_at"),
+        Index("ix_auth_users_session_revoked_after", "session_revoked_after"),
+        Index("ix_auth_users_last_seen_at", "last_seen_at"),
         Index(
             "uq_auth_users_single_active_admin",
             "is_admin",
@@ -635,28 +640,6 @@ class GenerationConfigTestResult(Base, TimestampMixin):
     )
 
 
-class ProviderBinding(Base, TimestampMixin):
-    """用途绑定，表达文案/图片当前使用哪个供应商和接口。"""
-
-    __tablename__ = "provider_bindings"
-    __table_args__ = (Index("uq_provider_bindings_purpose", "purpose", unique=True),)
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    purpose: Mapped[str] = mapped_column(String(40), nullable=False)
-    provider_kind: Mapped[str] = mapped_column(String(40), nullable=False)
-    provider_profile_id: Mapped[str | None] = mapped_column(
-        String(36),
-        nullable=True,
-    )
-    model_settings_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    config_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-
-    provider_profile: Mapped[ProviderProfile | None] = relationship(
-        primaryjoin=lambda: child_parent_join(ProviderBinding.provider_profile_id, ProviderProfile.id),
-        foreign_keys=lambda: [ProviderBinding.provider_profile_id],
-    )
-
-
 class UserCanvasTemplate(Base, TimestampMixin):
     """用户保存的可复用画布节点组模板。"""
 
@@ -876,6 +859,12 @@ class Inspiration(Base, TimestampMixin):
         cascade="all, delete-orphan",
         primaryjoin=lambda: parent_child_join(Inspiration.id, InspirationWorkflow.inspiration_id),
         foreign_keys=lambda: [InspirationWorkflow.inspiration_id],
+    )
+    decks: Mapped[list[Deck]] = relationship(
+        back_populates="inspiration",
+        cascade="all, delete-orphan",
+        primaryjoin=lambda: parent_child_join(Inspiration.id, Deck.inspiration_id),
+        foreign_keys=lambda: [Deck.inspiration_id],
     )
 
 
@@ -1663,3 +1652,91 @@ class ImageGalleryEntryViewEvent(Base):
     gallery_entry_id: Mapped[str] = mapped_column(String(36))
     viewer_key: Mapped[str] = mapped_column(String(128))
     viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Deck(Base, TimestampMixin):
+    """演示文稿(PPT)：挂在灵感产物下，一个灵感产物可保留多套 deck 历史。"""
+
+    __tablename__ = "decks"
+    __table_args__ = (Index("ix_decks_inspiration_id", "inspiration_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    inspiration_id: Mapped[str] = mapped_column(String(36))
+    resource_group_id: Mapped[str] = mapped_column(
+        String(36),
+        default=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    )
+    title: Mapped[str] = mapped_column(String(255), default="演示文稿")
+    status: Mapped[DeckStatus] = mapped_column(enum_value_column(DeckStatus), default=DeckStatus.DRAFT)
+    source_input: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outline_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    style_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    style_reference_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    speaker_notes_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pptx_storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pptx_storage_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    pptx_storage_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pptx_storage_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pptx_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    inspiration: Mapped[Inspiration] = relationship(
+        back_populates="decks",
+        primaryjoin=lambda: child_parent_join(Deck.inspiration_id, Inspiration.id),
+        foreign_keys=lambda: [Deck.inspiration_id],
+    )
+    resource_group: Mapped[GenerationResourceGroup | None] = relationship(
+        primaryjoin=lambda: child_parent_join(Deck.resource_group_id, GenerationResourceGroup.id),
+        foreign_keys=lambda: [Deck.resource_group_id],
+    )
+    slides: Mapped[list[DeckSlide]] = relationship(
+        back_populates="deck",
+        cascade="all, delete-orphan",
+        order_by=lambda: DeckSlide.order_index,
+        primaryjoin=lambda: parent_child_join(Deck.id, DeckSlide.deck_id),
+        foreign_keys=lambda: [DeckSlide.deck_id],
+    )
+
+
+class DeckSlide(Base, TimestampMixin):
+    """演示文稿单页：保存大纲要点、整页生成图、可选嵌入配图与演讲备注。"""
+
+    __tablename__ = "deck_slides"
+    __table_args__ = (Index("ix_deck_slides_deck_id", "deck_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    deck_id: Mapped[str] = mapped_column(String(36))
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    points_json: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    speaker_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slide_status: Mapped[DeckSlideStatus] = mapped_column(
+        enum_value_column(DeckSlideStatus),
+        default=DeckSlideStatus.PENDING,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 生成的整页幻灯片图
+    image_storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    image_storage_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    image_storage_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    image_storage_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    image_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    image_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    image_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 嵌入的指定配图（可为编辑增强结果）
+    material_source: Mapped[DeckMaterialSource | None] = mapped_column(
+        enum_value_column(DeckMaterialSource),
+        nullable=True,
+    )
+    material_storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    material_storage_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    material_storage_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    material_storage_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    material_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    deck: Mapped[Deck] = relationship(
+        back_populates="slides",
+        primaryjoin=lambda: child_parent_join(DeckSlide.deck_id, Deck.id),
+        foreign_keys=lambda: [DeckSlide.deck_id],
+    )

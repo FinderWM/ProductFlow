@@ -4,6 +4,10 @@ import type {
   CanvasTemplateCategoryListResponse,
   CanvasTemplateScope,
   CanvasTemplateSummary,
+  Deck,
+  DeckSlide,
+  DeckStyleOption,
+  DeckSummary,
   CanvasTemplateListResponse,
   ConfigResponse,
   ConfigUpdateRequest,
@@ -48,8 +52,7 @@ import type {
   LoginPageConfig,
   LoginPageSelectionUpdateRequest,
   LoginPageTemplateConfigUpdateRequest,
-  ProviderBinding,
-  ProviderBindingUpdateRequest,
+  LoginPageTemplateId,
   ProviderConfigResponse,
   ProviderModelListResponse,
   ProviderProfile,
@@ -347,8 +350,11 @@ export const api = {
   destroySession(): Promise<{ ok: boolean }> {
     return request("/api/auth/session", { method: "DELETE" });
   },
-  getLoginPageConfig(): Promise<LoginPageConfig> {
-    return request<LoginPageConfig>("/api/public/login-page-config");
+  getLoginPageConfig(templateId?: LoginPageTemplateId): Promise<LoginPageConfig> {
+    const path = templateId
+      ? `/api/public/login-page-config/${encodeURIComponent(templateId)}`
+      : "/api/public/login-page-config";
+    return request<LoginPageConfig>(path);
   },
   listRbacUsers(input?: {
     page?: number;
@@ -495,12 +501,6 @@ export const api = {
   },
   archiveProviderProfile(profileId: string): Promise<ProviderProfile> {
     return request(`/api/settings/provider-profiles/${profileId}`, { method: "DELETE" });
-  },
-  updateProviderBinding(purpose: "text" | "image", payload: ProviderBindingUpdateRequest): Promise<ProviderBinding> {
-    return request(`/api/settings/provider-bindings/${purpose}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
   },
   getGenerationConfigStatus(input?: { start_date?: string; end_date?: string }): Promise<GenerationConfigStatusSummary> {
     const params = new URLSearchParams();
@@ -1297,5 +1297,88 @@ export const api = {
   },
   retryFailedWorkflowNodes(inspirationId: string): Promise<InspirationWorkflow> {
     return request(`/api/inspirations/${inspirationId}/workflow/failed-nodes/retry`, { method: "POST" });
+  },
+  listDeckStyles(): Promise<DeckStyleOption[]> {
+    return request("/api/deck-styles");
+  },
+  listDecks(inspirationId: string): Promise<DeckSummary[]> {
+    return request(`/api/inspirations/${inspirationId}/decks`);
+  },
+  getDeck(deckId: string): Promise<Deck> {
+    return request(`/api/decks/${deckId}`);
+  },
+  createDeck(
+    inspirationId: string,
+    input: {
+      resource_group_id: string;
+      source_input?: string;
+      title?: string;
+      max_slides?: number;
+      style_key?: string;
+    },
+  ): Promise<Deck> {
+    return request(`/api/inspirations/${inspirationId}/decks`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  renameDeck(deckId: string, input: { title?: string; speaker_notes_enabled?: boolean }): Promise<Deck> {
+    return request(`/api/decks/${deckId}`, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  deleteDeck(deckId: string): Promise<void> {
+    return request(`/api/decks/${deckId}`, { method: "DELETE" });
+  },
+  replaceDeckOutline(
+    deckId: string,
+    input: { title?: string; slides: { title: string; points: string[] }[] },
+  ): Promise<Deck> {
+    return request(`/api/decks/${deckId}/outline`, { method: "PUT", body: JSON.stringify(input) });
+  },
+  setDeckStyle(deckId: string, input: { style_key?: string; style_reference_asset_id?: string }): Promise<Deck> {
+    return request(`/api/decks/${deckId}/style`, { method: "POST", body: JSON.stringify(input) });
+  },
+  generateDeck(deckId: string): Promise<Deck> {
+    return request(`/api/decks/${deckId}/generate`, { method: "POST" });
+  },
+  generateDeckSample(deckId: string): Promise<Deck> {
+    return request(`/api/decks/${deckId}/sample`, { method: "POST" });
+  },
+  regenerateDeckSlide(slideId: string): Promise<DeckSlide> {
+    return request(`/api/deck-slides/${slideId}/regenerate`, { method: "POST" });
+  },
+  updateDeckSlide(
+    slideId: string,
+    input: { title?: string; points?: string[]; speaker_notes?: string },
+  ): Promise<DeckSlide> {
+    return request(`/api/deck-slides/${slideId}`, { method: "PUT", body: JSON.stringify(input) });
+  },
+  generateDeckSlideSpeakerNotes(slideId: string): Promise<DeckSlide> {
+    return request(`/api/deck-slides/${slideId}/speaker-notes`, { method: "POST" });
+  },
+  enhanceDeckSlideMaterial(slideId: string, input: { prompt?: string }): Promise<DeckSlide> {
+    return request(`/api/deck-slides/${slideId}/material/enhance`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  setDeckSlideMaterial(slideId: string, input: { source_type: string; asset_id: string }): Promise<DeckSlide> {
+    return request(`/api/deck-slides/${slideId}/material`, { method: "PUT", body: JSON.stringify(input) });
+  },
+  exportDeck(deckId: string): Promise<Deck> {
+    return request(`/api/decks/${deckId}/export`, { method: "POST" });
+  },
+  reorderDeckSlides(deckId: string, slideIds: string[]): Promise<Deck> {
+    return request(`/api/decks/${deckId}/slide-order`, {
+      method: "PUT",
+      body: JSON.stringify({ slide_ids: slideIds }),
+    });
+  },
+  uploadDeckStyleReference(deckId: string, file: File): Promise<Deck> {
+    const formData = new FormData();
+    formData.set("image", file);
+    return request(`/api/decks/${deckId}/style-reference`, { method: "POST", body: formData });
+  },
+  saveDeckSlideToResourceLibrary(slideId: string): Promise<void> {
+    return request(`/api/deck-slides/${slideId}/resource-library`, { method: "POST" });
   },
 };

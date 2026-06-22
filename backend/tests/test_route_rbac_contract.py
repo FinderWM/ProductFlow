@@ -22,6 +22,7 @@ PUBLIC_ROUTES = frozenset(
         ("GET", "/api/auth/session"),
         ("DELETE", "/api/auth/session"),
         ("GET", "/api/public/login-page-config"),
+        ("GET", "/api/public/login-page-config/{template_id}"),
         ("GET", "/api/public/login-page-assets/{template_id}/{slot}"),
     }
 )

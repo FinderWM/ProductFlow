@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from helpers import _login, _make_demo_image_bytes
+from sqlalchemy import event
 
 from inspiration_one_backend.application import gallery as gallery_app
 from inspiration_one_backend.domain.enums import ImageSessionAssetKind
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    GalleryTag,
     GenerationResourceGroup,
     ImageGalleryEntry,
     ImageGalleryEntryTag,
@@ -717,6 +719,138 @@ def test_gallery_tag_filter_matches_any_and_orders_by_match_count(configured_env
     assert filtered.json()["total"] == 3
 
 
+def test_gallery_list_loads_tags_after_pagination_without_joining_tags_in_page_query(
+    configured_env: Path,
+    db_session,
+) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    tag_a = client.post("/api/gallery/tags", json={"name": "后置 A", "priority": 10}).json()
+    tag_b = client.post("/api/gallery/tags", json={"name": "后置 B", "priority": 9}).json()
+    base_time = datetime(2026, 1, 1, tzinfo=UTC)
+    older_entry = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="后置标签旧图",
+        created_at=base_time,
+    )
+    newest_entry = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="后置标签新图",
+        created_at=base_time + timedelta(minutes=1),
+    )
+    db_session.add_all(
+        [
+            ImageGalleryEntryTag(gallery_entry_id=older_entry.id, tag_id=tag_a["id"]),
+            ImageGalleryEntryTag(gallery_entry_id=newest_entry.id, tag_id=tag_b["id"]),
+        ]
+    )
+    db_session.commit()
+
+    statements: list[str] = []
+
+    @event.listens_for(db_session.bind, "before_cursor_execute")
+    def record_gallery_queries(conn, cursor, statement, parameters, context, executemany):
+        normalized_statement = " ".join(statement.lower().split())
+        if "image_gallery_entries" in normalized_statement or "image_gallery_entry_tags" in normalized_statement:
+            statements.append(normalized_statement)
+
+    try:
+        listed = client.get("/api/gallery", params={"limit": 1, "offset": 0})
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", record_gallery_queries)
+
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert [item["id"] for item in payload["items"]] == [newest_entry.id]
+    assert [tag["name"] for tag in payload["items"][0]["tags"]] == ["后置 B"]
+    assert payload["total"] == 2
+
+    page_selects = [
+        statement
+        for statement in statements
+        if statement.startswith("select image_gallery_entries.id") and " limit " in f" {statement} "
+    ]
+    assert page_selects
+    assert all("image_gallery_entry_tags" not in statement for statement in page_selects)
+    assert all("gallery_tags" not in statement for statement in page_selects)
+    tag_loads = [
+        statement
+        for statement in statements
+        if statement.startswith("select gallery_tags.id") and "image_gallery_entry_tags" in statement
+    ]
+    assert len(tag_loads) == 1
+
+
+def test_gallery_tag_filter_uses_indexable_match_subquery_and_loads_tags_after_page(
+    configured_env: Path,
+    db_session,
+) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    tag_a = client.post("/api/gallery/tags", json={"name": "索引 A", "priority": 10}).json()
+    tag_b = client.post("/api/gallery/tags", json={"name": "索引 B", "priority": 9}).json()
+    base_time = datetime(2026, 1, 1, tzinfo=UTC)
+    entry_a = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="索引 A 图",
+        created_at=base_time,
+    )
+    entry_both = _seed_gallery_entry_with_created_at(
+        db_session,
+        prompt="索引 AB 图",
+        created_at=base_time + timedelta(minutes=1),
+    )
+    db_session.add_all(
+        [
+            ImageGalleryEntryTag(gallery_entry_id=entry_a.id, tag_id=tag_a["id"]),
+            ImageGalleryEntryTag(gallery_entry_id=entry_both.id, tag_id=tag_a["id"]),
+            ImageGalleryEntryTag(gallery_entry_id=entry_both.id, tag_id=tag_b["id"]),
+        ]
+    )
+    db_session.commit()
+
+    statements: list[str] = []
+
+    @event.listens_for(db_session.bind, "before_cursor_execute")
+    def record_gallery_queries(conn, cursor, statement, parameters, context, executemany):
+        normalized_statement = " ".join(statement.lower().split())
+        if "image_gallery_entries" in normalized_statement or "image_gallery_entry_tags" in normalized_statement:
+            statements.append(normalized_statement)
+
+    try:
+        filtered = client.get(
+            "/api/gallery",
+            params=[("tag_ids", tag_a["id"]), ("tag_ids", tag_b["id"]), ("limit", "1")],
+        )
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", record_gallery_queries)
+
+    assert filtered.status_code == 200
+    payload = filtered.json()
+    assert [item["id"] for item in payload["items"]] == [entry_both.id]
+    assert [tag["name"] for tag in payload["items"][0]["tags"]] == ["索引 A", "索引 B"]
+    assert payload["total"] == 2
+
+    page_selects = [
+        statement
+        for statement in statements
+        if statement.startswith("select image_gallery_entries.id") and " limit " in f" {statement} "
+    ]
+    assert page_selects
+    assert all("join gallery_tags" not in statement for statement in page_selects)
+    assert any("image_gallery_entry_tags.tag_id in" in statement for statement in page_selects)
+    tag_loads = [
+        statement
+        for statement in statements
+        if statement.startswith("select gallery_tags.id") and "image_gallery_entry_tags" in statement
+    ]
+    assert len(tag_loads) == 1
+
+
 def test_gallery_tag_filter_uses_filter_selection_limit(configured_env: Path) -> None:
     app = create_app()
     client = TestClient(app)
@@ -731,6 +865,50 @@ def test_gallery_tag_filter_uses_filter_selection_limit(configured_env: Path) ->
 
     assert filtered.status_code == 400
     assert filtered.json()["detail"] == "最多选择 1 个画廊标签"
+
+
+def test_gallery_save_and_entry_tag_replace_use_bulk_insert(configured_env: Path, db_session, monkeypatch) -> None:
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    tag_a = client.post("/api/gallery/tags", json={"name": "批量写入 A", "priority": 10}).json()
+    tag_b = client.post("/api/gallery/tags", json={"name": "批量写入 B", "priority": 9}).json()
+    tag_c = client.post("/api/gallery/tags", json={"name": "批量写入 C", "priority": 8}).json()
+    created_session = client.post("/api/image-sessions", json={"title": "批量标签保存会话"})
+    assert created_session.status_code == 201
+    generated = client.post(
+        f"/api/image-sessions/{created_session.json()['id']}/generate",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "prompt": "批量标签保存",
+            "size": "1024x1024",
+        },
+    )
+    assert generated.status_code == 202
+    asset_id = generated.json()["rounds"][0]["generated_asset"]["id"]
+
+    inserted_batches: list[list[str]] = []
+    real_bulk_insert = gallery_app._bulk_insert_gallery_entry_tags
+
+    def record_bulk_insert(session, *, gallery_entry_id: str, tag_ids):
+        inserted_batches.append(list(tag_ids))
+        return real_bulk_insert(session, gallery_entry_id=gallery_entry_id, tag_ids=tag_ids)
+
+    monkeypatch.setattr(gallery_app, "_bulk_insert_gallery_entry_tags", record_bulk_insert)
+
+    saved = client.post(
+        "/api/gallery",
+        json={"image_session_asset_id": asset_id, "tag_ids": [tag_a["id"], tag_b["id"]]},
+    )
+    assert saved.status_code == 201
+    entry_id = saved.json()["id"]
+    assert inserted_batches == [[tag_a["id"], tag_b["id"]]]
+
+    updated = client.patch(f"/api/gallery/{entry_id}/tags", json={"tag_ids": [tag_b["id"], tag_c["id"]]})
+    assert updated.status_code == 200
+    assert [tag["id"] for tag in updated.json()["tags"]] == [tag_b["id"], tag_c["id"]]
+    assert inserted_batches == [[tag_a["id"], tag_b["id"]], [tag_c["id"]]]
 
 
 def test_disabled_and_deleted_gallery_tags_are_hidden_and_delete_soft_deletes_relations(
@@ -776,6 +954,45 @@ def test_disabled_and_deleted_gallery_tags_are_hidden_and_delete_soft_deletes_re
     filtered_old = client.get("/api/gallery", params={"tag_ids": tag_id})
     assert filtered_old.status_code == 200
     assert filtered_old.json()["items"] == []
+
+
+def test_delete_gallery_tag_soft_deletes_links_in_batches(configured_env: Path, db_session) -> None:
+    tag = GalleryTag(name="分批删除标签", priority=10)
+    db_session.add(tag)
+    db_session.flush()
+    entries = [
+        _seed_gallery_entry_with_created_at(
+            db_session,
+            prompt=f"分批删除图 {index}",
+            created_at=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=index),
+        )
+        for index in range(5)
+    ]
+    db_session.add_all([ImageGalleryEntryTag(gallery_entry_id=entry.id, tag_id=tag.id) for entry in entries])
+    db_session.commit()
+
+    statements: list[tuple[str, object]] = []
+
+    @event.listens_for(db_session.bind, "before_cursor_execute")
+    def record_update_batches(conn, cursor, statement, parameters, context, executemany):
+        normalized_statement = " ".join(statement.lower().split())
+        if normalized_statement.startswith("update image_gallery_entry_tags"):
+            statements.append((normalized_statement, parameters))
+
+    try:
+        gallery_app._soft_delete_gallery_tag_links_in_batches(
+            db_session,
+            tag_id=tag.id,
+            deleted_at=datetime(2026, 1, 2, tzinfo=UTC),
+            batch_size=2,
+        )
+        db_session.commit()
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", record_update_batches)
+
+    assert db_session.query(ImageGalleryEntryTag).filter_by(tag_id=tag.id, deleted_at=None).count() == 0
+    assert len(statements) == 3
+    assert all("image_gallery_entry_tags.id in" in statement for statement, _parameters in statements)
 
 
 def test_gallery_view_dedups_within_window_and_counts_after_window(configured_env: Path, db_session) -> None:

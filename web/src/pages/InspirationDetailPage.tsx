@@ -20,6 +20,7 @@ import {
   Move,
   Play,
   Plus,
+  Presentation,
   RotateCcw,
   Save,
   Settings2,
@@ -65,7 +66,6 @@ import type {
   CanvasTemplateScope,
   CanvasTemplateCategory,
   GenerationConfigOption,
-  GenerationConfigSelectionMode,
   GenerationResourceGroup,
   InspirationWorkflow,
   InspirationWorkflowStatus,
@@ -90,6 +90,7 @@ import { ImagesPanel } from "./inspiration-detail/ImagesPanel";
 import { InspectorPanel } from "./inspiration-detail/InspectorPanel";
 import { RunsPanel } from "./inspiration-detail/RunsPanel";
 import { SidebarTabButton } from "./inspiration-detail/SidebarTabButton";
+import { DeckPanel } from "./inspiration-detail/DeckPanel";
 import { TemplateGroupsPanel } from "./inspiration-detail/TemplateGroupsPanel";
 import { TailSplitPlanDialog } from "./inspiration-detail/TailSplitPlanDialog";
 import { WorkflowCanvas } from "./inspiration-detail/WorkflowCanvas";
@@ -159,8 +160,19 @@ import {
 } from "./inspiration-detail/workflowConfig";
 import type { DownloadableImage } from "../lib/image-downloads";
 import { normalizeWorkflowZoom } from "./inspiration-detail/reactFlowAdapters";
+import {
+  hasReusableTailPublicNode,
+  isAdminViewingOtherOwner,
+  isWorkflowNodeDeleteLocked,
+  latestActiveWorkflowRun,
+  latestCreatedWorkflowNode,
+  mergeActiveRunNodeStatuses,
+  workflowNodeMissingManualGenerationConfig,
+  workflowNodeRequiresResourceGroup,
+  workflowNodeResourceGroupId,
+} from "./inspiration-detail/workflowNodeHelpers";
 
-type SidebarTab = "singleNode" | "templates" | "details" | "runs" | "images";
+type SidebarTab = "singleNode" | "templates" | "details" | "runs" | "images" | "deck";
 type TemplateScopeFilter = CanvasTemplateScope | "all";
 type RunWorkflowInput = { startNodeId: string; startMode: WorkflowRunStartMode } | undefined;
 
@@ -186,11 +198,6 @@ function resourceLibrarySourceFromPreviewImage(image: DownloadableImage): Resour
     : null;
 }
 
-const RESOURCE_GROUP_REQUIRED_NODE_TYPES = new Set<WorkflowNodeType>([
-  "copy_generation",
-  "image_generation",
-  "tail_splitter",
-]);
 const RESOURCE_LIBRARY_SOURCE_ASSET_IMAGE_KINDS = new Set<SourceAsset["kind"]>([
   "original_image",
   "reference_image",
@@ -198,113 +205,11 @@ const RESOURCE_LIBRARY_SOURCE_ASSET_IMAGE_KINDS = new Set<SourceAsset["kind"]>([
   "context_image",
 ]);
 
-function workflowNodeResourceGroupId(node: WorkflowNode): string | null {
-  const value = node.config_json.resource_group_id;
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function workflowNodeRequiresResourceGroup(node: WorkflowNode): boolean {
-  return RESOURCE_GROUP_REQUIRED_NODE_TYPES.has(node.node_type);
-}
-
-function workflowNodeGenerationConfigMode(node: WorkflowNode): GenerationConfigSelectionMode {
-  return node.config_json.generation_config_mode === "manual" ? "manual" : "auto";
-}
-
-function workflowNodeGenerationConfigId(node: WorkflowNode): string | null {
-  const value = node.config_json.generation_config_id;
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function workflowNodeMissingManualGenerationConfig(node: WorkflowNode, selectedNode: WorkflowNode | null, draft: NodeConfigDraft): boolean {
-  if (!workflowNodeRequiresResourceGroup(node)) {
-    return false;
-  }
-  if (selectedNode?.id === node.id) {
-    return draft.generationConfigMode === "manual" && !draft.generationConfigId;
-  }
-  return workflowNodeGenerationConfigMode(node) === "manual" && !workflowNodeGenerationConfigId(node);
-}
-
 type WorkflowClipboard = {
   nodeIds: string[];
 };
 
 const AUTO_IMAGE_OUTPUT_NODE_OFFSET_X = NODE_WIDTH + 80;
-type TailPublicNodeRole = "public_copy" | "public_reference";
-
-function isAdminViewingOtherOwner(
-  user: { id: string; is_admin: boolean } | null | undefined,
-  ownerUserId: string | null | undefined,
-): boolean {
-  return Boolean(user?.is_admin && ownerUserId && user.id !== ownerUserId);
-}
-
-function latestCreatedWorkflowNode(
-  workflow: InspirationWorkflow,
-  previousNodeIds: Set<string>,
-  nodeType?: WorkflowNodeType,
-): WorkflowNode | null {
-  return (
-    workflow.nodes
-      .filter((node) => !previousNodeIds.has(node.id) && (!nodeType || node.node_type === nodeType))
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ?? null
-  );
-}
-
-function hasReusableTailPublicNode(
-  workflow: InspirationWorkflow | null | undefined,
-  tailNodeId: string | null | undefined,
-  role: TailPublicNodeRole,
-): boolean {
-  if (!workflow || !tailNodeId) {
-    return false;
-  }
-  return workflow.nodes.some((node) => {
-    const generatedBy = node.config_json.generated_by;
-    if (!generatedBy || typeof generatedBy !== "object" || Array.isArray(generatedBy)) {
-      return false;
-    }
-    const metadata = generatedBy as Record<string, unknown>;
-    return metadata.tail_node_id === tailNodeId && metadata.role === role;
-  });
-}
-
-function latestActiveWorkflowRun(workflow: InspirationWorkflow | null | undefined): InspirationWorkflow["runs"][number] | null {
-  return workflow?.runs.find((run) => run.status === "running" || run.status === "waiting_confirmation") ?? null;
-}
-
-function isWorkflowNodeDeleteLocked(node: WorkflowNode): boolean {
-  return node.status === "queued" || node.status === "running";
-}
-
-function mergeActiveRunNodeStatuses(workflow: InspirationWorkflow | null): InspirationWorkflow | null {
-  const activeRun = latestActiveWorkflowRun(workflow);
-  if (!workflow || !activeRun?.node_runs.length) {
-    return workflow;
-  }
-  const nodeRunByNodeId = new Map(activeRun.node_runs.map((nodeRun) => [nodeRun.node_id, nodeRun]));
-  let changed = false;
-  const nodes = workflow.nodes.map((node) => {
-    const nodeRun = nodeRunByNodeId.get(node.id);
-    if (!nodeRun) {
-      return node;
-    }
-    const nextFailureReason = nodeRun.failure_reason ?? node.failure_reason;
-    const nextLastRunAt = nodeRun.finished_at ?? nodeRun.started_at ?? node.last_run_at;
-    if (node.status === nodeRun.status && node.failure_reason === nextFailureReason && node.last_run_at === nextLastRunAt) {
-      return node;
-    }
-    changed = true;
-    return {
-      ...node,
-      status: nodeRun.status,
-      failure_reason: nextFailureReason,
-      last_run_at: nextLastRunAt,
-    };
-  });
-  return changed ? { ...workflow, nodes } : workflow;
-}
 
 function referenceImageNodesMissingSucceededOutput(
   workflow: InspirationWorkflow,
@@ -3099,6 +3004,7 @@ export function InspirationDetailPage() {
     { key: "details", label: t("detail.tabDetails"), icon: <Settings2 size={16} /> },
     { key: "runs", label: t("detail.tabRuns"), icon: <CircleDot size={16} /> },
     { key: "images", label: t("detail.tabImages"), icon: <ImageIcon size={16} /> },
+    { key: "deck", label: "演示", icon: <Presentation size={16} /> },
   ];
 
   const activeSidebarTabItem =
@@ -3264,6 +3170,7 @@ export function InspirationDetailPage() {
   const renderSidebarPanelContent = () => (
     <>
       {activeSidebarTab === "singleNode" ? renderSingleNodePanel() : null}
+      {activeSidebarTab === "deck" ? <DeckPanel inspirationId={inspirationId} /> : null}
       {activeSidebarTab === "details" ? renderDetailsPanelContent() : null}
       {activeSidebarTab === "runs" ? (
         <RunsPanel
@@ -3531,8 +3438,9 @@ export function InspirationDetailPage() {
               <SidebarTabButton active={false} label={t("detail.tabDetails")} title={t("detail.tabDetails")} icon={<Eye size={17} />} onClick={() => openSidebarTab("details")} />
               <SidebarTabButton active={false} label={t("detail.tabRuns")} title={t("detail.runsTitle")} icon={<CircleDot size={17} />} onClick={() => openSidebarTab("runs")} />
               <SidebarTabButton active={false} label={t("detail.tabImages")} title={t("detail.tabImages")} icon={<ImageIcon size={17} />} onClick={() => openSidebarTab("images")} />
+              <SidebarTabButton active={false} label="演示" title="演示" icon={<Presentation size={17} />} onClick={() => openSidebarTab("deck")} />
 
-              <div className="mt-auto flex w-full justify-center border-t border-slate-200/40 pt-2 dark:border-white/5">
+              <div className="mt-auto flex w-full justify-center border-t pf-hairline pt-2 dark:border-white/5">
                 <button
                   type="button"
                   onClick={() => setSidebarCollapsed(false)}
@@ -3559,7 +3467,7 @@ export function InspirationDetailPage() {
               <div className="h-12 w-[4px] rounded-full bg-slate-300 opacity-40 transition-all duration-300 group-hover:h-20 group-hover:opacity-100 dark:bg-slate-700 animate-handle-glow" />
             </div>
 
-            <div className="flex min-h-0 w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto overscroll-contain border-r border-slate-200/40 bg-white/5 px-2 py-4 dark:border-white/5 dark:bg-black/10">
+            <div className="flex min-h-0 w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto overscroll-contain border-r pf-hairline bg-white/5 px-2 py-4 dark:border-white/5 dark:bg-black/10">
               {renderWorkflowToolbarButtons()}
               <SidebarTabButton
                 active={activeSidebarTab === "singleNode"}
@@ -3597,8 +3505,15 @@ export function InspirationDetailPage() {
                 icon={<ImageIcon size={17} />}
                 onClick={() => openSidebarTab("images")}
               />
+              <SidebarTabButton
+                active={activeSidebarTab === "deck"}
+                label="演示"
+                title="演示"
+                icon={<Presentation size={17} />}
+                onClick={() => openSidebarTab("deck")}
+              />
 
-              <div className="mt-auto flex w-full justify-center border-t border-slate-200/40 pt-2 dark:border-white/5">
+              <div className="mt-auto flex w-full justify-center border-t pf-hairline pt-2 dark:border-white/5">
                 <button
                   type="button"
                   onClick={() => setSidebarCollapsed(true)}
@@ -3615,7 +3530,7 @@ export function InspirationDetailPage() {
               className="relative flex shrink-0 flex-col bg-transparent"
               style={{ width: inspectorWidth }}
             >
-              <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200/50 px-4 dark:border-slate-800">
+              <div className="flex h-12 shrink-0 items-center justify-between border-b pf-hairline px-4 dark:border-slate-800">
                 <div className="flex items-center">
                   <span className="mr-2 text-indigo-600 dark:text-violet-400">{activeSidebarTabItem.icon}</span>
                   <span className="text-[11px] font-bold uppercase tracking-widest text-slate-700 dark:text-slate-200">

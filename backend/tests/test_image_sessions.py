@@ -30,7 +30,6 @@ from inspiration_one_backend.infrastructure.db.models import (
     ImageSessionAsset,
     ImageSessionGenerationTask,
     ImageSessionRound,
-    ProviderBinding,
     ProviderProfile,
 )
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
@@ -2598,14 +2597,21 @@ def test_image_session_google_gemini_uses_selected_base_and_references_only(
     )
     db_session.add(profile)
     db_session.flush()
-    db_session.add(
-        ProviderBinding(
-            purpose="image",
-            provider_kind="google_gemini_image",
-            provider_profile_id=profile.id,
-            model_settings_json={"model": "gemini-2.5-flash-image"},
-            config_json={"gemini_api_version": "v1beta"},
-        )
+    from inspiration_one_backend.infrastructure.provider_config import (
+        DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        add_generation_config,
+    )
+
+    add_generation_config(
+        db_session,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        name="Gemini 图片配置",
+        purpose="image",
+        provider_kind="google_gemini_image",
+        provider_profile_id=profile.id,
+        model_settings={"model": "gemini-2.5-flash-image"},
+        config={"gemini_api_version": "v1beta"},
+        commit=False,
     )
     db_session.commit()
 

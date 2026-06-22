@@ -69,3 +69,4 @@ backend/backend/storage-dev/
 
 # temp file
 .tmp*
+tmp/

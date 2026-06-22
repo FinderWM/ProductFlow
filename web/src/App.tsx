@@ -188,6 +188,18 @@ function AppRoutes() {
               <Routes>
                 <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
                 <Route
+                  path="/login/command-orbit"
+                  element={<LoginPage authenticated={authenticated} templateId="command-orbit" />}
+                />
+                <Route
+                  path="/login/fluid-mist"
+                  element={<LoginPage authenticated={authenticated} templateId="fluid-mist" />}
+                />
+                <Route
+                  path="/login/image-lab"
+                  element={<LoginPage authenticated={authenticated} templateId="image-lab" />}
+                />
+                <Route
                   path="/inspirations"
                   element={menuRoute(
                     "inspirations",

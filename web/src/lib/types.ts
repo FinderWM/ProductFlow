@@ -10,7 +10,7 @@ export type SourceAssetKind =
   | "context_document";
 export type ImageSessionAssetKind = "reference_upload" | "generated_image";
 export type ResourceLibraryAssetKind = "image" | "document" | "other";
-export type ResourceLibrarySourceType = "source_asset" | "poster_variant" | "image_session_asset" | "upload";
+export type ResourceLibrarySourceType = "source_asset" | "poster_variant" | "image_session_asset" | "deck_slide" | "upload";
 export type GenerationConfigSelectionMode = "auto" | "manual";
 export type WorkflowNodeType =
   | "inspiration_context"
@@ -31,6 +31,58 @@ export type WorkflowRetryHint = "retry_later" | "revise_input" | "check_settings
 export type CanvasTemplateKind = "full_canvas" | "node_group";
 export type CanvasTemplateScope = "global" | "user";
 export type CanvasTemplateReviewStatus = "none" | "pending" | "approved" | "rejected";
+
+export type DeckStatus = "draft" | "outline_confirmed" | "style_confirmed" | "generating" | "completed" | "failed";
+export type DeckSlideStatus = "pending" | "queued" | "running" | "completed" | "failed";
+export type DeckMaterialSource = "resource_library" | "upload" | "source_asset" | "enhanced";
+
+export interface DeckSlide {
+  id: string;
+  order_index: number;
+  title: string;
+  points: string[];
+  speaker_notes: string | null;
+  slide_status: DeckSlideStatus;
+  last_error: string | null;
+  image_url: string | null;
+  image_width: number | null;
+  image_height: number | null;
+  material_source: DeckMaterialSource | null;
+  material_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Deck {
+  id: string;
+  inspiration_id: string;
+  resource_group_id: string;
+  title: string;
+  status: DeckStatus;
+  source_input: string | null;
+  style_key: string | null;
+  style_reference_asset_id: string | null;
+  speaker_notes_enabled: boolean;
+  pptx_url: string | null;
+  slides: DeckSlide[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeckSummary {
+  id: string;
+  inspiration_id: string;
+  title: string;
+  status: DeckStatus;
+  slide_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeckStyleOption {
+  key: string;
+  label: string;
+}
 export type CurrentWeatherCondition =
   | "clear"
   | "partly_cloudy"
@@ -1257,24 +1309,6 @@ export interface ProviderProfileUpdateRequest {
   enabled?: boolean | null;
 }
 
-export interface ProviderBinding {
-  id: string;
-  purpose: ProviderPurpose;
-  provider_kind: string;
-  provider_profile_id: string | null;
-  model_settings: Record<string, unknown>;
-  config: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProviderBindingUpdateRequest {
-  provider_kind: string;
-  provider_profile_id?: string | null;
-  model_settings?: Record<string, unknown>;
-  config?: Record<string, unknown>;
-}
-
 export interface GenerationConfigState {
   current_concurrency: number;
   frozen_until: string | null;
@@ -1554,7 +1588,6 @@ export interface ImageGenerationConfigTestResponse {
 
 export interface ProviderConfigResponse {
   profiles: ProviderProfile[];
-  bindings: ProviderBinding[];
   generation_resource_groups: GenerationResourceGroup[];
   generation_configs: GenerationConfig[];
   status_summary: GenerationConfigStatusSummary | null;
@@ -1589,15 +1622,6 @@ export interface SettingsExportProviderProfile {
   default_models: Record<string, unknown>;
   config: Record<string, unknown>;
   enabled: boolean;
-}
-
-export interface SettingsExportProviderBinding {
-  purpose: ProviderPurpose;
-  provider_kind: string;
-  provider_profile_name?: string | null;
-  provider_profile_id?: string | null;
-  model_settings: Record<string, unknown>;
-  config: Record<string, unknown>;
 }
 
 export interface SettingsExportGenerationConfig {
@@ -1661,7 +1685,6 @@ export interface SettingsExportPayload {
   metadata: SettingsExportMetadata;
   runtime_config: Record<string, string | number | boolean | string[] | null>;
   provider_profiles: SettingsExportProviderProfile[];
-  provider_bindings: SettingsExportProviderBinding[];
   generation_resource_groups: SettingsExportGenerationResourceGroup[];
   generation_configs: SettingsExportGenerationConfig[];
   canvas_template_categories: SettingsExportCanvasTemplateCategory[];
@@ -1672,13 +1695,11 @@ export interface SettingsImportPreviewResponse {
   schema_version: number;
   runtime_config_count: number;
   provider_profile_count: number;
-  provider_binding_count: number;
   generation_resource_group_count: number;
   generation_config_count: number;
   canvas_template_category_count: number;
   canvas_template_count: number;
   provider_profile_names: string[];
-  provider_binding_purposes: ProviderPurpose[];
   includes_api_keys: boolean;
   provider_profiles_with_api_key_count: number;
   canvas_template_keys: string[];
