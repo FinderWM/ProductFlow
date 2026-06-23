@@ -542,7 +542,7 @@ export function WorkspaceDateTimeRangeField({
   return (
     <div className={`pf-workspace-datetime-range relative min-w-0 space-y-2 ${className}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--pf-muted)]">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
           {t("statusPage.rangeTitle")}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -553,7 +553,7 @@ export function WorkspaceDateTimeRangeField({
               onClick={() => onQuickRangeChange?.(rangeId)}
               disabled={disabled}
               aria-current={activeQuickRange === rangeId ? "true" : undefined}
-              className="pf-workspace-date-quick inline-flex h-[15px] items-center justify-center rounded-md border px-1 text-[9px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-50"
+              className="pf-workspace-date-quick inline-flex h-[15px] items-center justify-center rounded-md border px-1 text-[10px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t(WORKSPACE_QUICK_RANGE_LABEL_KEYS[rangeId])}
             </button>
@@ -569,15 +569,15 @@ export function WorkspaceDateTimeRangeField({
           aria-controls={rangePanelId}
           disabled={disabled}
           onClick={() => setPickerOpen((current) => !current)}
-          className="pf-workspace-date-range-shell pf-workspace-date-range-trigger flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-3 py-2.5 text-left shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+          className="pf-workspace-date-range-shell pf-workspace-date-range-trigger flex min-w-0 h-11 flex-1 items-center gap-2 rounded-xl border px-3 text-left shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          <span className={`min-w-0 flex-1 truncate text-sm ${displayStart ? "font-medium" : "font-normal text-[color:var(--pf-subtle)]"}`}>
             {displayStart || t("statusPage.startDate")}
           </span>
           <span className="shrink-0 text-xs font-semibold text-[color:var(--pf-subtle)]" aria-hidden="true">
             -
           </span>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          <span className={`min-w-0 flex-1 truncate text-sm ${displayEnd ? "font-medium" : "font-normal text-[color:var(--pf-subtle)]"}`}>
             {displayEnd || t("statusPage.endDate")}
           </span>
         </button>
@@ -587,7 +587,7 @@ export function WorkspaceDateTimeRangeField({
           aria-label={clearRangeLabel}
           title={clearRangeLabel}
           onClick={handleRangeClear}
-          className="pf-workspace-date-range-clear inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-zinc-600 shadow-sm outline-none transition hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-300 dark:hover:text-slate-50"
+          className="pf-workspace-date-range-clear inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-zinc-600 shadow-sm outline-none transition hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-300 dark:hover:text-slate-50"
         >
           <RotateCcw size={15} aria-hidden="true" />
         </button>

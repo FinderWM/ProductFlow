@@ -3116,6 +3116,7 @@ textarea {
   background: color-mix(in srgb, var(--pf-panel-soft) 90%, transparent);
   color: var(--pf-muted);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  font-size: 11px;
 }
 
 :root[data-ui-layout-scheme="classic"] .pf-workspace-date-quick:hover {

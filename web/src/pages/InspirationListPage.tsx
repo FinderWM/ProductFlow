@@ -1367,21 +1367,19 @@ function InspirationSearchPanel({
 
           <label className="space-y-2">
             <span className={labelClassName}>{t("inspirations.resourceGroupFilter")}</span>
-            <select
+            <SelectField
               id="inspiration-resource-group-filter"
-              name="inspiration_resource_group_filter"
               value={selectedResourceGroupId}
-              onChange={(event) => onResourceGroupChange(event.target.value)}
+              options={[
+                { value: "", label: t("inspirations.allResourceGroups") },
+                ...resourceGroups.map((group) => ({ value: group.id, label: group.name })),
+              ]}
+              onChange={onResourceGroupChange}
+              ariaLabel={t("inspirations.resourceGroupFilter")}
               disabled={resourceGroupsLoading}
-              className={fieldClassName}
-            >
-              <option value="">{t("inspirations.allResourceGroups")}</option>
-              {resourceGroups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
-                </option>
-              ))}
-            </select>
+              radius="xl"
+              visualSize="md"
+            />
           </label>
 
           {isAdmin ? (
