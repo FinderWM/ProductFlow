@@ -4,7 +4,9 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
-const SCALE_STEP = 0.25;
+const SCALE_STEP = 0.2;
+const MAX_WHEEL_DELTA_PX = 120;
+const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
 interface ZoomableImageProps {
   src: string;
@@ -22,16 +24,56 @@ interface Point {
   y: number;
 }
 
+interface ImageTransformState {
+  scale: number;
+  offset: Point;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function boundedOffsetForElement(element: HTMLElement | null, next: Point, nextScale: number): Point {
+export function normalizeWheelDelta(delta: number, deltaMode: number, pageSize: number) {
+  if (deltaMode === 1) {
+    return delta * 16;
+  }
+  if (deltaMode === 2) {
+    return delta * pageSize;
+  }
+  return delta;
+}
+
+export function nextWheelZoomScale(currentScale: number, deltaY: number, deltaMode: number, pageSize: number) {
+  const deltaPixels = normalizeWheelDelta(deltaY, deltaMode, pageSize);
+  if (!Number.isFinite(deltaPixels) || deltaPixels === 0) {
+    return currentScale;
+  }
+  const boundedDelta = clamp(deltaPixels, -MAX_WHEEL_DELTA_PX, MAX_WHEEL_DELTA_PX);
+  const zoomFactor = Math.exp(-boundedDelta * WHEEL_ZOOM_SENSITIVITY);
+  return clamp(currentScale * zoomFactor, MIN_SCALE, MAX_SCALE);
+}
+
+export function anchoredOffsetFromPointer(currentOffset: Point, pointerDeltaFromImageCenter: Point, scaleRatio: number): Point {
+  if (!Number.isFinite(scaleRatio) || scaleRatio === 1) {
+    return currentOffset;
+  }
+  return {
+    x: currentOffset.x - pointerDeltaFromImageCenter.x * (scaleRatio - 1),
+    y: currentOffset.y - pointerDeltaFromImageCenter.y * (scaleRatio - 1),
+  };
+}
+
+function boundedOffsetForElement(
+  surfaceElement: HTMLElement | null,
+  imageElement: HTMLImageElement | null,
+  next: Point,
+  nextScale: number,
+): Point {
   if (nextScale <= MIN_SCALE) {
     return { x: 0, y: 0 };
   }
-  const width = element?.clientWidth ?? 0;
-  const height = element?.clientHeight ?? 0;
+  const width = imageElement?.clientWidth || surfaceElement?.clientWidth || 0;
+  const height = imageElement?.clientHeight || surfaceElement?.clientHeight || 0;
   const maxX = (width * (nextScale - 1)) / 2;
   const maxY = (height * (nextScale - 1)) / 2;
   return {
@@ -50,19 +92,25 @@ export function ZoomableImage({
   className = "",
   imageClassName = "",
 }: ZoomableImageProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const dragRef = useRef<{ pointerId: number; start: Point; offset: Point } | null>(null);
-  const [scale, setScale] = useState(MIN_SCALE);
-  const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
+  const [transform, setTransform] = useState<ImageTransformState>({
+    scale: MIN_SCALE,
+    offset: { x: 0, y: 0 },
+  });
+  const { scale, offset } = transform;
 
   useEffect(() => {
-    setScale(MIN_SCALE);
-    setOffset({ x: 0, y: 0 });
+    setTransform({
+      scale: MIN_SCALE,
+      offset: { x: 0, y: 0 },
+    });
   }, [src]);
 
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !interactive) {
+    const surface = surfaceRef.current;
+    if (!surface || !interactive) {
       return;
     }
 
@@ -70,37 +118,67 @@ export function ZoomableImage({
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      const direction = event.deltaY > 0 ? -1 : 1;
-      setScale((currentScale) => {
-        const nextScale = clamp(currentScale + direction * SCALE_STEP, MIN_SCALE, MAX_SCALE);
-        setOffset((currentOffset) => boundedOffsetForElement(container, currentOffset, nextScale));
-        return nextScale;
+      const surfaceRect = surface.getBoundingClientRect();
+      const pointerWithinSurface = {
+        x: event.clientX - surfaceRect.left,
+        y: event.clientY - surfaceRect.top,
+      };
+      const surfaceCenter = {
+        x: surface.clientWidth / 2,
+        y: surface.clientHeight / 2,
+      };
+
+      setTransform((current) => {
+        const nextScale = nextWheelZoomScale(current.scale, event.deltaY, event.deltaMode, surface.clientHeight || window.innerHeight);
+        if (nextScale === current.scale) {
+          return current;
+        }
+        const pointerDeltaFromImageCenter = {
+          x: pointerWithinSurface.x - surfaceCenter.x - current.offset.x,
+          y: pointerWithinSurface.y - surfaceCenter.y - current.offset.y,
+        };
+        const nextOffset = anchoredOffsetFromPointer(
+          current.offset,
+          pointerDeltaFromImageCenter,
+          nextScale / current.scale,
+        );
+
+        return {
+          scale: nextScale,
+          offset: boundedOffsetForElement(surfaceRef.current, imageRef.current, nextOffset, nextScale),
+        };
       });
     };
 
-    container.addEventListener("wheel", handleNativeWheel, { capture: true, passive: false });
-    return () => container.removeEventListener("wheel", handleNativeWheel, { capture: true });
+    surface.addEventListener("wheel", handleNativeWheel, { capture: true, passive: false });
+    return () => surface.removeEventListener("wheel", handleNativeWheel, { capture: true });
   }, [interactive]);
 
   function boundedOffset(next: Point, nextScale = scale): Point {
-    return boundedOffsetForElement(containerRef.current, next, nextScale);
+    return boundedOffsetForElement(surfaceRef.current, imageRef.current, next, nextScale);
   }
 
   function updateScale(nextScale: number) {
     if (!interactive) {
       return;
     }
-    const resolvedScale = clamp(nextScale, MIN_SCALE, MAX_SCALE);
-    setScale(resolvedScale);
-    setOffset((currentOffset) => boundedOffset(currentOffset, resolvedScale));
+    setTransform((current) => {
+      const resolvedScale = clamp(nextScale, MIN_SCALE, MAX_SCALE);
+      return {
+        scale: resolvedScale,
+        offset: boundedOffset(current.offset, resolvedScale),
+      };
+    });
   }
 
   function resetImage() {
     if (!interactive) {
       return;
     }
-    setScale(MIN_SCALE);
-    setOffset({ x: 0, y: 0 });
+    setTransform({
+      scale: MIN_SCALE,
+      offset: { x: 0, y: 0 },
+    });
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -125,7 +203,10 @@ export function ZoomableImage({
       x: drag.offset.x + event.clientX - drag.start.x,
       y: drag.offset.y + event.clientY - drag.start.y,
     };
-    setOffset(boundedOffset(nextOffset));
+    setTransform((current) => ({
+      ...current,
+      offset: boundedOffset(nextOffset, current.scale),
+    }));
   }
 
   function handlePointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
@@ -136,10 +217,10 @@ export function ZoomableImage({
 
   return (
     <div
-      ref={containerRef}
       className={`relative flex min-h-0 items-center justify-center overflow-hidden overscroll-contain ${className}`}
     >
       <div
+        ref={surfaceRef}
         className={`flex h-full w-full items-center justify-center ${
           interactive ? (scale > MIN_SCALE ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in") : "cursor-default"
         }`}
@@ -151,6 +232,7 @@ export function ZoomableImage({
         onPointerCancel={handlePointerEnd}
       >
         <img
+          ref={imageRef}
           src={src}
           alt={alt}
           decoding="async"
