@@ -22,7 +22,8 @@ const t = ((key, params = {}) => {
     "notification.imageAttemptFailed.bodyUnknown": "{title} 本次失败",
     "notification.imageAttemptFailed.retryLine": "将进入第 {nextAttempt}/{maxAttempts} 次",
     "notification.failureReasonLine": "失败原因：{reason}",
-    "notification.generationContext": "生成设置：{context}",
+    "notification.resourceGroupLine": "当前分组：{group}",
+    "notification.generationConfigLine": "生成配置：{config}",
     "notification.workflowFailed.nodeLine": "失败节点：{node}",
     "notification.taskAttemptLine": "尝试次数：第 {attempt} 次",
     "notification.inspirationDone.title": "工作流完成",
@@ -50,6 +51,7 @@ function task(overrides: Partial<ImageSessionGenerationTask>): ImageSessionGener
     generation_config_mode: "auto",
     requested_generation_config_id: null,
     used_generation_config_id: null,
+    generation_config_name: null,
     resource_group_id: "group-1",
     resource_group: { id: "group-1", key: "default", name: "default" },
     generation_count: 1,
@@ -131,14 +133,27 @@ describe("buildImageTaskTransitionNotification", () => {
   it("builds an error notification when an active image task fails", () => {
     expect(
       buildImageTaskTransitionNotification(
-        task({ status: "failed", failure_reason: "供应商拒绝" }),
+        task({
+          status: "failed",
+          failure_reason: "供应商拒绝",
+          generation_config_name: "图片配置 A",
+          resource_group: { id: "group-1", key: "default", name: "女装" },
+          attempts: 2,
+        }),
         "running",
-        "会话 A",
+        "这是一个很长很长的会话标题，用来验证通知内容会被截断展示",
         t,
       ),
     ).toMatchObject({
       title: "失败",
-      body: "会话 A 失败：供应商拒绝",
+      body: "这是一个很长很长的会话标题，用来验证通知内... 失败",
+      bodyLines: [
+        { text: "这是一个很长很长的会话标题，用来验证通知内... 失败" },
+        { text: "当前分组：女装", tone: "muted" },
+        { text: "生成配置：图片配置 A", tone: "muted" },
+        { text: "尝试次数：第 2 次", tone: "muted" },
+        { text: "失败原因：供应商拒绝", tone: "danger" },
+      ],
       variant: "error",
       autoClose: false,
       dedupeKey: "image-task-failed:task-1",
@@ -259,7 +274,7 @@ describe("task notification websocket events", () => {
       bodyLines: [
         { text: "灵感 A 失败：节点失败" },
         { text: "失败节点：卖点文案", tone: "muted" },
-        { text: "生成设置：文案配置 A", tone: "muted" },
+        { text: "生成配置：文案配置 A", tone: "muted" },
       ],
       variant: "error",
       autoClose: false,
@@ -275,6 +290,7 @@ describe("task notification websocket events", () => {
           status: "attempt_failed",
           failure_reason: "供应商超时",
           generation_config_name: "图片配置 A",
+          resource_group_name: "女装",
           attempt: 1,
           max_attempts: 3,
           next_attempt: 2,
@@ -288,12 +304,42 @@ describe("task notification websocket events", () => {
       bodyLines: [
         { text: "会话 A 第 1/3 次失败", tone: "warning" },
         { text: "将进入第 2/3 次", tone: "warning" },
-        { text: "生成设置：图片配置 A", tone: "muted" },
+        { text: "当前分组：女装", tone: "muted" },
+        { text: "生成配置：图片配置 A", tone: "muted" },
         { text: "失败原因：供应商超时", tone: "danger" },
       ],
       variant: "warning",
       autoClose: false,
       dedupeKey: "image-task-attempt-failed:task-1:1",
+    });
+  });
+
+  it("builds compact image failure notifications with group and config lines", () => {
+    expect(
+      buildTaskNotificationEventNotification(
+        taskEvent({
+          status: "failed",
+          title: "这是一个很长很长的会话标题，用来验证通知内容会被截断展示",
+          failure_reason: "供应商拒绝",
+          generation_config_name: "图片配置 A",
+          resource_group_name: "女装",
+          attempt: 2,
+        }),
+        t,
+      ),
+    ).toMatchObject({
+      title: "失败",
+      body: "这是一个很长很长的会话标题，用来验证通知内... 失败",
+      bodyLines: [
+        { text: "这是一个很长很长的会话标题，用来验证通知内... 失败" },
+        { text: "当前分组：女装", tone: "muted" },
+        { text: "生成配置：图片配置 A", tone: "muted" },
+        { text: "尝试次数：第 2 次", tone: "muted" },
+        { text: "失败原因：供应商拒绝", tone: "danger" },
+      ],
+      variant: "error",
+      autoClose: false,
+      dedupeKey: "image-task-failed:task-1",
     });
   });
 });

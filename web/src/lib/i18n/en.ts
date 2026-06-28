@@ -102,6 +102,8 @@ export const enUS: Record<keyof typeof zhCN, string> = {
   "notification.imageAttemptFailed.bodyUnknown": "{title} failed on this attempt.",
   "notification.imageAttemptFailed.retryLine": "Next attempt: {nextAttempt}/{maxAttempts}.",
   "notification.failureReasonLine": "Reason: {reason}",
+  "notification.resourceGroupLine": "Current group: {group}",
+  "notification.generationConfigLine": "Generation config: {config}",
   "notification.generationContext": "Generation setting: {context}",
   "notification.workflowFailed.nodeLine": "Failed node: {node}",
   "notification.taskAttemptLine": "Attempt: {attempt}",

@@ -44,11 +44,25 @@ export function buildImageTaskTransitionNotification(
     };
   }
   if (task.status === "failed") {
+    const body = t("notification.imageFailed.body", { title: abbreviateNotificationSubject(sessionTitle) });
+    const bodyLines: NonNullable<NotificationInput["bodyLines"]> = [{ text: body }];
+    if (task.resource_group.name) {
+      bodyLines.push({ text: t("notification.resourceGroupLine", { group: task.resource_group.name }), tone: "muted" });
+    }
+    const generationConfig = task.generation_config_name ?? task.used_generation_config_id ?? task.requested_generation_config_id;
+    if (generationConfig) {
+      bodyLines.push({ text: t("notification.generationConfigLine", { config: generationConfig }), tone: "muted" });
+    }
+    if (task.attempts > 0) {
+      bodyLines.push({ text: t("notification.taskAttemptLine", { attempt: task.attempts }), tone: "muted" });
+    }
+    if (task.failure_reason) {
+      bodyLines.push({ text: t("notification.failureReasonLine", { reason: task.failure_reason }), tone: "danger" });
+    }
     return {
       title: t("notification.imageFailed.title"),
-      body: task.failure_reason
-        ? t("notification.imageFailed.bodyWithReason", { title: sessionTitle, reason: task.failure_reason })
-        : t("notification.imageFailed.body", { title: sessionTitle }),
+      body,
+      bodyLines,
       variant: "error",
       autoClose: false,
       dedupeKey: `image-task-failed:${task.id}`,
@@ -94,6 +108,7 @@ export function buildTaskNotificationEventNotification(
   t: TranslateFunction,
 ): NotificationInput | null {
   if (event.task_kind === "image_session_generation") {
+    const shortTitle = abbreviateNotificationSubject(event.title);
     if (event.status === "succeeded") {
       return {
         title: t("notification.imageDone.title"),
@@ -104,7 +119,7 @@ export function buildTaskNotificationEventNotification(
       };
     }
     if (event.status === "attempt_failed") {
-      const body = imageAttemptFailedBody(event, t);
+      const body = imageAttemptFailedBody(event, shortTitle, t);
       return {
         title: t("notification.imageAttemptFailed.title"),
         body,
@@ -115,13 +130,11 @@ export function buildTaskNotificationEventNotification(
       };
     }
     if (event.status === "failed") {
-      const body = event.failure_reason
-        ? t("notification.imageFailed.bodyWithReason", { title: event.title, reason: event.failure_reason })
-        : t("notification.imageFailed.body", { title: event.title });
+      const body = t("notification.imageFailed.body", { title: shortTitle });
       return {
         title: t("notification.imageFailed.title"),
         body,
-        bodyLines: buildTaskFailureBodyLines(body, event, t, { includeAttempt: true }),
+        bodyLines: buildTaskFailureBodyLines(body, event, t, { includeAttempt: true, includeFailureReason: true }),
         variant: "error",
         autoClose: false,
         dedupeKey: `image-task-failed:${event.task_id}`,
@@ -234,27 +247,43 @@ function optionalPositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
-function generationContextLine(event: TaskNotificationEvent, t: TranslateFunction): string | null {
-  const context =
-    event.generation_config_name ??
-    event.generation_config_id ??
-    event.resource_group_name ??
-    event.resource_group_id;
-  return context ? t("notification.generationContext", { context }) : null;
+function abbreviateNotificationSubject(value: string, maxLength = 24): string {
+  const normalized = value.trim();
+  const chars = Array.from(normalized);
+  if (chars.length <= maxLength) {
+    return normalized;
+  }
+  return `${chars.slice(0, Math.max(1, maxLength - 3)).join("")}...`;
 }
 
-function imageAttemptFailedBody(event: TaskNotificationEvent, t: TranslateFunction): string {
+function generationContextLines(
+  event: TaskNotificationEvent,
+  t: TranslateFunction,
+): NonNullable<NotificationInput["bodyLines"]> {
+  const lines: NonNullable<NotificationInput["bodyLines"]> = [];
+  const resourceGroup = event.resource_group_name ?? event.resource_group_id;
+  if (resourceGroup) {
+    lines.push({ text: t("notification.resourceGroupLine", { group: resourceGroup }), tone: "muted" });
+  }
+  const generationConfig = event.generation_config_name ?? event.generation_config_id;
+  if (generationConfig) {
+    lines.push({ text: t("notification.generationConfigLine", { config: generationConfig }), tone: "muted" });
+  }
+  return lines;
+}
+
+function imageAttemptFailedBody(event: TaskNotificationEvent, title: string, t: TranslateFunction): string {
   if (event.attempt && event.max_attempts) {
     return t("notification.imageAttemptFailed.body", {
-      title: event.title,
+      title,
       attempt: event.attempt,
       maxAttempts: event.max_attempts,
     });
   }
   if (event.attempt) {
-    return t("notification.imageAttemptFailed.bodyWithoutMax", { title: event.title, attempt: event.attempt });
+    return t("notification.imageAttemptFailed.bodyWithoutMax", { title, attempt: event.attempt });
   }
-  return t("notification.imageAttemptFailed.bodyUnknown", { title: event.title });
+  return t("notification.imageAttemptFailed.bodyUnknown", { title });
 }
 
 function buildAttemptFailedBodyLines(
@@ -272,10 +301,7 @@ function buildAttemptFailedBodyLines(
       tone: "warning",
     });
   }
-  const contextLine = generationContextLine(event, t);
-  if (contextLine) {
-    lines.push({ text: contextLine, tone: "muted" });
-  }
+  lines.push(...generationContextLines(event, t));
   if (event.failure_reason) {
     lines.push({ text: t("notification.failureReasonLine", { reason: event.failure_reason }), tone: "danger" });
   }
@@ -286,7 +312,7 @@ function buildTaskFailureBodyLines(
   body: string,
   event: TaskNotificationEvent,
   t: TranslateFunction,
-  options: { includeAttempt?: boolean; includeWorkflowNode?: boolean } = {},
+  options: { includeAttempt?: boolean; includeWorkflowNode?: boolean; includeFailureReason?: boolean } = {},
 ): NotificationInput["bodyLines"] {
   const lines: NonNullable<NotificationInput["bodyLines"]> = [{ text: body }];
   if (options.includeWorkflowNode) {
@@ -295,12 +321,12 @@ function buildTaskFailureBodyLines(
       lines.push({ text: t("notification.workflowFailed.nodeLine", { node }), tone: "muted" });
     }
   }
-  const contextLine = generationContextLine(event, t);
-  if (contextLine) {
-    lines.push({ text: contextLine, tone: "muted" });
-  }
+  lines.push(...generationContextLines(event, t));
   if (options.includeAttempt && event.attempt) {
     lines.push({ text: t("notification.taskAttemptLine", { attempt: event.attempt }), tone: "muted" });
+  }
+  if (options.includeFailureReason && event.failure_reason) {
+    lines.push({ text: t("notification.failureReasonLine", { reason: event.failure_reason }), tone: "danger" });
   }
   return lines.length > 1 ? lines : undefined;
 }

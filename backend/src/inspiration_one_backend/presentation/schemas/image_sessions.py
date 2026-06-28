@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy.orm import object_session
 
 from inspiration_one_backend.application.image_sessions import ImageSessionStatusSnapshot
 from inspiration_one_backend.config import IMAGE_SESSION_MAX_MAX_BASE_IMAGES
@@ -11,6 +12,7 @@ from inspiration_one_backend.domain.durable_generation_tasks import IMAGE_SESSIO
 from inspiration_one_backend.domain.enums import ImageSessionAssetKind, JobStatus
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    GenerationConfig,
     ImageSession,
     ImageSessionAsset,
     ImageSessionGenerationTask,
@@ -80,6 +82,7 @@ class ImageSessionGenerationTaskResponse(BaseModel):
     generation_config_mode: Literal["auto", "manual"] = "auto"
     requested_generation_config_id: str | None = None
     used_generation_config_id: str | None = None
+    generation_config_name: str | None = None
     resource_group_id: str | None = None
     resource_group: GenerationResourceGroupTagResponse
     generation_count: int
@@ -344,6 +347,7 @@ def serialize_image_session_generation_task(
 ) -> ImageSessionGenerationTaskResponse:
     queue_metadata = getattr(task, "_queue_metadata", None)
     queue_overview = getattr(queue_metadata, "overview", None)
+    generation_config_name = _image_task_generation_config_name(task)
     return ImageSessionGenerationTaskResponse(
         id=task.id,
         session_id=task.session_id,
@@ -356,6 +360,7 @@ def serialize_image_session_generation_task(
         generation_config_mode="manual" if task.generation_config_mode == "manual" else "auto",
         requested_generation_config_id=task.requested_generation_config_id,
         used_generation_config_id=task.used_generation_config_id,
+        generation_config_name=generation_config_name,
         resource_group_id=task.resource_group_id,
         resource_group=serialize_generation_resource_group_tag(
             task.resource_group,
@@ -392,6 +397,19 @@ def _image_session_task_visible_group_id(task: ImageSessionGenerationTask) -> st
     if task.status == JobStatus.SUCCEEDED and task.result_generation_group_id is None:
         return None
     return task.result_generation_group_id or f"task:{task.id}"
+
+
+def _image_task_generation_config_name(task: ImageSessionGenerationTask) -> str | None:
+    generation_config_id = task.used_generation_config_id or task.requested_generation_config_id
+    if not generation_config_id:
+        return None
+    session = object_session(task)
+    if session is None:
+        return None
+    generation_config = session.get(GenerationConfig, generation_config_id)
+    if generation_config is None or not generation_config.name:
+        return None
+    return generation_config.name
 
 
 def _image_session_visible_round_count(image_session: ImageSession) -> int:

@@ -102,6 +102,8 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "notification.imageAttemptFailed.bodyUnknown": "{title} の今回の生成に失敗しました。",
   "notification.imageAttemptFailed.retryLine": "第 {nextAttempt}/{maxAttempts} 回の試行に進みます。",
   "notification.failureReasonLine": "失敗理由：{reason}",
+  "notification.resourceGroupLine": "現在のグループ：{group}",
+  "notification.generationConfigLine": "生成設定：{config}",
   "notification.generationContext": "生成設定：{context}",
   "notification.workflowFailed.nodeLine": "失敗ノード：{node}",
   "notification.taskAttemptLine": "試行回数：第 {attempt} 回",

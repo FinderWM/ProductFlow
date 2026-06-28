@@ -100,6 +100,8 @@ export const zhCN = {
   "notification.imageAttemptFailed.bodyUnknown": "{title} 本次生成失败。",
   "notification.imageAttemptFailed.retryLine": "将进入第 {nextAttempt}/{maxAttempts} 次尝试。",
   "notification.failureReasonLine": "失败原因：{reason}",
+  "notification.resourceGroupLine": "当前分组：{group}",
+  "notification.generationConfigLine": "生成配置：{config}",
   "notification.generationContext": "生成设置：{context}",
   "notification.workflowFailed.nodeLine": "失败节点：{node}",
   "notification.taskAttemptLine": "尝试次数：第 {attempt} 次",

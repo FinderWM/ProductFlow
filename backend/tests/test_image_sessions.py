@@ -664,6 +664,7 @@ def test_image_session_generate_returns_queued_task_without_waiting_for_provider
     assert task["prompt"] == "只创建任务，不等待 provider"
     assert task["generation_config_mode"] == "manual"
     assert task["requested_generation_config_id"] == image_config_id
+    assert task["generation_config_name"]
     assert task["completed_candidates"] == 0
     assert task["active_candidate_index"] is None
     assert task["progress_phase"] is None

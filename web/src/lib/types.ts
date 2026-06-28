@@ -964,6 +964,7 @@ export interface ImageSessionGenerationTask {
   generation_config_mode: GenerationConfigSelectionMode;
   requested_generation_config_id: string | null;
   used_generation_config_id: string | null;
+  generation_config_name?: string | null;
   resource_group_id?: string | null;
   resource_group: GenerationResourceGroupTag;
   generation_count: number;
