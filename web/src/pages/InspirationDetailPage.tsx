@@ -91,6 +91,7 @@ import {
   buildDeckSourceOrderForNodes,
   collectDeckSourceNodesFromTailSplitter,
 } from "./inspiration-detail/deckSourceOrder";
+import { resolveDeckEditorAutoOpenDecision } from "./inspiration-detail/deckEditorBehavior";
 import { ImagesPanel } from "./inspiration-detail/ImagesPanel";
 import { InspectorPanel } from "./inspiration-detail/InspectorPanel";
 import { RunsPanel } from "./inspiration-detail/RunsPanel";
@@ -624,21 +625,19 @@ export function InspirationDetailPage() {
   ]);
 
   useEffect(() => {
-    if (!selectedNode || selectedNode.node_type !== "deck_generation") {
+    const decision = resolveDeckEditorAutoOpenDecision({
+      activeSidebarTab,
+      selectedNode,
+      lastAutoOpenedDeckNodeId: lastAutoOpenedDeckNodeIdRef.current,
+    });
+    lastAutoOpenedDeckNodeIdRef.current = decision.nextLastAutoOpenedDeckNodeId;
+    if (decision.action === "open") {
+      setDeckEditorOpen(true);
+      return;
+    }
+    if (decision.action === "close") {
       setDeckEditorOpen(false);
-      lastAutoOpenedDeckNodeIdRef.current = null;
-      return;
     }
-    if (activeSidebarTab !== "details") {
-      setDeckEditorOpen(false);
-      lastAutoOpenedDeckNodeIdRef.current = null;
-      return;
-    }
-    if (lastAutoOpenedDeckNodeIdRef.current === selectedNode.id) {
-      return;
-    }
-    lastAutoOpenedDeckNodeIdRef.current = selectedNode.id;
-    setDeckEditorOpen(true);
   }, [activeSidebarTab, selectedNode?.id, selectedNode?.node_type]);
 
   useEffect(() => {
