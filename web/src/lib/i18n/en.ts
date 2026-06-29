@@ -1813,6 +1813,8 @@ export const enUS: Record<keyof typeof zhCN, string> = {
   "detail.deck.noGeneratedSlides": "No generated slides can be exported",
   "detail.deck.openCanvasNode": "Open canvas node",
   "detail.deck.sourceNodeDeleted": "Source node deleted",
+  "detail.deck.openEditor": "Open editor",
+  "detail.deck.editorTitle": "Edit deck node · {title}",
   "detail.deck.dagDeckHint": "This deck comes from a canvas node. Edit sources, slides, and generation settings in the node editor.",
   "detail.deck.sourceNodeLabel": "Source: {title}",
   "detail.deck.createFromSelection": "Create deck",

@@ -235,15 +235,17 @@
 - `image_generation` is a trigger/config node, not an image-bearing artifact node. It must not render generated-image
   previews or download links on the image-generation card itself.
 - `deck_generation` is a deck-editor node, not a workflow-run node. The normal node toolbar must not expose ordinary
-  run/run-after actions for it; selecting the node opens the deck editor surface in the right inspector instead.
+  run/run-after actions for it; selecting the node opens the Details sidebar summary and auto-opens a dedicated deck-editor
+  modal instead of expanding the full editor inside the narrow right inspector.
 - `deck_generation` can accept incoming edges from completed upstream material nodes but cannot be a connection source.
   Frontend connection validation must block `deck_generation -> *` edges before mutation submission.
 - Deck-node summary cards should show source counts, outline/deck page counts, generated slide counts, stale-source or
   invalid-source warnings, and browser-export availability. They should not show backend `pptx_url` as the primary export
   path for current DAG decks.
-- Deck editing lives in the node inspector, not the legacy deck tab. The editor uses node-scoped APIs for deck metadata,
-  outline generation, batch generation, slide edits, slide re-generation, speaker notes, source refresh, and slide
-  material binding by `source_item_id`.
+- Deck editing for DAG nodes lives in the node Details flow, not the legacy deck tab. The right inspector should stay
+  compact and render only deck summary/status plus an explicit reopen action; the full deck editor renders in a page-level
+  modal that uses the same node-scoped APIs for deck metadata, outline generation, batch generation, slide edits,
+  slide re-generation, speaker notes, source refresh, and slide material binding by `source_item_id`.
 - The DAG deck editor must not call legacy generic mutating deck endpoints such as `PUT /deck-slides/{id}/material`,
   `POST /decks/{id}/generate`, or backend export for active DAG decks. Generic endpoints remain only for legacy/non-DAG
   history flows.

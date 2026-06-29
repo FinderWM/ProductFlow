@@ -1811,6 +1811,8 @@ export const zhCN = {
   "detail.deck.noGeneratedSlides": "没有可导出的已生成页面",
   "detail.deck.openCanvasNode": "前往画布节点",
   "detail.deck.sourceNodeDeleted": "来源节点已删除",
+  "detail.deck.openEditor": "打开编辑器",
+  "detail.deck.editorTitle": "编辑演示节点 · {title}",
   "detail.deck.dagDeckHint": "此演示来自画布节点，请在节点编辑区修改来源、页面和生成设置。",
   "detail.deck.sourceNodeLabel": "来源：{title}",
   "detail.deck.createFromSelection": "生成演示",

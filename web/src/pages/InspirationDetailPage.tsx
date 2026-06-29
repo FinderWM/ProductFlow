@@ -264,6 +264,7 @@ export function InspirationDetailPage() {
   const draftVersionRef = useRef(0);
   const previousDraftNodeIdRef = useRef<string | null>(null);
   const lastOpenedTailPlanIdRef = useRef<string | null>(null);
+  const lastAutoOpenedDeckNodeIdRef = useRef<string | null>(null);
   const skipNextCanvasBlankClickRef = useRef(false);
   const canvasSelectionClearedRef = useRef(false);
   const workflowClipboardRef = useRef<WorkflowClipboard | null>(null);
@@ -336,6 +337,7 @@ export function InspirationDetailPage() {
   const [pendingDeckSourcePreflight, setPendingDeckSourcePreflight] =
     useState<PendingDeckSourcePreflight | null>(null);
   const [tailPlanDialogOpen, setTailPlanDialogOpen] = useState(false);
+  const [deckEditorOpen, setDeckEditorOpen] = useState(false);
   const [historyActionBusy, setHistoryActionBusy] = useState(false);
   const [error, setError] = useState("");
   const normalizedTemplateSearch = templateSearch.trim();
@@ -620,6 +622,24 @@ export function InspirationDetailPage() {
     selectedTailPendingPlan,
     selectedTailPendingPlan?.plan_id,
   ]);
+
+  useEffect(() => {
+    if (!selectedNode || selectedNode.node_type !== "deck_generation") {
+      setDeckEditorOpen(false);
+      lastAutoOpenedDeckNodeIdRef.current = null;
+      return;
+    }
+    if (activeSidebarTab !== "details") {
+      setDeckEditorOpen(false);
+      lastAutoOpenedDeckNodeIdRef.current = null;
+      return;
+    }
+    if (lastAutoOpenedDeckNodeIdRef.current === selectedNode.id) {
+      return;
+    }
+    lastAutoOpenedDeckNodeIdRef.current = selectedNode.id;
+    setDeckEditorOpen(true);
+  }, [activeSidebarTab, selectedNode?.id, selectedNode?.node_type]);
 
   useEffect(() => {
     return () => {
@@ -3365,6 +3385,9 @@ export function InspirationDetailPage() {
               pendingStartNodeId,
             })
           }
+          deckEditorOpen={deckEditorOpen}
+          onOpenDeckEditor={() => setDeckEditorOpen(true)}
+          onCloseDeckEditor={() => setDeckEditorOpen(false)}
         />
       </div>
     ) : (

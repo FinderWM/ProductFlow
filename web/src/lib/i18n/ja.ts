@@ -1814,6 +1814,8 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "detail.deck.noGeneratedSlides": "エクスポート可能な生成済みページがありません",
   "detail.deck.openCanvasNode": "キャンバスノードへ",
   "detail.deck.sourceNodeDeleted": "ソースノードは削除済みです",
+  "detail.deck.openEditor": "エディターを開く",
+  "detail.deck.editorTitle": "デッキノードを編集 · {title}",
   "detail.deck.dagDeckHint": "このデッキはキャンバスノード由来です。ソース、スライド、生成設定はノードエディタで編集してください。",
   "detail.deck.sourceNodeLabel": "ソース：{title}",
   "detail.deck.createFromSelection": "デッキを作成",

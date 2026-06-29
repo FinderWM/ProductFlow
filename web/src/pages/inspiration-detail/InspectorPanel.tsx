@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   ImagePlus,
   Loader2,
+  Maximize2,
   OctagonX,
   Play,
   Presentation,
@@ -23,6 +24,7 @@ import {
   Settings2,
   Trash2,
   Upload,
+  X,
   XCircle,
   Sparkles,
   Wand2,
@@ -34,6 +36,7 @@ import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSe
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../../components/ImageGenerationSettingsTabs";
 import { ImageToolControls } from "../../components/ImageToolControls";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
+import { ModalShell } from "../../components/ModalShell";
 import { ParameterHelpButton } from "../../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
 import { SelectField } from "../../components/SelectField";
@@ -70,6 +73,7 @@ import type {
 } from "../../lib/types";
 import { IMAGE_PREVIEW_SURFACE_CLASS_NAME } from "./constants";
 import { buildDeckOutlineSlideContext, partitionDeckSources } from "./deckSourcePlanning";
+import { readDeckNodeCardState } from "./deckNodeCardState";
 import { DECK_STATUS_LABEL_KEYS } from "./deckStatus";
 import { orderDeckSourcesForDraft } from "./deckSourceOrder";
 import { describeDeckGroupId, readDeckSlideSourcePlan } from "./deckSlideManifest";
@@ -255,6 +259,9 @@ interface InspectorPanelProps {
   cancelBusy: boolean;
   runActionState: WorkflowNodeRunActionState;
   saveStatus: SaveStatus;
+  deckEditorOpen?: boolean;
+  onOpenDeckEditor?: () => void;
+  onCloseDeckEditor?: () => void;
 }
 
 export function InspectorPanel({
@@ -293,6 +300,9 @@ export function InspectorPanel({
   cancelBusy,
   runActionState,
   saveStatus,
+  deckEditorOpen = false,
+  onOpenDeckEditor,
+  onCloseDeckEditor,
 }: InspectorPanelProps) {
   const { t } = useI18n();
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
@@ -619,16 +629,32 @@ export function InspectorPanel({
           />
         ) : null}
         {node.node_type === "deck_generation" ? (
-          <DeckGenerationInspector
-            inspiration={inspiration}
-            node={node}
-            draft={draft}
-            resourceGroups={resourceGroups}
-            onDraftChange={onDraftChange}
-            onFlushDraft={onFlushDraft}
-            busy={busy}
-            t={t}
-          />
+          <>
+            <DeckGenerationInspectorSummary
+              node={node}
+              onOpenEditor={onOpenDeckEditor}
+              t={t}
+            />
+            {onOpenDeckEditor && onCloseDeckEditor ? (
+              <DeckGenerationEditorDialog
+                open={deckEditorOpen}
+                title={displayTitle}
+                onClose={onCloseDeckEditor}
+                t={t}
+              >
+                <DeckGenerationInspector
+                  inspiration={inspiration}
+                  node={node}
+                  draft={draft}
+                  resourceGroups={resourceGroups}
+                  onDraftChange={onDraftChange}
+                  onFlushDraft={onFlushDraft}
+                  busy={busy}
+                  t={t}
+                />
+              </DeckGenerationEditorDialog>
+            ) : null}
+          </>
         ) : null}
         </fieldset>
       </section>
@@ -1529,6 +1555,106 @@ function deckPointsFromDraft(value: string): string[] {
 
 function stringArraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function DeckGenerationInspectorSummary({
+  node,
+  onOpenEditor,
+  t,
+}: {
+  node: WorkflowNode;
+  onOpenEditor?: () => void;
+  t: TFunction;
+}) {
+  const cardState = readDeckNodeCardState(node);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm dark:border-slate-700 dark:bg-[#0b1220]">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {cardState ? (
+                <span
+                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClass(cardState.badgeTone)}`}
+                >
+                  {t(cardState.badgeLabelKey)}
+                </span>
+              ) : null}
+              {cardState ? <DeckMetaChip label={t("detail.deck.sourceCount", { count: cardState.sourceItemCount })} /> : null}
+              {cardState && cardState.slideCount !== null ? (
+                <DeckMetaChip label={t("detail.deck.slideCount", { count: cardState.slideCount })} />
+              ) : null}
+              {cardState && cardState.generatedSlideCount !== null ? (
+                <DeckMetaChip label={t("detail.deck.generatedCount", { count: cardState.generatedSlideCount })} />
+              ) : null}
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">{t("detail.deck.dagDeckHint")}</p>
+          </div>
+          {onOpenEditor ? (
+            <button
+              type="button"
+              onClick={onOpenEditor}
+              className="btn-secondary-spring inline-flex min-h-10 w-full shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold sm:w-auto"
+            >
+              <Maximize2 size={14} />
+              {t("detail.deck.openEditor")}
+            </button>
+          ) : null}
+        </div>
+        {cardState?.sourceStale ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+            {t("detail.deck.sourceStale")}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DeckGenerationEditorDialog({
+  open,
+  title,
+  onClose,
+  t,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  t: TFunction;
+  children: ReactNode;
+}) {
+  const headingId = useId();
+
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      ariaLabelledBy={headingId}
+      panelElement="section"
+      overlayClassName="z-[90] bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6 sm:py-6"
+      panelClassName="flex h-[min(92vh,58rem)] w-[min(96vw,78rem)] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#0f1726]"
+    >
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-700 sm:px-6">
+        <div className="min-w-0 flex-1">
+          <h2 id={headingId} className="truncate text-base font-semibold text-slate-950 dark:text-white">
+            {t("detail.deck.editorTitle", { title })}
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{t("detail.deck.dagDeckHint")}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t("common.close")}
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
+    </ModalShell>
+  );
 }
 
 function DeckGenerationInspector({
