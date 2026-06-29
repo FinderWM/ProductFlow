@@ -454,3 +454,4 @@ def test_template_node_type_allowlist_matches_current_workflow_node_types() -> N
         WorkflowNodeType.IMAGE_GENERATION,
         WorkflowNodeType.TAIL_SPLITTER,
     }
+    assert WorkflowNodeType.DECK_GENERATION not in SUPPORTED_CANVAS_TEMPLATE_NODE_TYPES

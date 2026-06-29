@@ -622,6 +622,16 @@ returns the normal `InspirationWorkflow`.
 - `image_generation` nodes collect incoming edge context, including upstream copy text and reference-image outputs. They
   are trigger/config nodes, not image-bearing artifact slots; generated images must be viewed/downloaded from linked
   downstream `reference_image` nodes or normal inspiration artifact history, not from the `image_generation` node card.
+- `deck_generation` nodes are canvas-anchored deck editors, not normal execution nodes. They may consume upstream
+  `inspiration_context`, `copy_generation`, `reference_image`, `image_generation`, and `tail_splitter` outputs as deck
+  source material, but they are excluded from normal workflow run planning, queueing, retry, and scheduler dispatch.
+- Edges into `deck_generation` express source-pool membership only. They do not imply automatic downstream execution.
+  Backend edge validation must reject `deck_generation` as an edge source so the node stays target-only in the DAG.
+- `deck_generation` nodes are excluded from canvas-template save/apply contracts and from reusable-node artifact copying.
+  Full-canvas templates, node-group templates, and duplicate/template-copy sanitizers must not persist live deck ids,
+  slide bindings, deck source fingerprints, or deck history references.
+- Deleting a `deck_generation` node must not delete its deck history. Deck linkage is soft via `decks.workflow_node_id`,
+  and serializer-time existence checks determine whether the source node still exists.
 - Workflow image generation mode is derived from the stored `poster_generation_mode` plus the current image-purpose
   provider binding. Real image bindings (`openai_responses`, `openai_images`, or `google_gemini_image`) execute through
   the image provider even when the legacy runtime value remains `template`. `mock` image bindings keep the no-external
@@ -736,12 +746,17 @@ returns the normal `InspirationWorkflow`.
 - Image generation without downstream `reference_image` targets -> fail the node/run with a concise message such as
   `请先把生图节点连接到至少一个图片/参考图节点，再运行图片生成`; do not silently place output on the
   `image_generation` node.
+- Any workflow execution path that receives a `deck_generation` node for normal node execution -> fail fast as a
+  non-retryable validation error.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: run default DAG `inspiration_context -> copy_generation -> image_generation -> reference_image`; it produces one draft
   `CopySet`, one generated `PosterVariant` history row, fills the downstream reference slot with a `SourceAsset`, and writes
   run history.
+- Good: connect completed copy/image/reference nodes into a `deck_generation` node; normal workflow runs still ignore the
+  deck node while node-scoped deck APIs can read those upstream results as source material.
+- Good: deleting a deck node leaves deck history readable because `decks.workflow_node_id` is a soft link, not a FK.
 - Good: upload a context image and a UTF-8 markdown document to `inspiration_context`, patch `owner_id`, `entry_type`,
   `long_text`, and scalar `dynamic_fields`, then directly run a downstream image node. The downstream
   `context_summary.inspiration_context` reflects the saved config, `context_sources` include long text, document text, and

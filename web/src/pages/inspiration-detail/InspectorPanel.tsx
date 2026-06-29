@@ -1,8 +1,12 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   Clock3,
+  Download,
   Eye,
   EyeOff,
   FileText,
@@ -12,12 +16,16 @@ import {
   Loader2,
   OctagonX,
   Play,
+  Presentation,
   Plus,
+  RefreshCcw,
   Save,
+  Settings2,
   Trash2,
   Upload,
   XCircle,
   Sparkles,
+  Wand2,
 } from "lucide-react";
 
 import { ClipboardImageButton } from "../../components/ClipboardImageButton";
@@ -29,6 +37,8 @@ import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { ParameterHelpButton } from "../../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
 import { SelectField } from "../../components/SelectField";
+import { api, ApiError } from "../../lib/api";
+import { exportDeckAsPptx } from "../../lib/deckPptxExport";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import {
   generationConfigOptionLabel,
@@ -44,6 +54,11 @@ import type {
   CopyBlock,
   CopyPayloadV2,
   CopySection,
+  Deck,
+  DeckSlide,
+  DeckSlideStatus,
+  DeckSourceItem,
+  DeckSourceManifest,
   GenerationConfigOption,
   GenerationResourceGroup,
   ImageToolOptionKey,
@@ -54,6 +69,10 @@ import type {
   WorkflowNode,
 } from "../../lib/types";
 import { IMAGE_PREVIEW_SURFACE_CLASS_NAME } from "./constants";
+import { buildDeckOutlineSlideContext, partitionDeckSources } from "./deckSourcePlanning";
+import { DECK_STATUS_LABEL_KEYS } from "./deckStatus";
+import { orderDeckSourcesForDraft } from "./deckSourceOrder";
+import { describeDeckGroupId, readDeckSlideSourcePlan } from "./deckSlideManifest";
 import { DownloadLink } from "./ImageDownloadComponents";
 import { getNodeImageDownload, getNodeImageSourceAsset } from "./imageDownloads";
 import { workflowNodeDisplayLabel, workflowNodeDisplayTitle } from "./nodeDisplay";
@@ -213,6 +232,7 @@ interface InspectorPanelProps {
   resourceGroups: GenerationResourceGroup[];
   generationConfigOptions: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
+  onFlushDraft?: () => Promise<void>;
   onPreviewImage: (image: DownloadableImage) => void;
   onRun: () => void;
   onCancelRun: (() => void) | null;
@@ -229,6 +249,8 @@ interface InspectorPanelProps {
   onDelete: () => void;
   deleteDisabled?: boolean;
   deleteTitle?: string;
+  onCreateDeckFromTail?: (tailNode: WorkflowNode) => void;
+  createDeckPending?: boolean;
   busy: boolean;
   cancelBusy: boolean;
   runActionState: WorkflowNodeRunActionState;
@@ -248,6 +270,7 @@ export function InspectorPanel({
   resourceGroups,
   generationConfigOptions,
   onDraftChange,
+  onFlushDraft,
   onPreviewImage,
   onRun,
   onCancelRun,
@@ -264,6 +287,8 @@ export function InspectorPanel({
   onDelete,
   deleteDisabled = false,
   deleteTitle,
+  onCreateDeckFromTail,
+  createDeckPending = false,
   busy,
   cancelBusy,
   runActionState,
@@ -277,11 +302,12 @@ export function InspectorPanel({
     copy_generation: FileText,
     image_generation: ImageIcon,
     tail_splitter: Sparkles,
+    deck_generation: Presentation,
   }[node.node_type];
   const InspectorIcon = icon;
   const displayTitle = workflowNodeDisplayTitle({ ...node, title: draft.title || node.title }, t);
   const displayLabel = workflowNodeDisplayLabel(node, t);
-  const showRunAction = node.node_type !== "inspiration_context";
+  const showRunAction = node.node_type !== "inspiration_context" && node.node_type !== "deck_generation";
   const showDeleteAction = node.node_type !== "inspiration_context";
   const showActionRow = showRunAction || Boolean(onCancelRun) || showDeleteAction;
   const actionGridColumns = showRunAction && onCancelRun ? "grid-cols-2" : "grid-cols-1";
@@ -509,7 +535,9 @@ export function InspectorPanel({
                   ? t("detail.inspector.description.copyGeneration")
                   : node.node_type === "tail_splitter"
                     ? t("detail.inspector.description.tailSplitter")
-                  : t("detail.inspector.description.inspirationContext")}
+                    : node.node_type === "deck_generation"
+                      ? t("detail.inspector.description.deckGeneration")
+                      : t("detail.inspector.description.inspirationContext")}
           </div>
 
         {node.node_type === "inspiration_context" ? (
@@ -564,11 +592,14 @@ export function InspectorPanel({
         ) : null}
         {node.node_type === "tail_splitter" ? (
           <TailSplitterInspector
+            node={node}
             draft={draft}
             tailSplitterMaxItems={tailSplitterMaxItems}
             resourceGroups={resourceGroups}
             generationConfigOptions={textGenerationConfigOptions}
             onDraftChange={onDraftChange}
+            onCreateDeckFromTail={onCreateDeckFromTail}
+            createDeckPending={createDeckPending}
             t={t}
           />
         ) : null}
@@ -584,6 +615,18 @@ export function InspectorPanel({
             onDraftChange={onDraftChange}
             downstreamReferenceCount={downstreamReferenceCount}
             onPreviewPrompt={setPromptPreview}
+            t={t}
+          />
+        ) : null}
+        {node.node_type === "deck_generation" ? (
+          <DeckGenerationInspector
+            inspiration={inspiration}
+            node={node}
+            draft={draft}
+            resourceGroups={resourceGroups}
+            onDraftChange={onDraftChange}
+            onFlushDraft={onFlushDraft}
+            busy={busy}
             t={t}
           />
         ) : null}
@@ -1250,6 +1293,1216 @@ function ResourceGroupSelector({
   );
 }
 
+const DECK_SLIDE_STATUS_LABEL_KEYS: Record<DeckSlideStatus, TranslationKey> = {
+  pending: "detail.deck.slideStatus.pending",
+  queued: "detail.deck.slideStatus.queued",
+  running: "detail.deck.slideStatus.running",
+  completed: "detail.deck.slideStatus.completed",
+  failed: "detail.deck.slideStatus.failed",
+};
+
+function deckErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return error.detail;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function deckIsActive(deck: Deck | undefined): boolean {
+  if (!deck) {
+    return false;
+  }
+  return deck.status === "generating" || deck.slides.some((slide) => slide.slide_status === "queued" || slide.slide_status === "running");
+}
+
+function deckIdFromNode(node: WorkflowNode): string | null {
+  const value = node.config_json.deck_id ?? node.output_json?.deck_id;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function deckSourceKindLabel(kind: string, t: TFunction): string {
+  if (kind === "copy") return t("detail.deck.sourceKind.copy");
+  if (kind === "image") return t("detail.deck.sourceKind.image");
+  if (kind === "source_asset") return t("detail.deck.sourceKind.sourceAsset");
+  if (kind === "poster") return t("detail.deck.sourceKind.poster");
+  if (kind === "context") return t("detail.deck.sourceKind.context");
+  if (kind === "tail_item") return t("detail.deck.sourceKind.tailItem");
+  if (kind === "tail_plan") return t("detail.deck.sourceKind.tailPlan");
+  return kind;
+}
+
+function deckUnavailableReasonLabel(reason: string, t: TFunction): string {
+  const keyMap: Record<string, TranslationKey> = {
+    node_not_succeeded: "detail.deck.unavailableReason.nodeNotSucceeded",
+    empty_output: "detail.deck.unavailableReason.emptyOutput",
+    missing_copy_set: "detail.deck.unavailableReason.missingCopySet",
+    missing_source_asset: "detail.deck.unavailableReason.missingSourceAsset",
+    disabled_source_asset: "detail.deck.unavailableReason.disabledSourceAsset",
+    missing_poster_variant: "detail.deck.unavailableReason.missingPosterVariant",
+    disabled_poster_variant: "detail.deck.unavailableReason.disabledPosterVariant",
+    unsupported_node_type: "detail.deck.unavailableReason.unsupportedNodeType",
+  };
+  const key = keyMap[reason];
+  return key ? t(key) : reason;
+}
+
+function deckPageTypeLabel(pageType: string, t: TFunction): string {
+  const keyMap: Record<string, TranslationKey> = {
+    cover: "detail.deck.pageType.cover",
+    section: "detail.deck.pageType.section",
+    copy: "detail.deck.pageType.copy",
+    image: "detail.deck.pageType.image",
+    summary: "detail.deck.pageType.summary",
+  };
+  const key = keyMap[pageType];
+  return key ? t(key) : pageType;
+}
+
+function deckCaptionSourceLabel(captionSource: string, t: TFunction): string {
+  const keyMap: Record<string, TranslationKey> = {
+    copy_summary: "detail.deck.captionSource.copySummary",
+    visual_summary: "detail.deck.captionSource.visualSummary",
+  };
+  const key = keyMap[captionSource];
+  return key ? t(key) : captionSource;
+}
+
+function deckGroupLabel(groupId: string | null, t: TFunction): string | null {
+  const descriptor = describeDeckGroupId(groupId);
+  if (!descriptor) {
+    return null;
+  }
+  if (descriptor.kind === "tail") {
+    return t("detail.deck.group.tail", { id: descriptor.shortId });
+  }
+  if (descriptor.kind === "node") {
+    return t("detail.deck.group.node", { id: descriptor.shortId });
+  }
+  return t("detail.deck.group.other", { id: descriptor.shortId });
+}
+
+function deckSourceBadgeLabel(source: DeckSourceItem, t: TFunction): string {
+  return `${source.workflow_node_title} · ${deckSourceKindLabel(source.kind, t)}`;
+}
+
+function DeckMetaChip({
+  label,
+  title,
+}: {
+  label: string;
+  title?: string;
+}) {
+  return (
+    <span
+      title={title}
+      className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+    >
+      {label}
+    </span>
+  );
+}
+
+function DeckSourceSection({
+  title,
+  emptyLabel,
+  sources,
+  orderedSourceIds,
+  actionBusy,
+  onToggleSelection,
+  onMoveSource,
+  t,
+}: {
+  title: string;
+  emptyLabel: string;
+  sources: DeckSourceItem[];
+  orderedSourceIds: string[];
+  actionBusy: boolean;
+  onToggleSelection: (sourceItemId: string, selected: boolean) => void;
+  onMoveSource: (sourceItemId: string, direction: -1 | 1) => void;
+  t: TFunction;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{title}</div>
+      {sources.length ? (
+        sources.map((source) => {
+          const sourceIndex = orderedSourceIds.indexOf(source.source_item_id);
+          return (
+            <div
+              key={source.source_item_id}
+              className={`rounded-lg border px-2.5 py-2 text-xs dark:border-slate-700 ${
+                source.selected
+                  ? "border-slate-200 bg-slate-50 dark:bg-[#0b1220]"
+                  : "border-slate-200/80 bg-slate-50/50 opacity-75 dark:bg-slate-950/40"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 flex-1 gap-2.5">
+                  {source.thumbnail_url ? (
+                    <img
+                      src={api.toApiUrl(source.thumbnail_url)}
+                      alt={source.workflow_node_title}
+                      className="h-12 w-12 shrink-0 rounded-md border border-slate-200 object-cover dark:border-slate-700"
+                    />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={actionBusy}
+                        onClick={() => onToggleSelection(source.source_item_id, !source.selected)}
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                          source.selected
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200"
+                            : "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                        }`}
+                      >
+                        {source.selected ? t("detail.deck.sourceSelected") : t("detail.deck.sourceExcluded")}
+                      </button>
+                      <span className="truncate font-semibold text-slate-700 dark:text-slate-200">
+                        {source.workflow_node_title}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                        {deckSourceKindLabel(source.kind, t)}
+                      </span>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">{source.source_item_id}</span>
+                    </div>
+                    {source.summary ? (
+                      <div className="mt-1 line-clamp-3 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                        {source.summary}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={actionBusy || sourceIndex <= 0}
+                    onClick={() => onMoveSource(source.source_item_id, -1)}
+                    title={t("detail.deck.moveSourceUp")}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <ChevronUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionBusy || sourceIndex < 0 || sourceIndex === orderedSourceIds.length - 1}
+                    onClick={() => onMoveSource(source.source_item_id, 1)}
+                    title={t("detail.deck.moveSourceDown")}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })
+      ) : (
+        <div className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          {emptyLabel}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function deckBindableSources(manifest: DeckSourceManifest | undefined): DeckSourceItem[] {
+  return (manifest?.available_sources ?? []).filter((source) => source.source_asset_id || source.poster_variant_id);
+}
+
+function deckPointsDraft(points: string[]): string {
+  return points.join("\n");
+}
+
+function deckPointsFromDraft(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function stringArraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function DeckGenerationInspector({
+  inspiration,
+  node,
+  draft,
+  resourceGroups,
+  onDraftChange,
+  onFlushDraft,
+  busy,
+  t,
+}: {
+  inspiration: InspirationDetail;
+  node: WorkflowNode;
+  draft: NodeConfigDraft;
+  resourceGroups: GenerationResourceGroup[];
+  onDraftChange: (draft: NodeConfigDraft) => void;
+  onFlushDraft?: () => Promise<void>;
+  busy: boolean;
+  t: TFunction;
+}) {
+  const queryClient = useQueryClient();
+  const [localError, setLocalError] = useState("");
+  const [bindingSlideId, setBindingSlideId] = useState<string | null>(null);
+  const [pptxProgress, setPptxProgress] = useState<{ completed: number; total: number } | null>(null);
+  const [deckTitleDraft, setDeckTitleDraft] = useState("");
+  const [outlineSlideDrafts, setOutlineSlideDrafts] = useState<Record<string, { title: string; points: string[] }>>({});
+  const stylesQuery = useQuery({ queryKey: ["deck-styles"], queryFn: () => api.listDeckStyles() });
+  const sourcesQuery = useQuery({
+    queryKey: ["workflow-deck-sources", inspiration.id, node.id, draft.deckIncludeTransitiveInputs],
+    queryFn: () => api.getWorkflowDeckSources(inspiration.id, node.id, draft.deckIncludeTransitiveInputs),
+  });
+  const deckId = deckIdFromNode(node);
+  const deckQuery = useQuery({
+    queryKey: ["deck", deckId],
+    queryFn: () => api.getDeck(deckId as string),
+    enabled: Boolean(deckId),
+    refetchInterval: (query) => (deckIsActive(query.state.data as Deck | undefined) ? 1500 : false),
+  });
+  const deck = deckQuery.data;
+  useEffect(() => {
+    setDeckTitleDraft(deck?.title ?? "");
+  }, [deck?.id, deck?.title]);
+  useEffect(() => {
+    setOutlineSlideDrafts({});
+  }, [deck?.id]);
+  const styles = stylesQuery.data ?? [];
+  const availableSources = orderDeckSourcesForDraft(
+    sourcesQuery.data?.available_sources ?? [],
+    draft.deckSourceOrder,
+    draft.deckExcludedSourceItemIds,
+  );
+  const sourcePartitions = partitionDeckSources(sourcesQuery.data, availableSources);
+  const unavailableSources = sourcesQuery.data?.unavailable_sources ?? [];
+  const bindableSources = deckBindableSources(
+    sourcesQuery.data
+      ? { ...sourcesQuery.data, available_sources: availableSources }
+      : undefined,
+  );
+  const flushDraftBeforeDeckAction = async () => {
+    if (!onFlushDraft) {
+      return;
+    }
+    await onFlushDraft();
+  };
+  const invalidateDeckQueries = async (nextDeck?: Deck) => {
+    await queryClient.invalidateQueries({ queryKey: ["workflow-deck-sources", inspiration.id, node.id] });
+    await queryClient.invalidateQueries({ queryKey: ["inspiration-workflow", inspiration.id] });
+    await queryClient.invalidateQueries({ queryKey: ["decks", inspiration.id] });
+    if (nextDeck?.id) {
+      await queryClient.invalidateQueries({ queryKey: ["deck", nextDeck.id] });
+    }
+    if (deckId) {
+      await queryClient.invalidateQueries({ queryKey: ["deck", deckId] });
+    }
+  };
+  const onDeckError = (error: unknown) => {
+    setLocalError(deckErrorMessage(error, t("detail.deck.actionFailed")));
+  };
+  const refreshSourcesMutation = useMutation({
+    mutationFn: async () => {
+      await flushDraftBeforeDeckAction();
+      return api.refreshWorkflowDeckSources(inspiration.id, node.id, draft.deckIncludeTransitiveInputs);
+    },
+    onSuccess: async () => {
+      setLocalError("");
+      await invalidateDeckQueries(deck);
+    },
+    onError: onDeckError,
+  });
+  const outlineMutation = useMutation({
+    mutationFn: async () => {
+      await flushDraftBeforeDeckAction();
+      return api.createWorkflowDeckOutline(inspiration.id, node.id, {
+        resource_group_id: draft.resourceGroupId,
+        title: deckTitleDraft.trim() || undefined,
+        source_input: draft.deckSourceInput.trim() || undefined,
+        max_slides: draft.deckSlideCountMode === "target" ? draft.deckMaxSlides : undefined,
+        style_key: draft.deckStyleKey || undefined,
+        include_transitive_inputs: draft.deckIncludeTransitiveInputs,
+        planning_strategy: draft.deckPlanningStrategy,
+        slide_count_mode: draft.deckSlideCountMode,
+        group_by: draft.deckGroupBy,
+        section_pages: draft.deckSectionPages,
+        per_group_image_cap: draft.deckPerGroupImageCap,
+        slide_context: buildDeckOutlineSlideContext(deck, outlineSlideDrafts),
+      });
+    },
+    onSuccess: async (nextDeck) => {
+      setLocalError("");
+      await invalidateDeckQueries(nextDeck);
+    },
+    onError: onDeckError,
+  });
+  const styleMutation = useMutation({
+    mutationFn: (styleKey: string) => api.setWorkflowDeckStyle(inspiration.id, node.id, { style_key: styleKey }),
+    onSuccess: async (nextDeck) => {
+      setLocalError("");
+      await invalidateDeckQueries(nextDeck);
+    },
+    onError: onDeckError,
+  });
+  const metadataMutation = useMutation({
+    mutationFn: (input: { title?: string; speaker_notes_enabled?: boolean }) =>
+      api.renameWorkflowDeck(inspiration.id, node.id, input),
+    onSuccess: async (nextDeck) => {
+      setLocalError("");
+      await invalidateDeckQueries(nextDeck);
+    },
+    onError: onDeckError,
+  });
+  const reorderMutation = useMutation({
+    mutationFn: (slideIds: string[]) => api.reorderWorkflowDeckSlides(inspiration.id, node.id, slideIds),
+    onSuccess: async (nextDeck) => {
+      setLocalError("");
+      await invalidateDeckQueries(nextDeck);
+    },
+    onError: onDeckError,
+  });
+  const updateSlideMutation = useMutation({
+    mutationFn: (input: { slideId: string; payload: { title?: string; points?: string[]; speaker_notes?: string } }) =>
+      api.updateWorkflowDeckSlide(inspiration.id, node.id, input.slideId, input.payload),
+    onSuccess: async () => {
+      setLocalError("");
+      await invalidateDeckQueries(deck);
+    },
+    onError: onDeckError,
+  });
+  const regenerateSlideMutation = useMutation({
+    mutationFn: (slideId: string) => api.regenerateWorkflowDeckSlide(inspiration.id, node.id, slideId),
+    onSuccess: async () => {
+      setLocalError("");
+      await invalidateDeckQueries(deck);
+    },
+    onError: onDeckError,
+  });
+  const slideNotesMutation = useMutation({
+    mutationFn: (slideId: string) => api.generateWorkflowDeckSlideSpeakerNotes(inspiration.id, node.id, slideId),
+    onSuccess: async () => {
+      setLocalError("");
+      await invalidateDeckQueries(deck);
+    },
+    onError: onDeckError,
+  });
+  const sampleMutation = useMutation({
+    mutationFn: () => api.generateWorkflowDeckSample(inspiration.id, node.id),
+    onSuccess: async (nextDeck) => {
+      setLocalError("");
+      await invalidateDeckQueries(nextDeck);
+    },
+    onError: onDeckError,
+  });
+  const generateMutation = useMutation({
+    mutationFn: () => api.generateWorkflowDeck(inspiration.id, node.id),
+    onSuccess: async (nextDeck) => {
+      setLocalError("");
+      await invalidateDeckQueries(nextDeck);
+    },
+    onError: onDeckError,
+  });
+  const bindMutation = useMutation({
+    mutationFn: (input: { slideId: string; sourceItemId: string }) =>
+      api.bindWorkflowDeckSlideMaterial(inspiration.id, node.id, input.slideId, {
+        source_item_id: input.sourceItemId,
+        target_slot: "visual",
+      }),
+    onSuccess: async () => {
+      setLocalError("");
+      setBindingSlideId(null);
+      await invalidateDeckQueries(deck);
+    },
+    onError: onDeckError,
+  });
+  const exportMutation = useMutation({
+    mutationFn: async () => {
+      if (!deck || deck.generated_slide_count <= 0) {
+        throw new Error(t("detail.deck.noGeneratedSlides"));
+      }
+      await exportDeckAsPptx(deck, { onProgress: setPptxProgress });
+    },
+    onSuccess: () => {
+      setLocalError("");
+      setPptxProgress(null);
+    },
+    onError: (error) => {
+      setPptxProgress(null);
+      onDeckError(error);
+    },
+  });
+  const generating = deckIsActive(deck);
+  const actionBusy =
+    busy ||
+    generating ||
+    refreshSourcesMutation.isPending ||
+    outlineMutation.isPending ||
+    styleMutation.isPending ||
+    metadataMutation.isPending ||
+    reorderMutation.isPending ||
+    updateSlideMutation.isPending ||
+    regenerateSlideMutation.isPending ||
+    slideNotesMutation.isPending ||
+    sampleMutation.isPending ||
+    generateMutation.isPending ||
+    bindMutation.isPending ||
+    exportMutation.isPending;
+
+  const commitDeckTitle = () => {
+    if (!deck || metadataMutation.isPending) {
+      return;
+    }
+    const nextTitle = deckTitleDraft.trim();
+    if (!nextTitle) {
+      setDeckTitleDraft(deck.title);
+      return;
+    }
+    if (nextTitle !== deck.title) {
+      metadataMutation.mutate({ title: nextTitle });
+    }
+  };
+
+  const moveSlide = (slideId: string, direction: -1 | 1) => {
+    if (!deck || reorderMutation.isPending) {
+      return;
+    }
+    const slideIds = deck.slides.map((slide) => slide.id);
+    const index = slideIds.indexOf(slideId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= slideIds.length) {
+      return;
+    }
+    [slideIds[index], slideIds[nextIndex]] = [slideIds[nextIndex], slideIds[index]];
+    reorderMutation.mutate(slideIds);
+  };
+
+  const setDeckSourceSelection = (sourceItemId: string, selected: boolean) => {
+    const excludedSet = new Set(draft.deckExcludedSourceItemIds);
+    if (selected) {
+      excludedSet.delete(sourceItemId);
+    } else {
+      excludedSet.add(sourceItemId);
+    }
+    onDraftChange({
+      ...draft,
+      deckExcludedSourceItemIds: Array.from(excludedSet),
+      deckSourceOrder: draft.deckSourceOrder.includes(sourceItemId)
+        ? draft.deckSourceOrder
+        : [...draft.deckSourceOrder, sourceItemId],
+    });
+  };
+
+  const moveDeckSource = (sourceItemId: string, direction: -1 | 1) => {
+    const currentOrder = availableSources.map((source) => source.source_item_id);
+    const index = currentOrder.indexOf(sourceItemId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= currentOrder.length) {
+      return;
+    }
+    [currentOrder[index], currentOrder[nextIndex]] = [currentOrder[nextIndex], currentOrder[index]];
+    onDraftChange({
+      ...draft,
+      deckSourceOrder: currentOrder,
+    });
+  };
+  const handleOutlineSlideDraftChange = useCallback(
+    (slideId: string, payload: { title: string; points: string[] }) => {
+      setOutlineSlideDrafts((current) => {
+        const previous = current[slideId];
+        if (
+          previous &&
+          previous.title === payload.title &&
+          stringArraysEqual(previous.points, payload.points)
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          [slideId]: payload,
+        };
+      });
+    },
+    [],
+  );
+
+  return (
+    <div className="space-y-4">
+      {localError ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+          <AlertCircle size={13} className="mr-1.5 inline" />
+          {localError}
+        </div>
+      ) : null}
+      <ResourceGroupSelector
+        label={t("detail.inspector.resourceGroup")}
+        draft={draft}
+        resourceGroups={resourceGroups}
+        onDraftChange={onDraftChange}
+        t={t}
+      />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <FieldLabel label={t("detail.deck.planningStrategy")} />
+          <SelectField
+            value={draft.deckPlanningStrategy}
+            options={[
+              { value: "hybrid", label: t("detail.deck.planningStrategy.hybrid") },
+              { value: "copy_led", label: t("detail.deck.planningStrategy.copyLed") },
+              { value: "image_led", label: t("detail.deck.planningStrategy.imageLed") },
+            ]}
+            onChange={(value) =>
+              onDraftChange({
+                ...draft,
+                deckPlanningStrategy: value as NodeConfigDraft["deckPlanningStrategy"],
+              })
+            }
+            ariaLabel={t("detail.deck.planningStrategy")}
+            radius="lg"
+            visualSize="sm"
+          />
+        </label>
+        <label className="block">
+          <FieldLabel label={t("detail.deck.slideCountMode")} />
+          <SelectField
+            value={draft.deckSlideCountMode}
+            options={[
+              { value: "auto", label: t("detail.deck.slideCountMode.auto") },
+              { value: "target", label: t("detail.deck.slideCountMode.target") },
+            ]}
+            onChange={(value) =>
+              onDraftChange({
+                ...draft,
+                deckSlideCountMode: value as NodeConfigDraft["deckSlideCountMode"],
+              })
+            }
+            ariaLabel={t("detail.deck.slideCountMode")}
+            radius="lg"
+            visualSize="sm"
+          />
+        </label>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <FieldLabel label={t("detail.deck.style")} />
+          <SelectField
+            value={draft.deckStyleKey}
+            options={styles.map((style) => ({ value: style.key, label: style.label }))}
+            onChange={(value) => {
+              onDraftChange({ ...draft, deckStyleKey: value });
+              if (deck) {
+                styleMutation.mutate(value);
+              }
+            }}
+            ariaLabel={t("detail.deck.style")}
+            radius="lg"
+            visualSize="sm"
+          />
+        </label>
+        <label className="block">
+          <FieldLabel label={t("detail.deck.maxSlides")} />
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={draft.deckMaxSlides}
+            disabled={draft.deckSlideCountMode !== "target"}
+            onChange={(event) =>
+              onDraftChange({
+                ...draft,
+                deckMaxSlides: Math.max(1, Math.min(50, Number.parseInt(event.target.value || "8", 10))),
+              })
+            }
+            className="w-full px-3 py-2 text-sm outline-none input-premium"
+          />
+        </label>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="block">
+          <FieldLabel label={t("detail.deck.groupBy")} />
+          <SelectField
+            value={draft.deckGroupBy}
+            options={[
+              { value: "tail_item", label: t("detail.deck.groupBy.tailItem") },
+              { value: "source_node", label: t("detail.deck.groupBy.sourceNode") },
+            ]}
+            onChange={(value) =>
+              onDraftChange({
+                ...draft,
+                deckGroupBy: value as NodeConfigDraft["deckGroupBy"],
+              })
+            }
+            ariaLabel={t("detail.deck.groupBy")}
+            radius="lg"
+            visualSize="sm"
+          />
+        </label>
+        <label className="block">
+          <FieldLabel label={t("detail.deck.perGroupImageCap")} />
+          <input
+            type="number"
+            min={1}
+            max={12}
+            value={draft.deckPerGroupImageCap}
+            onChange={(event) =>
+              onDraftChange({
+                ...draft,
+                deckPerGroupImageCap: Math.max(1, Math.min(12, Number.parseInt(event.target.value || "3", 10))),
+              })
+            }
+            className="w-full px-3 py-2 text-sm outline-none input-premium"
+          />
+        </label>
+        <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200">
+          <input
+            type="checkbox"
+            checked={draft.deckSectionPages}
+            onChange={(event) => onDraftChange({ ...draft, deckSectionPages: event.target.checked })}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          {t("detail.deck.sectionPages")}
+        </label>
+      </div>
+      <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200">
+        <input
+          type="checkbox"
+          checked={draft.deckIncludeTransitiveInputs}
+          onChange={(event) => onDraftChange({ ...draft, deckIncludeTransitiveInputs: event.target.checked })}
+          className="h-4 w-4 rounded border-slate-300"
+        />
+        {t("detail.deck.includeTransitive")}
+      </label>
+      {!deck ? (
+        <label className="block">
+          <FieldLabel label={t("detail.deck.deckTitle")} />
+          <input
+            type="text"
+            value={deckTitleDraft}
+            disabled={actionBusy}
+            onChange={(event) => setDeckTitleDraft(event.target.value)}
+            className="w-full px-3 py-2 text-sm outline-none input-premium"
+            placeholder={t("detail.deck.deckTitle")}
+          />
+        </label>
+      ) : null}
+      <InspectorTextArea
+        label={t("detail.deck.sourceInput")}
+        value={draft.deckSourceInput}
+        onChange={(value) => onDraftChange({ ...draft, deckSourceInput: value })}
+        minRows={3}
+        maxRows={6}
+        placeholder={t("detail.deck.sourceInputPlaceholder")}
+      />
+      <div className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <FieldLabel label={t("detail.deck.sources")} className="text-xs font-semibold text-slate-700 dark:text-slate-200" />
+          <button
+            type="button"
+            disabled={actionBusy}
+            onClick={() => refreshSourcesMutation.mutate()}
+            className="inline-flex items-center rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            {refreshSourcesMutation.isPending ? <Loader2 size={12} className="mr-1 animate-spin" /> : <RefreshCcw size={12} className="mr-1" />}
+            {t("detail.deck.refreshSources")}
+          </button>
+        </div>
+        {sourcesQuery.isLoading ? (
+          <div className="space-y-2">
+            <div className="h-8 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+            <div className="h-8 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+          </div>
+        ) : availableSources.length ? (
+          <div className="space-y-3">
+            <DeckSourceSection
+              title={t("detail.deck.primarySources")}
+              emptyLabel={t("detail.deck.noPrimarySources")}
+              sources={sourcePartitions.primarySources}
+              orderedSourceIds={availableSources.map((source) => source.source_item_id)}
+              actionBusy={actionBusy}
+              onToggleSelection={setDeckSourceSelection}
+              onMoveSource={moveDeckSource}
+              t={t}
+            />
+            <DeckSourceSection
+              title={t("detail.deck.alternateSources")}
+              emptyLabel={t("detail.deck.noAlternateSources")}
+              sources={sourcePartitions.alternateSources}
+              orderedSourceIds={availableSources.map((source) => source.source_item_id)}
+              actionBusy={actionBusy}
+              onToggleSelection={setDeckSourceSelection}
+              onMoveSource={moveDeckSource}
+              t={t}
+            />
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("detail.deck.noSources")}
+          </div>
+        )}
+        {unavailableSources.length ? (
+          <div className="mt-3 space-y-1.5">
+            <div className="text-[11px] font-medium text-amber-700 dark:text-amber-200">
+              {t("detail.deck.unavailableSources", { count: unavailableSources.length })}
+            </div>
+            {unavailableSources.map((source) => (
+              <div
+                key={source.source_item_id}
+                className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-semibold">{source.workflow_node_title}</span>
+                  {source.kind ? (
+                    <span className="shrink-0 rounded-full border border-amber-200 bg-white/80 px-2 py-0.5 text-[10px] text-amber-700 dark:border-amber-300/20 dark:bg-slate-950/60 dark:text-amber-100">
+                      {deckSourceKindLabel(source.kind, t)}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1">{deckUnavailableReasonLabel(source.reason, t)}</div>
+                {source.summary ? <div className="mt-1 opacity-80">{source.summary}</div> : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {sourcesQuery.data?.source_stale ? (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+            {t("detail.deck.sourceStale")}
+          </div>
+        ) : null}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <button
+          type="button"
+          disabled={actionBusy}
+          onClick={() => outlineMutation.mutate()}
+          title={t("detail.deck.outline")}
+          className="inline-flex min-h-10 items-center justify-center rounded-xl px-3 text-xs font-semibold btn-primary-spring disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {outlineMutation.isPending ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Settings2 size={13} className="mr-1.5" />}
+          {deck ? t("detail.deck.refreshOutline") : t("detail.deck.outline")}
+        </button>
+        <button
+          type="button"
+          disabled={actionBusy || !deck || generating}
+          onClick={() => sampleMutation.mutate()}
+          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+          {sampleMutation.isPending ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Wand2 size={13} className="mr-1.5" />}
+          {t("detail.deck.sample")}
+        </button>
+        <button
+          type="button"
+          disabled={actionBusy || !deck || generating}
+          onClick={() => generateMutation.mutate()}
+          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+          {generateMutation.isPending || generating ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Sparkles size={13} className="mr-1.5" />}
+          {generating ? t("detail.deck.generating") : t("detail.deck.generate")}
+        </button>
+      </div>
+      {deck ? (
+        <div className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <label className="block">
+                <FieldLabel label={t("detail.deck.deckTitle")} />
+                <input
+                  type="text"
+                  value={deckTitleDraft}
+                  disabled={metadataMutation.isPending}
+                  onChange={(event) => setDeckTitleDraft(event.target.value)}
+                  onBlur={commitDeckTitle}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  className="w-full rounded-lg border border-transparent bg-transparent px-0 py-1 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-slate-200 focus:bg-white focus:px-2 dark:text-white dark:focus:border-slate-700 dark:focus:bg-slate-950"
+                  placeholder={t("detail.deck.deckTitle")}
+                />
+              </label>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                {t(DECK_STATUS_LABEL_KEYS[deck.status])} · {t("detail.deck.slideCount", { count: deck.slides.length })} · {t("detail.deck.generatedCount", { count: deck.generated_slide_count })}
+              </div>
+              <label className="mt-2 inline-flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={deck.speaker_notes_enabled}
+                  disabled={metadataMutation.isPending}
+                  onChange={(event) => metadataMutation.mutate({ speaker_notes_enabled: event.target.checked })}
+                  className="h-3.5 w-3.5 rounded border-slate-300"
+                />
+                {t("detail.deck.speakerNotesEnabled")}
+              </label>
+            </div>
+            {deck.generated_slide_count > 0 ? (
+              <button
+                type="button"
+                disabled={exportMutation.isPending}
+                onClick={() => exportMutation.mutate()}
+                className="inline-flex items-center rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                {exportMutation.isPending ? <Loader2 size={12} className="mr-1 animate-spin" /> : <Download size={12} className="mr-1" />}
+                {exportMutation.isPending && pptxProgress
+                  ? t("detail.deck.exportingPptx", pptxProgress)
+                  : t("detail.deck.exportPptx")}
+              </button>
+            ) : null}
+          </div>
+          <div className="space-y-2">
+            {deck.slides.map((slide, index) => (
+              <DeckNodeSlideRow
+                key={slide.id}
+                slide={slide}
+                index={index}
+                canMoveUp={index > 0}
+                canMoveDown={index < deck.slides.length - 1}
+                availableSources={availableSources}
+                bindableSources={bindableSources}
+                bindingSlideId={bindingSlideId}
+                slideId={slide.id}
+                onSetBindingSlideId={setBindingSlideId}
+                onMoveUp={() => moveSlide(slide.id, -1)}
+                onMoveDown={() => moveSlide(slide.id, 1)}
+                onUpdate={(payload) => updateSlideMutation.mutate({ slideId: slide.id, payload })}
+                onRegenerate={() => regenerateSlideMutation.mutate(slide.id)}
+                onGenerateNotes={() => slideNotesMutation.mutate(slide.id)}
+                onBind={(sourceItemId) => bindMutation.mutate({ slideId: slide.id, sourceItemId })}
+                onDraftChange={handleOutlineSlideDraftChange}
+                actionBusy={actionBusy}
+                updateBusy={updateSlideMutation.isPending && updateSlideMutation.variables?.slideId === slide.id}
+                regenerateBusy={regenerateSlideMutation.isPending && regenerateSlideMutation.variables === slide.id}
+                notesBusy={slideNotesMutation.isPending && slideNotesMutation.variables === slide.id}
+                bindingBusy={bindMutation.isPending && bindMutation.variables?.slideId === slide.id}
+                t={t}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DeckNodeSlideRow({
+  slide,
+  index,
+  canMoveUp,
+  canMoveDown,
+  availableSources,
+  bindableSources,
+  bindingSlideId,
+  slideId,
+  onSetBindingSlideId,
+  onMoveUp,
+  onMoveDown,
+  onUpdate,
+  onRegenerate,
+  onGenerateNotes,
+  onBind,
+  onDraftChange,
+  actionBusy,
+  updateBusy,
+  regenerateBusy,
+  notesBusy,
+  bindingBusy,
+  t,
+}: {
+  slide: DeckSlide;
+  index: number;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  availableSources: DeckSourceItem[];
+  bindableSources: DeckSourceItem[];
+  bindingSlideId: string | null;
+  slideId: string;
+  onSetBindingSlideId: (slideId: string | null) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onUpdate: (payload: { title?: string; points?: string[]; speaker_notes?: string }) => void;
+  onRegenerate: () => void;
+  onGenerateNotes: () => void;
+  onBind: (sourceItemId: string) => void;
+  onDraftChange: (slideId: string, payload: { title: string; points: string[] }) => void;
+  actionBusy: boolean;
+  updateBusy: boolean;
+  regenerateBusy: boolean;
+  notesBusy: boolean;
+  bindingBusy: boolean;
+  t: TFunction;
+}) {
+  const [titleDraft, setTitleDraft] = useState(slide.title);
+  const [pointsDraft, setPointsDraft] = useState(deckPointsDraft(slide.points));
+  const [notesDraft, setNotesDraft] = useState(slide.speaker_notes ?? "");
+  const slidePlan = readDeckSlideSourcePlan(slide);
+  const selectedSourceItemId = slidePlan.selectedSourceItemId ?? "";
+  const bindingOpen = bindingSlideId === slide.id;
+  const groupLabel = slidePlan.groupLabel ?? deckGroupLabel(slidePlan.groupId, t);
+  const plannedSourceRefs = slidePlan.sourceRefIds.map((sourceItemId) => ({
+    sourceItemId,
+    source: availableSources.find((candidate) => candidate.source_item_id === sourceItemId) ?? null,
+  }));
+  const selectedBoundSource =
+    availableSources.find((source) => source.source_item_id === selectedSourceItemId) ?? null;
+  useEffect(() => {
+    setTitleDraft(slide.title);
+    setPointsDraft(deckPointsDraft(slide.points));
+    setNotesDraft(slide.speaker_notes ?? "");
+  }, [slide.id, slide.title, slide.points, slide.speaker_notes]);
+  useEffect(() => {
+    onDraftChange(slideId, {
+      title: titleDraft,
+      points: deckPointsFromDraft(pointsDraft),
+    });
+  }, [onDraftChange, pointsDraft, slideId, titleDraft]);
+
+  const commitSlideDraft = () => {
+    if (updateBusy) {
+      return;
+    }
+    const nextTitle = titleDraft.trim();
+    const nextPoints = deckPointsFromDraft(pointsDraft);
+    const nextNotes = notesDraft;
+    const payload: { title?: string; points?: string[]; speaker_notes?: string } = {};
+    if (nextTitle && nextTitle !== slide.title) {
+      payload.title = nextTitle;
+    }
+    if (!nextTitle) {
+      setTitleDraft(slide.title);
+    }
+    if (!stringArraysEqual(nextPoints, slide.points)) {
+      payload.points = nextPoints;
+    }
+    if (nextNotes !== (slide.speaker_notes ?? "")) {
+      payload.speaker_notes = nextNotes;
+    }
+    if (Object.keys(payload).length) {
+      onUpdate(payload);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-700 dark:bg-[#0b1220]">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white text-[11px] font-semibold text-slate-500 shadow-sm dark:bg-slate-950 dark:text-slate-300">
+            {index + 1}
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+              {titleDraft || slide.title}
+            </div>
+            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+              {t(DECK_SLIDE_STATUS_LABEL_KEYS[slide.slide_status])}
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-1">
+          <button
+            type="button"
+            disabled={actionBusy || !canMoveUp}
+            onClick={onMoveUp}
+            aria-label={t("detail.deck.moveUp")}
+            title={t("detail.deck.moveUp")}
+            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+          >
+            <ChevronUp size={13} />
+          </button>
+          <button
+            type="button"
+            disabled={actionBusy || !canMoveDown}
+            onClick={onMoveDown}
+            aria-label={t("detail.deck.moveDown")}
+            title={t("detail.deck.moveDown")}
+            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+          >
+            <ChevronDown size={13} />
+          </button>
+          <button
+            type="button"
+            disabled={actionBusy}
+            onClick={commitSlideDraft}
+            aria-label={t("detail.deck.saveSlide")}
+            title={t("detail.deck.saveSlide")}
+            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+          >
+            {updateBusy ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          </button>
+          <button
+            type="button"
+            disabled={actionBusy || slide.slide_status === "queued" || slide.slide_status === "running"}
+            onClick={onRegenerate}
+            aria-label={t("detail.deck.regenerateSlide")}
+            title={t("detail.deck.regenerateSlide")}
+            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+          >
+            {regenerateBusy ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+          </button>
+          <button
+            type="button"
+            disabled={actionBusy}
+            onClick={onGenerateNotes}
+            aria-label={t("detail.deck.generateSpeakerNotes")}
+            title={t("detail.deck.generateSpeakerNotes")}
+            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+          >
+            {notesBusy ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+          </button>
+          {slide.image_url ? (
+            <a
+              href={api.toApiUrl(slide.image_url)}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={t("detail.deck.openGenerated")}
+              title={t("detail.deck.openGenerated")}
+              className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+            >
+              <Eye size={13} />
+            </a>
+          ) : null}
+        </div>
+      </div>
+      <div className="grid gap-2">
+        <label className="block">
+          <FieldLabel label={t("detail.deck.slideTitle")} />
+          <input
+            type="text"
+            value={titleDraft}
+            disabled={actionBusy}
+            onChange={(event) => setTitleDraft(event.target.value)}
+            onBlur={commitSlideDraft}
+            className="w-full px-3 py-2 text-xs outline-none input-premium"
+            placeholder={t("detail.deck.slideTitle")}
+          />
+        </label>
+        <label className="block">
+          <FieldLabel label={t("detail.deck.slidePoints")} />
+          <textarea
+            value={pointsDraft}
+            disabled={actionBusy}
+            onChange={(event) => setPointsDraft(event.target.value)}
+            onBlur={commitSlideDraft}
+            rows={3}
+            className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+            placeholder={t("detail.deck.slidePointsPlaceholder")}
+          />
+        </label>
+        <label className="block">
+          <FieldLabel label={t("detail.deck.speakerNotes")} />
+          <textarea
+            value={notesDraft}
+            disabled={actionBusy}
+            onChange={(event) => setNotesDraft(event.target.value)}
+            onBlur={commitSlideDraft}
+            rows={3}
+            className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+            placeholder={t("detail.deck.speakerNotesPlaceholder")}
+          />
+        </label>
+        {slidePlan.pageType ||
+        slidePlan.captionSource ||
+        groupLabel ||
+        plannedSourceRefs.length ||
+        slidePlan.materialHint ||
+        selectedSourceItemId ? (
+          <div className="border-t border-slate-200 pt-2 text-[11px] dark:border-slate-700">
+            <div className="flex flex-wrap gap-1">
+              {slidePlan.pageType ? (
+                <DeckMetaChip label={deckPageTypeLabel(slidePlan.pageType, t)} />
+              ) : null}
+              {groupLabel ? <DeckMetaChip label={groupLabel} title={slidePlan.groupId ?? undefined} /> : null}
+              {slidePlan.captionSource ? (
+                <DeckMetaChip label={deckCaptionSourceLabel(slidePlan.captionSource, t)} />
+              ) : null}
+            </div>
+            {plannedSourceRefs.length ? (
+              <div className="mt-2">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  {t("detail.deck.plannedSources")}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {plannedSourceRefs.map(({ sourceItemId, source }) => (
+                    <DeckMetaChip
+                      key={sourceItemId}
+                      label={source ? deckSourceBadgeLabel(source, t) : sourceItemId}
+                      title={sourceItemId}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {selectedSourceItemId ? (
+              <div className="mt-2">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  {t("detail.deck.currentMaterial")}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <DeckMetaChip
+                    label={
+                      selectedBoundSource
+                        ? deckSourceBadgeLabel(selectedBoundSource, t)
+                        : selectedSourceItemId
+                    }
+                    title={selectedSourceItemId}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {slidePlan.materialHint ? (
+              <div className="mt-2">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  {t("detail.deck.materialHint")}
+                </div>
+                <div className="leading-5 text-slate-600 dark:text-slate-300">{slidePlan.materialHint}</div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          disabled={actionBusy}
+          onClick={() => onSetBindingSlideId(bindingOpen ? null : slide.id)}
+          className="inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+        >
+          <ImageIcon size={12} className="mr-1" />
+          {selectedSourceItemId ? t("detail.deck.changeMaterial") : t("detail.deck.bindMaterial")}
+        </button>
+      </div>
+      {bindingOpen ? (
+        <div className="mt-2 grid gap-1.5">
+          {bindableSources.length ? (
+            bindableSources.map((source) => (
+              <button
+                key={source.source_item_id}
+                type="button"
+                disabled={bindingBusy}
+                onClick={() => onBind(source.source_item_id)}
+                className={`rounded-lg border px-2 py-1.5 text-left text-[11px] transition-colors disabled:opacity-50 ${
+                  selectedSourceItemId === source.source_item_id
+                    ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-sky-300/40 dark:bg-sky-400/15 dark:text-sky-100"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-slate-600"
+                }`}
+              >
+                {bindingBusy && selectedSourceItemId === source.source_item_id ? <Loader2 size={12} className="mr-1 inline animate-spin" /> : null}
+                {source.workflow_node_title} · {deckSourceKindLabel(source.kind, t)}
+              </button>
+            ))
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-300 px-2 py-2 text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              {t("detail.deck.noBindableSources")}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function GenerationConfigSelector({
   label,
   helpKey,
@@ -1406,20 +2659,28 @@ function CopyNodeInspector({
 }
 
 function TailSplitterInspector({
+  node,
   draft,
   tailSplitterMaxItems,
   resourceGroups,
   generationConfigOptions,
   onDraftChange,
+  onCreateDeckFromTail,
+  createDeckPending,
   t,
 }: {
+  node: WorkflowNode;
   draft: NodeConfigDraft;
   tailSplitterMaxItems: number;
   resourceGroups: GenerationResourceGroup[];
   generationConfigOptions: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
+  onCreateDeckFromTail?: (tailNode: WorkflowNode) => void;
+  createDeckPending?: boolean;
   t: TFunction;
 }) {
+  const appliedBatchCount = (node.output_json?.applied_batches as unknown[] | undefined)?.length ?? 0;
+
   return (
     <div className="space-y-3">
       <InspectorTextArea
@@ -1467,6 +2728,22 @@ function TailSplitterInspector({
         onDraftChange={onDraftChange}
         t={t}
       />
+      {appliedBatchCount > 0 && onCreateDeckFromTail ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-slate-900/45">
+          <div className="text-[11px] leading-5 text-zinc-500 dark:text-slate-400">
+            {t("detail.tailPlan.createDeckDescription", { count: appliedBatchCount })}
+          </div>
+          <button
+            type="button"
+            onClick={() => onCreateDeckFromTail(node)}
+            disabled={createDeckPending}
+            className="mt-3 inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+          >
+            {createDeckPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Presentation size={14} className="mr-2" />}
+            {t("detail.tailPlan.createDeck")}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -20,14 +20,19 @@ from inspiration_one_backend.application.contracts import (
 from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
 from inspiration_one_backend.domain.enums import (
     PosterKind,
+    SourceAssetKind,
     WorkflowNodeStatus,
+    WorkflowNodeType,
     WorkflowRunStatus,
 )
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
     CopySet,
+    Inspiration,
+    InspirationWorkflow,
     PosterVariant,
+    SourceAsset,
     WorkflowNode,
     WorkflowNodeRun,
     WorkflowRun,
@@ -106,6 +111,16 @@ def _contains_value(value: object, expected: object) -> bool:
     if isinstance(value, list):
         return any(_contains_value(item, expected) for item in value)
     return False
+
+
+def _create_workflow_for_poster_source_asset_test(db_session) -> tuple[str, str]:
+    inspiration = Inspiration(name="海报素材测试", resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID)
+    db_session.add(inspiration)
+    db_session.flush()
+    workflow = InspirationWorkflow(inspiration_id=inspiration.id, title="海报素材画布", active=True)
+    db_session.add(workflow)
+    db_session.commit()
+    return inspiration.id, workflow.id
 
 
 def test_inspiration_workflow_status_endpoint_returns_lightweight_state(db_session) -> None:
@@ -326,6 +341,144 @@ def test_reference_workflow_node_image_can_be_cleared(configured_env: Path) -> N
         asset["id"] for asset in inspiration_after.json()["source_assets"] if asset["kind"] == "reference_image"
     }
     assert asset_id in reference_asset_ids
+
+
+def test_lookup_source_asset_for_poster_variant_is_read_only(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.application.inspiration_workflow.artifacts import (
+        lookup_source_asset_for_poster_variant,
+    )
+
+    inspiration_id, workflow_id = _create_workflow_for_poster_source_asset_test(db_session)
+    poster_id = _create_poster_variant_for_binding(
+        inspiration_id=inspiration_id,
+        storage_root=configured_env,
+        write_file=False,
+    )
+
+    asset = SourceAsset(
+        inspiration_id=inspiration_id,
+        kind=SourceAssetKind.REFERENCE_IMAGE,
+        original_filename="paired-reference.png",
+        mime_type="image/png",
+        storage_path="inspirations/test/reference/paired-reference.png",
+    )
+    node = WorkflowNode(
+        workflow_id=workflow_id,
+        node_type=WorkflowNodeType.IMAGE_GENERATION,
+        title="生图节点",
+        status=WorkflowNodeStatus.SUCCEEDED,
+        config_json={"size": "1024x1024"},
+        output_json={"generated_poster_variant_ids": [poster_id], "filled_source_asset_ids": []},
+    )
+    db_session.add_all([asset, node])
+    db_session.flush()
+    node.output_json = {"generated_poster_variant_ids": [poster_id], "filled_source_asset_ids": [asset.id]}
+    db_session.commit()
+
+    workflow = db_session.get(InspirationWorkflow, workflow_id)
+    assert workflow is not None
+    found = lookup_source_asset_for_poster_variant(db_session, workflow=workflow, poster_variant_id=poster_id)
+
+    assert found is not None
+    assert found.id == asset.id
+    assert found.source_poster_variant_id is None
+    db_session.expire(found)
+    assert found.source_poster_variant_id is None
+
+
+def test_materialize_poster_variant_source_asset_backfills_existing_pair(
+    configured_env: Path,
+    db_session,
+) -> None:
+    from inspiration_one_backend.application.inspiration_workflow.artifacts import (
+        materialize_poster_variant_source_asset,
+    )
+
+    inspiration_id, workflow_id = _create_workflow_for_poster_source_asset_test(db_session)
+    poster_id = _create_poster_variant_for_binding(
+        inspiration_id=inspiration_id,
+        storage_root=configured_env,
+        write_file=False,
+    )
+
+    asset = SourceAsset(
+        inspiration_id=inspiration_id,
+        kind=SourceAssetKind.REFERENCE_IMAGE,
+        original_filename="paired-reference.png",
+        mime_type="image/png",
+        storage_path="inspirations/test/reference/paired-reference.png",
+    )
+    node = WorkflowNode(
+        workflow_id=workflow_id,
+        node_type=WorkflowNodeType.IMAGE_GENERATION,
+        title="生图节点",
+        status=WorkflowNodeStatus.SUCCEEDED,
+        config_json={"size": "1024x1024"},
+        output_json={"generated_poster_variant_ids": [poster_id], "filled_source_asset_ids": []},
+    )
+    db_session.add_all([asset, node])
+    db_session.flush()
+    node.output_json = {"generated_poster_variant_ids": [poster_id], "filled_source_asset_ids": [asset.id]}
+    expected_node_config = dict(node.config_json or {})
+    expected_node_output = dict(node.output_json or {})
+    db_session.commit()
+
+    workflow = db_session.get(InspirationWorkflow, workflow_id)
+    assert workflow is not None
+    materialized = materialize_poster_variant_source_asset(
+        db_session,
+        workflow=workflow,
+        poster_variant_id=poster_id,
+    )
+
+    assert materialized.id == asset.id
+    assert materialized.source_poster_variant_id == poster_id
+    db_session.refresh(node)
+    assert node.config_json == expected_node_config
+    assert node.output_json == expected_node_output
+
+
+def test_materialize_poster_variant_source_asset_creates_reference_asset_without_node_mutation(
+    configured_env: Path,
+    db_session,
+) -> None:
+    from inspiration_one_backend.application.inspiration_workflow.artifacts import (
+        materialize_poster_variant_source_asset,
+    )
+
+    inspiration_id, workflow_id = _create_workflow_for_poster_source_asset_test(db_session)
+    poster_id = _create_poster_variant_for_binding(
+        inspiration_id=inspiration_id,
+        storage_root=configured_env,
+        write_file=True,
+    )
+    node = WorkflowNode(
+        workflow_id=workflow_id,
+        node_type=WorkflowNodeType.REFERENCE_IMAGE,
+        title="参考图节点",
+        status=WorkflowNodeStatus.IDLE,
+        config_json={"role": "reference", "label": "参考图节点"},
+        output_json=None,
+    )
+    db_session.add(node)
+    db_session.commit()
+
+    workflow = db_session.get(InspirationWorkflow, workflow_id)
+    assert workflow is not None
+    materialized = materialize_poster_variant_source_asset(
+        db_session,
+        workflow=workflow,
+        poster_variant_id=poster_id,
+    )
+
+    assert materialized.inspiration_id == inspiration_id
+    assert materialized.kind == SourceAssetKind.REFERENCE_IMAGE
+    assert materialized.original_filename == f"poster-{poster_id}.png"
+    assert materialized.source_poster_variant_id == poster_id
+    assert materialized.storage_path.startswith(f"inspirations/{inspiration_id}/reference/")
+    db_session.refresh(node)
+    assert node.config_json == {"role": "reference", "label": "参考图节点"}
+    assert node.output_json is None
 
 
 def test_reference_workflow_node_can_bind_existing_source_or_poster_image(configured_env: Path) -> None:

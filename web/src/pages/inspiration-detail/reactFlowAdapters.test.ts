@@ -404,6 +404,17 @@ describe("reactFlowAdapters", () => {
       }),
     ).toBeNull();
     expect(
+      connectionToWorkflowEdgeInput(
+        {
+          source: "deck",
+          target: "copy",
+          sourceHandle: null,
+          targetHandle: null,
+        },
+        { sourceNodeTypeById: { deck: "deck_generation" } },
+      ),
+    ).toBeNull();
+    expect(
       connectionToWorkflowEdgeInput({
         source: "",
         target: "target",

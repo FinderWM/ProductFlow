@@ -4,20 +4,23 @@ import { ChevronDown, ChevronUp, Download, FolderPlus, Loader2, Plus, RefreshCcw
 
 import { ResourceLibraryModal } from "../../components/resource-library/ResourceLibraryModal";
 import { api } from "../../lib/api";
-import type { Deck, DeckSlide, DeckStatus } from "../../lib/types";
+import { exportDeckAsPptx } from "../../lib/deckPptxExport";
+import { useI18n } from "../../lib/preferences";
+import type { Deck, DeckSlide } from "../../lib/types";
+import { DECK_STATUS_LABEL_KEYS } from "./deckStatus";
+import {
+  canOpenWorkflowDeckNode,
+  deckAllowsLegacyMutation,
+  deckHistoryAccessoryKind,
+  deckSupportsFrontendPptxExport,
+  hasDeletedWorkflowDeckNode,
+  isWorkflowDeck,
+} from "./deckPanelState";
 
 interface DeckPanelProps {
   inspirationId: string;
+  onOpenWorkflowNode?: (nodeId: string) => void;
 }
-
-const STATUS_LABEL: Record<DeckStatus, string> = {
-  draft: "草稿",
-  outline_confirmed: "大纲已确认",
-  style_confirmed: "风格已确认",
-  generating: "生成中",
-  completed: "已完成",
-  failed: "失败",
-};
 
 const SLIDE_STATUS_LABEL: Record<string, string> = {
   pending: "待生成",
@@ -41,13 +44,15 @@ function deckIsActive(deck: Deck | undefined): boolean {
   return deck.slides.some((slide) => slide.slide_status === "queued" || slide.slide_status === "running");
 }
 
-export function DeckPanel({ inspirationId }: DeckPanelProps) {
+export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [sourceInput, setSourceInput] = useState("");
   const [styleKey, setStyleKey] = useState("clean_business");
   const [error, setError] = useState<string | null>(null);
   const [materialSlideId, setMaterialSlideId] = useState<string | null>(null);
+  const [pptxProgress, setPptxProgress] = useState<{ completed: number; total: number } | null>(null);
 
   const groupsQuery = useQuery({
     queryKey: ["my-generation-resource-groups"],
@@ -117,9 +122,22 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
     onError: (err) => setError(errorMessage(err)),
   });
   const exportMutation = useMutation({
-    mutationFn: () => api.exportDeck(deck!.id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["deck", selectedDeckId] }),
-    onError: (err) => setError(errorMessage(err)),
+    mutationFn: async () => {
+      if (!deck) {
+        throw new Error(t("detail.deck.noGeneratedSlides"));
+      }
+      await exportDeckAsPptx(deck, {
+        onProgress: setPptxProgress,
+      });
+    },
+    onSuccess: () => {
+      setPptxProgress(null);
+      setError(null);
+    },
+    onError: (err) => {
+      setPptxProgress(null);
+      setError(errorMessage(err));
+    },
   });
   const deleteMutation = useMutation({
     mutationFn: (deckId: string) => api.deleteDeck(deckId),
@@ -180,9 +198,14 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
 
   const styles = stylesQuery.data ?? [];
   const generating = deckIsActive(deck);
+  const workflowDeck = isWorkflowDeck(deck);
 
   const decks = decksQuery.data ?? [];
   const sortedDecks = useMemo(() => decks, [decks]);
+
+  useEffect(() => {
+    if (workflowDeck && materialSlideId) setMaterialSlideId(null);
+  }, [materialSlideId, workflowDeck]);
 
   return (
     <div className="flex flex-col gap-4 p-1 text-sm">
@@ -194,11 +217,11 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
 
       {/* 新建演示文稿 */}
       <section className="rounded-xl border border-slate-200/60 p-3 dark:border-white/10">
-        <h3 className="mb-2 font-medium text-slate-700 dark:text-slate-200">新建演示文稿</h3>
+        <h3 className="mb-2 font-medium text-slate-700 dark:text-slate-200">{t("detail.deck.newLegacyTitle")}</h3>
         <textarea
           value={sourceInput}
           onChange={(event) => setSourceInput(event.target.value)}
-          placeholder="可选：粘贴长文 / 补充要点，留空则用灵感产物已有素材生成大纲"
+          placeholder={t("detail.deck.legacySourcePlaceholder")}
           rows={3}
           className="mb-2 w-full resize-none rounded-lg border border-slate-200/70 bg-white/60 px-3 py-2 text-slate-700 outline-none focus:border-indigo-400 dark:border-white/10 dark:bg-black/20 dark:text-slate-100"
         />
@@ -221,7 +244,7 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
             className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-white disabled:opacity-50"
           >
             {createMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-            生成大纲
+            {t("detail.deck.outline")}
           </button>
         </div>
       </section>
@@ -229,32 +252,57 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
       {/* deck 历史 */}
       {sortedDecks.length > 0 ? (
         <section className="rounded-xl border border-slate-200/60 p-3 dark:border-white/10">
-          <h3 className="mb-2 font-medium text-slate-700 dark:text-slate-200">演示文稿历史</h3>
+          <h3 className="mb-2 font-medium text-slate-700 dark:text-slate-200">{t("detail.deck.historyTitle")}</h3>
           <ul className="flex flex-col gap-1">
-            {sortedDecks.map((item) => (
-              <li key={item.id} className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedDeckId(item.id)}
-                  className={`flex-1 truncate rounded-md px-2 py-1 text-left ${
-                    selectedDeckId === item.id ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15" : "hover:bg-slate-100 dark:hover:bg-white/5"
-                  }`}
-                >
-                  {item.title}
-                  <span className="ml-2 text-xs text-slate-400">
-                    {item.slide_count} 页 · {STATUS_LABEL[item.status]}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  title="删除"
-                  onClick={() => deleteMutation.mutate(item.id)}
-                  className="rounded-md p-1 text-slate-400 hover:text-rose-500"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </li>
-            ))}
+            {sortedDecks.map((item) => {
+              const itemHasDeletedWorkflowNode = hasDeletedWorkflowDeckNode(item);
+              const accessoryKind = deckHistoryAccessoryKind(item, Boolean(onOpenWorkflowNode));
+              const itemWorkflowNodeId = item.workflow_node_id;
+
+              return (
+                <li key={item.id} className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDeckId(item.id)}
+                    className={`flex-1 truncate rounded-md px-2 py-1 text-left ${
+                      selectedDeckId === item.id ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15" : "hover:bg-slate-100 dark:hover:bg-white/5"
+                    }`}
+                  >
+                    {item.title}
+                    <span className="ml-2 text-xs text-slate-400">
+                      {t("detail.deck.slideCount", { count: item.slide_count })} · {t(DECK_STATUS_LABEL_KEYS[item.status])}
+                      {item.generated_slide_count > 0 ? ` · ${t("detail.deck.generatedCount", { count: item.generated_slide_count })}` : ""}
+                    </span>
+                  </button>
+                  {accessoryKind === "openWorkflowNode" && itemWorkflowNodeId && onOpenWorkflowNode ? (
+                    <button
+                      type="button"
+                      title={t("detail.deck.openCanvasNode")}
+                      onClick={() => onOpenWorkflowNode(itemWorkflowNodeId)}
+                      className="rounded-md p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300"
+                    >
+                      <Sparkles size={15} />
+                    </button>
+                  ) : accessoryKind === "workflowDeleted" || accessoryKind === "workflowHint" ? (
+                    <span
+                      title={itemHasDeletedWorkflowNode ? t("detail.deck.sourceNodeDeleted") : t("detail.deck.dagDeckHint")}
+                      className="rounded-md px-1 text-[11px] text-amber-600 dark:text-amber-300"
+                    >
+                      {itemHasDeletedWorkflowNode ? t("detail.deck.sourceNodeDeleted") : <Sparkles size={15} />}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      title={t("detail.deck.delete")}
+                      onClick={() => deleteMutation.mutate(item.id)}
+                      className="rounded-md p-1 text-slate-400 hover:text-rose-500"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       ) : null}
@@ -264,63 +312,94 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
         <section className="rounded-xl border border-slate-200/60 p-3 dark:border-white/10">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0 flex-1">
-              <input
-                key={deck.id}
-                defaultValue={deck.title}
-                onBlur={(event) => {
-                  const next = event.target.value.trim();
-                  if (next && next !== deck.title) renameMutation.mutate(next);
-                }}
-                className="w-full truncate rounded-md bg-transparent font-medium text-slate-800 outline-none focus:bg-white/60 dark:text-slate-100 dark:focus:bg-black/20"
-              />
+              {!deckAllowsLegacyMutation(deck) ? (
+                <div
+                  title={deck.title}
+                  className="w-full truncate rounded-md bg-transparent font-medium text-slate-800 dark:text-slate-100"
+                >
+                  {deck.title}
+                </div>
+              ) : (
+                <input
+                  key={deck.id}
+                  defaultValue={deck.title}
+                  onBlur={(event) => {
+                    const next = event.target.value.trim();
+                    if (next && next !== deck.title) renameMutation.mutate(next);
+                  }}
+                  className="w-full truncate rounded-md bg-transparent font-medium text-slate-800 outline-none focus:bg-white/60 dark:text-slate-100 dark:focus:bg-black/20"
+                />
+              )}
               <div className="text-xs text-slate-400">
-                {STATUS_LABEL[deck.status]}
-                {deck.style_reference_asset_id ? " · 自定义风格" : ""}
+                {t(DECK_STATUS_LABEL_KEYS[deck.status])} · {t("detail.deck.slideCount", { count: deck.slides.length })} ·{" "}
+                {t("detail.deck.generatedCount", { count: deck.generated_slide_count })}
+                {deck.style_reference_asset_id ? ` · ${t("detail.deck.customStyle")}` : ""}
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={deck.style_key ?? ""}
-                onChange={(event) => styleMutation.mutate(event.target.value)}
-                className="rounded-lg border border-slate-200/70 bg-white/60 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-black/20"
-              >
-                {styles.map((style) => (
-                  <option key={style.key} value={style.key}>
-                    {style.label}
-                  </option>
-                ))}
-              </select>
-              <label className="cursor-pointer rounded-lg border border-slate-300 px-2 py-1.5 text-xs dark:border-white/15">
-                风格参考图
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) styleRefMutation.mutate(file);
-                    event.target.value = "";
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                disabled={generating || sampleMutation.isPending}
-                onClick={() => sampleMutation.mutate()}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs disabled:opacity-50 dark:border-white/15"
-              >
-                样张
-              </button>
-              <button
-                type="button"
-                disabled={generating || generateMutation.isPending}
-                onClick={() => generateMutation.mutate()}
-                className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-white disabled:opacity-50"
-              >
-                {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-                {generating ? "生成中" : "批量生成"}
-              </button>
-            </div>
+            {!deckAllowsLegacyMutation(deck) ? (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="max-w-xs rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-4 text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                  {t("detail.deck.dagDeckHint")}
+                </div>
+                {canOpenWorkflowDeckNode(deck) && deck.workflow_node_id && onOpenWorkflowNode ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenWorkflowNode(deck.workflow_node_id)}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/15 dark:text-slate-200 dark:hover:bg-white/5"
+                  >
+                    {t("detail.deck.openCanvasNode")}
+                  </button>
+                ) : hasDeletedWorkflowDeckNode(deck) ? (
+                  <span className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                    {t("detail.deck.sourceNodeDeleted")}
+                  </span>
+                ) : null}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={deck.style_key ?? ""}
+                  onChange={(event) => styleMutation.mutate(event.target.value)}
+                  className="rounded-lg border border-slate-200/70 bg-white/60 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-black/20"
+                >
+                  {styles.map((style) => (
+                    <option key={style.key} value={style.key}>
+                      {style.label}
+                    </option>
+                  ))}
+                </select>
+                <label className="cursor-pointer rounded-lg border border-slate-300 px-2 py-1.5 text-xs dark:border-white/15">
+                  {t("detail.deck.styleReference")}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) styleRefMutation.mutate(file);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={generating || sampleMutation.isPending}
+                  onClick={() => sampleMutation.mutate()}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs disabled:opacity-50 dark:border-white/15"
+                >
+                  {t("detail.deck.sample")}
+                </button>
+                <button
+                  type="button"
+                  disabled={generating || generateMutation.isPending}
+                  onClick={() => generateMutation.mutate()}
+                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-white disabled:opacity-50"
+                >
+                  {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+                  {generating ? t("detail.deck.generating") : t("detail.deck.generate")}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -330,6 +409,7 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
                 slide={slide}
                 index={index}
                 total={deck.slides.length}
+                readOnly={workflowDeck}
                 onRegenerate={() => regenerateMutation.mutate(slide.id)}
                 onNotes={() => notesMutation.mutate(slide.id)}
                 onEnhance={() => enhanceMutation.mutate(slide.id)}
@@ -350,12 +430,15 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200/40 pt-3 dark:border-white/5">
             <button
               type="button"
-              disabled={exportMutation.isPending}
+              disabled={exportMutation.isPending || !deckSupportsFrontendPptxExport(deck)}
               onClick={() => exportMutation.mutate()}
               className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 dark:border-white/15"
+              title={!deckSupportsFrontendPptxExport(deck) ? t("detail.deck.noGeneratedSlides") : t("detail.deck.exportPptx")}
             >
               {exportMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-              导出 PPTX
+              {exportMutation.isPending && pptxProgress
+                ? t("detail.deck.exportingPptx", pptxProgress)
+                : t("detail.deck.exportPptx")}
             </button>
             {deck.pptx_url ? (
               <a
@@ -364,7 +447,7 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
                 download={`${deck.title}.pptx`}
               >
                 <Download size={15} />
-                下载 PPTX
+                {t("detail.deck.downloadLegacyPptx")}
               </a>
             ) : null}
           </div>
@@ -372,7 +455,7 @@ export function DeckPanel({ inspirationId }: DeckPanelProps) {
       ) : null}
 
       <ResourceLibraryModal
-        open={Boolean(materialSlideId)}
+        open={Boolean(materialSlideId) && deckAllowsLegacyMutation(deck)}
         onClose={() => setMaterialSlideId(null)}
         canRead
         selectLabel="设为配图"
@@ -389,6 +472,7 @@ interface DeckSlideCardProps {
   index: number;
   total: number;
   busy: boolean;
+  readOnly: boolean;
   onRegenerate: () => void;
   onNotes: () => void;
   onEnhance: () => void;
@@ -404,6 +488,7 @@ function DeckSlideCard({
   index,
   total,
   busy,
+  readOnly,
   onRegenerate,
   onNotes,
   onEnhance,
@@ -446,13 +531,15 @@ function DeckSlideCard({
         value={notes}
         onChange={(event) => setNotes(event.target.value)}
         onBlur={() => {
-          if (notes !== (slide.speaker_notes ?? "")) onSaveNotes(notes);
+          if (!readOnly && notes !== (slide.speaker_notes ?? "")) onSaveNotes(notes);
         }}
         placeholder="演讲备注"
         rows={2}
+        readOnly={readOnly}
         className="w-full resize-none rounded-md border border-slate-200/60 bg-white/40 px-2 py-1 text-[11px] text-slate-600 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-300"
       />
-      <div className="flex flex-wrap items-center gap-1">
+      {!readOnly ? (
+        <div className="flex flex-wrap items-center gap-1">
         <button type="button" disabled={index === 0} onClick={onMoveUp} title="上移" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-30">
           <ChevronUp size={14} />
         </button>
@@ -474,7 +561,8 @@ function DeckSlideCard({
         <button type="button" disabled={!slide.image_url} onClick={onSaveToLibrary} title="存资源库" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-40">
           <FolderPlus size={14} />
         </button>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

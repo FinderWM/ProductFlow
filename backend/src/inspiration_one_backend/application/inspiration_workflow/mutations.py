@@ -65,7 +65,6 @@ from inspiration_one_backend.infrastructure.db.models import (
     WorkflowNodeRun,
     WorkflowRun,
 )
-from inspiration_one_backend.infrastructure.image.base import infer_extension
 from inspiration_one_backend.infrastructure.storage import LocalStorage
 
 NODE_GROUP_TEMPLATE_COLLISION_NODE_WIDTH = 248
@@ -173,7 +172,11 @@ def _node_group_template_offsets(
 def _insertable_template_nodes(
     template_nodes: tuple[CanvasTemplateNodeSpec, ...],
 ) -> tuple[CanvasTemplateNodeSpec, ...]:
-    return tuple(node for node in template_nodes if node.node_type != WorkflowNodeType.INSPIRATION_CONTEXT)
+    return tuple(
+        node
+        for node in template_nodes
+        if node.node_type not in {WorkflowNodeType.INSPIRATION_CONTEXT, WorkflowNodeType.DECK_GENERATION}
+    )
 
 
 def _single_inspiration_context_node(workflow: InspirationWorkflow) -> WorkflowNode:
@@ -200,6 +203,15 @@ def normalize_workflow_node_config(node_type: WorkflowNodeType, config_json: dic
     config = dict(config_json or {})
     if node_type == WorkflowNodeType.INSPIRATION_CONTEXT:
         return normalize_inspiration_context_config(config)
+    if node_type == WorkflowNodeType.DECK_GENERATION:
+        config.setdefault("style_key", None)
+        config.setdefault("slide_count_mode", "auto")
+        config.setdefault("planning_strategy", "hybrid")
+        config.setdefault("include_transitive_inputs", False)
+        config.setdefault("source_order", [])
+        config.setdefault("excluded_source_item_ids", [])
+        config.setdefault("slide_bindings", [])
+        return config
     if node_type == WorkflowNodeType.COPY_GENERATION:
         try:
             normalized_copy_config = normalize_copy_node_config(config).model_dump(mode="json")
@@ -772,26 +784,12 @@ def bind_workflow_node_image(
         if poster is None or poster.inspiration_id != workflow.inspiration_id:
             raise NotFoundError("海报不存在")
         source_poster_variant_id = poster.id
-        asset = source_asset_for_poster_variant(session, workflow=workflow, poster_variant_id=poster.id)
-        if asset is None:
-            storage = storage or LocalStorage()
-            try:
-                content = storage.resolve(storage.object_key_for(poster)).read_bytes()
-            except (OSError, ValueError) as exc:
-                raise BusinessValidationError("海报文件不存在") from exc
-            filename = f"poster-{poster.id}{infer_extension(poster.mime_type)}"
-            reference_path = storage.save_reference_upload(workflow.inspiration_id, filename, content)
-            storage_metadata = storage.metadata_for(reference_path)
-            asset = SourceAsset(
-                inspiration_id=workflow.inspiration_id,
-                kind=SourceAssetKind.REFERENCE_IMAGE,
-                original_filename=filename,
-                mime_type=poster.mime_type,
-                **storage_metadata.as_model_kwargs(),
-                source_poster_variant_id=poster.id,
-            )
-            session.add(asset)
-            session.flush()
+        asset = source_asset_for_poster_variant(
+            session,
+            workflow=workflow,
+            poster_variant_id=poster.id,
+            storage=storage,
+        )
 
     fill_reference_node(node, asset, source_poster_variant_id=source_poster_variant_id)
     workflow.updated_at = now_utc()
@@ -930,11 +928,13 @@ def create_workflow_edge(
     target_handle: str | None = None,
 ) -> InspirationWorkflow:
     workflow = get_or_create_inspiration_workflow(session, inspiration_id)
-    nodes = {node.id for node in workflow.nodes}
+    nodes = {node.id: node for node in workflow.nodes}
     if source_node_id == target_node_id:
         raise BusinessValidationError("工作流连线不能连接到自身")
     if source_node_id not in nodes or target_node_id not in nodes:
         raise BusinessValidationError("工作流连线节点不属于当前灵感产物")
+    if nodes[source_node_id].node_type == WorkflowNodeType.DECK_GENERATION:
+        raise BusinessValidationError("演示节点不能作为连线来源")
     edge = WorkflowEdge(
         workflow_id=workflow.id,
         source_node_id=source_node_id,

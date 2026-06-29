@@ -50,6 +50,14 @@ from inspiration_one_backend.presentation.schemas.decks import (
 router = APIRouter(prefix="/api", tags=["decks"])
 
 
+def _ensure_generic_deck_mutable(session: Session, deck_id: str) -> None:
+    deck_use_cases.ensure_deck_mutable_from_generic_endpoint(session, get_deck_or_raise(session, deck_id))
+
+
+def _ensure_generic_deck_slide_mutable(session: Session, slide_id: str) -> None:
+    deck_use_cases.ensure_deck_slide_mutable_from_generic_endpoint(session, get_deck_slide_or_raise(session, slide_id))
+
+
 @router.get("/deck-styles", response_model=list[DeckStyleOption])
 async def list_deck_styles_endpoint(
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_READ)),
@@ -79,7 +87,7 @@ async def create_deck_endpoint(
         max_slides=payload.max_slides,
         style_key=payload.style_key,
     )
-    return serialize_deck(deck)
+    return serialize_deck(deck, session=session)
 
 
 @router.get("/inspirations/{inspiration_id}/decks", response_model=list[DeckSummaryResponse])
@@ -88,7 +96,7 @@ async def list_decks_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_READ)),
 ) -> list[DeckSummaryResponse]:
-    return [serialize_deck_summary(deck) for deck in list_decks(session, inspiration_id)]
+    return [serialize_deck_summary(deck, session=session) for deck in list_decks(session, inspiration_id)]
 
 
 @router.get("/decks/{deck_id}", response_model=DeckResponse)
@@ -97,7 +105,7 @@ async def get_deck_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_READ)),
 ) -> DeckResponse:
-    return serialize_deck(get_deck_or_raise(session, deck_id))
+    return serialize_deck(get_deck_or_raise(session, deck_id), session=session)
 
 
 @router.patch("/decks/{deck_id}", response_model=DeckResponse)
@@ -107,8 +115,9 @@ async def rename_deck_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckResponse:
+    _ensure_generic_deck_mutable(session, deck_id)
     deck = rename_deck(session, deck_id, title=payload.title, speaker_notes_enabled=payload.speaker_notes_enabled)
-    return serialize_deck(deck)
+    return serialize_deck(deck, session=session)
 
 
 @router.delete("/decks/{deck_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -117,6 +126,7 @@ async def delete_deck_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> None:
+    _ensure_generic_deck_mutable(session, deck_id)
     delete_deck(session, deck_id)
 
 
@@ -127,13 +137,14 @@ async def replace_deck_outline_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckResponse:
+    _ensure_generic_deck_mutable(session, deck_id)
     deck = replace_deck_outline(
         session,
         deck_id,
         title=payload.title,
         slides=[slide.model_dump() for slide in payload.slides],
     )
-    return serialize_deck(deck)
+    return serialize_deck(deck, session=session)
 
 
 @router.post("/decks/{deck_id}/style", response_model=DeckResponse)
@@ -143,13 +154,14 @@ async def set_deck_style_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckResponse:
+    _ensure_generic_deck_mutable(session, deck_id)
     deck = set_deck_style(
         session,
         deck_id,
         style_key=payload.style_key,
         style_reference_asset_id=payload.style_reference_asset_id,
     )
-    return serialize_deck(deck)
+    return serialize_deck(deck, session=session)
 
 
 @router.post("/decks/{deck_id}/sample", response_model=DeckResponse)
@@ -158,8 +170,9 @@ async def generate_deck_sample_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_GENERATE)),
 ) -> DeckResponse:
+    _ensure_generic_deck_mutable(session, deck_id)
     generate_deck_sample(session, deck_id)
-    return serialize_deck(get_deck_or_raise(session, deck_id))
+    return serialize_deck(get_deck_or_raise(session, deck_id), session=session)
 
 
 @router.post("/decks/{deck_id}/generate", response_model=DeckResponse)
@@ -168,8 +181,9 @@ async def generate_deck_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_GENERATE)),
 ) -> DeckResponse:
+    _ensure_generic_deck_mutable(session, deck_id)
     deck = generate_deck(session, deck_id)
-    return serialize_deck(deck)
+    return serialize_deck(deck, session=session)
 
 
 @router.put("/deck-slides/{slide_id}", response_model=DeckSlideResponse)
@@ -179,6 +193,7 @@ async def update_deck_slide_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckSlideResponse:
+    _ensure_generic_deck_slide_mutable(session, slide_id)
     slide = update_deck_slide(
         session,
         slide_id,
@@ -195,6 +210,7 @@ async def regenerate_deck_slide_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_GENERATE)),
 ) -> DeckSlideResponse:
+    _ensure_generic_deck_slide_mutable(session, slide_id)
     return serialize_deck_slide(regenerate_deck_slide(session, slide_id))
 
 
@@ -205,6 +221,7 @@ async def set_deck_slide_material_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckSlideResponse:
+    _ensure_generic_deck_slide_mutable(session, slide_id)
     slide = deck_use_cases.set_deck_slide_material_from_source(
         session, slide_id, source_type=payload.source_type, asset_id=payload.asset_id
     )
@@ -218,6 +235,7 @@ async def upload_deck_slide_material_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckSlideResponse:
+    _ensure_generic_deck_slide_mutable(session, slide_id)
     content = await image.read()
     slide = deck_use_cases.set_deck_slide_material_from_upload(
         session,
@@ -236,6 +254,7 @@ async def enhance_deck_slide_material_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_GENERATE)),
 ) -> DeckSlideResponse:
+    _ensure_generic_deck_slide_mutable(session, slide_id)
     slide = enhance_deck_slide_material(session, slide_id=slide_id, prompt=payload.prompt)
     return serialize_deck_slide(slide)
 
@@ -246,6 +265,7 @@ async def generate_deck_slide_speaker_notes_endpoint(
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_DECK_GENERATE)),
 ) -> DeckSlideResponse:
+    _ensure_generic_deck_slide_mutable(session, slide_id)
     slide = generate_deck_slide_speaker_notes(session, slide_id, actor_user_id=current_user.id)
     return serialize_deck_slide(slide)
 
@@ -282,7 +302,8 @@ async def export_deck_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckResponse:
-    return serialize_deck(export_deck_pptx(session, deck_id))
+    _ensure_generic_deck_mutable(session, deck_id)
+    return serialize_deck(export_deck_pptx(session, deck_id), session=session)
 
 
 @router.get("/decks/{deck_id}/pptx")
@@ -308,6 +329,7 @@ async def save_deck_slide_to_resource_library_endpoint(
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> None:
+    _ensure_generic_deck_slide_mutable(session, slide_id)
     deck_use_cases.save_deck_slide_to_resource_library(
         session, slide_id, actor_user_id=current_user.id, actor_is_admin=current_user.is_admin
     )
@@ -320,7 +342,8 @@ async def reorder_deck_slides_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckResponse:
-    return serialize_deck(reorder_deck_slides(session, deck_id, slide_ids=payload.slide_ids))
+    _ensure_generic_deck_mutable(session, deck_id)
+    return serialize_deck(reorder_deck_slides(session, deck_id, slide_ids=payload.slide_ids), session=session)
 
 
 @router.post("/decks/{deck_id}/style-reference", response_model=DeckResponse)
@@ -330,8 +353,9 @@ async def upload_deck_style_reference_endpoint(
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
 ) -> DeckResponse:
+    _ensure_generic_deck_mutable(session, deck_id)
     content = await image.read()
     deck = deck_use_cases.set_deck_style_reference_from_upload(
         session, deck_id, content=content, mime_type=image.content_type
     )
-    return serialize_deck(deck)
+    return serialize_deck(deck, session=session)

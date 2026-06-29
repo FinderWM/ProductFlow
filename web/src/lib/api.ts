@@ -6,6 +6,7 @@ import type {
   CanvasTemplateSummary,
   Deck,
   DeckSlide,
+  DeckSourceManifest,
   DeckStyleOption,
   DeckSummary,
   CanvasTemplateListResponse,
@@ -179,6 +180,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function fetchApiBlob(path: string): Promise<Blob> {
+  const response = await fetch(toApiUrl(path), {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    let detail = "请求失败";
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      detail = payload.detail ?? detail;
+    } catch {
+      detail = response.statusText || detail;
+    }
+    throw new ApiError(response.status, detail);
+  }
+  return response.blob();
+}
+
+async function fetchApiDataUrl(path: string): Promise<string> {
+  const blob = await fetchApiBlob(path);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("图片读取失败"));
+    });
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("图片读取失败")));
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function requestExternalJson<T>(url: string, failureDetail: string): Promise<T> {
   const response = await fetch(url, { credentials: "omit" });
 
@@ -275,6 +309,8 @@ function normalizeNominatimLocations(payload: NominatimLocationPayload[]): Weath
 
 export const api = {
   toApiUrl,
+  fetchApiBlob,
+  fetchApiDataUrl,
   async searchWeatherLocations(input: { query: string; language?: string }): Promise<WeatherLocation[]> {
     const query = input.query.trim();
     if (!query) {
@@ -1297,6 +1333,114 @@ export const api = {
   },
   retryFailedWorkflowNodes(inspirationId: string): Promise<InspirationWorkflow> {
     return request(`/api/inspirations/${inspirationId}/workflow/failed-nodes/retry`, { method: "POST" });
+  },
+  getWorkflowDeckSources(
+    inspirationId: string,
+    nodeId: string,
+    includeTransitiveInputs?: boolean,
+  ): Promise<DeckSourceManifest> {
+    const params = includeTransitiveInputs === undefined ? "" : `?include_transitive_inputs=${includeTransitiveInputs}`;
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/sources${params}`);
+  },
+  refreshWorkflowDeckSources(
+    inspirationId: string,
+    nodeId: string,
+    includeTransitiveInputs?: boolean,
+  ): Promise<DeckSourceManifest> {
+    const params = includeTransitiveInputs === undefined ? "" : `?include_transitive_inputs=${includeTransitiveInputs}`;
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/refresh-sources${params}`, {
+      method: "POST",
+    });
+  },
+  renameWorkflowDeck(
+    inspirationId: string,
+    nodeId: string,
+    input: { title?: string; speaker_notes_enabled?: boolean },
+  ): Promise<Deck> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+  createWorkflowDeckOutline(
+    inspirationId: string,
+    nodeId: string,
+    input: {
+      resource_group_id?: string | null;
+      title?: string;
+      source_input?: string;
+      max_slides?: number;
+      style_key?: string;
+      include_transitive_inputs?: boolean;
+      planning_strategy?: "hybrid" | "copy_led" | "image_led";
+      slide_count_mode?: "auto" | "target";
+      group_by?: "tail_item" | "source_node";
+      section_pages?: boolean;
+      per_group_image_cap?: number;
+      slide_context?: Array<{
+        title?: string;
+        points?: string[];
+      }>;
+    },
+  ): Promise<Deck> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/outline`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  setWorkflowDeckStyle(
+    inspirationId: string,
+    nodeId: string,
+    input: { style_key?: string | null },
+  ): Promise<Deck> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/style`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  generateWorkflowDeckSample(inspirationId: string, nodeId: string): Promise<Deck> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/sample`, { method: "POST" });
+  },
+  generateWorkflowDeck(inspirationId: string, nodeId: string): Promise<Deck> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/generate`, { method: "POST" });
+  },
+  reorderWorkflowDeckSlides(inspirationId: string, nodeId: string, slideIds: string[]): Promise<Deck> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/slide-order`, {
+      method: "PUT",
+      body: JSON.stringify({ slide_ids: slideIds }),
+    });
+  },
+  updateWorkflowDeckSlide(
+    inspirationId: string,
+    nodeId: string,
+    slideId: string,
+    input: { title?: string; points?: string[]; speaker_notes?: string },
+  ): Promise<DeckSlide> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/slides/${slideId}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+  regenerateWorkflowDeckSlide(inspirationId: string, nodeId: string, slideId: string): Promise<DeckSlide> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/slides/${slideId}/regenerate`, {
+      method: "POST",
+    });
+  },
+  generateWorkflowDeckSlideSpeakerNotes(inspirationId: string, nodeId: string, slideId: string): Promise<DeckSlide> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/slides/${slideId}/speaker-notes`, {
+      method: "POST",
+    });
+  },
+  bindWorkflowDeckSlideMaterial(
+    inspirationId: string,
+    nodeId: string,
+    slideId: string,
+    input: { source_item_id: string; target_slot?: string; caption_source?: string },
+  ): Promise<DeckSlide> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/slides/${slideId}/material`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
   },
   listDeckStyles(): Promise<DeckStyleOption[]> {
     return request("/api/deck-styles");

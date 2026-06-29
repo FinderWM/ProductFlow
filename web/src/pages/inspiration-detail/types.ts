@@ -44,4 +44,15 @@ export type NodeConfigDraft = {
   generationConfigMode: GenerationConfigSelectionMode;
   generationConfigId: string | null;
   copyStructuredPayload: CopyPayloadV2 | null;
+  deckStyleKey: string;
+  deckSourceInput: string;
+  deckMaxSlides: number;
+  deckIncludeTransitiveInputs: boolean;
+  deckPlanningStrategy: "hybrid" | "copy_led" | "image_led";
+  deckSlideCountMode: "auto" | "target";
+  deckGroupBy: "tail_item" | "source_node";
+  deckSectionPages: boolean;
+  deckPerGroupImageCap: number;
+  deckExcludedSourceItemIds: string[];
+  deckSourceOrder: string[];
 };

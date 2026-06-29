@@ -27,6 +27,8 @@ from inspiration_one_backend.application.contracts import (
     TailSplitPlanDraft,
     TailSplitPlanInput,
 )
+from inspiration_one_backend.application.inspiration_workflow.execution import _execute_node
+from inspiration_one_backend.application.inspiration_workflow.run_state import WorkflowSafeExecutionError
 from inspiration_one_backend.application.inspiration_workflow.templates import TEMPLATE_METADATA_CONFIG_KEY
 from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
 from inspiration_one_backend.domain.enums import (
@@ -2860,3 +2862,84 @@ def test_copy_generation_provider_failure_records_text_usage_stats(
     assert config_state is not None
     assert config_state.current_concurrency == 0
     assert config_state.last_failure_at is not None
+
+
+def test_deck_generation_node_cannot_be_connection_source_or_regular_run(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/inspirations",
+        data={"name": "演示节点运行边界", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+        files={"image": ("deck-node.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert created.status_code == 201
+    inspiration_id = created.json()["id"]
+
+    workflow_response = client.get(f"/api/inspirations/{inspiration_id}/workflow")
+    assert workflow_response.status_code == 200
+    workflow = workflow_response.json()
+
+    copy_node = next(node for node in workflow["nodes"] if node["node_type"] == "copy_generation")
+    created_deck_node = client.post(
+        f"/api/inspirations/{inspiration_id}/workflow/nodes",
+        json={
+            "node_type": "deck_generation",
+            "title": "演示节点",
+            "position_x": 1180,
+            "position_y": 220,
+            "config_json": {},
+        },
+    )
+    assert created_deck_node.status_code == 201
+    deck_node = next(node for node in created_deck_node.json()["nodes"] if node["node_type"] == "deck_generation")
+
+    connect_copy_to_deck = client.post(
+        f"/api/inspirations/{inspiration_id}/workflow/edges",
+        json={
+            "source_node_id": copy_node["id"],
+            "target_node_id": deck_node["id"],
+            "source_handle": "output",
+            "target_handle": "input",
+        },
+    )
+    assert connect_copy_to_deck.status_code == 201
+
+    rejected_deck_source = client.post(
+        f"/api/inspirations/{inspiration_id}/workflow/edges",
+        json={
+            "source_node_id": deck_node["id"],
+            "target_node_id": copy_node["id"],
+            "source_handle": "output",
+            "target_handle": "input",
+        },
+    )
+    assert rejected_deck_source.status_code == 400
+    assert rejected_deck_source.json()["detail"] == "演示节点不能作为连线来源"
+
+    run_deck_node = client.post(
+        f"/api/inspirations/{inspiration_id}/workflow/run",
+        json={"start_node_id": deck_node["id"]},
+    )
+    assert run_deck_node.status_code == 400
+    assert run_deck_node.json()["detail"] == "工作流没有可运行节点"
+
+    run_after_deck_node = client.post(
+        f"/api/inspirations/{inspiration_id}/workflow/run",
+        json={"start_node_id": deck_node["id"], "start_mode": "after_node"},
+    )
+    assert run_after_deck_node.status_code == 400
+    assert run_after_deck_node.json()["detail"] == "工作流没有可运行节点"
+
+    with get_session_factory()() as session:
+        deck_node_row = session.get(WorkflowNode, deck_node["id"])
+        assert deck_node_row is not None
+        with pytest.raises(WorkflowSafeExecutionError) as exc:
+            _execute_node(session, workflow_id=workflow["id"], node=deck_node_row)
+
+    assert exc.value.retryable is False
+    assert exc.value.retry_hint == "revise_input"
+    assert "请在画布演示节点中编辑" in str(exc.value)

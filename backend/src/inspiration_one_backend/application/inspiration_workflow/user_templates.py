@@ -67,6 +67,7 @@ ARTIFACT_SPECIFIC_CONFIG_KEYS = frozenset(
     {
         "copy_set_id",
         "creative_brief_id",
+        "deck_id",
         "download_url",
         "filled_reference_node_ids",
         "filled_source_asset_ids",
@@ -81,10 +82,19 @@ ARTIFACT_SPECIFIC_CONFIG_KEYS = frozenset(
         "resource_group_id",
         "source_asset_id",
         "source_asset_ids",
+        "source_fingerprint",
+        "source_item_id",
+        "source_item_ids",
+        "source_manifest",
         "source_poster_variant_id",
         "storage_path",
         "thumbnail_url",
         "workflow_id",
+        "last_source_fingerprint",
+        "slide_binding",
+        "slide_bindings",
+        "slide_id",
+        "slide_ids",
     }
 )
 SYSTEM_TEMPLATE_CONFIG_KEYS = frozenset({"_canvas_template"})
@@ -649,7 +659,13 @@ def create_user_canvas_template_from_workflow_nodes(
     if unknown_node_ids:
         raise BusinessValidationError("保存模板包含不属于当前画布的节点")
 
-    selected_nodes = [workflow_nodes_by_id[node_id] for node_id in node_ids]
+    selected_nodes = [
+        workflow_nodes_by_id[node_id]
+        for node_id in node_ids
+        if workflow_nodes_by_id[node_id].node_type != WorkflowNodeType.DECK_GENERATION
+    ]
+    if not selected_nodes:
+        raise BusinessValidationError("请选择要保存的节点")
     if any(node.node_type == WorkflowNodeType.INSPIRATION_CONTEXT for node in selected_nodes):
         raise BusinessValidationError("节点组模板不能包含灵感产物资料节点")
     _validate_template_category(
@@ -1687,7 +1703,10 @@ def _workflow_template_entry_mode(value: str) -> CanvasTemplateEntryMode:
 
 
 def _full_canvas_template_nodes(workflow) -> list[WorkflowNode]:
-    nodes = sorted(workflow.nodes, key=lambda item: (item.position_x, item.position_y, item.created_at))
+    nodes = sorted(
+        (node for node in workflow.nodes if node.node_type != WorkflowNodeType.DECK_GENERATION),
+        key=lambda item: (item.position_x, item.position_y, item.created_at),
+    )
     tail_nodes = [node for node in nodes if node.node_type == WorkflowNodeType.TAIL_SPLITTER]
     if not tail_nodes:
         return nodes

@@ -19,13 +19,17 @@ from inspiration_one_backend.domain.enums import (
     WorkflowNodeStatus,
     WorkflowNodeType,
 )
+from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
 from inspiration_one_backend.infrastructure.db.models import (
     CopySet,
     Inspiration,
     InspirationWorkflow,
+    PosterVariant,
     SourceAsset,
     WorkflowNode,
 )
+from inspiration_one_backend.infrastructure.image.base import infer_extension
+from inspiration_one_backend.infrastructure.storage import LocalStorage
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,13 +138,13 @@ def copy_node_output(
     return output
 
 
-def source_asset_for_poster_variant(
+def lookup_source_asset_for_poster_variant(
     session: Session,
     *,
     workflow: InspirationWorkflow,
     poster_variant_id: str,
 ) -> SourceAsset | None:
-    """Find the reference SourceAsset that was created alongside a workflow poster."""
+    """Find a workflow-local SourceAsset for a poster without mutating ORM state."""
     asset = session.scalar(
         select(SourceAsset)
         .where(
@@ -176,8 +180,6 @@ def source_asset_for_poster_variant(
                 and asset.inspiration_id == workflow.inspiration_id
                 and asset.kind == SourceAssetKind.REFERENCE_IMAGE
             ):
-                asset.source_poster_variant_id = poster_variant_id
-                session.flush()
                 return asset
     for node in workflow.nodes:
         if node.node_type != WorkflowNodeType.REFERENCE_IMAGE:
@@ -200,10 +202,64 @@ def source_asset_for_poster_variant(
             and asset.inspiration_id == workflow.inspiration_id
             and asset.kind == SourceAssetKind.REFERENCE_IMAGE
         ):
-            asset.source_poster_variant_id = poster_variant_id
-            session.flush()
             return asset
     return None
+
+
+def materialize_poster_variant_source_asset(
+    session: Session,
+    *,
+    workflow: InspirationWorkflow,
+    poster_variant_id: str,
+    storage: LocalStorage | None = None,
+) -> SourceAsset:
+    """Ensure a poster variant has a reference SourceAsset without mutating workflow nodes."""
+    poster = session.get(PosterVariant, poster_variant_id)
+    if poster is None or poster.inspiration_id != workflow.inspiration_id:
+        raise NotFoundError("海报不存在")
+
+    asset = lookup_source_asset_for_poster_variant(session, workflow=workflow, poster_variant_id=poster.id)
+    if asset is not None:
+        if asset.source_poster_variant_id is None:
+            asset.source_poster_variant_id = poster.id
+            session.flush()
+        return asset
+
+    storage = storage or LocalStorage()
+    try:
+        content = storage.resolve(storage.object_key_for(poster)).read_bytes()
+    except (OSError, ValueError) as exc:
+        raise BusinessValidationError("海报文件不存在") from exc
+    filename = f"poster-{poster.id}{infer_extension(poster.mime_type)}"
+    reference_path = storage.save_reference_upload(workflow.inspiration_id, filename, content)
+    storage_metadata = storage.metadata_for(reference_path)
+    asset = SourceAsset(
+        inspiration_id=workflow.inspiration_id,
+        kind=SourceAssetKind.REFERENCE_IMAGE,
+        original_filename=filename,
+        mime_type=poster.mime_type,
+        **storage_metadata.as_model_kwargs(),
+        source_poster_variant_id=poster.id,
+    )
+    session.add(asset)
+    session.flush()
+    return asset
+
+
+def source_asset_for_poster_variant(
+    session: Session,
+    *,
+    workflow: InspirationWorkflow,
+    poster_variant_id: str,
+    storage: LocalStorage | None = None,
+) -> SourceAsset | None:
+    """Backward-compatible write helper for poster-to-reference materialization."""
+    return materialize_poster_variant_source_asset(
+        session,
+        workflow=workflow,
+        poster_variant_id=poster_variant_id,
+        storage=storage,
+    )
 
 
 def fill_reference_node(

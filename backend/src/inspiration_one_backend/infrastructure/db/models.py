@@ -1658,10 +1658,14 @@ class Deck(Base, TimestampMixin):
     """演示文稿(PPT)：挂在灵感产物下，一个灵感产物可保留多套 deck 历史。"""
 
     __tablename__ = "decks"
-    __table_args__ = (Index("ix_decks_inspiration_id", "inspiration_id"),)
+    __table_args__ = (
+        Index("ix_decks_inspiration_id", "inspiration_id"),
+        Index("ix_decks_workflow_node_id", "workflow_node_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     inspiration_id: Mapped[str] = mapped_column(String(36))
+    workflow_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     resource_group_id: Mapped[str] = mapped_column(
         String(36),
         default=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -1670,6 +1674,7 @@ class Deck(Base, TimestampMixin):
     status: Mapped[DeckStatus] = mapped_column(enum_value_column(DeckStatus), default=DeckStatus.DRAFT)
     source_input: Mapped[str | None] = mapped_column(Text, nullable=True)
     outline_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    source_manifest_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     style_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     style_reference_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     speaker_notes_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -1709,6 +1714,7 @@ class DeckSlide(Base, TimestampMixin):
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     title: Mapped[str] = mapped_column(String(255), default="")
     points_json: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    source_manifest_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     speaker_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     slide_status: Mapped[DeckSlideStatus] = mapped_column(
         enum_value_column(DeckSlideStatus),

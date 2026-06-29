@@ -186,7 +186,6 @@ def execute_deck_slide_generation_task(slide_id: str) -> None:
             result = service.generate(
                 prompt=prompt,
                 size=get_runtime_settings().deck_slide_size or DECK_SLIDE_SIZE,
-                history=[],
                 manual_reference_images=references,
             )
             relative_path = storage.save_deck_slide_image(
@@ -243,7 +242,6 @@ def enhance_deck_slide_material(session: Session, *, slide_id: str, prompt: str 
         result = service.generate(
             prompt=(prompt or "").strip() or "在保持主体与构图不变的前提下，提升清晰度、细节与画质。",
             size=DECK_MATERIAL_ENHANCE_SIZE,
-            history=[],
             manual_reference_images=[base],
         )
         relative_path = storage.save_deck_slide_material(

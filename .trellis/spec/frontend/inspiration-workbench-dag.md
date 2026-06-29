@@ -34,7 +34,7 @@
 
 - Frontend keeps backend `snake_case` fields (`node_type`, `config_json`, `output_json`, `start_node_id`).
 - Supported user-facing node types are `inspiration_context`, `reference_image`, `copy_generation`, `image_generation`, and
-  `tail_splitter`.
+  `tail_splitter`, plus the non-runnable editor node `deck_generation`.
 - Inspiration detail/workbench is canvas-first: inspiration context, reference slots, copy, and image generation are graph nodes,
   not permanent fixed columns.
 - InspirationDetail workbench uses ReactFlow / `@xyflow/react` as the frontend graph renderer and pointer interaction layer.
@@ -234,6 +234,28 @@
   frontend; the backend contract must replace the node output.
 - `image_generation` is a trigger/config node, not an image-bearing artifact node. It must not render generated-image
   previews or download links on the image-generation card itself.
+- `deck_generation` is a deck-editor node, not a workflow-run node. The normal node toolbar must not expose ordinary
+  run/run-after actions for it; selecting the node opens the deck editor surface in the right inspector instead.
+- `deck_generation` can accept incoming edges from completed upstream material nodes but cannot be a connection source.
+  Frontend connection validation must block `deck_generation -> *` edges before mutation submission.
+- Deck-node summary cards should show source counts, outline/deck page counts, generated slide counts, stale-source or
+  invalid-source warnings, and browser-export availability. They should not show backend `pptx_url` as the primary export
+  path for current DAG decks.
+- Deck editing lives in the node inspector, not the legacy deck tab. The editor uses node-scoped APIs for deck metadata,
+  outline generation, batch generation, slide edits, slide re-generation, speaker notes, source refresh, and slide
+  material binding by `source_item_id`.
+- The DAG deck editor must not call legacy generic mutating deck endpoints such as `PUT /deck-slides/{id}/material`,
+  `POST /decks/{id}/generate`, or backend export for active DAG decks. Generic endpoints remain only for legacy/non-DAG
+  history flows.
+- The deck editor may let users input title, supplemental description, and per-slide points locally, but those values must
+  be sent through node-scoped deck/outline APIs so they enter backend outline context instead of living as frontend-only
+  draft state.
+- Browser PPTX export is shared between DAG decks and legacy decks. Frontend fetches each generated slide image with
+  authenticated API requests, converts to data URLs, builds a 16:9 PPTX with `pptxgenjs`, includes speaker notes when
+  enabled, and exports only slides that have generated images.
+- Deck history / legacy `DeckPanel` must detect `workflow_node_id`, `workflow_node_exists`, and `generated_slide_count`.
+  Active DAG decks should show summary/export/locate actions only and steer editing back to the canvas node; legacy decks
+  keep their old mutation controls.
 - `image_generation` output count is represented by downstream graph slots: one generated image per connected downstream
   `reference_image` node. With no downstream slots, backend execution fails with a concise "connect at least one
   image/reference node" message; the frontend should make that requirement visible in the inspector.

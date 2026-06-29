@@ -613,7 +613,6 @@ def test_image_generation_config(
         result = ImageChatService(provider_config=provider_config).generate(
             prompt=normalized_prompt,
             size=normalized_size,
-            history=[],
             manual_reference_images=[],
         )
         duration_ms = int((perf_counter() - start) * 1000)
@@ -864,7 +863,6 @@ def _execute_image_session_round_generation(
         max_generation_count=IMAGE_SESSION_GENERATION_MAX_COUNT,
     )
     (
-        history,
         manual_references,
         previous_response_id,
         _validated_base_asset_ids,
@@ -988,7 +986,6 @@ def _execute_image_session_round_generation(
                     provider_results = service.generate_many(
                         prompt=prompt,
                         size=normalized_size,
-                        history=history,
                         manual_reference_images=provider_manual_references,
                         candidate_count=batch_count,
                         tool_options=normalized_tool_options,
@@ -999,7 +996,6 @@ def _execute_image_session_round_generation(
                     result = service.generate(
                         prompt=prompt,
                         size=normalized_size,
-                        history=history,
                         manual_reference_images=provider_manual_references,
                         previous_response_id=previous_response_id,
                         tool_options=normalized_tool_options,

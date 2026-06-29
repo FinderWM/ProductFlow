@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.auth import require_generation_resource_group_for_user
-from inspiration_one_backend.application.contracts import DeckOutlineInput, SpeakerNotesInput
+from inspiration_one_backend.application.contracts import DeckOutlineInput, DeckOutlinePayload, SpeakerNotesInput
 from inspiration_one_backend.application.deck_generation_core import enhance_deck_slide_material
 from inspiration_one_backend.application.generation_config_runtime import (
     GenerationConfigSelection,
@@ -26,6 +26,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     Inspiration,
     ResourceLibraryAsset,
     SourceAsset,
+    WorkflowNode,
 )
 from inspiration_one_backend.infrastructure.deck.pptx_assembler import build_deck_pptx
 from inspiration_one_backend.infrastructure.deck.styles import DEFAULT_DECK_STYLE_KEY, is_valid_deck_style
@@ -39,8 +40,13 @@ DECK_DEFAULT_MAX_SLIDES = 20
 
 __all__ = [
     "create_deck",
+    "add_outline_slides_to_deck",
+    "generate_deck_outline_payload",
     "list_decks",
     "get_deck_or_raise",
+    "is_active_dag_deck",
+    "ensure_deck_mutable_from_generic_endpoint",
+    "ensure_deck_slide_mutable_from_generic_endpoint",
     "rename_deck",
     "delete_deck",
     "replace_deck_outline",
@@ -75,6 +81,22 @@ def get_deck_slide_or_raise(session: Session, slide_id: str) -> DeckSlide:
     if slide is None:
         raise NotFoundError("幻灯片不存在")
     return slide
+
+
+def is_active_dag_deck(session: Session, deck: Deck) -> bool:
+    if deck.workflow_node_id is None:
+        return False
+    return session.get(WorkflowNode, deck.workflow_node_id) is not None
+
+
+def ensure_deck_mutable_from_generic_endpoint(session: Session, deck: Deck) -> None:
+    if is_active_dag_deck(session, deck):
+        raise BusinessValidationError("请在画布演示节点中编辑")
+
+
+def ensure_deck_slide_mutable_from_generic_endpoint(session: Session, slide: DeckSlide) -> None:
+    deck = get_deck_or_raise(session, slide.deck_id)
+    ensure_deck_mutable_from_generic_endpoint(session, deck)
 
 
 def _inspiration_material_summary(inspiration: Inspiration) -> str:
@@ -133,7 +155,47 @@ def create_deck(
     title: str | None = None,
     max_slides: int | None = None,
     style_key: str | None = None,
+    workflow_node_id: str | None = None,
+    source_manifest_json: dict[str, Any] | None = None,
 ) -> Deck:
+    outline, group_id, bounded_max = generate_deck_outline_payload(
+        session,
+        inspiration_id=inspiration_id,
+        resource_group_id=resource_group_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        source_input=source_input,
+        max_slides=max_slides,
+    )
+    deck = Deck(
+        inspiration_id=inspiration_id,
+        resource_group_id=group_id,
+        title=(title or outline.title or "演示文稿").strip() or "演示文稿",
+        status=DeckStatus.DRAFT,
+        source_input=source_input,
+        style_key=style_key if is_valid_deck_style(style_key) else None,
+        outline_json={"title": outline.title},
+        workflow_node_id=workflow_node_id,
+        source_manifest_json=source_manifest_json,
+    )
+    session.add(deck)
+    session.flush()
+    add_outline_slides_to_deck(session, deck=deck, outline=outline, max_slides=bounded_max)
+    session.commit()
+    session.refresh(deck)
+    return deck
+
+
+def generate_deck_outline_payload(
+    session: Session,
+    *,
+    inspiration_id: str,
+    resource_group_id: str | None,
+    actor_user_id: str,
+    actor_is_admin: bool,
+    source_input: str | None = None,
+    max_slides: int | None = None,
+) -> tuple[DeckOutlinePayload, str, int]:
     inspiration = session.get(Inspiration, inspiration_id)
     if inspiration is None:
         raise NotFoundError("灵感产物不存在")
@@ -153,18 +215,18 @@ def create_deck(
         max_slides=bounded_max,
     )
     outline = _generate_outline(resource_group_id=group.id, outline_input=outline_input, actor_user_id=actor_user_id)
-    deck = Deck(
-        inspiration_id=inspiration.id,
-        resource_group_id=group.id,
-        title=(title or outline.title or "演示文稿").strip() or "演示文稿",
-        status=DeckStatus.DRAFT,
-        source_input=source_input,
-        style_key=style_key if is_valid_deck_style(style_key) else None,
-        outline_json={"title": outline.title},
-    )
-    session.add(deck)
-    session.flush()
-    for index, slide in enumerate(outline.slides[:bounded_max]):
+    return outline, group.id, bounded_max
+
+
+def add_outline_slides_to_deck(
+    session: Session,
+    *,
+    deck: Deck,
+    outline: DeckOutlinePayload,
+    max_slides: int,
+    source_manifest_json: dict[str, Any] | None = None,
+) -> None:
+    for index, slide in enumerate(outline.slides[:max_slides]):
         session.add(
             DeckSlide(
                 deck_id=deck.id,
@@ -172,11 +234,9 @@ def create_deck(
                 title=slide.title,
                 points_json=list(slide.points),
                 slide_status=DeckSlideStatus.PENDING,
+                source_manifest_json=source_manifest_json,
             )
         )
-    session.commit()
-    session.refresh(deck)
-    return deck
 
 
 def list_decks(session: Session, inspiration_id: str) -> list[Deck]:

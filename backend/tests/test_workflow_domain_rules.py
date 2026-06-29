@@ -64,6 +64,18 @@ def test_missing_upstream_business_rules_do_not_need_orm_models() -> None:
     assert should_execute_missing_upstream(empty_reference, copy_node) is False
 
 
+def test_deck_generation_target_does_not_request_missing_upstream_execution() -> None:
+    copy_node = _node("copy", WorkflowNodeType.COPY_GENERATION)
+    deck_node = _node("deck", WorkflowNodeType.DECK_GENERATION)
+
+    assert should_execute_missing_upstream(copy_node, deck_node) is False
+    assert selected_node_execution_plan(
+        nodes=[copy_node, deck_node],
+        edges=[WorkflowRuleEdge(source_node_id="copy", target_node_id="deck")],
+        start_node_id="deck",
+    ) == {"deck"}
+
+
 def test_source_asset_ids_from_config_preserves_legacy_string_shape_without_database_session() -> None:
     assert source_asset_ids_from_config({"source_asset_ids": "asset-1"}) == ("asset-1",)
     assert source_asset_ids_from_config({"source_asset_ids": ["asset-2", 3, "asset-3"]}) == ("asset-2", "asset-3")

@@ -8,6 +8,7 @@ import {
   Loader2,
   Maximize2,
   Pencil,
+  Presentation,
   Plus,
   Search,
   Sparkles,
@@ -254,6 +255,7 @@ function previewNodeMeta(nodeType: CanvasTemplateSummary["preview_nodes"][number
     copy_generation: FileText,
     image_generation: ImageIcon,
     tail_splitter: Sparkles,
+    deck_generation: Presentation,
   };
   const statusByType: Record<CanvasTemplateSummary["preview_nodes"][number]["node_type"], string> = {
     inspiration_context: t("detail.nodeStatus.available"),
@@ -261,6 +263,7 @@ function previewNodeMeta(nodeType: CanvasTemplateSummary["preview_nodes"][number
     copy_generation: t("detail.nodeStatus.idle"),
     image_generation: t("detail.nodeStatus.idle"),
     tail_splitter: t("detail.nodeStatus.idle"),
+    deck_generation: t("detail.nodeStatus.available"),
   };
   if (nodeType === "copy_generation") {
     return { icon: iconByType[nodeType], label: localizedWorkflowNodeTypeLabel(nodeType, t), status: statusByType[nodeType] };
@@ -281,6 +284,7 @@ function compactPreviewNodeLabel(nodeType: CanvasTemplateSummary["preview_nodes"
     copy_generation: "detail.template.compact.copyGeneration",
     image_generation: "detail.template.compact.imageGeneration",
     tail_splitter: "detail.template.compact.tailSplitter",
+    deck_generation: "detail.template.compact.deckGeneration",
   };
   return t(labelByType[nodeType]);
 }

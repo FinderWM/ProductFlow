@@ -34,7 +34,7 @@ import type {
   Viewport,
   XYPosition,
 } from "@xyflow/react";
-import { CopyPlus, Focus, Grid, Loader2, Play, Save, SkipForward, Sparkles, Trash2 } from "lucide-react";
+import { CopyPlus, Focus, Grid, Loader2, Play, Presentation, Save, SkipForward, Sparkles, Trash2 } from "lucide-react";
 
 import type { DownloadableImage } from "../../lib/image-downloads";
 import type { InspirationWorkflow, WorkflowNode } from "../../lib/types";
@@ -97,6 +97,7 @@ interface WorkflowCanvasNodeData extends InspirationOneNodeData {
   primarySelected: boolean;
   secondarySelected: boolean;
   previewSelected: boolean;
+  workflowNodeTypeById: Record<string, string | undefined>;
   inputHandleLabel: string;
   outputHandleLabel: string;
   onSelectNode: (nodeId: string, event: ReactMouseEvent<Element>) => void;
@@ -199,6 +200,7 @@ function getConnectionHandleVisualState(
   nodeId: string,
   handleType: "source" | "target",
   connection: ConnectionHandleSnapshot,
+  sourceNodeTypeById: Record<string, string | undefined>,
 ): ConnectionHandleVisualState {
   if (!connection.inProgress || !connection.fromHandle) {
     return "idle";
@@ -226,7 +228,7 @@ function getConnectionHandleVisualState(
           targetHandle: fromHandle.id ?? null,
         };
 
-  return connectionToWorkflowEdgeInput(candidate) ? "valid-target" : "invalid-target";
+  return connectionToWorkflowEdgeInput(candidate, { sourceNodeTypeById }) ? "valid-target" : "invalid-target";
 }
 
 function connectionHandleClassName(state: ConnectionHandleVisualState) {
@@ -254,6 +256,9 @@ function WorkflowNodeToolbarIcon({
   }
   if (icon === "fitSelected") {
     return <Focus size={16} aria-hidden="true" />;
+  }
+  if (icon === "createDeck") {
+    return <Presentation size={16} aria-hidden="true" />;
   }
   if (icon === "saveTemplate") {
     return <Save size={16} aria-hidden="true" />;
@@ -326,8 +331,8 @@ function InspirationOneCanvasNode({ data, dragging, isConnectable }: NodeProps<W
       return `idle${HANDLE_STATE_SEPARATOR}idle`;
     }
     return [
-      getConnectionHandleVisualState(node.id, "target", connection),
-      getConnectionHandleVisualState(node.id, "source", connection),
+      getConnectionHandleVisualState(node.id, "target", connection, data.workflowNodeTypeById),
+      getConnectionHandleVisualState(node.id, "source", connection, data.workflowNodeTypeById),
     ].join(HANDLE_STATE_SEPARATOR);
   });
   const [inputHandleState, outputHandleState] = connectionHandleStateKey.split(HANDLE_STATE_SEPARATOR) as [
@@ -978,6 +983,10 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
   const nodeClickCommitDistance = mobileCanvasControlsActive
     ? TOUCH_NODE_POINTER_DRAG_THRESHOLD
     : MOUSE_NODE_CLICK_COMMIT_DISTANCE;
+  const workflowNodeTypeById = useMemo(
+    () => Object.fromEntries((workflow?.nodes ?? []).map((node) => [node.id, node.node_type])),
+    [workflow],
+  );
 
   const buildNodes = useCallback((previousNodes: WorkflowCanvasNode[] = []): WorkflowCanvasNode[] => {
     if (!workflow) {
@@ -1004,6 +1013,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
           primarySelected: node.id === selectedNodeId,
           secondarySelected: secondarySelectedNodeIds.has(node.id) && node.id !== selectedNodeId,
           previewSelected: previewSelectedNodeIds.has(node.id),
+          workflowNodeTypeById,
           inputHandleLabel,
           outputHandleLabel,
           onSelectNode,
@@ -1028,6 +1038,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     structureBusy,
     outputHandleLabel,
     workflow,
+    workflowNodeTypeById,
   ]);
 
   const nodes = useMemo<WorkflowCanvasNode[]>(() => buildNodes(), [buildNodes]);
@@ -1250,7 +1261,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
 
   const handleConnect = useCallback(
     (connection: Connection) => {
-      const input = connectionToWorkflowEdgeInput(connection);
+      const input = connectionToWorkflowEdgeInput(connection, { sourceNodeTypeById: workflowNodeTypeById });
       if (!input) {
         return;
       }
@@ -1259,7 +1270,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         targetNodeId: input.target_node_id,
       });
     },
-    [onConnectionCreate],
+    [onConnectionCreate, workflowNodeTypeById],
   );
 
   const handleSelectionEnd = useCallback(() => {
@@ -1279,9 +1290,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
           target: connection.target,
           sourceHandle: connection.sourceHandle ?? null,
           targetHandle: connection.targetHandle ?? null,
-        }),
+        }, { sourceNodeTypeById: workflowNodeTypeById }),
       ),
-    [],
+    [workflowNodeTypeById],
   );
 
   const handleMiniMapNodeClick = useCallback(

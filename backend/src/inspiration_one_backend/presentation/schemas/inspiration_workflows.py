@@ -4,12 +4,18 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import object_session
 
 from inspiration_one_backend.application.canvas_templates import (
     CanvasTemplate,
     CanvasTemplateEntryMode,
     CanvasTemplateScenario,
     TemplateKind,
+)
+from inspiration_one_backend.application.inspiration_workflow.deck_sources import (
+    DeckSourceItem,
+    DeckSourceManifest,
+    preview_deck_node_output,
 )
 from inspiration_one_backend.application.inspiration_workflow.graph import InspirationWorkflowStatusSnapshot
 from inspiration_one_backend.application.inspiration_workflow.run_state import (
@@ -37,6 +43,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     WorkflowNodeRun,
     WorkflowRun,
 )
+from inspiration_one_backend.presentation.image_variants import build_image_urls
 from inspiration_one_backend.presentation.schemas.generation_resource_groups import (
     GenerationResourceGroupTagResponse,
     serialize_generation_resource_group_tag,
@@ -181,6 +188,101 @@ class InspirationWorkflowStatusResponse(BaseModel):
     runs: list[WorkflowRunStatusResponse]
     created_at: datetime
     updated_at: datetime
+
+
+class DeckSourceItemResponse(BaseModel):
+    source_item_id: str
+    workflow_node_id: str
+    workflow_node_title: str
+    workflow_node_type: str
+    kind: str
+    group_id: str | None = None
+    selected: bool = True
+    planning_role: str | None = None
+    summary: str | None = None
+    copy_set_id: str | None = None
+    source_asset_id: str | None = None
+    poster_variant_id: str | None = None
+    tail_batch_id: str | None = None
+    tail_item_id: str | None = None
+    download_url: str | None = None
+    preview_url: str | None = None
+    thumbnail_url: str | None = None
+
+
+class DeckUnavailableSourceResponse(BaseModel):
+    source_item_id: str
+    workflow_node_id: str
+    workflow_node_title: str
+    workflow_node_type: str
+    reason: str
+    kind: str | None = None
+    summary: str | None = None
+    copy_set_id: str | None = None
+    source_asset_id: str | None = None
+    poster_variant_id: str | None = None
+    tail_batch_id: str | None = None
+    tail_item_id: str | None = None
+
+
+class DeckPlannedGroupResponse(BaseModel):
+    group_id: str
+    label: str
+    text_source_item_ids: list[str] = Field(default_factory=list)
+    primary_visual_source_item_ids: list[str] = Field(default_factory=list)
+    alternate_visual_source_item_ids: list[str] = Field(default_factory=list)
+
+
+class DeckSourceManifestResponse(BaseModel):
+    workflow_id: str
+    deck_node_id: str
+    include_transitive_inputs: bool
+    available_sources: list[DeckSourceItemResponse]
+    unavailable_sources: list[DeckUnavailableSourceResponse]
+    source_fingerprint: str
+    last_source_fingerprint: str | None = None
+    source_stale: bool
+    model_summary: str
+    planning_strategy: str
+    slide_count_mode: str
+    target_slide_count: int | None = None
+    group_by: str
+    section_pages: bool
+    per_group_image_cap: int
+    primary_visual_source_item_ids: list[str] = Field(default_factory=list)
+    alternate_visual_source_item_ids: list[str] = Field(default_factory=list)
+    planned_groups: list[DeckPlannedGroupResponse] = Field(default_factory=list)
+    workflow_node_ids: list[str]
+    copy_set_ids: list[str]
+    source_asset_ids: list[str]
+    poster_variant_ids: list[str]
+    tail_batch_ids: list[str]
+
+
+class DeckNodeOutlineSlideContextRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    points: list[str] = Field(default_factory=list)
+
+
+class DeckNodeOutlineRequest(BaseModel):
+    resource_group_id: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    source_input: str | None = Field(default=None, max_length=8000)
+    max_slides: int | None = None
+    style_key: str | None = None
+    include_transitive_inputs: bool | None = None
+    planning_strategy: str | None = None
+    slide_count_mode: str | None = None
+    group_by: str | None = None
+    section_pages: bool | None = None
+    per_group_image_cap: int | None = None
+    slide_context: list[DeckNodeOutlineSlideContextRequest] = Field(default_factory=list)
+
+
+class DeckNodeSlideMaterialRequest(BaseModel):
+    source_item_id: str = Field(min_length=1)
+    target_slot: str | None = None
+    caption_source: str | None = None
 
 
 class CanvasTemplateScenarioResponse(BaseModel):
@@ -524,7 +626,11 @@ def workflow_node_retry_hint(node: WorkflowNode, runs: list[WorkflowRun]) -> Wor
     return _workflow_run_retry_hint(failed_run)
 
 
-def serialize_workflow_node(node: WorkflowNode, runs: list[WorkflowRun] | None = None) -> WorkflowNodeResponse:
+def serialize_workflow_node(
+    node: WorkflowNode,
+    runs: list[WorkflowRun] | None = None,
+    output_json_override: dict[str, Any] | None = None,
+) -> WorkflowNodeResponse:
     context_runs = runs or []
     return WorkflowNodeResponse(
         id=node.id,
@@ -535,7 +641,7 @@ def serialize_workflow_node(node: WorkflowNode, runs: list[WorkflowRun] | None =
         position_y=node.position_y,
         config_json=node.config_json,
         status=workflow_node_display_status(node),
-        output_json=node.output_json,
+        output_json=output_json_override if output_json_override is not None else node.output_json,
         failure_reason=node.failure_reason,
         is_retryable=workflow_node_failed_run_is_retryable(node, context_runs),
         attempt_count=workflow_node_attempt_count(node, context_runs),
@@ -598,6 +704,54 @@ def serialize_workflow_node_run_status(node_run: WorkflowNodeRun) -> WorkflowNod
     )
 
 
+def _deck_source_item_urls(item: DeckSourceItem) -> dict[str, str | None]:
+    if item.source_asset_id:
+        return build_image_urls(f"/api/source-assets/{item.source_asset_id}/download")
+    if item.poster_variant_id:
+        return build_image_urls(f"/api/posters/{item.poster_variant_id}/download")
+    return {
+        "download_url": None,
+        "preview_url": None,
+        "thumbnail_url": None,
+    }
+
+
+def serialize_deck_source_manifest(manifest: DeckSourceManifest) -> DeckSourceManifestResponse:
+    return DeckSourceManifestResponse.model_validate(
+        {
+            "workflow_id": manifest.workflow_id,
+            "deck_node_id": manifest.deck_node_id,
+            "include_transitive_inputs": manifest.include_transitive_inputs,
+            "available_sources": [
+                {
+                    **item.model_dump(),
+                    **_deck_source_item_urls(item),
+                }
+                for item in manifest.available_sources
+            ],
+            "unavailable_sources": [item.model_dump() for item in manifest.unavailable_sources],
+            "source_fingerprint": manifest.source_fingerprint,
+            "last_source_fingerprint": manifest.last_source_fingerprint,
+            "source_stale": manifest.source_stale,
+            "model_summary": manifest.model_summary,
+            "planning_strategy": manifest.planning_strategy,
+            "slide_count_mode": manifest.slide_count_mode,
+            "target_slide_count": manifest.target_slide_count,
+            "group_by": manifest.group_by,
+            "section_pages": manifest.section_pages,
+            "per_group_image_cap": manifest.per_group_image_cap,
+            "primary_visual_source_item_ids": manifest.primary_visual_source_item_ids,
+            "alternate_visual_source_item_ids": manifest.alternate_visual_source_item_ids,
+            "planned_groups": manifest.planned_groups,
+            "workflow_node_ids": manifest.workflow_node_ids,
+            "copy_set_ids": manifest.copy_set_ids,
+            "source_asset_ids": manifest.source_asset_ids,
+            "poster_variant_ids": manifest.poster_variant_ids,
+            "tail_batch_ids": manifest.tail_batch_ids,
+        }
+    )
+
+
 def serialize_workflow_run(run: WorkflowRun) -> WorkflowRunResponse:
     node_runs = sorted(run.node_runs, key=lambda item: item.started_at)
     return WorkflowRunResponse(
@@ -632,18 +786,38 @@ def serialize_workflow_run_status(run: WorkflowRun) -> WorkflowRunStatusResponse
     )
 
 
-def serialize_inspiration_workflow(workflow: InspirationWorkflow) -> InspirationWorkflowResponse:
+def _default_workflow_output_json_overrides(workflow: InspirationWorkflow) -> dict[str, dict[str, Any] | None]:
+    session = object_session(workflow)
+    if session is None:
+        return {}
+    return {
+        node.id: preview_deck_node_output(session, workflow=workflow, deck_node=node)
+        for node in workflow.nodes
+        if node.node_type == WorkflowNodeType.DECK_GENERATION
+    }
+
+
+def serialize_inspiration_workflow(
+    workflow: InspirationWorkflow,
+    *,
+    output_json_overrides: dict[str, dict[str, Any] | None] | None = None,
+) -> InspirationWorkflowResponse:
     nodes = sorted(workflow.nodes, key=lambda item: (item.position_x, item.position_y, item.created_at))
     edges = sorted(workflow.edges, key=lambda item: item.created_at)
     runs = latest_workflow_runs(workflow)
     node_context_runs = list(workflow.runs)
+    overrides = (
+        output_json_overrides
+        if output_json_overrides is not None
+        else _default_workflow_output_json_overrides(workflow)
+    )
     return InspirationWorkflowResponse(
         id=workflow.id,
         inspiration_id=workflow.inspiration_id,
         title=workflow.title,
         active=workflow.active,
         initial_entry_mode=workflow.initial_entry_mode,
-        nodes=[serialize_workflow_node(item, node_context_runs) for item in nodes],
+        nodes=[serialize_workflow_node(item, node_context_runs, overrides.get(item.id)) for item in nodes],
         edges=[serialize_workflow_edge(item) for item in edges],
         runs=[serialize_workflow_run(item) for item in runs],
         created_at=workflow.created_at,

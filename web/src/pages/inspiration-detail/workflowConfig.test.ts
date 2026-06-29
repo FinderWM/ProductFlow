@@ -83,6 +83,62 @@ describe("draftFromNode", () => {
     expect(defaultTitleForType("reference_image", 1)).toBe("承载图片节点 1");
     expect(defaultTitleForType("copy_generation", 1)).toBe("文案生成节点 1");
     expect(defaultTitleForType("image_generation", 1)).toBe("生图触发器节点 1");
+    expect(defaultConfigForType("deck_generation")).toMatchObject({
+      resource_group_id: null,
+      style_key: "clean_business",
+      target_slide_count: 8,
+      include_transitive_inputs: false,
+      planning_strategy: "hybrid",
+      slide_count_mode: "auto",
+      group_by: "tail_item",
+      section_pages: true,
+      per_group_image_cap: 3,
+      excluded_source_item_ids: [],
+      source_order: [],
+    });
+  });
+
+  it("round-trips deck source exclusion and ordering config", () => {
+    const node: WorkflowNode = {
+      ...baseNode,
+      id: "deck-node",
+      node_type: "deck_generation",
+      title: "演示节点",
+      config_json: {
+        resource_group_id: "group-deck",
+        style_key: "clean_business",
+        source_input: "补充说明",
+        target_slide_count: 12,
+        include_transitive_inputs: true,
+        planning_strategy: "image_led",
+        slide_count_mode: "target",
+        group_by: "source_node",
+        section_pages: false,
+        per_group_image_cap: 5,
+        excluded_source_item_ids: ["node:copy:1", "node:image:2"],
+        source_order: ["node:image:2", "node:copy:1", "node:context:3"],
+      },
+      output_json: null,
+    };
+
+    const draft = draftFromNode(node, inspiration);
+    expect(draft.deckPlanningStrategy).toBe("image_led");
+    expect(draft.deckSlideCountMode).toBe("target");
+    expect(draft.deckGroupBy).toBe("source_node");
+    expect(draft.deckSectionPages).toBe(false);
+    expect(draft.deckPerGroupImageCap).toBe(5);
+    expect(draft.deckExcludedSourceItemIds).toEqual(["node:copy:1", "node:image:2"]);
+    expect(draft.deckSourceOrder).toEqual(["node:image:2", "node:copy:1", "node:context:3"]);
+
+    expect(nodeConfigFromDraft(node, draft)).toMatchObject({
+      planning_strategy: "image_led",
+      slide_count_mode: "target",
+      group_by: "source_node",
+      section_pages: false,
+      per_group_image_cap: 5,
+      excluded_source_item_ids: ["node:copy:1", "node:image:2"],
+      source_order: ["node:image:2", "node:copy:1", "node:context:3"],
+    });
   });
 
   it("round-trips manual generation config selection on copy nodes", () => {

@@ -584,8 +584,12 @@ export function workflowEdgeIdFromReactFlowEdge(edge: Pick<Edge, "id"> | string)
 
 export function connectionToWorkflowEdgeInput(
   connection: Connection,
+  options: { sourceNodeTypeById?: Record<string, string | undefined> } = {},
 ): { source_node_id: string; target_node_id: string; source_handle: string; target_handle: string } | null {
   if (!connection.source || !connection.target || connection.source === connection.target) {
+    return null;
+  }
+  if (options.sourceNodeTypeById?.[connection.source] === "deck_generation") {
     return null;
   }
   return {

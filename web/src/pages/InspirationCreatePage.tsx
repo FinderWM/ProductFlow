@@ -103,6 +103,7 @@ const NODE_TYPE_LABEL_KEYS: Record<WorkflowNodeType, TranslationKey> = {
   copy_generation: "create.copy",
   image_generation: "create.imageGeneration",
   tail_splitter: "create.tailSplitter",
+  deck_generation: "create.deckGeneration",
 };
 
 const INITIAL_WORKFLOW_ENTRY_OPTIONS: Array<{

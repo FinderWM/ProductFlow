@@ -49,6 +49,7 @@ import { ZoomableImage } from "../components/ZoomableImage";
 import { api, ApiError } from "../lib/api";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
+import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import {
   API_INSPIRATIONS_GENERATE,
@@ -86,6 +87,10 @@ import {
   NODE_WIDTH,
 } from "./inspiration-detail/constants";
 import { DownloadLink } from "./inspiration-detail/ImageDownloadComponents";
+import {
+  buildDeckSourceOrderForNodes,
+  collectDeckSourceNodesFromTailSplitter,
+} from "./inspiration-detail/deckSourceOrder";
 import { ImagesPanel } from "./inspiration-detail/ImagesPanel";
 import { InspectorPanel } from "./inspiration-detail/InspectorPanel";
 import { RunsPanel } from "./inspiration-detail/RunsPanel";
@@ -128,9 +133,16 @@ import type { WorkflowHistoryStep } from "./inspiration-detail/workflowHistory";
 import { connectionDescription, localizedWorkflowNodeTypeLabel } from "./inspiration-detail/nodeDisplay";
 import type { CanvasInteractionMode, NodeConfigDraft, SaveStatus } from "./inspiration-detail/types";
 import {
+  buildWorkflowDeckNodeEdgeInputs,
   buildWorkflowCanvasActionItems,
   getWorkflowCanvasActionTargetForNodeToolbar,
   getWorkflowCanvasActionTargetNodeIds,
+  planWorkflowDeckNodeCreation,
+  summarizeWorkflowDeckSourceSelection,
+  workflowHasActiveDeckGeneration,
+  workflowNodeDeckSourceUnavailableReasonKey,
+  workflowNodeHasUsableDeckSourceOutput,
+  workflowTemplateGroupNodeIdsFromSelection,
 } from "./inspiration-detail/workflowActions";
 import type {
   WorkflowCanvasActionId,
@@ -184,6 +196,16 @@ type PendingDeleteAction =
 type PendingHistoryAction = {
   direction: "undo" | "redo";
   step: WorkflowHistoryStep;
+};
+
+type PendingDeckSourcePreflight = {
+  allNodeIds: string[];
+  usableNodeIds: string[];
+  unavailableSources: Array<{
+    nodeId: string;
+    title: string;
+    reasonKey: TranslationKey;
+  }>;
 };
 
 function resourceLibrarySourceFromPreviewImage(image: DownloadableImage): ResourceLibrarySaveSource | null {
@@ -311,6 +333,8 @@ export function InspirationDetailPage() {
   const [pendingDeleteAction, setPendingDeleteAction] =
     useState<PendingDeleteAction | null>(null);
   const [pendingHistoryAction, setPendingHistoryAction] = useState<PendingHistoryAction | null>(null);
+  const [pendingDeckSourcePreflight, setPendingDeckSourcePreflight] =
+    useState<PendingDeckSourcePreflight | null>(null);
   const [tailPlanDialogOpen, setTailPlanDialogOpen] = useState(false);
   const [historyActionBusy, setHistoryActionBusy] = useState(false);
   const [error, setError] = useState("");
@@ -376,6 +400,11 @@ export function InspirationDetailPage() {
     queryKey: ["inspiration-workflow", inspirationId],
     queryFn: () => api.getInspirationWorkflow(inspirationId),
     enabled: Boolean(inspirationId),
+    refetchInterval: (query) => (
+      workflowHasActiveDeckGeneration((query.state.data as InspirationWorkflow | undefined)?.nodes ?? [])
+        ? 1500
+        : false
+    ),
   });
   const workflow = useMemo(() => mergeActiveRunNodeStatuses(workflowQuery.data ?? null), [workflowQuery.data]);
   const workflowInitialEntryMode = workflow?.initial_entry_mode ?? "image";
@@ -1276,6 +1305,78 @@ export function InspirationDetailPage() {
     },
   });
 
+  const createDeckNodeFromSelectionMutation = useMutation({
+    mutationFn: async ({ nodeIds }: { nodeIds: string[] }) => {
+      assertInspirationWritable();
+      const currentWorkflow = queryClient.getQueryData<InspirationWorkflow>(["inspiration-workflow", inspirationId]) ?? workflow;
+      if (!currentWorkflow) {
+        throw new Error(t("detail.error.workflowNotLoaded"));
+      }
+      const deckNodeCreationPlan = planWorkflowDeckNodeCreation(
+        nodeIds,
+        currentWorkflow.nodes,
+        AUTO_IMAGE_OUTPUT_NODE_OFFSET_X,
+      );
+      const { sourceNodes, sourceSelectionSummary, usableSourceNodes } = deckNodeCreationPlan;
+      if (!usableSourceNodes.length) {
+        const reason = sourceSelectionSummary.firstUnavailableReasonKey
+          ? t(sourceSelectionSummary.firstUnavailableReasonKey)
+          : t("detail.deck.noSources");
+        throw new Error(`${t("detail.deck.createFromSelectionDisabled")} ${reason}`);
+      }
+      const previousNodeIds = new Set(currentWorkflow.nodes.map((node) => node.id));
+      const siblingCount = currentWorkflow.nodes.filter((node) => node.node_type === "deck_generation").length;
+      if (!deckNodeCreationPlan.nextPosition) {
+        throw new Error(t("detail.deck.createFromSelectionFailed"));
+      }
+      let nextWorkflow = await api.createWorkflowNode(inspirationId, {
+        node_type: "deck_generation",
+        title: defaultTitleForType("deck_generation", siblingCount + 1),
+        position_x: deckNodeCreationPlan.nextPosition.x,
+        position_y: deckNodeCreationPlan.nextPosition.y,
+        config_json: {
+          ...defaultConfigForType("deck_generation"),
+          source_order: buildDeckSourceOrderForNodes(sourceNodes),
+        },
+      });
+      const createdNode = latestCreatedWorkflowNode(nextWorkflow, previousNodeIds, "deck_generation");
+      if (!createdNode) {
+        throw new Error(t("detail.deck.createFromSelectionFailed"));
+      }
+      for (const edgeInput of buildWorkflowDeckNodeEdgeInputs(sourceNodes, createdNode.id)) {
+        nextWorkflow = await api.createWorkflowEdge(inspirationId, edgeInput);
+      }
+      return {
+        nextWorkflow,
+        createdNodeId: createdNode.id,
+        hadUnavailableSources: sourceSelectionSummary.unavailableNodeCount > 0,
+      };
+    },
+    onSuccess: ({ nextWorkflow, createdNodeId, hadUnavailableSources }) => {
+      setError("");
+      setNotice(
+        hadUnavailableSources
+          ? t("detail.deck.createFromSelectionPartial")
+          : t("detail.deck.createFromSelection"),
+      );
+      setWorkflowCache(nextWorkflow);
+      setSelectedNodeId(createdNodeId);
+      setSelectedNodeIds([createdNodeId]);
+      setActiveSidebarTab("details");
+      workflowCanvasRef.current?.fitNodeIds([createdNodeId]);
+      pushUndoStep({ kind: "deleteNodes", nodeIds: [createdNodeId] });
+    },
+    onError: (mutationError) => {
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.detail
+          : mutationError instanceof Error
+            ? mutationError.message
+            : t("detail.deck.createFromSelectionFailed"),
+      );
+    },
+  });
+
   const applyTemplateGroupMutation = useMutation({
     mutationFn: async (template: CanvasTemplateSummary) => {
       assertInspirationWritable();
@@ -1420,10 +1521,11 @@ export function InspirationDetailPage() {
   const createUserTemplateGroupMutation = useMutation({
     mutationFn: async () => {
       assertInspirationWritable();
-      if (selectedNodeIds.length < 2) {
+      const templateNodeIds = workflowTemplateGroupNodeIdsFromSelection(selectedNodeIds, workflow?.nodes ?? []);
+      if (templateNodeIds.length < 2) {
         throw new Error(t("detail.error.selectNodesToSave"));
       }
-      if (workflowNodeIdsContainInspirationContext(selectedNodeIds)) {
+      if (workflowNodeIdsContainInspirationContext(templateNodeIds)) {
         throw new Error(t("detail.error.templateContainsInspirationContext"));
       }
       const title = templateSaveTitle.trim();
@@ -1434,7 +1536,7 @@ export function InspirationDetailPage() {
       return api.createUserTemplateGroup(inspirationId, {
         title,
         description: templateSaveDescription.trim() || undefined,
-        node_ids: selectedNodeIds,
+        node_ids: templateNodeIds,
       });
     },
     onSuccess: async () => {
@@ -1666,6 +1768,9 @@ export function InspirationDetailPage() {
       const previousEdgeIds = new Set(currentWorkflow?.edges.map((edge) => edge.id) ?? []);
       const source = currentWorkflow?.nodes.find((node) => node.id === input.sourceNodeId);
       const target = currentWorkflow?.nodes.find((node) => node.id === input.targetNodeId);
+      if (source?.node_type === "deck_generation") {
+        throw new Error(t("detail.deck.connectionSourceBlocked"));
+      }
       if (source?.node_type === "reference_image" && target?.node_type === "reference_image") {
         throw new Error(connectionDescription(source, target, t));
       }
@@ -2304,21 +2409,60 @@ export function InspirationDetailPage() {
   }, [workflow]);
 
   const workflowActionTargetNodes = useCallback((target: WorkflowCanvasActionTarget) => {
-    const targetNodeIds = new Set(getWorkflowCanvasActionTargetNodeIds(target));
-    return workflow?.nodes.filter((node) => targetNodeIds.has(node.id)) ?? [];
+    if (!workflow) {
+      return [];
+    }
+    const workflowNodesById = new Map(workflow.nodes.map((node) => [node.id, node]));
+    return getWorkflowCanvasActionTargetNodeIds(target)
+      .map((nodeId) => workflowNodesById.get(nodeId) ?? null)
+      .filter((node): node is WorkflowNode => node !== null);
   }, [workflow]);
+
+  const requestCreateDeckFromNodeIds = useCallback((requestedNodeIds: string[]) => {
+    if (!workflow) {
+      return;
+    }
+    const workflowNodesById = new Map(workflow.nodes.map((node) => [node.id, node]));
+    const targetNodes = requestedNodeIds
+      .map((nodeId) => workflowNodesById.get(nodeId) ?? null)
+      .filter(
+        (node): node is WorkflowNode =>
+          Boolean(node && node.node_type !== "inspiration_context" && node.node_type !== "deck_generation"),
+      );
+    const allNodeIds = targetNodes.map((node) => node.id);
+    const usableNodeIds = targetNodes.filter(workflowNodeHasUsableDeckSourceOutput).map((node) => node.id);
+    const unavailableSources = targetNodes
+      .map((node) => {
+        const reasonKey = workflowNodeDeckSourceUnavailableReasonKey(node);
+        return reasonKey
+          ? {
+              nodeId: node.id,
+              title: node.title,
+              reasonKey,
+            }
+          : null;
+      })
+      .filter((item): item is PendingDeckSourcePreflight["unavailableSources"][number] => item !== null);
+    if (usableNodeIds.length > 0 && unavailableSources.length > 0) {
+      setPendingDeckSourcePreflight({ allNodeIds, usableNodeIds, unavailableSources });
+      return;
+    }
+    createDeckNodeFromSelectionMutation.mutate({ nodeIds: allNodeIds });
+  }, [createDeckNodeFromSelectionMutation, workflow]);
 
   const workflowActionItems = useCallback((target: WorkflowCanvasActionTarget): WorkflowCanvasActionItem[] => {
     const primaryNode = workflowActionPrimaryNode(target);
+    const targetNodes = workflowActionTargetNodes(target);
     const runActionState = primaryNode
       ? getWorkflowNodeRunActionState(primaryNode, {
           runSubmissionPending,
           pendingStartNodeId,
         })
       : null;
+    const deckSourceSummary = summarizeWorkflowDeckSourceSelection(targetNodes);
     return buildWorkflowCanvasActionItems(target, {
       primaryNode,
-      targetNodes: workflowActionTargetNodes(target),
+      targetNodes,
       runActionState: inspirationGenerateBlocked && runActionState
         ? {
             ...runActionState,
@@ -2329,18 +2473,31 @@ export function InspirationDetailPage() {
         : runActionState,
       structureBusy,
       duplicatePending: duplicateNodeGroupMutation.isPending,
-      templatePending: createUserTemplateGroupMutation.isPending,
+      templatePending: createUserTemplateGroupMutation.isPending || createDeckNodeFromSelectionMutation.isPending,
       deletePending: deleteNodeMutation.isPending || deleteSelectedNodesMutation.isPending,
     }).map((item) => {
       const label = item.label ?? (item.labelKey ? t(item.labelKey) : "");
+      const createDeckTitle =
+        item.id === "createDeck"
+          ? deckSourceSummary.usableNodeCount === 0
+            ? `${t("detail.deck.createFromSelectionDisabled")} ${
+                deckSourceSummary.firstUnavailableReasonKey
+                  ? t(deckSourceSummary.firstUnavailableReasonKey)
+                  : t("detail.deck.noSources")
+              }`
+            : deckSourceSummary.unavailableNodeCount > 0
+              ? t("detail.deck.createFromSelectionPartial")
+              : undefined
+          : undefined;
       return {
         ...item,
         label,
-        title: item.title ?? label,
+        title: createDeckTitle ?? item.title ?? label,
       };
     });
   }, [
     createUserTemplateGroupMutation.isPending,
+    createDeckNodeFromSelectionMutation.isPending,
     deleteNodeMutation.isPending,
     deleteSelectedNodesMutation.isPending,
     duplicateNodeGroupMutation.isPending,
@@ -2384,6 +2541,10 @@ export function InspirationDetailPage() {
       showInspirationWriteBlockedError();
       return;
     }
+    if (actionId === "createDeck") {
+      requestCreateDeckFromNodeIds(nodeIds);
+      return;
+    }
     if (actionId === "duplicate") {
       duplicateNodeGroupMutation.mutate({ nodeIds, source: "duplicate" });
       return;
@@ -2416,6 +2577,29 @@ export function InspirationDetailPage() {
     }
   };
 
+  const handleCreateDeckFromTail = useCallback((tailNode: WorkflowNode) => {
+    if (inspirationWriteBlocked) {
+      showInspirationWriteBlockedError();
+      return;
+    }
+    if (!workflow) {
+      return;
+    }
+    const tailSourceNodes = collectDeckSourceNodesFromTailSplitter(tailNode, workflow.nodes);
+    if (!tailSourceNodes.length) {
+      setError(t("detail.tailPlan.createDeckUnavailable"));
+      return;
+    }
+    requestCreateDeckFromNodeIds(tailSourceNodes.map((node) => node.id));
+  }, [
+    inspirationWriteBlocked,
+    requestCreateDeckFromNodeIds,
+    setError,
+    showInspirationWriteBlockedError,
+    t,
+    workflow,
+  ]);
+
   const getWorkflowNodeActionToolbar = useCallback((nodeId: string): WorkflowCanvasActionToolbar | null => {
     const target = getWorkflowCanvasActionTargetForNodeToolbar(nodeId, selectedNodeId, selectedNodeIds);
     if (!target) {
@@ -2424,6 +2608,22 @@ export function InspirationDetailPage() {
     const items = workflowActionItems(target);
     return items.length ? { target, items } : null;
   }, [selectedNodeId, selectedNodeIds, workflowActionItems]);
+
+  const handleOpenWorkflowNodeFromDeck = useCallback(
+    (nodeId: string) => {
+      const node = workflow?.nodes.find((workflowNode) => workflowNode.id === nodeId);
+      if (!node) {
+        setError(t("detail.deck.sourceNodeDeleted"));
+        return;
+      }
+      setSelectedNodeId(node.id);
+      setSelectedNodeIds([node.id]);
+      setActiveSidebarTab("details");
+      setMobileDetailsSheetOpen(true);
+      workflowCanvasRef.current?.fitNodeIds([node.id]);
+    },
+    [t, workflow],
+  );
 
   const commitNodePosition = (input: NodePositionCommitInput) => {
     if (inspirationWriteBlocked) {
@@ -2946,7 +3146,9 @@ export function InspirationDetailPage() {
               ? t("detail.singleNode.description.copyGeneration")
               : option.type === "tail_splitter"
                 ? t("detail.singleNode.description.tailSplitter")
-                : t("detail.singleNode.description.imageGeneration");
+                : option.type === "deck_generation"
+                  ? t("detail.inspector.description.deckGeneration")
+                  : t("detail.singleNode.description.imageGeneration");
         const creatingThisNode = createNodeMutation.isPending && createNodeMutation.variables === option.type;
         const NodeIcon = option.type === "reference_image"
           ? ImagePlus
@@ -2954,7 +3156,9 @@ export function InspirationDetailPage() {
             ? FileText
             : option.type === "tail_splitter"
               ? Sparkles
-              : ImageIcon;
+              : option.type === "deck_generation"
+                ? Presentation
+                : ImageIcon;
         return (
           <div
             key={option.type}
@@ -3129,6 +3333,7 @@ export function InspirationDetailPage() {
           generationConfigOptions={generationConfigOptions}
           onPreviewImage={handlePreviewImage}
           onDraftChange={handleGuardedDraftChange}
+          onFlushDraft={flushSelectedDraft}
           onRun={() => void handleRunWorkflow(selectedNode.id)}
           onCancelRun={
             selectedNodeCancelableRun
@@ -3149,6 +3354,8 @@ export function InspirationDetailPage() {
           onDelete={() => handleDeleteNode(selectedNode)}
           deleteDisabled={selectedNodeDeleteDisabled}
           deleteTitle={selectedNodeDeleteTitle}
+          onCreateDeckFromTail={handleCreateDeckFromTail}
+          createDeckPending={createDeckNodeFromSelectionMutation.isPending || inspirationWriteBlocked}
           busy={inspectorBusy}
           cancelBusy={cancelWorkflowRunMutation.isPending || inspirationGenerateBlocked}
           runActionState={
@@ -3170,7 +3377,9 @@ export function InspirationDetailPage() {
   const renderSidebarPanelContent = () => (
     <>
       {activeSidebarTab === "singleNode" ? renderSingleNodePanel() : null}
-      {activeSidebarTab === "deck" ? <DeckPanel inspirationId={inspirationId} /> : null}
+      {activeSidebarTab === "deck" ? (
+        <DeckPanel inspirationId={inspirationId} onOpenWorkflowNode={handleOpenWorkflowNodeFromDeck} />
+      ) : null}
       {activeSidebarTab === "details" ? renderDetailsPanelContent() : null}
       {activeSidebarTab === "runs" ? (
         <RunsPanel
@@ -3770,6 +3979,79 @@ export function InspirationDetailPage() {
           void handleConfirmTailSplitPlan(itemIds, imageGenerationConfig, reuseOptions)
         }
       />
+      {pendingDeckSourcePreflight ? (
+        <ModalShell
+          onClose={() => setPendingDeckSourcePreflight(null)}
+          ariaLabel={t("detail.deck.createFromSelectionPreflightTitle")}
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950 dark:text-slate-100">
+                {t("detail.deck.createFromSelectionPreflightTitle")}
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-slate-500 dark:text-slate-400">
+                {t("detail.deck.createFromSelectionPreflightDescription", {
+                  count: pendingDeckSourcePreflight.unavailableSources.length,
+                })}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPendingDeckSourcePreflight(null)}
+              className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              aria-label={t("common.close")}
+            >
+              <X size={17} />
+            </button>
+          </div>
+          <div className="max-h-[50vh] overflow-y-auto px-5 py-4">
+            <div className="space-y-2">
+              {pendingDeckSourcePreflight.unavailableSources.map((source) => (
+                <div
+                  key={source.nodeId}
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                >
+                  <div className="font-semibold">{source.title}</div>
+                  <div className="mt-1 text-xs leading-5">{t(source.reasonKey)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
+            <button
+              type="button"
+              onClick={() => setPendingDeckSourcePreflight(null)}
+              className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              disabled={createDeckNodeFromSelectionMutation.isPending}
+              onClick={() => {
+                createDeckNodeFromSelectionMutation.mutate({ nodeIds: pendingDeckSourcePreflight.allNodeIds });
+                setPendingDeckSourcePreflight(null);
+              }}
+              className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              {createDeckNodeFromSelectionMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
+              {t("detail.deck.createFromSelectionKeepUnavailable")}
+            </button>
+            <button
+              type="button"
+              disabled={createDeckNodeFromSelectionMutation.isPending}
+              onClick={() => {
+                createDeckNodeFromSelectionMutation.mutate({ nodeIds: pendingDeckSourcePreflight.usableNodeIds });
+                setPendingDeckSourcePreflight(null);
+              }}
+              className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+            >
+              {createDeckNodeFromSelectionMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
+              {t("detail.deck.createFromSelectionExcludeUnavailable")}
+            </button>
+          </div>
+        </ModalShell>
+      ) : null}
       {canvasTemplateSaveOpen ? (
         <ModalShell
           onClose={() => setCanvasTemplateSaveOpen(false)}

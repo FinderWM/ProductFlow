@@ -215,7 +215,6 @@ DEFAULT_PROMPT_POSTER_IMAGE_REFERENCE_POLICY = (
 )
 DEFAULT_PROMPT_IMAGE_CHAT_TEMPLATE = """请根据本轮用户要求生成图片。
 输出尺寸：{size}
-{history_block}
 本轮用户要求：{prompt}
 请直接生成图片，不要返回说明文字。"""
 DEFAULT_PROMPT_IMAGE_PROMPT_POLISH_SYSTEM = (

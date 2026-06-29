@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from textwrap import shorten
-from typing import Any, Literal
+from typing import Any
 
 from PIL import Image, ImageDraw
 
@@ -35,15 +35,6 @@ from inspiration_one_backend.infrastructure.provider_config import (
 
 
 @dataclass(slots=True)
-class ImageChatTurn:
-    """生图对话中的一轮：用户输入或 AI 回复（含历史图片）。"""
-
-    role: Literal["user", "assistant"]
-    content: str
-    image_data_url: str | None = None
-
-
-@dataclass(slots=True)
 class GeneratedChatImage:
     """AI 生成的图片结果。"""
 
@@ -64,6 +55,13 @@ class GeneratedChatImage:
     def data_url(self) -> str:
         encoded = b64encode(self.bytes_data).decode("utf-8")
         return f"data:{self.mime_type};base64,{encoded}"
+
+
+@dataclass(frozen=True, slots=True)
+class ImageChatTurn:
+    role: str
+    content: str
+    image_data_url: str | None = None
 
 
 class ImageChatService:
@@ -88,8 +86,8 @@ class ImageChatService:
         self,
         prompt: str,
         size: str,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
+        history: list[ImageChatTurn] | None = None,
         previous_response_id: str | None = None,
         tool_options: dict | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -98,15 +96,15 @@ class ImageChatService:
             return self._generate_mock(
                 prompt=prompt,
                 size=size,
-                history=history,
                 manual_reference_images=manual_reference_images,
+                history=history,
             )
         if self.provider_kind == "openai_responses":
             return self._generate_openai_responses(
                 prompt=prompt,
                 size=size,
-                history=history,
                 manual_reference_images=manual_reference_images,
+                history=history,
                 previous_response_id=previous_response_id,
                 tool_options=tool_options,
                 progress_callback=progress_callback,
@@ -115,24 +113,24 @@ class ImageChatService:
             return self._generate_openai_images(
                 prompt=prompt,
                 size=size,
-                history=history,
                 manual_reference_images=manual_reference_images,
+                history=history,
                 tool_options=tool_options,
             )
         if self.provider_kind == "openai_chat_image":
             return self._generate_openai_chat_image(
                 prompt=prompt,
                 size=size,
-                history=history,
                 manual_reference_images=manual_reference_images,
+                history=history,
                 tool_options=tool_options,
             )
         if self.provider_kind == "google_gemini_image":
             return self._generate_google_gemini(
                 prompt=prompt,
                 size=size,
-                history=history,
                 manual_reference_images=manual_reference_images,
+                history=history,
             )
         raise RuntimeError(f"暂不支持的图片 provider: {self.provider_kind}")
 
@@ -140,8 +138,8 @@ class ImageChatService:
         self,
         prompt: str,
         size: str,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
+        history: list[ImageChatTurn] | None = None,
         *,
         candidate_count: int,
         tool_options: dict | None = None,
@@ -152,8 +150,8 @@ class ImageChatService:
             return self._generate_openai_images_many(
                 prompt=prompt,
                 size=size,
-                history=history,
                 manual_reference_images=manual_reference_images,
+                history=history,
                 tool_options=tool_options,
                 candidate_count=candidate_count,
             )
@@ -161,8 +159,8 @@ class ImageChatService:
             self.generate(
                 prompt=prompt,
                 size=size,
-                history=history,
                 manual_reference_images=manual_reference_images,
+                history=history,
                 tool_options=tool_options,
             )
             for _ in range(candidate_count)
@@ -172,20 +170,17 @@ class ImageChatService:
         self,
         prompt: str,
         size: str,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
+        history: list[ImageChatTurn] | None,
     ) -> GeneratedChatImage:
         width, height = parse_size(size)
-        background = (246, 238, 255) if history else (240, 244, 255)
         accent = (99, 91, 255)
-        image = Image.new("RGB", (width, height), background)
+        image = Image.new("RGB", (width, height), (240, 244, 255))
         draw = ImageDraw.Draw(image)
-        history_image_count = len([turn for turn in history if turn.role == "assistant" and turn.image_data_url])
 
         lines = [
             "Inspiration One Image Chat",
-            f"Turn: {len([turn for turn in history if turn.role == 'user']) + 1}",
-            f"Refs: {len(manual_reference_images)} upload / {history_image_count} history",
+            f"Refs: {len(manual_reference_images)} upload",
             shorten(prompt, width=100, placeholder="..."),
         ]
         y = max(40, height // 10)
@@ -223,7 +218,7 @@ class ImageChatService:
             provider_request_json={
                 "prompt": prompt,
                 "size": size,
-                "history_count": len(history),
+                "history_count": len(history or []),
                 "manual_reference_count": len(manual_reference_images),
                 "previous_response_id": None,
             },
@@ -233,19 +228,19 @@ class ImageChatService:
         self,
         prompt: str,
         size: str,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
+        history: list[ImageChatTurn] | None,
         previous_response_id: str | None,
         tool_options: dict | None,
         progress_callback: Callable[[dict[str, Any]], None] | None,
     ) -> GeneratedChatImage:
         client = OpenAIResponsesImageClient(self.provider_config)
-        history_for_prompt = [] if previous_response_id else history
-        history_for_images = [] if previous_response_id else history
         result = client.generate_image(
-            prompt=self._build_prompt(prompt=prompt, history=history_for_prompt, size=size),
+            prompt=self._build_prompt(prompt=prompt, history=history, size=size),
             size=size,
-            reference_images=self._collect_reference_images(history_for_images, manual_reference_images),
+            reference_images=self._collect_reference_images(
+                self._generation_reference_images(history, manual_reference_images)
+            ),
             previous_response_id=previous_response_id,
             tool_options=tool_options,
             progress_callback=progress_callback,
@@ -265,64 +260,69 @@ class ImageChatService:
             provider_output_json=result.provider_output_json,
         )
 
-    def _build_prompt(self, prompt: str, history: list[ImageChatTurn], size: str) -> str:
-        recent_turns = history[-8:]
-        history_lines = []
-        for index, turn in enumerate(recent_turns, start=1):
-            role = "用户" if turn.role == "user" else "助手"
-            history_lines.append(f"{index}. {role}：{turn.content.strip()}")
-
-        history_block = ""
-        if history_lines:
-            history_block = "\n".join(["以下是之前对话中已经确认的上下文：", *history_lines])
+    def _build_prompt(
+        self,
+        prompt: str,
+        history: list[ImageChatTurn] | None = None,
+        size: str = "",
+    ) -> str:
         return render_prompt_template(
             self.prompt_template,
             {
                 "prompt": prompt.strip(),
+                "history_block": self._history_block(history),
                 "size": size,
-                "history_block": history_block,
             },
         )
 
+    def _history_block(self, history: list[ImageChatTurn] | None) -> str:
+        lines: list[str] = []
+        for turn in history or []:
+            content = turn.content.strip()
+            if not content and not turn.image_data_url:
+                continue
+            role_label = "用户" if turn.role == "user" else "助手" if turn.role == "assistant" else "系统"
+            if content:
+                line = f"{role_label}：{content}"
+            else:
+                line = f"{role_label}：（附图）"
+            if turn.image_data_url and content:
+                line = f"{line}（附图）"
+            lines.append(line)
+        return "\n".join(lines) if lines else "无显式上游上下文"
+
+    def _generation_reference_images(
+        self,
+        history: list[ImageChatTurn] | None,
+        manual_reference_images: list[str],
+    ) -> list[str]:
+        history_image_data_urls = [
+            turn.image_data_url.strip()
+            for turn in history or []
+            if isinstance(turn.image_data_url, str) and turn.image_data_url.strip()
+        ]
+        return [*history_image_data_urls, *manual_reference_images]
+
     def _collect_reference_images(
         self,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
     ) -> list[ResponsesReferenceImage]:
-        references: list[ResponsesReferenceImage] = []
-
         reference_limit = max(0, self.max_reference_images)
-        references.extend(
-            build_responses_reference_images_from_data_urls(manual_reference_images, limit=reference_limit)
-        )
-        if len(references) >= reference_limit:
-            return references[:reference_limit]
-
-        history_references: list[ResponsesReferenceImage] = []
-        remaining_history_slots = max(0, reference_limit - len(references))
-        for turn in reversed(history):
-            if turn.role != "assistant" or not turn.image_data_url:
-                continue
-            history_references.append(decode_reference_data_url(turn.image_data_url))
-            if len(history_references) >= min(3, remaining_history_slots):
-                break
-        history_references.reverse()
-        references.extend(history_references)
-        return references[:reference_limit]
+        return build_responses_reference_images_from_data_urls(manual_reference_images, limit=reference_limit)
 
     def _generate_openai_images(
         self,
         prompt: str,
         size: str,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
+        history: list[ImageChatTurn] | None,
         tool_options: dict | None,
     ) -> GeneratedChatImage:
         return self._generate_openai_images_many(
             prompt=prompt,
             size=size,
-            history=history,
             manual_reference_images=manual_reference_images,
+            history=history,
             tool_options=tool_options,
             candidate_count=None,
         )[0]
@@ -331,8 +331,8 @@ class ImageChatService:
         self,
         prompt: str,
         size: str,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
+        history: list[ImageChatTurn] | None,
         tool_options: dict | None,
         candidate_count: int | None,
     ) -> list[GeneratedChatImage]:
@@ -340,7 +340,9 @@ class ImageChatService:
         full_prompt = self._build_prompt(prompt=prompt, history=history, size=size)
         request_options = self._images_api_request_options(tool_options, candidate_count=candidate_count)
 
-        reference_images = self._collect_images_api_references(history, manual_reference_images)
+        reference_images = self._collect_images_api_references(
+            self._generation_reference_images(history, manual_reference_images)
+        )
         if reference_images:
             results = client.edit(image=reference_images, prompt=full_prompt, size=size, **request_options)
         else:
@@ -386,8 +388,8 @@ class ImageChatService:
         self,
         prompt: str,
         size: str,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
+        history: list[ImageChatTurn] | None,
         tool_options: dict | None,
     ) -> GeneratedChatImage:
         client = OpenAIChatImageClient(self.provider_config)
@@ -395,7 +397,9 @@ class ImageChatService:
         result = client.generate_image(
             prompt=full_prompt,
             size=size,
-            reference_images=self._collect_images_api_references(history, manual_reference_images),
+            reference_images=self._collect_images_api_references(
+                self._generation_reference_images(history, manual_reference_images)
+            ),
             model=self._openai_chat_model_option(tool_options),
         )
         return self._chat_image_from_openai_chat_result(result, size=size)
@@ -434,15 +438,17 @@ class ImageChatService:
         self,
         prompt: str,
         size: str,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
+        history: list[ImageChatTurn] | None,
     ) -> GeneratedChatImage:
         client = GoogleGeminiImageClient(self.provider_config)
         full_prompt = self._build_prompt(prompt=prompt, history=history, size=size)
         result = client.generate_image(
             prompt=full_prompt,
             size=size,
-            reference_images=self._collect_gemini_references(history, manual_reference_images),
+            reference_images=self._collect_gemini_references(
+                self._generation_reference_images(history, manual_reference_images)
+            ),
         )
         return GeneratedChatImage(
             bytes_data=result.bytes_data,
@@ -461,7 +467,6 @@ class ImageChatService:
 
     def _collect_images_api_references(
         self,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
     ) -> list[ImagesReferenceImage]:
         references: list[ImagesReferenceImage] = []
@@ -469,21 +474,8 @@ class ImageChatService:
         if reference_limit <= 0:
             return references
         has_base_image = False
-        for turn in reversed(history):
-            if turn.role == "assistant" and turn.image_data_url:
-                ref = decode_reference_data_url(turn.image_data_url)
-                references.append(
-                    ImagesReferenceImage(
-                        bytes_data=ref.bytes_data,
-                        mime_type=ref.mime_type,
-                        filename="base.png",
-                    )
-                )
-                has_base_image = True
-                break
-        manual_images = manual_reference_images[: max(0, reference_limit - len(references))]
         reference_index = 1
-        for index, data_url in enumerate(manual_images, start=1):
+        for index, data_url in enumerate(manual_reference_images[:reference_limit], start=1):
             ref = decode_reference_data_url(data_url)
             if not has_base_image and index == 1:
                 filename = "base.png"
@@ -502,7 +494,6 @@ class ImageChatService:
 
     def _collect_gemini_references(
         self,
-        history: list[ImageChatTurn],
         manual_reference_images: list[str],
     ) -> list[GoogleGeminiReferenceImage]:
         return [
@@ -511,5 +502,5 @@ class ImageChatService:
                 mime_type=reference.mime_type,
                 filename=reference.filename,
             )
-            for reference in self._collect_images_api_references(history, manual_reference_images)
+            for reference in self._collect_images_api_references(manual_reference_images)
         ]

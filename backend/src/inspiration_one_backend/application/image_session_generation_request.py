@@ -13,7 +13,6 @@ from inspiration_one_backend.config import get_runtime_settings, normalize_image
 from inspiration_one_backend.domain.enums import ImageSessionAssetKind
 from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
 from inspiration_one_backend.infrastructure.db.models import ImageSession, ImageSessionAsset
-from inspiration_one_backend.infrastructure.image.chat_service import ImageChatTurn
 from inspiration_one_backend.infrastructure.storage import LocalStorage
 
 IMAGE_SESSION_IMAGES_API_N_MAX_COUNT = 10
@@ -63,7 +62,7 @@ def build_branch_generation_context(
     base_asset_ids: list[str] | None = None,
     base_asset_id: str | None = None,
     selected_reference_asset_ids: list[str] | None = None,
-) -> tuple[list[ImageChatTurn], list[str], str | None, list[str], str | None, list[str]]:
+) -> tuple[list[str], str | None, list[str], str | None, list[str]]:
     """Build card-style branch context from the explicit base asset and selected references only."""
 
     normalized_base_assets = _normalize_base_assets(
@@ -82,7 +81,6 @@ def build_branch_generation_context(
     ]
 
     return (
-        [],
         manual_references,
         None,
         [asset.id for asset in normalized_base_assets],

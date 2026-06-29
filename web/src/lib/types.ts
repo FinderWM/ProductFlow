@@ -17,7 +17,8 @@ export type WorkflowNodeType =
   | "reference_image"
   | "copy_generation"
   | "image_generation"
-  | "tail_splitter";
+  | "tail_splitter"
+  | "deck_generation";
 export type CanvasTemplateWorkflowNodeType = WorkflowNodeType;
 export type InspirationInitialWorkflowEntry = "image" | "copy" | "tail" | "blank";
 export type CanvasTemplateEntryMode = Exclude<InspirationInitialWorkflowEntry, "blank">;
@@ -36,6 +37,75 @@ export type DeckStatus = "draft" | "outline_confirmed" | "style_confirmed" | "ge
 export type DeckSlideStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type DeckMaterialSource = "resource_library" | "upload" | "source_asset" | "enhanced";
 
+export interface DeckSourceItem {
+  source_item_id: string;
+  workflow_node_id: string;
+  workflow_node_title: string;
+  workflow_node_type: string;
+  kind: string;
+  group_id: string | null;
+  selected: boolean;
+  planning_role: string | null;
+  summary: string | null;
+  copy_set_id: string | null;
+  source_asset_id: string | null;
+  poster_variant_id: string | null;
+  tail_batch_id: string | null;
+  tail_item_id: string | null;
+  download_url: string | null;
+  preview_url: string | null;
+  thumbnail_url: string | null;
+}
+
+export interface DeckUnavailableSource {
+  source_item_id: string;
+  workflow_node_id: string;
+  workflow_node_title: string;
+  workflow_node_type: string;
+  reason: string;
+  kind: string | null;
+  summary: string | null;
+  copy_set_id: string | null;
+  source_asset_id: string | null;
+  poster_variant_id: string | null;
+  tail_batch_id: string | null;
+  tail_item_id: string | null;
+}
+
+export interface DeckSourceManifest {
+  workflow_id: string;
+  deck_node_id: string;
+  include_transitive_inputs: boolean;
+  available_sources: DeckSourceItem[];
+  unavailable_sources: DeckUnavailableSource[];
+  source_fingerprint: string;
+  last_source_fingerprint: string | null;
+  source_stale: boolean;
+  model_summary: string;
+  planning_strategy: "hybrid" | "copy_led" | "image_led";
+  slide_count_mode: "auto" | "target";
+  target_slide_count: number | null;
+  group_by: "tail_item" | "source_node";
+  section_pages: boolean;
+  per_group_image_cap: number;
+  primary_visual_source_item_ids: string[];
+  alternate_visual_source_item_ids: string[];
+  planned_groups: DeckPlannedGroup[];
+  workflow_node_ids: string[];
+  copy_set_ids: string[];
+  source_asset_ids: string[];
+  poster_variant_ids: string[];
+  tail_batch_ids: string[];
+}
+
+export interface DeckPlannedGroup {
+  group_id: string;
+  label: string;
+  text_source_item_ids: string[];
+  primary_visual_source_item_ids: string[];
+  alternate_visual_source_item_ids: string[];
+}
+
 export interface DeckSlide {
   id: string;
   order_index: number;
@@ -49,6 +119,7 @@ export interface DeckSlide {
   image_height: number | null;
   material_source: DeckMaterialSource | null;
   material_url: string | null;
+  source_manifest_json: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +135,11 @@ export interface Deck {
   style_reference_asset_id: string | null;
   speaker_notes_enabled: boolean;
   pptx_url: string | null;
+  workflow_node_id: string | null;
+  workflow_node_exists: boolean | null;
+  workflow_node_title: string | null;
+  generated_slide_count: number;
+  source_manifest_json: Record<string, unknown> | null;
   slides: DeckSlide[];
   created_at: string;
   updated_at: string;
@@ -75,6 +151,10 @@ export interface DeckSummary {
   title: string;
   status: DeckStatus;
   slide_count: number;
+  workflow_node_id: string | null;
+  workflow_node_exists: boolean | null;
+  workflow_node_title: string | null;
+  generated_slide_count: number;
   created_at: string;
   updated_at: string;
 }

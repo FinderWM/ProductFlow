@@ -35,6 +35,33 @@ function generationConfigIdFromNode(node: WorkflowNode | null): string | null {
   return generationConfigId || null;
 }
 
+function configNumber(node: WorkflowNode | null, key: string, fallback: number): number {
+  const value = node?.config_json?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function configBoolean(node: WorkflowNode | null, key: string, fallback = false): boolean {
+  const value = node?.config_json?.[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function configStringArray(node: WorkflowNode | null, key: string): string[] {
+  const value = node?.config_json?.[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
 function generationConfigFromDraft(draft: NodeConfigDraft): {
   generation_config_mode: "auto" | "manual";
   generation_config_id: string | null;
@@ -146,6 +173,22 @@ export function draftFromNode(
     generationConfigMode: generationConfigModeFromNode(node),
     generationConfigId: generationConfigIdFromNode(node),
     copyStructuredPayload: copySet?.structured_payload ?? outputStructuredPayload(node),
+    deckStyleKey: configString(node, "style_key", "clean_business"),
+    deckSourceInput: configString(node, "source_input"),
+    deckMaxSlides: configNumber(node, "target_slide_count", 8),
+    deckIncludeTransitiveInputs: configBoolean(node, "include_transitive_inputs"),
+    deckPlanningStrategy:
+      configString(node, "planning_strategy", "hybrid") === "copy_led"
+        ? "copy_led"
+        : configString(node, "planning_strategy", "hybrid") === "image_led"
+          ? "image_led"
+          : "hybrid",
+    deckSlideCountMode: configString(node, "slide_count_mode", "auto") === "target" ? "target" : "auto",
+    deckGroupBy: configString(node, "group_by", "tail_item") === "source_node" ? "source_node" : "tail_item",
+    deckSectionPages: configBoolean(node, "section_pages", true),
+    deckPerGroupImageCap: configNumber(node, "per_group_image_cap", 3),
+    deckExcludedSourceItemIds: configStringArray(node, "excluded_source_item_ids"),
+    deckSourceOrder: configStringArray(node, "source_order"),
   };
 }
 
@@ -215,6 +258,24 @@ export function nodeConfigFromDraft(
         base.document_source && typeof base.document_source === "object" ? base.document_source : null,
     };
   }
+  if (node.node_type === "deck_generation") {
+    return {
+      ...base,
+      title: draft.title,
+      resource_group_id: draft.resourceGroupId,
+      style_key: draft.deckStyleKey || null,
+      source_input: draft.deckSourceInput,
+      target_slide_count: Math.max(1, Math.min(50, Math.trunc(draft.deckMaxSlides || 8))),
+      include_transitive_inputs: draft.deckIncludeTransitiveInputs,
+      planning_strategy: draft.deckPlanningStrategy,
+      slide_count_mode: draft.deckSlideCountMode,
+      group_by: draft.deckGroupBy,
+      section_pages: draft.deckSectionPages,
+      per_group_image_cap: Math.max(1, Math.min(12, Math.trunc(draft.deckPerGroupImageCap || 3))),
+      excluded_source_item_ids: Array.from(new Set(draft.deckExcludedSourceItemIds)),
+      source_order: Array.from(new Set(draft.deckSourceOrder)),
+    };
+  }
   return base;
 }
 
@@ -253,6 +314,22 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
       generation_config_mode: "auto",
       generation_config_id: null,
       document_source: null,
+    };
+  }
+  if (type === "deck_generation") {
+    return {
+      resource_group_id: null,
+      style_key: "clean_business",
+      source_input: "",
+      target_slide_count: 8,
+      include_transitive_inputs: false,
+      planning_strategy: "hybrid",
+      slide_count_mode: "auto",
+      group_by: "tail_item",
+      section_pages: true,
+      per_group_image_cap: 3,
+      excluded_source_item_ids: [],
+      source_order: [],
     };
   }
   return {};

@@ -50,6 +50,8 @@ def should_execute_missing_upstream(source_node: WorkflowRuleNode, target_node: 
     upstream may be required when the target cannot be satisfied from existing first-class artifacts.
     """
 
+    if target_node.node_type == WorkflowNodeType.DECK_GENERATION:
+        return False
     if source_node.node_type == WorkflowNodeType.INSPIRATION_CONTEXT:
         return False
     if source_node.node_type == WorkflowNodeType.REFERENCE_IMAGE:

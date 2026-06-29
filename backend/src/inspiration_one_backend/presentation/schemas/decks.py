@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from inspiration_one_backend.domain.enums import DeckMaterialSource, DeckSlideStatus, DeckStatus
-from inspiration_one_backend.infrastructure.db.models import Deck, DeckSlide
+from inspiration_one_backend.infrastructure.db.models import Deck, DeckSlide, WorkflowNode
 
 # --- responses -------------------------------------------------------------
 
@@ -23,6 +25,7 @@ class DeckSlideResponse(BaseModel):
     image_height: int | None
     material_source: DeckMaterialSource | None
     material_url: str | None
+    source_manifest_json: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
 
@@ -38,6 +41,11 @@ class DeckResponse(BaseModel):
     style_reference_asset_id: str | None
     speaker_notes_enabled: bool
     pptx_url: str | None
+    workflow_node_id: str | None
+    workflow_node_exists: bool | None
+    workflow_node_title: str | None
+    generated_slide_count: int
+    source_manifest_json: dict[str, Any] | None
     slides: list[DeckSlideResponse]
     created_at: datetime
     updated_at: datetime
@@ -49,6 +57,10 @@ class DeckSummaryResponse(BaseModel):
     title: str
     status: DeckStatus
     slide_count: int
+    workflow_node_id: str | None
+    workflow_node_exists: bool | None
+    workflow_node_title: str | None
+    generated_slide_count: int
     created_at: datetime
     updated_at: datetime
 
@@ -125,12 +137,32 @@ def serialize_deck_slide(slide: DeckSlide) -> DeckSlideResponse:
         image_height=slide.image_height,
         material_source=slide.material_source,
         material_url=f"/api/deck-slides/{slide.id}/material" if slide.material_storage_path else None,
+        source_manifest_json=slide.source_manifest_json,
         created_at=slide.created_at,
         updated_at=slide.updated_at,
     )
 
 
-def serialize_deck(deck: Deck) -> DeckResponse:
+def _generated_slide_count(deck: Deck) -> int:
+    return sum(1 for slide in deck.slides if slide.image_storage_path)
+
+
+def _workflow_node_snapshot(
+    session: Session | None,
+    workflow_node_id: str | None,
+) -> tuple[bool | None, str | None]:
+    if workflow_node_id is None:
+        return None, None
+    if session is None:
+        return None, None
+    workflow_node = session.get(WorkflowNode, workflow_node_id)
+    if workflow_node is None:
+        return False, None
+    return True, workflow_node.title
+
+
+def serialize_deck(deck: Deck, *, session: Session | None = None) -> DeckResponse:
+    workflow_node_exists, workflow_node_title = _workflow_node_snapshot(session, deck.workflow_node_id)
     return DeckResponse(
         id=deck.id,
         inspiration_id=deck.inspiration_id,
@@ -142,19 +174,29 @@ def serialize_deck(deck: Deck) -> DeckResponse:
         style_reference_asset_id=deck.style_reference_asset_id,
         speaker_notes_enabled=deck.speaker_notes_enabled,
         pptx_url=f"/api/decks/{deck.id}/pptx" if deck.pptx_storage_path else None,
+        workflow_node_id=deck.workflow_node_id,
+        workflow_node_exists=workflow_node_exists,
+        workflow_node_title=workflow_node_title,
+        generated_slide_count=_generated_slide_count(deck),
+        source_manifest_json=deck.source_manifest_json,
         slides=[serialize_deck_slide(slide) for slide in deck.slides],
         created_at=deck.created_at,
         updated_at=deck.updated_at,
     )
 
 
-def serialize_deck_summary(deck: Deck) -> DeckSummaryResponse:
+def serialize_deck_summary(deck: Deck, *, session: Session | None = None) -> DeckSummaryResponse:
+    workflow_node_exists, workflow_node_title = _workflow_node_snapshot(session, deck.workflow_node_id)
     return DeckSummaryResponse(
         id=deck.id,
         inspiration_id=deck.inspiration_id,
         title=deck.title,
         status=deck.status,
         slide_count=len(deck.slides),
+        workflow_node_id=deck.workflow_node_id,
+        workflow_node_exists=workflow_node_exists,
+        workflow_node_title=workflow_node_title,
+        generated_slide_count=_generated_slide_count(deck),
         created_at=deck.created_at,
         updated_at=deck.updated_at,
     )

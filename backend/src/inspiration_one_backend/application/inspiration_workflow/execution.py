@@ -120,6 +120,15 @@ WORKFLOW_RESOURCE_GROUP_NODE_TYPES = frozenset(
         WorkflowNodeType.IMAGE_GENERATION,
     }
 )
+RUNNABLE_WORKFLOW_NODE_TYPES = frozenset(
+    {
+        WorkflowNodeType.INSPIRATION_CONTEXT,
+        WorkflowNodeType.REFERENCE_IMAGE,
+        WorkflowNodeType.COPY_GENERATION,
+        WorkflowNodeType.TAIL_SPLITTER,
+        WorkflowNodeType.IMAGE_GENERATION,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,14 +193,27 @@ def _workflow_run_retry_node_ids(run: WorkflowRun) -> set[str] | None:
     retry_node_ids = {
         node_run.node_id
         for node_run in run.node_runs
-        if node_run.status == WorkflowNodeStatus.FAILED and node_run.failure_reason != WORKFLOW_CANCELLED_REASON
+        if node_run.status == WorkflowNodeStatus.FAILED
+        and node_run.failure_reason != WORKFLOW_CANCELLED_REASON
+        and _workflow_node_is_runnable(node_run.node)
     }
     if not retry_node_ids:
         return None
-    ordered_nodes = inspiration_workflow_graph.topological_nodes(run.workflow)
+    ordered_nodes = [
+        node for node in inspiration_workflow_graph.topological_nodes(run.workflow) if _workflow_node_is_runnable(node)
+    ]
     if len(retry_node_ids) == len(ordered_nodes):
         return None
     return retry_node_ids
+
+
+def _workflow_node_is_runnable(node: WorkflowNode) -> bool:
+    return node.node_type in RUNNABLE_WORKFLOW_NODE_TYPES
+
+
+def _runnable_node_ids(workflow: InspirationWorkflow, node_ids: set[str]) -> set[str]:
+    runnable_ids = {node.id for node in workflow.nodes if _workflow_node_is_runnable(node)}
+    return node_ids & runnable_ids
 
 
 def _generation_resource_group_config_error(message: str, *, for_execution: bool) -> BusinessValidationError:
@@ -354,6 +376,7 @@ def start_inspiration_workflow_run(
         if node_ids_to_run_override is not None
         else _node_ids_to_run(session, workflow, start_node_id, start_mode=start_mode)
     )
+    node_ids_to_run = _runnable_node_ids(workflow, node_ids_to_run)
     node_ids_to_run = _exclude_generated_nodes_for_running_tails(workflow, node_ids_to_run)
     if not node_ids_to_run:
         raise BusinessValidationError("工作流没有可运行节点")
@@ -626,6 +649,7 @@ def _failed_workflow_node_ids_to_retry(workflow: InspirationWorkflow) -> set[str
         node
         for node in workflow.nodes
         if node.status == WorkflowNodeStatus.FAILED and node.failure_reason != WORKFLOW_CANCELLED_REASON
+        and _workflow_node_is_runnable(node)
     ]
     if not failed_nodes:
         raise BusinessValidationError("画布没有可重新运行的失败节点")
@@ -1090,7 +1114,7 @@ def _node_ids_to_run(
     start_mode: str = "from_node",
 ) -> set[str]:
     if start_node_id is None:
-        return {node.id for node in workflow.nodes}
+        return _runnable_node_ids(workflow, {node.id for node in workflow.nodes})
     if start_mode not in {"from_node", "after_node"}:
         raise BusinessValidationError("工作流运行模式不支持")
     rule_nodes = [
@@ -1140,12 +1164,15 @@ def _node_ids_to_run(
                 )
             )
         node_ids_to_run.discard(start_node_id)
-        return node_ids_to_run
-    return selected_node_execution_plan(
+        return _runnable_node_ids(workflow, node_ids_to_run)
+    return _runnable_node_ids(
+        workflow,
+        selected_node_execution_plan(
         nodes=rule_nodes,
         edges=rule_edges,
         start_node_id=start_node_id,
         reusable_edges=reusable_edges,
+        ),
     )
 
 
@@ -1309,6 +1336,13 @@ def _execute_node(
         return _execute_tail_splitter(session, workflow=workflow, node=node, dependencies=dependencies)
     if node.node_type == WorkflowNodeType.IMAGE_GENERATION:
         return execute_workflow_image_generation(session, workflow=workflow, node=node, dependencies=dependencies)
+    if node.node_type == WorkflowNodeType.DECK_GENERATION:
+        raise WorkflowSafeExecutionError(
+            "请在画布演示节点中编辑",
+            retryable=False,
+            retry_hint="revise_input",
+            failure_category="invalid_node_type",
+        )
     raise BusinessValidationError("工作流节点类型不支持")
 
 

@@ -5,6 +5,7 @@ import {
   Image as ImageIcon,
   ImagePlus,
   Loader2,
+  Presentation,
   Sparkles,
 } from "lucide-react";
 
@@ -12,6 +13,7 @@ import { formatDateTime } from "../../lib/format";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
 import type { WorkflowNode } from "../../lib/types";
+import { readDeckNodeCardState } from "./deckNodeCardState";
 import { DownloadLink } from "./ImageDownloadComponents";
 import {
   IMAGE_PREVIEW_SURFACE_CLASS_NAME,
@@ -56,6 +58,7 @@ export function WorkflowNodeCard({
     copy_generation: FileText,
     image_generation: ImageIcon,
     tail_splitter: Sparkles,
+    deck_generation: Presentation,
   }[node.node_type];
   const Icon = icon;
   const displayTitle = workflowNodeDisplayTitle(node, t);
@@ -63,6 +66,9 @@ export function WorkflowNodeCard({
   const imageWaiting = isImageWorkflowNodeWaiting(node);
   const waitingLabel = imageWorkflowNodeWaitingLabel(node, t);
   const activityText = workflowNodeActivityText(node, t);
+  const deckNodeState = readDeckNodeCardState(node);
+  const statusTone = deckNodeState?.badgeTone ?? node.status;
+  const statusLabel = deckNodeState ? t(deckNodeState.badgeLabelKey) : workflowNodeStatusLabel(node, t);
   const selectedClassName = primarySelected
     ? "border-indigo-300 shadow-lg shadow-indigo-950/10 ring-2 ring-indigo-200/70 dark:border-violet-400 dark:shadow-indigo-950/30 dark:ring-violet-300/60"
     : secondarySelected || previewSelected
@@ -76,9 +82,9 @@ export function WorkflowNodeCard({
       className={`nopan relative w-[272px] touch-none select-none rounded-2xl border bg-white/95 p-3 text-left shadow-sm backdrop-blur dark:bg-[#1c2940]/96 dark:shadow-[0_18px_42px_rgba(0,0,0,0.34)] transition-[border-color,box-shadow,transform] transition-spring animate-spring-node-in ${
         dragging ? "cursor-grabbing" : "hover:-translate-y-0.5 hover:shadow-md dark:hover:border-slate-400/85 dark:hover:shadow-[0_20px_46px_rgba(0,0,0,0.42)]"
       } ${selectedClassName} ${
-        node.status === "running"
+        statusTone === "running"
           ? "animate-running-glow"
-          : node.status === "queued"
+          : statusTone === "queued"
             ? "animate-queued-glow"
             : ""
       }`}
@@ -111,9 +117,9 @@ export function WorkflowNodeCard({
             </div>
           </div>
           <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClass(node.status)}`}
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusClass(statusTone)}`}
           >
-            {workflowNodeStatusLabel(node, t)}
+            {statusLabel}
           </span>
         </div>
         {image ? (
@@ -164,6 +170,30 @@ export function WorkflowNodeCard({
                 </div>
               ) : null}
             </div>
+          </div>
+        ) : null}
+        {deckNodeState ? (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {deckNodeState.sourceItemCount > 0 ? (
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-200">
+                {t("detail.deck.sourceCount", { count: deckNodeState.sourceItemCount })}
+              </span>
+            ) : null}
+            {deckNodeState.slideCount !== null ? (
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-200">
+                {t("detail.deck.slideCount", { count: deckNodeState.slideCount })}
+              </span>
+            ) : null}
+            {deckNodeState.generatedSlideCount !== null ? (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-100">
+                {t("detail.deck.generatedCount", { count: deckNodeState.generatedSlideCount })}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {deckNodeState?.sourceStale ? (
+          <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-5 text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+            {t("detail.deck.sourceStale")}
           </div>
         ) : null}
         {node.failure_reason ? (
