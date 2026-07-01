@@ -46,7 +46,7 @@ import {
 } from "../components/resource-library/SaveToResourceLibraryDialog";
 import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
-import { api, ApiError } from "../lib/api";
+import { api, ApiError, resourceGroupMaxDimension } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { compositeEnhanceTiles, estimateEnhanceTileCallCount } from "../lib/enhanceCompositor";
 import { formatDateTime } from "../lib/format";
@@ -553,6 +553,11 @@ function ImageChatWorkbenchPage() {
     queryFn: api.listGenerationConfigOptions,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
+  const generationConfigsQuery = useQuery({
+    queryKey: ["generation-configs"],
+    queryFn: api.listGenerationConfigs,
+    staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
+  });
   const galleryTagsQuery = useQuery({
     queryKey: ["gallery-tags", "active"],
     queryFn: () => api.listGalleryTags(),
@@ -568,8 +573,36 @@ function ImageChatWorkbenchPage() {
 
   const inspirations = inspirationsQuery.data?.items ?? [];
   const rbacUsers = rbacUsersQuery.data?.items ?? [];
-  const imageGenerationMaxDimension =
+  const generationConfigs = generationConfigsQuery.data ?? [];
+  const globalImageGenerationMaxDimension =
     runtimeConfigQuery.data?.image_generation_max_dimension ?? DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
+
+  const effectiveMaxDimension = useMemo(() => {
+    if (generationConfigMode === "manual" && generationConfigId) {
+      const selectedConfig = generationConfigs.find((c) => c.id === generationConfigId);
+      if (selectedConfig) {
+        const providerMax = selectedConfig.provider_max_dimension ?? globalImageGenerationMaxDimension;
+        return Math.min(providerMax, globalImageGenerationMaxDimension);
+      }
+    }
+    if (generationConfigMode === "auto" && selectedResourceGroupId) {
+      const groupMax = resourceGroupMaxDimension(
+        generationConfigs,
+        selectedResourceGroupId,
+        globalImageGenerationMaxDimension,
+      );
+      return Math.min(groupMax, globalImageGenerationMaxDimension);
+    }
+    return globalImageGenerationMaxDimension;
+  }, [
+    generationConfigMode,
+    generationConfigId,
+    selectedResourceGroupId,
+    generationConfigs,
+    globalImageGenerationMaxDimension,
+  ]);
+
+  const imageGenerationMaxDimension = effectiveMaxDimension;
   const maxSelectedBaseImageCount = Math.max(
     0,
     Math.round(runtimeConfigQuery.data?.image_session_max_base_images ?? DEFAULT_IMAGE_SESSION_MAX_BASE_IMAGES),

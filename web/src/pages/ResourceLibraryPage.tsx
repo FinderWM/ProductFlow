@@ -1107,7 +1107,6 @@ function ResourceLibraryManagePage({
           <Drawer.Portal>
             <Drawer.Overlay
               className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px]"
-              onClick={(event) => event.stopPropagation()}
               onWheel={(event) => {
                 event.preventDefault();
                 event.stopPropagation();

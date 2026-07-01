@@ -49,11 +49,22 @@ export function HistoryBranchStrip({
 
   if (variant === "mobileDrawer") {
     return (
-      <div className="flex flex-col items-center gap-2">
-        <div className="inline-flex min-h-7 max-w-[5.75rem] items-center gap-1 rounded-full border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-800 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100">
+      <div className="space-y-2">
+        <div className="inline-flex min-h-7 max-w-full items-center gap-1 rounded-full border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-800 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100">
           {isBranch ? <Layers3 size={12} /> : <History size={12} />}
           <span className="truncate">{branchLabel}</span>
         </div>
+        <button
+          type="button"
+          onClick={() => onPreviewPrompt(promptPreview)}
+          title={branch.prompt}
+          className="block w-full rounded-xl border border-slate-200 bg-white/90 px-2.5 py-2 text-left shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-[#0b1220] dark:hover:border-violet-400/45 dark:hover:text-violet-200 dark:focus-visible:ring-violet-400"
+        >
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500">
+            {t("chat.prompt")}
+          </div>
+          <div className="mt-1 line-clamp-4 text-[11px] leading-4 text-slate-600 dark:text-slate-300">{branch.prompt}</div>
+        </button>
         <div className="flex flex-col gap-2">
           {branch.candidates.map((candidate) => (
             <HistoryCandidateCard
