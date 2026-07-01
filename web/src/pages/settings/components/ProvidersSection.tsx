@@ -508,6 +508,28 @@ function ProviderProfileDrawer({
             </div>
 
             <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
+              <SettingsFormField
+                label={t("settings.provider.imageMaxDimension")}
+                help={t("settings.provider.imageMaxDimensionHelp")}
+              >
+                <input
+                  type="number"
+                  min="512"
+                  max="8192"
+                  step="256"
+                  value={form.image_max_dimension ?? ""}
+                  placeholder={t("settings.provider.imageMaxDimensionPlaceholder")}
+                  disabled={!canWrite || pending}
+                  onChange={(e) => {
+                    const value = e.target.value.trim();
+                    onFormChange({ ...form, image_max_dimension: value ? parseInt(value, 10) : null });
+                  }}
+                  className={INPUT_CLASS}
+                />
+              </SettingsFormField>
+            </div>
+
+            <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
               <ProviderDrawerEnableToggle
                 checked={form.enabled}
                 disabled={!canWrite || pending}

@@ -62,6 +62,7 @@ export interface ProviderProfileFormState {
   api_key: string;
   capabilities: ProviderCapability[];
   enabled: boolean;
+  image_max_dimension: number | null;
 }
 
 export interface ProviderProfileUsage {
@@ -82,6 +83,7 @@ export const EMPTY_PROVIDER_FORM: ProviderProfileFormState = {
   api_key: "",
   capabilities: ["text_responses", "image_images"],
   enabled: true,
+  image_max_dimension: null,
 };
 
 export const PROVIDER_CAPABILITY_OPTIONS: Array<{ value: ProviderCapability; labelKey: TranslationKey }> = [
@@ -104,6 +106,7 @@ export function providerFormFromProfile(profile?: ProviderProfile | null): Provi
     api_key: "",
     capabilities: profile.capabilities,
     enabled: profile.enabled,
+    image_max_dimension: profile.config_json?.capabilities?.image_max_dimension ?? null,
   };
 }
 
@@ -183,6 +186,11 @@ export function providerProfileCreatePayload(form: ProviderProfileFormState): Pr
     api_key: form.api_key.trim() || null,
     capabilities: form.capabilities,
     enabled: form.enabled,
+    config_json: {
+      capabilities: {
+        image_max_dimension: form.image_max_dimension,
+      },
+    },
   };
 }
 
@@ -194,5 +202,10 @@ export function providerProfileUpdatePayload(form: ProviderProfileFormState): Pr
     api_key: form.api_key,
     capabilities: form.capabilities,
     enabled: form.enabled,
+    config_json: {
+      capabilities: {
+        image_max_dimension: form.image_max_dimension,
+      },
+    },
   };
 }
