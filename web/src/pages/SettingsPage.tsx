@@ -12,6 +12,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
+import { cssLengthToPixels } from "../lib/cssLength";
 import { useI18n } from "../lib/preferences";
 import {
   API_GLOBAL_TEMPLATES_MANAGE,
@@ -254,6 +255,7 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const session = useSessionState();
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const contentSectionRef = useRef<HTMLElement | null>(null);
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
   const [draftSnapshots, setDraftSnapshots] = useState<Record<string, DraftSnapshot>>({});
   const [secretTouched, setSecretTouched] = useState<Record<string, boolean>>({});
@@ -392,11 +394,27 @@ export function SettingsPage() {
           t(section.descriptionKey).toLowerCase().includes(normalizedSectionSearch),
       )
     : SETTINGS_SECTIONS;
+  const scrollActiveSectionToTop = useCallback(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return;
+    }
+    const contentSection = contentSectionRef.current;
+    if (!contentSection) {
+      return;
+    }
+    const root = document.documentElement;
+    const computedRootStyle = window.getComputedStyle(root);
+    const rootFontSize = Number.parseFloat(computedRootStyle.fontSize) || 16;
+    const safeTop = cssLengthToPixels(computedRootStyle.getPropertyValue("--pf-top-chrome-safe-height"), rootFontSize);
+    const nextTop = Math.max(window.scrollY + contentSection.getBoundingClientRect().top - safeTop, 0);
+    window.scrollTo({ top: nextTop, behavior: "auto" });
+  }, []);
   const handleActiveSectionChange = useCallback((section: SettingsSectionId) => {
     setActiveSection(section);
     setSavedMessage("");
     setError("");
-  }, []);
+    window.requestAnimationFrame(scrollActiveSectionToTop);
+  }, [scrollActiveSectionToTop]);
 
   const refreshProviderSettingsQueries = useCallback(
     async ({
@@ -1034,16 +1052,40 @@ export function SettingsPage() {
   const isWorkspaceSubpage = activeScheme === "workspace";
 
   return (
-    <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} flex flex-col dark:text-slate-100`}>
+    <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} flex min-h-dvh flex-col dark:text-slate-100`}>
       <TopNav
         breadcrumbs={t("settings.breadcrumb")}
         onLogout={() => logoutMutation.mutate()}
       />
 
-      <main className={isWorkspaceSubpage ? "pf-workspace-subpage flex-1" : "mx-auto flex w-full max-w-[1440px] flex-1"}>
-        <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame-shell w-full" : "w-full"}>
-          <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame" : "w-full"}>
-            <div className={isWorkspaceSubpage ? "pf-page-header" : "pf-page-header mx-auto mb-0 w-full max-w-[1440px] px-5 py-6 md:flex-row md:items-end md:justify-between lg:px-8 lg:py-8"}>
+      <main
+        className={
+          isWorkspaceSubpage
+            ? "pf-workspace-subpage pf-settings-main flex min-h-0 flex-1 flex-col"
+            : "pf-settings-main mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col"
+        }
+      >
+        <div
+          className={
+            isWorkspaceSubpage
+              ? "pf-workspace-subpage-frame-shell pf-settings-frame-shell flex min-h-0 w-full flex-1 flex-col"
+              : "pf-settings-frame-shell flex min-h-0 w-full flex-1 flex-col"
+          }
+        >
+          <div
+            className={
+              isWorkspaceSubpage
+                ? "pf-workspace-subpage-frame pf-settings-frame flex min-h-0 flex-1 flex-col"
+                : "pf-settings-frame flex min-h-0 w-full flex-1 flex-col"
+            }
+          >
+            <div
+              className={
+                isWorkspaceSubpage
+                  ? "pf-page-header pf-settings-header shrink-0"
+                  : "pf-page-header pf-settings-header mx-auto mb-0 w-full max-w-[1440px] shrink-0 px-5 py-6 md:flex-row md:items-end md:justify-between lg:px-8 lg:py-8"
+              }
+            >
               <div>
                 <div className="pf-eyebrow mb-2 gap-1.5">
                   <SettingsIcon size={13} className="mr-1.5" />
@@ -1065,30 +1107,33 @@ export function SettingsPage() {
                 {configQuery.error instanceof ApiError ? configQuery.error.detail : t("settings.loadFailed")}
               </div>
             ) : (
-              <div className="pf-side-shell min-h-full">
-              <SettingsSideRail
-                search={sectionSearch}
-                onSearchChange={setSectionSearch}
-                visibleSections={visibleSections}
-                activeSection={activeSection}
-                onSectionChange={handleActiveSectionChange}
-              />
+              <div className="pf-side-shell pf-settings-shell min-h-0 flex-1">
+                <SettingsSideRail
+                  search={sectionSearch}
+                  onSearchChange={setSectionSearch}
+                  visibleSections={visibleSections}
+                  activeSection={activeSection}
+                  onSectionChange={handleActiveSectionChange}
+                />
 
-              <section className="pf-side-content px-5 py-8 sm:px-8 lg:px-12 lg:py-10">
-                <div className="mx-auto max-w-4xl">
-                  <div className="mb-10">
-                    <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
-                      <span>{t("settings.title")}</span>
-                      <span>/</span>
-                      <span>{t(activeMeta.labelKey)}</span>
+                <section
+                  ref={contentSectionRef}
+                  className="pf-side-content pf-settings-content min-h-0 px-5 py-8 sm:px-8 lg:px-12 lg:py-10"
+                >
+                  <div className="mx-auto max-w-4xl">
+                    <div className="mb-10">
+                      <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
+                        <span>{t("settings.title")}</span>
+                        <span>/</span>
+                        <span>{t(activeMeta.labelKey)}</span>
+                      </div>
+                      <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                        {t(activeMeta.labelKey)}
+                      </h1>
+                      <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+                        {t(activeMeta.descriptionKey)}
+                      </p>
                     </div>
-                    <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
-                      {t(activeMeta.labelKey)}
-                    </h1>
-                    <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-                      {t(activeMeta.descriptionKey)}
-                    </p>
-                  </div>
                   {shouldShowSettingsMigrationPanel(activeSection) ? (
                     <SettingsMigrationPanel
                       importInputRef={importInputRef}
@@ -1511,10 +1556,10 @@ export function SettingsPage() {
                       />
                     ) : null}
                   </div>
-                </div>
-              </section>
-            </div>
-          )}
+                  </div>
+                </section>
+              </div>
+            )}
 
           </div>
         </div>

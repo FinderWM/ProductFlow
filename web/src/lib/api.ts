@@ -13,6 +13,7 @@ import type {
   ConfigResponse,
   ConfigUpdateRequest,
   CurrentWeather,
+  CreateEnhanceJobInput,
   CreateCanvasTemplateCategoryInput,
   CreateGlobalCanvasTemplateInput,
   CopySet,
@@ -29,6 +30,8 @@ import type {
   GalleryTag,
   GalleryTagCreateInput,
   GalleryTagUpdateInput,
+  EnhanceJob,
+  EnhanceJobListResponse,
   GenerationConfig,
   GenerationConfigCreateRequest,
   GenerationConfigOption,
@@ -50,6 +53,7 @@ import type {
   InspirationDetail,
   InspirationHistory,
   InspirationInitialWorkflowEntry,
+  JobStatus,
   LoginPageConfig,
   LoginPageSelectionUpdateRequest,
   LoginPageTemplateConfigUpdateRequest,
@@ -655,6 +659,47 @@ export const api = {
   },
   getGenerationQueueOverview(): Promise<GenerationQueueOverview> {
     return request("/api/generation-queue");
+  },
+  listEnhanceJobs(input?: { limit?: number; offset?: number; status?: JobStatus | null }): Promise<EnhanceJobListResponse> {
+    const params = new URLSearchParams({
+      limit: String(input?.limit ?? 50),
+      offset: String(input?.offset ?? 0),
+    });
+    if (input?.status) {
+      params.set("status", input.status);
+    }
+    return request(`/api/enhance-jobs?${params.toString()}`);
+  },
+  createEnhanceJob(input: CreateEnhanceJobInput): Promise<EnhanceJob> {
+    return request("/api/enhance-jobs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  getEnhanceJob(jobId: string): Promise<EnhanceJob> {
+    return request(`/api/enhance-jobs/${encodeURIComponent(jobId)}`);
+  },
+  cancelEnhanceJob(jobId: string): Promise<EnhanceJob> {
+    return request(`/api/enhance-jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+  },
+  uploadEnhanceJobFinal(jobId: string, blob: Blob): Promise<EnhanceJob> {
+    const formData = new FormData();
+    formData.set("file", blob, `enhance-${jobId}.png`);
+    return request(`/api/enhance-jobs/${encodeURIComponent(jobId)}/final`, {
+      method: "POST",
+      body: formData,
+    });
+  },
+  saveEnhanceJobToLibrary(jobId: string, input?: { group_ids?: string[] }): Promise<ResourceLibraryAsset> {
+    return request(`/api/enhance-jobs/${encodeURIComponent(jobId)}/save-to-library`, {
+      method: "POST",
+      body: JSON.stringify({ group_ids: input?.group_ids ?? [] }),
+    });
+  },
+  attachEnhanceJobToImageSession(jobId: string): Promise<ImageSessionDetail> {
+    return request(`/api/enhance-jobs/${encodeURIComponent(jobId)}/attach-to-image-session`, {
+      method: "POST",
+    });
   },
   updateConfig(payload: ConfigUpdateRequest): Promise<ConfigResponse> {
     return request("/api/settings", {
@@ -1367,6 +1412,10 @@ export const api = {
     nodeId: string,
     input: {
       resource_group_id?: string | null;
+      text_generation_config_mode?: "auto" | "manual";
+      text_generation_config_id?: string | null;
+      image_generation_config_mode?: "auto" | "manual";
+      image_generation_config_id?: string | null;
       title?: string;
       source_input?: string;
       max_slides?: number;
@@ -1431,6 +1480,20 @@ export const api = {
       method: "POST",
     });
   },
+  enhanceWorkflowDeckSlideMaterial(
+    inspirationId: string,
+    nodeId: string,
+    slideId: string,
+    input: { prompt?: string },
+  ): Promise<DeckSlide> {
+    return request(
+      `/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/slides/${slideId}/material/enhance`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+  },
   bindWorkflowDeckSlideMaterial(
     inspirationId: string,
     nodeId: string,
@@ -1440,6 +1503,11 @@ export const api = {
     return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/slides/${slideId}/material`, {
       method: "PUT",
       body: JSON.stringify(input),
+    });
+  },
+  unbindWorkflowDeckSlideMaterial(inspirationId: string, nodeId: string, slideId: string): Promise<DeckSlide> {
+    return request(`/api/inspirations/${inspirationId}/workflow/nodes/${nodeId}/deck/slides/${slideId}/material`, {
+      method: "DELETE",
     });
   },
   listDeckStyles(): Promise<DeckStyleOption[]> {

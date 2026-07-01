@@ -28,6 +28,7 @@ import {
   Rose,
   Settings,
   ShieldCheck,
+  Sparkles,
   Sun,
   Trees,
   UserRound,
@@ -41,6 +42,7 @@ import { useCurrentWeather, weatherGeocodingLanguage } from "../lib/currentWeath
 import { LOCALES, type Locale, type TranslationKey } from "../lib/i18n";
 import { usePreferences } from "../lib/preferences";
 import {
+  API_ENHANCE_READ,
   API_GALLERY_READ,
   API_GLOBAL_TEMPLATES_MANAGE,
   API_IMAGE_CHAT_READ,
@@ -161,6 +163,8 @@ const NAV_AUTO_HIDE_DELAY_MS = 5_000;
 const NAV_HOVER_REVEAL_DELAY_MS = 500;
 const WORKSPACE_THEME_DOCK_REVEAL_DELAY_MS = 500;
 const WORKSPACE_THEME_DOCK_REVEAL_MARGIN_PX = 16;
+const WORKSPACE_HOME_BRAND_BOTTOM_GAP_PX = 50;
+const WORKSPACE_HOME_LEADING_SPACE_PROPERTY = "--pf-workspace-home-leading-space";
 const CURTAIN_EASING = "cubic-bezier(0.18, 0.9, 0.2, 1.12)";
 export const TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS = "h-[4.5rem] md:h-[4.65rem]";
 const TOP_CHROME_OPEN_HEIGHT_CLASS = "h-[4.75rem] md:h-[4.65rem]";
@@ -174,6 +178,15 @@ const navItems: TopNavItem[] = [
     priority: "primary",
     icon: Trees,
     match: (pathname: string) => pathname.startsWith("/resource-library"),
+  },
+  {
+    labelKey: "nav.enhance",
+    to: "/enhance",
+    menuCode: "enhance",
+    requiredPermission: API_ENHANCE_READ,
+    priority: "primary",
+    icon: Sparkles,
+    match: (pathname: string) => pathname.startsWith("/enhance"),
   },
   {
     labelKey: "nav.inspirations",
@@ -461,6 +474,18 @@ export function getWorkspaceNavLayout({
     visibleKeys,
     overflowKeys: items.map((item) => item.key).filter((key) => overflowKeys.has(key)),
   };
+}
+
+export function getWorkspaceHomeLeadingSpace({
+  brandBottom,
+  shellBottom,
+  desiredGap = WORKSPACE_HOME_BRAND_BOTTOM_GAP_PX,
+}: {
+  brandBottom: number;
+  shellBottom: number;
+  desiredGap?: number;
+}): number {
+  return Math.max(0, safeWidth(desiredGap) - (safeWidth(shellBottom) - safeWidth(brandBottom)));
 }
 
 const themeIcons: Record<ThemePreference, typeof Sun> = {
@@ -1397,7 +1422,7 @@ function WeatherControl() {
                 setLocalErrorKey(null);
               }}
               placeholder={t("weather.locationPlaceholder")}
-              className="pf-shell-input h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+              className="pf-shell-input pf-input h-10 min-w-0 flex-1 font-medium"
             />
             <button
               type="submit"
@@ -1491,6 +1516,7 @@ export function TopNav({ onLogout }: TopNavProps) {
   const workspaceMeasureRowRef = useRef<HTMLDivElement | null>(null);
   const workspaceMeasureItemRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const workspaceMoreMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const workspaceShellRef = useRef<HTMLDivElement | null>(null);
   const workspaceBrandRef = useRef<HTMLDivElement | null>(null);
   const workspaceRuntimeRef = useRef<HTMLDivElement | null>(null);
   const workspaceLocaleRef = useRef<HTMLDivElement | null>(null);
@@ -1841,10 +1867,37 @@ export function TopNav({ onLogout }: TopNavProps) {
     setWorkspaceOverflowKeys((current) => (arraysEqual(current, layout.overflowKeys) ? current : layout.overflowKeys));
   }, [shellScheme, visibleNavItems]);
 
+  const updateWorkspaceHomeLeadingSpace = useCallback(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const root = document.documentElement;
+    if (shellScheme !== "workspace") {
+      root.style.removeProperty(WORKSPACE_HOME_LEADING_SPACE_PROPERTY);
+      return;
+    }
+
+    const shell = workspaceShellRef.current;
+    const brand = workspaceBrandRef.current;
+    if (!shell || !brand) {
+      return;
+    }
+
+    const shellRect = shell.getBoundingClientRect();
+    const brandRect = brand.getBoundingClientRect();
+    const leadingSpace = getWorkspaceHomeLeadingSpace({
+      brandBottom: brandRect.bottom,
+      shellBottom: shellRect.bottom,
+    });
+    root.style.setProperty(WORKSPACE_HOME_LEADING_SPACE_PROPERTY, `${leadingSpace}px`);
+  }, [shellScheme]);
+
   useLayoutEffect(() => {
     updateDesktopNavLayout();
     updateWorkspaceNavLayout();
-  }, [locale, updateDesktopNavLayout, updateWorkspaceNavLayout, workspaceBrandWeatherSummary]);
+    updateWorkspaceHomeLeadingSpace();
+  }, [locale, updateDesktopNavLayout, updateWorkspaceHomeLeadingSpace, updateWorkspaceNavLayout, workspaceBrandWeatherSummary]);
 
   useEffect(
     () => () => {
@@ -1930,6 +1983,35 @@ export function TopNav({ onLogout }: TopNavProps) {
       window.removeEventListener("resize", updateWorkspaceNavLayout);
     };
   }, [shellScheme, updateWorkspaceNavLayout]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const root = document.documentElement;
+    if (shellScheme !== "workspace" || typeof window === "undefined") {
+      root.style.removeProperty(WORKSPACE_HOME_LEADING_SPACE_PROPERTY);
+      return;
+    }
+
+    const observedElements = [
+      workspaceShellRef.current,
+      workspaceBrandRef.current,
+    ].filter((element): element is HTMLDivElement => Boolean(element));
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateWorkspaceHomeLeadingSpace);
+
+    observedElements.forEach((element) => observer?.observe(element));
+    window.addEventListener("resize", updateWorkspaceHomeLeadingSpace);
+    updateWorkspaceHomeLeadingSpace();
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateWorkspaceHomeLeadingSpace);
+      root.style.removeProperty(WORKSPACE_HOME_LEADING_SPACE_PROPERTY);
+    };
+  }, [curtainOpen, shellScheme, updateWorkspaceHomeLeadingSpace, workspaceBrandWeatherSummary]);
 
   useEffect(() => {
     if (desktopOverflowNavItems.length === 0) {
@@ -2203,6 +2285,7 @@ export function TopNav({ onLogout }: TopNavProps) {
     return (
       <>
         <div
+          ref={workspaceShellRef}
           data-ui-layout-scheme="workspace"
           className={`pf-shell-workspace-shell ${curtainOpen ? "is-open" : "is-collapsed"}`}
           style={{ transitionTimingFunction: CURTAIN_EASING }}

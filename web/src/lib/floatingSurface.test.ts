@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   FLOATING_LAYER_Z_INDEX,
+  FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS,
+  createFloatingTouchDismissProtection,
+  isFloatingTouchDismissProtectionHit,
   placeFloatingSurface,
   viewportFromVisualViewport,
 } from "./floatingSurface";
@@ -108,5 +111,26 @@ describe("floating surface placement", () => {
     expect(result.left).toBe(174);
     expect(result.top).toBe(274);
     expect(result.placement).toBe("top-end");
+  });
+
+  it("creates touch dismiss protection from the triggering tap point", () => {
+    expect(createFloatingTouchDismissProtection({ x: 128, y: 256 }, 1_000)).toEqual({
+      x: 128,
+      y: 256,
+      expiresAt: 1_000 + FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS,
+    });
+  });
+
+  it("suppresses only nearby touch-dismiss ghost taps before expiry", () => {
+    const protection = createFloatingTouchDismissProtection({ x: 100, y: 200 }, 5_000);
+    expect(isFloatingTouchDismissProtectionHit(protection, { x: 116, y: 212 }, 5_100)).toBe(true);
+    expect(isFloatingTouchDismissProtectionHit(protection, { x: 160, y: 260 }, 5_100)).toBe(false);
+    expect(
+      isFloatingTouchDismissProtectionHit(
+        protection,
+        { x: 100, y: 200 },
+        5_000 + FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS + 1,
+      ),
+    ).toBe(false);
   });
 });

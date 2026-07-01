@@ -57,8 +57,16 @@ export interface FloatingPlacementResult {
   placement: FloatingPlacement;
 }
 
+export interface FloatingTouchDismissProtection {
+  x: number;
+  y: number;
+  expiresAt: number;
+}
+
 const DEFAULT_OFFSET = 6;
 const DEFAULT_MARGIN = 8;
+export const FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS = 320;
+export const FLOATING_TOUCH_DISMISS_PROTECTION_RADIUS_PX = 28;
 
 function clamp(value: number, min: number, max: number): number {
   if (max < min) {
@@ -77,6 +85,32 @@ function placementAlign(placement: FloatingPlacement): "start" | "end" {
 
 function withSide(placement: FloatingPlacement, side: "top" | "bottom"): FloatingPlacement {
   return `${side}-${placementAlign(placement)}` as FloatingPlacement;
+}
+
+export function createFloatingTouchDismissProtection(
+  point: { x: number; y: number },
+  now = Date.now(),
+  durationMs = FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS,
+): FloatingTouchDismissProtection {
+  return {
+    x: point.x,
+    y: point.y,
+    expiresAt: now + durationMs,
+  };
+}
+
+export function isFloatingTouchDismissProtectionHit(
+  protection: FloatingTouchDismissProtection,
+  point: { x: number; y: number },
+  now = Date.now(),
+  radiusPx = FLOATING_TOUCH_DISMISS_PROTECTION_RADIUS_PX,
+): boolean {
+  if (now > protection.expiresAt) {
+    return false;
+  }
+  const deltaX = protection.x - point.x;
+  const deltaY = protection.y - point.y;
+  return deltaX * deltaX + deltaY * deltaY <= radiusPx * radiusPx;
 }
 
 export function viewportFromVisualViewport(

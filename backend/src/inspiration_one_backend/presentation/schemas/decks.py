@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from inspiration_one_backend.application.deck_status import derived_deck_status
 from inspiration_one_backend.domain.enums import DeckMaterialSource, DeckSlideStatus, DeckStatus
 from inspiration_one_backend.infrastructure.db.models import Deck, DeckSlide, WorkflowNode
 
@@ -25,6 +26,7 @@ class DeckSlideResponse(BaseModel):
     image_height: int | None
     material_source: DeckMaterialSource | None
     material_url: str | None
+    material_enhance_job_id: str | None
     source_manifest_json: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
@@ -137,6 +139,7 @@ def serialize_deck_slide(slide: DeckSlide) -> DeckSlideResponse:
         image_height=slide.image_height,
         material_source=slide.material_source,
         material_url=f"/api/deck-slides/{slide.id}/material" if slide.material_storage_path else None,
+        material_enhance_job_id=slide.material_enhance_job_id,
         source_manifest_json=slide.source_manifest_json,
         created_at=slide.created_at,
         updated_at=slide.updated_at,
@@ -168,7 +171,7 @@ def serialize_deck(deck: Deck, *, session: Session | None = None) -> DeckRespons
         inspiration_id=deck.inspiration_id,
         resource_group_id=deck.resource_group_id,
         title=deck.title,
-        status=deck.status,
+        status=derived_deck_status(deck),
         source_input=deck.source_input,
         style_key=deck.style_key,
         style_reference_asset_id=deck.style_reference_asset_id,
@@ -191,7 +194,7 @@ def serialize_deck_summary(deck: Deck, *, session: Session | None = None) -> Dec
         id=deck.id,
         inspiration_id=deck.inspiration_id,
         title=deck.title,
-        status=deck.status,
+        status=derived_deck_status(deck),
         slide_count=len(deck.slides),
         workflow_node_id=deck.workflow_node_id,
         workflow_node_exists=workflow_node_exists,

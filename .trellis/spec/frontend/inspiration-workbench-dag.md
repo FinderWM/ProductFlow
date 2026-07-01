@@ -270,10 +270,18 @@
   `copy_generation` and `tail_splitter` filter manual options to `purpose="text"`, while `image_generation` filters to
   `purpose="image"`. Auto mode persists `generation_config_mode: "auto"` and `generation_config_id: null`; manual mode
   persists the selected config id.
+- `deck_generation` inspector uses two separate generation-config controls under the selected resource group:
+  `text_generation_config_mode/id` for outline + speaker-notes actions and `image_generation_config_mode/id` for sample,
+  batch generate, and single-slide regenerate. Missing fields mean auto. Switching the deck node to another resource group
+  resets both deck-specific selections to auto/null before save or outline generation.
 - `draftFromNode(...)` and `nodeConfigFromDraft(...)` must round-trip `resource_group_id`, `generation_config_mode`, and
   `generation_config_id` for workflow `copy_generation`, `tail_splitter`, and `image_generation` nodes. Switching a node
   to a resource group that does not contain the selected manual config resets that config selection to auto before save or
   run.
+- `draftFromNode(...)` and `nodeConfigFromDraft(...)` must also round-trip
+  `text_generation_config_mode/id` and `image_generation_config_mode/id` for `deck_generation` nodes, and
+  `api.createWorkflowDeckOutline(...)` must include those four fields so the deck outline request can consume the latest
+  inspector draft even before autosave finishes.
 - Running a workflow node with `generation_config_mode="manual"` and no `generation_config_id` is a local validation error:
   show the inspector generation-config-required message and do not submit the run mutation.
 - The tail-split plan dialog must expose image generation config scheduling for generated downstream image nodes. It filters

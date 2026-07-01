@@ -11,6 +11,7 @@ from inspiration_one_backend.application.inspiration_workflow.deck_sources impor
     bind_deck_node_slide_material,
     build_deck_source_manifest,
     create_or_replace_deck_node_outline,
+    enhance_deck_node_slide_material,
     generate_deck_node_deck,
     generate_deck_node_sample,
     generate_deck_node_slide_speaker_notes,
@@ -20,6 +21,7 @@ from inspiration_one_backend.application.inspiration_workflow.deck_sources impor
     rename_deck_node_deck,
     reorder_deck_node_slides,
     set_deck_node_style,
+    unbind_deck_node_slide_material,
     update_deck_node_slide,
 )
 from inspiration_one_backend.application.inspiration_workflow.tail_splitter import TailSplitPlanImageGenerationConfig
@@ -87,6 +89,7 @@ from inspiration_one_backend.presentation.deps import get_session, require_any_a
 from inspiration_one_backend.presentation.schemas.decks import (
     DeckResponse,
     DeckSlideResponse,
+    EnhanceDeckSlideMaterialRequest,
     RenameDeckRequest,
     ReorderDeckSlidesRequest,
     SetDeckStyleRequest,
@@ -913,6 +916,10 @@ def create_or_replace_workflow_deck_outline_endpoint(
         section_pages=payload.section_pages,
         per_group_image_cap=payload.per_group_image_cap,
         slide_context=[item.model_dump() for item in payload.slide_context],
+        text_generation_config_mode=payload.text_generation_config_mode,
+        text_generation_config_id=payload.text_generation_config_id,
+        image_generation_config_mode=payload.image_generation_config_mode,
+        image_generation_config_id=payload.image_generation_config_id,
     )
     return serialize_deck(deck, session=session)
 
@@ -1086,6 +1093,36 @@ def generate_workflow_deck_slide_speaker_notes_endpoint(
     )
 
 
+@router.post(
+    "/inspirations/{inspiration_id}/workflow/nodes/{node_id}/deck/slides/{slide_id}/material/enhance",
+    response_model=DeckSlideResponse,
+)
+def enhance_workflow_deck_slide_material_endpoint(
+    inspiration_id: str,
+    node_id: str,
+    slide_id: str,
+    payload: EnhanceDeckSlideMaterialRequest,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_DECK_GENERATE)),
+) -> DeckSlideResponse:
+    workflow, node = _ensure_workflow_deck_node_context(
+        session,
+        inspiration_id=inspiration_id,
+        node_id=node_id,
+        current_user=current_user,
+        mutate=True,
+    )
+    return serialize_deck_slide(
+        enhance_deck_node_slide_material(
+            session,
+            workflow=workflow,
+            deck_node=node,
+            slide_id=slide_id,
+            prompt=payload.prompt,
+        )
+    )
+
+
 @router.put(
     "/inspirations/{inspiration_id}/workflow/nodes/{node_id}/deck/slides/{slide_id}/material",
     response_model=DeckSlideResponse,
@@ -1113,6 +1150,33 @@ def bind_workflow_deck_slide_material_endpoint(
         source_item_id=payload.source_item_id,
         target_slot=payload.target_slot,
         caption_source=payload.caption_source,
+    )
+    return serialize_deck_slide(slide)
+
+
+@router.delete(
+    "/inspirations/{inspiration_id}/workflow/nodes/{node_id}/deck/slides/{slide_id}/material",
+    response_model=DeckSlideResponse,
+)
+def unbind_workflow_deck_slide_material_endpoint(
+    inspiration_id: str,
+    node_id: str,
+    slide_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_DECK_WRITE)),
+) -> DeckSlideResponse:
+    workflow, node = _ensure_workflow_deck_node_context(
+        session,
+        inspiration_id=inspiration_id,
+        node_id=node_id,
+        current_user=current_user,
+        mutate=True,
+    )
+    slide = unbind_deck_node_slide_material(
+        session,
+        workflow=workflow,
+        deck_node=node,
+        slide_id=slide_id,
     )
     return serialize_deck_slide(slide)
 

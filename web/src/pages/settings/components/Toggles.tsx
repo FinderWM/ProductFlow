@@ -21,7 +21,7 @@ export function SettingsOptionToggle({
     <label
       className={`pf-settings-option-toggle inline-flex min-h-9 max-w-full items-center gap-2 rounded-full border py-1.5 pl-2.5 pr-3 text-xs font-medium transition-all ${
         checked
-          ? "border-indigo-300 bg-indigo-50 text-slate-950 dark:border-violet-400/45 dark:bg-violet-500/14 dark:text-white"
+          ? "border-slate-900/20 bg-slate-50 text-slate-950 dark:border-slate-400/35 dark:bg-slate-400/10 dark:text-white"
           : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white hover:text-slate-950 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:hover:text-white"
       } ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer active:scale-[0.99]"}`}
     >

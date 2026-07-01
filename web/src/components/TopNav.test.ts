@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getDesktopNavAvailableWidth,
   getDesktopNavLayout,
+  getWorkspaceHomeLeadingSpace,
   getWorkspaceNavAvailableWidth,
   getWorkspaceNavLayout,
   isPointerInWorkspaceThemeDockRevealZone,
@@ -190,6 +191,35 @@ describe("getWorkspaceNavLayout", () => {
 
     expect(layout.visibleKeys).toEqual(["resource-library", "inspirations", "image-chat"]);
     expect(layout.overflowKeys).toEqual(["gallery", "status", "usage", "settings", "help"]);
+  });
+});
+
+describe("getWorkspaceHomeLeadingSpace", () => {
+  it("keeps the greeting 50px below the brand bottom when the shell ends 10px lower", () => {
+    expect(
+      getWorkspaceHomeLeadingSpace({
+        brandBottom: 76,
+        shellBottom: 86,
+      }),
+    ).toBe(40);
+  });
+
+  it("expands the leading space as the collapsed shell bottom approaches the brand", () => {
+    expect(
+      getWorkspaceHomeLeadingSpace({
+        brandBottom: 76,
+        shellBottom: 78,
+      }),
+    ).toBe(48);
+  });
+
+  it("never returns a negative leading space", () => {
+    expect(
+      getWorkspaceHomeLeadingSpace({
+        brandBottom: 60,
+        shellBottom: 140,
+      }),
+    ).toBe(0);
   });
 });
 

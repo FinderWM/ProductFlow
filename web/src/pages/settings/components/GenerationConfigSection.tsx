@@ -339,7 +339,7 @@ function GenerationConfigBatchTestDialog({
             value={concurrency}
             disabled={busy}
             onChange={(event) => onConcurrencyChange(event.target.value)}
-            className="h-9 w-20 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+            className="pf-input-compact w-20"
           />
         </label>
         <div className="flex justify-end gap-2">

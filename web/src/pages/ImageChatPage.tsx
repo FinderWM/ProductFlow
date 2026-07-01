@@ -24,6 +24,7 @@ import {
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { EnhanceJobProgress } from "../components/EnhanceJobProgress";
 import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { ImageGenerationSettingsPanel } from "../components/ImageGenerationSettingsPanel";
@@ -47,17 +48,20 @@ import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
+import { compositeEnhanceTiles, estimateEnhanceTileCallCount } from "../lib/enhanceCompositor";
 import { formatDateTime } from "../lib/format";
 import {
   generationConfigOptionLabel,
   generationConfigOptionsForPurpose,
 } from "../lib/generationConfigs";
+import { useEnhanceJob } from "../lib/hooks/useEnhanceJob";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { useI18n } from "../lib/preferences";
 import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import { useSensitiveImageMaskPreference } from "../lib/sensitiveImagePreferences";
 import { shouldShowSensitiveImageMaskPreference } from "../lib/sensitiveImages";
 import {
+  API_ENHANCE_GENERATE,
   API_GALLERY_WRITE,
   API_IMAGE_CHAT_GENERATE,
   API_IMAGE_CHAT_WRITE,
@@ -119,6 +123,9 @@ import type {
   GenerationConfigOption,
   GenerationConfigSelectionMode,
   GenerationResourceGroup,
+  CreateEnhanceJobInput,
+  EnhanceJob,
+  EnhanceStrategy,
   ImageSessionDetail,
   ImageSessionAsset,
   ImageSessionRound,
@@ -140,12 +147,15 @@ const INSPIRATION_PICKER_LIST_STALE_TIME_MS = 60_000;
 const RUNTIME_CONFIG_STALE_TIME_MS = 5 * 60_000;
 const RBAC_USERS_STALE_TIME_MS = 5 * 60_000;
 const IMAGE_CHAT_GENERATION_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const IMAGE_CHAT_ENHANCE_DIRECT_PRESETS = [1024, 2048, 2560, 3072, 4096] as const;
+const IMAGE_CHAT_ENHANCE_SCALES = [2, 3, 4] as const;
 const IMAGE_CHAT_GRADIENT_ACTION_CLASS =
   "pf-image-chat-action inline-flex items-center justify-center rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500";
 const IMAGE_CHAT_GRADIENT_ICON_ACTION_CLASS = `${IMAGE_CHAT_GRADIENT_ACTION_CLASS} h-11 w-11 shrink-0`;
 
 type ImageChatResizeTarget = "left" | "right" | "history";
 type ImageChatGenerationDraftMode = "new_round" | "retry";
+type ImageChatMode = "normal" | "enhance";
 
 interface ImageChatRouteState {
   selectedSessionId: string | null;
@@ -320,6 +330,19 @@ function ImageChatWorkbenchPage() {
   const [promptPolishConfigId, setPromptPolishConfigId] = useState<string | null>(null);
   const [generationConfigMode, setGenerationConfigMode] = useState<GenerationConfigSelectionMode>("auto");
   const [generationConfigId, setGenerationConfigId] = useState<string | null>(null);
+  const [chatMode, setChatMode] = useState<ImageChatMode>("normal");
+  const [enhanceSourceAssetId, setEnhanceSourceAssetId] = useState("");
+  const [enhanceStrategy, setEnhanceStrategy] = useState<EnhanceStrategy>("direct");
+  const [enhanceDirectWidth, setEnhanceDirectWidth] = useState("2048");
+  const [enhanceDirectHeight, setEnhanceDirectHeight] = useState("2048");
+  const [enhanceScale, setEnhanceScale] = useState<(typeof IMAGE_CHAT_ENHANCE_SCALES)[number]>(2);
+  const [enhanceTileBaseSize, setEnhanceTileBaseSize] = useState("1024");
+  const [activeEnhanceJobId, setActiveEnhanceJobId] = useState<string | null>(null);
+  const [processingEnhanceJobId, setProcessingEnhanceJobId] = useState<string | null>(null);
+  const [attachedEnhanceJobIds, setAttachedEnhanceJobIds] = useState<Set<string>>(() => new Set());
+  const [failedEnhanceAttachJobIds, setFailedEnhanceAttachJobIds] = useState<Set<string>>(() => new Set());
+  const [savedEnhanceJobIds, setSavedEnhanceJobIds] = useState<Set<string>>(() => new Set());
+  const [enhanceSourceImageSize, setEnhanceSourceImageSize] = useState<{ width: number; height: number } | null>(null);
   const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(
     () => initialRouteState?.selectedResourceGroupId ?? null,
   );
@@ -361,6 +384,7 @@ function ImageChatWorkbenchPage() {
   const [mobileSessionDrawerOpen, setMobileSessionDrawerOpen] = useState(false);
   const [mobileHistoryDrawerOpen, setMobileHistoryDrawerOpen] = useState(false);
   const [mobileGenerationSheetOpen, setMobileGenerationSheetOpen] = useState(false);
+  const [newRoundChoiceOpen, setNewRoundChoiceOpen] = useState(false);
   const [generationDraftMode, setGenerationDraftMode] = useState<ImageChatGenerationDraftMode | null>(null);
   const [retryGenerationTaskId, setRetryGenerationTaskId] = useState<string | null>(null);
   const [galleryTagPickerAsset, setGalleryTagPickerAsset] = useState<ImageSessionAsset | null>(null);
@@ -583,10 +607,12 @@ function ImageChatWorkbenchPage() {
   const adminReadonlyActionTitle = t("resource.adminReadonlyAction");
   const canWriteImageChat = hasSessionApiPermission(sessionState, API_IMAGE_CHAT_WRITE);
   const canGenerateImageChat = hasSessionApiPermission(sessionState, API_IMAGE_CHAT_GENERATE);
+  const canGenerateEnhance = hasSessionApiPermission(sessionState, API_ENHANCE_GENERATE);
   const canWriteGallery = hasSessionApiPermission(sessionState, API_GALLERY_WRITE);
   const canWriteInspirations = hasSessionApiPermission(sessionState, API_INSPIRATIONS_WRITE);
   const imageChatWritePermissionTitle = canWriteImageChat ? null : t("chat.permission.imageChatWriteRequired");
   const imageChatGeneratePermissionTitle = canGenerateImageChat ? null : t("chat.permission.imageChatGenerateRequired");
+  const enhanceGeneratePermissionTitle = canGenerateEnhance ? null : t("chat.permission.enhanceGenerateRequired");
   const galleryWritePermissionTitle = canWriteGallery ? null : t("chat.permission.galleryWriteRequired");
   const inspirationsWritePermissionTitle = canWriteInspirations ? null : t("chat.permission.inspirationsWriteRequired");
   const createSessionBlockedTitle =
@@ -682,6 +708,10 @@ function ImageChatWorkbenchPage() {
     setPromptPolishConfigId(null);
     setGenerationConfigMode("auto");
     setGenerationConfigId(null);
+    setEnhanceSourceAssetId("");
+    setActiveEnhanceJobId(null);
+    setProcessingEnhanceJobId(null);
+    setFailedEnhanceAttachJobIds(new Set());
   }
 
   function handleGenerationResourceGroupChange(value: string) {
@@ -884,6 +914,16 @@ function ImageChatWorkbenchPage() {
     () => new Map((imageSession?.assets ?? []).map((asset) => [asset.id, asset])),
     [imageSession],
   );
+  const enhanceSourceAssets = useMemo(
+    () =>
+      (imageSession?.assets ?? []).filter(
+        (asset) => asset.kind === "generated_image" || asset.kind === "reference_upload",
+      ),
+    [imageSession],
+  );
+  const selectedEnhanceSourceAsset = enhanceSourceAssetId
+    ? (imageSessionAssetsById.get(enhanceSourceAssetId) ?? null)
+    : null;
   const selectedBaseAssets = selectedBaseAssetIds
     .map((assetId) => imageSessionAssetsById.get(assetId))
     .filter((asset): asset is ImageSessionAsset => Boolean(asset));
@@ -894,6 +934,12 @@ function ImageChatWorkbenchPage() {
   );
   const submitGenerationCount = effectiveImageGenerationSubmitCount(generationCount, compactedToolOptions);
   const hasActiveGenerationTask = imageSession?.generation_tasks.some(isImageSessionGenerationTaskActive) ?? false;
+  const activeEnhanceJobQuery = useEnhanceJob(activeEnhanceJobId);
+  const activeEnhanceJob = activeEnhanceJobQuery.data ?? null;
+  const activeEnhanceAttachedRound = useMemo(
+    () => imageSession?.rounds.find((round) => round.provider_response_id === activeEnhanceJobId) ?? null,
+    [activeEnhanceJobId, imageSession],
+  );
 
   const sessionStatusQuery = useQuery({
     queryKey: ["image-session-status", selectedSessionId],
@@ -975,6 +1021,45 @@ function ImageChatWorkbenchPage() {
       imageSession.rounds.find((round) => round.generated_asset.id === selectedGeneratedAssetId) ?? imageSession.rounds.at(-1) ?? null
     );
   }, [imageSession, selectedGeneratedAssetId, selectedTaskPlaceholderId]);
+
+  useEffect(() => {
+    if (chatMode !== "enhance") {
+      return;
+    }
+    if (enhanceSourceAssetId && enhanceSourceAssets.some((asset) => asset.id === enhanceSourceAssetId)) {
+      return;
+    }
+    const selectedRoundAssetId = selectedRound?.generated_asset.id;
+    const fallbackAssetId =
+      (selectedRoundAssetId && enhanceSourceAssets.some((asset) => asset.id === selectedRoundAssetId)
+        ? selectedRoundAssetId
+        : enhanceSourceAssets[0]?.id) ?? "";
+    setEnhanceSourceAssetId(fallbackAssetId);
+  }, [chatMode, enhanceSourceAssetId, enhanceSourceAssets, selectedRound?.generated_asset.id]);
+
+  useEffect(() => {
+    if (chatMode !== "enhance" || !selectedEnhanceSourceAsset) {
+      setEnhanceSourceImageSize(null);
+      return;
+    }
+    let cancelled = false;
+    setEnhanceSourceImageSize(null);
+    const image = new Image();
+    image.onload = () => {
+      if (!cancelled && image.naturalWidth > 0 && image.naturalHeight > 0) {
+        setEnhanceSourceImageSize({ width: image.naturalWidth, height: image.naturalHeight });
+      }
+    };
+    image.onerror = () => {
+      if (!cancelled) {
+        setEnhanceSourceImageSize(null);
+      }
+    };
+    image.src = api.toApiUrl(selectedEnhanceSourceAsset.download_url);
+    return () => {
+      cancelled = true;
+    };
+  }, [chatMode, selectedEnhanceSourceAsset]);
 
   const selectedPlaceholder = useMemo(
     () => findImageHistoryPlaceholder(historyBranches, selectedTaskPlaceholderId),
@@ -1076,6 +1161,14 @@ function ImageChatWorkbenchPage() {
   const generationSettingsBlockedTitle = generationAdminReadonly
     ? adminReadonlyActionTitle
     : imageChatGeneratePermissionTitle;
+  const enhanceBlockedResource = firstBlockedResource([imageSession, selectedEnhanceSourceAsset]);
+  const enhanceAdminReadonly = hasAdminReadonlyResource(currentUser, [imageSession, selectedEnhanceSourceAsset]);
+  const enhanceBlockedTitle = enhanceBlockedResource
+    ? blockedActionMessage(enhanceBlockedResource)
+    : enhanceAdminReadonly
+      ? adminReadonlyActionTitle
+      : enhanceGeneratePermissionTitle;
+  const enhanceSettingsBlockedTitle = enhanceAdminReadonly ? adminReadonlyActionTitle : enhanceGeneratePermissionTitle;
   const sessionEditBlockedTitle = sessionEditBlockedResource
     ? blockedActionMessage(sessionEditBlockedResource)
     : sessionEditAdminReadonly
@@ -1325,10 +1418,145 @@ function ImageChatWorkbenchPage() {
     },
   });
 
+  const createEnhanceMutation = useMutation({
+    mutationFn: (input: CreateEnhanceJobInput) => {
+      assertImageChatActionAllowed(enhanceBlockedTitle);
+      return api.createEnhanceJob(input);
+    },
+    onSuccess: (job) => {
+      queryClient.setQueryData(["enhance-job", job.id], job);
+      setActiveEnhanceJobId(job.id);
+      setAttachedEnhanceJobIds((previous) => {
+        const next = new Set(previous);
+        next.delete(job.id);
+        return next;
+      });
+      setFailedEnhanceAttachJobIds((previous) => {
+        const next = new Set(previous);
+        next.delete(job.id);
+        return next;
+      });
+      setSuccessMessage(t("chat.enhance.submitted"));
+      setErrorMessage("");
+    },
+    onError: (error) => {
+      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.enhance.submitFailed"));
+    },
+  });
+
+  const saveEnhanceJobMutation = useMutation({
+    mutationFn: (jobId: string) => api.saveEnhanceJobToLibrary(jobId),
+    onSuccess: (_asset, jobId) => {
+      setSavedEnhanceJobIds((previous) => new Set(previous).add(jobId));
+      setSuccessMessage(t("chat.enhance.savedToLibrary"));
+      setErrorMessage("");
+    },
+    onError: (error) => {
+      setErrorMessage(error instanceof ApiError ? error.detail : t("chat.enhance.saveFailed"));
+    },
+  });
+
+  useEffect(() => {
+    const job = activeEnhanceJob;
+    if (!job || job.status !== "succeeded" || !job.result_manifest) {
+      return;
+    }
+    if (
+      attachedEnhanceJobIds.has(job.id) ||
+      failedEnhanceAttachJobIds.has(job.id) ||
+      processingEnhanceJobId === job.id
+    ) {
+      return;
+    }
+    const initialManifest = job.result_manifest;
+    setProcessingEnhanceJobId(job.id);
+    void (async () => {
+      let readyJob: EnhanceJob = job;
+      if (job.strategy === "tiled" && initialManifest.final_status !== "ready") {
+        const blob = await compositeEnhanceTiles(initialManifest);
+        readyJob = await api.uploadEnhanceJobFinal(job.id, blob);
+        queryClient.setQueryData(["enhance-job", job.id], readyJob);
+      }
+      const updated = await api.attachEnhanceJobToImageSession(readyJob.id);
+      queryClient.setQueryData(["image-session", updated.id], updated);
+      await queryClient.invalidateQueries({ queryKey: ["image-sessions", sessionListScope] });
+      const attachedRound = [...updated.rounds].reverse().find((round) => round.provider_response_id === readyJob.id);
+      if (updated.id === selectedSessionId && attachedRound) {
+        setSelectedTaskPlaceholderId(null);
+        setSelectedGeneratedAssetId(attachedRound.generated_asset.id);
+        setLastExplicitHistoryAssetId(attachedRound.generated_asset.id);
+      }
+      setAttachedEnhanceJobIds((previous) => new Set(previous).add(readyJob.id));
+      setSuccessMessage(t("chat.enhance.attached"));
+      setErrorMessage("");
+    })()
+      .catch((error) => {
+        setFailedEnhanceAttachJobIds((previous) => new Set(previous).add(job.id));
+        setErrorMessage(error instanceof ApiError ? error.detail : t("chat.enhance.attachFailed"));
+      })
+      .finally(() => setProcessingEnhanceJobId(null));
+  }, [
+    activeEnhanceJob,
+    attachedEnhanceJobIds,
+    failedEnhanceAttachJobIds,
+    processingEnhanceJobId,
+    queryClient,
+    selectedSessionId,
+    sessionListScope,
+    t,
+  ]);
+
   const promptPolishConfigRequirementMessage =
     promptPolishConfigMode === "manual" && !promptPolishConfigId ? t("chat.promptPolishConfigRequired") : null;
   const imageGenerationConfigRequirementMessage =
     generationConfigMode === "manual" && !generationConfigId ? t("chat.imageGenerationConfigRequired") : null;
+  const enhanceDirectWidthValue = Number.parseInt(enhanceDirectWidth, 10);
+  const enhanceDirectHeightValue = Number.parseInt(enhanceDirectHeight, 10);
+  const enhanceTileBaseSizeValue = Number.parseInt(enhanceTileBaseSize, 10);
+  const enhanceDirectSizeInvalid =
+    !Number.isFinite(enhanceDirectWidthValue) ||
+    !Number.isFinite(enhanceDirectHeightValue) ||
+    enhanceDirectWidthValue <= 0 ||
+    enhanceDirectHeightValue <= 0;
+  const enhanceDirectSizeTooLarge =
+    enhanceDirectWidthValue > imageGenerationMaxDimension ||
+    enhanceDirectHeightValue > imageGenerationMaxDimension;
+  const enhanceTileBaseSizeInvalid =
+    !Number.isFinite(enhanceTileBaseSizeValue) ||
+    enhanceTileBaseSizeValue <= 0 ||
+    enhanceTileBaseSizeValue > imageGenerationMaxDimension;
+  const estimatedEnhanceTileCallCount =
+    enhanceStrategy === "tiled" && !enhanceTileBaseSizeInvalid && enhanceSourceImageSize
+      ? estimateEnhanceTileCallCount({
+          sourceWidth: enhanceSourceImageSize.width,
+          sourceHeight: enhanceSourceImageSize.height,
+          scale: enhanceScale,
+          tileBaseSize: enhanceTileBaseSizeValue,
+        })
+      : null;
+  const enhanceSourceRequirementMessage =
+    chatMode === "enhance" && !selectedEnhanceSourceAsset ? t("chat.enhance.sourceRequired") : "";
+  const enhanceResourceGroupRequirementMessage =
+    chatMode === "enhance" && !selectedResourceGroupId ? t("chat.resourceGroupRequired") : "";
+  const enhanceConfigRequirementMessage =
+    chatMode === "enhance" && generationConfigMode === "manual" && !generationConfigId
+      ? t("chat.imageGenerationConfigRequired")
+      : "";
+  const enhanceParamRequirementMessage =
+    chatMode !== "enhance"
+      ? ""
+      : enhanceStrategy === "direct" && enhanceDirectSizeInvalid
+        ? t("chat.enhance.directSizeInvalid")
+        : enhanceStrategy === "direct" && enhanceDirectSizeTooLarge
+          ? t("chat.enhance.directSizeTooLarge")
+          : enhanceStrategy === "tiled" && enhanceTileBaseSizeInvalid
+            ? t("chat.enhance.tileBaseInvalid")
+            : "";
+  const enhanceSubmitRequirementMessage =
+    enhanceSourceRequirementMessage ||
+    enhanceResourceGroupRequirementMessage ||
+    enhanceConfigRequirementMessage ||
+    enhanceParamRequirementMessage;
   const generationSubmitRequirementMessage =
     generationDraftGateMessage ||
     baseRequirementMessage ||
@@ -1342,6 +1570,13 @@ function ImageChatWorkbenchPage() {
     generateMutation.isPending ||
     Boolean(generationBlockedTitle) ||
     Boolean(generationSubmitRequirementMessage);
+  const enhanceBusy = createEnhanceMutation.isPending || processingEnhanceJobId !== null;
+  const enhanceSubmitDisabled =
+    !selectedSessionId ||
+    !imageSession ||
+    enhanceBusy ||
+    Boolean(enhanceBlockedTitle) ||
+    Boolean(enhanceSubmitRequirementMessage);
 
   const attachMutation = useMutation({
     mutationFn: (payload: { assetId: string; target: "reference" | "main_source"; inspirationId?: string }) => {
@@ -1540,6 +1775,57 @@ function ImageChatWorkbenchPage() {
     generateMutation.mutate(payload);
   }
 
+  function handleSubmitEnhance() {
+    if (!selectedSessionId || !imageSession || createEnhanceMutation.isPending || processingEnhanceJobId) {
+      return;
+    }
+    if (enhanceBlockedTitle) {
+      setErrorMessage(enhanceBlockedTitle);
+      return;
+    }
+    if (enhanceSubmitRequirementMessage) {
+      setErrorMessage(enhanceSubmitRequirementMessage);
+      return;
+    }
+    if (!selectedEnhanceSourceAsset) {
+      setErrorMessage(t("chat.enhance.sourceRequired"));
+      return;
+    }
+    const params =
+      enhanceStrategy === "direct"
+        ? {
+            target_width: enhanceDirectWidthValue,
+            target_height: enhanceDirectHeightValue,
+          }
+        : {
+            scale: enhanceScale,
+            tile_base_size: enhanceTileBaseSizeValue,
+            overlap_pct: 10,
+          };
+    createEnhanceMutation.mutate({
+      source_kind: "image_session_asset",
+      source_ref: selectedEnhanceSourceAsset.id,
+      strategy: enhanceStrategy,
+      params,
+      resource_group_id: selectedResourceGroupId ?? "",
+      generation_config_mode: generationConfigMode,
+      generation_config_id: generationConfigMode === "manual" ? generationConfigId : null,
+    });
+  }
+
+  function handleUseAttachedEnhanceAsBase() {
+    const assetId = activeEnhanceAttachedRound?.generated_asset.id;
+    if (!assetId) {
+      return;
+    }
+    setSelectedBaseAssetIds(addImageBaseAssetIds([], [assetId], maxSelectedBaseImageCount));
+    setGenerationDraftMode("new_round");
+    setRetryGenerationTaskId(null);
+    setChatMode("normal");
+    setSuccessMessage(t("chat.enhance.baseApplied"));
+    setErrorMessage("");
+  }
+
   function handlePolishPrompt() {
     const prompt = draft.trim();
     if (!prompt || polishPromptMutation.isPending) {
@@ -1674,6 +1960,18 @@ function ImageChatWorkbenchPage() {
       setErrorMessage(newRoundBlockedTitle);
       return;
     }
+    const hasPreviousTask = imageSession.generation_tasks.length > 0;
+    if (hasPreviousTask) {
+      setNewRoundChoiceOpen(true);
+      return;
+    }
+    startNewRoundFresh();
+  }
+
+  function startNewRoundFresh() {
+    if (!imageSession) {
+      return;
+    }
     const nextBaseAssetIds =
       explicitHistoryBaseAvailable && lastExplicitHistoryAssetId ? [lastExplicitHistoryAssetId] : [];
     const defaultResourceGroupId = imageSessionNewRoundDefaultResourceGroupId({
@@ -1691,6 +1989,45 @@ function ImageChatWorkbenchPage() {
     setSettingsTab("basic");
     setGenerationConfigMode("auto");
     setGenerationConfigId(null);
+    setRetryGenerationTaskId(null);
+    setGenerationDraftMode("new_round");
+    setSuccessMessage(t("chat.newRoundReady"));
+    setErrorMessage("");
+    openMobileGenerationSheetOnCompactLayout();
+  }
+
+  function startNewRoundWithPreviousConfig() {
+    if (!imageSession) {
+      return;
+    }
+    const sortedTasks = [...imageSession.generation_tasks].sort(
+      (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+    );
+    const task = sortedTasks[0];
+    if (!task) {
+      return;
+    }
+    const payload = imageGenerationTaskSubmitPayload(task);
+    const nextBaseAssetIds =
+      explicitHistoryBaseAvailable && lastExplicitHistoryAssetId ? [lastExplicitHistoryAssetId] : [];
+    setSelectedTaskPlaceholderId(null);
+    setSelectedBaseAssetIds(
+      nextBaseAssetIds.length > 0
+        ? nextBaseAssetIds
+        : addImageBaseAssetIds([], payload.base_asset_ids, maxSelectedBaseImageCount),
+    );
+    setLastExplicitHistoryAssetId(null);
+    setDraft("");
+    setPolishedPrompt("");
+    setSize(payload.size);
+    setToolOptions(payload.tool_options ?? {});
+    setGenerationCount(clampGenerationCount(payload.generation_count));
+    setSelectedResourceGroupId(payload.resource_group_id || selectedResourceGroupId || null);
+    setGenerationConfigMode(payload.generation_config_mode ?? "auto");
+    setGenerationConfigId(
+      payload.generation_config_mode === "manual" ? (payload.generation_config_id ?? null) : null,
+    );
+    setSettingsTab("basic");
     setRetryGenerationTaskId(null);
     setGenerationDraftMode("new_round");
     setSuccessMessage(t("chat.newRoundReady"));
@@ -2310,7 +2647,7 @@ function ImageChatWorkbenchPage() {
                   type="checkbox"
                   checked={maskSensitiveImages}
                   onChange={(event) => setMaskSensitiveImages(event.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+                  className="pf-checkbox rounded"
                 />
                 <span>{t("chat.maskSensitiveImages")}</span>
               </label>
@@ -2341,7 +2678,7 @@ function ImageChatWorkbenchPage() {
                     type="checkbox"
                     checked={onlyDeletedSessions}
                     onChange={(event) => handleOnlyDeletedSessionsChange(event.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+                    className="pf-checkbox rounded"
                   />
                   <span>{t("chat.onlyDeletedSessions")}</span>
                 </label>
@@ -2507,13 +2844,248 @@ function ImageChatWorkbenchPage() {
     );
   }
 
+  function renderModeToggle() {
+    return (
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-[#0b1220]">
+        {(["normal", "enhance"] as ImageChatMode[]).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setChatMode(mode)}
+            className={`h-9 rounded-lg text-xs font-semibold transition ${
+              chatMode === mode
+                ? "bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100 dark:bg-slate-950 dark:text-violet-100 dark:ring-violet-400/35"
+                : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
+            }`}
+          >
+            {t(mode === "normal" ? "chat.mode.normal" : "chat.mode.enhance")}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderEnhanceSettingsSection() {
+    const sourceOptions = [
+      {
+        value: "",
+        label: enhanceSourceAssets.length ? t("chat.enhance.selectSource") : t("chat.enhance.noSource"),
+        disabled: true,
+      },
+      ...enhanceSourceAssets.map((asset) => ({
+        value: asset.id,
+        label: `${asset.kind === "generated_image" ? t("chat.historyImage") : t("chat.sessionReferenceShort")} · ${
+          asset.original_filename
+        }`,
+      })),
+    ];
+    const activeJobFinalReady = activeEnhanceJob?.result_manifest?.final_status === "ready";
+    const activeJobSaved = Boolean(activeEnhanceJobId && savedEnhanceJobIds.has(activeEnhanceJobId));
+    return (
+      <section className="space-y-3">
+        <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
+          <Settings size={15} /> {t("chat.enhance.settings")}
+        </div>
+        {renderModeToggle()}
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
+          <div className="grid gap-3">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-200">
+                {t("chat.enhance.source")}
+              </span>
+              <SelectField
+                value={enhanceSourceAssetId}
+                options={sourceOptions}
+                onChange={setEnhanceSourceAssetId}
+                ariaLabel={t("chat.enhance.source")}
+                radius="lg"
+                visualSize="sm"
+                disabled={Boolean(enhanceSettingsBlockedTitle)}
+              />
+            </label>
+            {selectedEnhanceSourceAsset ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setReferencePreview({
+                    asset: selectedEnhanceSourceAsset,
+                    title: t("chat.enhance.source"),
+                  })
+                }
+                className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-[#0b1220]"
+              >
+                <img
+                  src={api.toApiUrl(selectedEnhanceSourceAsset.thumbnail_url || selectedEnhanceSourceAsset.preview_url)}
+                  alt={selectedEnhanceSourceAsset.original_filename}
+                  className="h-28 w-full object-cover"
+                />
+              </button>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+              {t("chat.enhance.strategy")}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(["direct", "tiled"] as EnhanceStrategy[]).map((strategyOption) => (
+                <button
+                  key={strategyOption}
+                  type="button"
+                  onClick={() => setEnhanceStrategy(strategyOption)}
+                  disabled={Boolean(enhanceSettingsBlockedTitle)}
+                  className={`h-9 rounded-lg border px-3 text-xs font-semibold transition disabled:opacity-60 ${
+                    enhanceStrategy === strategyOption
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  }`}
+                >
+                  {t(
+                    strategyOption === "direct"
+                      ? "chat.enhance.strategyDirect"
+                      : "chat.enhance.strategyTiled",
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {enhanceStrategy === "direct" ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                {IMAGE_CHAT_ENHANCE_DIRECT_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    disabled={preset > imageGenerationMaxDimension || Boolean(enhanceSettingsBlockedTitle)}
+                    onClick={() => {
+                      setEnhanceDirectWidth(String(preset));
+                      setEnhanceDirectHeight(String(preset));
+                    }}
+                    className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  {t("chat.enhance.width")}
+                  <input
+                    value={enhanceDirectWidth}
+                    onChange={(event) => setEnhanceDirectWidth(event.target.value)}
+                    className="pf-input-compact mt-1 w-full"
+                    inputMode="numeric"
+                    disabled={Boolean(enhanceSettingsBlockedTitle)}
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  {t("chat.enhance.height")}
+                  <input
+                    value={enhanceDirectHeight}
+                    onChange={(event) => setEnhanceDirectHeight(event.target.value)}
+                    className="pf-input-compact mt-1 w-full"
+                    inputMode="numeric"
+                    disabled={Boolean(enhanceSettingsBlockedTitle)}
+                  />
+                </label>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                {IMAGE_CHAT_ENHANCE_SCALES.map((scale) => (
+                  <button
+                    key={scale}
+                    type="button"
+                    onClick={() => setEnhanceScale(scale)}
+                    disabled={Boolean(enhanceSettingsBlockedTitle)}
+                    className={`h-8 rounded-lg border text-xs font-semibold transition disabled:opacity-60 ${
+                      enhanceScale === scale
+                        ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
+                        : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                    }`}
+                  >
+                    {scale}x
+                  </button>
+                ))}
+              </div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                {t("chat.enhance.tileBaseSize")}
+                <input
+                  value={enhanceTileBaseSize}
+                  onChange={(event) => setEnhanceTileBaseSize(event.target.value)}
+                  className="pf-input-compact mt-1 w-full"
+                  inputMode="numeric"
+                  disabled={Boolean(enhanceSettingsBlockedTitle)}
+                />
+              </label>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {t("chat.enhance.tileCalls", { count: estimatedEnhanceTileCallCount ?? t("common.unknown") })}
+              </p>
+            </div>
+          )}
+
+          {renderResourceGroupSelector({ disabled: Boolean(enhanceSettingsBlockedTitle) })}
+          {renderGenerationConfigSelector({
+            label: t("chat.imageGenerationConfig"),
+            helpKey: "imageGenerationConfig",
+            mode: generationConfigMode,
+            configId: generationConfigId,
+            options: imageGenerationConfigOptions,
+            onModeChange: setGenerationConfigMode,
+            onConfigIdChange: setGenerationConfigId,
+            disabled: Boolean(enhanceSettingsBlockedTitle),
+          })}
+
+          {activeEnhanceJob ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+              <EnhanceJobProgress job={activeEnhanceJob} compact />
+              {processingEnhanceJobId === activeEnhanceJob.id ? (
+                <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-300">
+                  <Loader2 size={14} className="animate-spin" />
+                  {t("chat.enhance.processingFinal")}
+                </div>
+              ) : null}
+              {activeEnhanceAttachedRound ? (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleUseAttachedEnhanceAsBase}
+                    className="pf-workspace-action-primary inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold"
+                  >
+                    <Layers3 size={14} />
+                    {t("chat.enhance.useAsBase")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => activeEnhanceJobId && saveEnhanceJobMutation.mutate(activeEnhanceJobId)}
+                    disabled={!activeJobFinalReady || saveEnhanceJobMutation.isPending || activeJobSaved}
+                    className="pf-workspace-action-secondary inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {activeJobSaved ? <Check size={14} /> : <Save size={14} />}
+                    {activeJobSaved ? t("chat.enhance.savedToLibrary") : t("chat.enhance.saveToLibrary")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </section>
+    );
+  }
+
   function renderGenerationSettingsSection(promptId: string) {
+    if (chatMode === "enhance") {
+      return renderEnhanceSettingsSection();
+    }
     if (!generationDraftOpen) {
       return (
         <section className="space-y-3">
           <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
             <Settings size={15} /> {t("chat.generationSettings")}
           </div>
+          {renderModeToggle()}
           <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm font-medium leading-6 text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
             {generationDraftGateMessage}
           </div>
@@ -2525,6 +3097,7 @@ function ImageChatWorkbenchPage() {
         <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
           <Settings size={15} /> {t("chat.generationSettings")}
         </div>
+        {renderModeToggle()}
         {renderGenerationSettingsTabs(promptId)}
       </section>
     );
@@ -2663,6 +3236,25 @@ function ImageChatWorkbenchPage() {
         </button>
       </div>
     ) : null;
+  const primaryBlockedResource = chatMode === "enhance" ? enhanceBlockedResource : generationBlockedResource;
+  const primarySubmitRequirementMessage =
+    chatMode === "enhance" ? enhanceSubmitRequirementMessage : generationSubmitRequirementMessage;
+  const primaryActionDisabled = chatMode === "enhance" ? enhanceSubmitDisabled : generateDisabled;
+  const primaryActionPending = chatMode === "enhance" ? enhanceBusy : generateMutation.isPending;
+  const primaryActionTitle =
+    chatMode === "enhance"
+      ? enhanceBlockedTitle ?? (enhanceSubmitRequirementMessage || t("chat.enhance.start"))
+      : generationBlockedTitle ?? (generationSubmitRequirementMessage || t("chat.startGenerate"));
+  const primaryActionLabel =
+    chatMode === "enhance"
+      ? primaryActionPending
+        ? t("chat.enhance.submitting")
+        : t("chat.enhance.start")
+      : generateMutation.isPending
+        ? t("chat.submitting")
+        : submitGenerationCount > 1
+          ? t("chat.startGenerateCount", { count: submitGenerationCount })
+          : t("chat.startGenerate");
 
   const pendingDeleteDialog = pendingDeleteAction
     ? {
@@ -2761,7 +3353,7 @@ function ImageChatWorkbenchPage() {
                 type="button"
                 onClick={() => setMobileSessionDrawerOpen(true)}
                 aria-label={t("chat.openSessionDrawer")}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100"
+                className="btn-secondary-spring inline-flex h-11 w-11 items-center justify-center rounded-2xl"
               >
                 <Menu size={18} />
               </button>
@@ -2782,7 +3374,7 @@ function ImageChatWorkbenchPage() {
                     disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
                     title={sessionEditBlockedTitle ?? t("chat.rename")}
                     aria-label={t("chat.rename")}
-                    className="h-10 w-full rounded-xl border border-indigo-200 bg-white px-3 text-center text-sm font-semibold text-slate-950 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-500 dark:border-violet-400/45 dark:bg-slate-950/80 dark:text-white dark:focus:border-violet-300 dark:focus:ring-violet-400/20"
+                    className="pf-input h-10 text-center font-semibold"
                   />
                 ) : (
                   <>
@@ -2975,31 +3567,27 @@ function ImageChatWorkbenchPage() {
           </div>
 
           <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-[0_-8px_24px_rgba(15,23,42,0.10)] backdrop-blur dark:border-slate-800 dark:bg-slate-950/90 dark:shadow-[0_-18px_40px_rgba(0,0,0,0.32)] lg:sticky lg:inset-x-auto lg:bottom-0 lg:p-4">
-            {generationBlockedResource ? (
-              <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
+            {primaryBlockedResource ? (
+              <ResourceBlockedNotice resource={primaryBlockedResource} className="mb-2" />
             ) : null}
-            {generationSubmitRequirementMessage ? (
+            {primarySubmitRequirementMessage ? (
               <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                {generationSubmitRequirementMessage}
+                {primarySubmitRequirementMessage}
               </div>
             ) : null}
             <button
               type="button"
-              onClick={handleGenerate}
-              disabled={generateDisabled}
-              title={generationBlockedTitle ?? (generationSubmitRequirementMessage || t("chat.startGenerate"))}
+              onClick={chatMode === "enhance" ? handleSubmitEnhance : handleGenerate}
+              disabled={primaryActionDisabled}
+              title={primaryActionTitle}
               className="inline-flex w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
             >
-              {generateMutation.isPending ? (
+              {primaryActionPending ? (
                 <Loader2 size={15} className="mr-2 animate-spin" />
               ) : (
                 <Sparkles size={15} className="mr-2" />
               )}
-              {generateMutation.isPending
-                ? t("chat.submitting")
-                : submitGenerationCount > 1
-                  ? t("chat.startGenerateCount", { count: submitGenerationCount })
-                  : t("chat.startGenerate")}
+              {primaryActionLabel}
             </button>
           </div>
         </aside>
@@ -3237,27 +3825,23 @@ function ImageChatWorkbenchPage() {
               </div>
             </div>
             <div className="border-t border-slate-200 bg-white/96 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] dark:border-slate-800 dark:bg-slate-950/94">
-              {generationBlockedResource ? (
-                <ResourceBlockedNotice resource={generationBlockedResource} className="mb-2" />
+              {primaryBlockedResource ? (
+                <ResourceBlockedNotice resource={primaryBlockedResource} className="mb-2" />
               ) : null}
-              {generationSubmitRequirementMessage ? (
+              {primarySubmitRequirementMessage ? (
                 <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
-                  {generationSubmitRequirementMessage}
+                  {primarySubmitRequirementMessage}
                 </div>
               ) : null}
               <button
                 type="button"
-                onClick={handleGenerate}
-                disabled={generateDisabled}
-                title={generationBlockedTitle ?? (generationSubmitRequirementMessage || t("chat.startGenerate"))}
+                onClick={chatMode === "enhance" ? handleSubmitEnhance : handleGenerate}
+                disabled={primaryActionDisabled}
+                title={primaryActionTitle}
                 className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
               >
-                {generateMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Sparkles size={15} className="mr-2" />}
-                {generateMutation.isPending
-                  ? t("chat.submitting")
-                  : submitGenerationCount > 1
-                    ? t("chat.startGenerateCount", { count: submitGenerationCount })
-                    : t("chat.startGenerate")}
+                {primaryActionPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Sparkles size={15} className="mr-2" />}
+                {primaryActionLabel}
               </button>
             </div>
           </Drawer.Content>
@@ -3503,6 +4087,46 @@ function ImageChatWorkbenchPage() {
           });
         }}
       />
+      {newRoundChoiceOpen ? (
+        <ModalShell
+          open={newRoundChoiceOpen}
+          onClose={() => setNewRoundChoiceOpen(false)}
+          ariaLabelledBy="new-round-choice-title"
+          overlayClassName="z-[90] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+          panelClassName="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45 animate-spring-pop-in"
+        >
+          <div className="px-5 pt-5 pb-2">
+            <h2 id="new-round-choice-title" className="text-base font-semibold text-slate-950 dark:text-white">
+              {t("chat.newRoundDialogTitle")}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+              {t("chat.newRoundDialogDescription")}
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
+            <button
+              type="button"
+              onClick={() => {
+                setNewRoundChoiceOpen(false);
+                startNewRoundFresh();
+              }}
+              className="inline-flex h-9 min-w-[72px] items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              {t("chat.newRoundFreshConfig")}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setNewRoundChoiceOpen(false);
+                startNewRoundWithPreviousConfig();
+              }}
+              className="inline-flex h-9 min-w-[88px] items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white shadow-sm shadow-slate-950/15 transition-colors hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 dark:bg-violet-500 dark:hover:bg-violet-400"
+            >
+              {t("chat.newRoundReuseConfig")}
+            </button>
+          </div>
+        </ModalShell>
+      ) : null}
     </div>
   );
 

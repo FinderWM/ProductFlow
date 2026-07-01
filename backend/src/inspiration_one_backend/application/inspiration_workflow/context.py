@@ -436,7 +436,11 @@ def collect_incoming_context(
         output = candidate.output_json or {}
         if context.copy_set_id is None and isinstance(output.get("copy_set_id"), str):
             context.copy_set_id = output["copy_set_id"]
-        if candidate.node_type in {WorkflowNodeType.REFERENCE_IMAGE, WorkflowNodeType.IMAGE_GENERATION}:
+        if candidate.node_type in {
+            WorkflowNodeType.REFERENCE_IMAGE,
+            WorkflowNodeType.IMAGE_GENERATION,
+            WorkflowNodeType.IMAGE_ENHANCE,
+        }:
             for key in ("source_asset_ids", "image_asset_ids", "reference_asset_ids"):
                 raw_ids = output.get(key)
                 if isinstance(raw_ids, list):

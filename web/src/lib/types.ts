@@ -10,13 +10,28 @@ export type SourceAssetKind =
   | "context_document";
 export type ImageSessionAssetKind = "reference_upload" | "generated_image";
 export type ResourceLibraryAssetKind = "image" | "document" | "other";
-export type ResourceLibrarySourceType = "source_asset" | "poster_variant" | "image_session_asset" | "deck_slide" | "upload";
+export type ResourceLibrarySourceType =
+  | "source_asset"
+  | "poster_variant"
+  | "image_session_asset"
+  | "deck_slide"
+  | "enhance_job_result"
+  | "upload";
+export type EnhanceStrategy = "direct" | "tiled";
+export type EnhanceSourceKind =
+  | "resource_library_asset"
+  | "source_asset"
+  | "image_session_asset"
+  | "enhance_input_blob";
+export type EnhanceFinalStatus = "pending_upload" | "ready";
+export type EnhanceBlendEdge = "left" | "right" | "top" | "bottom";
 export type GenerationConfigSelectionMode = "auto" | "manual";
 export type WorkflowNodeType =
   | "inspiration_context"
   | "reference_image"
   | "copy_generation"
   | "image_generation"
+  | "image_enhance"
   | "tail_splitter"
   | "deck_generation";
 export type CanvasTemplateWorkflowNodeType = WorkflowNodeType;
@@ -55,6 +70,89 @@ export interface DeckSourceItem {
   download_url: string | null;
   preview_url: string | null;
   thumbnail_url: string | null;
+}
+
+export interface EnhanceTileManifest {
+  row: number;
+  col: number;
+  rows: number;
+  cols: number;
+  storage_key: string;
+  download_url: string | null;
+  target_x: number;
+  target_y: number;
+  target_width: number;
+  target_height: number;
+  blend_edges: EnhanceBlendEdge[];
+  width: number;
+  height: number;
+}
+
+export interface EnhanceResultManifest {
+  scale?: number;
+  source_w?: number;
+  source_h?: number;
+  source?: {
+    kind?: string;
+    ref?: string;
+    width?: number;
+    height?: number;
+    mime_type?: string;
+  };
+  final_w?: number;
+  final_h?: number;
+  final_width?: number;
+  final_height?: number;
+  overlap_pct?: number;
+  rows?: number;
+  cols?: number;
+  final_image_ref?: string | null;
+  final_mime_type?: string | null;
+  final_status: EnhanceFinalStatus;
+  final_download_url: string | null;
+  tiles: EnhanceTileManifest[];
+}
+
+export interface CreateEnhanceJobInput {
+  source_kind: EnhanceSourceKind;
+  source_ref: string;
+  strategy: EnhanceStrategy;
+  params: Record<string, unknown>;
+  resource_group_id?: string | null;
+  generation_config_mode?: GenerationConfigSelectionMode;
+  generation_config_id?: string | null;
+}
+
+export interface EnhanceJob {
+  id: string;
+  owner_user_id: string;
+  source_kind: EnhanceSourceKind;
+  source_ref: string;
+  source_width: number;
+  source_height: number;
+  source_mime_type: string;
+  strategy: EnhanceStrategy;
+  params: Record<string, unknown>;
+  status: JobStatus;
+  progress_completed: number;
+  progress_total: number;
+  result_manifest: EnhanceResultManifest | null;
+  last_error: string | null;
+  generation_config_mode: GenerationConfigSelectionMode;
+  requested_generation_config_id: string | null;
+  used_generation_config_id: string | null;
+  resource_group_id: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EnhanceJobListResponse {
+  items: EnhanceJob[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface DeckUnavailableSource {
@@ -119,6 +217,7 @@ export interface DeckSlide {
   image_height: number | null;
   material_source: DeckMaterialSource | null;
   material_url: string | null;
+  material_enhance_job_id: string | null;
   source_manifest_json: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;

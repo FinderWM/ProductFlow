@@ -17,6 +17,7 @@ SUPPORTED_CANVAS_TEMPLATE_NODE_TYPES = frozenset(
         WorkflowNodeType.REFERENCE_IMAGE,
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.IMAGE_ENHANCE,
         WorkflowNodeType.TAIL_SPLITTER,
     }
 )

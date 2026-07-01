@@ -196,6 +196,11 @@ claim = claim_runtime_generation_config(
   - `unavailable_sources[].source_item_id`
   - `slide_bindings[*].source_item_id`
   - slide-level `source_manifest_json`
+- Deck-node generation-config contract in `WorkflowNode.config_json`:
+  - `text_generation_config_mode: "auto" | "manual"`
+  - `text_generation_config_id: str | null`
+  - `image_generation_config_mode: "auto" | "manual"`
+  - `image_generation_config_id: str | null`
 
 ### 3. Contracts
 - `deck_generation` is a valid DAG node type but **never** a runnable workflow execution node. Full run, run-from-node,
@@ -226,6 +231,14 @@ claim = claim_runtime_generation_config(
 - DAG deck resource-group handling stays deck-scoped rather than workflow-run-scoped. `deck_generation` must not be added
   to generic workflow resource-group required-node allowlists; node-scoped deck actions validate or resolve the deck's
   `resource_group_id` through existing deck generation permissions.
+- `deck_generation` has two independent generation-config selections inside the same `resource_group_id` boundary:
+  text selection controls outline generation and speaker notes; image selection controls sample generation, batch
+  generation, single-slide regenerate, and node-scoped slide material enhance. Missing fields mean `auto`. Manual
+  selection must exist, match purpose, and belong to the current resource group.
+- `POST .../deck/outline` may carry the current text/image generation-config selections so the outline action can consume
+  unsaved deck-node draft changes. Other node-scoped deck actions read the persisted node config through
+  `deck.workflow_node_id`; if the source node is missing or old config fields are absent, async worker execution falls
+  back to `Deck.resource_group_id` auto selection.
 - Browser export is the primary path for current decks. Frontend builds PPTX from generated slide images with `pptxgenjs`;
   backend export persists only legacy `.pptx` files for old flows and old downloads.
 - Legacy `POST /decks/{id}/export` remains a compatibility path for non-DAG decks. Active DAG decks must be blocked from
@@ -236,6 +249,10 @@ claim = claim_runtime_generation_config(
 - Creating an edge with `deck_generation` as source -> `BusinessValidationError` from the workflow edge mutation.
 - Generic deck mutation against an active DAG deck -> reject with the node-editor message; do not partially mutate deck rows.
 - Binding a stale/unknown/non-current `source_item_id` -> `BusinessValidationError`; do not fall back to node-level binding.
+- Manual text selection with an image config -> `BusinessValidationError("演示文稿文案只能使用文案生成配置")`.
+- Manual image selection with a text config -> `BusinessValidationError("演示文稿图片只能使用图片生成配置")`.
+- Manual deck-node generation config outside the selected resource group ->
+  `BusinessValidationError("手动指定的生成配置不属于当前供应商生成分组")`.
 - `GET .../deck/sources` on a poster-only source with no paired `SourceAsset` -> preview may show poster-backed item, but
   must not materialize storage or backfill relationships.
 - Deck history with `workflow_node_id != null` and missing source node -> `workflow_node_exists=false`, keep history visible,
@@ -258,6 +275,9 @@ claim = claim_runtime_generation_config(
   read-only poster lookup with no writes.
 - Backend route tests must cover node-scoped deck actions, node-scoped slide binding by `source_item_id`, and generic
   endpoint guard behavior for active DAG decks.
+- Backend deck-node tests must cover outline request persistence of text/image generation-config fields, worker fallback to
+  `Deck.resource_group_id` for old node configs, and route-level rejection for wrong-purpose or cross-group manual deck
+  config selection.
 - Backend workflow tests must prove `deck_generation` is excluded from full-run, run-after, retry, scheduler-ready, and
   `_execute_node` execution paths.
 - Backend serializer tests must cover `workflow_node_id`, `workflow_node_exists`, `generated_slide_count`, and

@@ -85,6 +85,11 @@ describe("draftFromNode", () => {
     expect(defaultTitleForType("image_generation", 1)).toBe("生图触发器节点 1");
     expect(defaultConfigForType("deck_generation")).toMatchObject({
       resource_group_id: null,
+      text_generation_config_mode: "auto",
+      text_generation_config_id: null,
+      image_generation_config_mode: "auto",
+      image_generation_config_id: null,
+      deck_slide_size: null,
       style_key: "clean_business",
       target_slide_count: 8,
       include_transitive_inputs: false,
@@ -106,6 +111,11 @@ describe("draftFromNode", () => {
       title: "演示节点",
       config_json: {
         resource_group_id: "group-deck",
+        text_generation_config_mode: "manual",
+        text_generation_config_id: "config-text",
+        image_generation_config_mode: "manual",
+        image_generation_config_id: "config-image",
+        deck_slide_size: "1920x1080",
         style_key: "clean_business",
         source_input: "补充说明",
         target_slide_count: 12,
@@ -125,12 +135,22 @@ describe("draftFromNode", () => {
     expect(draft.deckPlanningStrategy).toBe("image_led");
     expect(draft.deckSlideCountMode).toBe("target");
     expect(draft.deckGroupBy).toBe("source_node");
+    expect(draft.deckTextGenerationConfigMode).toBe("manual");
+    expect(draft.deckTextGenerationConfigId).toBe("config-text");
+    expect(draft.deckImageGenerationConfigMode).toBe("manual");
+    expect(draft.deckImageGenerationConfigId).toBe("config-image");
+    expect(draft.deckSlideSize).toBe("1920x1080");
     expect(draft.deckSectionPages).toBe(false);
     expect(draft.deckPerGroupImageCap).toBe(5);
     expect(draft.deckExcludedSourceItemIds).toEqual(["node:copy:1", "node:image:2"]);
     expect(draft.deckSourceOrder).toEqual(["node:image:2", "node:copy:1", "node:context:3"]);
 
     expect(nodeConfigFromDraft(node, draft)).toMatchObject({
+      text_generation_config_mode: "manual",
+      text_generation_config_id: "config-text",
+      image_generation_config_mode: "manual",
+      image_generation_config_id: "config-image",
+      deck_slide_size: "1920x1080",
       planning_strategy: "image_led",
       slide_count_mode: "target",
       group_by: "source_node",

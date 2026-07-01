@@ -126,7 +126,7 @@ export function ClipboardImageButton({
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-violet-400/40"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pf-accent,#6366f1)]/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-[var(--pf-accent,#a78bfa)]/40"
             aria-label={closeLabel}
             title={closeLabel}
           >
@@ -139,7 +139,7 @@ export function ClipboardImageButton({
           aria-label={pasteAreaLabel}
           placeholder={pasteAreaPlaceholder}
           rows={4}
-          className={`min-h-28 w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-slate-950 dark:focus:ring-violet-400/15 ${inputClassName}`}
+          className={`pf-textarea min-h-28 resize-none ${inputClassName}`}
           onPaste={handlePaste}
           onInput={(event) => {
             event.currentTarget.value = "";

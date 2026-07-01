@@ -308,7 +308,7 @@ export function SaveToResourceLibraryDialog({
                           checked={selected || alreadyLinked}
                           onChange={(event) => toggleGroup(group.id, event.target.checked)}
                           disabled={!canWrite || saveMutation.isPending || alreadyLinked}
-                          className="h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-70 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
+                          className="pf-checkbox shrink-0 rounded border-slate-300 disabled:opacity-70 dark:border-slate-600 dark:bg-slate-950"
                         />
                         <span className="min-w-0 flex-1 whitespace-normal break-words leading-5">{group.name}</span>
                         {alreadyLinked ? (
@@ -316,7 +316,7 @@ export function SaveToResourceLibraryDialog({
                             {t("resourceLibrary.alreadyInLibrary")}
                           </span>
                         ) : selected ? (
-                          <Check size={14} className="ml-auto shrink-0 text-indigo-600 dark:text-violet-300" />
+                          <Check size={14} className="ml-auto shrink-0 text-[var(--pf-accent,#047857)] dark:text-[var(--pf-accent,#a7f3d0)]" />
                         ) : null}
                       </label>
                     );

@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.auth import require_generation_resource_group_for_user
 from inspiration_one_backend.application.contracts import DeckOutlineInput, DeckOutlinePayload, SpeakerNotesInput
+from inspiration_one_backend.application.deck_generation_config import (
+    resolve_deck_generation_config_selection_for_execution,
+)
 from inspiration_one_backend.application.deck_generation_core import enhance_deck_slide_material
 from inspiration_one_backend.application.generation_config_runtime import (
     GenerationConfigSelection,
@@ -120,10 +123,16 @@ def _inspiration_material_summary(inspiration: Inspiration) -> str:
     return "\n".join(parts)[:4000]
 
 
-def _generate_outline(*, resource_group_id: str, outline_input: DeckOutlineInput, actor_user_id: str):
+def _generate_outline(
+    *,
+    resource_group_id: str,
+    outline_input: DeckOutlineInput,
+    actor_user_id: str,
+    generation_config_selection: GenerationConfigSelection | None = None,
+):
     claim = claim_runtime_generation_config(
         purpose="text",
-        selection=GenerationConfigSelection(resource_group_id=resource_group_id),
+        selection=generation_config_selection or GenerationConfigSelection(resource_group_id=resource_group_id),
     )
     try:
         provider = get_text_provider(claim.generation_config_id)
@@ -157,6 +166,7 @@ def create_deck(
     style_key: str | None = None,
     workflow_node_id: str | None = None,
     source_manifest_json: dict[str, Any] | None = None,
+    generation_config_selection: GenerationConfigSelection | None = None,
 ) -> Deck:
     outline, group_id, bounded_max = generate_deck_outline_payload(
         session,
@@ -166,6 +176,7 @@ def create_deck(
         actor_is_admin=actor_is_admin,
         source_input=source_input,
         max_slides=max_slides,
+        generation_config_selection=generation_config_selection,
     )
     deck = Deck(
         inspiration_id=inspiration_id,
@@ -195,6 +206,7 @@ def generate_deck_outline_payload(
     actor_is_admin: bool,
     source_input: str | None = None,
     max_slides: int | None = None,
+    generation_config_selection: GenerationConfigSelection | None = None,
 ) -> tuple[DeckOutlinePayload, str, int]:
     inspiration = session.get(Inspiration, inspiration_id)
     if inspiration is None:
@@ -214,7 +226,12 @@ def generate_deck_outline_payload(
         source_input=source_input or "",
         max_slides=bounded_max,
     )
-    outline = _generate_outline(resource_group_id=group.id, outline_input=outline_input, actor_user_id=actor_user_id)
+    outline = _generate_outline(
+        resource_group_id=group.id,
+        outline_input=outline_input,
+        actor_user_id=actor_user_id,
+        generation_config_selection=generation_config_selection,
+    )
     return outline, group.id, bounded_max
 
 
@@ -394,7 +411,13 @@ def reorder_deck_slides(session: Session, deck_id: str, *, slide_ids: list[str])
     return deck
 
 
-def generate_deck_slide_speaker_notes(session: Session, slide_id: str, *, actor_user_id: str) -> DeckSlide:
+def generate_deck_slide_speaker_notes(
+    session: Session,
+    slide_id: str,
+    *,
+    actor_user_id: str,
+    generation_config_selection: GenerationConfigSelection | None = None,
+) -> DeckSlide:
     slide = get_deck_slide_or_raise(session, slide_id)
     deck = get_deck_or_raise(session, slide.deck_id)
     notes_input = SpeakerNotesInput(
@@ -404,7 +427,7 @@ def generate_deck_slide_speaker_notes(session: Session, slide_id: str, *, actor_
     )
     claim = claim_runtime_generation_config(
         purpose="text",
-        selection=GenerationConfigSelection(resource_group_id=deck.resource_group_id),
+        selection=generation_config_selection or GenerationConfigSelection(resource_group_id=deck.resource_group_id),
     )
     try:
         provider = get_text_provider(claim.generation_config_id)
@@ -479,6 +502,23 @@ def set_deck_slide_material_from_source(
         )
     else:
         raise BusinessValidationError("不支持的配图来源")
+    session.commit()
+    session.refresh(slide)
+    return slide
+
+
+def clear_deck_slide_material(session: Session, slide_id: str) -> DeckSlide:
+    slide = get_deck_slide_or_raise(session, slide_id)
+    _apply_material_from_storage(
+        slide,
+        storage_path=None,
+        storage_backend=None,
+        storage_bucket=None,
+        storage_object_key=None,
+        mime_type=None,
+        source=None,
+    )
+    slide.source_manifest_json = None
     session.commit()
     session.refresh(slide)
     return slide
@@ -580,3 +620,11 @@ def export_deck_pptx(session: Session, deck_id: str) -> Deck:
     session.commit()
     session.refresh(deck)
     return deck
+
+
+def deck_image_generation_config_selection_for_execution(session: Session, deck: Deck) -> GenerationConfigSelection:
+    return resolve_deck_generation_config_selection_for_execution(session, deck=deck, purpose="image")
+
+
+def deck_text_generation_config_selection_for_execution(session: Session, deck: Deck) -> GenerationConfigSelection:
+    return resolve_deck_generation_config_selection_for_execution(session, deck=deck, purpose="text")

@@ -183,8 +183,8 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
                 title={labelForImageAspect(option.value, locale)}
                 className={`flex h-16 flex-col items-center justify-center rounded-lg border px-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                   active
-                    ? "border-indigo-500 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-100 dark:border-violet-400 dark:bg-violet-500/18 dark:text-violet-50 dark:ring-violet-400/45"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                    ? "border-slate-900 bg-slate-50 text-slate-900 ring-2 ring-slate-900/10 dark:border-slate-100 dark:bg-slate-100/10 dark:text-slate-50 dark:ring-slate-100/20"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100"
                 }`}
               >
                 <span
@@ -198,7 +198,7 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
         <label
           className={`block rounded-lg border p-3 transition-colors ${
             customAspectActive
-              ? "border-indigo-500 bg-indigo-50 dark:border-violet-400 dark:bg-violet-500/18"
+              ? "border-slate-900 bg-slate-50 dark:border-slate-100 dark:bg-slate-100/10"
               : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950/50"
           }`}
         >
@@ -209,7 +209,7 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
             value={customAspectDraft}
             onChange={(event) => updateCustomAspect(event.target.value)}
             disabled={disabled}
-            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20 dark:disabled:bg-slate-950"
+            className="pf-input-compact w-full disabled:bg-slate-100 dark:disabled:bg-slate-950"
             placeholder="4:5"
           />
           <span
@@ -247,8 +247,8 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
                   title={formatImageSizeValue(option.value)}
                   className={`flex h-20 flex-col items-center justify-center rounded-lg border px-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                     active
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-100 dark:border-violet-400 dark:bg-violet-500/18 dark:text-violet-50 dark:ring-violet-400/45"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                      ? "border-slate-900 bg-slate-50 text-slate-900 ring-2 ring-slate-900/10 dark:border-slate-100 dark:bg-slate-100/10 dark:text-slate-50 dark:ring-slate-100/20"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100"
                   }`}
                 >
                   <span className="text-sm font-black">{display.tierLabel}</span>
@@ -281,7 +281,7 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
               pattern="[0-9]*"
               onChange={(event) => updateCustom(event.target.value, height)}
               disabled={disabled}
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20 dark:disabled:bg-slate-950"
+              className="pf-input-compact px-2 text-xs disabled:bg-slate-100 dark:disabled:bg-slate-950"
               placeholder="2048"
             />
           </label>
@@ -296,7 +296,7 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
               pattern="[0-9]*"
               onChange={(event) => updateCustom(width, event.target.value)}
               disabled={disabled}
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20 dark:disabled:bg-slate-950"
+              className="pf-input-compact px-2 text-xs disabled:bg-slate-100 dark:disabled:bg-slate-950"
               placeholder="2048"
             />
           </label>

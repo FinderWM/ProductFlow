@@ -109,6 +109,56 @@ Current workspace page surfaces include:
 - Special immersive tools: `/inspirations/:inspirationId`, `/image-chat/workbench`,
   `/inspirations/:inspirationId/image-chat`, and `/inspirations/new`.
 
+## Workspace Visual Signature — Inputs & Buttons
+
+The workspace layout intentionally uses **larger border-radius** and **pill-shaped buttons** as a visual differentiator
+from the classic layout. These conventions are enforced via CSS scope overrides in `web/src/index.css` under
+`:root[data-ui-layout-scheme="workspace"]`.
+
+### Input Radius
+
+| Token | Value | Scope |
+|---|---|---|
+| `--pf-radius-workspace-input` | `20px` | All inputs/textareas/selects under workspace scheme |
+
+Mechanism:
+- `.input-premium`, `.textarea-premium`, `.pf-shell-input`, and native `input`/`textarea`/`select` elements all receive
+  `border-radius: var(--pf-radius-workspace-input)` when inside the workspace scheme selector.
+- Classic scheme continues to use `--pf-radius-md` (14px) for `.input-premium`/`.textarea-premium`.
+- **Do not hardcode** `rounded-md` / `rounded-lg` on workspace inputs. Use `.input-premium` or `.textarea-premium` class
+  so the workspace override applies automatically.
+
+### Button Radius
+
+| Style | Radius | Description |
+|---|---|---|
+| `.btn-primary-spring` | `var(--pf-radius-pill)` (999px) | Primary action buttons become pill-shaped in workspace |
+| `.btn-secondary-spring` | `var(--pf-radius-pill)` (999px) | Secondary buttons also become pill-shaped |
+| `.btn-workspace-primary` | `var(--pf-radius-pill)` (999px) | Dedicated class: pill + indigo-600 bg + semibold |
+
+Mechanism:
+- Workspace scope overrides on `.btn-primary-spring` and `.btn-secondary-spring` add
+  `border-radius: var(--pf-radius-pill)` so all spring buttons become pills.
+- The standalone `.btn-workspace-primary` class provides a complete pill button style (indigo-600, white text, semibold,
+  h-10, gradient in dark mode) for use in workspace-only components.
+- **Do not hardcode** `rounded-lg bg-indigo-600` inline for action buttons in workspace pages. Use `.btn-primary-spring`
+  or `.btn-workspace-primary` so radius and color both resolve through the token system.
+
+### When to Use Each Button Class
+
+| Scenario | Class |
+|---|---|
+| Standard primary action in any layout | `.btn-primary-spring` |
+| Standard secondary action in any layout | `.btn-secondary-spring` |
+| Workspace-only primary action (no classic fallback needed) | `.btn-workspace-primary` |
+
+### Classic Scheme Isolation
+
+These overrides are scoped exclusively to `[data-ui-layout-scheme="workspace"]`. Classic scheme buttons retain their
+existing `border-radius` from `.btn-primary-spring` / `.btn-secondary-spring` base definitions (no pill shape).
+
+---
+
 ## Adding A Workspace Appearance Theme
 
 ### Signatures

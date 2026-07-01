@@ -102,6 +102,7 @@ const NODE_TYPE_LABEL_KEYS: Record<WorkflowNodeType, TranslationKey> = {
   reference_image: "create.referenceImage",
   copy_generation: "create.copy",
   image_generation: "create.imageGeneration",
+  image_enhance: "create.imageEnhance",
   tail_splitter: "create.tailSplitter",
   deck_generation: "create.deckGeneration",
 };
@@ -641,7 +642,7 @@ export function InspirationCreatePage() {
               value={templateCategoryId}
               onChange={(event) => setTemplateCategoryId(event.target.value)}
               disabled={templateCategoriesQuery.isLoading || templateCategoriesQuery.isError}
-              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2.5 text-xs text-zinc-900 outline-none transition-shadow focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+              className="pf-input-compact disabled:cursor-not-allowed disabled:opacity-60"
             >
               <option value="">{t("templateFilter.allCategories")}</option>
               {templateCategories.map((category) => (
@@ -841,7 +842,7 @@ export function InspirationCreatePage() {
                       setError("");
                     }}
                     disabled={generationResourceGroupsQuery.isLoading || !resourceGroups.length}
-                    className="h-10 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none transition-shadow focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                    className="pf-input-compact disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <option value="" disabled>
                       {resourceGroups.length ? t("create.selectResourceGroup") : t("create.noResourceGroups")}
@@ -1153,7 +1154,7 @@ export function InspirationCreatePage() {
                 setError("");
                 setMobileStep(mobileStep === "template" ? "details" : "entry");
               }}
-              className="inline-flex min-h-11 shrink-0 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+              className="btn-secondary-spring inline-flex min-h-11 shrink-0 items-center rounded-xl px-3 text-xs font-semibold"
             >
               {t("create.mobileBack")}
             </button>

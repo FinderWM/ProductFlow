@@ -17,6 +17,7 @@ import { defaultTitleForNodeType } from "./nodeDisplay";
 import { configString, outputText } from "./utils";
 
 const INSPIRATION_CONTEXT_ENTRY_TYPES: InspirationInitialWorkflowEntry[] = ["image", "copy", "tail", "blank"];
+const DECK_SLIDE_SIZE_VALUES = new Set(["2048x1152", "1920x1080", "1280x720"]);
 
 function outputStructuredPayload(node: WorkflowNode | null): CopyPayloadV2 | null {
   const payload = node?.output_json?.structured_payload;
@@ -37,6 +38,24 @@ function generationConfigIdFromNode(node: WorkflowNode | null): string | null {
 
 function configNumber(node: WorkflowNode | null, key: string, fallback: number): number {
   const value = node?.config_json?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function configRecordNumber(node: WorkflowNode | null, recordKey: string, key: string, fallback: number): number {
+  const record = node?.config_json?.[recordKey];
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    return fallback;
+  }
+  const value = (record as Record<string, unknown>)[key];
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
@@ -71,6 +90,36 @@ function generationConfigFromDraft(draft: NodeConfigDraft): {
     generation_config_mode: mode,
     generation_config_id: mode === "manual" ? draft.generationConfigId : null,
   };
+}
+
+function deckGenerationConfigFromDraft(
+  mode: NodeConfigDraft["deckTextGenerationConfigMode"],
+  generationConfigId: string | null,
+): {
+  generation_config_mode: "auto" | "manual";
+  generation_config_id: string | null;
+} {
+  const resolvedMode = mode === "manual" ? "manual" : "auto";
+  return {
+    generation_config_mode: resolvedMode,
+    generation_config_id: resolvedMode === "manual" ? generationConfigId : null,
+  };
+}
+
+function deckGenerationConfigModeFromNode(
+  node: WorkflowNode | null,
+  modeKey: string,
+): "auto" | "manual" {
+  return configString(node, modeKey) === "manual" ? "manual" : "auto";
+}
+
+function deckGenerationConfigIdFromNode(node: WorkflowNode | null, idKey: string): string | null {
+  return configString(node, idKey) || null;
+}
+
+function deckSlideSizeFromNode(node: WorkflowNode | null): string | null {
+  const value = configString(node, "deck_slide_size");
+  return DECK_SLIDE_SIZE_VALUES.has(value) ? value : null;
 }
 
 function recordString(record: Record<string, unknown> | null | undefined, key: string, fallback = ""): string {
@@ -169,9 +218,19 @@ export function draftFromNode(
         : configString(node, "channel", "灵感主图"),
     size: configString(node, "size", "1024x1024"),
     toolOptions: imageToolOptionsFromUnknown(node?.config_json?.tool_options),
+    imageEnhanceStrategy: configString(node, "strategy", "direct") === "tiled" ? "tiled" : "direct",
+    imageEnhanceTargetWidth: String(configRecordNumber(node, "params", "target_width", 1024)),
+    imageEnhanceTargetHeight: String(configRecordNumber(node, "params", "target_height", 1024)),
+    imageEnhanceScale: String(configRecordNumber(node, "params", "scale", 2)),
+    imageEnhanceTileBaseSize: String(configRecordNumber(node, "params", "tile_base_size", 1024)),
     resourceGroupId: configString(node, "resource_group_id") || null,
     generationConfigMode: generationConfigModeFromNode(node),
     generationConfigId: generationConfigIdFromNode(node),
+    deckTextGenerationConfigMode: deckGenerationConfigModeFromNode(node, "text_generation_config_mode"),
+    deckTextGenerationConfigId: deckGenerationConfigIdFromNode(node, "text_generation_config_id"),
+    deckImageGenerationConfigMode: deckGenerationConfigModeFromNode(node, "image_generation_config_mode"),
+    deckImageGenerationConfigId: deckGenerationConfigIdFromNode(node, "image_generation_config_id"),
+    deckSlideSize: deckSlideSizeFromNode(node),
     copyStructuredPayload: copySet?.structured_payload ?? outputStructuredPayload(node),
     deckStyleKey: configString(node, "style_key", "clean_business"),
     deckSourceInput: configString(node, "source_input"),
@@ -245,6 +304,29 @@ export function nodeConfigFromDraft(
       ...(toolOptions ? { tool_options: toolOptions } : { tool_options: null }),
     };
   }
+  if (node.node_type === "image_enhance") {
+    const targetWidth = Number.parseInt(draft.imageEnhanceTargetWidth || "1024", 10);
+    const targetHeight = Number.parseInt(draft.imageEnhanceTargetHeight || "1024", 10);
+    const scale = Number.parseInt(draft.imageEnhanceScale || "2", 10);
+    const tileBaseSize = Number.parseInt(draft.imageEnhanceTileBaseSize || "1024", 10);
+    return {
+      ...base,
+      strategy: draft.imageEnhanceStrategy,
+      params:
+        draft.imageEnhanceStrategy === "direct"
+          ? {
+              target_width: Number.isFinite(targetWidth) ? targetWidth : 1024,
+              target_height: Number.isFinite(targetHeight) ? targetHeight : 1024,
+            }
+          : {
+              scale: Number.isFinite(scale) ? Math.max(2, Math.min(4, scale)) : 2,
+              tile_base_size: Number.isFinite(tileBaseSize) ? Math.max(256, Math.min(2048, tileBaseSize)) : 1024,
+              overlap_pct: 10,
+            },
+      resource_group_id: draft.resourceGroupId,
+      ...generationConfigFromDraft(draft),
+    };
+  }
   if (node.node_type === "tail_splitter") {
     const parsedMaxItems = Number.parseInt(draft.channel || "8", 10);
     return {
@@ -259,10 +341,23 @@ export function nodeConfigFromDraft(
     };
   }
   if (node.node_type === "deck_generation") {
+    const textConfig = deckGenerationConfigFromDraft(
+      draft.deckTextGenerationConfigMode,
+      draft.deckTextGenerationConfigId,
+    );
+    const imageConfig = deckGenerationConfigFromDraft(
+      draft.deckImageGenerationConfigMode,
+      draft.deckImageGenerationConfigId,
+    );
     return {
       ...base,
       title: draft.title,
       resource_group_id: draft.resourceGroupId,
+      text_generation_config_mode: textConfig.generation_config_mode,
+      text_generation_config_id: textConfig.generation_config_id,
+      image_generation_config_mode: imageConfig.generation_config_mode,
+      image_generation_config_id: imageConfig.generation_config_id,
+      deck_slide_size: draft.deckSlideSize,
       style_key: draft.deckStyleKey || null,
       source_input: draft.deckSourceInput,
       target_slide_count: Math.max(1, Math.min(50, Math.trunc(draft.deckMaxSlides || 8))),
@@ -305,6 +400,18 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
       tool_options: null,
     };
   }
+  if (type === "image_enhance") {
+    return {
+      strategy: "direct",
+      params: {
+        target_width: 1024,
+        target_height: 1024,
+      },
+      resource_group_id: null,
+      generation_config_mode: "auto",
+      generation_config_id: null,
+    };
+  }
   if (type === "tail_splitter") {
     return {
       description: "",
@@ -319,6 +426,11 @@ export function defaultConfigForType(type: WorkflowNodeType): Record<string, unk
   if (type === "deck_generation") {
     return {
       resource_group_id: null,
+      text_generation_config_mode: "auto",
+      text_generation_config_id: null,
+      image_generation_config_mode: "auto",
+      image_generation_config_id: null,
+      deck_slide_size: null,
       style_key: "clean_business",
       source_input: "",
       target_slide_count: 8,

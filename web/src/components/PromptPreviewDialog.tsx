@@ -86,7 +86,7 @@ export function PromptPreviewDialog({ preview, onClose }: PromptPreviewDialogPro
               onClick={handleCopy}
               title={copyTitle}
               aria-label={t("promptPreview.copy")}
-              className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-slate-500"
             >
               {copyState === "copied" ? <Check size={14} className="mr-1.5" /> : <Copy size={14} className="mr-1.5" />}
               {t("common.copy")}

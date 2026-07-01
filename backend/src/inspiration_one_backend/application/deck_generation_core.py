@@ -8,6 +8,18 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.admission import generation_running_capacity_available
+from inspiration_one_backend.application.deck_generation_config import (
+    resolve_deck_generation_config_selection_for_execution,
+    resolve_deck_slide_size_for_execution,
+)
+from inspiration_one_backend.application.deck_status import derived_deck_status
+from inspiration_one_backend.application.enhance.jobs import (
+    _result_manifest as enhance_result_manifest,
+)
+from inspiration_one_backend.application.enhance.jobs import (
+    create_enhance_input_blob,
+)
+from inspiration_one_backend.application.enhance.strategy import DirectParams, EnhanceContext, run_direct_strategy
 from inspiration_one_backend.application.generation_config_runtime import (
     GenerationConfigSelection,
     GenerationConfigWaitError,
@@ -17,10 +29,15 @@ from inspiration_one_backend.application.generation_config_runtime import (
     generation_failure_reason,
     release_runtime_generation_config,
 )
-from inspiration_one_backend.config import get_runtime_settings
-from inspiration_one_backend.domain.enums import DeckMaterialSource, DeckSlideStatus, DeckStatus
+from inspiration_one_backend.domain.enums import (
+    DeckMaterialSource,
+    DeckSlideStatus,
+    EnhanceSourceKind,
+    EnhanceStrategy,
+    JobStatus,
+)
 from inspiration_one_backend.domain.errors import BusinessValidationError, NotFoundError
-from inspiration_one_backend.infrastructure.db.models import Deck, DeckSlide, Inspiration
+from inspiration_one_backend.infrastructure.db.models import Deck, DeckSlide, EnhanceJob, Inspiration, new_id
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
 from inspiration_one_backend.infrastructure.deck.styles import build_slide_image_prompt
 from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes, infer_extension
@@ -29,12 +46,10 @@ from inspiration_one_backend.infrastructure.storage import LocalStorage
 
 logger = logging.getLogger(__name__)
 
-DECK_SLIDE_SIZE = "2048x1152"
 DECK_MATERIAL_ENHANCE_SIZE = "1024x1024"
 DECK_SLIDE_MAX_ATTEMPTS = 3
 DECK_CAPACITY_RETRY_DELAY_MS = 2000
 
-_ACTIVE_SLIDE_STATUSES = (DeckSlideStatus.PENDING, DeckSlideStatus.QUEUED, DeckSlideStatus.RUNNING)
 _CLAIMABLE_SLIDE_STATUSES = (DeckSlideStatus.PENDING, DeckSlideStatus.QUEUED)
 
 
@@ -51,6 +66,21 @@ def _storage_data_url(storage: LocalStorage, *, path: str | None, mime_type: str
         logger.warning("[Deck｜生成｜配图] 读取配图失败 path=%s", path)
         return None
     return f"data:{mime_type or 'image/png'};base64,{b64encode(raw).decode('utf-8')}"
+
+
+def _storage_image_bytes(storage: LocalStorage, *, path: str | None) -> bytes | None:
+    if not path:
+        return None
+    try:
+        return storage.resolve(path).read_bytes()
+    except OSError:
+        logger.warning("[Deck｜生成｜配图] 读取配图失败 path=%s", path)
+        return None
+
+
+def _deck_material_enhance_size() -> tuple[int, int]:
+    raw_width, raw_height = DECK_MATERIAL_ENHANCE_SIZE.lower().split("x", maxsplit=1)
+    return int(raw_width), int(raw_height)
 
 
 def _deck_owner_user_id(session: Session, deck: Deck) -> str | None:
@@ -120,13 +150,7 @@ def _recompute_deck_status(session: Session, deck_id: str) -> None:
     deck = session.get(Deck, deck_id)
     if deck is None or not deck.slides:
         return
-    statuses = [slide.slide_status for slide in deck.slides]
-    if all(status == DeckSlideStatus.COMPLETED for status in statuses):
-        deck.status = DeckStatus.COMPLETED
-    elif any(status in _ACTIVE_SLIDE_STATUSES for status in statuses):
-        deck.status = DeckStatus.GENERATING
-    else:
-        deck.status = DeckStatus.FAILED
+    deck.status = derived_deck_status(deck)
     session.commit()
 
 
@@ -161,9 +185,14 @@ def execute_deck_slide_generation_task(slide_id: str) -> None:
         storage = LocalStorage()
         claim = None
         try:
+            image_selection = resolve_deck_generation_config_selection_for_execution(
+                session,
+                deck=deck,
+                purpose="image",
+            )
             claim = claim_runtime_generation_config(
                 purpose="image",
-                selection=GenerationConfigSelection(resource_group_id=deck.resource_group_id),
+                selection=image_selection,
             )
             service = ImageChatService(generation_config_id=claim.generation_config_id)
             material_url = _storage_data_url(
@@ -185,7 +214,7 @@ def execute_deck_slide_generation_task(slide_id: str) -> None:
             )
             result = service.generate(
                 prompt=prompt,
-                size=get_runtime_settings().deck_slide_size or DECK_SLIDE_SIZE,
+                size=resolve_deck_slide_size_for_execution(session, deck=deck),
                 manual_reference_images=references,
             )
             relative_path = storage.save_deck_slide_image(
@@ -219,7 +248,13 @@ def execute_deck_slide_generation_task(slide_id: str) -> None:
         session.close()
 
 
-def enhance_deck_slide_material(session: Session, *, slide_id: str, prompt: str | None = None) -> DeckSlide:
+def enhance_deck_slide_material(
+    session: Session,
+    *,
+    slide_id: str,
+    prompt: str | None = None,
+    generation_config_selection: GenerationConfigSelection | None = None,
+) -> DeckSlide:
     """R8：对当前低清配图做图生图增强，结果设为该页配图（material_source=enhanced），供后续整页生图使用。"""
     slide = session.get(DeckSlide, slide_id)
     if slide is None:
@@ -228,32 +263,90 @@ def enhance_deck_slide_material(session: Session, *, slide_id: str, prompt: str 
     if deck is None:
         raise NotFoundError("演示文稿不存在")
     storage = LocalStorage()
-    base = _storage_data_url(storage, path=slide.material_storage_path, mime_type=slide.material_mime_type)
-    if base is None:
+    source_bytes = _storage_image_bytes(storage, path=slide.material_storage_path)
+    if source_bytes is None:
         raise BusinessValidationError("当前幻灯片没有可增强的配图")
 
     owner_user_id = _deck_owner_user_id(session, deck)
+    if owner_user_id is None:
+        raise BusinessValidationError("演示文稿缺少所属用户，无法增强配图")
+    source_mime_type = slide.material_mime_type or "image/png"
+    source_dimensions = image_dimensions_from_bytes(source_bytes)
+    if source_dimensions is None:
+        raise BusinessValidationError("当前幻灯片配图不是可增强的图片")
+    target_width, target_height = _deck_material_enhance_size()
+    selection = generation_config_selection or resolve_deck_generation_config_selection_for_execution(
+        session,
+        deck=deck,
+        purpose="image",
+    )
     claim = claim_runtime_generation_config(
         purpose="image",
-        selection=GenerationConfigSelection(resource_group_id=deck.resource_group_id),
+        selection=selection,
     )
     try:
         service = ImageChatService(generation_config_id=claim.generation_config_id)
-        result = service.generate(
-            prompt=(prompt or "").strip() or "在保持主体与构图不变的前提下，提升清晰度、细节与画质。",
-            size=DECK_MATERIAL_ENHANCE_SIZE,
-            manual_reference_images=[base],
+        ctx = EnhanceContext(
+            session=session,
+            storage=storage,
+            service=service,
+            source_image_bytes=source_bytes,
+            source_mime=source_mime_type,
+            source_width=source_dimensions[0],
+            source_height=source_dimensions[1],
+            output_prefix=f"decks/{deck.id}/materials/{new_id()}",
+            reference_limit=1,
+            quality_prompt=(prompt or "").strip() or None,
         )
-        relative_path = storage.save_deck_slide_material(
-            deck.id, slide.order_index, result.bytes_data, suffix=infer_extension(result.mime_type)
+        result = run_direct_strategy(ctx, DirectParams(target_width=target_width, target_height=target_height))
+        if result.final_image_ref is None:
+            raise BusinessValidationError("图片增强结果不存在")
+        _final_path, final_mime_type = storage.resolve_for_variant(
+            result.final_image_ref,
+            "original",
+            fallback_media_type=source_mime_type,
         )
-        meta = storage.metadata_for(relative_path).as_model_kwargs()
+        input_blob = create_enhance_input_blob(
+            session,
+            content=source_bytes,
+            mime_type=source_mime_type,
+            owner_user_id=owner_user_id,
+            storage=storage,
+        )
+        job = EnhanceJob(
+            id=new_id(),
+            owner_user_id=owner_user_id,
+            source_kind=EnhanceSourceKind.ENHANCE_INPUT_BLOB,
+            source_ref=input_blob.id,
+            source_width=input_blob.width,
+            source_height=input_blob.height,
+            source_mime_type=input_blob.mime_type,
+            strategy=EnhanceStrategy.DIRECT,
+            params_json={"target_width": target_width, "target_height": target_height},
+            status=JobStatus.SUCCEEDED,
+            progress_completed=1,
+            progress_total=1,
+            progress_updated_at=_now(),
+            generation_config_mode=selection.mode,
+            requested_generation_config_id=selection.generation_config_id,
+            used_generation_config_id=claim.generation_config_id,
+            resource_group_id=claim.resource_group_id,
+            started_at=_now(),
+            finished_at=_now(),
+        )
+        manifest = enhance_result_manifest(job, result)
+        manifest["final_mime_type"] = final_mime_type
+        job.result_manifest_json = manifest
+        session.add(job)
+
+        meta = storage.metadata_for(result.final_image_ref).as_model_kwargs()
         slide.material_storage_path = meta["storage_path"]
         slide.material_storage_backend = meta["storage_backend"]
         slide.material_storage_bucket = meta["storage_bucket"]
         slide.material_storage_object_key = meta["storage_object_key"]
-        slide.material_mime_type = result.mime_type
+        slide.material_mime_type = final_mime_type
         slide.material_source = DeckMaterialSource.ENHANCED
+        slide.material_enhance_job_id = job.id
         session.commit()
         release_runtime_generation_config(claim, success=True, user_id=owner_user_id, generated_unit_count=1)
         session.refresh(slide)

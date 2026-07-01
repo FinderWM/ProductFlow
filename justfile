@@ -28,7 +28,7 @@ web-install:
     pnpm --dir web install
 
 web-dev:
-    bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target="${VITE_DEV_PROXY_TARGET:-http://127.0.0.1:${APP_PORT:-29282}}"; VITE_API_BASE_URL= VITE_DEV_PROXY_TARGET="$api_target" pnpm --dir web dev -- --host 0.0.0.0 --port "$web_port" --strictPort'
+    bash scripts/with_dev_env.sh bash -lc 'web_port="${WEB_PORT:-29283}"; api_target="${VITE_DEV_PROXY_TARGET:-http://127.0.0.1:${APP_PORT:-29282}}"; while true; do VITE_API_BASE_URL= VITE_DEV_PROXY_TARGET="$api_target" pnpm --dir web dev -- --host 0.0.0.0 --port "$web_port" --strictPort 2>&1 | tee /tmp/web-dev.log; echo "[$(date)] Vite crashed, restarting in 2s..." | tee -a /tmp/web-dev.log; sleep 2; done'
 
 web-preview-prod:
     pnpm --dir web preview -- --host 0.0.0.0 --port ${WEB_PORT:-29281} --strictPort

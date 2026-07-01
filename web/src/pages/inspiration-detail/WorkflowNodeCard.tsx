@@ -57,6 +57,7 @@ export function WorkflowNodeCard({
     reference_image: ImagePlus,
     copy_generation: FileText,
     image_generation: ImageIcon,
+    image_enhance: ImageIcon,
     tail_splitter: Sparkles,
     deck_generation: Presentation,
   }[node.node_type];

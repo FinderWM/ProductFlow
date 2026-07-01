@@ -15,6 +15,7 @@ const BASE_NODE_LABEL_KEYS: Record<WorkflowNodeType, TranslationKey> = {
   reference_image: "detail.node.referenceImage",
   copy_generation: "detail.node.copyGeneration",
   image_generation: "detail.node.imageGeneration",
+  image_enhance: "detail.node.imageEnhance",
   tail_splitter: "detail.node.tailSplitter",
   deck_generation: "detail.node.deckGeneration",
 };
@@ -24,6 +25,7 @@ const LEGACY_TITLE_PREFIX_KEYS: Record<WorkflowNodeType, TranslationKey> = {
   reference_image: "detail.node.legacyReference",
   copy_generation: "detail.node.legacyCopy",
   image_generation: "detail.node.legacyImage",
+  image_enhance: "detail.node.legacyImageEnhance",
   tail_splitter: "detail.node.legacyTail",
   deck_generation: "detail.node.legacyDeck",
 };
@@ -32,6 +34,7 @@ const EXTRA_LEGACY_TITLE_PREFIXES: Partial<Record<WorkflowNodeType, string[]>> =
   reference_image: ["图片节点", "图片输入", "Image node", "Image input"],
   copy_generation: ["灵感产物文案", "灵感文案", "文案生成", "Inspiration copy", "Inspiration copy", "Copy generation"],
   image_generation: ["生成图片", "图片生成", "Generate image", "Image generation"],
+  image_enhance: ["图片增强", "增强图片", "Image enhance", "Enhance image"],
   tail_splitter: ["尾巴节点", "拆分节点", "Tail splitter", "Tail node"],
   deck_generation: ["演示节点", "演示生成", "Deck generation", "Presentation node"],
 };
@@ -146,10 +149,16 @@ export function connectionDescription(
   if (source.node_type === "image_generation" && target.node_type === "reference_image") {
     return t("detail.connection.imageToReference", { source: sourceTitle, target: targetTitle });
   }
-  if (source.node_type === "tail_splitter" && target.node_type === "image_generation") {
+  if (source.node_type === "image_enhance" && target.node_type === "reference_image") {
+    return t("detail.connection.imageToReference", { source: sourceTitle, target: targetTitle });
+  }
+  if (
+    source.node_type === "tail_splitter" &&
+    (target.node_type === "image_generation" || target.node_type === "image_enhance")
+  ) {
     return t("detail.connection.tailToImage", { source: sourceTitle, target: targetTitle });
   }
-  if (target.node_type === "image_generation") {
+  if (target.node_type === "image_generation" || target.node_type === "image_enhance") {
     return t("detail.connection.toImage", { source: sourceTitle, target: targetTitle });
   }
   return t("detail.connection.default", { source: sourceTitle, target: targetTitle });

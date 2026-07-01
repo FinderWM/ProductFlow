@@ -43,6 +43,7 @@ from inspiration_one_backend.application.inspiration_workflow.context import (
     reference_image_inputs_for_tail,
     source_asset_ids_from_config,
 )
+from inspiration_one_backend.application.inspiration_workflow.image_enhance import execute_workflow_image_enhance
 from inspiration_one_backend.application.inspiration_workflow.image_generation import (
     execute_workflow_image_generation,
 )
@@ -118,6 +119,7 @@ WORKFLOW_RESOURCE_GROUP_NODE_TYPES = frozenset(
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.TAIL_SPLITTER,
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.IMAGE_ENHANCE,
     }
 )
 RUNNABLE_WORKFLOW_NODE_TYPES = frozenset(
@@ -127,6 +129,7 @@ RUNNABLE_WORKFLOW_NODE_TYPES = frozenset(
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.TAIL_SPLITTER,
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.IMAGE_ENHANCE,
     }
 )
 
@@ -241,12 +244,16 @@ def _workflow_generation_config_selection(
 
 
 def _workflow_generation_config_purpose(node_type: WorkflowNodeType) -> str:
-    return IMAGE_PURPOSE if node_type == WorkflowNodeType.IMAGE_GENERATION else TEXT_PURPOSE
+    if node_type in {WorkflowNodeType.IMAGE_GENERATION, WorkflowNodeType.IMAGE_ENHANCE}:
+        return IMAGE_PURPOSE
+    return TEXT_PURPOSE
 
 
 def _workflow_generation_config_purpose_error(node_type: WorkflowNodeType) -> str:
     if node_type == WorkflowNodeType.IMAGE_GENERATION:
         return "生图节点只能使用图片生成配置"
+    if node_type == WorkflowNodeType.IMAGE_ENHANCE:
+        return "图片增强节点只能使用图片生成配置"
     if node_type == WorkflowNodeType.TAIL_SPLITTER:
         return "尾巴节点只能使用文案生成配置"
     return "文案节点只能使用文案生成配置"
@@ -847,7 +854,13 @@ def _execute_workflow_node_run(
             node.id,
             node.node_type.value,
         )
-        output = _execute_node(session, workflow_id=workflow.id, node=node, dependencies=dependencies)
+        output = _execute_node(
+            session,
+            workflow_id=workflow.id,
+            node=node,
+            node_run_id=node_run_id,
+            dependencies=dependencies,
+        )
     except GenerationConfigWaitError:
         session.rollback()
         _reset_workflow_node_run_for_generation_config_wait(session, node_run_id=node_run_id)
@@ -1241,7 +1254,7 @@ def _node_has_reusable_output(
     if node.node_type == WorkflowNodeType.TAIL_SPLITTER:
         latest_plan = output.get("latest_plan")
         return isinstance(latest_plan, dict) and isinstance(latest_plan.get("plan_id"), str)
-    if node.node_type == WorkflowNodeType.IMAGE_GENERATION:
+    if node.node_type in {WorkflowNodeType.IMAGE_GENERATION, WorkflowNodeType.IMAGE_ENHANCE}:
         if target_node is not None and target_node.node_type == WorkflowNodeType.REFERENCE_IMAGE:
             return _image_generation_filled_reference_target(
                 session,
@@ -1322,6 +1335,7 @@ def _execute_node(
     *,
     workflow_id: str,
     node: WorkflowNode,
+    node_run_id: str | None = None,
     dependencies: WorkflowExecutionDependencies | None = None,
 ) -> dict[str, Any]:
     workflow = inspiration_workflow_graph.get_workflow_or_raise(session, workflow_id)
@@ -1336,6 +1350,18 @@ def _execute_node(
         return _execute_tail_splitter(session, workflow=workflow, node=node, dependencies=dependencies)
     if node.node_type == WorkflowNodeType.IMAGE_GENERATION:
         return execute_workflow_image_generation(session, workflow=workflow, node=node, dependencies=dependencies)
+    if node.node_type == WorkflowNodeType.IMAGE_ENHANCE:
+        return execute_workflow_image_enhance(
+            session,
+            workflow=workflow,
+            node=node,
+            node_run_id=node_run_id,
+            generation_config_selection=_workflow_generation_config_selection_for_execution(
+                session,
+                workflow=workflow,
+                node=node,
+            ),
+        )
     if node.node_type == WorkflowNodeType.DECK_GENERATION:
         raise WorkflowSafeExecutionError(
             "请在画布演示节点中编辑",

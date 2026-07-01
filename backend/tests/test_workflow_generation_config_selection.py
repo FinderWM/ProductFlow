@@ -5,7 +5,10 @@ from helpers import _make_demo_image_bytes
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.contracts import PosterGenerationInput
+from inspiration_one_backend.application.enhance.strategy import EnhanceResult, EnhanceTile
+from inspiration_one_backend.application.generation_config_runtime import GenerationConfigSelection
 from inspiration_one_backend.application.inspiration_workflow.artifacts import copy_node_output
+from inspiration_one_backend.application.inspiration_workflow.image_enhance import execute_workflow_image_enhance
 from inspiration_one_backend.application.inspiration_workflow.image_generation import execute_workflow_image_generation
 from inspiration_one_backend.application.inspiration_workflow.tail_splitter import TailSplitPlanImageGenerationConfig
 from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
@@ -16,14 +19,23 @@ from inspiration_one_backend.application.inspiration_workflows import (
     update_workflow_node,
 )
 from inspiration_one_backend.application.use_cases import create_inspiration
-from inspiration_one_backend.domain.enums import CopyStatus, WorkflowNodeStatus, WorkflowNodeType, WorkflowRunStatus
+from inspiration_one_backend.domain.enums import (
+    CopyStatus,
+    SourceAssetKind,
+    WorkflowNodeStatus,
+    WorkflowNodeType,
+    WorkflowRunStatus,
+)
 from inspiration_one_backend.domain.errors import BusinessValidationError
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     CopySet,
     GenerationConfig,
+    SourceAsset,
     WorkflowEdge,
     WorkflowNode,
+    WorkflowNodeRun,
+    WorkflowRun,
 )
 from inspiration_one_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
@@ -232,6 +244,208 @@ def test_workflow_image_generation_manual_image_config_is_used(db_session: Sessi
 
     assert output["generation_config_id"] == image_config.id
     assert output["resource_group_id"] == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+
+
+def test_workflow_image_enhance_node_outputs_reusable_source_asset(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_config = _add_mock_generation_config(db_session, purpose=IMAGE_PURPOSE, name="图片增强配置")
+    inspiration, workflow = _create_image_workflow(db_session, name="图片增强工作流")
+    source_asset = next(asset for asset in inspiration.source_assets if asset.kind == SourceAssetKind.ORIGINAL_IMAGE)
+    enhance_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.IMAGE_ENHANCE,
+        title="增强节点",
+        position_x=640,
+        position_y=160,
+        config_json={
+            "strategy": "direct",
+            "params": {"target_width": 800, "target_height": 800},
+            "source_asset_ids": [source_asset.id],
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "generation_config_mode": "manual",
+            "generation_config_id": image_config.id,
+        },
+    )
+    target_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.REFERENCE_IMAGE,
+        title="增强输出",
+        position_x=960,
+        position_y=160,
+        config_json={"role": "reference", "label": "增强输出"},
+    )
+    db_session.add_all([enhance_node, target_node])
+    db_session.flush()
+    db_session.add(
+        WorkflowEdge(
+            workflow_id=workflow.id,
+            source_node_id=enhance_node.id,
+            target_node_id=target_node.id,
+            source_handle="output",
+            target_handle="input",
+        )
+    )
+    db_session.flush()
+    db_session.expire(workflow, ["nodes", "edges"])
+    workflow = get_or_create_inspiration_workflow(db_session, inspiration.id)
+    enhance_node = next(node for node in workflow.nodes if node.id == enhance_node.id)
+    target_node = next(node for node in workflow.nodes if node.id == target_node.id)
+
+    captured: dict[str, object] = {}
+
+    def fake_run_direct_strategy(ctx, params) -> EnhanceResult:
+        captured["source_size"] = (ctx.source_width, ctx.source_height)
+        captured["target_size"] = (params.target_width, params.target_height)
+        final_ref = ctx.storage.save_enhance_final(ctx.output_prefix, _make_demo_image_bytes(), ".png")
+        return EnhanceResult(
+            tiles=[
+                EnhanceTile(
+                    row=0,
+                    col=0,
+                    rows=1,
+                    cols=1,
+                    storage_key=final_ref,
+                    target_x=0,
+                    target_y=0,
+                    target_width=params.target_width,
+                    target_height=params.target_height,
+                    blend_edges=(),
+                    width=params.target_width,
+                    height=params.target_height,
+                    source_x=0,
+                    source_y=0,
+                    source_width=ctx.source_width,
+                    source_height=ctx.source_height,
+                )
+            ],
+            final_width=params.target_width,
+            final_height=params.target_height,
+            rows=1,
+            cols=1,
+            final_image_ref=final_ref,
+            completed_call_count=1,
+        )
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.application.inspiration_workflow.image_enhance.run_direct_strategy",
+        fake_run_direct_strategy,
+    )
+
+    output = execute_workflow_image_enhance(
+        db_session,
+        workflow=workflow,
+        node=enhance_node,
+        generation_config_selection=GenerationConfigSelection(
+            mode="manual",
+            generation_config_id=image_config.id,
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        ),
+    )
+
+    assert captured == {"source_size": (800, 800), "target_size": (800, 800)}
+    assert output["generation_config_id"] == image_config.id
+    assert output["resource_group_id"] == DEFAULT_GENERATION_RESOURCE_GROUP_ID
+    assert output["filled_reference_node_ids"] == [target_node.id]
+    assert output["target_count"] == 1
+    asset_id = output["filled_source_asset_ids"][0]
+    enhanced_asset = db_session.get(SourceAsset, asset_id)
+    assert enhanced_asset is not None
+    assert enhanced_asset.kind == SourceAssetKind.REFERENCE_IMAGE
+    assert target_node.config_json["source_asset_ids"] == [asset_id]
+    assert target_node.output_json["source_asset_ids"] == [asset_id]
+
+
+def test_workflow_image_enhance_node_persists_progress_snapshot(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_config = _add_mock_generation_config(db_session, purpose=IMAGE_PURPOSE, name="图片增强进度配置")
+    inspiration, workflow = _create_image_workflow(db_session, name="图片增强进度工作流")
+    source_asset = next(asset for asset in inspiration.source_assets if asset.kind == SourceAssetKind.ORIGINAL_IMAGE)
+    enhance_node = WorkflowNode(
+        workflow_id=workflow.id,
+        node_type=WorkflowNodeType.IMAGE_ENHANCE,
+        title="增强进度节点",
+        position_x=640,
+        position_y=160,
+        config_json={
+            "strategy": "direct",
+            "params": {"target_width": 800, "target_height": 800},
+            "source_asset_ids": [source_asset.id],
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "generation_config_mode": "manual",
+            "generation_config_id": image_config.id,
+        },
+    )
+    workflow_run = WorkflowRun(workflow_id=workflow.id, status=WorkflowRunStatus.RUNNING)
+    db_session.add_all([enhance_node, workflow_run])
+    db_session.flush()
+    node_run = WorkflowNodeRun(
+        workflow_run_id=workflow_run.id,
+        node_id=enhance_node.id,
+        status=WorkflowNodeStatus.RUNNING,
+    )
+    db_session.add(node_run)
+    db_session.flush()
+    db_session.expire(workflow, ["nodes", "edges"])
+    workflow = get_or_create_inspiration_workflow(db_session, inspiration.id)
+    enhance_node = next(node for node in workflow.nodes if node.id == enhance_node.id)
+
+    def fake_run_direct_strategy(ctx, params) -> EnhanceResult:
+        assert ctx.progress_callback is not None
+        ctx.progress_callback(1, 1)
+        final_ref = ctx.storage.save_enhance_final(ctx.output_prefix, _make_demo_image_bytes(), ".png")
+        return EnhanceResult(
+            tiles=[
+                EnhanceTile(
+                    row=0,
+                    col=0,
+                    rows=1,
+                    cols=1,
+                    storage_key=final_ref,
+                    target_x=0,
+                    target_y=0,
+                    target_width=params.target_width,
+                    target_height=params.target_height,
+                    blend_edges=(),
+                    width=params.target_width,
+                    height=params.target_height,
+                    source_x=0,
+                    source_y=0,
+                    source_width=ctx.source_width,
+                    source_height=ctx.source_height,
+                )
+            ],
+            final_width=params.target_width,
+            final_height=params.target_height,
+            rows=1,
+            cols=1,
+            final_image_ref=final_ref,
+            completed_call_count=1,
+        )
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.application.inspiration_workflow.image_enhance.run_direct_strategy",
+        fake_run_direct_strategy,
+    )
+
+    execute_workflow_image_enhance(
+        db_session,
+        workflow=workflow,
+        node=enhance_node,
+        node_run_id=node_run.id,
+        generation_config_selection=GenerationConfigSelection(
+            mode="manual",
+            generation_config_id=image_config.id,
+            resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        ),
+    )
+
+    persisted_node_run = db_session.get(WorkflowNodeRun, node_run.id)
+    assert persisted_node_run is not None
+    assert persisted_node_run.output_json == {"progress": {"completed": 1, "total": 1}}
 
 
 def test_workflow_manual_config_rejects_wrong_purpose_and_group(db_session: Session) -> None:

@@ -488,7 +488,10 @@ const WORKFLOW_ZOOM_ACTIVATION_KEY_CODES = ["Control", "Meta"];
 
 function estimateWorkflowNodeHeight(node: WorkflowNode): number {
   let estimatedHeight = 116;
-  const isImageNode = node.node_type === "reference_image" || node.node_type === "image_generation";
+  const isImageNode =
+    node.node_type === "reference_image" ||
+    node.node_type === "image_generation" ||
+    node.node_type === "image_enhance";
   const hasImage = isImageNode && (node.status === "succeeded" || node.status === "failed");
   const imageWaiting = isImageNode && node.status === "queued";
   if (hasImage || imageWaiting) {

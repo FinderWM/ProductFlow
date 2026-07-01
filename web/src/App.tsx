@@ -9,6 +9,7 @@ import { CurrentWeatherProvider } from "./lib/currentWeather";
 import { NotificationProvider } from "./lib/notifications";
 import { PreferencesProvider, useI18n } from "./lib/preferences";
 import {
+  API_ENHANCE_READ,
   API_GALLERY_READ,
   API_GLOBAL_TEMPLATES_MANAGE,
   API_IMAGE_CHAT_READ,
@@ -28,6 +29,9 @@ import { UiLayoutSchemeProvider, useUiLayoutScheme } from "./lib/uiLayoutSchemeP
 
 const GalleryPage = lazy(() =>
   import("./pages/GalleryPage").then((module) => ({ default: module.GalleryPage })),
+);
+const EnhancePage = lazy(() =>
+  import("./pages/EnhancePage").then((module) => ({ default: module.EnhancePage })),
 );
 const HelpPage = lazy(() =>
   import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })),
@@ -86,6 +90,7 @@ const menuHomeRoutes: Array<{
 }> = [
   { code: "inspirations", to: "/inspirations", requiredPermission: API_INSPIRATIONS_READ },
   { code: "resource_library", to: "/resource-library", hasAccess: (sessionState) => Boolean(sessionState?.authenticated) },
+  { code: "enhance", to: "/enhance", requiredPermission: API_ENHANCE_READ },
   { code: "image_chat", to: "/image-chat", requiredPermission: API_IMAGE_CHAT_READ },
   { code: "gallery", to: "/gallery", requiredPermission: API_GALLERY_READ },
   { code: "status", to: "/status", requiredPermission: API_STATUS_READ },
@@ -236,6 +241,7 @@ function AppRoutes() {
                   path="/resource-library/manage"
                   element={menuRoute("resource_library", <ResourceLibraryPage mode="manage" />)}
                 />
+                <Route path="/enhance" element={menuRoute("enhance", <EnhancePage />)} />
                 <Route
                   path="/gallery"
                   element={menuRoute(

@@ -9,8 +9,11 @@ import {
   workspaceFirstPreviewImageUrl,
   workspaceGalleryArtImageUrl,
   workspaceGalleryRetainedOffsets,
+  workspaceHomeActiveAnchorId,
   workspaceHomeAnchorPath,
+  workspaceHomeAnchorSelectionOffset,
   workspaceHomeGreetingKey,
+  workspaceHomeQuickNavShouldCollapse,
   workspaceHomeVisibleAnchorIds,
   workspaceImageChatWorkbenchPath,
   workspaceImageSessionArtImageUrl,
@@ -163,6 +166,72 @@ describe("workspace landing privacy filters", () => {
         usageStats: false,
       }),
     ).toEqual(["resource-library", "chat", "status"]);
+  });
+
+  it("uses the same anchor activation offset as the section scroll margin contract", () => {
+    expect(workspaceHomeAnchorSelectionOffset(981)).toBe(112);
+    expect(workspaceHomeAnchorSelectionOffset(980)).toBe(94);
+    expect(workspaceHomeAnchorSelectionOffset(640)).toBe(94);
+  });
+
+  it("collapses the compact quick nav after tapping outside the expanded drawer", () => {
+    expect(
+      workspaceHomeQuickNavShouldCollapse({
+        compactMode: true,
+        expandedAnchorId: "chat",
+        targetInsideQuickNav: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      workspaceHomeQuickNavShouldCollapse({
+        compactMode: true,
+        expandedAnchorId: "chat",
+        targetInsideQuickNav: true,
+      }),
+    ).toBe(false);
+
+    expect(
+      workspaceHomeQuickNavShouldCollapse({
+        compactMode: false,
+        expandedAnchorId: "chat",
+        targetInsideQuickNav: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("selects the section whose viewport band contains the activation offset", () => {
+    expect(
+      workspaceHomeActiveAnchorId(
+        [
+          { id: "resource-library", top: -240, bottom: 60 },
+          { id: "workspace", top: 80, bottom: 420 },
+          { id: "chat", top: 440, bottom: 760 },
+        ],
+        112,
+      ),
+    ).toBe("workspace");
+
+    expect(
+      workspaceHomeActiveAnchorId(
+        [
+          { id: "resource-library", top: -240, bottom: 60 },
+          { id: "workspace", top: 128, bottom: 420 },
+          { id: "chat", top: 440, bottom: 760 },
+        ],
+        112,
+      ),
+    ).toBe("workspace");
+
+    expect(
+      workspaceHomeActiveAnchorId(
+        [
+          { id: "resource-library", top: 180, bottom: 520 },
+          { id: "workspace", top: 560, bottom: 920 },
+        ],
+        112,
+      ),
+    ).toBeNull();
   });
 
   it("selects the greeting by local hour", () => {

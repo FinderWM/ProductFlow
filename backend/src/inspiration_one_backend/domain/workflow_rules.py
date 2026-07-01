@@ -60,16 +60,18 @@ def should_execute_missing_upstream(source_node: WorkflowRuleNode, target_node: 
         return target_node.node_type in {
             WorkflowNodeType.COPY_GENERATION,
             WorkflowNodeType.IMAGE_GENERATION,
+            WorkflowNodeType.IMAGE_ENHANCE,
             WorkflowNodeType.TAIL_SPLITTER,
         }
-    if source_node.node_type == WorkflowNodeType.IMAGE_GENERATION:
+    if source_node.node_type in {WorkflowNodeType.IMAGE_GENERATION, WorkflowNodeType.IMAGE_ENHANCE}:
         return target_node.node_type in {
             WorkflowNodeType.REFERENCE_IMAGE,
             WorkflowNodeType.IMAGE_GENERATION,
+            WorkflowNodeType.IMAGE_ENHANCE,
             WorkflowNodeType.TAIL_SPLITTER,
         }
     if source_node.node_type == WorkflowNodeType.TAIL_SPLITTER:
-        return target_node.node_type == WorkflowNodeType.IMAGE_GENERATION
+        return target_node.node_type in {WorkflowNodeType.IMAGE_GENERATION, WorkflowNodeType.IMAGE_ENHANCE}
     return False
 
 

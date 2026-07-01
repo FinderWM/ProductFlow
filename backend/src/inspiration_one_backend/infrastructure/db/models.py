@@ -1810,6 +1810,7 @@ class DeckSlide(Base, TimestampMixin):
     material_storage_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
     material_storage_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     material_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    material_enhance_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     deck: Mapped[Deck] = relationship(
         back_populates="slides",

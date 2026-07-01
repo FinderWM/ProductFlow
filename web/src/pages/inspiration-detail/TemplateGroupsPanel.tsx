@@ -254,6 +254,7 @@ function previewNodeMeta(nodeType: CanvasTemplateSummary["preview_nodes"][number
     reference_image: ImagePlus,
     copy_generation: FileText,
     image_generation: ImageIcon,
+    image_enhance: ImageIcon,
     tail_splitter: Sparkles,
     deck_generation: Presentation,
   };
@@ -262,6 +263,7 @@ function previewNodeMeta(nodeType: CanvasTemplateSummary["preview_nodes"][number
     reference_image: t("detail.nodeStatus.available"),
     copy_generation: t("detail.nodeStatus.idle"),
     image_generation: t("detail.nodeStatus.idle"),
+    image_enhance: t("detail.nodeStatus.idle"),
     tail_splitter: t("detail.nodeStatus.idle"),
     deck_generation: t("detail.nodeStatus.available"),
   };
@@ -283,6 +285,7 @@ function compactPreviewNodeLabel(nodeType: CanvasTemplateSummary["preview_nodes"
     reference_image: "detail.template.compact.referenceImage",
     copy_generation: "detail.template.compact.copyGeneration",
     image_generation: "detail.template.compact.imageGeneration",
+    image_enhance: "detail.template.compact.imageEnhance",
     tail_splitter: "detail.template.compact.tailSplitter",
     deck_generation: "detail.template.compact.deckGeneration",
   };
@@ -730,7 +733,7 @@ export function TemplateGroupsPanel({
             value={selectedCategoryId}
             onChange={(event) => onSelectedCategoryIdChange(event.target.value)}
             disabled={categoriesLoading || categoriesError}
-            className="h-9 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none transition-shadow focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+            className="pf-input-compact text-xs disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="">{t("templateFilter.allCategories")}</option>
             {categories.map((category) => (

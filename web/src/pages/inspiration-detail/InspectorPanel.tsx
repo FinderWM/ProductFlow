@@ -42,7 +42,7 @@ import { PromptPreviewDialog, type PromptPreview } from "../../components/Prompt
 import { SelectField } from "../../components/SelectField";
 import { api, ApiError } from "../../lib/api";
 import { exportDeckAsPptx } from "../../lib/deckPptxExport";
-import type { DownloadableImage } from "../../lib/image-downloads";
+import { sanitizeFilenamePart, toImageUrl, type DownloadableImage } from "../../lib/image-downloads";
 import {
   generationConfigOptionLabel,
   generationConfigOptionsForPurpose,
@@ -311,6 +311,7 @@ export function InspectorPanel({
     reference_image: ImagePlus,
     copy_generation: FileText,
     image_generation: ImageIcon,
+    image_enhance: ImageIcon,
     tail_splitter: Sparkles,
     deck_generation: Presentation,
   }[node.node_type];
@@ -327,7 +328,7 @@ export function InspectorPanel({
     ? "border border-slate-200 bg-slate-100 text-slate-400 shadow-none disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-500"
     : "btn-danger-spring";
   const downstreamReferenceCount =
-    node.node_type === "image_generation"
+    node.node_type === "image_generation" || node.node_type === "image_enhance"
       ? new Set(
           workflow?.edges
             .filter((edge) => {
@@ -539,6 +540,8 @@ export function InspectorPanel({
           <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
             {node.node_type === "image_generation"
               ? t("detail.inspector.description.imageGeneration")
+              : node.node_type === "image_enhance"
+                ? t("detail.inspector.description.imageEnhance")
               : node.node_type === "reference_image"
                 ? t("detail.inspector.description.referenceImage")
                 : node.node_type === "copy_generation"
@@ -628,6 +631,15 @@ export function InspectorPanel({
             t={t}
           />
         ) : null}
+        {node.node_type === "image_enhance" ? (
+          <ImageEnhanceInspector
+            draft={draft}
+            resourceGroups={resourceGroups}
+            generationConfigOptions={imageGenerationConfigOptions}
+            onDraftChange={onDraftChange}
+            t={t}
+          />
+        ) : null}
         {node.node_type === "deck_generation" ? (
           <>
             <DeckGenerationInspectorSummary
@@ -647,8 +659,10 @@ export function InspectorPanel({
                   node={node}
                   draft={draft}
                   resourceGroups={resourceGroups}
+                  generationConfigOptions={generationConfigOptions}
                   onDraftChange={onDraftChange}
                   onFlushDraft={onFlushDraft}
+                  onPreviewImage={onPreviewImage}
                   busy={busy}
                   t={t}
                 />
@@ -1309,6 +1323,10 @@ function ResourceGroupSelector({
             resourceGroupId: value || null,
             generationConfigMode: "auto",
             generationConfigId: null,
+            deckTextGenerationConfigMode: "auto",
+            deckTextGenerationConfigId: null,
+            deckImageGenerationConfigMode: "auto",
+            deckImageGenerationConfigId: null,
           })
         }
         ariaLabel={label}
@@ -1326,6 +1344,12 @@ const DECK_SLIDE_STATUS_LABEL_KEYS: Record<DeckSlideStatus, TranslationKey> = {
   completed: "detail.deck.slideStatus.completed",
   failed: "detail.deck.slideStatus.failed",
 };
+
+const DECK_SLIDE_SIZE_OPTIONS = [
+  { value: "2048x1152", label: "2K 16:9 · 2048x1152" },
+  { value: "1920x1080", label: "FHD 16:9 · 1920x1080" },
+  { value: "1280x720", label: "HD 16:9 · 1280x720" },
+] as const;
 
 function deckErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
@@ -1414,6 +1438,109 @@ function deckSourceBadgeLabel(source: DeckSourceItem, t: TFunction): string {
   return `${source.workflow_node_title} · ${deckSourceKindLabel(source.kind, t)}`;
 }
 
+function deckSourcePreviewImage(source: DeckSourceItem, t: TFunction): DownloadableImage | null {
+  const previewPath = source.preview_url || source.download_url || source.thumbnail_url;
+  const downloadPath = source.download_url || source.preview_url || source.thumbnail_url;
+  if (!previewPath || !downloadPath) {
+    return null;
+  }
+  return {
+    previewUrl: toImageUrl(previewPath),
+    downloadUrl: toImageUrl(downloadPath),
+    filename: `${sanitizeFilenamePart(source.workflow_node_title, "deck-source")}-${sanitizeFilenamePart(source.source_item_id, "source")}.png`,
+    alt: deckSourceBadgeLabel(source, t),
+  };
+}
+
+function deckGeneratedSlidePreviewImage(slide: DeckSlide, t: TFunction): DownloadableImage | null {
+  if (!slide.image_url) {
+    return null;
+  }
+  const slideLabel = slide.title.trim() || `${t("detail.deck.generatedImage")}-${slide.order_index + 1}`;
+  return {
+    previewUrl: toImageUrl(slide.image_url),
+    downloadUrl: toImageUrl(slide.image_url),
+    filename: `${sanitizeFilenamePart(slideLabel, "deck-slide")}.png`,
+    alt: slideLabel,
+  };
+}
+
+function deckMaterialPreviewImage(
+  slide: DeckSlide,
+  selectedBoundSource: DeckSourceItem | null,
+  t: TFunction,
+): DownloadableImage | null {
+  if (slide.material_url) {
+    const slideLabel = slide.title.trim() || `${t("detail.deck.currentMaterial")}-${slide.order_index + 1}`;
+    return {
+      previewUrl: toImageUrl(slide.material_url),
+      downloadUrl: toImageUrl(slide.material_url),
+      filename: `${sanitizeFilenamePart(slideLabel, "deck-material")}.png`,
+      alt: slideLabel,
+    };
+  }
+  return selectedBoundSource ? deckSourcePreviewImage(selectedBoundSource, t) : null;
+}
+
+function DeckPreviewSurface({
+  label,
+  image,
+  thumbnailUrl,
+  caption,
+  emptyLabel,
+  aspectClassName = "aspect-[16/9]",
+  onPreviewImage,
+  t,
+}: {
+  label: string;
+  image: DownloadableImage | null;
+  thumbnailUrl?: string;
+  caption?: string | null;
+  emptyLabel: string;
+  aspectClassName?: string;
+  onPreviewImage: (image: DownloadableImage) => void;
+  t: TFunction;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/80 p-2 dark:border-slate-700 dark:bg-slate-950/55">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="truncate text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+          {label}
+        </div>
+        {caption ? <div className="truncate text-[10px] text-slate-500 dark:text-slate-400">{caption}</div> : null}
+      </div>
+      {image ? (
+        <div
+          className={`group relative overflow-hidden rounded-lg border border-slate-200 bg-white/70 dark:border-slate-700 dark:bg-slate-950/70 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
+        >
+          <button
+            type="button"
+            onClick={() => onPreviewImage(image)}
+            className={`block w-full ${aspectClassName}`}
+            aria-label={t("detail.previewImage", { alt: image.alt })}
+          >
+            <img
+              src={thumbnailUrl || image.previewUrl}
+              alt={image.alt}
+              className="h-full w-full object-contain bg-slate-100/70 p-1.5 transition-transform duration-300 ease-out group-hover:scale-[1.03] dark:bg-slate-950/80"
+            />
+            <span className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-zinc-950/70 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+              {t("detail.inspector.clickPreview")}
+            </span>
+          </button>
+          <DownloadLink image={image} variant="overlay" />
+        </div>
+      ) : (
+        <div
+          className={`flex items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-3 text-center text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-400 ${aspectClassName}`}
+        >
+          {emptyLabel}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DeckMetaChip({
   label,
   title,
@@ -1437,6 +1564,7 @@ function DeckSourceSection({
   sources,
   orderedSourceIds,
   actionBusy,
+  onPreviewImage,
   onToggleSelection,
   onMoveSource,
   t,
@@ -1446,6 +1574,7 @@ function DeckSourceSection({
   sources: DeckSourceItem[];
   orderedSourceIds: string[];
   actionBusy: boolean;
+  onPreviewImage: (image: DownloadableImage) => void;
   onToggleSelection: (sourceItemId: string, selected: boolean) => void;
   onMoveSource: (sourceItemId: string, direction: -1 | 1) => void;
   t: TFunction;
@@ -1456,6 +1585,7 @@ function DeckSourceSection({
       {sources.length ? (
         sources.map((source) => {
           const sourceIndex = orderedSourceIds.indexOf(source.source_item_id);
+          const previewImage = deckSourcePreviewImage(source, t);
           return (
             <div
               key={source.source_item_id}
@@ -1467,12 +1597,20 @@ function DeckSourceSection({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 flex-1 gap-2.5">
-                  {source.thumbnail_url ? (
-                    <img
-                      src={api.toApiUrl(source.thumbnail_url)}
-                      alt={source.workflow_node_title}
-                      className="h-12 w-12 shrink-0 rounded-md border border-slate-200 object-cover dark:border-slate-700"
-                    />
+                  {previewImage ? (
+                    <button
+                      type="button"
+                      onClick={() => onPreviewImage(previewImage)}
+                      className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+                      aria-label={t("detail.previewImage", { alt: previewImage.alt })}
+                      title={t("detail.previewImage", { alt: previewImage.alt })}
+                    >
+                      <img
+                        src={toImageUrl(source.thumbnail_url, source.preview_url, source.download_url)}
+                        alt={previewImage.alt}
+                        className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                      />
+                    </button>
                   ) : null}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -1662,8 +1800,10 @@ function DeckGenerationInspector({
   node,
   draft,
   resourceGroups,
+  generationConfigOptions,
   onDraftChange,
   onFlushDraft,
+  onPreviewImage,
   busy,
   t,
 }: {
@@ -1671,8 +1811,10 @@ function DeckGenerationInspector({
   node: WorkflowNode;
   draft: NodeConfigDraft;
   resourceGroups: GenerationResourceGroup[];
+  generationConfigOptions: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
   onFlushDraft?: () => Promise<void>;
+  onPreviewImage: (image: DownloadableImage) => void;
   busy: boolean;
   t: TFunction;
 }) {
@@ -1702,6 +1844,16 @@ function DeckGenerationInspector({
     setOutlineSlideDrafts({});
   }, [deck?.id]);
   const styles = stylesQuery.data ?? [];
+  const textGenerationConfigOptions = generationConfigOptionsForPurpose(
+    generationConfigOptions,
+    "text",
+    draft.resourceGroupId,
+  );
+  const imageGenerationConfigOptions = generationConfigOptionsForPurpose(
+    generationConfigOptions,
+    "image",
+    draft.resourceGroupId,
+  );
   const availableSources = orderDeckSourcesForDraft(
     sourcesQuery.data?.available_sources ?? [],
     draft.deckSourceOrder,
@@ -1750,6 +1902,12 @@ function DeckGenerationInspector({
       await flushDraftBeforeDeckAction();
       return api.createWorkflowDeckOutline(inspiration.id, node.id, {
         resource_group_id: draft.resourceGroupId,
+        text_generation_config_mode: draft.deckTextGenerationConfigMode,
+        text_generation_config_id:
+          draft.deckTextGenerationConfigMode === "manual" ? draft.deckTextGenerationConfigId : null,
+        image_generation_config_mode: draft.deckImageGenerationConfigMode,
+        image_generation_config_id:
+          draft.deckImageGenerationConfigMode === "manual" ? draft.deckImageGenerationConfigId : null,
         title: deckTitleDraft.trim() || undefined,
         source_input: draft.deckSourceInput.trim() || undefined,
         max_slides: draft.deckSlideCountMode === "target" ? draft.deckMaxSlides : undefined,
@@ -1804,7 +1962,10 @@ function DeckGenerationInspector({
     onError: onDeckError,
   });
   const regenerateSlideMutation = useMutation({
-    mutationFn: (slideId: string) => api.regenerateWorkflowDeckSlide(inspiration.id, node.id, slideId),
+    mutationFn: async (slideId: string) => {
+      await flushDraftBeforeDeckAction();
+      return api.regenerateWorkflowDeckSlide(inspiration.id, node.id, slideId);
+    },
     onSuccess: async () => {
       setLocalError("");
       await invalidateDeckQueries(deck);
@@ -1812,7 +1973,21 @@ function DeckGenerationInspector({
     onError: onDeckError,
   });
   const slideNotesMutation = useMutation({
-    mutationFn: (slideId: string) => api.generateWorkflowDeckSlideSpeakerNotes(inspiration.id, node.id, slideId),
+    mutationFn: async (slideId: string) => {
+      await flushDraftBeforeDeckAction();
+      return api.generateWorkflowDeckSlideSpeakerNotes(inspiration.id, node.id, slideId);
+    },
+    onSuccess: async () => {
+      setLocalError("");
+      await invalidateDeckQueries(deck);
+    },
+    onError: onDeckError,
+  });
+  const enhanceMaterialMutation = useMutation({
+    mutationFn: async (slideId: string) => {
+      await flushDraftBeforeDeckAction();
+      return api.enhanceWorkflowDeckSlideMaterial(inspiration.id, node.id, slideId, {});
+    },
     onSuccess: async () => {
       setLocalError("");
       await invalidateDeckQueries(deck);
@@ -1820,7 +1995,10 @@ function DeckGenerationInspector({
     onError: onDeckError,
   });
   const sampleMutation = useMutation({
-    mutationFn: () => api.generateWorkflowDeckSample(inspiration.id, node.id),
+    mutationFn: async () => {
+      await flushDraftBeforeDeckAction();
+      return api.generateWorkflowDeckSample(inspiration.id, node.id);
+    },
     onSuccess: async (nextDeck) => {
       setLocalError("");
       await invalidateDeckQueries(nextDeck);
@@ -1828,7 +2006,10 @@ function DeckGenerationInspector({
     onError: onDeckError,
   });
   const generateMutation = useMutation({
-    mutationFn: () => api.generateWorkflowDeck(inspiration.id, node.id),
+    mutationFn: async () => {
+      await flushDraftBeforeDeckAction();
+      return api.generateWorkflowDeck(inspiration.id, node.id);
+    },
     onSuccess: async (nextDeck) => {
       setLocalError("");
       await invalidateDeckQueries(nextDeck);
@@ -1844,6 +2025,15 @@ function DeckGenerationInspector({
     onSuccess: async () => {
       setLocalError("");
       setBindingSlideId(null);
+      await invalidateDeckQueries(deck);
+    },
+    onError: onDeckError,
+  });
+  const unbindMutation = useMutation({
+    mutationFn: (slideId: string) =>
+      api.unbindWorkflowDeckSlideMaterial(inspiration.id, node.id, slideId),
+    onSuccess: async () => {
+      setLocalError("");
       await invalidateDeckQueries(deck);
     },
     onError: onDeckError,
@@ -1876,6 +2066,7 @@ function DeckGenerationInspector({
     updateSlideMutation.isPending ||
     regenerateSlideMutation.isPending ||
     slideNotesMutation.isPending ||
+    enhanceMaterialMutation.isPending ||
     sampleMutation.isPending ||
     generateMutation.isPending ||
     bindMutation.isPending ||
@@ -1973,6 +2164,38 @@ function DeckGenerationInspector({
         onDraftChange={onDraftChange}
         t={t}
       />
+      <div className="grid gap-3">
+        <GenerationConfigSelector
+          label={t("detail.inspector.textGenerationConfig")}
+          helpKey="copyTextGenerationConfig"
+          mode={draft.deckTextGenerationConfigMode}
+          generationConfigId={draft.deckTextGenerationConfigId}
+          options={textGenerationConfigOptions}
+          onDraftChange={(next) =>
+            onDraftChange({
+              ...draft,
+              deckTextGenerationConfigMode: next.mode,
+              deckTextGenerationConfigId: next.generationConfigId,
+            })
+          }
+          t={t}
+        />
+        <GenerationConfigSelector
+          label={t("detail.inspector.imageGenerationConfig")}
+          helpKey="imageGenerationConfig"
+          mode={draft.deckImageGenerationConfigMode}
+          generationConfigId={draft.deckImageGenerationConfigId}
+          options={imageGenerationConfigOptions}
+          onDraftChange={(next) =>
+            onDraftChange({
+              ...draft,
+              deckImageGenerationConfigMode: next.mode,
+              deckImageGenerationConfigId: next.generationConfigId,
+            })
+          }
+          t={t}
+        />
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <FieldLabel label={t("detail.deck.planningStrategy")} />
@@ -2014,7 +2237,7 @@ function DeckGenerationInspector({
           />
         </label>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label className="block">
           <FieldLabel label={t("detail.deck.style")} />
           <SelectField
@@ -2027,6 +2250,20 @@ function DeckGenerationInspector({
               }
             }}
             ariaLabel={t("detail.deck.style")}
+            radius="lg"
+            visualSize="sm"
+          />
+        </label>
+        <label className="block">
+          <FieldLabel label={t("detail.deck.slideImageSize")} />
+          <SelectField
+            value={draft.deckSlideSize ?? ""}
+            options={[
+              { value: "", label: t("detail.deck.slideImageSize.default") },
+              ...DECK_SLIDE_SIZE_OPTIONS,
+            ]}
+            onChange={(value) => onDraftChange({ ...draft, deckSlideSize: value || null })}
+            ariaLabel={t("detail.deck.slideImageSize")}
             radius="lg"
             visualSize="sm"
           />
@@ -2151,6 +2388,7 @@ function DeckGenerationInspector({
               sources={sourcePartitions.primarySources}
               orderedSourceIds={availableSources.map((source) => source.source_item_id)}
               actionBusy={actionBusy}
+              onPreviewImage={onPreviewImage}
               onToggleSelection={setDeckSourceSelection}
               onMoveSource={moveDeckSource}
               t={t}
@@ -2161,6 +2399,7 @@ function DeckGenerationInspector({
               sources={sourcePartitions.alternateSources}
               orderedSourceIds={availableSources.map((source) => source.source_item_id)}
               actionBusy={actionBusy}
+              onPreviewImage={onPreviewImage}
               onToggleSelection={setDeckSourceSelection}
               onMoveSource={moveDeckSource}
               t={t}
@@ -2298,13 +2537,18 @@ function DeckGenerationInspector({
                 onUpdate={(payload) => updateSlideMutation.mutate({ slideId: slide.id, payload })}
                 onRegenerate={() => regenerateSlideMutation.mutate(slide.id)}
                 onGenerateNotes={() => slideNotesMutation.mutate(slide.id)}
+                onEnhanceMaterial={() => enhanceMaterialMutation.mutate(slide.id)}
                 onBind={(sourceItemId) => bindMutation.mutate({ slideId: slide.id, sourceItemId })}
+                onUnbind={() => unbindMutation.mutate(slide.id)}
                 onDraftChange={handleOutlineSlideDraftChange}
+                onPreviewImage={onPreviewImage}
                 actionBusy={actionBusy}
                 updateBusy={updateSlideMutation.isPending && updateSlideMutation.variables?.slideId === slide.id}
                 regenerateBusy={regenerateSlideMutation.isPending && regenerateSlideMutation.variables === slide.id}
                 notesBusy={slideNotesMutation.isPending && slideNotesMutation.variables === slide.id}
+                enhanceBusy={enhanceMaterialMutation.isPending && enhanceMaterialMutation.variables === slide.id}
                 bindingBusy={bindMutation.isPending && bindMutation.variables?.slideId === slide.id}
+                unbindBusy={unbindMutation.isPending && unbindMutation.variables === slide.id}
                 t={t}
               />
             ))}
@@ -2330,13 +2574,18 @@ function DeckNodeSlideRow({
   onUpdate,
   onRegenerate,
   onGenerateNotes,
+  onEnhanceMaterial,
   onBind,
+  onUnbind,
   onDraftChange,
+  onPreviewImage,
   actionBusy,
   updateBusy,
   regenerateBusy,
   notesBusy,
+  enhanceBusy,
   bindingBusy,
+  unbindBusy,
   t,
 }: {
   slide: DeckSlide;
@@ -2353,13 +2602,18 @@ function DeckNodeSlideRow({
   onUpdate: (payload: { title?: string; points?: string[]; speaker_notes?: string }) => void;
   onRegenerate: () => void;
   onGenerateNotes: () => void;
+  onEnhanceMaterial: () => void;
   onBind: (sourceItemId: string) => void;
+  onUnbind: () => void;
   onDraftChange: (slideId: string, payload: { title: string; points: string[] }) => void;
+  onPreviewImage: (image: DownloadableImage) => void;
   actionBusy: boolean;
   updateBusy: boolean;
   regenerateBusy: boolean;
   notesBusy: boolean;
+  enhanceBusy: boolean;
   bindingBusy: boolean;
+  unbindBusy: boolean;
   t: TFunction;
 }) {
   const [titleDraft, setTitleDraft] = useState(slide.title);
@@ -2375,6 +2629,9 @@ function DeckNodeSlideRow({
   }));
   const selectedBoundSource =
     availableSources.find((source) => source.source_item_id === selectedSourceItemId) ?? null;
+  const generatedImage = deckGeneratedSlidePreviewImage(slide, t);
+  const materialPreviewImage = deckMaterialPreviewImage(slide, selectedBoundSource, t);
+  const hasPreviewRail = Boolean(generatedImage || materialPreviewImage);
   useEffect(() => {
     setTitleDraft(slide.title);
     setPointsDraft(deckPointsDraft(slide.points));
@@ -2414,210 +2671,293 @@ function DeckNodeSlideRow({
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-700 dark:bg-[#0b1220]">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white text-[11px] font-semibold text-slate-500 shadow-sm dark:bg-slate-950 dark:text-slate-300">
-            {index + 1}
-          </span>
-          <div className="min-w-0">
-            <div className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
-              {titleDraft || slide.title}
+      <div className={`grid gap-3 ${hasPreviewRail ? "lg:grid-cols-[minmax(0,1fr)_11.5rem]" : ""}`}>
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white text-[11px] font-semibold text-slate-500 shadow-sm dark:bg-slate-950 dark:text-slate-300">
+                {index + 1}
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  {titleDraft || slide.title}
+                </div>
+                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  {t(DECK_SLIDE_STATUS_LABEL_KEYS[slide.slide_status])}
+                </div>
+              </div>
             </div>
-            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-              {t(DECK_SLIDE_STATUS_LABEL_KEYS[slide.slide_status])}
+            <div className="flex shrink-0 flex-wrap items-center gap-1">
+              <button
+                type="button"
+                disabled={actionBusy || !canMoveUp}
+                onClick={onMoveUp}
+                aria-label={t("detail.deck.moveUp")}
+                title={t("detail.deck.moveUp")}
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+              >
+                <ChevronUp size={13} />
+              </button>
+              <button
+                type="button"
+                disabled={actionBusy || !canMoveDown}
+                onClick={onMoveDown}
+                aria-label={t("detail.deck.moveDown")}
+                title={t("detail.deck.moveDown")}
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+              >
+                <ChevronDown size={13} />
+              </button>
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={commitSlideDraft}
+                aria-label={t("detail.deck.saveSlide")}
+                title={t("detail.deck.saveSlide")}
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+              >
+                {updateBusy ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              </button>
+              <button
+                type="button"
+                disabled={actionBusy || slide.slide_status === "queued" || slide.slide_status === "running"}
+                onClick={onRegenerate}
+                aria-label={t("detail.deck.regenerateSlide")}
+                title={t("detail.deck.regenerateSlide")}
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+              >
+                {regenerateBusy ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+              </button>
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={onGenerateNotes}
+                aria-label={t("detail.deck.generateSpeakerNotes")}
+                title={t("detail.deck.generateSpeakerNotes")}
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+              >
+                {notesBusy ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+              </button>
+              <button
+                type="button"
+                disabled={actionBusy || !slide.material_url}
+                onClick={onEnhanceMaterial}
+                aria-label={t("detail.deck.enhanceMaterial")}
+                title={t("detail.deck.enhanceMaterial")}
+                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
+              >
+                {enhanceBusy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              </button>
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <label className="block">
+              <FieldLabel label={t("detail.deck.slideTitle")} />
+              <input
+                type="text"
+                value={titleDraft}
+                disabled={actionBusy}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={commitSlideDraft}
+                className="w-full px-3 py-2 text-xs outline-none input-premium"
+                placeholder={t("detail.deck.slideTitle")}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel label={t("detail.deck.slidePoints")} />
+              <textarea
+                value={pointsDraft}
+                disabled={actionBusy}
+                onChange={(event) => setPointsDraft(event.target.value)}
+                onBlur={commitSlideDraft}
+                rows={3}
+                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+                placeholder={t("detail.deck.slidePointsPlaceholder")}
+              />
+            </label>
+            <label className="block">
+              <FieldLabel label={t("detail.deck.speakerNotes")} />
+              <textarea
+                value={notesDraft}
+                disabled={actionBusy}
+                onChange={(event) => setNotesDraft(event.target.value)}
+                onBlur={commitSlideDraft}
+                rows={3}
+                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+                placeholder={t("detail.deck.speakerNotesPlaceholder")}
+              />
+            </label>
+            {slidePlan.pageType ||
+            slidePlan.captionSource ||
+            groupLabel ||
+            plannedSourceRefs.length ||
+            slidePlan.materialHint ||
+            selectedSourceItemId ? (
+              <div className="border-t border-slate-200 pt-2 text-[11px] dark:border-slate-700">
+                <div className="flex flex-wrap gap-1">
+                  {slidePlan.pageType ? <DeckMetaChip label={deckPageTypeLabel(slidePlan.pageType, t)} /> : null}
+                  {groupLabel ? <DeckMetaChip label={groupLabel} title={slidePlan.groupId ?? undefined} /> : null}
+                  {slidePlan.captionSource ? <DeckMetaChip label={deckCaptionSourceLabel(slidePlan.captionSource, t)} /> : null}
+                </div>
+                {plannedSourceRefs.length ? (
+                  <div className="mt-2">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                      {t("detail.deck.plannedSources")}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {plannedSourceRefs.map(({ sourceItemId, source }) => (
+                        <DeckMetaChip
+                          key={sourceItemId}
+                          label={source ? deckSourceBadgeLabel(source, t) : sourceItemId}
+                          title={sourceItemId}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {selectedSourceItemId ? (
+                  <div className="mt-2">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                      {t("detail.deck.currentMaterial")}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      <DeckMetaChip
+                        label={selectedBoundSource ? deckSourceBadgeLabel(selectedBoundSource, t) : selectedSourceItemId}
+                        title={selectedSourceItemId}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                {slidePlan.materialHint ? (
+                  <div className="mt-2">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                      {t("detail.deck.materialHint")}
+                    </div>
+                    <div className="leading-5 text-slate-600 dark:text-slate-300">{slidePlan.materialHint}</div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={() => onSetBindingSlideId(bindingOpen ? null : slide.id)}
+                className="inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+              >
+                <ImageIcon size={12} className="mr-1" />
+                {selectedSourceItemId ? t("detail.deck.changeMaterial") : t("detail.deck.bindMaterial")}
+              </button>
+              {selectedSourceItemId ? (
+                <button
+                  type="button"
+                  disabled={actionBusy || unbindBusy}
+                  onClick={() => onUnbind()}
+                  className="inline-flex min-h-8 items-center justify-center rounded-lg border border-red-200 bg-white px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-slate-950 dark:text-red-400 dark:hover:bg-red-950/30"
+                >
+                  {unbindBusy ? <Loader2 size={12} className="mr-1 animate-spin" /> : null}
+                  {t("detail.deck.unbindMaterial")}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-1">
-          <button
-            type="button"
-            disabled={actionBusy || !canMoveUp}
-            onClick={onMoveUp}
-            aria-label={t("detail.deck.moveUp")}
-            title={t("detail.deck.moveUp")}
-            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-          >
-            <ChevronUp size={13} />
-          </button>
-          <button
-            type="button"
-            disabled={actionBusy || !canMoveDown}
-            onClick={onMoveDown}
-            aria-label={t("detail.deck.moveDown")}
-            title={t("detail.deck.moveDown")}
-            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-          >
-            <ChevronDown size={13} />
-          </button>
-          <button
-            type="button"
-            disabled={actionBusy}
-            onClick={commitSlideDraft}
-            aria-label={t("detail.deck.saveSlide")}
-            title={t("detail.deck.saveSlide")}
-            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-          >
-            {updateBusy ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-          </button>
-          <button
-            type="button"
-            disabled={actionBusy || slide.slide_status === "queued" || slide.slide_status === "running"}
-            onClick={onRegenerate}
-            aria-label={t("detail.deck.regenerateSlide")}
-            title={t("detail.deck.regenerateSlide")}
-            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-          >
-            {regenerateBusy ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
-          </button>
-          <button
-            type="button"
-            disabled={actionBusy}
-            onClick={onGenerateNotes}
-            aria-label={t("detail.deck.generateSpeakerNotes")}
-            title={t("detail.deck.generateSpeakerNotes")}
-            className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-          >
-            {notesBusy ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
-          </button>
-          {slide.image_url ? (
-            <a
-              href={api.toApiUrl(slide.image_url)}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={t("detail.deck.openGenerated")}
-              title={t("detail.deck.openGenerated")}
-              className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-            >
-              <Eye size={13} />
-            </a>
-          ) : null}
-        </div>
-      </div>
-      <div className="grid gap-2">
-        <label className="block">
-          <FieldLabel label={t("detail.deck.slideTitle")} />
-          <input
-            type="text"
-            value={titleDraft}
-            disabled={actionBusy}
-            onChange={(event) => setTitleDraft(event.target.value)}
-            onBlur={commitSlideDraft}
-            className="w-full px-3 py-2 text-xs outline-none input-premium"
-            placeholder={t("detail.deck.slideTitle")}
-          />
-        </label>
-        <label className="block">
-          <FieldLabel label={t("detail.deck.slidePoints")} />
-          <textarea
-            value={pointsDraft}
-            disabled={actionBusy}
-            onChange={(event) => setPointsDraft(event.target.value)}
-            onBlur={commitSlideDraft}
-            rows={3}
-            className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
-            placeholder={t("detail.deck.slidePointsPlaceholder")}
-          />
-        </label>
-        <label className="block">
-          <FieldLabel label={t("detail.deck.speakerNotes")} />
-          <textarea
-            value={notesDraft}
-            disabled={actionBusy}
-            onChange={(event) => setNotesDraft(event.target.value)}
-            onBlur={commitSlideDraft}
-            rows={3}
-            className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
-            placeholder={t("detail.deck.speakerNotesPlaceholder")}
-          />
-        </label>
-        {slidePlan.pageType ||
-        slidePlan.captionSource ||
-        groupLabel ||
-        plannedSourceRefs.length ||
-        slidePlan.materialHint ||
-        selectedSourceItemId ? (
-          <div className="border-t border-slate-200 pt-2 text-[11px] dark:border-slate-700">
-            <div className="flex flex-wrap gap-1">
-              {slidePlan.pageType ? (
-                <DeckMetaChip label={deckPageTypeLabel(slidePlan.pageType, t)} />
-              ) : null}
-              {groupLabel ? <DeckMetaChip label={groupLabel} title={slidePlan.groupId ?? undefined} /> : null}
-              {slidePlan.captionSource ? (
-                <DeckMetaChip label={deckCaptionSourceLabel(slidePlan.captionSource, t)} />
-              ) : null}
-            </div>
-            {plannedSourceRefs.length ? (
-              <div className="mt-2">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                  {t("detail.deck.plannedSources")}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {plannedSourceRefs.map(({ sourceItemId, source }) => (
-                    <DeckMetaChip
-                      key={sourceItemId}
-                      label={source ? deckSourceBadgeLabel(source, t) : sourceItemId}
-                      title={sourceItemId}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {selectedSourceItemId ? (
-              <div className="mt-2">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                  {t("detail.deck.currentMaterial")}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  <DeckMetaChip
-                    label={
-                      selectedBoundSource
-                        ? deckSourceBadgeLabel(selectedBoundSource, t)
-                        : selectedSourceItemId
-                    }
-                    title={selectedSourceItemId}
-                  />
-                </div>
-              </div>
-            ) : null}
-            {slidePlan.materialHint ? (
-              <div className="mt-2">
-                <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                  {t("detail.deck.materialHint")}
-                </div>
-                <div className="leading-5 text-slate-600 dark:text-slate-300">{slidePlan.materialHint}</div>
-              </div>
+        {hasPreviewRail ? (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+            <DeckPreviewSurface
+              label={t("detail.deck.generatedImage")}
+              image={generatedImage}
+              caption={slide.image_width && slide.image_height ? `${slide.image_width}x${slide.image_height}` : null}
+              emptyLabel={t(DECK_SLIDE_STATUS_LABEL_KEYS[slide.slide_status])}
+              onPreviewImage={onPreviewImage}
+              t={t}
+            />
+            {materialPreviewImage ? (
+              <DeckPreviewSurface
+                label={t("detail.deck.currentMaterial")}
+                image={materialPreviewImage}
+                thumbnailUrl={
+                  slide.material_url
+                    ? toImageUrl(slide.material_url)
+                    : selectedBoundSource
+                      ? toImageUrl(
+                          selectedBoundSource.thumbnail_url,
+                          selectedBoundSource.preview_url,
+                          selectedBoundSource.download_url,
+                        )
+                      : undefined
+                }
+                caption={selectedBoundSource ? deckSourceBadgeLabel(selectedBoundSource, t) : null}
+                emptyLabel={t("detail.deck.bindMaterial")}
+                aspectClassName="aspect-[4/3]"
+                onPreviewImage={onPreviewImage}
+                t={t}
+              />
             ) : null}
           </div>
         ) : null}
-        <button
-          type="button"
-          disabled={actionBusy}
-          onClick={() => onSetBindingSlideId(bindingOpen ? null : slide.id)}
-          className="inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-        >
-          <ImageIcon size={12} className="mr-1" />
-          {selectedSourceItemId ? t("detail.deck.changeMaterial") : t("detail.deck.bindMaterial")}
-        </button>
       </div>
       {bindingOpen ? (
         <div className="mt-2 grid gap-1.5">
           {bindableSources.length ? (
-            bindableSources.map((source) => (
-              <button
-                key={source.source_item_id}
-                type="button"
-                disabled={bindingBusy}
-                onClick={() => onBind(source.source_item_id)}
-                className={`rounded-lg border px-2 py-1.5 text-left text-[11px] transition-colors disabled:opacity-50 ${
-                  selectedSourceItemId === source.source_item_id
-                    ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-sky-300/40 dark:bg-sky-400/15 dark:text-sky-100"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-slate-600"
-                }`}
-              >
-                {bindingBusy && selectedSourceItemId === source.source_item_id ? <Loader2 size={12} className="mr-1 inline animate-spin" /> : null}
-                {source.workflow_node_title} · {deckSourceKindLabel(source.kind, t)}
-              </button>
-            ))
+            bindableSources.map((source) => {
+              const previewImage = deckSourcePreviewImage(source, t);
+              const isSelected = selectedSourceItemId === source.source_item_id;
+              return (
+                <div
+                  key={source.source_item_id}
+                  className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-2 text-[11px] transition-colors ${
+                    isSelected
+                      ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-sky-300/40 dark:bg-sky-400/15 dark:text-sky-100"
+                      : "border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    {previewImage ? (
+                      <button
+                        type="button"
+                        onClick={() => onPreviewImage(previewImage)}
+                        className="group relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+                        aria-label={t("detail.previewImage", { alt: previewImage.alt })}
+                        title={t("detail.previewImage", { alt: previewImage.alt })}
+                      >
+                        <img
+                          src={toImageUrl(source.thumbnail_url, source.preview_url, source.download_url)}
+                          alt={previewImage.alt}
+                          className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+                        />
+                      </button>
+                    ) : (
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-500">
+                        <ImageIcon size={14} />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold">{source.workflow_node_title}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                        <DeckMetaChip label={deckSourceKindLabel(source.kind, t)} />
+                        {source.group_id ? (
+                          <DeckMetaChip label={deckGroupLabel(source.group_id, t) ?? source.group_id} />
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={bindingBusy || isSelected}
+                    onClick={() => onBind(source.source_item_id)}
+                    className={`inline-flex min-h-8 shrink-0 items-center justify-center rounded-lg border px-2 py-1 font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      isSelected
+                        ? "border-blue-300 bg-blue-100 text-blue-700 dark:border-sky-300/40 dark:bg-sky-300/20 dark:text-sky-100"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                    }`}
+                  >
+                    {bindingBusy && isSelected ? <Loader2 size={12} className="mr-1 animate-spin" /> : null}
+                    {isSelected ? t("detail.deck.currentMaterial") : t("detail.deck.bindMaterial")}
+                  </button>
+                </div>
+              );
+            })
           ) : (
             <div className="rounded-lg border border-dashed border-slate-300 px-2 py-2 text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
               {t("detail.deck.noBindableSources")}
@@ -2632,16 +2972,18 @@ function DeckNodeSlideRow({
 function GenerationConfigSelector({
   label,
   helpKey,
-  draft,
+  mode,
+  generationConfigId,
   options,
   onDraftChange,
   t,
 }: {
   label: string;
   helpKey: ParameterHelpKey;
-  draft: NodeConfigDraft;
+  mode: "auto" | "manual";
+  generationConfigId: string | null;
   options: GenerationConfigOption[];
-  onDraftChange: (draft: NodeConfigDraft) => void;
+  onDraftChange: (next: { mode: "auto" | "manual"; generationConfigId: string | null }) => void;
   t: TFunction;
 }) {
   return (
@@ -2653,17 +2995,16 @@ function GenerationConfigSelector({
       />
       <div className="grid gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
         <SelectField
-          value={draft.generationConfigMode}
+          value={mode}
           options={[
             { value: "auto", label: t("detail.inspector.generationConfigAuto") },
             { value: "manual", label: t("detail.inspector.generationConfigManual") },
           ]}
           onChange={(value) => {
-            const mode = value === "manual" ? "manual" : "auto";
+            const nextMode = value === "manual" ? "manual" : "auto";
             onDraftChange({
-              ...draft,
-              generationConfigMode: mode,
-              generationConfigId: mode === "manual" ? draft.generationConfigId : null,
+              mode: nextMode,
+              generationConfigId: nextMode === "manual" ? generationConfigId : null,
             });
           }}
           ariaLabel={label}
@@ -2671,7 +3012,7 @@ function GenerationConfigSelector({
           visualSize="sm"
         />
         <SelectField
-          value={draft.generationConfigMode === "manual" ? (draft.generationConfigId ?? "") : ""}
+          value={mode === "manual" ? (generationConfigId ?? "") : ""}
           options={[
             {
               value: "",
@@ -2690,11 +3031,11 @@ function GenerationConfigSelector({
               disabled: !config.enabled,
             })),
           ]}
-          onChange={(value) => onDraftChange({ ...draft, generationConfigId: value || null })}
+          onChange={(value) => onDraftChange({ mode, generationConfigId: value || null })}
           ariaLabel={label}
           radius="lg"
           visualSize="sm"
-          disabled={draft.generationConfigMode !== "manual"}
+          disabled={mode !== "manual"}
         />
       </div>
     </div>
@@ -2738,9 +3079,16 @@ function CopyNodeInspector({
       <GenerationConfigSelector
         label={t("detail.inspector.textGenerationConfig")}
         helpKey="copyTextGenerationConfig"
-        draft={draft}
+        mode={draft.generationConfigMode}
+        generationConfigId={draft.generationConfigId}
         options={generationConfigOptions}
-        onDraftChange={onDraftChange}
+        onDraftChange={(next) =>
+          onDraftChange({
+            ...draft,
+            generationConfigMode: next.mode,
+            generationConfigId: next.generationConfigId,
+          })
+        }
         t={t}
       />
       <div className="block">
@@ -2849,9 +3197,16 @@ function TailSplitterInspector({
       <GenerationConfigSelector
         label={t("detail.inspector.textGenerationConfig")}
         helpKey="copyTextGenerationConfig"
-        draft={draft}
+        mode={draft.generationConfigMode}
+        generationConfigId={draft.generationConfigId}
         options={generationConfigOptions}
-        onDraftChange={onDraftChange}
+        onDraftChange={(next) =>
+          onDraftChange({
+            ...draft,
+            generationConfigMode: next.mode,
+            generationConfigId: next.generationConfigId,
+          })
+        }
         t={t}
       />
       {appliedBatchCount > 0 && onCreateDeckFromTail ? (
@@ -2870,6 +3225,158 @@ function TailSplitterInspector({
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ImageEnhanceInspector({
+  draft,
+  resourceGroups,
+  generationConfigOptions,
+  onDraftChange,
+  t,
+}: {
+  draft: NodeConfigDraft;
+  resourceGroups: GenerationResourceGroup[];
+  generationConfigOptions: GenerationConfigOption[];
+  onDraftChange: (draft: NodeConfigDraft) => void;
+  t: TFunction;
+}) {
+  const strategyOptions = [
+    { value: "direct", label: t("enhance.strategy.direct") },
+    { value: "tiled", label: t("enhance.strategy.tiled") },
+  ];
+  const scaleOptions = [
+    { value: "2", label: "2x" },
+    { value: "3", label: "3x" },
+    { value: "4", label: "4x" },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+        <FieldLabel
+          label={t("enhance.strategy")}
+          className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+        />
+        <SelectField
+          value={draft.imageEnhanceStrategy}
+          options={strategyOptions}
+          onChange={(value) =>
+            onDraftChange({
+              ...draft,
+              imageEnhanceStrategy: value === "tiled" ? "tiled" : "direct",
+            })
+          }
+          ariaLabel={t("enhance.strategy")}
+          radius="lg"
+          visualSize="sm"
+        />
+        <div className="text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+          {draft.imageEnhanceStrategy === "tiled"
+            ? t("enhance.strategy.tiledHelp")
+            : t("enhance.strategy.directHelp")}
+        </div>
+      </div>
+
+      {draft.imageEnhanceStrategy === "direct" ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <FieldLabel label={t("enhance.customWidth")} />
+            <input
+              type="number"
+              min={64}
+              step={16}
+              value={draft.imageEnhanceTargetWidth}
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  imageEnhanceTargetWidth: event.target.value,
+                })
+              }
+              className="w-full px-3 py-2 text-xs outline-none input-premium"
+            />
+          </label>
+          <label className="block">
+            <FieldLabel label={t("enhance.customHeight")} />
+            <input
+              type="number"
+              min={64}
+              step={16}
+              value={draft.imageEnhanceTargetHeight}
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  imageEnhanceTargetHeight: event.target.value,
+                })
+              }
+              className="w-full px-3 py-2 text-xs outline-none input-premium"
+            />
+          </label>
+        </div>
+      ) : (
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+          <label className="block">
+            <FieldLabel label={t("enhance.tiledScale")} />
+            <SelectField
+              value={draft.imageEnhanceScale}
+              options={scaleOptions}
+              onChange={(value) =>
+                onDraftChange({
+                  ...draft,
+                  imageEnhanceScale: value,
+                })
+              }
+              ariaLabel={t("enhance.tiledScale")}
+              radius="lg"
+              visualSize="sm"
+            />
+          </label>
+          <label className="block">
+            <FieldLabel label={t("enhance.tileBaseSize")} />
+            <input
+              type="number"
+              min={256}
+              max={2048}
+              step={128}
+              value={draft.imageEnhanceTileBaseSize}
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  imageEnhanceTileBaseSize: event.target.value,
+                })
+              }
+              className="w-full px-3 py-2 text-xs outline-none input-premium"
+            />
+          </label>
+          <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] leading-5 text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/10 dark:text-violet-100">
+            {t("detail.inspector.imageEnhanceTileHint")}
+          </div>
+        </div>
+      )}
+
+      <ResourceGroupSelector
+        label={t("detail.inspector.resourceGroup")}
+        draft={draft}
+        resourceGroups={resourceGroups}
+        onDraftChange={onDraftChange}
+        t={t}
+      />
+      <GenerationConfigSelector
+        label={t("detail.inspector.imageGenerationConfig")}
+        helpKey="imageGenerationConfig"
+        mode={draft.generationConfigMode}
+        generationConfigId={draft.generationConfigId}
+        options={generationConfigOptions}
+        onDraftChange={(next) =>
+          onDraftChange({
+            ...draft,
+            generationConfigMode: next.mode,
+            generationConfigId: next.generationConfigId,
+          })
+        }
+        t={t}
+      />
     </div>
   );
 }
@@ -3375,9 +3882,16 @@ function ImageGenerationInspector({
             <GenerationConfigSelector
               label={t("detail.inspector.imageGenerationConfig")}
               helpKey="imageGenerationConfig"
-              draft={draft}
+              mode={draft.generationConfigMode}
+              generationConfigId={draft.generationConfigId}
               options={generationConfigOptions}
-              onDraftChange={onDraftChange}
+              onDraftChange={(next) =>
+                onDraftChange({
+                  ...draft,
+                  generationConfigMode: next.mode,
+                  generationConfigId: next.generationConfigId,
+                })
+              }
               t={t}
             />
             {previewText.trim() ? (

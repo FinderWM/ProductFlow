@@ -1,5 +1,6 @@
 import type {
   CopyPayloadV2,
+  EnhanceStrategy,
   GenerationConfigSelectionMode,
   ImageToolOptions,
   InspirationInitialWorkflowEntry,
@@ -40,9 +41,19 @@ export type NodeConfigDraft = {
   channel: string;
   size: string;
   toolOptions: ImageToolOptions;
+  imageEnhanceStrategy: EnhanceStrategy;
+  imageEnhanceTargetWidth: string;
+  imageEnhanceTargetHeight: string;
+  imageEnhanceScale: string;
+  imageEnhanceTileBaseSize: string;
   resourceGroupId: string | null;
   generationConfigMode: GenerationConfigSelectionMode;
   generationConfigId: string | null;
+  deckTextGenerationConfigMode: GenerationConfigSelectionMode;
+  deckTextGenerationConfigId: string | null;
+  deckImageGenerationConfigMode: GenerationConfigSelectionMode;
+  deckImageGenerationConfigId: string | null;
+  deckSlideSize: string | null;
   copyStructuredPayload: CopyPayloadV2 | null;
   deckStyleKey: string;
   deckSourceInput: string;

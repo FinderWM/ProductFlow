@@ -15,12 +15,17 @@ import { createPortal } from "react-dom";
 
 import {
   FLOATING_LAYER_Z_INDEX,
+  FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS,
+  createFloatingTouchDismissProtection,
+  isFloatingTouchDismissProtectionHit,
   placeFloatingSurface,
   viewportFromVisualViewport,
   type FloatingLayer,
   type FloatingPlacement,
   type FloatingPlacementResult,
+  type FloatingTouchDismissProtection,
 } from "../lib/floatingSurface";
+import { shouldPreventScrollChain } from "../lib/scrollChain";
 
 interface FloatingSurfaceProps {
   open: boolean;
@@ -41,6 +46,10 @@ interface TouchPoint {
   y: number;
 }
 
+interface TimedTouchPoint extends TouchPoint {
+  at: number;
+}
+
 function samePlacement(left: FloatingPlacementResult | null, right: FloatingPlacementResult): boolean {
   return (
     left?.left === right.left &&
@@ -49,39 +58,6 @@ function samePlacement(left: FloatingPlacementResult | null, right: FloatingPlac
     left.maxHeight === right.maxHeight &&
     left.placement === right.placement
   );
-}
-
-function canScrollInDirection(element: HTMLElement, deltaX: number, deltaY: number): boolean {
-  const canScrollY =
-    deltaY < 0
-      ? element.scrollTop > 0
-      : deltaY > 0
-        ? element.scrollTop + element.clientHeight < element.scrollHeight - 1
-        : false;
-  const canScrollX =
-    deltaX < 0
-      ? element.scrollLeft > 0
-      : deltaX > 0
-        ? element.scrollLeft + element.clientWidth < element.scrollWidth - 1
-        : false;
-  return canScrollX || canScrollY;
-}
-
-function shouldPreventScrollChain(root: HTMLElement | null, target: EventTarget | null, deltaX: number, deltaY: number): boolean {
-  if (!root || !(target instanceof Node)) {
-    return true;
-  }
-  let node: Node | null = target;
-  while (node && node !== root.parentNode) {
-    if (node instanceof HTMLElement && root.contains(node) && canScrollInDirection(node, deltaX, deltaY)) {
-      return false;
-    }
-    if (node === root) {
-      break;
-    }
-    node = node.parentNode;
-  }
-  return true;
 }
 
 export function FloatingSurface({
@@ -99,9 +75,25 @@ export function FloatingSurface({
 }: FloatingSurfaceProps) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const lastTouchPointRef = useRef<TouchPoint | null>(null);
+  const pendingTouchDismissProtectionRef = useRef<TimedTouchPoint | null>(null);
+  const dismissProtectionRef = useRef<FloatingTouchDismissProtection | null>(null);
+  const dismissProtectionCleanupRef = useRef<(() => void) | null>(null);
   const [placement, setPlacement] = useState<FloatingPlacementResult | null>(null);
 
   const close = useCallback(() => onOpenChange?.(false), [onOpenChange]);
+
+  const clearDismissProtection = useCallback(() => {
+    dismissProtectionCleanupRef.current?.();
+    dismissProtectionCleanupRef.current = null;
+    dismissProtectionRef.current = null;
+  }, []);
+
+  const rememberTouchDismissProtection = useCallback((point: TouchPoint | null) => {
+    if (!point) {
+      return;
+    }
+    pendingTouchDismissProtectionRef.current = { ...point, at: Date.now() };
+  }, []);
 
   const updatePlacement = useCallback(() => {
     if (!open || typeof window === "undefined") {
@@ -154,6 +146,9 @@ export function FloatingSurface({
       if (surfaceRef.current?.contains(target) || triggerRef.current?.contains(target)) {
         return;
       }
+      if (event.pointerType === "touch") {
+        rememberTouchDismissProtection({ x: event.clientX, y: event.clientY });
+      }
       close();
     }
 
@@ -178,7 +173,47 @@ export function FloatingSurface({
       window.visualViewport?.removeEventListener("resize", updatePlacement);
       window.visualViewport?.removeEventListener("scroll", updatePlacement);
     };
-  }, [close, open, triggerRef, updatePlacement]);
+  }, [close, open, rememberTouchDismissProtection, triggerRef, updatePlacement]);
+
+  useEffect(() => {
+    clearDismissProtection();
+    if (open || typeof document === "undefined" || typeof window === "undefined") {
+      return undefined;
+    }
+    const touchPoint = pendingTouchDismissProtectionRef.current;
+    if (!touchPoint) {
+      return undefined;
+    }
+    pendingTouchDismissProtectionRef.current = null;
+    if (Date.now() - touchPoint.at > FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS) {
+      return undefined;
+    }
+    dismissProtectionRef.current = createFloatingTouchDismissProtection(touchPoint);
+
+    const suppressGhostTap = (event: MouseEvent | PointerEvent) => {
+      const protection = dismissProtectionRef.current;
+      if (
+        !protection ||
+        !isFloatingTouchDismissProtectionHit(protection, { x: event.clientX, y: event.clientY })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      clearDismissProtection();
+    };
+
+    const timeoutId = window.setTimeout(clearDismissProtection, FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS);
+    document.addEventListener("click", suppressGhostTap, true);
+    document.addEventListener("pointerup", suppressGhostTap, true);
+    dismissProtectionCleanupRef.current = () => {
+      window.clearTimeout(timeoutId);
+      document.removeEventListener("click", suppressGhostTap, true);
+      document.removeEventListener("pointerup", suppressGhostTap, true);
+    };
+    return clearDismissProtection;
+  }, [clearDismissProtection, open]);
 
   useEffect(() => {
     if (!open || typeof ResizeObserver === "undefined") {
@@ -195,6 +230,8 @@ export function FloatingSurface({
     observer.observe(triggerElement);
     return () => observer.disconnect();
   }, [open, triggerRef, updatePlacement]);
+
+  useEffect(() => clearDismissProtection, [clearDismissProtection]);
 
   if (!open || typeof document === "undefined") {
     return null;
@@ -222,6 +259,7 @@ export function FloatingSurface({
   function handleTouchStart(event: TouchEvent<HTMLDivElement>) {
     event.stopPropagation();
     const touch = event.touches[0];
+    rememberTouchDismissProtection(touch ? { x: touch.clientX, y: touch.clientY } : null);
     lastTouchPointRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
   }
 
@@ -256,7 +294,12 @@ export function FloatingSurface({
       data-floating-placement={placement?.placement ?? preferredPlacement}
       className={className}
       style={style}
-      onPointerDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => {
+        if (event.pointerType === "touch") {
+          rememberTouchDismissProtection({ x: event.clientX, y: event.clientY });
+        }
+        event.stopPropagation();
+      }}
       onClick={(event) => event.stopPropagation()}
       onWheel={handleWheel}
       onTouchStart={handleTouchStart}

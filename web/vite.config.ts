@@ -1,6 +1,23 @@
-import { defineConfig, loadEnv } from "vite";
+import type { Socket } from "node:net";
+
+import { defineConfig, loadEnv, type Plugin, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+
+type SocketError = Error & { code?: string };
+
+function suppressSocketErrors(): Plugin {
+  return {
+    name: "suppress-socket-errors",
+    configureServer(server: ViteDevServer) {
+      server.httpServer?.on("connection", (socket: Socket) => {
+        socket.on("error", (err: SocketError) => {
+          if (err.code === "ECONNRESET" || err.code === "EPIPE") return;
+        });
+      });
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
@@ -12,7 +29,7 @@ export default defineConfig(({ mode }) => {
     : ["draw.devbin.de"];
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), suppressSocketErrors()],
     server: {
       port: devPort,
       strictPort: true,

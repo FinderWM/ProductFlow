@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from inspiration_one_backend.application.canvas_templates import CanvasTemplateNodeSpec
 from inspiration_one_backend.application.copy_payloads import normalize_copy_node_config
+from inspiration_one_backend.application.deck_generation_config import normalize_deck_slide_size
 from inspiration_one_backend.application.image_generation_core import normalize_image_generation_tool_options
 from inspiration_one_backend.application.inspiration_workflow import graph as inspiration_workflow_graph
 from inspiration_one_backend.application.inspiration_workflow.artifacts import (
@@ -24,6 +25,7 @@ from inspiration_one_backend.application.inspiration_workflow.context import (
     normalize_inspiration_context_config,
     optional_config_text,
 )
+from inspiration_one_backend.application.inspiration_workflow.image_enhance import normalize_image_enhance_config
 from inspiration_one_backend.application.inspiration_workflow.tail_confirmation import (
     remove_pending_tail_confirmation,
     run_has_pending_tail_confirmation,
@@ -75,6 +77,7 @@ GENERATION_RESOURCE_GROUP_NODE_TYPES = frozenset(
     {
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.IMAGE_ENHANCE,
         WorkflowNodeType.TAIL_SPLITTER,
     }
 )
@@ -205,6 +208,7 @@ def normalize_workflow_node_config(node_type: WorkflowNodeType, config_json: dic
         return normalize_inspiration_context_config(config)
     if node_type == WorkflowNodeType.DECK_GENERATION:
         config.setdefault("style_key", None)
+        config["deck_slide_size"] = normalize_deck_slide_size(config.get("deck_slide_size"))
         config.setdefault("slide_count_mode", "auto")
         config.setdefault("planning_strategy", "hybrid")
         config.setdefault("include_transitive_inputs", False)
@@ -235,6 +239,8 @@ def normalize_workflow_node_config(node_type: WorkflowNodeType, config_json: dic
             config["tool_options"] = normalize_image_generation_tool_options(
                 raw_tool_options if isinstance(raw_tool_options, dict) else None
             )
+    if node_type == WorkflowNodeType.IMAGE_ENHANCE:
+        config = normalize_image_enhance_config(config)
     return config
 
 

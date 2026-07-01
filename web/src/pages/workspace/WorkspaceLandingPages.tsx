@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -54,6 +54,8 @@ const GALLERY_STRIP_PAGE_SIZE = 6;
 const GALLERY_STRIP_SCROLL_SPEED_PX_PER_SECOND = 22;
 const GALLERY_STRIP_STATIC_PAGE_DWELL_MS = 1400;
 const GALLERY_STRIP_QUERY_GC_MS = 10_000;
+const WORKSPACE_HOME_ACTIVE_ANCHOR_TOLERANCE_PX = 24;
+const WORKSPACE_HOME_COMPACT_EXPAND_DWELL_MS = 900;
 const EMPTY_RESOURCE_LIBRARY_GROUPS: ResourceLibraryGroup[] = [];
 const EMPTY_RESOURCE_LIBRARY_ASSETS: ResourceLibraryAsset[] = [];
 const WORKSPACE_HOME_PATH = "/inspirations";
@@ -109,6 +111,45 @@ export function workspaceHomeVisibleAnchorIds(access: WorkspaceHomeAccess): Work
   return WORKSPACE_HOME_ANCHORS
     .filter((anchor) => access[WORKSPACE_HOME_ANCHOR_ACCESS_KEYS[anchor.id]])
     .map((anchor) => anchor.id);
+}
+
+export interface WorkspaceHomeSectionPosition {
+  id: WorkspaceHomeAnchorId;
+  top: number;
+  bottom: number;
+}
+
+export function workspaceHomeAnchorSelectionOffset(viewportWidth: number): number {
+  return viewportWidth <= 980 ? 94 : 112;
+}
+
+export function workspaceHomeActiveAnchorId(
+  sections: WorkspaceHomeSectionPosition[],
+  activationOffset: number,
+): WorkspaceHomeAnchorId | null {
+  const relaxedActivationOffset = activationOffset + WORKSPACE_HOME_ACTIVE_ANCHOR_TOLERANCE_PX;
+  let activeAnchorId: WorkspaceHomeAnchorId | null = null;
+  for (const section of sections) {
+    if (section.top <= relaxedActivationOffset && section.bottom > activationOffset) {
+      activeAnchorId = section.id;
+    }
+  }
+  if (activeAnchorId) {
+    return activeAnchorId;
+  }
+  return sections.some((section) => section.top > relaxedActivationOffset) ? null : sections.at(-1)?.id ?? null;
+}
+
+export function workspaceHomeQuickNavShouldCollapse({
+  compactMode,
+  expandedAnchorId,
+  targetInsideQuickNav,
+}: {
+  compactMode: boolean;
+  expandedAnchorId: WorkspaceHomeAnchorId | null;
+  targetInsideQuickNav: boolean;
+}): boolean {
+  return compactMode && expandedAnchorId !== null && !targetInsideQuickNav;
 }
 
 function workspaceHomeAnchorIdFromHash(hash: string): WorkspaceHomeAnchorId | null {
@@ -1446,15 +1487,19 @@ function WorkspaceHomeSection({
 
 function WorkspaceHomeQuickNav({ anchorIds }: { anchorIds: WorkspaceHomeAnchorId[] }) {
   const { t } = useI18n();
-  const location = useLocation();
-  const activeAnchorId = workspaceHomeAnchorIdFromHash(location.hash);
+  const activeAnchorId = useWorkspaceHomeActiveAnchor(anchorIds);
+  const quickNavRef = useRef<HTMLElement | null>(null);
+  const { expandedAnchorId, handleAnchorClick, handleAnchorPointerDown } = useWorkspaceHomeQuickNavExpansion(
+    anchorIds,
+    quickNavRef,
+  );
 
   if (!anchorIds.length) {
     return null;
   }
 
   return (
-    <nav className="pf-workspace-quick-nav" aria-label={t("workspaceHome.quickNav")}>
+    <nav ref={quickNavRef} className="pf-workspace-quick-nav" aria-label={t("workspaceHome.quickNav")}>
       <div className="pf-workspace-quick-nav-list">
         {anchorIds.map((anchorId) => {
           const anchor = WORKSPACE_HOME_ANCHORS.find((item) => item.id === anchorId);
@@ -1469,8 +1514,10 @@ function WorkspaceHomeQuickNav({ anchorIds }: { anchorIds: WorkspaceHomeAnchorId
               key={anchorId}
               to={workspaceHomeAnchorPath(anchorId)}
               aria-current={active ? "location" : undefined}
-              className={`pf-workspace-quick-nav-item${active ? " is-active" : ""}`}
+              className={`pf-workspace-quick-nav-item${expandedAnchorId === anchorId ? " is-expanded" : ""}${active ? " is-active" : ""}`}
               title={label}
+              onPointerDown={() => handleAnchorPointerDown(anchorId)}
+              onClick={() => handleAnchorClick(anchorId)}
             >
               <span className="pf-workspace-quick-nav-text">{label}</span>
               <span className="pf-workspace-quick-nav-icon" aria-hidden="true">
@@ -1482,6 +1529,173 @@ function WorkspaceHomeQuickNav({ anchorIds }: { anchorIds: WorkspaceHomeAnchorId
       </div>
     </nav>
   );
+}
+
+function useWorkspaceHomeActiveAnchor(anchorIds: WorkspaceHomeAnchorId[]): WorkspaceHomeAnchorId | null {
+  const location = useLocation();
+  const anchorIdsKey = anchorIds.join("|");
+  const [activeAnchorId, setActiveAnchorId] = useState<WorkspaceHomeAnchorId | null>(() =>
+    workspaceHomeAnchorIdFromHash(location.hash),
+  );
+
+  useEffect(() => {
+    const orderedAnchorIds = anchorIdsKey
+      ? (anchorIdsKey.split("|").filter(Boolean) as WorkspaceHomeAnchorId[])
+      : [];
+    if (!orderedAnchorIds.length || typeof window === "undefined") {
+      setActiveAnchorId(null);
+      return;
+    }
+
+    let animationFrame = 0;
+    const updateActiveAnchor = () => {
+      animationFrame = 0;
+      const sections = orderedAnchorIds.flatMap((anchorId) => {
+        const element = document.getElementById(anchorId);
+        if (!element) {
+          return [];
+        }
+        const rect = element.getBoundingClientRect();
+        return [{ id: anchorId, top: rect.top, bottom: rect.bottom }];
+      });
+      const nextActiveAnchorId = workspaceHomeActiveAnchorId(
+        sections,
+        workspaceHomeAnchorSelectionOffset(window.innerWidth),
+      );
+      setActiveAnchorId((current) => (current === nextActiveAnchorId ? current : nextActiveAnchorId));
+    };
+    const scheduleUpdate = () => {
+      if (animationFrame !== 0) {
+        return;
+      }
+      animationFrame = window.requestAnimationFrame(updateActiveAnchor);
+    };
+
+    scheduleUpdate();
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      if (animationFrame !== 0) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+    };
+  }, [anchorIdsKey, location.hash]);
+
+  return activeAnchorId;
+}
+
+function useWorkspaceHomeQuickNavExpansion(
+  anchorIds: WorkspaceHomeAnchorId[],
+  quickNavRef: RefObject<HTMLElement | null>,
+) {
+  const anchorIdsKey = anchorIds.join("|");
+  const [compactMode, setCompactMode] = useState(false);
+  const [expandedAnchorId, setExpandedAnchorId] = useState<WorkspaceHomeAnchorId | null>(null);
+  const collapseTimerRef = useRef<number | null>(null);
+
+  const clearCollapseTimer = useCallback(() => {
+    if (collapseTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(collapseTimerRef.current);
+      collapseTimerRef.current = null;
+    }
+  }, []);
+
+  const expandAnchor = useCallback((anchorId: WorkspaceHomeAnchorId) => {
+    if (!compactMode || typeof window === "undefined") {
+      return;
+    }
+    clearCollapseTimer();
+    setExpandedAnchorId(anchorId);
+    collapseTimerRef.current = window.setTimeout(() => {
+      setExpandedAnchorId((current) => (current === anchorId ? null : current));
+      collapseTimerRef.current = null;
+    }, WORKSPACE_HOME_COMPACT_EXPAND_DWELL_MS);
+  }, [clearCollapseTimer, compactMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 980px)");
+    const syncCompactMode = () => {
+      const nextCompactMode = mediaQuery.matches;
+      setCompactMode(nextCompactMode);
+      if (!nextCompactMode) {
+        clearCollapseTimer();
+        setExpandedAnchorId(null);
+      }
+    };
+
+    syncCompactMode();
+    mediaQuery.addEventListener("change", syncCompactMode);
+    return () => mediaQuery.removeEventListener("change", syncCompactMode);
+  }, [clearCollapseTimer]);
+
+  useEffect(() => {
+    if (!expandedAnchorId) {
+      return;
+    }
+    const visibleAnchorIds = anchorIdsKey ? anchorIdsKey.split("|") : [];
+    if (!visibleAnchorIds.includes(expandedAnchorId)) {
+      clearCollapseTimer();
+      setExpandedAnchorId(null);
+    }
+  }, [anchorIdsKey, clearCollapseTimer, expandedAnchorId]);
+
+  useEffect(() => {
+    if (!compactMode || !expandedAnchorId || typeof window === "undefined") {
+      return;
+    }
+
+    const collapseExpandedAnchor = () => {
+      clearCollapseTimer();
+      setExpandedAnchorId(null);
+    };
+    const collapseExpandedAnchorOnPointerDown = (event: PointerEvent) => {
+      const quickNavRoot = quickNavRef.current;
+      const eventTarget = event.target;
+      const targetInsideQuickNav = eventTarget instanceof Node && Boolean(quickNavRoot?.contains(eventTarget));
+      if (
+        !workspaceHomeQuickNavShouldCollapse({
+          compactMode,
+          expandedAnchorId,
+          targetInsideQuickNav,
+        })
+      ) {
+        return;
+      }
+      collapseExpandedAnchor();
+    };
+
+    window.addEventListener("pointerdown", collapseExpandedAnchorOnPointerDown, true);
+    window.addEventListener("touchmove", collapseExpandedAnchor, { passive: true });
+    window.addEventListener("wheel", collapseExpandedAnchor, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", collapseExpandedAnchorOnPointerDown, true);
+      window.removeEventListener("touchmove", collapseExpandedAnchor);
+      window.removeEventListener("wheel", collapseExpandedAnchor);
+    };
+  }, [clearCollapseTimer, compactMode, expandedAnchorId, quickNavRef]);
+
+  useEffect(
+    () => () => {
+      clearCollapseTimer();
+    },
+    [clearCollapseTimer],
+  );
+
+  return {
+    expandedAnchorId,
+    handleAnchorPointerDown: (anchorId: WorkspaceHomeAnchorId) => {
+      expandAnchor(anchorId);
+    },
+    handleAnchorClick: (anchorId: WorkspaceHomeAnchorId) => {
+      expandAnchor(anchorId);
+    },
+  };
 }
 
 function useWorkspaceHomeHashScroll() {

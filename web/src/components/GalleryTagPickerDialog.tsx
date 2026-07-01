@@ -115,8 +115,8 @@ export function GalleryTagPickerDialog({
       onClick={() => (selected ? removeSelected(tag) : moveToSelected(tag))}
       className={
         selected
-          ? "inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-800 transition hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-          : "inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-200 dark:hover:border-violet-400/45 dark:hover:bg-violet-500/10"
+          ? "inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg border border-slate-400 bg-slate-100 px-3 text-xs font-semibold text-slate-900 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+          : "inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800"
       }
       title={tag.description || tag.name}
     >
@@ -159,7 +159,7 @@ export function GalleryTagPickerDialog({
           onClick={onClose}
           disabled={busy}
           aria-label={t("common.close")}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-60 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-slate-500"
         >
           <X size={16} />
         </button>
@@ -207,7 +207,7 @@ export function GalleryTagPickerDialog({
           type="button"
           onClick={onClose}
           disabled={busy}
-          className="inline-flex h-9 min-w-20 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+          className="pf-btn-secondary min-w-20"
         >
           {t("common.cancel")}
         </button>
@@ -215,7 +215,7 @@ export function GalleryTagPickerDialog({
           type="button"
           onClick={handleConfirm}
           disabled={busy}
-          className="inline-flex h-9 min-w-20 items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+          className="pf-btn-primary min-w-20"
         >
           {busy ? <Loader2 size={15} className="mr-2 animate-spin" /> : null}
           {dialogConfirmLabel}

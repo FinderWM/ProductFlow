@@ -177,7 +177,7 @@ export function SelectField({
             setOpen(false);
           }
         }}
-        className={`relative w-full border border-slate-300 bg-slate-50/90 text-left font-medium text-slate-900 shadow-sm shadow-slate-200/45 outline-none ring-1 ring-white/70 transition-colors hover:border-slate-400 hover:bg-white focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/25 dark:ring-slate-800 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:focus:border-violet-400 dark:focus:bg-[#111b2d] dark:focus:ring-violet-400/20 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500 ${radiusClassName} ${sizeClassName}`}
+        className={`relative w-full border border-slate-300 bg-slate-50/90 text-left font-medium text-slate-900 shadow-sm shadow-slate-200/45 outline-none ring-1 ring-white/70 transition-colors hover:border-slate-400 hover:bg-white focus:border-[var(--pf-accent,#6366f1)] focus:bg-white focus:ring-2 focus:ring-[var(--pf-accent,#6366f1)]/15 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/25 dark:ring-slate-800 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:focus:border-[var(--pf-accent,#a78bfa)] dark:focus:bg-[#111b2d] dark:focus:ring-[var(--pf-accent,#a78bfa)]/20 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500 ${radiusClassName} ${sizeClassName}`}
       >
         <span className="block truncate">{selectedOption?.label ?? ""}</span>
         <span
@@ -218,7 +218,7 @@ export function SelectField({
                 }}
                 aria-label={searchAriaLabel ?? searchPlaceholder}
                 placeholder={searchPlaceholder}
-                className={`w-full rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-900 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-slate-950 dark:focus:ring-violet-400/20 ${searchInputClassName}`}
+                className={`w-full rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-900 outline-none transition focus:border-[var(--pf-accent,#6366f1)] focus:bg-white focus:ring-2 focus:ring-[var(--pf-accent,#6366f1)]/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-[var(--pf-accent,#a78bfa)] dark:focus:bg-slate-950 dark:focus:ring-[var(--pf-accent,#a78bfa)]/20 ${searchInputClassName}`}
               />
               {searchLoading ? (
                 <Loader2
@@ -296,7 +296,7 @@ function SelectOptionButton({
 }) {
   const sizeClassName = visualSize === "sm" ? "min-h-8 px-2 py-1.5 text-xs" : "min-h-9 px-2.5 py-2 text-sm";
   const stateClassName = selected
-    ? "bg-indigo-50 text-indigo-700 dark:bg-violet-500/18 dark:text-violet-100"
+    ? "bg-[color-mix(in_srgb,var(--pf-accent,#6366f1)_10%,white)] text-[color-mix(in_srgb,var(--pf-accent,#6366f1)_72%,rgb(2_6_23))] dark:bg-[color-mix(in_srgb,var(--pf-accent,#a78bfa)_18%,transparent)] dark:text-[color-mix(in_srgb,var(--pf-accent,#a78bfa)_38%,white)]"
     : active
       ? "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
       : "text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white";

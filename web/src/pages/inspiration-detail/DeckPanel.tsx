@@ -241,7 +241,7 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
             type="button"
             disabled={createMutation.isPending || !defaultGroupId}
             onClick={() => createMutation.mutate()}
-            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-white disabled:opacity-50"
+            className="btn-primary-spring inline-flex items-center gap-1 px-3 py-1.5 text-sm"
           >
             {createMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
             {t("detail.deck.outline")}
@@ -385,7 +385,7 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
                   type="button"
                   disabled={generating || sampleMutation.isPending}
                   onClick={() => sampleMutation.mutate()}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs disabled:opacity-50 dark:border-white/15"
+                  className="btn-secondary-spring px-3 py-1.5 text-xs"
                 >
                   {t("detail.deck.sample")}
                 </button>
@@ -393,7 +393,7 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
                   type="button"
                   disabled={generating || generateMutation.isPending}
                   onClick={() => generateMutation.mutate()}
-                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-white disabled:opacity-50"
+                  className="btn-primary-spring inline-flex items-center gap-1 px-3 py-1.5 text-sm"
                 >
                   {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
                   {generating ? t("detail.deck.generating") : t("detail.deck.generate")}
@@ -432,7 +432,7 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
               type="button"
               disabled={exportMutation.isPending || !deckSupportsFrontendPptxExport(deck)}
               onClick={() => exportMutation.mutate()}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 dark:border-white/15"
+              className="btn-secondary-spring inline-flex items-center gap-1 px-3 py-1.5"
               title={!deckSupportsFrontendPptxExport(deck) ? t("detail.deck.noGeneratedSlides") : t("detail.deck.exportPptx")}
             >
               {exportMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
@@ -443,7 +443,7 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
             {deck.pptx_url ? (
               <a
                 href={deck.pptx_url}
-                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-white"
                 download={`${deck.title}.pptx`}
               >
                 <Download size={15} />

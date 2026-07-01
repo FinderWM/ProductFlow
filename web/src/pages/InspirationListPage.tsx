@@ -1737,7 +1737,7 @@ function Pagination({
               event.currentTarget.blur();
             }
           }}
-          className="h-8 w-11 rounded-md border border-slate-200 bg-white px-1.5 text-center text-xs font-semibold tabular-nums text-slate-700 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-violet-400 dark:focus:ring-violet-400/20 xl:h-7"
+          className="pf-input-compact h-8 w-11 px-1.5 text-center text-xs font-semibold tabular-nums disabled:opacity-50 xl:h-7"
           aria-label={t("pagination.pageInput")}
         />
         <span>/</span>

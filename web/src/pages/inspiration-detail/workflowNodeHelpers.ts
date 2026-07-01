@@ -12,6 +12,7 @@ import type { NodeConfigDraft } from "./types";
 export const RESOURCE_GROUP_REQUIRED_NODE_TYPES = new Set<WorkflowNodeType>([
   "copy_generation",
   "image_generation",
+  "image_enhance",
   "tail_splitter",
 ]);
 

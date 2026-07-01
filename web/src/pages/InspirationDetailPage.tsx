@@ -3167,7 +3167,9 @@ export function InspirationDetailPage() {
                 ? t("detail.singleNode.description.tailSplitter")
                 : option.type === "deck_generation"
                   ? t("detail.inspector.description.deckGeneration")
-                  : t("detail.singleNode.description.imageGeneration");
+                  : option.type === "image_enhance"
+                    ? t("detail.singleNode.description.imageEnhance")
+                    : t("detail.singleNode.description.imageGeneration");
         const creatingThisNode = createNodeMutation.isPending && createNodeMutation.variables === option.type;
         const NodeIcon = option.type === "reference_image"
           ? ImagePlus
@@ -3622,14 +3624,14 @@ export function InspirationDetailPage() {
                       <input
                         value={templateSaveTitle}
                         onChange={(event) => setTemplateSaveTitle(event.target.value)}
-                        className="h-11 rounded-lg border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-indigo-300 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 lg:h-9"
+                        className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs text-slate-950 placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]"
                         placeholder={t("detail.templateName")}
                         maxLength={255}
                       />
                       <input
                         value={templateSaveDescription}
                         onChange={(event) => setTemplateSaveDescription(event.target.value)}
-                        className="h-11 rounded-lg border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-indigo-300 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 lg:h-9"
+                        className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs text-slate-950 placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]"
                         placeholder={t("detail.templateDescription")}
                         maxLength={1000}
                       />
@@ -3637,7 +3639,7 @@ export function InspirationDetailPage() {
                         <button
                           type="button"
                           onClick={() => setTemplateSaveOpen(false)}
-                          className="h-11 rounded-lg px-3 text-xs font-semibold text-zinc-500 hover:bg-zinc-50 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white lg:h-8 lg:px-2.5"
+                          className="btn-secondary-spring inline-flex h-9 items-center rounded-xl px-3 text-xs font-semibold"
                         >
                           {t("detail.cancel")}
                         </button>
@@ -3645,7 +3647,7 @@ export function InspirationDetailPage() {
                           type="submit"
                           disabled={createUserTemplateGroupMutation.isPending || inspirationWriteBlocked}
                           title={inspirationWriteBlocked ? inspirationWriteBlockedTitle : t("detail.save")}
-                          className="inline-flex h-11 items-center rounded-lg bg-zinc-950 px-3 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-400 lg:h-8"
+                          className="btn-primary-spring inline-flex h-9 items-center rounded-xl px-3 text-xs font-semibold disabled:cursor-not-allowed"
                         >
                           {t("detail.save")}
                         </button>
@@ -3829,7 +3831,7 @@ export function InspirationDetailPage() {
                 type="button"
                 onClick={() => void handleRetryFailedWorkflowNodes()}
                 disabled={retryFailedWorkflowNodesDisabled || !workflow}
-                className="inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl border border-red-200 bg-white px-1 text-[10px] font-semibold leading-[1.05] text-red-600 transition-colors active:scale-[0.98] hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/35 dark:bg-slate-950/80 dark:text-red-200 dark:hover:bg-red-500/12"
+                className="btn-danger-spring inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl px-1 text-[10px] font-semibold leading-[1.05] disabled:cursor-not-allowed"
                 title={failedWorkflowNodesRetryTitle}
                 aria-label={failedWorkflowNodesRetryTitle}
               >
@@ -3908,7 +3910,7 @@ export function InspirationDetailPage() {
                 <button
                   type="button"
                   onClick={() => setMobileDetailsSheetOpen(false)}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition-colors active:scale-[0.98] hover:border-slate-300 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+                  className="btn-secondary-spring inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl"
                   aria-label={t("detail.closeMobileSheet")}
                 >
                   <X size={18} />
@@ -4043,7 +4045,7 @@ export function InspirationDetailPage() {
             <button
               type="button"
               onClick={() => setPendingDeckSourcePreflight(null)}
-              className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="pf-btn-secondary"
             >
               {t("common.cancel")}
             </button>
@@ -4054,7 +4056,7 @@ export function InspirationDetailPage() {
                 createDeckNodeFromSelectionMutation.mutate({ nodeIds: pendingDeckSourcePreflight.allNodeIds });
                 setPendingDeckSourcePreflight(null);
               }}
-              className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="pf-btn-secondary disabled:opacity-60"
             >
               {createDeckNodeFromSelectionMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
               {t("detail.deck.createFromSelectionKeepUnavailable")}
@@ -4066,7 +4068,7 @@ export function InspirationDetailPage() {
                 createDeckNodeFromSelectionMutation.mutate({ nodeIds: pendingDeckSourcePreflight.usableNodeIds });
                 setPendingDeckSourcePreflight(null);
               }}
-              className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+              className="pf-btn-primary disabled:opacity-60"
             >
               {createDeckNodeFromSelectionMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
               {t("detail.deck.createFromSelectionExcludeUnavailable")}
@@ -4106,14 +4108,14 @@ export function InspirationDetailPage() {
               <input
                 value={canvasTemplateSaveTitle}
                 onChange={(event) => setCanvasTemplateSaveTitle(event.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]"
                 placeholder={t("detail.templateName")}
                 maxLength={255}
               />
               <textarea
                 value={canvasTemplateSaveDescription}
                 onChange={(event) => setCanvasTemplateSaveDescription(event.target.value)}
-                className="min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-950 outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400"
+                className="min-h-20 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-950 placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]"
                 placeholder={t("detail.templateDescription")}
                 maxLength={1000}
               />
@@ -4133,7 +4135,7 @@ export function InspirationDetailPage() {
                   type="checkbox"
                   checked={canvasTemplateRetainPromptText}
                   onChange={(event) => setCanvasTemplateRetainPromptText(event.target.checked)}
-                  className="h-4 w-4 accent-indigo-600"
+                  className="h-4 w-4 accent-[var(--pf-accent)]"
                 />
                 {t("detail.saveCanvasTemplateRetainPrompt")}
               </label>
@@ -4148,7 +4150,7 @@ export function InspirationDetailPage() {
                 type="button"
                 onClick={() => setCanvasTemplateSaveOpen(false)}
                 disabled={createUserCanvasTemplateMutation.isPending}
-                className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+                className="btn-secondary-spring inline-flex h-9 items-center rounded-xl px-3 text-sm font-semibold disabled:opacity-60"
               >
                 {t("common.cancel")}
               </button>
@@ -4160,7 +4162,7 @@ export function InspirationDetailPage() {
                   !canvasTemplateSaveTitle.trim() ||
                   !canvasTemplateSaveCategoryId
                 }
-                className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                className="btn-primary-spring inline-flex h-9 items-center rounded-xl px-3 text-sm font-semibold disabled:opacity-60"
               >
                 {createUserCanvasTemplateMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
                 {t("detail.save")}
@@ -4247,7 +4249,7 @@ function InspirationImagePreviewModal({
     <ModalShell
       onClose={onClose}
       ariaLabel={image.alt}
-      overlayClassName="pointer-events-auto z-[80] bg-zinc-950/70 p-6"
+      overlayClassName="pointer-events-auto z-[100] bg-zinc-950/70 p-6"
       panelClassName="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#0f1726]"
     >
         <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-slate-800">

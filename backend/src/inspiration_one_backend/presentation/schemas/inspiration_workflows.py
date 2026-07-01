@@ -266,6 +266,10 @@ class DeckNodeOutlineSlideContextRequest(BaseModel):
 
 class DeckNodeOutlineRequest(BaseModel):
     resource_group_id: str | None = None
+    text_generation_config_mode: Literal["auto", "manual"] = "auto"
+    text_generation_config_id: str | None = Field(default=None, min_length=1, max_length=36)
+    image_generation_config_mode: Literal["auto", "manual"] = "auto"
+    image_generation_config_id: str | None = Field(default=None, min_length=1, max_length=36)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     source_input: str | None = Field(default=None, max_length=8000)
     max_slides: int | None = None

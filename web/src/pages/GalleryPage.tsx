@@ -1231,7 +1231,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                 <input
                   value={tagForm.name}
                   onChange={(event) => setTagForm((current) => ({ ...current, name: event.target.value }))}
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:border-violet-400 dark:focus:ring-violet-500/20"
+                  className="pf-input"
                 />
               </label>
               <label className="mt-4 block">
@@ -1242,7 +1242,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                   value={tagForm.description}
                   onChange={(event) => setTagForm((current) => ({ ...current, description: event.target.value }))}
                   rows={4}
-                  className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:border-violet-400 dark:focus:ring-violet-500/20"
+                  className="pf-input h-auto py-2"
                 />
               </label>
               <label className="mt-4 block">
@@ -1253,7 +1253,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                   type="number"
                   value={tagForm.priority}
                   onChange={(event) => setTagForm((current) => ({ ...current, priority: event.target.value }))}
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:border-violet-400 dark:focus:ring-violet-500/20"
+                  className="pf-input"
                 />
               </label>
               {tagManageError ? (
@@ -1270,7 +1270,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                       setTagForm(galleryTagFormFromTag());
                       setTagManageError("");
                     }}
-                    className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="pf-btn-secondary inline-flex h-9 items-center rounded-xl px-3 text-sm font-medium"
                   >
                     {t("common.cancel")}
                   </button>
@@ -1278,7 +1278,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                 <button
                   type="submit"
                   disabled={saveGalleryTagMutation.isPending}
-                  className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                  className="pf-btn-primary inline-flex h-9 items-center rounded-xl px-3 text-sm font-semibold"
                 >
                   {saveGalleryTagMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Save size={15} className="mr-2" />}
                   {editingTag ? t("common.save") : t("common.create")}

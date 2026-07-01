@@ -16,6 +16,7 @@ const baseSlide: DeckSlide = {
   image_height: 900,
   material_source: null,
   material_url: null,
+  material_enhance_job_id: null,
   source_manifest_json: null,
   created_at: "2026-06-26T00:00:00Z",
   updated_at: "2026-06-26T00:00:00Z",

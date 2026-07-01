@@ -17,6 +17,7 @@ from inspiration_one_backend.application.inspiration_workflow.deck_sources impor
     refresh_deck_source_manifest,
 )
 from inspiration_one_backend.domain.enums import (
+    DeckMaterialSource,
     DeckStatus,
     PosterKind,
     SourceAssetKind,
@@ -29,6 +30,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     CopySet,
     Deck,
     DeckSlide,
+    GenerationConfig,
     Inspiration,
     InspirationWorkflow,
     PosterVariant,
@@ -36,7 +38,11 @@ from inspiration_one_backend.infrastructure.db.models import (
     WorkflowEdge,
     WorkflowNode,
 )
-from inspiration_one_backend.infrastructure.provider_config import ensure_provider_config_bootstrapped
+from inspiration_one_backend.infrastructure.provider_config import (
+    IMAGE_PURPOSE,
+    TEXT_PURPOSE,
+    ensure_provider_config_bootstrapped,
+)
 
 
 def _create_workflow(db_session) -> tuple[Inspiration, InspirationWorkflow, WorkflowNode]:
@@ -136,6 +142,29 @@ def _poster(
     db_session.add(poster)
     db_session.flush()
     return poster
+
+
+def _generation_config(
+    db_session,
+    *,
+    purpose: str,
+    name: str,
+    resource_group_id: str = DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+) -> GenerationConfig:
+    config = GenerationConfig(
+        purpose=purpose,
+        name=name,
+        provider_kind="mock",
+        resource_group_id=resource_group_id,
+        model_settings_json={"brief_model": "mock-brief", "copy_model": "mock-copy"}
+        if purpose == TEXT_PURPOSE
+        else {"model": "mock-image"},
+        config_json={},
+        enabled=True,
+    )
+    db_session.add(config)
+    db_session.flush()
+    return config
 
 
 def _node(
@@ -1129,6 +1158,151 @@ def test_refresh_deck_sources_endpoint_persists_fingerprint_and_returns_current_
     assert deck_node.output_json["source_fingerprint"] == payload["source_fingerprint"]
 
 
+def test_workflow_deck_sample_endpoint_does_not_leave_deck_generating(
+    configured_env,
+    db_session,
+    monkeypatch,
+) -> None:
+    from inspiration_one_backend.application import decks as deck_use_cases
+    from inspiration_one_backend.application.deck_generation_core import execute_deck_slide_generation_task
+    from inspiration_one_backend.presentation.api import create_app
+
+    monkeypatch.setattr(deck_use_cases, "enqueue_deck_slide_generation_task", execute_deck_slide_generation_task)
+
+    ensure_auth_bootstrapped(db_session)
+    ensure_provider_config_bootstrapped(db_session)
+    db_session.commit()
+
+    inspiration, workflow, deck_node = _create_workflow(db_session)
+    copy_set = _copy_set(db_session, inspiration.id)
+    copy_node = _node(
+        db_session,
+        workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title="文案节点",
+        output_json={"copy_set_id": copy_set.id, "summary": "样张来源"},
+    )
+    _edge(db_session, workflow.id, copy_node.id, deck_node.id)
+
+    deck = Deck(
+        inspiration_id=inspiration.id,
+        workflow_node_id=deck_node.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        title="样张演示",
+        status=DeckStatus.STYLE_CONFIRMED,
+        style_key="clean_business",
+    )
+    db_session.add(deck)
+    db_session.flush()
+    deck_node.config_json = {"deck_id": deck.id, "style_key": "clean_business"}
+    db_session.add_all(
+        [
+            DeckSlide(
+                deck_id=deck.id,
+                order_index=0,
+                title="封面",
+                points_json=["封面要点"],
+            ),
+            DeckSlide(
+                deck_id=deck.id,
+                order_index=1,
+                title="正文",
+                points_json=["正文要点"],
+            ),
+        ]
+    )
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.post(f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/sample")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "style_confirmed"
+    assert payload["generated_slide_count"] == 1
+    assert payload["slides"][0]["slide_status"] == "completed"
+    assert payload["slides"][1]["slide_status"] == "pending"
+
+    workflow_response = client.get(f"/api/inspirations/{inspiration.id}/workflow")
+    assert workflow_response.status_code == 200, workflow_response.text
+    workflow_payload = workflow_response.json()
+    returned_node = next(item for item in workflow_payload["nodes"] if item["id"] == deck_node.id)
+    assert returned_node["output_json"]["deck_status"] == "style_confirmed"
+    assert returned_node["output_json"]["generated_slide_count"] == 1
+
+
+def test_stale_generating_deck_is_derived_as_style_confirmed_in_read_paths(
+    configured_env,
+    db_session,
+) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    ensure_auth_bootstrapped(db_session)
+    ensure_provider_config_bootstrapped(db_session)
+    db_session.commit()
+
+    inspiration, workflow, deck_node = _create_workflow(db_session)
+    copy_set = _copy_set(db_session, inspiration.id)
+    copy_node = _node(
+        db_session,
+        workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title="文案节点",
+        output_json={"copy_set_id": copy_set.id, "summary": "当前来源"},
+    )
+    _edge(db_session, workflow.id, copy_node.id, deck_node.id)
+
+    deck = Deck(
+        inspiration_id=inspiration.id,
+        workflow_node_id=deck_node.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        title="脏状态演示",
+        status=DeckStatus.GENERATING,
+        style_key="clean_business",
+    )
+    db_session.add(deck)
+    db_session.flush()
+    deck_node.config_json = {"deck_id": deck.id, "style_key": "clean_business"}
+    db_session.add_all(
+        [
+            DeckSlide(
+                deck_id=deck.id,
+                order_index=0,
+                title="封面",
+                points_json=["封面要点"],
+                image_storage_path="decks/demo/cover.png",
+            ),
+            DeckSlide(
+                deck_id=deck.id,
+                order_index=1,
+                title="正文",
+                points_json=["正文要点"],
+            ),
+        ]
+    )
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    deck_response = client.get(f"/api/decks/{deck.id}")
+    assert deck_response.status_code == 200, deck_response.text
+    deck_payload = deck_response.json()
+    assert deck_payload["status"] == "style_confirmed"
+    assert deck_payload["generated_slide_count"] == 1
+
+    workflow_response = client.get(f"/api/inspirations/{inspiration.id}/workflow")
+    assert workflow_response.status_code == 200, workflow_response.text
+    workflow_payload = workflow_response.json()
+    returned_node = next(item for item in workflow_payload["nodes"] if item["id"] == deck_node.id)
+    assert returned_node["output_json"]["deck_status"] == "style_confirmed"
+    assert returned_node["output_json"]["generated_slide_count"] == 1
+
+
 def test_workflow_endpoint_derives_live_deck_source_stale_without_persisting_snapshot(
     configured_env,
     db_session,
@@ -1332,6 +1506,208 @@ def test_deck_outline_endpoint_creates_dag_deck_and_updates_node_snapshot(db_ses
     assert deck_node.output_json["deck_id"] == deck.id
     assert deck_node.output_json["deck_title"] == "画布演示大纲"
     assert deck_node.output_json["last_action"] == "outline"
+
+
+def test_deck_outline_endpoint_persists_text_and_image_generation_config_selection(db_session) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    ensure_provider_config_bootstrapped(db_session)
+    text_config = _generation_config(db_session, purpose=TEXT_PURPOSE, name="演示文案配置")
+    image_config = _generation_config(db_session, purpose=IMAGE_PURPOSE, name="演示图片配置")
+    inspiration, workflow, deck_node = _create_workflow(db_session)
+    copy_set = _copy_set(db_session, inspiration.id)
+    copy_node = _node(
+        db_session,
+        workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title="文案节点",
+        output_json={"copy_set_id": copy_set.id},
+    )
+    _edge(db_session, workflow.id, copy_node.id, deck_node.id)
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    response = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/outline",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "text_generation_config_mode": "manual",
+            "text_generation_config_id": text_config.id,
+            "image_generation_config_mode": "manual",
+            "image_generation_config_id": image_config.id,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.refresh(deck_node)
+    assert deck_node.config_json["text_generation_config_mode"] == "manual"
+    assert deck_node.config_json["text_generation_config_id"] == text_config.id
+    assert deck_node.config_json["image_generation_config_mode"] == "manual"
+    assert deck_node.config_json["image_generation_config_id"] == image_config.id
+
+
+def test_deck_outline_endpoint_rejects_wrong_generation_config_purpose(db_session) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    ensure_provider_config_bootstrapped(db_session)
+    wrong_text_config = _generation_config(db_session, purpose=IMAGE_PURPOSE, name="错误文案配置")
+    inspiration, workflow, deck_node = _create_workflow(db_session)
+    copy_set = _copy_set(db_session, inspiration.id)
+    copy_node = _node(
+        db_session,
+        workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title="文案节点",
+        output_json={"copy_set_id": copy_set.id},
+    )
+    _edge(db_session, workflow.id, copy_node.id, deck_node.id)
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    response = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/outline",
+        json={
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "text_generation_config_mode": "manual",
+            "text_generation_config_id": wrong_text_config.id,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "演示文稿文案只能使用文案生成配置"
+
+
+def test_deck_speaker_notes_endpoint_rejects_wrong_text_generation_config_purpose(db_session) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    ensure_provider_config_bootstrapped(db_session)
+    inspiration, workflow, deck_node = _create_workflow(db_session)
+    copy_set = _copy_set(db_session, inspiration.id)
+    copy_node = _node(
+        db_session,
+        workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title="文案节点",
+        output_json={"copy_set_id": copy_set.id},
+    )
+    _edge(db_session, workflow.id, copy_node.id, deck_node.id)
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    outline = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/outline",
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "source_input": "第一页。第二页。"},
+    )
+    assert outline.status_code == 200, outline.text
+    slide_id = outline.json()["slides"][0]["id"]
+
+    wrong_text_config = _generation_config(db_session, purpose=IMAGE_PURPOSE, name="错误备注配置")
+    db_session.refresh(deck_node)
+    deck_node.config_json = {
+        **(deck_node.config_json or {}),
+        "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        "text_generation_config_mode": "manual",
+        "text_generation_config_id": wrong_text_config.id,
+    }
+    db_session.commit()
+
+    response = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/slides/{slide_id}/speaker-notes"
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "演示文稿文案只能使用文案生成配置"
+
+
+def test_deck_sample_endpoint_rejects_wrong_image_generation_config_purpose(db_session) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    ensure_provider_config_bootstrapped(db_session)
+    inspiration, workflow, deck_node = _create_workflow(db_session)
+    copy_set = _copy_set(db_session, inspiration.id)
+    copy_node = _node(
+        db_session,
+        workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title="文案节点",
+        output_json={"copy_set_id": copy_set.id},
+    )
+    _edge(db_session, workflow.id, copy_node.id, deck_node.id)
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    outline = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/outline",
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "source_input": "第一页。第二页。"},
+    )
+    assert outline.status_code == 200, outline.text
+
+    wrong_image_config = _generation_config(db_session, purpose=TEXT_PURPOSE, name="错误图片配置")
+    db_session.refresh(deck_node)
+    deck_node.config_json = {
+        **(deck_node.config_json or {}),
+        "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        "image_generation_config_mode": "manual",
+        "image_generation_config_id": wrong_image_config.id,
+    }
+    db_session.commit()
+
+    response = client.post(f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/sample")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "演示文稿图片只能使用图片生成配置"
+
+
+def test_deck_regenerate_endpoint_rejects_wrong_image_generation_config_purpose(db_session) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    ensure_provider_config_bootstrapped(db_session)
+    inspiration, workflow, deck_node = _create_workflow(db_session)
+    copy_set = _copy_set(db_session, inspiration.id)
+    copy_node = _node(
+        db_session,
+        workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title="文案节点",
+        output_json={"copy_set_id": copy_set.id},
+    )
+    _edge(db_session, workflow.id, copy_node.id, deck_node.id)
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    outline = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/outline",
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "source_input": "第一页。第二页。"},
+    )
+    assert outline.status_code == 200, outline.text
+    slide_id = outline.json()["slides"][0]["id"]
+
+    wrong_image_config = _generation_config(db_session, purpose=TEXT_PURPOSE, name="错误重生成配置")
+    db_session.refresh(deck_node)
+    deck_node.config_json = {
+        **(deck_node.config_json or {}),
+        "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        "image_generation_config_mode": "manual",
+        "image_generation_config_id": wrong_image_config.id,
+    }
+    db_session.commit()
+
+    response = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/slides/{slide_id}/regenerate"
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "演示文稿图片只能使用图片生成配置"
 
 
 def test_deck_outline_endpoint_reuses_existing_deck_id_and_replaces_slides(db_session) -> None:
@@ -1581,3 +1957,61 @@ def test_deck_node_slide_material_binding_uses_manifest_source_item(configured_e
     assert deck_node.output_json["last_action"] == "bind_slide_material"
     materialized = db_session.query(SourceAsset).filter_by(source_poster_variant_id=poster.id).one()
     assert materialized.storage_path.startswith(f"inspirations/{inspiration.id}/reference/")
+
+
+def test_deck_node_slide_material_enhance_uses_workflow_endpoint(configured_env, db_session) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    ensure_provider_config_bootstrapped(db_session)
+    inspiration, workflow, deck_node = _create_workflow(db_session)
+    copy_set = _copy_set(db_session, inspiration.id)
+    copy_node = _node(
+        db_session,
+        workflow.id,
+        node_type=WorkflowNodeType.COPY_GENERATION,
+        title="文案节点",
+        output_json={"copy_set_id": copy_set.id},
+    )
+    _edge(db_session, workflow.id, copy_node.id, deck_node.id)
+    db_session.commit()
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+    outline = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/outline",
+        json={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID, "source_input": "增强素材页"},
+    )
+    assert outline.status_code == 200, outline.text
+    slide_id = outline.json()["slides"][0]["id"]
+
+    upload = client.put(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/slides/{slide_id}/material",
+        json={"source_item_id": "node:missing:poster:missing"},
+    )
+    assert upload.status_code == 400
+
+    db_slide = db_session.get(DeckSlide, slide_id)
+    assert db_slide is not None
+    db_slide.material_source = DeckMaterialSource.UPLOAD
+    db_slide.material_mime_type = "image/png"
+    db_slide.material_storage_path = f"inspirations/{inspiration.id}/deck-material/{slide_id}.png"
+    db_slide.material_storage_backend = "local"
+    db_slide.material_storage_bucket = None
+    db_slide.material_storage_object_key = None
+    disk_path = configured_env / db_slide.material_storage_path
+    disk_path.parent.mkdir(parents=True, exist_ok=True)
+    disk_path.write_bytes(_make_demo_image_bytes())
+    db_session.commit()
+
+    response = client.post(
+        f"/api/inspirations/{inspiration.id}/workflow/nodes/{deck_node.id}/deck/slides/{slide_id}/material/enhance",
+        json={"prompt": "提升清晰度"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["material_source"] == "enhanced"
+    assert payload["material_url"] == f"/api/deck-slides/{slide_id}/material"
+    db_session.refresh(deck_node)
+    assert deck_node.output_json["last_action"] == "enhance_material"

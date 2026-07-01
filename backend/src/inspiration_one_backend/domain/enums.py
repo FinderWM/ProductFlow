@@ -95,6 +95,7 @@ class WorkflowNodeType(StrEnum):
     REFERENCE_IMAGE = "reference_image"
     COPY_GENERATION = "copy_generation"
     IMAGE_GENERATION = "image_generation"
+    IMAGE_ENHANCE = "image_enhance"
     TAIL_SPLITTER = "tail_splitter"
     DECK_GENERATION = "deck_generation"
 

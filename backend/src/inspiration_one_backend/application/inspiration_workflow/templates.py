@@ -27,6 +27,7 @@ GENERATION_RESOURCE_GROUP_NODE_TYPES = frozenset(
     {
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.IMAGE_ENHANCE,
         WorkflowNodeType.TAIL_SPLITTER,
     }
 )

@@ -39,6 +39,7 @@ TEXT_GENERATION_NODE_TYPES = frozenset(
 IMAGE_GENERATION_NODE_TYPES = frozenset(
     {
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.IMAGE_ENHANCE,
     }
 )
 

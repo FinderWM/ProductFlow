@@ -9,9 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.copy_payloads import copy_payload_context_text, normalize_copy_payload
+from inspiration_one_backend.application.deck_generation_config import (
+    deck_generation_config_keys_for_purpose,
+    require_deck_generation_config_selection,
+)
+from inspiration_one_backend.application.deck_status import derived_deck_status
 from inspiration_one_backend.application.decks import (
     add_outline_slides_to_deck,
     create_deck,
+    enhance_deck_slide_material,
     generate_deck,
     generate_deck_outline_payload,
     generate_deck_sample,
@@ -59,6 +65,7 @@ DECK_SOURCE_SUPPORTED_NODE_TYPES = frozenset(
         WorkflowNodeType.COPY_GENERATION,
         WorkflowNodeType.REFERENCE_IMAGE,
         WorkflowNodeType.IMAGE_GENERATION,
+        WorkflowNodeType.IMAGE_ENHANCE,
         WorkflowNodeType.TAIL_SPLITTER,
     }
 )
@@ -456,6 +463,10 @@ def create_or_replace_deck_node_outline(
     section_pages: bool | None = None,
     per_group_image_cap: int | None = None,
     slide_context: list[dict[str, Any]] | None = None,
+    text_generation_config_mode: str | None = None,
+    text_generation_config_id: str | None = None,
+    image_generation_config_mode: str | None = None,
+    image_generation_config_id: str | None = None,
 ) -> Deck:
     config = dict(deck_node.config_json or {})
     selected_slide_count_mode = _normalized_slide_count_mode(slide_count_mode or config.get("slide_count_mode"))
@@ -496,6 +507,34 @@ def create_or_replace_deck_node_outline(
 
     manifest_payload = manifest.model_dump()
     selected_resource_group_id = resource_group_id or _optional_text(config.get("resource_group_id"))
+    _merge_deck_generation_config_selection(
+        config,
+        purpose="text",
+        mode=text_generation_config_mode,
+        generation_config_id=text_generation_config_id,
+    )
+    _merge_deck_generation_config_selection(
+        config,
+        purpose="image",
+        mode=image_generation_config_mode,
+        generation_config_id=image_generation_config_id,
+    )
+    text_selection = require_deck_generation_config_selection(
+        session,
+        raw_config=config,
+        purpose="text",
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        resource_group_id=selected_resource_group_id,
+    )
+    require_deck_generation_config_selection(
+        session,
+        raw_config=config,
+        purpose="image",
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        resource_group_id=selected_resource_group_id,
+    )
     selected_title = title or _optional_text(config.get("title"))
     selected_style_key = style_key or _optional_text(config.get("style_key"))
     merged_source_input = _outline_source_input(
@@ -523,6 +562,7 @@ def create_or_replace_deck_node_outline(
             style_key=selected_style_key,
             workflow_node_id=deck_node.id,
             source_manifest_json=manifest_payload,
+            generation_config_selection=text_selection,
         )
         deck.status = DeckStatus.OUTLINE_CONFIRMED
     else:
@@ -534,6 +574,7 @@ def create_or_replace_deck_node_outline(
             actor_is_admin=actor_is_admin,
             source_input=merged_source_input,
             max_slides=selected_max_slides,
+            generation_config_selection=text_selection,
         )
         for slide in list(existing_deck.slides):
             session.delete(slide)
@@ -626,6 +667,14 @@ def generate_deck_node_sample(
     deck_node: WorkflowNode,
 ) -> Deck:
     deck = _deck_for_node_or_raise(session, workflow=workflow, deck_node=deck_node)
+    require_deck_generation_config_selection(
+        session,
+        raw_config=deck_node.config_json,
+        purpose="image",
+        actor_user_id=workflow.inspiration.owner_user_id,
+        actor_is_admin=bool(workflow.inspiration.owner and workflow.inspiration.owner.is_admin),
+        resource_group_id=deck.resource_group_id,
+    )
     generate_deck_sample(session, deck.id)
     deck = get_deck_or_raise(session, deck.id)
     _sync_deck_node_output(session, workflow=workflow, deck_node=deck_node, deck=deck, last_action="sample")
@@ -639,6 +688,14 @@ def generate_deck_node_deck(
     deck_node: WorkflowNode,
 ) -> Deck:
     deck = _deck_for_node_or_raise(session, workflow=workflow, deck_node=deck_node)
+    require_deck_generation_config_selection(
+        session,
+        raw_config=deck_node.config_json,
+        purpose="image",
+        actor_user_id=workflow.inspiration.owner_user_id,
+        actor_is_admin=bool(workflow.inspiration.owner and workflow.inspiration.owner.is_admin),
+        resource_group_id=deck.resource_group_id,
+    )
     deck = generate_deck(session, deck.id)
     _sync_deck_node_output(session, workflow=workflow, deck_node=deck_node, deck=deck, last_action="generate")
     return deck
@@ -683,6 +740,14 @@ def regenerate_deck_node_slide(
 ) -> Any:
     deck = _deck_for_node_or_raise(session, workflow=workflow, deck_node=deck_node)
     _ensure_slide_belongs_to_deck(session, slide_id=slide_id, deck_id=deck.id)
+    require_deck_generation_config_selection(
+        session,
+        raw_config=deck_node.config_json,
+        purpose="image",
+        actor_user_id=workflow.inspiration.owner_user_id,
+        actor_is_admin=bool(workflow.inspiration.owner and workflow.inspiration.owner.is_admin),
+        resource_group_id=deck.resource_group_id,
+    )
     slide = regenerate_deck_slide(session, slide_id)
     _sync_deck_node_output(session, workflow=workflow, deck_node=deck_node, deck=deck, last_action="regenerate_slide")
     return slide
@@ -698,8 +763,49 @@ def generate_deck_node_slide_speaker_notes(
 ) -> Any:
     deck = _deck_for_node_or_raise(session, workflow=workflow, deck_node=deck_node)
     _ensure_slide_belongs_to_deck(session, slide_id=slide_id, deck_id=deck.id)
-    slide = generate_deck_slide_speaker_notes(session, slide_id, actor_user_id=actor_user_id)
+    selection = require_deck_generation_config_selection(
+        session,
+        raw_config=deck_node.config_json,
+        purpose="text",
+        actor_user_id=workflow.inspiration.owner_user_id,
+        actor_is_admin=bool(workflow.inspiration.owner and workflow.inspiration.owner.is_admin),
+        resource_group_id=deck.resource_group_id,
+    )
+    slide = generate_deck_slide_speaker_notes(
+        session,
+        slide_id,
+        actor_user_id=actor_user_id,
+        generation_config_selection=selection,
+    )
     _sync_deck_node_output(session, workflow=workflow, deck_node=deck_node, deck=deck, last_action="speaker_notes")
+    return slide
+
+
+def enhance_deck_node_slide_material(
+    session: Session,
+    *,
+    workflow: InspirationWorkflow,
+    deck_node: WorkflowNode,
+    slide_id: str,
+    prompt: str | None = None,
+) -> Any:
+    deck = _deck_for_node_or_raise(session, workflow=workflow, deck_node=deck_node)
+    _ensure_slide_belongs_to_deck(session, slide_id=slide_id, deck_id=deck.id)
+    selection = require_deck_generation_config_selection(
+        session,
+        raw_config=deck_node.config_json,
+        purpose="image",
+        actor_user_id=workflow.inspiration.owner_user_id,
+        actor_is_admin=bool(workflow.inspiration.owner and workflow.inspiration.owner.is_admin),
+        resource_group_id=deck.resource_group_id,
+    )
+    slide = enhance_deck_slide_material(
+        session,
+        slide_id=slide_id,
+        prompt=prompt,
+        generation_config_selection=selection,
+    )
+    _sync_deck_node_output(session, workflow=workflow, deck_node=deck_node, deck=deck, last_action="enhance_material")
     return slide
 
 
@@ -766,6 +872,56 @@ def bind_deck_node_slide_material(
     )
     session.refresh(slide)
     return slide
+
+
+def unbind_deck_node_slide_material(
+    session: Session,
+    *,
+    workflow: InspirationWorkflow,
+    deck_node: WorkflowNode,
+    slide_id: str,
+) -> Any:
+    from inspiration_one_backend.application.decks import clear_deck_slide_material
+
+    deck = _deck_for_node_or_raise(session, workflow=workflow, deck_node=deck_node)
+    _ensure_slide_belongs_to_deck(session, slide_id=slide_id, deck_id=deck.id)
+    slide = clear_deck_slide_material(session, slide_id)
+    _remove_slide_binding_config(deck_node, slide_id=slide.id)
+    _sync_deck_node_output(
+        session,
+        workflow=workflow,
+        deck_node=deck_node,
+        deck=deck,
+        last_action="unbind_slide_material",
+    )
+    session.refresh(slide)
+    return slide
+
+
+def _remove_slide_binding_config(deck_node: WorkflowNode, *, slide_id: str) -> None:
+    config = dict(deck_node.config_json or {})
+    raw_bindings = config.get("slide_bindings")
+    if not isinstance(raw_bindings, dict):
+        return
+    slide_bindings = dict(raw_bindings)
+    slide_bindings.pop(slide_id, None)
+    config["slide_bindings"] = slide_bindings
+    deck_node.config_json = config
+
+
+def _merge_deck_generation_config_selection(
+    config: dict[str, Any],
+    *,
+    purpose: str,
+    mode: str | None,
+    generation_config_id: str | None,
+) -> None:
+    mode_key, id_key = deck_generation_config_keys_for_purpose(purpose)
+    normalized_mode = _optional_text(mode)
+    if normalized_mode is not None:
+        config[mode_key] = "manual" if normalized_mode == "manual" else "auto"
+    if generation_config_id is not None:
+        config[id_key] = _optional_text(generation_config_id)
 
 
 def _existing_deck_for_node(
@@ -1951,7 +2107,7 @@ def _deck_node_output_snapshot(
             **existing_output,
             "deck_id": deck_id,
             "deck_title": deck.title if deck is not None else existing_output.get("deck_title"),
-            "deck_status": deck.status.value if deck is not None else existing_output.get("deck_status"),
+            "deck_status": derived_deck_status(deck).value if deck is not None else existing_output.get("deck_status"),
             "slide_count": len(deck.slides) if deck is not None else existing_output.get("slide_count"),
             "generated_slide_count": generated_slide_count,
             "source_fingerprint": manifest.source_fingerprint,
