@@ -206,6 +206,7 @@ class GenerationConfigResponse(BaseModel):
     state: GenerationConfigStateResponse | None = None
     today_stat: GenerationConfigDailyStatResponse | None = None
     latest_test_result: GenerationConfigTestResultResponse | None = None
+    provider_max_dimension: int | None = None
 
 
 class GenerationConfigOptionResponse(BaseModel):

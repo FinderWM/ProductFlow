@@ -32,6 +32,7 @@ class GenerationConfigSelection:
     mode: GenerationConfigMode = "auto"
     generation_config_id: str | None = None
     resource_group_id: str | None = None
+    required_max_dimension: int | None = None
 
 
 @dataclass(slots=True)
@@ -91,6 +92,7 @@ def claim_runtime_generation_config(
             purpose=purpose,
             resource_group_id=resolved_selection.resource_group_id,
             generation_config_id=generation_config_id_for_claim(resolved_selection),
+            required_max_dimension=resolved_selection.required_max_dimension,
         )
         if claim is None:
             if owns_session:

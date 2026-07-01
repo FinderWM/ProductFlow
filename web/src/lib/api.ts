@@ -1594,3 +1594,22 @@ export const api = {
     return request(`/api/deck-slides/${slideId}/resource-library`, { method: "POST" });
   },
 };
+
+/**
+ * Compute the maximum dimension supported by a resource group based on its enabled configs.
+ * Returns the highest provider_max_dimension among configs, or globalMax if no configs exist.
+ */
+export function resourceGroupMaxDimension(
+  configs: GenerationConfig[],
+  resourceGroupId: string,
+  globalMax: number,
+): number {
+  const groupConfigs = configs.filter(
+    (c) => c.resource_group_ids.includes(resourceGroupId) && c.enabled,
+  );
+  if (groupConfigs.length === 0) return globalMax;
+  return Math.max(
+    ...groupConfigs.map((c) => c.provider_max_dimension ?? globalMax),
+  );
+}
+

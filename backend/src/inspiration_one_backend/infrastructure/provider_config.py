@@ -61,6 +61,12 @@ def _as_aware_utc(value: datetime) -> datetime:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderCapabilities:
+    """Provider-specific capability constraints."""
+    image_max_dimension: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TextStructuredOutputConfig:
     enabled: bool = False
     mode: Literal["json_object", "json_schema"] = TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA
@@ -126,6 +132,92 @@ class GenerationConfigStatusSummary:
     today_failure_count: int
     today_text_attempt_count: int
     today_image_attempt_count: int
+
+
+def get_provider_capabilities(provider_profile: ProviderProfile | None) -> ProviderCapabilities:
+    """Extract provider capabilities from profile config_json.
+
+    Args:
+        provider_profile: The provider profile, or None for mock providers.
+
+    Returns:
+        ProviderCapabilities instance with parsed values.
+    """
+    if provider_profile is None:
+        return ProviderCapabilities()
+
+    capabilities_dict = provider_profile.config_json.get("capabilities", {})
+    return ProviderCapabilities(
+        image_max_dimension=capabilities_dict.get("image_max_dimension")
+    )
+
+
+def resolve_effective_max_dimension(provider_profile: ProviderProfile | None, global_max: int) -> int:
+    """Resolve the effective maximum dimension for image generation.
+
+    Args:
+        provider_profile: The provider profile, or None for mock providers.
+        global_max: The global maximum dimension from runtime config.
+
+    Returns:
+        The minimum of provider max (or global if unset) and global max.
+    """
+    caps = get_provider_capabilities(provider_profile)
+    provider_max = caps.image_max_dimension
+    return min(provider_max or global_max, global_max)
+
+
+def parse_image_size_dimensions(size: str) -> tuple[int, int]:
+    """Parse normalized image size string into (width, height) tuple.
+
+    Args:
+        size: Normalized size string like "1024x768".
+
+    Returns:
+        Tuple of (width, height).
+
+    Raises:
+        ValueError: If the size string format is invalid.
+    """
+    parts = size.split("x")
+    if len(parts) != 2:
+        raise ValueError(f"Invalid image size format: {size}")
+    try:
+        width = int(parts[0])
+        height = int(parts[1])
+        return (width, height)
+    except ValueError as e:
+        raise ValueError(f"Invalid image size dimensions: {size}") from e
+
+
+def enforce_generation_config_resolution(
+    width: int,
+    height: int,
+    generation_config: GenerationConfig,
+    provider_profile: ProviderProfile | None,
+    global_max: int,
+) -> None:
+    """Validate that requested resolution does not exceed provider/global limits.
+
+    Args:
+        width: Requested image width.
+        height: Requested image height.
+        generation_config: The generation config being used.
+        provider_profile: The provider profile, or None for mock.
+        global_max: The global maximum dimension from runtime config.
+
+    Raises:
+        ValueError: If the requested resolution exceeds limits.
+    """
+    effective_max = resolve_effective_max_dimension(provider_profile, global_max)
+    requested_max = max(width, height)
+
+    if requested_max > effective_max:
+        if provider_profile is not None:
+            msg = f"供应商 {provider_profile.name} 最大分辨率限制为 {effective_max}，请求 {requested_max} 超限"
+        else:
+            msg = f"全局最大分辨率限制为 {global_max}，请求 {requested_max} 超限"
+        raise ValueError(msg)
 
 
 def ensure_provider_config_bootstrapped(session: Session | None = None, *, commit: bool = True) -> None:
@@ -937,16 +1029,24 @@ def claim_generation_config(
     purpose: str,
     resource_group_id: str | None = None,
     generation_config_id: str | None = None,
+    required_max_dimension: int | None = None,
     now: datetime | None = None,
 ) -> GenerationConfigClaim | None:
     ensure_provider_config_bootstrapped(session, commit=False)
     resolved_now = now or datetime.now(UTC)
     resource_group = require_generation_resource_group(session, resource_group_id, require_enabled=True)
+
+    # Get global max dimension for resolution filtering
+    runtime_settings = get_runtime_settings(session)
+    global_max = runtime_settings.image_generation_max_dimension
+
     candidates = _candidate_generation_configs(
         session,
         purpose=purpose,
         resource_group_id=resource_group.id,
         generation_config_id=generation_config_id,
+        required_max_dimension=required_max_dimension,
+        global_max=global_max,
         now=resolved_now,
     )
     for generation_config, score in candidates:
@@ -1635,6 +1735,8 @@ def _candidate_generation_configs(
     purpose: str,
     resource_group_id: str,
     generation_config_id: str | None,
+    required_max_dimension: int | None,
+    global_max: int,
     now: datetime,
 ) -> list[tuple[GenerationConfig, float]]:
     if purpose not in PROVIDER_PURPOSES:
@@ -1667,6 +1769,13 @@ def _candidate_generation_configs(
     for generation_config in configs:
         if not _generation_config_candidate_available(generation_config, now=now, manual=bool(generation_config_id)):
             continue
+
+        # Filter by required_max_dimension if specified
+        if required_max_dimension is not None:
+            effective_max = resolve_effective_max_dimension(generation_config.provider_profile, global_max)
+            if effective_max < required_max_dimension:
+                continue
+
         score = _generation_config_score(generation_config, stat=today_stats_by_config.get(generation_config.id))
         candidates.append((generation_config, score))
     candidates.sort(key=lambda item: (item[1], item[0].priority, item[0].created_at), reverse=True)

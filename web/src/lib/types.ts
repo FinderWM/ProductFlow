@@ -1567,6 +1567,7 @@ export interface GenerationConfig {
   state: GenerationConfigState | null;
   today_stat: GenerationConfigDailyStat | null;
   latest_test_result: GenerationConfigTestResult | null;
+  provider_max_dimension: number | null;
 }
 
 export interface GenerationConfigOption {

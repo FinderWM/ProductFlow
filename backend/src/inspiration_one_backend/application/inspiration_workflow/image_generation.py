@@ -63,6 +63,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     IMAGE_PURPOSE,
     generation_config_resource_group_ids,
     is_real_image_provider_kind,
+    parse_image_size_dimensions,
     resolve_image_provider_config,
 )
 from inspiration_one_backend.infrastructure.storage import LocalStorage
@@ -319,10 +320,23 @@ def _workflow_image_generation_config_selection_for_execution(
             retry_hint="check_settings",
             failure_category="invalid_node_config",
         ) from exc
+
+    # Parse size from node config to compute required_max_dimension
+    required_max_dimension = None
+    raw_size = image_size_from_config(node.config_json)
+    if raw_size:
+        try:
+            width, height = parse_image_size_dimensions(raw_size)
+            required_max_dimension = max(width, height)
+        except ValueError:
+            # Invalid size format will be caught later by provider validation
+            pass
+
     authorized_selection = GenerationConfigSelection(
         mode=selection.mode,
         generation_config_id=selection.generation_config_id,
         resource_group_id=group.id,
+        required_max_dimension=required_max_dimension,
     )
     _validate_manual_image_generation_config_selection(session, selection=authorized_selection)
     return authorized_selection

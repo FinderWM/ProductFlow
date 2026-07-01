@@ -186,7 +186,7 @@ def create_enhance_job(
         actor_is_admin=actor_is_admin,
         storage=storage,
     )
-    normalized_params = validate_enhance_params(strategy=strategy, params=params, source=source)
+    normalized_params, required_max_dimension = validate_enhance_params(strategy=strategy, params=params, source=source)
     selection = _authorized_image_generation_config_selection(
         session,
         resource_group_id=resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -194,6 +194,7 @@ def create_enhance_job(
         generation_config_id=generation_config_id,
         actor_user_id=actor_user_id,
         actor_is_admin=actor_is_admin,
+        required_max_dimension=required_max_dimension,
     )
     job = EnhanceJob(
         owner_user_id=source.owner_user_id,
@@ -728,7 +729,8 @@ def validate_enhance_params(
     strategy: EnhanceStrategy,
     params: dict[str, Any],
     source: LoadedEnhanceSource,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], int]:
+    """Validate enhance params and return (normalized_params, required_max_dimension)."""
     settings = get_runtime_settings()
     if strategy == EnhanceStrategy.DIRECT:
         target_width = _positive_int(params.get("target_width"), "目标宽度")
@@ -736,7 +738,8 @@ def validate_enhance_params(
         max_dim = int(settings.image_generation_max_dimension)
         if target_width > max_dim or target_height > max_dim:
             raise BusinessValidationError(f"目标尺寸不能超过生图最大单边 {max_dim}")
-        return {"target_width": target_width, "target_height": target_height}
+        required_max_dimension = max(target_width, target_height)
+        return ({"target_width": target_width, "target_height": target_height}, required_max_dimension)
 
     if strategy == EnhanceStrategy.TILED:
         scale = _positive_int(params.get("scale"), "增强倍数")
@@ -752,7 +755,8 @@ def validate_enhance_params(
         final_width = source.width * scale
         final_height = source.height * scale
         _validate_final_resource_bounds(width=final_width, height=final_height, byte_count=0)
-        return {"scale": scale, "tile_base_size": tile_base_size, "overlap_pct": overlap_pct}
+        required_max_dimension = max(final_width, final_height)
+        return ({"scale": scale, "tile_base_size": tile_base_size, "overlap_pct": overlap_pct}, required_max_dimension)
 
     raise BusinessValidationError("暂不支持该增强策略")
 
@@ -1086,6 +1090,7 @@ def _authorized_image_generation_config_selection(
     generation_config_id: str | None,
     actor_user_id: str,
     actor_is_admin: bool,
+    required_max_dimension: int | None = None,
 ) -> GenerationConfigSelection:
     normalized_mode = (generation_config_mode or "auto").strip().lower()
     if normalized_mode not in {"auto", "manual"}:
@@ -1101,6 +1106,7 @@ def _authorized_image_generation_config_selection(
         mode="manual" if normalized_mode == "manual" else "auto",
         generation_config_id=normalized_id if normalized_mode == "manual" else None,
         resource_group_id=group.id,
+        required_max_dimension=required_max_dimension,
     )
     if selection.mode == "manual":
         if selection.generation_config_id is None:

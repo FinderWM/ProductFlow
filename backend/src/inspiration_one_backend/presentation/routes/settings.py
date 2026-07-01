@@ -537,7 +537,10 @@ def _serialize_generation_config(
     today_stats: dict[str, GenerationConfigDailyStat],
     latest_test_results: dict[str, GenerationConfigTestResult] | None = None,
 ) -> GenerationConfigResponse:
+    from inspiration_one_backend.infrastructure.provider_config import get_provider_capabilities
+
     resource_group_ids = generation_config_resource_group_ids(generation_config)
+    caps = get_provider_capabilities(generation_config.provider_profile)
     return GenerationConfigResponse(
         id=generation_config.id,
         resource_group_id=resource_group_ids[0] if resource_group_ids else None,
@@ -563,6 +566,7 @@ def _serialize_generation_config(
         latest_test_result=_serialize_generation_config_test_result(
             (latest_test_results or {}).get(generation_config.id)
         ),
+        provider_max_dimension=caps.image_max_dimension,
     )
 
 
