@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./api";
+import { api, resourceGroupMaxDimension } from "./api";
+import type { GenerationConfig } from "./types";
 
 function inspirationDetailResponse() {
   return new Response(
@@ -159,5 +160,141 @@ describe("api.getCurrentWeather", () => {
       observed_at: "2026-06-07T10:30",
       timezone: "Asia/Shanghai",
     });
+  });
+});
+
+describe("resourceGroupMaxDimension", () => {
+  const mockConfigs: GenerationConfig[] = [
+    {
+      id: "config-1",
+      resource_group_id: "group-a",
+      resource_group_ids: ["group-a"],
+      purpose: "image",
+      name: "Config 1024",
+      provider_kind: "openai_images",
+      provider_profile_id: "provider-1",
+      provider_max_dimension: 1024,
+      model_settings: { model: "dall-e-3" },
+      config: {},
+      enabled: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    },
+    {
+      id: "config-2",
+      resource_group_id: "group-a",
+      resource_group_ids: ["group-a"],
+      purpose: "image",
+      name: "Config 2048",
+      provider_kind: "openai_images",
+      provider_profile_id: "provider-2",
+      provider_max_dimension: 2048,
+      model_settings: { model: "dall-e-3" },
+      config: {},
+      enabled: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    },
+    {
+      id: "config-3",
+      resource_group_id: "group-a",
+      resource_group_ids: ["group-a"],
+      purpose: "image",
+      name: "Config 3840",
+      provider_kind: "openai_images",
+      provider_profile_id: "provider-3",
+      provider_max_dimension: 3840,
+      model_settings: { model: "dall-e-3" },
+      config: {},
+      enabled: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    },
+    {
+      id: "config-4",
+      resource_group_id: "group-b",
+      resource_group_ids: ["group-b"],
+      purpose: "image",
+      name: "Config 4096",
+      provider_kind: "openai_images",
+      provider_profile_id: "provider-4",
+      provider_max_dimension: 4096,
+      model_settings: { model: "dall-e-3" },
+      config: {},
+      enabled: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    },
+    {
+      id: "config-5",
+      resource_group_id: "group-a",
+      resource_group_ids: ["group-a"],
+      purpose: "image",
+      name: "Config Disabled",
+      provider_kind: "openai_images",
+      provider_profile_id: "provider-5",
+      provider_max_dimension: 8192,
+      model_settings: { model: "dall-e-3" },
+      config: {},
+      enabled: false,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    },
+  ];
+
+  it("aggregates max dimension across multiple configs", () => {
+    const result = resourceGroupMaxDimension(mockConfigs, "group-a", 3840);
+    expect(result).toBe(3840);
+  });
+
+  it("returns globalMax when group is empty", () => {
+    const result = resourceGroupMaxDimension(mockConfigs, "group-empty", 3840);
+    expect(result).toBe(3840);
+  });
+
+  it("uses globalMax when providerMaxDimension is null", () => {
+    const configsWithNull: GenerationConfig[] = [
+      {
+        ...mockConfigs[0],
+        resource_group_ids: ["group-a"],
+        provider_max_dimension: null,
+      },
+    ];
+    const result = resourceGroupMaxDimension(configsWithNull, "group-a", 3840);
+    expect(result).toBe(3840);
+  });
+
+  it("excludes disabled configs from aggregation", () => {
+    const result = resourceGroupMaxDimension(mockConfigs, "group-a", 4096);
+    expect(result).toBe(3840);
+  });
+
+  it("returns max from different resource group", () => {
+    const result = resourceGroupMaxDimension(mockConfigs, "group-b", 3840);
+    expect(result).toBe(4096);
+  });
+
+  it("handles all configs with null provider_max_dimension", () => {
+    const configsAllNull: GenerationConfig[] = [
+      { ...mockConfigs[0], resource_group_ids: ["group-a"], provider_max_dimension: null },
+      { ...mockConfigs[1], resource_group_ids: ["group-a"], provider_max_dimension: null },
+    ];
+    const result = resourceGroupMaxDimension(configsAllNull, "group-a", 2048);
+    expect(result).toBe(2048);
+  });
+
+  it("handles empty config list", () => {
+    const result = resourceGroupMaxDimension([], "group-a", 3840);
+    expect(result).toBe(3840);
+  });
+
+  it("returns correct max when some configs have null", () => {
+    const mixedConfigs: GenerationConfig[] = [
+      { ...mockConfigs[0], resource_group_ids: ["group-a"], provider_max_dimension: 1024 },
+      { ...mockConfigs[1], resource_group_ids: ["group-a"], provider_max_dimension: null },
+      { ...mockConfigs[2], resource_group_ids: ["group-a"], provider_max_dimension: 2048 },
+    ];
+    const result = resourceGroupMaxDimension(mixedConfigs, "group-a", 3840);
+    expect(result).toBe(3840);
   });
 });
