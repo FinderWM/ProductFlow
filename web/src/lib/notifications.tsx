@@ -44,6 +44,7 @@ export const MIN_NOTIFICATION_AUTO_CLOSE_MS = 1000;
 export const MAX_NOTIFICATION_AUTO_CLOSE_MS = 60000;
 const NOTIFICATION_COLLAPSE_THRESHOLD = 2;
 const MAX_NOTIFICATION_COUNT = 12;
+const NOTIFICATION_AUTO_CLOSE_MS_TTL = 5 * 60 * 1000; // 5 分钟过期
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
@@ -93,21 +94,56 @@ export function normalizeNotificationAutoCloseMs(value: unknown): number {
   return Math.min(MAX_NOTIFICATION_AUTO_CLOSE_MS, Math.max(MIN_NOTIFICATION_AUTO_CLOSE_MS, Math.round(parsed)));
 }
 
+interface NotificationAutoCloseMsCache {
+  value: number;
+  fetchedAt: number;
+}
+
 export function readNotificationAutoCloseMs(): number {
   if (typeof window === "undefined") {
     return DEFAULT_NOTIFICATION_AUTO_CLOSE_MS;
   }
-  return normalizeNotificationAutoCloseMs(window.localStorage.getItem(NOTIFICATION_AUTO_CLOSE_MS_STORAGE_KEY));
+  try {
+    const raw = window.localStorage.getItem(NOTIFICATION_AUTO_CLOSE_MS_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_NOTIFICATION_AUTO_CLOSE_MS;
+    }
+    // 尝试解析为带过期时间的缓存格式
+    const cache = JSON.parse(raw) as NotificationAutoCloseMsCache;
+    if (typeof cache === "object" && cache !== null && "value" in cache && "fetchedAt" in cache) {
+      const now = Date.now();
+      const isExpired = now > cache.fetchedAt + NOTIFICATION_AUTO_CLOSE_MS_TTL;
+      if (!isExpired) {
+        return normalizeNotificationAutoCloseMs(cache.value);
+      }
+      // 过期了，返回默认值，后续会从后端重新拉取
+      return DEFAULT_NOTIFICATION_AUTO_CLOSE_MS;
+    }
+    // 旧格式（纯数字），迁移到新格式
+    const legacyValue = normalizeNotificationAutoCloseMs(raw);
+    writeNotificationAutoCloseMs(legacyValue);
+    return legacyValue;
+  } catch {
+    // JSON 解析失败，可能是旧格式纯数字
+    const raw = window.localStorage.getItem(NOTIFICATION_AUTO_CLOSE_MS_STORAGE_KEY);
+    const legacyValue = normalizeNotificationAutoCloseMs(raw);
+    writeNotificationAutoCloseMs(legacyValue);
+    return legacyValue;
+  }
 }
 
 export function writeNotificationAutoCloseMs(value: number): void {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(NOTIFICATION_AUTO_CLOSE_MS_STORAGE_KEY, String(normalizeNotificationAutoCloseMs(value)));
+  const cache: NotificationAutoCloseMsCache = {
+    value: normalizeNotificationAutoCloseMs(value),
+    fetchedAt: Date.now(),
+  };
+  window.localStorage.setItem(NOTIFICATION_AUTO_CLOSE_MS_STORAGE_KEY, JSON.stringify(cache));
 }
 
-function notificationFromInput(input: NotificationInput): AppNotification {
+function notificationFromInput(input: NotificationInput, fallbackAutoCloseMs?: number): AppNotification {
   const autoClose = input.autoClose ?? false;
   const body = input.body?.trim() || null;
   const fallbackBodyLines: NotificationBodyLine[] | undefined = body
@@ -127,7 +163,9 @@ function notificationFromInput(input: NotificationInput): AppNotification {
     bodyLines,
     variant: input.variant ?? "info",
     autoClose,
-    autoCloseMs: normalizeNotificationAutoCloseMs(input.autoCloseMs ?? readNotificationAutoCloseMs()),
+    autoCloseMs: normalizeNotificationAutoCloseMs(
+      input.autoCloseMs ?? fallbackAutoCloseMs ?? readNotificationAutoCloseMs()
+    ),
     createdAt: Date.now(),
     dedupeKey: input.dedupeKey?.trim() || null,
   };
@@ -291,6 +329,46 @@ function WorkspaceNotificationPopover({
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [defaultAutoCloseMs, setDefaultAutoCloseMs] = useState(readNotificationAutoCloseMs);
+
+  // 监听 localStorage 变化（跨标签页同步）
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === NOTIFICATION_AUTO_CLOSE_MS_STORAGE_KEY) {
+        setDefaultAutoCloseMs(readNotificationAutoCloseMs());
+      }
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+  // 定期检查缓存是否过期
+  useEffect(() => {
+    const checkExpiration = () => {
+      try {
+        const raw = window.localStorage.getItem(NOTIFICATION_AUTO_CLOSE_MS_STORAGE_KEY);
+        if (!raw) return;
+        const cache = JSON.parse(raw) as NotificationAutoCloseMsCache;
+        if (typeof cache === "object" && cache !== null && "fetchedAt" in cache) {
+          const now = Date.now();
+          const isExpired = now > cache.fetchedAt + NOTIFICATION_AUTO_CLOSE_MS_TTL;
+          if (isExpired) {
+            // 过期了，更新状态触发重新读取
+            setDefaultAutoCloseMs(DEFAULT_NOTIFICATION_AUTO_CLOSE_MS);
+          }
+        }
+      } catch {
+        // 忽略解析错误
+      }
+    };
+
+    // 启动时检查一次
+    checkExpiration();
+
+    // 每分钟检查一次
+    const timer = window.setInterval(checkExpiration, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const dismiss = useCallback((notificationId: string) => {
     setNotifications((current) => current.filter((notification) => notification.id !== notificationId));
@@ -301,7 +379,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const notify = useCallback((input: NotificationInput) => {
-    const nextNotification = notificationFromInput(input);
+    const nextNotification = notificationFromInput(input, defaultAutoCloseMs);
     setNotifications((current) => {
       if (nextNotification.dedupeKey) {
         const existingIndex = current.findIndex((item) => item.dedupeKey === nextNotification.dedupeKey);
@@ -317,7 +395,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       return [nextNotification, ...current].slice(0, MAX_NOTIFICATION_COUNT);
     });
     return nextNotification.id;
-  }, []);
+  }, [defaultAutoCloseMs]);
 
   useEffect(() => {
     const timers = notifications
