@@ -160,11 +160,14 @@ def resolve_effective_max_dimension(provider_profile: ProviderProfile | None, gl
         global_max: The global maximum dimension from runtime config.
 
     Returns:
-        The minimum of provider max (or global if unset) and global max.
+        Provider max (clamped to global) if set, otherwise global max.
+        When provider_max is None, the provider has no limit (uses global max as ceiling).
     """
     caps = get_provider_capabilities(provider_profile)
     provider_max = caps.image_max_dimension
-    return min(provider_max or global_max, global_max)
+    if provider_max is None:
+        return global_max
+    return min(provider_max, global_max)
 
 
 def parse_image_size_dimensions(size: str) -> tuple[int, int]:

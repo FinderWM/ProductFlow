@@ -1597,7 +1597,8 @@ export const api = {
 
 /**
  * Compute the maximum dimension supported by a resource group based on its enabled configs.
- * Returns the highest provider_max_dimension among configs, or globalMax if no configs exist.
+ * Returns the highest provider_max_dimension among configs.
+ * When provider_max_dimension is null, the provider has no limit (uses globalMax as ceiling).
  */
 export function resourceGroupMaxDimension(
   configs: GenerationConfig[],

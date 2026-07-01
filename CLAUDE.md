@@ -75,14 +75,14 @@ Runtime config (DB-overridable via `/settings`): prompt templates, image tool pa
 
 ### Resolution Capability System
 
-**Backend**: Provider profiles store `image_max_dimension` (int | null) in `config_json.capabilities`. When claiming a generation config, the system filters by `required_max_dimension` parameter. Effective limit is `min(provider_max ?? global, global)`. Manual mode uses defensive validation at execution time to prevent bypassing claim filtering.
+**Backend**: Provider profiles store `image_max_dimension` (int | null) in `config_json.capabilities`. When `null`, the provider has no resolution limit (only global ceiling applies). When claiming a generation config, the system filters by `required_max_dimension` parameter. Effective limit: `min(provider_max, global)` if provider_max is set, otherwise `global`. Manual mode uses defensive validation at execution time to prevent bypassing claim filtering.
 
 **Frontend**: `ImageChatPage` dynamically calculates `effectiveMaxDimension`:
-- **Manual mode**: uses selected config's `provider_max_dimension`
-- **Auto mode**: aggregates max across all enabled configs in the resource group via `resourceGroupMaxDimension()`
+- **Manual mode**: uses selected config's `provider_max_dimension` (null = no limit, use global)
+- **Auto mode**: aggregates max across all enabled configs in the resource group via `resourceGroupMaxDimension()` (null configs treated as no limit)
 - Final limit: `min(computed_max, global_max)`
 
-Settings UI (`ProvidersSection`) allows admins to edit `image_max_dimension` per provider. Leave empty to follow global setting.
+Settings UI (`ProvidersSection`) allows admins to edit `image_max_dimension` per provider. **Leave empty to indicate no provider-specific limit** (only global ceiling applies).
 
 ## Code Style
 
