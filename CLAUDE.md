@@ -35,6 +35,12 @@ Four-layer DDD:
 
 Key patterns:
 - `config.py` — settings from env (`get_settings()`) + DB overrides (`get_runtime_settings()`). Business config keys are defined as `ConfigDefinition` tuples and can be mutated at runtime via `/settings` API, stored in `app_settings` table.
+- `provider_config.py` — provider capabilities and generation config scheduling:
+  - `ProviderProfile.config_json.capabilities.image_max_dimension` (int | null) — provider-level resolution limit
+  - `get_provider_capabilities()` / `resolve_effective_max_dimension()` — capability resolution helpers
+  - `enforce_generation_config_resolution()` — defensive validation for manual mode
+  - `claim_generation_config(..., required_max_dimension)` — filters candidates by resolution capability
+  - Effective max dimension: `min(provider_max ?? global, global)`
 - `main.py` — thin entry point; `create_app()` in `presentation/api.py` wires middleware, routes, and lifespan hooks.
 - `workers.py` — Dramatiq broker entry point; actors are defined under `application/` and `infrastructure/queue.py`.
 - DB sessions via FastAPI dependency `get_db_session()` (gives `Session`, autocommit=False).
@@ -45,6 +51,8 @@ Key patterns:
 - **Pages** (`web/src/pages/`) — route-level components, lazy-loaded in `App.tsx`
 - **Components** (`web/src/components/`) — shared UI: TopNav, ConfirmDialog, ImageDropZone, ImageGenerationSettingsPanel, StatusPill, etc.
 - **Lib** (`web/src/lib/`) — API client (`api.ts`), types, RBAC helpers, i18n, preferences, session context, image tool options, canvas template localization
+  - `resourceGroupMaxDimension(configs, resourceGroupId, globalMax)` — frontend aggregation of provider max dimensions within a resource group
+  - `GenerationConfig.provider_max_dimension` (number | null) — provider's maximum resolution capability
 - State: `@tanstack/react-query` for server state; `SessionStateProvider` context for auth/permissions
 - Routing: `react-router-dom` v7 with menu-based access control via `hasSessionMenu` / `hasSessionApiPermission`
 - Styling: Tailwind CSS 4 with dark mode (`dark:` variants on `<html>`)
@@ -61,7 +69,20 @@ Dramatiq actors handle: workflow runs, image generation, poster rendering, copy 
 ### Config System
 
 `Settings` (env-only): database_url, redis_url, session_secret, admin_access_key, storage backend settings.
+
 Runtime config (DB-overridable via `/settings`): prompt templates, image tool parameters, upload limits, generation queue thresholds, feature flags like `deletion_enabled`.
+- `image_generation_max_dimension` — global maximum resolution limit (default 3840). Provider-level limits in `ProviderProfile.config_json.capabilities.image_max_dimension` can further restrict this on a per-provider basis.
+
+### Resolution Capability System
+
+**Backend**: Provider profiles store `image_max_dimension` (int | null) in `config_json.capabilities`. When claiming a generation config, the system filters by `required_max_dimension` parameter. Effective limit is `min(provider_max ?? global, global)`. Manual mode uses defensive validation at execution time to prevent bypassing claim filtering.
+
+**Frontend**: `ImageChatPage` dynamically calculates `effectiveMaxDimension`:
+- **Manual mode**: uses selected config's `provider_max_dimension`
+- **Auto mode**: aggregates max across all enabled configs in the resource group via `resourceGroupMaxDimension()`
+- Final limit: `min(computed_max, global_max)`
+
+Settings UI (`ProvidersSection`) allows admins to edit `image_max_dimension` per provider. Leave empty to follow global setting.
 
 ## Code Style
 
