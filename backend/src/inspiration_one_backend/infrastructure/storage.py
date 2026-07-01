@@ -368,6 +368,44 @@ class StorageService:
         self._warm_image_variants(relative.as_posix())
         return relative.as_posix()
 
+    def save_enhance_tile(
+        self,
+        output_prefix: str,
+        row: int,
+        col: int,
+        content: bytes,
+        suffix: str = ".png",
+    ) -> str:
+        relative = self._validated_relative_path(output_prefix) / f"tile-{row}-{col}{self._normalized_suffix(suffix)}"
+        self._write_relative(relative, content)
+        return relative.as_posix()
+
+    def save_enhance_final(self, output_prefix: str, content: bytes, suffix: str = ".png") -> str:
+        relative = self._validated_relative_path(output_prefix) / f"final{self._normalized_suffix(suffix)}"
+        self._write_relative(relative, content)
+        self._warm_image_variants(relative.as_posix())
+        return relative.as_posix()
+
+    def save_enhance_input_blob(self, blob_id: str, content: bytes, suffix: str = ".png") -> str:
+        relative = Path("enhance") / "inputs" / blob_id / f"source{self._normalized_suffix(suffix)}"
+        self._write_relative(relative, content)
+        return relative.as_posix()
+
+    def delete_enhance_artifacts(self, job_or_run_id: str) -> None:
+        normalized = job_or_run_id.strip().strip("/")
+        if not normalized:
+            raise ValueError("增强任务标识不能为空")
+        parts = normalized.split("/")
+        if len(parts) == 1:
+            if not _safe_storage_path_segment(normalized) or normalized in {"inputs", "node"}:
+                raise ValueError("增强产物删除前缀无效")
+            self._delete_tree(Path("enhance") / normalized)
+            return
+        if len(parts) == 2 and parts[0] == "node" and _safe_storage_path_segment(parts[1]):
+            self._delete_tree(Path("enhance") / "node" / parts[1])
+            return
+        raise ValueError("增强产物删除前缀无效")
+
     def resolve(self, relative_path: str) -> Path:
         """相对路径转可读的本地路径，防路径穿越攻击。"""
 
@@ -497,6 +535,14 @@ class StorageService:
             raise ValueError("存储路径越界") from exc
         return resolved.relative_to(self.root)
 
+    def _normalized_suffix(self, suffix: str) -> str:
+        normalized = suffix.strip().lower()
+        if not normalized.startswith("."):
+            normalized = f".{normalized}"
+        if Path(normalized).name != normalized or normalized in {"", "."}:
+            raise ValueError("文件后缀无效")
+        return normalized
+
     def _variant_relative_path(self, relative: Path, variant: ImageVariantName) -> Path:
         output_suffix = self._variant_output_suffix()
         return relative.parent / ".variants" / f"{relative.stem}.{variant}{output_suffix}"
@@ -559,6 +605,10 @@ class StorageService:
 
     def _guess_media_type_by_name(self, filename: str) -> str:
         return mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+
+def _safe_storage_path_segment(value: str) -> bool:
+    return bool(value) and value not in {".", ".."} and Path(value).name == value
 
 
 LocalStorage = StorageService

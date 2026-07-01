@@ -19,6 +19,7 @@ from inspiration_one_backend.domain.enums import JobStatus, WorkflowNodeStatus, 
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AppSetting,
+    EnhanceJob,
     WorkflowNode,
     WorkflowNodeRun,
 )
@@ -149,6 +150,31 @@ def test_image_generation_capacity_pool_counts_image_sessions_and_image_nodes(co
     assert generation_running_capacity_available(db_session, pool="text") is True
 
 
+def test_image_generation_capacity_pool_counts_enhance_jobs(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.application.admission import generation_running_capacity_available
+
+    db_session.add(
+        EnhanceJob(
+            owner_user_id="user-1",
+            source_kind="source_asset",
+            source_ref="source-1",
+            source_width=100,
+            source_height=100,
+            source_mime_type="image/png",
+            strategy="direct",
+            params_json={"target_width": 100, "target_height": 100},
+            status=JobStatus.RUNNING,
+            progress_completed=0,
+            progress_total=1,
+        )
+    )
+    db_session.commit()
+    _set_split_generation_caps(db_session, text=1, image=1)
+
+    assert generation_running_capacity_available(db_session, pool="image") is False
+    assert generation_running_capacity_available(db_session, pool="text") is True
+
+
 def test_generation_cap_accepts_and_queues_image_session_generation_task_creation(
     configured_env: Path,
     db_session,
@@ -222,6 +248,31 @@ def test_active_generation_task_count_includes_image_session_generation_tasks(
     assert active_generation_task_count(db_session) == 0
 
 
+def test_active_generation_task_count_includes_enhance_jobs(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.application.admission import active_generation_task_count
+
+    job = EnhanceJob(
+        owner_user_id="user-1",
+        source_kind="source_asset",
+        source_ref="source-1",
+        source_width=100,
+        source_height=100,
+        source_mime_type="image/png",
+        strategy="direct",
+        params_json={"target_width": 100, "target_height": 100},
+        status=JobStatus.QUEUED,
+        progress_completed=0,
+        progress_total=1,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    assert active_generation_task_count(db_session) == 1
+    job.status = JobStatus.SUCCEEDED
+    db_session.commit()
+    assert active_generation_task_count(db_session) == 0
+
+
 def test_generation_queue_overview_and_positions_include_durable_tasks(
     configured_env: Path,
     db_session,
@@ -274,6 +325,51 @@ def test_generation_queue_overview_and_positions_include_durable_tasks(
     assert first_metadata.queued_ahead_count == 0
     assert second_metadata.queue_position is None
     assert second_metadata.queued_ahead_count is None
+
+
+def test_generation_queue_overview_and_positions_include_enhance_jobs(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.application.admission import (
+        get_generation_queue_overview,
+        get_queued_generation_positions,
+    )
+
+    queued = EnhanceJob(
+        owner_user_id="user-1",
+        source_kind="source_asset",
+        source_ref="source-1",
+        source_width=100,
+        source_height=100,
+        source_mime_type="image/png",
+        strategy="direct",
+        params_json={"target_width": 100, "target_height": 100},
+        status=JobStatus.QUEUED,
+        progress_completed=0,
+        progress_total=1,
+    )
+    running = EnhanceJob(
+        owner_user_id="user-1",
+        source_kind="source_asset",
+        source_ref="source-2",
+        source_width=100,
+        source_height=100,
+        source_mime_type="image/png",
+        strategy="direct",
+        params_json={"target_width": 100, "target_height": 100},
+        status=JobStatus.RUNNING,
+        progress_completed=0,
+        progress_total=1,
+    )
+    db_session.add_all([queued, running])
+    db_session.commit()
+
+    overview = get_generation_queue_overview(db_session)
+    positions = get_queued_generation_positions(db_session)
+
+    assert overview.active_count == 2
+    assert overview.running_count == 1
+    assert overview.queued_count == 1
+    assert positions[queued.id] == 1
+    assert running.id not in positions
 
 
 def test_generation_queue_overview_endpoint_returns_public_snapshot(

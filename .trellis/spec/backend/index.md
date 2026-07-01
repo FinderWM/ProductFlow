@@ -24,6 +24,7 @@ These files document the backend conventions that are actually present in this r
 | [Realtime Task Notifications](./realtime-task-notifications.md) | WebSocket + Redis pub/sub task-result notification contract | Filled |
 | [Inspiration Workbench DAG](./inspiration-workflow-dag.md) | Canvas/workflow DAG templates, validation, and user-template contracts | Filled |
 | [Deck (PPT) Generation](./deck-generation.md) | Deck/DeckSlide schema, generation pipeline, image capacity pool, RBAC, runtime config, pptx export | Filled |
+| [Enhance Pipeline](./enhance-pipeline.md) | EnhanceJob model/API, strategy, storage, queue, final upload, and resource-library contracts | Filled |
 
 ---
 
@@ -45,6 +46,8 @@ Use this map when the change is feature-driven rather than file-driven:
   `./inspiration-workflow-dag.md`.
 - Deck/PPT generation (deck schema, outline/style/batch generation, image capacity pool, deck RBAC, deck
   runtime config, pptx export): read `./deck-generation.md` and `./database-guidelines.md`.
+- Image enhancement jobs, Direct/Tiled strategy, final upload, enhance artifacts, or resource-library save from enhance:
+  read `./enhance-pipeline.md`, `./database-guidelines.md`, and `./error-handling.md`.
 
 If a feature is not represented here, update this map in the same change that adds or changes the feature contract.
 

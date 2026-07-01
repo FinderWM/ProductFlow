@@ -13,9 +13,10 @@ from inspiration_one_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
     WORKFLOW_RUN_GENERATION_TASK_CONTRACT,
 )
-from inspiration_one_backend.domain.enums import DeckSlideStatus, WorkflowNodeStatus, WorkflowNodeType
+from inspiration_one_backend.domain.enums import DeckSlideStatus, JobStatus, WorkflowNodeStatus, WorkflowNodeType
 from inspiration_one_backend.infrastructure.db.models import (
     DeckSlide,
+    EnhanceJob,
     ImageSessionGenerationTask,
     WorkflowNode,
     WorkflowNodeRun,
@@ -68,7 +69,12 @@ def _active_async_task_count(session: Session) -> int:
         .select_from(ImageSessionGenerationTask)
         .where(ImageSessionGenerationTask.status.in_(IMAGE_SESSION_GENERATION_TASK_CONTRACT.active_statuses))
     )
-    return int(active_workflow_runs or 0) + int(active_image_session_tasks or 0)
+    active_enhance_jobs = session.scalar(
+        select(func.count())
+        .select_from(EnhanceJob)
+        .where(EnhanceJob.status.in_((JobStatus.QUEUED, JobStatus.RUNNING)))
+    )
+    return int(active_workflow_runs or 0) + int(active_image_session_tasks or 0) + int(active_enhance_jobs or 0)
 
 
 def _running_async_task_count(session: Session) -> int:
@@ -86,7 +92,12 @@ def _running_async_task_count(session: Session) -> int:
         .select_from(ImageSessionGenerationTask)
         .where(ImageSessionGenerationTask.status.in_(IMAGE_SESSION_GENERATION_TASK_CONTRACT.running_statuses))
     )
-    return int(running_workflow_node_runs or 0) + int(running_image_session_tasks or 0)
+    running_enhance_jobs = session.scalar(
+        select(func.count()).select_from(EnhanceJob).where(EnhanceJob.status == JobStatus.RUNNING)
+    )
+    return int(running_workflow_node_runs or 0) + int(running_image_session_tasks or 0) + int(
+        running_enhance_jobs or 0
+    )
 
 
 def _running_workflow_node_count(session: Session, *, node_types: frozenset[WorkflowNodeType]) -> int:
@@ -119,10 +130,14 @@ def _running_image_generation_task_count(session: Session) -> int:
     running_deck_slides = session.scalar(
         select(func.count()).select_from(DeckSlide).where(DeckSlide.slide_status == DeckSlideStatus.RUNNING)
     )
+    running_enhance_jobs = session.scalar(
+        select(func.count()).select_from(EnhanceJob).where(EnhanceJob.status == JobStatus.RUNNING)
+    )
     return (
         _running_workflow_node_count(session, node_types=IMAGE_GENERATION_NODE_TYPES)
         + int(running_image_session_tasks or 0)
         + int(running_deck_slides or 0)
+        + int(running_enhance_jobs or 0)
     )
 
 
@@ -165,12 +180,12 @@ def get_generation_queue_overview(session: Session) -> GenerationQueueOverview:
         session,
         ImageSessionGenerationTask,
         IMAGE_SESSION_GENERATION_TASK_CONTRACT.running_statuses,
-    )
+    ) + _status_count(session, EnhanceJob, (JobStatus.RUNNING,))
     queued_count = workflow_queued_count + _status_count(
         session,
         ImageSessionGenerationTask,
         IMAGE_SESSION_GENERATION_TASK_CONTRACT.queued_statuses,
-    )
+    ) + _status_count(session, EnhanceJob, (JobStatus.QUEUED,))
     return GenerationQueueOverview(
         active_count=running_count + queued_count,
         running_count=running_count,
@@ -212,6 +227,10 @@ def get_queued_generation_positions(session: Session) -> dict[str, int]:
                 ImageSessionGenerationTask.status.in_(IMAGE_SESSION_GENERATION_TASK_CONTRACT.queued_statuses)
             )
         ).all()
+    )
+    queued_items.extend(
+        (job.created_at, "enhance_job", job.id)
+        for job in session.scalars(select(EnhanceJob).where(EnhanceJob.status == JobStatus.QUEUED)).all()
     )
     queued_items.sort(key=lambda item: (item[0], item[1], item[2]))
     return {item_id: index + 1 for index, (_created_at, _kind, item_id) in enumerate(queued_items)}

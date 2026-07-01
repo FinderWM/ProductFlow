@@ -6,6 +6,7 @@ from pathlib import Path
 import dramatiq
 
 from inspiration_one_backend.application.deck_generation_core import execute_deck_slide_generation_task
+from inspiration_one_backend.application.enhance.jobs import cleanup_expired_enhance_inputs, execute_enhance_job
 from inspiration_one_backend.application.image_sessions import execute_image_session_generation_task
 from inspiration_one_backend.application.inspiration_workflows import (
     execute_inspiration_workflow_node_run,
@@ -30,6 +31,7 @@ from inspiration_one_backend.infrastructure.logging import (
 from inspiration_one_backend.infrastructure.queue import (
     get_broker,
     recover_unfinished_deck_slides,
+    recover_unfinished_enhance_jobs,
     recover_unfinished_image_session_generation_tasks,
     recover_unfinished_workflow_runs,
 )
@@ -86,6 +88,12 @@ def run_deck_slide_generation_task(slide_id: str) -> None:
     execute_deck_slide_generation_task(slide_id)
 
 
+@dramatiq.actor(max_retries=0, time_limit=IMAGE_SESSION_WORKER_FAILSAFE_TIME_LIMIT_MS)
+def run_enhance_job(job_id: str) -> None:
+    """图片增强 worker：执行 Direct/Tiled 增强任务并回写 durable 状态。"""
+    execute_enhance_job(job_id)
+
+
 assert_actor_uses_durable_generation_contract(WORKFLOW_RUN_GENERATION_TASK_CONTRACT, run_inspiration_workflow_run)
 assert_actor_uses_durable_generation_contract(
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
@@ -102,3 +110,5 @@ if _running_under_dramatiq_cli():
     recover_unfinished_workflow_runs(reset_stale_running=True)
     recover_unfinished_image_session_generation_tasks(reset_stale_running=True)
     recover_unfinished_deck_slides(reset_stale_running=True)
+    recover_unfinished_enhance_jobs(reset_stale_running=True)
+    cleanup_expired_enhance_inputs()

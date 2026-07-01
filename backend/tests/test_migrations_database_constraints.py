@@ -11,6 +11,8 @@ from alembic import command
 from inspiration_one_backend.config import get_settings
 from inspiration_one_backend.domain.enums import (
     CopyStatus,
+    EnhanceSourceKind,
+    EnhanceStrategy,
     ImageSessionAssetKind,
     JobStatus,
     PosterKind,
@@ -26,6 +28,8 @@ from inspiration_one_backend.infrastructure.db.models import (
     CanvasTemplate,
     CanvasTemplateCategory,
     CopySet,
+    EnhanceJob,
+    EnhanceJobInput,
     GalleryTag,
     GenerationConfigResourceGroup,
     ImageGalleryEntry,
@@ -59,6 +63,9 @@ def test_sqlalchemy_enum_columns_use_application_values_without_database_constra
         (ImageSessionAsset.__table__.c.kind, ImageSessionAssetKind),
         (ResourceLibraryAsset.__table__.c.kind, ResourceLibraryAssetKind),
         (ResourceLibraryAsset.__table__.c.source_type, ResourceLibrarySourceType),
+        (EnhanceJob.__table__.c.source_kind, EnhanceSourceKind),
+        (EnhanceJob.__table__.c.strategy, EnhanceStrategy),
+        (EnhanceJob.__table__.c.status, JobStatus),
         (CopySet.__table__.c.status, CopyStatus),
         (PosterVariant.__table__.c.kind, PosterKind),
         (ImageSessionGenerationTask.__table__.c.status, JobStatus),
@@ -130,6 +137,95 @@ def test_generation_config_resource_group_model_matches_migration_contract() -> 
     assert {index.name for index in table.indexes} == {"ix_generation_config_resource_groups_group"}
     assert not table.foreign_keys
     assert not [constraint for constraint in table.constraints if isinstance(constraint, sa.CheckConstraint)]
+
+
+def test_enhance_job_models_match_migration_contract() -> None:
+    job_table = EnhanceJob.__table__
+    assert job_table.c.id.type.length == 36
+    assert not job_table.c.id.nullable
+    assert job_table.c.id.default is not None
+    assert job_table.c.id.default.arg.__name__ == new_id.__name__
+    assert job_table.c.owner_user_id.type.length == 36
+    assert job_table.c.source_kind.type.enums == [member.value for member in EnhanceSourceKind]
+    assert job_table.c.source_ref.type.length == 36
+    assert job_table.c.source_mime_type.type.length == 100
+    assert job_table.c.strategy.type.enums == [member.value for member in EnhanceStrategy]
+    assert job_table.c.status.type.enums == [member.value for member in JobStatus]
+    assert not job_table.c.params_json.nullable
+    assert not job_table.c.progress_completed.nullable
+    assert not job_table.c.progress_total.nullable
+    assert job_table.c.progress_updated_at.nullable
+    assert job_table.c.result_manifest_json.nullable
+    assert job_table.c.last_error.nullable
+    assert job_table.c.generation_config_mode.type.length == 20
+    assert job_table.c.requested_generation_config_id.nullable
+    assert job_table.c.used_generation_config_id.nullable
+    assert job_table.c.resource_group_id.nullable
+    assert job_table.c.started_at.nullable
+    assert job_table.c.finished_at.nullable
+    assert not job_table.c.attempts.nullable
+    assert {index.name for index in job_table.indexes} == {
+        "ix_enhance_jobs_owner_status_created",
+        "ix_enhance_jobs_resource_group_id",
+        "ix_enhance_jobs_source",
+    }
+    assert not job_table.foreign_keys
+    assert not [constraint for constraint in job_table.constraints if isinstance(constraint, sa.CheckConstraint)]
+
+    input_table = EnhanceJobInput.__table__
+    assert input_table.c.id.type.length == 36
+    assert input_table.c.owner_user_id.type.length == 36
+    assert input_table.c.storage_path.type.length == 500
+    assert input_table.c.storage_backend.nullable
+    assert input_table.c.storage_bucket.nullable
+    assert input_table.c.storage_object_key.nullable
+    assert input_table.c.mime_type.type.length == 100
+    assert not input_table.c.width.nullable
+    assert not input_table.c.height.nullable
+    assert not input_table.c.created_at.nullable
+    assert {index.name for index in input_table.indexes} == {"ix_enhance_job_inputs_owner_created"}
+    assert not input_table.foreign_keys
+    assert not [constraint for constraint in input_table.constraints if isinstance(constraint, sa.CheckConstraint)]
+
+
+def test_enhance_job_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "enhance-migration.db"
+    storage_root = tmp_path / "storage"
+    monkeypatch.setenv("ADMIN_ACCESS_KEY", "super-secret-admin-key")
+    monkeypatch.setenv("SESSION_SECRET", "super-secret-session-key-123")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/9")
+    monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    command.upgrade(config, "head")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    table_names = set(inspector.get_table_names())
+    assert {"enhance_jobs", "enhance_job_inputs"} <= table_names
+    assert {
+        "ix_enhance_jobs_owner_status_created",
+        "ix_enhance_jobs_resource_group_id",
+        "ix_enhance_jobs_source",
+    } <= {index["name"] for index in inspector.get_indexes("enhance_jobs")}
+    assert "ix_enhance_job_inputs_owner_created" in {
+        index["name"] for index in inspector.get_indexes("enhance_job_inputs")
+    }
+    engine.dispose()
+
+    command.downgrade(config, "20260625_0065")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    table_names = set(inspector.get_table_names())
+    assert "enhance_jobs" not in table_names
+    assert "enhance_job_inputs" not in table_names
+    engine.dispose()
+    get_settings.cache_clear()
 
 
 def test_gallery_entry_model_matches_migration_contract() -> None:

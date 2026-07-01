@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from inspiration_one_backend.config import get_settings
 from inspiration_one_backend.infrastructure.storage import (
     LocalFilesystemStorageBackend,
@@ -115,3 +117,28 @@ def test_storage_service_public_urls_use_current_host_instead_of_legacy_stored_u
     assert (
         urls["download_url"] == "http://new-host.example/inspiration-one/inspirations/inspiration-id/source/upload.png"
     )
+
+
+def test_delete_enhance_artifacts_rejects_reserved_or_traversal_segments(configured_env: Path) -> None:
+    storage = StorageService()
+    keep_key = storage.save_enhance_tile("enhance/keep-job", 0, 0, b"tile", suffix=".png")
+
+    for unsafe in ("inputs", "node", ".", "..", "node/.", "node/..", "../keep-job", "keep-job/../other"):
+        with pytest.raises(ValueError, match="增强产物删除前缀无效|增强任务标识不能为空"):
+            storage.delete_enhance_artifacts(unsafe)
+
+    assert storage.resolve(keep_key).read_bytes() == b"tile"
+
+
+def test_delete_enhance_artifacts_removes_only_allowed_prefixes(configured_env: Path) -> None:
+    storage = StorageService()
+    job_key = storage.save_enhance_tile("enhance/job-1", 0, 0, b"tile", suffix=".png")
+    node_key = storage.save_enhance_tile("enhance/node/node-1", 0, 0, b"tile", suffix=".png")
+    keep_key = storage.save_enhance_tile("enhance/job-2", 0, 0, b"tile", suffix=".png")
+
+    storage.delete_enhance_artifacts("job-1")
+    storage.delete_enhance_artifacts("node/node-1")
+
+    assert not storage.resolve(job_key).exists()
+    assert not storage.resolve(node_key).exists()
+    assert storage.resolve(keep_key).read_bytes() == b"tile"

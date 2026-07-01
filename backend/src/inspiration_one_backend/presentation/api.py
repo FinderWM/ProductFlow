@@ -26,12 +26,14 @@ from inspiration_one_backend.infrastructure.provider_config import (
     reconcile_generation_config_concurrency,
 )
 from inspiration_one_backend.infrastructure.queue import (
+    recover_unfinished_enhance_jobs,
     recover_unfinished_image_session_generation_tasks,
     recover_unfinished_workflow_runs,
 )
 from inspiration_one_backend.presentation.errors import register_exception_handlers
 from inspiration_one_backend.presentation.routes.auth import router as auth_router
 from inspiration_one_backend.presentation.routes.decks import router as decks_router
+from inspiration_one_backend.presentation.routes.enhance import router as enhance_router
 from inspiration_one_backend.presentation.routes.gallery import router as gallery_router
 from inspiration_one_backend.presentation.routes.generation_queue import router as generation_queue_router
 from inspiration_one_backend.presentation.routes.image_sessions import router as image_sessions_router
@@ -72,6 +74,7 @@ def create_app() -> FastAPI:
             reconcile_generation_config_concurrency()
         recover_unfinished_workflow_runs()
         recover_unfinished_image_session_generation_tasks()
+        recover_unfinished_enhance_jobs()
         task_notification_listener = start_task_notification_listener()
         try:
             yield
@@ -107,6 +110,7 @@ def create_app() -> FastAPI:
     app.include_router(inspirations_router)
     app.include_router(inspiration_workflows_router)
     app.include_router(decks_router)
+    app.include_router(enhance_router)
     app.include_router(image_sessions_router)
     app.include_router(resource_library_router)
     app.include_router(moderation_router)

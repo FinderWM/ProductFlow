@@ -35,7 +35,24 @@ class ResourceLibrarySourceType(StrEnum):
     POSTER_VARIANT = "poster_variant"
     IMAGE_SESSION_ASSET = "image_session_asset"
     DECK_SLIDE = "deck_slide"
+    ENHANCE_JOB_RESULT = "enhance_job_result"
     UPLOAD = "upload"
+
+
+class EnhanceStrategy(StrEnum):
+    """图片增强策略：直接增强 / 分块增强。"""
+
+    DIRECT = "direct"
+    TILED = "tiled"
+
+
+class EnhanceSourceKind(StrEnum):
+    """图片增强输入来源。"""
+
+    RESOURCE_LIBRARY_ASSET = "resource_library_asset"
+    SOURCE_ASSET = "source_asset"
+    IMAGE_SESSION_ASSET = "image_session_asset"
+    ENHANCE_INPUT_BLOB = "enhance_input_blob"
 
 
 class JobStatus(StrEnum):

@@ -26,6 +26,7 @@ class ApiPermissionDefinition:
 
 MENU_INSPIRATIONS = "inspirations"
 MENU_IMAGE_CHAT = "image_chat"
+MENU_ENHANCE = "enhance"
 MENU_GALLERY = "gallery"
 MENU_STATUS = "status"
 MENU_USAGE_STATS = "usage_stats"
@@ -41,6 +42,8 @@ API_DECK_GENERATE = "deck:generate"
 API_IMAGE_CHAT_READ = "image_chat:read"
 API_IMAGE_CHAT_WRITE = "image_chat:write"
 API_IMAGE_CHAT_GENERATE = "image_chat:generate"
+API_ENHANCE_READ = "enhance:read"
+API_ENHANCE_GENERATE = "enhance:generate"
 API_GALLERY_READ = "gallery:read"
 API_GALLERY_WRITE = "gallery:write"
 API_GALLERY_TAGS_MANAGE = "gallery:tags_manage"
@@ -57,9 +60,10 @@ API_GLOBAL_TEMPLATES_MANAGE = "templates:manage_global"
 MENU_DEFINITIONS: tuple[MenuDefinition, ...] = (
     MenuDefinition(MENU_INSPIRATIONS, "灵感", 10),
     MenuDefinition(MENU_IMAGE_CHAT, "生图", 20),
-    MenuDefinition(MENU_GALLERY, "画廊", 30),
-    MenuDefinition(MENU_STATUS, "状态", 40),
-    MenuDefinition(MENU_USAGE_STATS, "个人统计", 50),
+    MenuDefinition(MENU_ENHANCE, "图片增强", 30),
+    MenuDefinition(MENU_GALLERY, "画廊", 40),
+    MenuDefinition(MENU_STATUS, "状态", 50),
+    MenuDefinition(MENU_USAGE_STATS, "个人统计", 60),
     MenuDefinition(MENU_SETTINGS, "设置", 90),
     MenuDefinition(MENU_RBAC, "权限管理", 100),
 )
@@ -80,6 +84,8 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
     ApiPermissionDefinition(API_IMAGE_CHAT_READ, MENU_IMAGE_CHAT, "查看连续生图", "查看连续生图会话和图片", 10),
     ApiPermissionDefinition(API_IMAGE_CHAT_WRITE, MENU_IMAGE_CHAT, "维护连续生图", "创建和编辑连续生图会话", 20),
     ApiPermissionDefinition(API_IMAGE_CHAT_GENERATE, MENU_IMAGE_CHAT, "连续生图生成", "发起连续生图生成任务", 30),
+    ApiPermissionDefinition(API_ENHANCE_READ, MENU_ENHANCE, "查看图片增强", "查看图片增强任务和结果", 10),
+    ApiPermissionDefinition(API_ENHANCE_GENERATE, MENU_ENHANCE, "图片增强生成", "发起、取消和保存图片增强任务", 20),
     ApiPermissionDefinition(API_GALLERY_READ, MENU_GALLERY, "查看画廊", "查看画廊条目", 10),
     ApiPermissionDefinition(API_GALLERY_WRITE, MENU_GALLERY, "保存画廊", "将生成图保存到画廊", 20),
     ApiPermissionDefinition(
@@ -122,6 +128,7 @@ DEFAULT_ROLE_MENU_CODES = frozenset(
     {
         MENU_INSPIRATIONS,
         MENU_IMAGE_CHAT,
+        MENU_ENHANCE,
         MENU_GALLERY,
         MENU_STATUS,
         MENU_USAGE_STATS,
@@ -136,6 +143,8 @@ DEFAULT_ROLE_API_PERMISSION_CODES = frozenset(
         API_IMAGE_CHAT_READ,
         API_IMAGE_CHAT_WRITE,
         API_IMAGE_CHAT_GENERATE,
+        API_ENHANCE_READ,
+        API_ENHANCE_GENERATE,
         API_GALLERY_READ,
         API_GALLERY_WRITE,
         API_STATUS_READ,

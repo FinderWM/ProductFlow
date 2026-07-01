@@ -16,6 +16,7 @@ from inspiration_one_backend.application.ownership import ensure_actor_can_mutat
 from inspiration_one_backend.application.time import now_utc
 from inspiration_one_backend.domain.enums import (
     ImageSessionAssetKind,
+    JobStatus,
     ResourceLibraryAssetKind,
     ResourceLibrarySourceType,
     SourceAssetKind,
@@ -25,6 +26,7 @@ from inspiration_one_backend.domain.errors import BusinessValidationError, NotFo
 from inspiration_one_backend.infrastructure.db.models import (
     Deck,
     DeckSlide,
+    EnhanceJob,
     ImageSession,
     ImageSessionAsset,
     Inspiration,
@@ -645,6 +647,32 @@ def _load_source_image(
             owner_user_id=owner_user_id,
             filename=f"deck-slide-{slide.order_index + 1}.png",
             mime_type=slide.image_mime_type or "image/png",
+            storage_object=storage_object,
+        )
+
+    if source_type == ResourceLibrarySourceType.ENHANCE_JOB_RESULT:
+        job = session.get(EnhanceJob, source_id)
+        if job is None:
+            raise NotFoundError("图片增强任务不存在")
+        ensure_actor_can_mutate_owner(
+            owner_user_id=job.owner_user_id,
+            actor_user_id=actor_user_id,
+            actor_is_admin=actor_is_admin,
+            missing_message="图片增强任务不存在",
+        )
+        if job.status != JobStatus.SUCCEEDED:
+            raise BusinessValidationError("图片增强任务尚未完成")
+        manifest = job.result_manifest_json or {}
+        final_ref = manifest.get("final_image_ref")
+        if not isinstance(final_ref, str) or not final_ref:
+            raise BusinessValidationError("拼接结果尚未上传")
+        storage_object = SimpleNamespace(**LocalStorage().metadata_for(final_ref).as_model_kwargs())
+        return _SourceImage(
+            source_type=source_type,
+            source_resource_id=job.id,
+            owner_user_id=job.owner_user_id,
+            filename=f"enhance-{job.id}{infer_extension(str(manifest.get('final_mime_type') or job.source_mime_type))}",
+            mime_type=str(manifest.get("final_mime_type") or job.source_mime_type or "image/png"),
             storage_object=storage_object,
         )
 

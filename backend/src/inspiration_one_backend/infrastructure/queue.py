@@ -132,6 +132,30 @@ def enqueue_deck_slide_generation_task_later(slide_id: str, *, delay_ms: int) ->
     run_deck_slide_generation_task.send_with_options(args=(slide_id,), delay=delay_ms)
 
 
+def enqueue_enhance_job(job_id: str) -> None:
+    from inspiration_one_backend.workers import run_enhance_job
+
+    get_broker()
+    run_enhance_job.send(job_id)
+
+
+def enqueue_enhance_job_later(job_id: str, *, delay_ms: int) -> None:
+    from inspiration_one_backend.workers import run_enhance_job
+
+    get_broker()
+    run_enhance_job.send_with_options(args=(job_id,), delay=delay_ms)
+
+
+def recover_unfinished_enhance_jobs(
+    *,
+    reset_stale_running: bool = False,
+    stale_running_after: timedelta = DEFAULT_STALE_RUNNING_AFTER,
+) -> int:
+    from inspiration_one_backend.application.enhance.jobs import recover_unfinished_enhance_jobs as recover
+
+    return recover(reset_stale_running=reset_stale_running, stale_running_after=stale_running_after)
+
+
 def recover_unfinished_deck_slides(
     *,
     reset_stale_running: bool = False,
