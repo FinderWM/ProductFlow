@@ -1,6 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Loader2, Search } from "lucide-react";
 
+import {
+  FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS,
+  createFloatingTouchDismissProtection,
+  isFloatingTouchDismissProtectionHit,
+} from "../lib/floatingSurface";
 import { FloatingSurface } from "./FloatingSurface";
 
 export interface SelectFieldOption {
@@ -36,6 +41,58 @@ interface SelectFieldProps {
 
 interface FlatOption extends SelectFieldOption {
   groupLabel?: string;
+}
+
+interface TouchPoint {
+  x: number;
+  y: number;
+}
+
+let clearSelectFieldGhostTapProtection: (() => void) | null = null;
+
+function protectSelectFieldGhostTap(point: TouchPoint | null) {
+  if (!point || typeof document === "undefined" || typeof window === "undefined") {
+    return;
+  }
+
+  clearSelectFieldGhostTapProtection?.();
+
+  const protection = createFloatingTouchDismissProtection(point);
+  const suppressGhostTap = (event: MouseEvent | PointerEvent | TouchEvent) => {
+    const clientX = 'clientX' in event ? event.clientX : (event as TouchEvent).changedTouches[0]?.clientX ?? 0;
+    const clientY = 'clientY' in event ? event.clientY : (event as TouchEvent).changedTouches[0]?.clientY ?? 0;
+    if (!isFloatingTouchDismissProtectionHit(protection, { x: clientX, y: clientY })) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    // 不要立即清理，让 320ms 超时自然过期，以覆盖完整的触摸事件链
+  };
+
+  const timeoutId = window.setTimeout(() => {
+    clearSelectFieldGhostTapProtection?.();
+  }, FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS);
+
+  clearSelectFieldGhostTapProtection = () => {
+    window.clearTimeout(timeoutId);
+    document.removeEventListener("pointerdown", suppressGhostTap, true);
+    document.removeEventListener("click", suppressGhostTap, true);
+    document.removeEventListener("mousedown", suppressGhostTap, true);
+    document.removeEventListener("mouseup", suppressGhostTap, true);
+    document.removeEventListener("pointerup", suppressGhostTap, true);
+    document.removeEventListener("touchstart", suppressGhostTap, true);
+    document.removeEventListener("touchend", suppressGhostTap, true);
+    clearSelectFieldGhostTapProtection = null;
+  };
+
+  document.addEventListener("pointerdown", suppressGhostTap, true);
+  document.addEventListener("click", suppressGhostTap, true);
+  document.addEventListener("mousedown", suppressGhostTap, true);
+  document.addEventListener("mouseup", suppressGhostTap, true);
+  document.addEventListener("pointerup", suppressGhostTap, true);
+  document.addEventListener("touchstart", suppressGhostTap, true);
+  document.addEventListener("touchend", suppressGhostTap, true);
 }
 
 export function SelectField({
@@ -113,6 +170,87 @@ export function SelectField({
     visualSize === "sm"
       ? "h-8 pl-7 pr-8 text-xs"
       : "h-9 pl-8 pr-9 text-sm";
+
+  const optionsContent = (
+    <>
+      {searchable ? (
+        <div className="border-b border-slate-100 p-1.5 dark:border-slate-800">
+          <div className="relative">
+            <Search
+              size={visualSize === "sm" ? 13 : 15}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+            />
+            <input
+              ref={searchInputRef}
+              value={searchValue}
+              onChange={(event) => onSearchChange?.(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Escape") {
+                  setOpen(false);
+                  buttonRef.current?.focus();
+                }
+              }}
+              aria-label={searchAriaLabel ?? searchPlaceholder}
+              placeholder={searchPlaceholder}
+              className={`w-full rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-900 outline-none transition focus:border-[var(--pf-accent,#6366f1)] focus:bg-white focus:ring-2 focus:ring-[var(--pf-accent,#6366f1)]/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-[var(--pf-accent,#a78bfa)] dark:focus:bg-slate-950 dark:focus:ring-[var(--pf-accent,#a78bfa)]/20 ${searchInputClassName}`}
+            />
+            {searchLoading ? (
+              <Loader2
+                size={visualSize === "sm" ? 13 : 15}
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-slate-400 dark:text-slate-500"
+                aria-label={searchLoadingLabel}
+              />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      <div
+        id={listboxId}
+        role="listbox"
+        aria-labelledby={buttonId}
+        className="min-h-0 flex-1 overflow-y-auto p-1"
+      >
+        {groups.length
+          ? groups.map((group) => (
+              <div key={group.label}>
+                <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  {group.label}
+                </div>
+                {group.options.map((option) => (
+                  <SelectOptionButton
+                    key={`${group.label}-${option.value}`}
+                    option={option}
+                    selected={option.value === value}
+                    active={option.value === activeOption?.value}
+                    visualSize={visualSize}
+                    onSelect={selectOption}
+                    refCallback={(element) => {
+                      optionRefs.current[option.value] = element;
+                    }}
+                  />
+                ))}
+              </div>
+            ))
+          : options.map((option) => (
+              <SelectOptionButton
+                key={option.value}
+                option={option}
+                selected={option.value === value}
+                active={option.value === activeOption?.value}
+                visualSize={visualSize}
+                onSelect={selectOption}
+                refCallback={(element) => {
+                  optionRefs.current[option.value] = element;
+                }}
+              />
+            ))}
+        {!flatOptions.length && emptyLabel ? (
+          <div className="px-2.5 py-2 text-xs font-medium text-slate-500 dark:text-slate-400">{emptyLabel}</div>
+        ) : null}
+      </div>
+    </>
+  );
 
   function moveActive(delta: number) {
     if (!enabledOptions.length) {
@@ -198,82 +336,7 @@ export function SelectField({
         onOpenChange={setOpen}
         className={`pf-select-field-surface flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10 ${menuTextClassName}`}
       >
-        {searchable ? (
-          <div className="border-b border-slate-100 p-1.5 dark:border-slate-800">
-            <div className="relative">
-              <Search
-                size={visualSize === "sm" ? 13 : 15}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
-              />
-              <input
-                ref={searchInputRef}
-                value={searchValue}
-                onChange={(event) => onSearchChange?.(event.target.value)}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                  if (event.key === "Escape") {
-                    setOpen(false);
-                    buttonRef.current?.focus();
-                  }
-                }}
-                aria-label={searchAriaLabel ?? searchPlaceholder}
-                placeholder={searchPlaceholder}
-                className={`w-full rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-900 outline-none transition focus:border-[var(--pf-accent,#6366f1)] focus:bg-white focus:ring-2 focus:ring-[var(--pf-accent,#6366f1)]/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-[var(--pf-accent,#a78bfa)] dark:focus:bg-slate-950 dark:focus:ring-[var(--pf-accent,#a78bfa)]/20 ${searchInputClassName}`}
-              />
-              {searchLoading ? (
-                <Loader2
-                  size={visualSize === "sm" ? 13 : 15}
-                  className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-slate-400 dark:text-slate-500"
-                  aria-label={searchLoadingLabel}
-                />
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-        <div
-          id={listboxId}
-          role="listbox"
-          aria-labelledby={buttonId}
-          className="min-h-0 flex-1 overflow-y-auto p-1"
-        >
-          {groups.length
-            ? groups.map((group) => (
-                <div key={group.label}>
-                  <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                    {group.label}
-                  </div>
-                  {group.options.map((option) => (
-                    <SelectOptionButton
-                      key={`${group.label}-${option.value}`}
-                      option={option}
-                      selected={option.value === value}
-                      active={option.value === activeOption?.value}
-                      visualSize={visualSize}
-                      onSelect={selectOption}
-                      refCallback={(element) => {
-                        optionRefs.current[option.value] = element;
-                      }}
-                    />
-                  ))}
-                </div>
-              ))
-            : options.map((option) => (
-                <SelectOptionButton
-                  key={option.value}
-                  option={option}
-                  selected={option.value === value}
-                  active={option.value === activeOption?.value}
-                  visualSize={visualSize}
-                  onSelect={selectOption}
-                  refCallback={(element) => {
-                    optionRefs.current[option.value] = element;
-                  }}
-                />
-              ))}
-          {!flatOptions.length && emptyLabel ? (
-            <div className="px-2.5 py-2 text-xs font-medium text-slate-500 dark:text-slate-400">{emptyLabel}</div>
-          ) : null}
-        </div>
+        {optionsContent}
       </FloatingSurface>
     </div>
   );
@@ -294,12 +357,25 @@ function SelectOptionButton({
   onSelect: (option: SelectFieldOption) => void;
   refCallback: (element: HTMLButtonElement | null) => void;
 }) {
+  const touchSelectionHandledRef = useRef(false);
   const sizeClassName = visualSize === "sm" ? "min-h-8 px-2 py-1.5 text-xs" : "min-h-9 px-2.5 py-2 text-sm";
   const stateClassName = selected
     ? "bg-[color-mix(in_srgb,var(--pf-accent,#6366f1)_10%,white)] text-[color-mix(in_srgb,var(--pf-accent,#6366f1)_72%,rgb(2_6_23))] dark:bg-[color-mix(in_srgb,var(--pf-accent,#a78bfa)_18%,transparent)] dark:text-[color-mix(in_srgb,var(--pf-accent,#a78bfa)_38%,white)]"
     : active
       ? "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
       : "text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white";
+
+  function handleTouchSelection(point: TouchPoint | null, event: { preventDefault: () => void; stopPropagation: () => void; stopImmediatePropagation?: () => void }) {
+    if (option.disabled || touchSelectionHandledRef.current) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    protectSelectFieldGhostTap(point);
+    touchSelectionHandledRef.current = true;
+    onSelect(option);
+  }
 
   return (
     <button
@@ -308,7 +384,39 @@ function SelectOptionButton({
       role="option"
       aria-selected={selected}
       disabled={option.disabled}
-      onClick={() => onSelect(option)}
+      onPointerDown={(event) => {
+        if (event.pointerType === "touch") {
+          touchSelectionHandledRef.current = false;
+        }
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }}
+      onPointerUp={(event) => {
+        if (event.pointerType !== "touch") {
+          return;
+        }
+        handleTouchSelection({ x: event.clientX, y: event.clientY }, event);
+        event.stopImmediatePropagation();
+      }}
+      onTouchStart={(event) => {
+        touchSelectionHandledRef.current = false;
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }}
+      onTouchEnd={(event) => {
+        const touch = event.changedTouches[0] ?? event.touches[0];
+        handleTouchSelection(touch ? { x: touch.clientX, y: touch.clientY } : null, event);
+        event.stopImmediatePropagation();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (touchSelectionHandledRef.current) {
+          touchSelectionHandledRef.current = false;
+          return;
+        }
+        onSelect(option);
+      }}
       className={`flex w-full items-center gap-2 rounded-lg text-left font-medium outline-none transition-colors disabled:cursor-not-allowed disabled:text-slate-400 disabled:opacity-60 dark:disabled:text-slate-600 ${sizeClassName} ${stateClassName}`}
     >
       <span className="min-w-0 flex-1 truncate">{option.label}</span>

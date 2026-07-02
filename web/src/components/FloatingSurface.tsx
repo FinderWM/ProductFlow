@@ -76,6 +76,7 @@ export function FloatingSurface({
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const lastTouchPointRef = useRef<TouchPoint | null>(null);
   const pendingTouchDismissProtectionRef = useRef<TimedTouchPoint | null>(null);
+  const pendingSurfaceTouchProtectionRef = useRef<TimedTouchPoint | null>(null);
   const dismissProtectionRef = useRef<FloatingTouchDismissProtection | null>(null);
   const dismissProtectionCleanupRef = useRef<(() => void) | null>(null);
   const [placement, setPlacement] = useState<FloatingPlacementResult | null>(null);
@@ -93,6 +94,13 @@ export function FloatingSurface({
       return;
     }
     pendingTouchDismissProtectionRef.current = { ...point, at: Date.now() };
+  }, []);
+
+  const rememberSurfaceTouchProtection = useCallback((point: TouchPoint | null) => {
+    if (!point) {
+      return;
+    }
+    pendingSurfaceTouchProtectionRef.current = { ...point, at: Date.now() };
   }, []);
 
   const updatePlacement = useCallback(() => {
@@ -143,7 +151,10 @@ export function FloatingSurface({
       if (!(target instanceof Node)) {
         return;
       }
-      if (surfaceRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+      const isSurfaceClick = surfaceRef.current?.contains(target);
+      const isTriggerClick = triggerRef.current?.contains(target);
+
+      if (isSurfaceClick || isTriggerClick) {
         return;
       }
       if (event.pointerType === "touch") {
@@ -201,19 +212,68 @@ export function FloatingSurface({
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      clearDismissProtection();
+      // 不要立即清理，让 320ms 超时自然过期，以覆盖完整的触摸事件链
     };
 
     const timeoutId = window.setTimeout(clearDismissProtection, FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS);
+    document.addEventListener("pointerdown", suppressGhostTap, true);
     document.addEventListener("click", suppressGhostTap, true);
     document.addEventListener("pointerup", suppressGhostTap, true);
     dismissProtectionCleanupRef.current = () => {
       window.clearTimeout(timeoutId);
+      document.removeEventListener("pointerdown", suppressGhostTap, true);
       document.removeEventListener("click", suppressGhostTap, true);
       document.removeEventListener("pointerup", suppressGhostTap, true);
     };
     return clearDismissProtection;
   }, [clearDismissProtection, open]);
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined") {
+      pendingSurfaceTouchProtectionRef.current = null;
+      return undefined;
+    }
+
+    const suppressSurfaceGhostTap = (event: MouseEvent | PointerEvent) => {
+      const touchPoint = pendingSurfaceTouchProtectionRef.current;
+      const target = event.target;
+      if (!touchPoint || !(target instanceof Node)) {
+        return;
+      }
+      if (Date.now() - touchPoint.at > FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS) {
+        pendingSurfaceTouchProtectionRef.current = null;
+        return;
+      }
+      if (surfaceRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+        return;
+      }
+      if (
+        !isFloatingTouchDismissProtectionHit(
+          {
+            x: touchPoint.x,
+            y: touchPoint.y,
+            expiresAt: touchPoint.at + FLOATING_TOUCH_DISMISS_PROTECTION_DURATION_MS,
+          },
+          { x: event.clientX, y: event.clientY },
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      // 不要立即清理，让超时检查自然过期，以覆盖完整的触摸事件链
+    };
+
+    document.addEventListener("pointerdown", suppressSurfaceGhostTap, true);
+    document.addEventListener("pointerup", suppressSurfaceGhostTap, true);
+    document.addEventListener("click", suppressSurfaceGhostTap, true);
+    return () => {
+      document.removeEventListener("pointerdown", suppressSurfaceGhostTap, true);
+      document.removeEventListener("pointerup", suppressSurfaceGhostTap, true);
+      document.removeEventListener("click", suppressSurfaceGhostTap, true);
+    };
+  }, [open, triggerRef]);
 
   useEffect(() => {
     if (!open || typeof ResizeObserver === "undefined") {
@@ -237,16 +297,21 @@ export function FloatingSurface({
     return null;
   }
 
+  const portalRoot =
+    triggerRef.current?.closest<HTMLElement>("[data-floating-root]") ?? document.body;
+  const rootRect = portalRoot === document.body ? null : portalRoot.getBoundingClientRect();
+
   const style: CSSProperties = {
-    position: "fixed",
-    left: placement?.left ?? 0,
-    top: placement?.top ?? 0,
+    position: portalRoot === document.body ? "fixed" : "absolute",
+    left: placement ? placement.left - (rootRect?.left ?? 0) + portalRoot.scrollLeft : 0,
+    top: placement ? placement.top - (rootRect?.top ?? 0) + portalRoot.scrollTop : 0,
     width: placement?.width,
     maxHeight: placement?.maxHeight,
     zIndex: FLOATING_LAYER_Z_INDEX[layer],
     visibility: placement ? "visible" : "hidden",
     boxSizing: "border-box",
     overscrollBehavior: "contain",
+    pointerEvents: "auto",
   };
 
   function handleWheel(event: WheelEvent<HTMLDivElement>) {
@@ -258,13 +323,17 @@ export function FloatingSurface({
 
   function handleTouchStart(event: TouchEvent<HTMLDivElement>) {
     event.stopPropagation();
+    event.stopImmediatePropagation();
     const touch = event.touches[0];
-    rememberTouchDismissProtection(touch ? { x: touch.clientX, y: touch.clientY } : null);
+    const point = touch ? { x: touch.clientX, y: touch.clientY } : null;
+    rememberTouchDismissProtection(point);
+    rememberSurfaceTouchProtection(point);
     lastTouchPointRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
   }
 
   function handleTouchMove(event: TouchEvent<HTMLDivElement>) {
     event.stopPropagation();
+    event.stopImmediatePropagation();
     const touch = event.touches[0];
     const previous = lastTouchPointRef.current;
     if (!touch || !previous) {
@@ -296,24 +365,38 @@ export function FloatingSurface({
       style={style}
       onPointerDown={(event) => {
         if (event.pointerType === "touch") {
-          rememberTouchDismissProtection({ x: event.clientX, y: event.clientY });
+          const point = { x: event.clientX, y: event.clientY };
+          rememberTouchDismissProtection(point);
+          rememberSurfaceTouchProtection(point);
         }
         event.stopPropagation();
+        event.stopImmediatePropagation();
       }}
-      onClick={(event) => event.stopPropagation()}
+      onPointerUp={(event) => {
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }}
       onWheel={handleWheel}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
-      onTouchEnd={() => {
+      onTouchEnd={(event) => {
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         lastTouchPointRef.current = null;
       }}
-      onTouchCancel={() => {
+      onTouchCancel={(event) => {
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         lastTouchPointRef.current = null;
       }}
       onKeyDown={handleKeyDown}
     >
       {children}
     </div>,
-    document.body,
+    portalRoot,
   );
 }

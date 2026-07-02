@@ -31,7 +31,7 @@ interface ImageChatMainStageProps {
 }
 
 export function ImageChatMainStage({
-  sessionRounds,
+  sessionRounds = [],
   selectedRound,
   selectedPlaceholder,
   retryingTaskId,

@@ -3477,6 +3477,7 @@ function ImageChatWorkbenchPage() {
             ) : null}
 
             <ImageChatMainStage
+              sessionRounds={imageSession?.rounds ?? []}
               selectedRound={selectedRound}
               selectedPlaceholder={selectedPlaceholder}
               retryingTaskId={null}
@@ -3486,6 +3487,7 @@ function ImageChatWorkbenchPage() {
               generationBlockedTitle={selectedPlaceholderActionBlockedTitle}
               stageInfo={selectedRoundStageInfo}
               stageActions={selectedRoundStageActions}
+              onSelectRound={handleSelectHistoryRound}
               onPreviewRound={setPreviewRound}
               onRetryGenerationTask={handleRetryGenerationTask}
               onCancelGenerationTask={handleCancelGenerationTask}
@@ -3638,7 +3640,6 @@ function ImageChatWorkbenchPage() {
         <Drawer.Portal>
           <Drawer.Overlay
             className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden"
-            onClick={(event) => event.stopPropagation()}
             onWheel={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -3649,6 +3650,7 @@ function ImageChatWorkbenchPage() {
             }}
           />
           <Drawer.Content
+            data-floating-root
             onPointerDown={(event) => {
               event.stopPropagation();
               handleMobileSessionDrawerSwipeBackStart(event);
@@ -3727,7 +3729,6 @@ function ImageChatWorkbenchPage() {
         <Drawer.Portal>
           <Drawer.Overlay
             className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px] lg:hidden"
-            onClick={(event) => event.stopPropagation()}
             onWheel={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -3738,6 +3739,7 @@ function ImageChatWorkbenchPage() {
             }}
           />
           <Drawer.Content
+            data-floating-root
             className="pf-workspace-tool-drawer fixed inset-y-0 right-0 z-[71] flex w-[7.75rem] flex-col border-l border-slate-200 bg-white shadow-2xl outline-none dark:border-slate-700 dark:bg-[#0f1726] lg:hidden"
             onClick={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
@@ -3823,7 +3825,6 @@ function ImageChatWorkbenchPage() {
         <Drawer.Portal>
           <Drawer.Overlay
             className="fixed inset-0 z-[70] bg-slate-950/42 lg:hidden"
-            onClick={(event) => event.stopPropagation()}
             onWheel={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -3834,6 +3835,7 @@ function ImageChatWorkbenchPage() {
             }}
           />
           <Drawer.Content
+            data-floating-root
             className="pf-workspace-tool-drawer mobile-generation-sheet fixed inset-x-0 bottom-0 z-[71] flex max-h-[80dvh] flex-col rounded-t-[1.5rem] border-t border-slate-200 bg-white shadow-[0_-12px_34px_rgba(15,23,42,0.16)] outline-none dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-[0_-18px_42px_rgba(0,0,0,0.34)] lg:hidden"
             onClick={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}

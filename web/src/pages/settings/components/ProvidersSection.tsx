@@ -124,7 +124,7 @@ export function ProvidersSection({
 
       {profiles.length ? (
         filteredProfiles.length ? (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
             {filteredProfiles.map((profile) => {
             const usage = providerUsageFromGenerationConfigs(data?.generation_configs ?? [], profile.id);
             return (
@@ -207,7 +207,7 @@ function ProviderProfileCard({
   const switchHelp = disableBlocked ? t("settings.provider.disableBlocked") : undefined;
 
   return (
-    <div className="group relative flex min-h-[230px] flex-col justify-between rounded-xl border pf-hairline bg-white/80 p-5 shadow-md shadow-slate-200/50 backdrop-blur-sm transition hover:border-indigo-200 hover:shadow-lg dark:border-slate-700/40 dark:bg-[#0f1726]/80 dark:shadow-black/20 dark:hover:border-violet-400/45">
+    <div className="group relative flex flex-col justify-between overflow-hidden rounded-xl border pf-hairline bg-white/80 p-3 shadow-md shadow-slate-200/50 backdrop-blur-sm transition hover:border-indigo-200 hover:shadow-lg dark:border-slate-700/40 dark:bg-[#0f1726]/80 dark:shadow-black/20 dark:hover:border-violet-400/45 sm:p-5">
       <button
         type="button"
         onClick={onEdit}
@@ -215,7 +215,7 @@ function ProviderProfileCard({
         className="-m-2 block w-full space-y-4 rounded-lg p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400"
       >
         <span className="flex items-start justify-between gap-4">
-          <span className="min-w-0 pr-20">
+          <span className="min-w-0 pr-16 sm:pr-20">
             <span className="flex flex-wrap items-center gap-2">
               <span className="truncate text-base font-semibold text-slate-950 dark:text-white">{profile.name}</span>
               <span
@@ -228,18 +228,18 @@ function ProviderProfileCard({
                 {profile.enabled ? t("settings.provider.enabled") : t("settings.provider.disabled")}
               </span>
             </span>
-            <span className="mt-2 flex items-center gap-1.5 truncate font-mono text-xs text-slate-500 dark:text-slate-400">
+            <span className="mt-2 flex items-center gap-1.5 overflow-hidden font-mono text-xs text-slate-500 dark:text-slate-400">
               <ServerCog size={13} className="shrink-0" />
               <span className="truncate">{profile.base_url || t(providerDefaultEndpointLabelKey(profile))}</span>
             </span>
           </span>
         </span>
 
-        <span className="grid grid-cols-[max-content_1px_minmax(0,1fr)] items-start gap-3">
+        <span className="flex flex-col gap-3 sm:grid sm:grid-cols-[max-content_1px_minmax(0,1fr)] sm:items-start">
           <span className="whitespace-nowrap rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700 dark:bg-violet-500/12 dark:text-violet-100">
             {t(providerTypeLabelKey(profile.provider_type))}
           </span>
-          <span aria-hidden="true" className="w-px self-stretch bg-slate-200 dark:bg-slate-700" />
+          <span aria-hidden="true" className="hidden w-px self-stretch bg-slate-200 dark:bg-slate-700 sm:block" />
           <span className="flex min-w-0 flex-col items-start gap-1.5">
             {profile.capabilities.map((capability) => (
               <span
@@ -280,7 +280,7 @@ function ProviderProfileCard({
         </span>
       </button>
 
-      <div className="absolute right-5 top-5 flex shrink-0 items-center gap-2">
+      <div className="absolute right-3 top-3 flex shrink-0 items-center gap-2 sm:right-5 sm:top-5">
         <button
           type="button"
           onClick={onEdit}
@@ -303,7 +303,7 @@ function ProviderProfileCard({
         </button>
       </div>
 
-      <div className="mt-5 flex items-start justify-between gap-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+      <div className="mt-4 flex flex-col items-start gap-3 border-t border-slate-100 pt-4 dark:border-slate-800 sm:mt-5 sm:flex-row sm:justify-between">
         <div>
           <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
             <ParameterHelpLabel

@@ -172,7 +172,45 @@ export function ResourceGroupChipEditor({
                   role="option"
                   aria-selected={selected}
                   disabled={disabled}
-                  onClick={() => toggleGroup(group.id)}
+                  onPointerDown={(event) => {
+                    if (event.pointerType === "touch") {
+                      event.currentTarget.dataset.touchSelectionHandled = "";
+                    }
+                    event.stopPropagation();
+                  }}
+                  onPointerUp={(event) => {
+                    if (event.pointerType !== "touch") {
+                      return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.currentTarget.dataset.touchSelectionHandled === "true") {
+                      return;
+                    }
+                    event.currentTarget.dataset.touchSelectionHandled = "true";
+                    toggleGroup(group.id);
+                  }}
+                  onTouchStart={(event) => {
+                    event.currentTarget.dataset.touchSelectionHandled = "";
+                    event.stopPropagation();
+                  }}
+                  onTouchEnd={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.currentTarget.dataset.touchSelectionHandled === "true") {
+                      return;
+                    }
+                    event.currentTarget.dataset.touchSelectionHandled = "true";
+                    toggleGroup(group.id);
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (event.currentTarget.dataset.touchSelectionHandled === "true") {
+                      event.currentTarget.dataset.touchSelectionHandled = "";
+                      return;
+                    }
+                    toggleGroup(group.id);
+                  }}
                   className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
                     selected
                       ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-50"

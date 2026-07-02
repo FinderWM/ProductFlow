@@ -114,7 +114,45 @@ export function GenerationResourceGroupMultiSelect({
                   role="option"
                   aria-selected={selected}
                   disabled={groupDisabled}
-                  onClick={() => toggleResourceGroup(group)}
+                  onPointerDown={(event) => {
+                    if (event.pointerType === "touch") {
+                      event.currentTarget.dataset.touchSelectionHandled = "";
+                    }
+                    event.stopPropagation();
+                  }}
+                  onPointerUp={(event) => {
+                    if (event.pointerType !== "touch") {
+                      return;
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.currentTarget.dataset.touchSelectionHandled === "true") {
+                      return;
+                    }
+                    event.currentTarget.dataset.touchSelectionHandled = "true";
+                    toggleResourceGroup(group);
+                  }}
+                  onTouchStart={(event) => {
+                    event.currentTarget.dataset.touchSelectionHandled = "";
+                    event.stopPropagation();
+                  }}
+                  onTouchEnd={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.currentTarget.dataset.touchSelectionHandled === "true") {
+                      return;
+                    }
+                    event.currentTarget.dataset.touchSelectionHandled = "true";
+                    toggleResourceGroup(group);
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (event.currentTarget.dataset.touchSelectionHandled === "true") {
+                      event.currentTarget.dataset.touchSelectionHandled = "";
+                      return;
+                    }
+                    toggleResourceGroup(group);
+                  }}
                   className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
                     selected
                       ? "bg-indigo-50 text-indigo-700 dark:bg-violet-500/18 dark:text-violet-100"

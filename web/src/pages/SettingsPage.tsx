@@ -1118,16 +1118,16 @@ export function SettingsPage() {
 
                 <section
                   ref={contentSectionRef}
-                  className="pf-side-content pf-settings-content min-h-0 px-5 py-8 sm:px-8 lg:px-12 lg:py-10"
+                  className="pf-side-content pf-settings-content min-h-0 px-3 py-6 sm:px-5 sm:py-8 lg:px-12 lg:py-10"
                 >
                   <div className="mx-auto max-w-4xl">
-                    <div className="mb-10">
+                    <div className="mb-8 sm:mb-10">
                       <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
                         <span>{t("settings.title")}</span>
                         <span>/</span>
                         <span>{t(activeMeta.labelKey)}</span>
                       </div>
-                      <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+                      <h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
                         {t(activeMeta.labelKey)}
                       </h1>
                       <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">

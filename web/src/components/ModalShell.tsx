@@ -220,6 +220,7 @@ export function ModalShell({
   const shell = (
     <div
       {...overlayProps}
+      data-floating-root={overlayProps?.["data-floating-root"] ?? true}
       className={mergeClassNames(
         "fixed inset-0 flex items-center justify-center overflow-hidden overscroll-contain",
         overlayClassName,
