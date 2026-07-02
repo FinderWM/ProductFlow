@@ -167,7 +167,7 @@ const WORKSPACE_HOME_BRAND_BOTTOM_GAP_PX = 50;
 const WORKSPACE_HOME_LEADING_SPACE_PROPERTY = "--pf-workspace-home-leading-space";
 const CURTAIN_EASING = "cubic-bezier(0.18, 0.9, 0.2, 1.12)";
 export const TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS = "h-[4.5rem] md:h-[4.65rem]";
-const TOP_CHROME_OPEN_HEIGHT_CLASS = "h-[4.75rem] md:h-[4.65rem]";
+const TOP_CHROME_OPEN_HEIGHT_CLASS = "h-[4.5rem] md:h-[4.65rem]";
 
 const navItems: TopNavItem[] = [
   {
@@ -197,6 +197,7 @@ const navItems: TopNavItem[] = [
     priority: "primary",
     icon: Flower2,
     match: (pathname: string) =>
+      pathname === "/inspirations" ||
       pathname === "/inspirations/list" ||
       pathname === "/inspirations/all" ||
       pathname === "/inspirations/new" ||
@@ -634,7 +635,7 @@ function mobileMoreMenuItemClassName(active: boolean) {
   return [
     "pf-shell-mobile-menu-item flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm font-semibold transition-colors",
     active
-      ? "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
+      ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950"
       : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white",
   ].join(" ");
 }
@@ -1601,7 +1602,9 @@ export function TopNav({ onLogout }: TopNavProps) {
   ];
   const secondaryActive = secondaryNavItems.some((item) => item.match(location.pathname));
   const hasOverflowNav = secondaryNavItems.length > 0 || Boolean(logoutAction);
-  const mobileNavColumnCount = primaryNavItems.length + (hasOverflowNav ? 1 : 0);
+  const mobileVisiblePrimaryNavItems = primaryNavItems.slice(0, 4);
+  const mobileOverflowPrimaryNavItems = primaryNavItems.slice(4);
+  const mobileNavColumnCount = mobileVisiblePrimaryNavItems.length + (hasOverflowNav ? 1 : 0);
   const desktopOverflowKeySet = useMemo(() => new Set(desktopOverflowKeys), [desktopOverflowKeys]);
   const desktopVisibleNavItems = visibleNavItems.filter((item) => !desktopOverflowKeySet.has(item.to));
   const desktopOverflowNavItems = visibleNavItems.filter((item) => desktopOverflowKeySet.has(item.to));
@@ -2721,6 +2724,24 @@ export function TopNav({ onLogout }: TopNavProps) {
                 ) : null}
               </div>
             ) : null}
+            {mobileOverflowPrimaryNavItems.map((item) => {
+              const Icon = item.icon;
+              const active = item.match(location.pathname);
+              const label = t(item.labelKey);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  role="menuitem"
+                  aria-current={active ? "page" : undefined}
+                  className={mobileMoreMenuItemClassName(active)}
+                  onClick={() => setMobileMoreOpen(false)}
+                >
+                  <Icon size={17} aria-hidden="true" />
+                  <span className="min-w-0 truncate">{label}</span>
+                </Link>
+              );
+            })}
             {renderMobileMenuItems(mobileMoreMenuItemClassName)}
             <MobilePreferenceGroup label={t("nav.language")} options={localeOptions} value={locale} onChange={setLocale} />
             <MobilePreferenceGroup
@@ -2760,10 +2781,10 @@ export function TopNav({ onLogout }: TopNavProps) {
         onPointerDown={keepCurtainOpen}
       >
         <div
-          className="mx-auto grid w-full max-w-lg gap-1"
+          className="mx-auto grid w-full max-w-lg gap-2"
           style={{ gridTemplateColumns: `repeat(${Math.max(1, mobileNavColumnCount)}, minmax(0, 1fr))` }}
         >
-          {primaryNavItems.map((item) => {
+          {mobileVisiblePrimaryNavItems.map((item) => {
             const Icon = item.icon;
             const active = item.match(location.pathname);
             const label = t(item.labelKey);
@@ -2787,7 +2808,7 @@ export function TopNav({ onLogout }: TopNavProps) {
               onClick={() => setMobileMoreOpen((current) => !current)}
               aria-expanded={mobileMoreOpen}
               aria-label={t("nav.more")}
-              className={mobileNavItemClassName(secondaryActive || mobileMoreOpen)}
+              className={mobileNavItemClassName(secondaryActive || mobileMoreOpen || mobileOverflowPrimaryNavItems.some((item) => item.match(location.pathname)))}
             >
               <MoreHorizontal size={18} aria-hidden="true" />
               <span className="mt-0.5 truncate">{t("nav.more")}</span>
