@@ -7,6 +7,7 @@ import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup } from "../../lib/types";
+import { ActionButton, actionButtonClassName } from "../ActionButton";
 import { GalleryImagePreviewDialog } from "../GalleryImagePreviewDialog";
 import { ModalShell } from "../ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../ResourceGovernance";
@@ -27,15 +28,7 @@ interface ResourceLibraryModalProps {
 
 const EMPTY_RESOURCE_LIBRARY_GROUPS: ResourceLibraryGroup[] = [];
 const EMPTY_RESOURCE_LIBRARY_ASSETS: ResourceLibraryAsset[] = [];
-const RESOURCE_LIBRARY_MODAL_PRIMARY_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RESOURCE_LIBRARY_MODAL_ICON_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RESOURCE_LIBRARY_MODAL_CLOSE_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RESOURCE_LIBRARY_MODAL_ICON_ACTION_CLASS = actionButtonClassName({ preset: "secondary", size: "icon-sm" });
 
 export function ResourceLibraryModal({
   open,
@@ -111,16 +104,16 @@ export function ResourceLibraryModal({
                 {selectedGroup ? selectedGroup.name : t("resourceLibrary.allGroups")} · {assetCountLabel}
               </div>
             </div>
-            <button
-              type="button"
+            <ActionButton
+              preset="secondary"
+              size="icon-md"
               onClick={onClose}
               disabled={Boolean(selectingAssetId)}
-              className={RESOURCE_LIBRARY_MODAL_CLOSE_ACTION_CLASS}
               aria-label={t("resourceLibrary.close")}
               title={t("resourceLibrary.close")}
+              leadingIcon={<X size={18} />}
             >
-              <X size={18} />
-            </button>
+            </ActionButton>
           </div>
 
           {!canRead ? (
@@ -217,15 +210,15 @@ export function ResourceLibraryModal({
                               ))}
                             </div>
                             <div className="flex items-center gap-1">
-                              <button
-                                type="button"
+                              <ActionButton
+                                preset="secondary"
+                                size="icon-sm"
                                 onClick={() => setPreviewAsset(asset)}
-                                className={RESOURCE_LIBRARY_MODAL_ICON_ACTION_CLASS}
                                 aria-label={t("common.preview")}
                                 title={t("common.preview")}
+                                leadingIcon={<Eye size={14} />}
                               >
-                                <Eye size={14} />
-                              </button>
+                              </ActionButton>
                               <a
                                 href={api.toApiUrl(asset.download_url)}
                                 target="_blank"
@@ -237,16 +230,18 @@ export function ResourceLibraryModal({
                                 <Download size={14} />
                               </a>
                               {onSelectAsset ? (
-                                <button
-                                  type="button"
+                                <ActionButton
+                                  preset="primary"
+                                  size="sm"
                                   onClick={() => onSelectAsset(asset)}
                                   disabled={actionDisabled}
                                   title={actionTitle}
-                                  className={`${RESOURCE_LIBRARY_MODAL_PRIMARY_ACTION_CLASS} ml-auto min-w-0`}
+                                  loading={selectedBusy}
+                                  leadingIcon={<Check size={13} />}
+                                  className="ml-auto min-w-0 max-w-full [&_.pf-action-button__label]:truncate"
                                 >
-                                  {selectedBusy ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Check size={13} className="mr-1" />}
-                                  <span className="min-w-0 truncate">{selectLabel ?? t("resourceLibrary.select")}</span>
-                                </button>
+                                  {selectLabel ?? t("resourceLibrary.select")}
+                                </ActionButton>
                               ) : null}
                             </div>
                           </div>

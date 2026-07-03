@@ -5,6 +5,7 @@ import { Check, CheckCircle2, Image as ImageIcon, Loader2, Save, X } from "lucid
 import { api, ApiError } from "../../lib/api";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup, ResourceLibrarySourceType } from "../../lib/types";
+import { ActionButton } from "../ActionButton";
 import { ModalShell } from "../ModalShell";
 
 export interface ResourceLibrarySaveSource {
@@ -22,15 +23,6 @@ interface SaveToResourceLibraryDialogProps {
 }
 
 const EMPTY_RESOURCE_LIBRARY_GROUPS: ResourceLibraryGroup[] = [];
-const RESOURCE_LIBRARY_DIALOG_MAIN_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RESOURCE_LIBRARY_DIALOG_SECONDARY_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RESOURCE_LIBRARY_DIALOG_ICON_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const RESOURCE_LIBRARY_SAVE_FEEDBACK_AUTO_DISMISS_MS = 1000;
 
 function ResourceLibrarySaveFeedbackDialog({
@@ -86,15 +78,15 @@ function ResourceLibrarySaveFeedbackDialog({
             </p>
           </div>
           {isError ? (
-            <button
-              type="button"
+            <ActionButton
+              preset="secondary"
+              size="icon-md"
               onClick={onCloseError}
-              className={RESOURCE_LIBRARY_DIALOG_ICON_ACTION_CLASS}
               aria-label={t("resourceLibrary.close")}
               title={t("resourceLibrary.close")}
+              leadingIcon={<X size={16} />}
             >
-              <X size={16} />
-            </button>
+            </ActionButton>
           ) : null}
         </div>
     </ModalShell>
@@ -238,16 +230,16 @@ export function SaveToResourceLibraryDialog({
                 <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{source.title}</div>
               ) : null}
             </div>
-            <button
-              type="button"
+            <ActionButton
+              preset="secondary"
+              size="icon-md"
               onClick={onClose}
               disabled={saveMutation.isPending}
-              className={RESOURCE_LIBRARY_DIALOG_ICON_ACTION_CLASS}
               aria-label={t("resourceLibrary.close")}
               title={t("resourceLibrary.close")}
+              leadingIcon={<X size={18} />}
             >
-              <X size={18} />
-            </button>
+            </ActionButton>
           </div>
 
           <div className="space-y-4 px-5 py-4">
@@ -331,16 +323,17 @@ export function SaveToResourceLibraryDialog({
           </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
-          <button
-            type="button"
+          <ActionButton
+            preset="secondary"
+            size="md"
             onClick={onClose}
             disabled={saveMutation.isPending}
-            className={RESOURCE_LIBRARY_DIALOG_SECONDARY_ACTION_CLASS}
           >
             {t("common.cancel")}
-          </button>
-          <button
-            type="button"
+          </ActionButton>
+          <ActionButton
+            preset="primary"
+            size="md"
             onClick={handleSave}
             disabled={
               !canWrite ||
@@ -349,11 +342,11 @@ export function SaveToResourceLibraryDialog({
               groupsQuery.isLoading ||
               sourceStatusQuery.isLoading
             }
-            className={RESOURCE_LIBRARY_DIALOG_MAIN_ACTION_CLASS}
+            loading={saveMutation.isPending}
+            leadingIcon={<Save size={15} />}
           >
-            {saveMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Save size={15} className="mr-2" />}
             {t("resourceLibrary.saveToLibrary")}
-          </button>
+          </ActionButton>
         </div>
       </ModalShell>
     <ResourceLibrarySaveFeedbackDialog
