@@ -1,5 +1,6 @@
 import { Loader2, OctagonX, RotateCcw, Sparkles } from "lucide-react";
 
+import { ActionButton } from "../../components/ActionButton";
 import { formatImageSizeValue } from "../../lib/imageSizes";
 import type { ImageSessionGenerationTask } from "../../lib/types";
 import {
@@ -104,40 +105,46 @@ export function GenerationCanvasPlaceholder({
           ) : null}
           </div>
           {isImageSessionGenerationTaskCancelable(candidate.task) ? (
-            <button
-              type="button"
+            <ActionButton
+              preset="danger"
+              size="lg"
               onClick={() => onCancel(candidate.task)}
               disabled={cancelling || Boolean(actionBlockedTitle)}
               title={actionBlockedTitle ?? t("chat.cancelGeneration")}
-              className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:bg-red-50 disabled:opacity-60 dark:border-red-400/40 dark:bg-[#0b1220] dark:text-red-200 dark:hover:bg-red-500/12"
+              loading={cancelling}
+              leadingIcon={<OctagonX size={15} />}
+              className="px-4 text-sm"
             >
-              {cancelling ? <Loader2 size={15} className="mr-2 animate-spin" /> : <OctagonX size={15} className="mr-2" />}
               {t("chat.cancelGeneration")}
-            </button>
+            </ActionButton>
           ) : null}
           {failed && retryable ? (
-            <button
-              type="button"
+            <ActionButton
+              preset="danger"
+              size="lg"
               onClick={() => onRetry(candidate.task)}
               disabled={retrying || Boolean(actionBlockedTitle)}
               title={actionBlockedTitle ?? t("chat.retryGeneration")}
-              className="inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-500/20 transition-colors hover:bg-red-500 disabled:opacity-60"
+              loading={retrying}
+              leadingIcon={<RotateCcw size={15} />}
+              className="px-4 text-sm"
             >
-              {retrying ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
               {t("chat.retryGeneration")}
-            </button>
+            </ActionButton>
           ) : null}
           {cancelled && regeneratable ? (
-            <button
-              type="button"
+            <ActionButton
+              preset="primary"
+              size="lg"
               onClick={() => onRegenerate(candidate.task)}
               disabled={regenerating || Boolean(actionBlockedTitle)}
               title={actionBlockedTitle ?? t("chat.regenerateCancelled")}
-              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-700 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+              loading={regenerating}
+              leadingIcon={<RotateCcw size={15} />}
+              className="px-4 text-sm"
             >
-              {regenerating ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RotateCcw size={15} className="mr-2" />}
               {t("chat.regenerateCancelled")}
-            </button>
+            </ActionButton>
           ) : null}
         </div>
       </div>

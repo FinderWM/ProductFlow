@@ -33,6 +33,7 @@ import { ImageToolControls } from "../components/ImageToolControls";
 import { ModalShell } from "../components/ModalShell";
 import { ParameterHelpLabel } from "../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../components/PromptPreviewDialog";
+import { ActionButton, actionButtonClassName } from "../components/ActionButton";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -44,15 +45,21 @@ import {
   SaveToResourceLibraryDialog,
   type ResourceLibrarySaveSource,
 } from "../components/resource-library/SaveToResourceLibraryDialog";
-import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
-import { api, ApiError, resourceGroupMaxDimension } from "../lib/api";
+import {
+  WorkspaceCheckbox,
+  WorkspaceSelectField as SelectField,
+  WorkspaceTextInput,
+  WorkspaceTextarea,
+} from "../components/workspaceInputs";
+import { api, ApiError } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { compositeEnhanceTiles, estimateEnhanceTileCallCount } from "../lib/enhanceCompositor";
 import { formatDateTime } from "../lib/format";
 import {
   generationConfigOptionLabel,
   generationConfigOptionsForPurpose,
+  generationConfigSelectionMaxDimension,
 } from "../lib/generationConfigs";
 import { useEnhanceJob } from "../lib/hooks/useEnhanceJob";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
@@ -149,9 +156,10 @@ const RBAC_USERS_STALE_TIME_MS = 5 * 60_000;
 const IMAGE_CHAT_GENERATION_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const IMAGE_CHAT_ENHANCE_DIRECT_PRESETS = [1024, 2048, 2560, 3072, 4096] as const;
 const IMAGE_CHAT_ENHANCE_SCALES = [2, 3, 4] as const;
-const IMAGE_CHAT_GRADIENT_ACTION_CLASS =
-  "pf-image-chat-action inline-flex items-center justify-center rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500";
-const IMAGE_CHAT_GRADIENT_ICON_ACTION_CLASS = `${IMAGE_CHAT_GRADIENT_ACTION_CLASS} h-11 w-11 shrink-0`;
+const ENHANCE_FINAL_MAX_EDGE = 16_384;
+const ENHANCE_FINAL_MAX_PIXELS = 120_000_000;
+const IMAGE_CHAT_SECONDARY_ICON_COMPACT_BUTTON_CLASS = actionButtonClassName({ preset: "secondary", size: "icon-sm" });
+const IMAGE_CHAT_DANGER_ICON_COMPACT_BUTTON_CLASS = actionButtonClassName({ preset: "danger", size: "icon-sm" });
 
 type ImageChatResizeTarget = "left" | "right" | "history";
 type ImageChatGenerationDraftMode = "new_round" | "retry";
@@ -553,11 +561,6 @@ function ImageChatWorkbenchPage() {
     queryFn: api.listGenerationConfigOptions,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
-  const generationConfigsQuery = useQuery({
-    queryKey: ["generation-configs"],
-    queryFn: api.listGenerationConfigs,
-    staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
-  });
   const galleryTagsQuery = useQuery({
     queryKey: ["gallery-tags", "active"],
     queryFn: () => api.listGalleryTags(),
@@ -573,32 +576,41 @@ function ImageChatWorkbenchPage() {
 
   const inspirations = inspirationsQuery.data?.items ?? [];
   const rbacUsers = rbacUsersQuery.data?.items ?? [];
-  const generationConfigs = generationConfigsQuery.data ?? [];
   const globalImageGenerationMaxDimension =
     runtimeConfigQuery.data?.image_generation_max_dimension ?? DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
+  const generationConfigOptions = generationConfigOptionsQuery.data ?? [];
+  const resourceGroups = useMemo(
+    () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
+    [generationResourceGroupsQuery.data],
+  );
+  const selectedResourceGroup = useMemo(
+    () => resourceGroups.find((group) => group.id === selectedResourceGroupId) ?? null,
+    [resourceGroups, selectedResourceGroupId],
+  );
+  const promptPolishConfigOptions = useMemo(
+    () => generationConfigOptionsForPurpose(generationConfigOptions, "text", selectedResourceGroupId),
+    [generationConfigOptions, selectedResourceGroupId],
+  );
+  const imageGenerationConfigOptions = useMemo(
+    () => generationConfigOptionsForPurpose(generationConfigOptions, "image", selectedResourceGroupId),
+    [generationConfigOptions, selectedResourceGroupId],
+  );
 
   const effectiveMaxDimension = useMemo(() => {
-    if (generationConfigMode === "manual" && generationConfigId) {
-      const selectedConfig = generationConfigs.find((c) => c.id === generationConfigId);
-      if (selectedConfig) {
-        const providerMax = selectedConfig.provider_max_dimension ?? globalImageGenerationMaxDimension;
-        return Math.min(providerMax, globalImageGenerationMaxDimension);
-      }
-    }
-    if (generationConfigMode === "auto" && selectedResourceGroupId) {
-      const groupMax = resourceGroupMaxDimension(
-        generationConfigs,
-        selectedResourceGroupId,
-        globalImageGenerationMaxDimension,
-      );
-      return Math.min(groupMax, globalImageGenerationMaxDimension);
-    }
-    return globalImageGenerationMaxDimension;
+    return generationConfigSelectionMaxDimension({
+      mode: generationConfigMode,
+      generationConfigId,
+      resourceGroupId: selectedResourceGroupId,
+      resourceGroupMaxDimension: selectedResourceGroup?.image_max_dimension,
+      options: imageGenerationConfigOptions,
+      globalMaxDimension: globalImageGenerationMaxDimension,
+    });
   }, [
     generationConfigMode,
     generationConfigId,
     selectedResourceGroupId,
-    generationConfigs,
+    selectedResourceGroup,
+    imageGenerationConfigOptions,
     globalImageGenerationMaxDimension,
   ]);
 
@@ -615,23 +627,7 @@ function ImageChatWorkbenchPage() {
   );
   const galleryTagRequiredOnSave = runtimeConfigQuery.data?.gallery_tag_required_on_save ?? false;
   const galleryTags = galleryTagsQuery.data ?? [];
-  const sizeOptions = useMemo(
-    () => buildImageSizeOptions(imageGenerationMaxDimension),
-    [imageGenerationMaxDimension],
-  );
-  const resourceGroups = useMemo(
-    () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
-    [generationResourceGroupsQuery.data],
-  );
-  const generationConfigOptions = generationConfigOptionsQuery.data ?? [];
-  const promptPolishConfigOptions = useMemo(
-    () => generationConfigOptionsForPurpose(generationConfigOptions, "text", selectedResourceGroupId),
-    [generationConfigOptions, selectedResourceGroupId],
-  );
-  const imageGenerationConfigOptions = useMemo(
-    () => generationConfigOptionsForPurpose(generationConfigOptions, "image", selectedResourceGroupId),
-    [generationConfigOptions, selectedResourceGroupId],
-  );
+  const sizeOptions = useMemo(() => buildImageSizeOptions(imageGenerationMaxDimension), [imageGenerationMaxDimension]);
   const currentInspiration = isInspirationMode
     ? (inspirationQuery.data ?? null)
     : (inspirations.find((inspiration) => inspiration.id === targetInspirationId) ?? null);
@@ -1558,6 +1554,19 @@ function ImageChatWorkbenchPage() {
     !Number.isFinite(enhanceTileBaseSizeValue) ||
     enhanceTileBaseSizeValue <= 0 ||
     enhanceTileBaseSizeValue > imageGenerationMaxDimension;
+  const enhanceTiledFinalSize =
+    enhanceSourceImageSize && enhanceStrategy === "tiled"
+      ? {
+          width: enhanceSourceImageSize.width * enhanceScale,
+          height: enhanceSourceImageSize.height * enhanceScale,
+        }
+      : null;
+  const enhanceTiledFinalTooLarge = Boolean(
+    enhanceTiledFinalSize &&
+      (enhanceTiledFinalSize.width > ENHANCE_FINAL_MAX_EDGE ||
+        enhanceTiledFinalSize.height > ENHANCE_FINAL_MAX_EDGE ||
+        enhanceTiledFinalSize.width * enhanceTiledFinalSize.height > ENHANCE_FINAL_MAX_PIXELS),
+  );
   const estimatedEnhanceTileCallCount =
     enhanceStrategy === "tiled" && !enhanceTileBaseSizeInvalid && enhanceSourceImageSize
       ? estimateEnhanceTileCallCount({
@@ -1584,6 +1593,8 @@ function ImageChatWorkbenchPage() {
           ? t("chat.enhance.directSizeTooLarge")
           : enhanceStrategy === "tiled" && enhanceTileBaseSizeInvalid
             ? t("chat.enhance.tileBaseInvalid")
+            : enhanceStrategy === "tiled" && enhanceTiledFinalTooLarge
+              ? t("chat.enhance.finalSizeTooLarge")
             : "";
   const enhanceSubmitRequirementMessage =
     enhanceSourceRequirementMessage ||
@@ -2570,7 +2581,7 @@ function ImageChatWorkbenchPage() {
                   disabled={Boolean(generationSettingsBlockedTitle)}
                   title={generationSettingsBlockedTitle ?? t("chat.removeBaseImage")}
                   aria-label={t("chat.removeBaseImage")}
-                  className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/92 text-slate-500 shadow-sm ring-1 ring-slate-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/90 dark:text-slate-300 dark:ring-slate-700 dark:hover:text-red-300"
+                  className={`absolute right-1 top-1 bg-white/92 dark:bg-slate-950/90 ${IMAGE_CHAT_DANGER_ICON_COMPACT_BUTTON_CLASS}`}
                 >
                   <X size={13} />
                 </button>
@@ -2675,15 +2686,14 @@ function ImageChatWorkbenchPage() {
               />
             </label>
             {showSensitiveImageMaskPreference ? (
-              <label className="pf-image-chat-filter-check flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={maskSensitiveImages}
-                  onChange={(event) => setMaskSensitiveImages(event.target.checked)}
-                  className="pf-checkbox rounded"
-                />
-                <span>{t("chat.maskSensitiveImages")}</span>
-              </label>
+              <WorkspaceCheckbox
+                checked={maskSensitiveImages}
+                onChange={(event) => setMaskSensitiveImages(event.target.checked)}
+                variant="card"
+                wrapperClassName="pf-image-chat-filter-check px-2.5 py-2 text-xs font-semibold"
+              >
+                {t("chat.maskSensitiveImages")}
+              </WorkspaceCheckbox>
             ) : null}
             {isAdmin ? (
               <>
@@ -2706,15 +2716,14 @@ function ImageChatWorkbenchPage() {
                     visualSize="sm"
                   />
                 </label>
-                <label className="pf-image-chat-filter-check flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={onlyDeletedSessions}
-                    onChange={(event) => handleOnlyDeletedSessionsChange(event.target.checked)}
-                    className="pf-checkbox rounded"
-                  />
-                  <span>{t("chat.onlyDeletedSessions")}</span>
-                </label>
+                <WorkspaceCheckbox
+                  checked={onlyDeletedSessions}
+                  onChange={(event) => handleOnlyDeletedSessionsChange(event.target.checked)}
+                  variant="card"
+                  wrapperClassName="pf-image-chat-filter-check px-2.5 py-2 text-xs font-semibold"
+                >
+                  {t("chat.onlyDeletedSessions")}
+                </WorkspaceCheckbox>
               </>
             ) : null}
           </div>
@@ -2770,7 +2779,7 @@ function ImageChatWorkbenchPage() {
               <label className="mb-2 block text-sm font-semibold text-slate-950 dark:text-white" htmlFor={promptId}>
                 <ParameterHelpLabel label={t("chat.prompt")} helpKey="imageChatPrompt" uiType="imageChat" />
               </label>
-              <textarea
+              <WorkspaceTextarea
                 id={promptId}
                 value={draft}
                 onChange={(event) => {
@@ -2781,7 +2790,7 @@ function ImageChatWorkbenchPage() {
                 title={generationSettingsBlockedTitle ?? t("chat.prompt")}
                 rows={6}
                 placeholder={isInspirationMode ? t("chat.inspirationPromptPlaceholder") : t("chat.freePromptPlaceholder")}
-                className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-3 text-sm leading-6 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                className="rounded-2xl"
               />
               <div className="mt-2 grid gap-2">
                 {renderGenerationConfigSelector({
@@ -2794,8 +2803,9 @@ function ImageChatWorkbenchPage() {
                   onConfigIdChange: setPromptPolishConfigId,
                   disabled: Boolean(generationSettingsBlockedTitle),
                 })}
-                <button
-                  type="button"
+                <ActionButton
+                  preset="primary"
+                  size="sm"
                   onClick={handlePolishPrompt}
                   disabled={
                     !draft.trim() ||
@@ -2812,35 +2822,32 @@ function ImageChatWorkbenchPage() {
                     promptPolishConfigRequirementMessage ??
                     t("chat.polishPrompt")
                   }
-                  className="inline-flex w-full items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-60 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100 dark:hover:border-violet-300/55 dark:hover:bg-violet-500/25"
+                  loading={polishPromptMutation.isPending}
+                  leadingIcon={<Sparkles size={13} />}
+                  fullWidth
                 >
-                  {polishPromptMutation.isPending ? (
-                    <Loader2 size={13} className="mr-1.5 animate-spin" />
-                  ) : (
-                    <Sparkles size={13} className="mr-1.5" />
-                  )}
                   {t("chat.polishPrompt")}
-                </button>
+                </ActionButton>
                 {polishedPrompt ? (
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-800 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-100">
                     <div className="whitespace-pre-wrap">{polishedPrompt}</div>
                     <div className="mt-2 flex gap-2">
-                      <button
-                        type="button"
+                      <ActionButton
+                        preset="primary"
+                        size="sm"
                         onClick={handleUsePolishedPrompt}
                         disabled={Boolean(generationSettingsBlockedTitle)}
                         title={generationSettingsBlockedTitle ?? t("chat.usePolishedPrompt")}
-                        className="inline-flex items-center rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-60"
                       >
                         {t("chat.usePolishedPrompt")}
-                      </button>
-                      <button
-                        type="button"
+                      </ActionButton>
+                      <ActionButton
+                        preset="secondary"
+                        size="sm"
                         onClick={() => setPolishedPrompt("")}
-                        className="inline-flex items-center rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:border-emerald-300 dark:border-emerald-400/30 dark:bg-slate-950/60 dark:text-emerald-100"
                       >
                         {t("common.cancel")}
-                      </button>
+                      </ActionButton>
                     </div>
                   </div>
                 ) : null}
@@ -2861,6 +2868,7 @@ function ImageChatWorkbenchPage() {
               showToolOptions={false}
               helpUiType="imageChat"
               disabled={Boolean(generationSettingsBlockedTitle)}
+              appearance="workspace"
             />
           </div>
         }
@@ -2871,6 +2879,7 @@ function ImageChatWorkbenchPage() {
             helpUiType="imageChat"
             onChange={setToolOptions}
             disabled={Boolean(generationSettingsBlockedTitle)}
+            appearance="workspace"
           />
         }
       />
@@ -2881,18 +2890,16 @@ function ImageChatWorkbenchPage() {
     return (
       <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-[#0b1220]">
         {(["normal", "enhance"] as ImageChatMode[]).map((mode) => (
-          <button
+          <ActionButton
             key={mode}
-            type="button"
+            preset="secondary"
+            size="sm"
             onClick={() => setChatMode(mode)}
-            className={`h-9 rounded-lg text-xs font-semibold transition ${
-              chatMode === mode
-                ? "bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100 dark:bg-slate-950 dark:text-violet-100 dark:ring-violet-400/35"
-                : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
-            }`}
+            aria-pressed={chatMode === mode}
+            className="h-9 w-full justify-center text-xs"
           >
             {t(mode === "normal" ? "chat.mode.normal" : "chat.mode.enhance")}
-          </button>
+          </ActionButton>
         ))}
       </div>
     );
@@ -2962,23 +2969,21 @@ function ImageChatWorkbenchPage() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               {(["direct", "tiled"] as EnhanceStrategy[]).map((strategyOption) => (
-                <button
+                <ActionButton
                   key={strategyOption}
-                  type="button"
+                  preset="secondary"
+                  size="sm"
                   onClick={() => setEnhanceStrategy(strategyOption)}
                   disabled={Boolean(enhanceSettingsBlockedTitle)}
-                  className={`h-9 rounded-lg border px-3 text-xs font-semibold transition disabled:opacity-60 ${
-                    enhanceStrategy === strategyOption
-                      ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                  }`}
+                  aria-pressed={enhanceStrategy === strategyOption}
+                  className="h-9 w-full justify-center px-3 text-xs"
                 >
                   {t(
                     strategyOption === "direct"
                       ? "chat.enhance.strategyDirect"
                       : "chat.enhance.strategyTiled",
                   )}
-                </button>
+                </ActionButton>
               ))}
             </div>
           </div>
@@ -2987,37 +2992,41 @@ function ImageChatWorkbenchPage() {
             <div className="space-y-2">
               <div className="grid grid-cols-3 gap-2">
                 {IMAGE_CHAT_ENHANCE_DIRECT_PRESETS.map((preset) => (
-                  <button
+                  <ActionButton
                     key={preset}
-                    type="button"
+                    preset="secondary"
+                    size="sm"
                     disabled={preset > imageGenerationMaxDimension || Boolean(enhanceSettingsBlockedTitle)}
                     onClick={() => {
                       setEnhanceDirectWidth(String(preset));
                       setEnhanceDirectHeight(String(preset));
                     }}
-                    className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                    aria-pressed={enhanceDirectWidth === String(preset) && enhanceDirectHeight === String(preset)}
+                    className="h-8 w-full justify-center text-xs"
                   >
                     {preset}
-                  </button>
+                  </ActionButton>
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
                   {t("chat.enhance.width")}
-                  <input
+                  <WorkspaceTextInput
                     value={enhanceDirectWidth}
                     onChange={(event) => setEnhanceDirectWidth(event.target.value)}
-                    className="pf-input-compact mt-1 w-full"
+                    size="compact"
+                    className="mt-1"
                     inputMode="numeric"
                     disabled={Boolean(enhanceSettingsBlockedTitle)}
                   />
                 </label>
                 <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
                   {t("chat.enhance.height")}
-                  <input
+                  <WorkspaceTextInput
                     value={enhanceDirectHeight}
                     onChange={(event) => setEnhanceDirectHeight(event.target.value)}
-                    className="pf-input-compact mt-1 w-full"
+                    size="compact"
+                    className="mt-1"
                     inputMode="numeric"
                     disabled={Boolean(enhanceSettingsBlockedTitle)}
                   />
@@ -3028,27 +3037,26 @@ function ImageChatWorkbenchPage() {
             <div className="space-y-2">
               <div className="grid grid-cols-3 gap-2">
                 {IMAGE_CHAT_ENHANCE_SCALES.map((scale) => (
-                  <button
+                  <ActionButton
                     key={scale}
-                    type="button"
+                    preset="secondary"
+                    size="sm"
                     onClick={() => setEnhanceScale(scale)}
                     disabled={Boolean(enhanceSettingsBlockedTitle)}
-                    className={`h-8 rounded-lg border text-xs font-semibold transition disabled:opacity-60 ${
-                      enhanceScale === scale
-                        ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-                        : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                    }`}
+                    aria-pressed={enhanceScale === scale}
+                    className="h-8 w-full justify-center text-xs"
                   >
                     {scale}x
-                  </button>
+                  </ActionButton>
                 ))}
               </div>
               <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
                 {t("chat.enhance.tileBaseSize")}
-                <input
+                <WorkspaceTextInput
                   value={enhanceTileBaseSize}
                   onChange={(event) => setEnhanceTileBaseSize(event.target.value)}
-                  className="pf-input-compact mt-1 w-full"
+                  size="compact"
+                  className="mt-1"
                   inputMode="numeric"
                   disabled={Boolean(enhanceSettingsBlockedTitle)}
                 />
@@ -3082,23 +3090,24 @@ function ImageChatWorkbenchPage() {
               ) : null}
               {activeEnhanceAttachedRound ? (
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
+                  <ActionButton
+                    preset="primary"
+                    size="sm"
                     onClick={handleUseAttachedEnhanceAsBase}
-                    className="pf-workspace-action-primary inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold"
+                    leadingIcon={<Layers3 size={14} />}
                   >
-                    <Layers3 size={14} />
                     {t("chat.enhance.useAsBase")}
-                  </button>
-                  <button
-                    type="button"
+                  </ActionButton>
+                  <ActionButton
+                    preset="secondary"
+                    size="sm"
                     onClick={() => activeEnhanceJobId && saveEnhanceJobMutation.mutate(activeEnhanceJobId)}
                     disabled={!activeJobFinalReady || saveEnhanceJobMutation.isPending || activeJobSaved}
-                    className="pf-workspace-action-secondary inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                    loading={saveEnhanceJobMutation.isPending}
+                    leadingIcon={activeJobSaved ? <Check size={14} /> : <Save size={14} />}
                   >
-                    {activeJobSaved ? <Check size={14} /> : <Save size={14} />}
                     {activeJobSaved ? t("chat.enhance.savedToLibrary") : t("chat.enhance.saveToLibrary")}
-                  </button>
+                  </ActionButton>
                 </div>
               ) : null}
             </div>
@@ -3185,12 +3194,6 @@ function ImageChatWorkbenchPage() {
   };
   const stageInfoChipClass =
     "inline-flex min-w-0 max-w-full items-center rounded-lg border border-slate-200/90 bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm shadow-slate-900/5 backdrop-blur-md dark:border-slate-600/70 dark:bg-slate-950/82 dark:text-slate-200";
-  const stageActionClass =
-    "inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-slate-200/90 bg-white/90 px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm shadow-slate-900/5 backdrop-blur-md transition-colors hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600/70 dark:bg-slate-950/82 dark:text-slate-200 dark:hover:border-violet-400/60 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400";
-  const headerGalleryActionClass =
-    "inline-flex h-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 px-2.5 text-[11px] font-semibold text-white shadow-sm shadow-indigo-500/20 ring-1 ring-indigo-500 transition-colors hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-violet-300/35 dark:focus-visible:ring-violet-400";
-  const headerResourceActionClass =
-    "pf-image-chat-action inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-2.5 text-[11px] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500";
   const selectedRoundStageInfo = selectedRound ? (
     <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
       <span className={stageInfoChipClass} title={selectedRound.resource_group.name}>
@@ -3230,7 +3233,7 @@ function ImageChatWorkbenchPage() {
           setErrorMessage(selectedResultResourceBlockedTitle);
         }
       }}
-      className={`${stageActionClass} w-8 px-0 aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
+      className={`${IMAGE_CHAT_SECONDARY_ICON_COMPACT_BUTTON_CLASS} w-8 bg-white/90 px-0 backdrop-blur-md aria-disabled:cursor-not-allowed aria-disabled:opacity-60 dark:bg-slate-950/82`}
       aria-disabled={Boolean(selectedResultResourceBlockedTitle)}
     >
       <Download size={14} />
@@ -3239,34 +3242,33 @@ function ImageChatWorkbenchPage() {
   const renderSelectedRoundHeaderActions = () =>
     selectedRound ? (
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <button
-          type="button"
+        <ActionButton
+          preset="secondary"
+          size="sm"
           onClick={handleSaveSelectedToGallery}
           disabled={saveSelectedGalleryDisabled}
           title={saveSelectedGalleryTitle}
           aria-label={saveSelectedGalleryTitle}
-          className={headerGalleryActionClass}
+          loading={saveGalleryMutation.isPending}
+          leadingIcon={selectedGeneratedSavedToGallery ? <Check size={13} /> : <GalleryHorizontalEnd size={13} />}
+          className="text-[11px]"
         >
-          {saveGalleryMutation.isPending ? (
-            <Loader2 size={13} className="mr-1.5 animate-spin" />
-          ) : (
-            <GalleryHorizontalEnd size={13} className="mr-1.5" />
-          )}
           {selectedGeneratedSavedToGallery ? t("chat.alreadyInGallery") : t("chat.sendGallery")}
-        </button>
-        <button
-          type="button"
+        </ActionButton>
+        <ActionButton
+          preset="primary"
+          size="sm"
           onClick={handleSaveSelectedToResourceLibrary}
           disabled={saveSelectedResourceLibraryDisabled}
           title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
           aria-label={t("chat.resourceLibrary.saveGenerated")}
-          className={headerResourceActionClass}
+          leadingIcon={selectedGeneratedSavedToResourceLibrary ? <Check size={13} /> : <Save size={13} />}
+          className="text-[11px]"
         >
-          <Save size={13} className="mr-1.5" />
           {selectedGeneratedSavedToResourceLibrary
             ? t("resourceLibrary.alreadyInLibrary")
             : t("chat.resourceLibrary.saveGenerated")}
-        </button>
+        </ActionButton>
       </div>
     ) : null;
   const primaryBlockedResource = chatMode === "enhance" ? enhanceBlockedResource : generationBlockedResource;
@@ -3343,21 +3345,19 @@ function ImageChatWorkbenchPage() {
                 <div className="pf-workspace-title text-sm font-semibold text-slate-950 dark:text-white">{t("chat.sessions")}</div>
                 <div className="pf-workspace-muted mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
               </div>
-              <button
-                type="button"
+              <ActionButton
+                preset="primary"
+                size="lg"
                 onClick={openCreateSessionDialog}
                 disabled={createSessionDisabled}
                 title={createSessionButtonTitle}
-                className="pf-workspace-action-primary inline-flex h-11 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                 aria-label={t("chat.newSession")}
+                loading={createSessionMutation.isPending}
+                leadingIcon={<Plus size={18} className="shrink-0" />}
+                className="min-w-[5.5rem]"
               >
-                {createSessionMutation.isPending ? (
-                  <Loader2 size={16} className="shrink-0 animate-spin" />
-                ) : (
-                  <Plus size={18} className="shrink-0" />
-                )}
-                <span>{t("chat.newSessionShort")}</span>
-              </button>
+                {t("chat.newSessionShort")}
+              </ActionButton>
             </div>
             <div className="mt-3">{renderSessionResourceGroupFilter()}</div>
           </div>
@@ -3381,18 +3381,18 @@ function ImageChatWorkbenchPage() {
         <section className="pf-workspace-stage flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col p-3 pb-2">
             <div className="mb-3 flex items-center justify-between gap-1.5 lg:hidden">
-              <button
+              <ActionButton
                 ref={mobileSessionButtonRef}
-                type="button"
+                preset="secondary"
+                size="icon-lg"
                 onClick={() => setMobileSessionDrawerOpen(true)}
                 aria-label={t("chat.openSessionDrawer")}
-                className="btn-secondary-spring inline-flex h-11 w-11 items-center justify-center rounded-2xl"
+                leadingIcon={<Menu size={18} />}
               >
-                <Menu size={18} />
-              </button>
+              </ActionButton>
               <div className="min-w-0 flex-1 px-1 text-left">
                 {renameEnabled ? (
-                  <input
+                  <WorkspaceTextInput
                     value={titleDraft}
                     onChange={(event) => setTitleDraft(event.target.value)}
                     onKeyDown={(event) => {
@@ -3407,7 +3407,8 @@ function ImageChatWorkbenchPage() {
                     disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
                     title={sessionEditBlockedTitle ?? t("chat.rename")}
                     aria-label={t("chat.rename")}
-                    className="pf-input h-10 text-center font-semibold"
+                    size="default"
+                    className="text-center font-semibold"
                   />
                 ) : (
                   <>
@@ -3421,8 +3422,9 @@ function ImageChatWorkbenchPage() {
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
-                <button
-                  type="button"
+                <ActionButton
+                  preset="primary"
+                  size="icon-lg"
                   onClick={() => {
                     if (renameEnabled) {
                       handleRename();
@@ -3433,25 +3435,19 @@ function ImageChatWorkbenchPage() {
                   disabled={renameSessionDisabled}
                   title={sessionEditBlockedTitle ?? (renameEnabled ? t("chat.saveSessionName") : t("chat.rename"))}
                   aria-label={renameEnabled ? t("chat.saveSessionName") : t("chat.rename")}
-                  className={`${IMAGE_CHAT_GRADIENT_ICON_ACTION_CLASS} rounded-2xl`}
+                  loading={renameSessionMutation.isPending}
+                  leadingIcon={renameEnabled ? <Save size={17} /> : <Pencil size={16} />}
                 >
-                  {renameSessionMutation.isPending ? (
-                    <Loader2 size={17} className="animate-spin" />
-                  ) : renameEnabled ? (
-                    <Save size={17} />
-                  ) : (
-                    <Pencil size={16} />
-                  )}
-                </button>
-                <button
+                </ActionButton>
+                <ActionButton
                   ref={mobileHistoryButtonRef}
-                  type="button"
+                  preset="secondary"
+                  size="icon-lg"
                   onClick={() => setMobileHistoryDrawerOpen(true)}
                   aria-label={t("chat.openHistoryDrawer")}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+                  leadingIcon={<History size={17} />}
                 >
-                  <History size={17} />
-                </button>
+                </ActionButton>
               </div>
             </div>
             <div className="mb-3 flex flex-col gap-2">
@@ -3554,35 +3550,38 @@ function ImageChatWorkbenchPage() {
                     <Pencil size={15} /> {t("chat.sessionSettings")}
                   </div>
                 </div>
-                <button
-                  type="button"
+                <ActionButton
+                  preset="secondary"
+                  size="sm"
                   onClick={() => setRenameEnabled((current) => !current)}
                   disabled={renameSessionDisabled}
                   title={sessionEditBlockedTitle ?? t("chat.rename")}
-                  className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} h-8 rounded-lg px-2.5 text-xs`}
+                  leadingIcon={<Pencil size={12} />}
+                  className="h-8 px-2.5 text-xs"
                 >
-                  <Pencil size={12} className="mr-1.5" /> {t("chat.rename")}
-                </button>
+                  {t("chat.rename")}
+                </ActionButton>
               </div>
               <div className="flex gap-2">
-                <input
+                <WorkspaceTextInput
                   value={titleDraft}
                   onChange={(event) => setTitleDraft(event.target.value)}
                   disabled={!renameEnabled || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
                   title={sessionEditBlockedTitle ?? t("chat.rename")}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:focus:border-violet-400 dark:focus:ring-violet-400/20 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+                  size="default"
                 />
                 {renameEnabled ? (
-                  <button
-                    type="button"
+                  <ActionButton
+                    preset="primary"
+                    size="icon-lg"
                     onClick={handleRename}
                     disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
                     title={sessionEditBlockedTitle ?? t("chat.saveSessionName")}
-                    className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} px-3 py-2 text-sm`}
                     aria-label={t("chat.saveSessionName")}
+                    loading={renameSessionMutation.isPending}
+                    leadingIcon={<Save size={14} />}
                   >
-                    {renameSessionMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  </button>
+                  </ActionButton>
                 ) : null}
               </div>
             </div>
@@ -3610,20 +3609,19 @@ function ImageChatWorkbenchPage() {
                 {primarySubmitRequirementMessage}
               </div>
             ) : null}
-            <button
-              type="button"
+            <ActionButton
+              preset="primary"
+              size="lg"
               onClick={chatMode === "enhance" ? handleSubmitEnhance : handleGenerate}
               disabled={primaryActionDisabled}
               title={primaryActionTitle}
-              className="inline-flex w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
+              fullWidth
+              loading={primaryActionPending}
+              leadingIcon={<Sparkles size={15} />}
+              className="py-3.5"
             >
-              {primaryActionPending ? (
-                <Loader2 size={15} className="mr-2 animate-spin" />
-              ) : (
-                <Sparkles size={15} className="mr-2" />
-              )}
               {primaryActionLabel}
-            </button>
+            </ActionButton>
           </div>
         </aside>
       </main>
@@ -3668,32 +3666,30 @@ function ImageChatWorkbenchPage() {
                   <div className="pf-workspace-muted mt-1 text-xs text-slate-500 dark:text-slate-400">{t("chat.count", { count: sessionItems.length })}</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
+                  <ActionButton
+                    preset="primary"
+                    size="lg"
                     onClick={openCreateSessionDialog}
                     disabled={createSessionDisabled}
                     title={createSessionButtonTitle}
-                    className="pf-workspace-action-primary inline-flex h-11 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-2xl bg-indigo-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-br dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/30"
                     aria-label={t("chat.newSession")}
+                    loading={createSessionMutation.isPending}
+                    leadingIcon={<Plus size={18} className="shrink-0" />}
+                    className="min-w-[5.5rem]"
                   >
-                    {createSessionMutation.isPending ? (
-                      <Loader2 size={16} className="shrink-0 animate-spin" />
-                    ) : (
-                      <Plus size={18} className="shrink-0" />
-                    )}
-                    <span>{t("chat.newSessionShort")}</span>
-                  </button>
-                  <button
-                    type="button"
+                    {t("chat.newSessionShort")}
+                  </ActionButton>
+                  <ActionButton
+                    preset="secondary"
+                    size="icon-lg"
                     aria-label={t("chat.closeSessionDrawer")}
                     onClick={() => {
                       setMobileSessionDrawerOpen(false);
                       mobileSessionButtonRef.current?.focus();
                     }}
-                    className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition-colors active:scale-[0.98] hover:border-slate-300 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+                    leadingIcon={<X size={18} />}
                   >
-                    <X size={18} />
-                  </button>
+                  </ActionButton>
                 </div>
               </div>
               <div className="mt-3">{renderSessionResourceGroupFilter()}</div>
@@ -3750,17 +3746,17 @@ function ImageChatWorkbenchPage() {
               <div className="min-w-0 px-1">
                 <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("chat.history")}</div>
               </div>
-              <button
-                type="button"
+              <ActionButton
+                preset="secondary"
+                size="icon-lg"
                 aria-label={t("chat.closeHistoryDrawer")}
                 onClick={() => {
                   setMobileHistoryDrawerOpen(false);
                   mobileHistoryButtonRef.current?.focus();
                 }}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition-colors active:scale-[0.98] hover:border-slate-300 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+                leadingIcon={<X size={18} />}
               >
-                <X size={18} />
-              </button>
+              </ActionButton>
             </div>
             <ImageChatHistoryPanel
               historyBranches={historyBranches}
@@ -3785,9 +3781,10 @@ function ImageChatWorkbenchPage() {
 
       <div className="fixed inset-x-0 z-40 px-3 lg:hidden" style={{ bottom: "calc(4.1rem + env(safe-area-inset-bottom))" }}>
         <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_-6px_18px_rgba(15,23,42,0.12)] dark:border-slate-700 dark:bg-slate-950 dark:shadow-[0_-12px_28px_rgba(0,0,0,0.30)]">
-          <button
+          <ActionButton
             ref={mobileSettingsButtonRef}
-            type="button"
+            preset="primary"
+            size="lg"
             onClick={() => {
               if (!generationDraftOpen) {
                 handleStartNewRound();
@@ -3797,17 +3794,17 @@ function ImageChatWorkbenchPage() {
             }}
             disabled={!generationDraftOpen && newRoundDisabled}
             title={generationDraftOpen ? t("chat.openGenerationSheet") : (newRoundBlockedTitle || t("chat.newRound"))}
-            className={`${IMAGE_CHAT_GRADIENT_ACTION_CLASS} min-h-11 w-full min-w-0 px-3 text-left`}
+            className="min-h-11 w-full min-w-0 justify-between px-3 text-left [&_.pf-action-button__label]:flex [&_.pf-action-button__label]:min-w-0 [&_.pf-action-button__label]:flex-1 [&_.pf-action-button__label]:items-center"
             aria-label={generationDraftOpen ? t("chat.openGenerationSheet") : t("chat.newRound")}
+            leadingIcon={<Sparkles size={17} className="shrink-0" />}
+            trailingIcon={<ChevronRight size={17} className="shrink-0 text-indigo-100 dark:text-violet-100" />}
           >
-            <Sparkles size={17} className="mr-2 shrink-0" />
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold leading-5">
                 {generationDraftOpen ? t("chat.mobileGenerate") : t("chat.newRoundShort")}
               </span>
             </span>
-            <ChevronRight size={17} className="ml-2 shrink-0 text-indigo-100 dark:text-violet-100" />
-          </button>
+          </ActionButton>
         </div>
       </div>
 
@@ -3868,16 +3865,19 @@ function ImageChatWorkbenchPage() {
                   {primarySubmitRequirementMessage}
                 </div>
               ) : null}
-              <button
-                type="button"
+              <ActionButton
+                preset="primary"
+                size="lg"
                 onClick={chatMode === "enhance" ? handleSubmitEnhance : handleGenerate}
                 disabled={primaryActionDisabled}
                 title={primaryActionTitle}
-                className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
+                fullWidth
+                loading={primaryActionPending}
+                leadingIcon={<Sparkles size={15} />}
+                className="min-h-12"
               >
-                {primaryActionPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Sparkles size={15} className="mr-2" />}
                 {primaryActionLabel}
-              </button>
+              </ActionButton>
             </div>
           </Drawer.Content>
         </Drawer.Portal>
@@ -3909,21 +3909,18 @@ function ImageChatWorkbenchPage() {
                     {previewPromptCopyTitle}
                   </span>
                 ) : null}
-                <button
-                  type="button"
+                <ActionButton
+                  preset="secondary"
+                  size="sm"
                   onClick={handleCopyPreviewPrompt}
                   disabled={!activePreviewPrompt}
                   title={previewPromptCopyTitle}
                   aria-label={t("gallery.copyPrompt")}
-                  className="inline-flex h-7 items-center justify-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:bg-violet-500/12 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
+                  leadingIcon={previewPromptCopyState === "copied" ? <Check size={13} /> : <Copy size={13} />}
+                  className="min-h-7 px-2.5 text-xs"
                 >
-                  {previewPromptCopyState === "copied" ? (
-                    <Check size={13} className="mr-1.5" />
-                  ) : (
-                    <Copy size={13} className="mr-1.5" />
-                  )}
                   {t("common.copy")}
-                </button>
+                </ActionButton>
               </div>
             </section>
           }
@@ -4061,23 +4058,23 @@ function ImageChatWorkbenchPage() {
               </div>
             </div>
             <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
-              <button
-                type="button"
+              <ActionButton
+                preset="secondary"
+                size="md"
                 onClick={() => setCreateSessionDialogOpen(false)}
                 disabled={createSessionMutation.isPending}
-                className="inline-flex h-9 min-w-[72px] items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 {t("common.cancel")}
-              </button>
-              <button
-                type="button"
+              </ActionButton>
+              <ActionButton
+                preset="primary"
+                size="md"
                 onClick={handleConfirmCreateSession}
                 disabled={createSessionMutation.isPending || !createSessionResourceGroupId}
-                className="inline-flex h-9 min-w-[88px] items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white shadow-sm shadow-slate-950/15 transition-colors hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+                loading={createSessionMutation.isPending}
               >
-                {createSessionMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : null}
                 {t("chat.createSessionConfirm")}
-              </button>
+              </ActionButton>
             </div>
         </ModalShell>
       ) : null}
@@ -4139,26 +4136,26 @@ function ImageChatWorkbenchPage() {
             </p>
           </div>
           <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
-            <button
-              type="button"
+            <ActionButton
+              preset="secondary"
+              size="md"
               onClick={() => {
                 setNewRoundChoiceOpen(false);
                 startNewRoundFresh();
               }}
-              className="inline-flex h-9 min-w-[72px] items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               {t("chat.newRoundFreshConfig")}
-            </button>
-            <button
-              type="button"
+            </ActionButton>
+            <ActionButton
+              preset="primary"
+              size="md"
               onClick={() => {
                 setNewRoundChoiceOpen(false);
                 startNewRoundWithPreviousConfig();
               }}
-              className="inline-flex h-9 min-w-[88px] items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white shadow-sm shadow-slate-950/15 transition-colors hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-700 dark:bg-violet-500 dark:hover:bg-violet-400"
             >
               {t("chat.newRoundReuseConfig")}
-            </button>
+            </ActionButton>
           </div>
         </ModalShell>
       ) : null}

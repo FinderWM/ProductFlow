@@ -1,5 +1,6 @@
-import { Archive, History, Loader2, MessagesSquare } from "lucide-react";
+import { Archive, History, MessagesSquare } from "lucide-react";
 
+import { ActionButton } from "../../components/ActionButton";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -134,8 +135,9 @@ function ImageChatSessionCard({
       : "pf-image-chat-session-card-button flex min-h-20 w-full items-center gap-3 p-2.5 pr-12 text-left active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400";
   const deleteClassName =
     variant === "desktop"
-      ? "pf-image-chat-session-delete absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/95 text-slate-400 opacity-100 shadow-sm ring-1 ring-slate-200 transition-colors hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/88 dark:text-slate-400 dark:ring-slate-700 dark:hover:text-red-300 md:opacity-0 md:group-hover:opacity-100"
-      : "pf-image-chat-session-delete absolute right-2 top-2 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-white/95 text-slate-400 shadow-sm ring-1 ring-slate-200 transition-colors active:scale-[0.98] hover:text-red-600 disabled:opacity-60 dark:bg-slate-950/88 dark:text-slate-400 dark:ring-slate-700 dark:hover:text-red-300";
+      ? "pf-image-chat-session-delete absolute right-2 top-2 bg-white/95 opacity-100 dark:bg-slate-950/88 md:opacity-0 md:group-hover:opacity-100"
+      : "pf-image-chat-session-delete absolute right-2 top-2 bg-white/95 dark:bg-slate-950/88";
+  const deleteButtonSize = variant === "desktop" ? "icon-sm" : "icon-lg";
   const blocked = isResourceBlocked(item);
   const deleted = isResourceDeleted(item);
   const blockedTitle = getResourceBlockedActionTitle(item, t("resource.blockedAction"));
@@ -185,8 +187,9 @@ function ImageChatSessionCard({
           <ResourceMetaBadges resource={item} className="mt-1" />
         </div>
       </button>
-      <button
-        type="button"
+      <ActionButton
+        preset="danger"
+        size={deleteButtonSize}
         aria-label={t("chat.deleteSession")}
         onClick={() => onDeleteSession(item.id)}
         disabled={deleteDisabled}
@@ -204,9 +207,10 @@ function ImageChatSessionCard({
                     : t("chat.deleteDisabled")
         }
         className={deleteClassName}
+        loading={deleting}
+        leadingIcon={<Archive size={variant === "desktop" ? 13 : 15} />}
       >
-        {deleting ? <Loader2 size={variant === "desktop" ? 13 : 14} className="animate-spin" /> : <Archive size={variant === "desktop" ? 13 : 15} />}
-      </button>
+      </ActionButton>
     </div>
   );
 }

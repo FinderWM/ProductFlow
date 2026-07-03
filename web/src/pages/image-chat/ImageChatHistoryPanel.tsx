@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Plus } from "lucide-react";
 
+import { ActionButton } from "../../components/ActionButton";
 import type { PromptPreview } from "../../components/PromptPreviewDialog";
 import { getVerticalWheelMappedScrollLeft } from "./resizableLayout";
 import type { ImageHistoryBranch } from "./branching";
@@ -77,20 +78,18 @@ export function ImageChatHistoryPanel({
       <div className="flex min-h-0 flex-1 flex-col bg-white dark:bg-[#0f1726]">
         {onStartNewRound ? (
           <div className="border-b border-slate-200 px-2 py-2 dark:border-slate-800">
-            <button
-              type="button"
+            <ActionButton
+              preset="primary"
+              size="lg"
               onClick={onStartNewRound}
               disabled={newRoundDisabled}
               title={newRoundTitle ?? t("chat.newRound")}
-              className={`inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors disabled:opacity-60 ${
-                newRoundActive
-                  ? "border border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-100"
-                  : "bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 hover:bg-indigo-500 dark:bg-violet-500 dark:hover:bg-violet-400"
-              }`}
+              aria-pressed={newRoundActive}
+              leadingIcon={<Plus size={14} />}
+              className="min-h-10 w-full px-3 text-xs"
             >
-              <Plus size={14} />
               {t("chat.newRound")}
-            </button>
+            </ActionButton>
           </div>
         ) : null}
         {historyBranches.length ? (
@@ -148,20 +147,18 @@ export function ImageChatHistoryPanel({
             {t("chat.historyMultiRoundHint")}
           </div>
           {onStartNewRound ? (
-            <button
-              type="button"
+            <ActionButton
+              preset="primary"
+              size="sm"
               onClick={onStartNewRound}
               disabled={newRoundDisabled}
               title={newRoundTitle ?? t("chat.newRound")}
-              className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors disabled:opacity-60 ${
-                newRoundActive
-                  ? "border border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-100"
-                  : "bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 hover:bg-indigo-500 dark:bg-violet-500 dark:hover:bg-violet-400"
-              }`}
+              aria-pressed={newRoundActive}
+              leadingIcon={<Plus size={13} />}
+              className="h-8 shrink-0 px-3 text-xs"
             >
-              <Plus size={13} />
               {t("chat.newRound")}
-            </button>
+            </ActionButton>
           ) : selectedBaseAssetIds.length ? (
             <div className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 dark:border-violet-400/40 dark:bg-violet-500/15 dark:text-violet-100">
               {t("chat.clickHistoryBase")}
