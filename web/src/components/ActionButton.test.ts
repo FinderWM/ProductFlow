@@ -7,6 +7,12 @@ import {
   actionButtonClassName,
   actionSurfaceClassName,
   actionButtonToneStyle,
+  ClassicActionButton,
+  classicActionButtonClassName,
+  classicActionSurfaceClassName,
+  WorkspaceActionButton,
+  workspaceActionButtonClassName,
+  workspaceActionSurfaceClassName,
   type ActionButtonToneVars,
 } from "./ActionButton";
 
@@ -20,6 +26,23 @@ describe("ActionButton helpers", () => {
         className: "extra-class",
       }),
     ).toBe("pf-action-button pf-action-button--danger pf-action-button--icon-sm w-full extra-class");
+  });
+
+  it("builds classic and workspace class names explicitly", () => {
+    expect(
+      classicActionButtonClassName({
+        preset: "secondary",
+        size: "sm",
+        className: "extra-class",
+      }),
+    ).toBe("pf-classic-action-button pf-classic-action-button--secondary pf-action-button--sm extra-class");
+
+    expect(
+      workspaceActionButtonClassName({
+        preset: "primary",
+        size: "lg",
+      }),
+    ).toBe("pf-workspace-action-button pf-workspace-action-button--primary pf-action-button--lg");
   });
 
   it("merges tone vars with inline styles", () => {
@@ -47,6 +70,20 @@ describe("ActionButton helpers", () => {
         className: "pf-action-surface--dashed extra-class",
       }),
     ).toBe("pf-action-surface pf-action-surface--secondary pf-action-surface-focus pf-action-surface--dashed extra-class");
+
+    expect(
+      classicActionSurfaceClassName({
+        preset: "danger",
+        className: "pf-action-surface--dashed extra-class",
+      }),
+    ).toBe("pf-classic-action-surface pf-classic-action-surface--danger pf-action-surface--dashed extra-class");
+
+    expect(
+      workspaceActionSurfaceClassName({
+        preset: "primary",
+        focusWithin: true,
+      }),
+    ).toBe("pf-workspace-action-surface pf-workspace-action-surface--primary pf-action-surface-focus");
   });
 
   it("disables the rendered button while loading", () => {
@@ -67,5 +104,25 @@ describe("ActionButton helpers", () => {
     expect(markup).toContain('type="submit"');
     expect(markup).toContain("disabled");
     expect(markup).toContain("pf-action-button--primary");
+  });
+
+  it("renders classic and workspace buttons with dedicated base classes", () => {
+    const classicMarkup = renderToStaticMarkup(
+      createElement(ClassicActionButton, {
+        children: "Cancel",
+        preset: "secondary",
+      }),
+    );
+    const workspaceMarkup = renderToStaticMarkup(
+      createElement(WorkspaceActionButton, {
+        children: "Create",
+        preset: "primary",
+      }),
+    );
+
+    expect(classicMarkup).toContain("pf-classic-action-button");
+    expect(classicMarkup).toContain("pf-classic-action-button--secondary");
+    expect(workspaceMarkup).toContain("pf-workspace-action-button");
+    expect(workspaceMarkup).toContain("pf-workspace-action-button--primary");
   });
 });

@@ -979,6 +979,444 @@ textarea {
   cursor: not-allowed;
 }
 
+.pf-action-button,
+.pf-action-surface,
+.pf-classic-action-button,
+.pf-classic-action-surface,
+.pf-workspace-action-button,
+.pf-workspace-action-surface {
+  --pf-action-radius: var(--pf-radius-sm);
+  --pf-action-bg: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pf-panel) 98%, rgb(255 255 255 / 0.9)),
+    color-mix(in srgb, var(--pf-panel-soft) 90%, transparent)
+  );
+  --pf-action-bg-hover: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--pf-panel) 100%, rgb(255 255 255 / 0.94)),
+    color-mix(in srgb, var(--pf-panel-soft) 100%, transparent)
+  );
+  --pf-action-border: color-mix(in srgb, var(--pf-border) 88%, transparent);
+  --pf-action-border-hover: color-mix(in srgb, var(--pf-border) 72%, var(--pf-text) 28%);
+  --pf-action-text: var(--pf-text);
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.74) inset, 0 1px 2px rgb(15 23 42 / 0.04);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.86) inset, 0 4px 10px rgb(15 23 42 / 0.06);
+  --pf-action-focus-ring: rgb(99 102 241 / 0.16);
+  --pf-action-hover-transform: translateY(0);
+  --pf-action-active-transform: translateY(0.5px) scale(0.985);
+  --pf-action-disabled-border: color-mix(in srgb, var(--pf-border-soft) 82%, transparent);
+  --pf-action-disabled-bg: color-mix(in srgb, var(--pf-panel-soft) 72%, transparent);
+  --pf-action-disabled-text: var(--pf-muted);
+  --pf-action-disabled-opacity: 0.82;
+  border: 1px solid var(--pf-action-border);
+  border-radius: var(--pf-action-radius);
+  background: var(--pf-action-bg);
+  color: var(--pf-action-text);
+  box-shadow: var(--pf-action-shadow);
+  transition:
+    transform 180ms var(--pf-motion-soft),
+    border-color 220ms var(--pf-motion-standard),
+    background 220ms var(--pf-motion-standard),
+    color 220ms var(--pf-motion-standard),
+    box-shadow 220ms var(--pf-motion-standard);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-action-button, .pf-action-surface),
+.pf-workspace-action-button,
+.pf-workspace-action-surface {
+  --pf-action-radius: var(--pf-radius-pill);
+  --pf-action-hover-transform: translateY(-1px);
+  --pf-action-active-transform: translateY(1px) scale(0.985);
+  --pf-action-disabled-opacity: 0.72;
+}
+
+.pf-action-button,
+.pf-classic-action-button,
+.pf-workspace-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.pf-action-surface,
+.pf-classic-action-surface,
+.pf-workspace-action-surface {
+  display: block;
+}
+
+.pf-layout-action-drop-zone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+:is(.pf-action-button, .pf-classic-action-button, .pf-workspace-action-button):hover,
+:is(.pf-action-surface, .pf-classic-action-surface, .pf-workspace-action-surface):hover,
+.pf-action-surface--active {
+  border-color: var(--pf-action-border-hover);
+  background: var(--pf-action-bg-hover);
+  color: var(--pf-action-text);
+  box-shadow: var(--pf-action-shadow-hover);
+  transform: var(--pf-action-hover-transform);
+}
+
+:is(.pf-action-button, .pf-classic-action-button, .pf-workspace-action-button):focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px var(--pf-action-focus-ring),
+    var(--pf-action-shadow);
+}
+
+.pf-action-surface-focus:focus-within {
+  outline: none;
+  box-shadow:
+    0 0 0 3px var(--pf-action-focus-ring),
+    var(--pf-action-shadow);
+}
+
+:is(.pf-action-button, .pf-classic-action-button, .pf-workspace-action-button):active:not(:disabled) {
+  transform: var(--pf-action-active-transform);
+}
+
+:is(.pf-action-button, .pf-classic-action-button, .pf-action-surface, .pf-classic-action-surface)[aria-pressed="true"] {
+  --pf-action-bg: linear-gradient(180deg, rgb(241 245 249), rgb(226 232 240));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(226 232 240), rgb(203 213 225));
+  --pf-action-border: rgb(148 163 184 / 0.62);
+  --pf-action-border-hover: rgb(100 116 139 / 0.82);
+  --pf-action-text: rgb(30 41 59);
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.96) inset, 0 2px 8px rgb(15 23 42 / 0.08);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.98) inset, 0 4px 12px rgb(15 23 42 / 0.1);
+  --pf-action-focus-ring: rgb(99 102 241 / 0.18);
+}
+
+:is(.pf-action-button, .pf-classic-action-button, .pf-workspace-action-button):disabled {
+  border-color: var(--pf-action-disabled-border);
+  background: var(--pf-action-disabled-bg);
+  color: var(--pf-action-disabled-text);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: var(--pf-action-disabled-opacity);
+  transform: none;
+}
+
+.pf-action-surface--dashed {
+  border-style: dashed;
+}
+
+:is(.pf-action-button--primary, .pf-action-surface--primary, .pf-classic-action-button--primary, .pf-classic-action-surface--primary) {
+  --pf-action-bg: linear-gradient(180deg, rgb(30 41 59), rgb(20 31 48));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(45 59 78), rgb(27 39 57));
+  --pf-action-border: rgb(30 41 59 / 0.82);
+  --pf-action-border-hover: rgb(15 23 42 / 0.9);
+  --pf-action-text: #ffffff;
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.1) inset, 0 4px 12px rgb(15 23 42 / 0.12);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.14) inset, 0 6px 14px rgb(15 23 42 / 0.16);
+  --pf-action-focus-ring: rgb(99 102 241 / 0.2);
+}
+
+:is(.pf-action-button--secondary, .pf-action-surface--secondary, .pf-classic-action-button--secondary, .pf-classic-action-surface--secondary) {
+  --pf-action-bg: linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(248 250 252 / 0.92));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(255 255 255 / 0.99), rgb(241 245 249 / 0.96));
+  --pf-action-border: rgb(203 213 225 / 0.88);
+  --pf-action-border-hover: rgb(100 116 139 / 0.42);
+  --pf-action-text: rgb(51 65 85);
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.82) inset, 0 1px 2px rgb(15 23 42 / 0.04);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.9) inset, 0 4px 10px rgb(15 23 42 / 0.06);
+  --pf-action-focus-ring: rgb(99 102 241 / 0.14);
+}
+
+:is(.pf-action-button--danger, .pf-action-surface--danger, .pf-classic-action-button--danger, .pf-classic-action-surface--danger) {
+  --pf-action-bg: linear-gradient(180deg, rgb(255 245 245), rgb(254 242 242));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(254 242 242), rgb(254 226 226));
+  --pf-action-border: rgb(248 113 113 / 0.46);
+  --pf-action-border-hover: rgb(239 68 68 / 0.66);
+  --pf-action-text: rgb(185 28 28);
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.92) inset, 0 2px 8px rgb(239 68 68 / 0.08);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.94) inset, 0 4px 12px rgb(239 68 68 / 0.12);
+  --pf-action-focus-ring: rgb(248 113 113 / 0.2);
+}
+
+.pf-action-button--sm {
+  min-height: 2rem;
+  padding-inline: 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+}
+
+.pf-action-surface--compact-button {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding-inline: 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pf-action-button--md {
+  min-height: 2.25rem;
+  padding-inline: 0.875rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+}
+
+.pf-action-button--lg {
+  min-height: 2.5rem;
+  padding-inline: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+}
+
+.pf-action-button--icon-sm,
+.pf-action-button--icon-md,
+.pf-action-button--icon-lg {
+  padding-inline: 0;
+}
+
+.pf-action-button--icon-sm {
+  width: 2rem;
+  min-width: 2rem;
+  min-height: 2rem;
+}
+
+.pf-action-button--icon-md {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+}
+
+.pf-action-button--icon-lg {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.pf-action-button__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pf-action-button__label {
+  min-width: 0;
+}
+
+:root.dark :is(.pf-action-button--primary, .pf-action-surface--primary, .pf-classic-action-button--primary, .pf-classic-action-surface--primary) {
+  --pf-action-bg: linear-gradient(180deg, rgb(241 245 249), rgb(226 232 240));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(248 250 252), rgb(236 242 248));
+  --pf-action-border: rgb(226 232 240 / 0.68);
+  --pf-action-border-hover: rgb(248 250 252 / 0.82);
+  --pf-action-text: rgb(15 23 42);
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.66) inset, 0 4px 12px rgb(0 0 0 / 0.18);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.74) inset, 0 6px 14px rgb(0 0 0 / 0.22);
+  --pf-action-focus-ring: rgb(196 181 253 / 0.3);
+}
+
+:root.dark :is(.pf-action-button--secondary, .pf-action-surface--secondary, .pf-classic-action-button--secondary, .pf-classic-action-surface--secondary) {
+  --pf-action-bg: linear-gradient(180deg, rgb(15 23 42 / 0.94), rgb(2 6 23 / 0.98));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(30 41 59 / 0.96), rgb(15 23 42 / 0.98));
+  --pf-action-border: rgb(71 85 105 / 0.78);
+  --pf-action-border-hover: rgb(100 116 139 / 0.9);
+  --pf-action-text: rgb(226 232 240);
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 2px 8px rgb(0 0 0 / 0.18);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.08) inset, 0 4px 12px rgb(0 0 0 / 0.22);
+  --pf-action-focus-ring: rgb(148 163 184 / 0.24);
+}
+
+:root.dark :is(.pf-action-button, .pf-classic-action-button, .pf-action-surface, .pf-classic-action-surface)[aria-pressed="true"] {
+  --pf-action-bg: linear-gradient(180deg, rgb(51 65 85 / 0.9), rgb(30 41 59 / 0.96));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(71 85 105 / 0.94), rgb(51 65 85 / 0.98));
+  --pf-action-border: rgb(148 163 184 / 0.42);
+  --pf-action-border-hover: rgb(203 213 225 / 0.52);
+  --pf-action-text: rgb(241 245 249);
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.08) inset, 0 3px 10px rgb(0 0 0 / 0.2);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.1) inset, 0 5px 14px rgb(0 0 0 / 0.24);
+  --pf-action-focus-ring: rgb(167 139 250 / 0.24);
+}
+
+:root.dark :is(.pf-action-button--danger, .pf-action-surface--danger, .pf-classic-action-button--danger, .pf-classic-action-surface--danger) {
+  --pf-action-bg: linear-gradient(180deg, rgb(127 29 29 / 0.36), rgb(69 10 10 / 0.24));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(153 27 27 / 0.44), rgb(127 29 29 / 0.28));
+  --pf-action-border: rgb(248 113 113 / 0.36);
+  --pf-action-border-hover: rgb(252 165 165 / 0.52);
+  --pf-action-text: rgb(254 202 202);
+  --pf-action-shadow: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 3px 10px rgb(127 29 29 / 0.18);
+  --pf-action-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.08) inset, 0 5px 14px rgb(127 29 29 / 0.22);
+  --pf-action-focus-ring: rgb(248 113 113 / 0.24);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-action-button--primary, .pf-action-surface--primary),
+:is(.pf-workspace-action-button--primary, .pf-workspace-action-surface--primary) {
+  --pf-action-bg: linear-gradient(180deg, rgb(79 70 229), rgb(67 56 202));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(99 102 241), rgb(79 70 229));
+  --pf-action-border: rgb(99 102 241 / 0.54);
+  --pf-action-border-hover: rgb(129 140 248 / 0.74);
+  --pf-action-text: #ffffff;
+  --pf-action-shadow:
+    0 12px 24px rgb(79 70 229 / 0.16),
+    0 2px 0 rgb(55 48 163 / 0.16),
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    inset 0 -1px 0 rgb(49 46 129 / 0.16);
+  --pf-action-shadow-hover:
+    0 16px 28px rgb(79 70 229 / 0.2),
+    0 2px 0 rgb(55 48 163 / 0.18),
+    inset 0 1px 0 rgb(255 255 255 / 0.24),
+    inset 0 -1px 0 rgb(49 46 129 / 0.12);
+  --pf-action-focus-ring: rgb(129 140 248 / 0.32);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-action-button--secondary, .pf-action-surface--secondary),
+:is(.pf-workspace-action-button--secondary, .pf-workspace-action-surface--secondary) {
+  --pf-action-bg: linear-gradient(180deg, rgb(255 255 255 / 0.98), rgb(241 245 249 / 0.96));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(248 250 252), rgb(226 232 240 / 0.96));
+  --pf-action-border: rgb(203 213 225 / 0.92);
+  --pf-action-border-hover: rgb(148 163 184 / 0.9);
+  --pf-action-text: rgb(71 85 105);
+  --pf-action-shadow:
+    0 12px 22px rgb(15 23 42 / 0.06),
+    0 2px 0 rgb(226 232 240 / 0.88),
+    inset 0 1px 0 rgb(255 255 255 / 0.96),
+    inset 0 -1px 0 rgb(148 163 184 / 0.12);
+  --pf-action-shadow-hover:
+    0 16px 26px rgb(15 23 42 / 0.08),
+    0 2px 0 rgb(203 213 225 / 0.96),
+    inset 0 1px 0 rgb(255 255 255 / 0.98),
+    inset 0 -1px 0 rgb(148 163 184 / 0.16);
+  --pf-action-focus-ring: rgb(148 163 184 / 0.26);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-action-button, .pf-action-surface):is([aria-pressed="true"]),
+:is(.pf-workspace-action-button, .pf-workspace-action-surface)[aria-pressed="true"] {
+  --pf-action-bg: linear-gradient(180deg, rgb(238 242 255), rgb(224 231 255));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(224 231 255), rgb(199 210 254));
+  --pf-action-border: rgb(129 140 248 / 0.54);
+  --pf-action-border-hover: rgb(99 102 241 / 0.72);
+  --pf-action-text: rgb(55 48 163);
+  --pf-action-shadow:
+    0 12px 22px rgb(79 70 229 / 0.1),
+    0 2px 0 rgb(199 210 254 / 0.96),
+    inset 0 1px 0 rgb(255 255 255 / 0.96),
+    inset 0 -1px 0 rgb(79 70 229 / 0.1);
+  --pf-action-shadow-hover:
+    0 16px 26px rgb(79 70 229 / 0.14),
+    0 2px 0 rgb(165 180 252 / 0.96),
+    inset 0 1px 0 rgb(255 255 255 / 0.98),
+    inset 0 -1px 0 rgb(79 70 229 / 0.14);
+  --pf-action-focus-ring: rgb(129 140 248 / 0.28);
+}
+
+:root[data-ui-layout-scheme="workspace"] :is(.pf-action-button--danger, .pf-action-surface--danger),
+:is(.pf-workspace-action-button--danger, .pf-workspace-action-surface--danger) {
+  --pf-action-bg: linear-gradient(180deg, rgb(255 245 245), rgb(254 242 242));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(254 242 242), rgb(254 226 226));
+  --pf-action-border: rgb(248 113 113 / 0.44);
+  --pf-action-border-hover: rgb(239 68 68 / 0.6);
+  --pf-action-text: rgb(185 28 28);
+  --pf-action-shadow:
+    0 12px 22px rgb(239 68 68 / 0.08),
+    0 2px 0 rgb(254 202 202 / 0.92),
+    inset 0 1px 0 rgb(255 255 255 / 0.94),
+    inset 0 -1px 0 rgb(239 68 68 / 0.1);
+  --pf-action-shadow-hover:
+    0 16px 26px rgb(239 68 68 / 0.12),
+    0 2px 0 rgb(252 165 165 / 0.96),
+    inset 0 1px 0 rgb(255 255 255 / 0.96),
+    inset 0 -1px 0 rgb(239 68 68 / 0.14);
+  --pf-action-focus-ring: rgb(248 113 113 / 0.24);
+}
+
+:root.dark :is(.pf-workspace-action-button--primary, .pf-workspace-action-surface--primary),
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] :is(.pf-action-button--primary, .pf-action-surface--primary, .pf-workspace-action-button--primary, .pf-workspace-action-surface--primary) {
+  --pf-action-bg: linear-gradient(135deg, rgb(99 102 241), rgb(139 92 246));
+  --pf-action-bg-hover: linear-gradient(135deg, rgb(129 140 248), rgb(167 139 250));
+  --pf-action-border: rgb(196 181 253 / 0.34);
+  --pf-action-border-hover: rgb(216 180 254 / 0.54);
+  --pf-action-shadow:
+    0 14px 28px rgb(91 33 182 / 0.22),
+    0 2px 0 rgb(109 40 217 / 0.18),
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    inset 0 -1px 0 rgb(76 29 149 / 0.14);
+  --pf-action-shadow-hover:
+    0 18px 30px rgb(91 33 182 / 0.28),
+    0 2px 0 rgb(109 40 217 / 0.22),
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    inset 0 -1px 0 rgb(76 29 149 / 0.12);
+  --pf-action-focus-ring: rgb(196 181 253 / 0.34);
+}
+
+:root.dark :is(.pf-workspace-action-button--secondary, .pf-workspace-action-surface--secondary),
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] :is(.pf-action-button--secondary, .pf-action-surface--secondary, .pf-workspace-action-button--secondary, .pf-workspace-action-surface--secondary) {
+  --pf-action-bg: linear-gradient(180deg, rgb(30 41 59 / 0.96), rgb(15 23 42 / 0.9));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(51 65 85 / 0.96), rgb(30 41 59 / 0.92));
+  --pf-action-border: rgb(71 85 105 / 0.86);
+  --pf-action-border-hover: rgb(100 116 139 / 0.92);
+  --pf-action-text: rgb(226 232 240);
+  --pf-action-shadow:
+    0 12px 22px rgb(0 0 0 / 0.16),
+    0 2px 0 rgb(15 23 42 / 0.56),
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(15 23 42 / 0.18);
+  --pf-action-shadow-hover:
+    0 15px 26px rgb(0 0 0 / 0.22),
+    0 2px 0 rgb(15 23 42 / 0.68),
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    inset 0 -1px 0 rgb(15 23 42 / 0.22);
+  --pf-action-focus-ring: rgb(148 163 184 / 0.26);
+}
+
+:root.dark :is(.pf-workspace-action-button, .pf-workspace-action-surface)[aria-pressed="true"],
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] :is(.pf-action-button, .pf-action-surface, .pf-workspace-action-button, .pf-workspace-action-surface)[aria-pressed="true"] {
+  --pf-action-bg: linear-gradient(180deg, rgb(67 56 202 / 0.38), rgb(49 46 129 / 0.32));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(79 70 229 / 0.45), rgb(67 56 202 / 0.36));
+  --pf-action-border: rgb(167 139 250 / 0.4);
+  --pf-action-border-hover: rgb(196 181 253 / 0.56);
+  --pf-action-text: rgb(237 233 254);
+  --pf-action-shadow:
+    0 12px 22px rgb(91 33 182 / 0.16),
+    0 2px 0 rgb(49 46 129 / 0.24),
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(49 46 129 / 0.18);
+  --pf-action-shadow-hover:
+    0 15px 26px rgb(91 33 182 / 0.22),
+    0 2px 0 rgb(49 46 129 / 0.32),
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    inset 0 -1px 0 rgb(49 46 129 / 0.22);
+  --pf-action-focus-ring: rgb(167 139 250 / 0.3);
+}
+
+:root.dark :is(.pf-workspace-action-button--danger, .pf-workspace-action-surface--danger),
+:root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"] :is(.pf-action-button--danger, .pf-action-surface--danger, .pf-workspace-action-button--danger, .pf-workspace-action-surface--danger) {
+  --pf-action-bg: linear-gradient(180deg, rgb(127 29 29 / 0.4), rgb(69 10 10 / 0.28));
+  --pf-action-bg-hover: linear-gradient(180deg, rgb(153 27 27 / 0.48), rgb(127 29 29 / 0.32));
+  --pf-action-border: rgb(248 113 113 / 0.32);
+  --pf-action-border-hover: rgb(252 165 165 / 0.48);
+  --pf-action-text: rgb(254 202 202);
+  --pf-action-shadow:
+    0 12px 22px rgb(127 29 29 / 0.18),
+    0 2px 0 rgb(69 10 10 / 0.26),
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(69 10 10 / 0.22);
+  --pf-action-shadow-hover:
+    0 15px 26px rgb(127 29 29 / 0.24),
+    0 2px 0 rgb(69 10 10 / 0.32),
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    inset 0 -1px 0 rgb(69 10 10 / 0.24);
+  --pf-action-focus-ring: rgb(248 113 113 / 0.24);
+}
+
 .pf-workspace-action-primary {
   border-color: color-mix(in srgb, var(--pf-deep) 84%, var(--pf-accent));
   background:
@@ -1383,11 +1821,11 @@ textarea {
   line-height: 1.25rem;
 }
 
-.pf-workspace-horizontal-switch-tabs {
+:is(.pf-classic-horizontal-switch-tabs, .pf-workspace-horizontal-switch-tabs) {
   align-items: stretch;
 }
 
-.pf-workspace-horizontal-switch-tabs .pf-settings-generation-tab {
+:is(.pf-classic-horizontal-switch-tabs, .pf-workspace-horizontal-switch-tabs) .pf-settings-generation-tab {
   min-width: min(9rem, 42vw);
   padding: 0.625rem 1rem;
   text-align: center;
@@ -1413,6 +1851,11 @@ textarea {
 
 .pf-settings-generation-tab:hover {
   color: rgb(15 23 42);
+}
+
+.pf-settings-generation-tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .pf-settings-generation-tab:hover::before {
@@ -1450,24 +1893,180 @@ textarea {
   box-shadow: 0 -8px 18px -18px rgb(167 139 250 / 0.68);
 }
 
+.pf-sidebar-rail-tabs {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.pf-sidebar-rail-action {
+  width: 100%;
+  white-space: normal;
+}
+
+.pf-sidebar-rail-action .pf-action-button__icon {
+  flex-shrink: 0;
+}
+
+.pf-sidebar-rail-action .pf-action-button__label {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.05;
+}
+
+.pf-sidebar-rail-tab {
+  position: relative;
+  display: inline-flex;
+  min-height: 3.5rem;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0.875rem;
+  padding: 0.45rem 0.25rem;
+  background: transparent;
+  color: rgb(71 85 105);
+  box-shadow: none;
+  font-size: 0.625rem;
+  font-weight: 650;
+  line-height: 1.05;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background 180ms var(--pf-motion-standard, ease),
+    color 180ms var(--pf-motion-standard, ease),
+    transform 180ms var(--pf-motion-soft, ease);
+}
+
+.pf-sidebar-rail-tab::after {
+  content: "";
+  position: absolute;
+  top: 0.7rem;
+  right: 0.2rem;
+  bottom: 0.7rem;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--pf-accent, rgb(79 70 229));
+  opacity: 0;
+  transform: scaleY(0.45);
+  transition:
+    opacity 180ms var(--pf-motion-standard, ease),
+    transform 180ms var(--pf-motion-soft, ease);
+}
+
+.pf-sidebar-rail-tab:hover {
+  background: rgb(248 250 252 / 0.86);
+  color: rgb(15 23 42);
+}
+
+.pf-sidebar-rail-tab:active {
+  transform: translateY(0.5px);
+}
+
+.pf-sidebar-rail-tab:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--pf-action-focus-ring, rgb(99 102 241 / 0.22));
+}
+
+.pf-sidebar-rail-tab.is-active {
+  background: color-mix(in srgb, var(--pf-accent, rgb(79 70 229)) 10%, rgb(255 255 255));
+  color: rgb(49 46 129);
+}
+
+.pf-sidebar-rail-tab.is-active::after {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.pf-sidebar-rail-tab__icon {
+  display: inline-flex;
+  height: 1.2rem;
+  width: 1.2rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  transition: transform 180ms var(--pf-motion-soft, ease);
+}
+
+.pf-sidebar-rail-tab.is-active .pf-sidebar-rail-tab__icon {
+  transform: translateY(-1px) scale(1.06);
+}
+
+.pf-sidebar-rail-tab__label {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.05;
+}
+
+.pf-sidebar-rail-tab--workspace {
+  border-radius: 1rem;
+  color: var(--pf-muted);
+}
+
+.pf-sidebar-rail-tab--workspace:hover {
+  background: color-mix(in srgb, var(--pf-panel) 70%, transparent);
+  color: var(--pf-text);
+}
+
+.pf-sidebar-rail-tab--workspace.is-active {
+  background: color-mix(in srgb, var(--pf-accent) 14%, var(--pf-panel));
+  color: var(--pf-text);
+}
+
+:root.dark .pf-sidebar-rail-tab--classic {
+  color: rgb(203 213 225);
+}
+
+:root.dark .pf-sidebar-rail-tab--classic:hover {
+  background: rgb(30 41 59 / 0.72);
+  color: rgb(248 250 252);
+}
+
+:root.dark .pf-sidebar-rail-tab--classic.is-active {
+  background: rgb(79 70 229 / 0.2);
+  color: rgb(237 233 254);
+}
+
 .pf-settings-prompt-textarea {
-  border-color: rgb(71 85 105 / 0.82);
+  border-color: rgb(102 135 146 / 0.34);
   background:
-    linear-gradient(135deg, rgb(96 110 132 / 0.36), rgb(15 23 42 / 0) 52%),
-    linear-gradient(135deg, rgb(35 48 68 / 0.94), rgb(15 23 42 / 0.98) 72%),
-    rgb(15 23 42);
-  color: rgb(226 232 240);
+    linear-gradient(135deg, rgb(79 117 131 / 0.14), rgb(176 111 88 / 0.05) 42%, rgb(245 248 251 / 0) 62%),
+    linear-gradient(135deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.54) 48%, rgb(245 248 251 / 0.88)),
+    rgb(251 252 253);
+  color: rgb(31 51 60);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.08),
-    inset 0 0 0 1px rgb(255 255 255 / 0.03);
+    inset 0 1px 0 rgb(255 255 255 / 0.78),
+    0 10px 28px -24px rgb(79 117 131 / 0.38);
 }
 
 .pf-settings-prompt-textarea:focus {
-  color: rgb(248 250 252);
+  border-color: rgb(79 117 131 / 0.56);
+  color: rgb(24 43 52);
   background:
-    linear-gradient(135deg, rgb(120 136 158 / 0.42), rgb(15 23 42 / 0) 54%),
-    linear-gradient(135deg, rgb(41 56 78 / 0.96), rgb(15 23 42 / 0.98) 72%),
-    rgb(15 23 42);
+    linear-gradient(135deg, rgb(79 117 131 / 0.2), rgb(176 111 88 / 0.08) 42%, rgb(245 248 251 / 0) 64%),
+    linear-gradient(135deg, rgb(255 255 255 / 0.94), rgb(255 255 255 / 0.66) 48%, rgb(248 251 253 / 0.94)),
+    rgb(252 253 254);
+  box-shadow:
+    0 0 0 4px rgb(79 117 131 / 0.14),
+    inset 0 1px 0 rgb(255 255 255 / 0.84);
+}
+
+.pf-settings-prompt-textarea::placeholder {
+  color: rgb(98 120 131 / 0.84);
 }
 
 :root.dark .pf-settings-prompt-textarea {
@@ -1476,12 +2075,14 @@ textarea {
     linear-gradient(135deg, rgb(96 110 132 / 0.34), rgb(2 6 23 / 0) 52%),
     linear-gradient(135deg, rgb(30 41 59 / 0.9), rgb(2 6 23 / 0.98) 72%),
     rgb(15 23 42);
+  color: rgb(226 232 240);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.055),
     inset 0 0 0 1px rgb(255 255 255 / 0.025);
 }
 
 :root.dark .pf-settings-prompt-textarea:focus {
+  color: rgb(248 250 252);
   background:
     linear-gradient(135deg, rgb(120 136 158 / 0.4), rgb(2 6 23 / 0) 54%),
     linear-gradient(135deg, rgb(36 50 70 / 0.92), rgb(2 6 23 / 0.98) 72%),
@@ -1663,6 +2264,114 @@ textarea {
   background: color-mix(in srgb, var(--pf-panel) 40%, transparent);
 }
 
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-option-toggle {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 54%, transparent);
+  color: var(--pf-muted);
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-option-toggle:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 36%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 8%, var(--pf-panel));
+  color: var(--pf-text);
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-option-toggle:has(input:checked) {
+  border-color: color-mix(in srgb, var(--pf-accent) 48%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 13%, var(--pf-panel));
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-option-toggle-control,
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope .pf-settings-option-toggle-control {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 88%, transparent);
+  background: color-mix(in srgb, var(--pf-panel) 74%, transparent);
+  color: var(--pf-accent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-option-toggle
+  input:checked
+  + .pf-settings-option-toggle-control {
+  border-color: color-mix(in srgb, var(--pf-accent) 72%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 34%, var(--pf-panel));
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-option-toggle
+  input:focus-visible
+  + .pf-settings-option-toggle-control {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 18%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-option-toggle:has(input:disabled) {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 68%, transparent);
+  background: color-mix(in srgb, var(--pf-panel) 38%, transparent);
+  color: var(--pf-subtle);
+  transform: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-option-toggle
+  input:disabled
+  + .pf-settings-option-toggle-control {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 58%, transparent);
+  background: color-mix(in srgb, var(--pf-panel) 40%, transparent);
+  color: var(--pf-subtle);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-switch-toggle {
+  border-color: var(--pf-line-strong);
+  background: color-mix(in srgb, var(--pf-panel) 54%, transparent);
+  color: var(--pf-muted);
+  box-shadow: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-switch-toggle:hover {
+  border-color: color-mix(in srgb, var(--pf-accent) 36%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 8%, var(--pf-panel));
+  color: var(--pf-text);
+  transform: translateY(-1px);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-switch-toggle:has(input:checked) {
+  border-color: color-mix(in srgb, var(--pf-accent) 54%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 16%, var(--pf-panel));
+  color: var(--pf-text);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-switch-toggle .pf-settings-switch-control {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 88%, transparent);
+  background: color-mix(in srgb, var(--pf-muted) 22%, var(--pf-panel));
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-switch-toggle
+  input:checked
+  + .pf-settings-switch-control {
+  border-color: color-mix(in srgb, var(--pf-accent) 78%, var(--pf-line-strong));
+  background: color-mix(in srgb, var(--pf-accent) 78%, var(--pf-panel));
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-switch-toggle
+  input:focus-visible
+  + .pf-settings-switch-control {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 18%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-switch-toggle:has(input:disabled) {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 68%, transparent);
+  background: color-mix(in srgb, var(--pf-panel) 38%, transparent);
+  color: var(--pf-subtle);
+  transform: none;
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-workspace-input-scope.pf-settings-switch-toggle
+  input:disabled
+  + .pf-settings-switch-control {
+  border-color: color-mix(in srgb, var(--pf-line-strong) 58%, transparent);
+  background: color-mix(in srgb, var(--pf-panel) 40%, transparent);
+}
+
 :root[data-ui-layout-scheme="workspace"] .pf-settings-workspace .pf-settings-provider-option[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 76%, var(--pf-line-strong));
   background: color-mix(in srgb, var(--pf-accent) 24%, var(--pf-panel));
@@ -1692,7 +2401,7 @@ textarea {
 }
 
 @media (max-width: 640px) {
-  .pf-workspace-horizontal-switch-tabs .pf-settings-generation-tab {
+  :is(.pf-classic-horizontal-switch-tabs, .pf-workspace-horizontal-switch-tabs) .pf-settings-generation-tab {
     min-width: 0;
     padding-inline: 0.75rem;
   }
@@ -3017,7 +3726,7 @@ textarea {
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
         [type="hidden"]
       ):not(.pf-composite-input),
-    textarea,
+    textarea:not(.pf-markdown-editor-textarea),
     select,
     button[aria-haspopup="listbox"]
   ):focus-visible,
@@ -3108,7 +3817,7 @@ textarea {
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(
         [type="hidden"]
       ):not(.pf-composite-input),
-    textarea,
+    textarea:not(.pf-markdown-editor-textarea),
     select,
     button[aria-haspopup="listbox"]
   ):focus-visible {
@@ -3137,7 +3846,7 @@ textarea {
   color: var(--pf-settings-input-placeholder) !important;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-quick {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-quick {
   border-color: color-mix(in srgb, var(--pf-line-strong) 72%, transparent);
   background: color-mix(in srgb, var(--pf-panel) 78%, transparent);
   color: var(--pf-muted);
@@ -3147,22 +3856,22 @@ textarea {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-quick:hover {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-quick:hover {
   border-color: color-mix(in srgb, var(--pf-accent) 42%, var(--pf-line-strong));
   background: color-mix(in srgb, var(--pf-accent) 12%, var(--pf-panel));
   color: var(--pf-text);
   transform: translateY(-1px);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-quick[aria-current="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-quick[aria-current="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 62%, var(--pf-line-strong));
   background: color-mix(in srgb, var(--pf-accent) 18%, var(--pf-panel));
   color: var(--pf-text);
   box-shadow: 0 8px 18px -16px color-mix(in srgb, var(--pf-accent) 70%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-clear {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-shell,
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-clear {
   border-color: var(--pf-settings-input-border);
   background: var(--pf-settings-input-bg);
   color: var(--pf-settings-input-color);
@@ -3199,33 +3908,33 @@ textarea {
   color: var(--pf-settings-input-placeholder) !important;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-trigger:hover,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-clear:hover:not(:disabled) {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-trigger:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-clear:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--pf-accent) 42%, var(--pf-settings-input-border));
   background: var(--pf-settings-input-bg-hover);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-trigger:focus-visible,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-clear:focus-visible {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-trigger:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-clear:focus-visible {
   outline: none;
   border-color: var(--pf-settings-input-border-focus);
   background: var(--pf-settings-input-bg-focus);
   box-shadow: var(--pf-settings-input-shadow-focus);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-shell:focus-within {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-shell:focus-within {
   border-color: var(--pf-settings-input-border-focus);
   background: var(--pf-settings-input-bg-focus);
   box-shadow: var(--pf-settings-input-shadow-focus);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-clear:disabled {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-clear:disabled {
   background: var(--pf-settings-input-bg-disabled);
   color: var(--pf-settings-input-disabled-color);
   opacity: 1;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-range-popover {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-popover {
   border-color: var(--pf-settings-input-border);
   background: color-mix(in srgb, var(--pf-panel) 92%, transparent);
   color: var(--pf-settings-input-color);
@@ -3233,70 +3942,70 @@ textarea {
   backdrop-filter: blur(18px);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-nav {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-boundary,
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-nav {
   border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent);
   background: color-mix(in srgb, var(--pf-panel-soft) 84%, transparent);
   color: var(--pf-settings-input-color);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary:hover,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-nav:hover {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-boundary:hover,
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-nav:hover {
   border-color: color-mix(in srgb, var(--pf-accent) 40%, var(--pf-settings-input-border));
   background: color-mix(in srgb, var(--pf-accent) 10%, var(--pf-panel-soft));
   transform: translateY(-1px);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary:focus-visible,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary-button:focus-visible,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-nav:focus-visible,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day:focus-visible {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-boundary:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-boundary-button:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-nav:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day:focus-visible {
   outline: none;
   border-color: var(--pf-settings-input-border-focus);
   box-shadow: var(--pf-settings-input-shadow-focus);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary[aria-pressed="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-boundary[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 58%, var(--pf-settings-input-border));
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 18%, transparent), transparent 54%),
     color-mix(in srgb, var(--pf-panel) 90%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-boundary[data-active-boundary="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-boundary[data-active-boundary="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 58%, var(--pf-settings-input-border));
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 18%, transparent), transparent 54%),
     color-mix(in srgb, var(--pf-panel) 90%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger {
+:root[data-ui-layout-scheme="workspace"] .pf-time-trigger {
   border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent);
   background: var(--pf-settings-input-bg);
   color: var(--pf-settings-input-color);
   box-shadow: var(--pf-settings-input-shadow);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger:hover:not(:disabled) {
+:root[data-ui-layout-scheme="workspace"] .pf-time-trigger:hover:not(:disabled) {
   border-color: var(--pf-settings-input-border-hover);
   background: var(--pf-settings-input-bg-hover);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger:focus-visible,
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger[aria-expanded="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-time-trigger:focus-visible,
+:root[data-ui-layout-scheme="workspace"] .pf-time-trigger[aria-expanded="true"] {
   border-color: var(--pf-settings-input-border-focus);
   background: var(--pf-settings-input-bg-focus);
   box-shadow: var(--pf-settings-input-shadow-focus);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-trigger:disabled {
+:root[data-ui-layout-scheme="workspace"] .pf-time-trigger:disabled {
   background: var(--pf-settings-input-bg-disabled);
   color: var(--pf-settings-input-disabled-color);
   opacity: 1;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-popover {
+:root[data-ui-layout-scheme="workspace"] .pf-time-popover {
   border-color: var(--pf-settings-input-border);
   background: color-mix(in srgb, var(--pf-panel) 94%, transparent);
   color: var(--pf-settings-input-color);
@@ -3304,45 +4013,45 @@ textarea {
   backdrop-filter: blur(18px);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day {
   border: 1px solid transparent;
   color: var(--pf-settings-input-color);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day:hover {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day:hover {
   border-color: color-mix(in srgb, var(--pf-accent) 34%, transparent);
   background: color-mix(in srgb, var(--pf-accent) 10%, transparent);
   transform: translateY(-1px);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-outside-month="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day[data-outside-month="true"] {
   color: color-mix(in srgb, var(--pf-muted) 62%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-today="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day[data-today="true"] {
   border-color: color-mix(in srgb, var(--pf-accent-2) 52%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-in-range="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day[data-in-range="true"] {
   background: color-mix(in srgb, var(--pf-accent) 12%, transparent);
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-range-start="true"],
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-range-end="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day[data-range-start="true"],
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day[data-range-end="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 70%, var(--pf-line-strong));
   background: color-mix(in srgb, var(--pf-accent) 24%, var(--pf-panel));
   color: var(--pf-text);
   box-shadow: 0 10px 20px -18px color-mix(in srgb, var(--pf-accent) 72%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-date-day[data-active="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-datetime-range-day[data-active="true"] {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 60%, transparent),
     0 10px 22px -20px color-mix(in srgb, var(--pf-accent) 72%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-columns {
+:root[data-ui-layout-scheme="workspace"] .pf-time-columns {
   position: relative;
   border-color: color-mix(in srgb, var(--pf-settings-input-border) 78%, transparent);
   background: color-mix(in srgb, var(--pf-panel-soft) 86%, transparent);
@@ -3350,7 +4059,7 @@ textarea {
   box-shadow: var(--pf-settings-input-shadow);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-columns::before {
+:root[data-ui-layout-scheme="workspace"] .pf-time-columns::before {
   content: "";
   position: absolute;
   inset-inline: 0;
@@ -3362,44 +4071,44 @@ textarea {
   pointer-events: none;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-column {
+:root[data-ui-layout-scheme="workspace"] .pf-time-column {
   position: relative;
   z-index: 1;
   border-color: color-mix(in srgb, var(--pf-settings-input-border) 68%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-column-scroll {
+:root[data-ui-layout-scheme="workspace"] .pf-time-column-scroll {
   scrollbar-width: none;
   scroll-snap-type: y mandatory;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-column-scroll::-webkit-scrollbar {
+:root[data-ui-layout-scheme="workspace"] .pf-time-column-scroll::-webkit-scrollbar {
   display: none;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option {
+:root[data-ui-layout-scheme="workspace"] .pf-time-option {
   position: relative;
   z-index: 1;
   color: color-mix(in srgb, var(--pf-muted) 74%, transparent);
   scroll-snap-align: center;
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option:hover:not(:disabled) {
+:root[data-ui-layout-scheme="workspace"] .pf-time-option:hover:not(:disabled) {
   color: var(--pf-text);
   background: color-mix(in srgb, var(--pf-accent) 10%, transparent);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option:focus-visible {
+:root[data-ui-layout-scheme="workspace"] .pf-time-option:focus-visible {
   color: var(--pf-text);
   box-shadow: inset 0 0 0 1px var(--pf-settings-input-border-focus);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option[data-selected="true"] {
+:root[data-ui-layout-scheme="workspace"] .pf-time-option[data-selected="true"] {
   background: transparent;
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="workspace"] .pf-workspace-time-option:disabled {
+:root[data-ui-layout-scheme="workspace"] .pf-time-option:disabled {
   color: var(--pf-settings-input-disabled-color);
   opacity: 1;
 }
@@ -3409,7 +4118,7 @@ textarea {
    不引入 workspace 的 settings-input 玻璃渐变与 mist/sage/dusk 分支，
    全部走 base :root / :root.dark 的 --pf-* token，与 .pf-panel / .pf-eyebrow 同源。 */
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-quick {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-quick {
   border-color: var(--pf-border-soft);
   background: color-mix(in srgb, var(--pf-panel-soft) 90%, transparent);
   color: var(--pf-muted);
@@ -3417,156 +4126,156 @@ textarea {
   font-size: 11px;
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-quick:hover {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-quick:hover {
   border-color: color-mix(in srgb, var(--pf-accent) 38%, var(--pf-border));
   background: color-mix(in srgb, var(--pf-accent) 8%, var(--pf-panel-soft));
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-quick[aria-current="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-quick[aria-current="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
   background: color-mix(in srgb, var(--pf-accent) 14%, var(--pf-panel));
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-shell,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-clear {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-shell,
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-clear {
   border-color: var(--pf-border);
   background: var(--pf-panel);
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-trigger:hover,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-clear:hover:not(:disabled) {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-trigger:hover,
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-clear:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--pf-accent) 40%, var(--pf-border));
   background: color-mix(in srgb, var(--pf-accent) 6%, var(--pf-panel));
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-trigger:focus-visible,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-clear:focus-visible {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-trigger:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-clear:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-shell:focus-within {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-shell:focus-within {
   border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-clear:disabled {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-clear:disabled {
   background: var(--pf-panel-soft);
   color: var(--pf-subtle);
   opacity: 1;
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-range-popover {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-popover {
   border-color: var(--pf-border);
   background: var(--pf-panel);
   color: var(--pf-text);
   box-shadow: var(--pf-shadow);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-nav {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-boundary,
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-nav {
   border-color: var(--pf-border-soft);
   background: var(--pf-panel-soft);
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary:hover,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-nav:hover {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-boundary:hover,
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-nav:hover {
   border-color: color-mix(in srgb, var(--pf-accent) 38%, var(--pf-border));
   background: color-mix(in srgb, var(--pf-accent) 6%, var(--pf-panel-soft));
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary:focus-visible,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary-button:focus-visible,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-nav:focus-visible,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day:focus-visible {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-boundary:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-boundary-button:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-nav:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary[aria-pressed="true"],
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-boundary[data-active-boundary="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-boundary[aria-pressed="true"],
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-boundary[data-active-boundary="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 52%, var(--pf-border));
   background: color-mix(in srgb, var(--pf-accent) 10%, var(--pf-panel));
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger {
+:root[data-ui-layout-scheme="classic"] .pf-time-trigger {
   border-color: var(--pf-border-soft);
   background: var(--pf-panel);
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger:hover:not(:disabled) {
+:root[data-ui-layout-scheme="classic"] .pf-time-trigger:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--pf-accent) 38%, var(--pf-border));
   background: color-mix(in srgb, var(--pf-accent) 6%, var(--pf-panel));
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger:focus-visible,
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger[aria-expanded="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-time-trigger:focus-visible,
+:root[data-ui-layout-scheme="classic"] .pf-time-trigger[aria-expanded="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 55%, var(--pf-border));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-accent) 16%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-trigger:disabled {
+:root[data-ui-layout-scheme="classic"] .pf-time-trigger:disabled {
   background: var(--pf-panel-soft);
   color: var(--pf-subtle);
   opacity: 1;
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-popover {
+:root[data-ui-layout-scheme="classic"] .pf-time-popover {
   border-color: var(--pf-border);
   background: var(--pf-panel);
   color: var(--pf-text);
   box-shadow: var(--pf-shadow);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day {
   border: 1px solid transparent;
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day:hover {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day:hover {
   border-color: color-mix(in srgb, var(--pf-accent) 34%, transparent);
   background: color-mix(in srgb, var(--pf-accent) 8%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-outside-month="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day[data-outside-month="true"] {
   color: var(--pf-subtle);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-today="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day[data-today="true"] {
   border-color: color-mix(in srgb, var(--pf-accent-2) 55%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-in-range="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day[data-in-range="true"] {
   background: color-mix(in srgb, var(--pf-accent) 10%, transparent);
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-range-start="true"],
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-range-end="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day[data-range-start="true"],
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day[data-range-end="true"] {
   border-color: color-mix(in srgb, var(--pf-accent) 62%, var(--pf-border));
   background: color-mix(in srgb, var(--pf-accent) 22%, var(--pf-panel));
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-date-day[data-active="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-datetime-range-day[data-active="true"] {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 60%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-columns {
+:root[data-ui-layout-scheme="classic"] .pf-time-columns {
   position: relative;
   border-color: var(--pf-border-soft);
   background: var(--pf-panel-soft);
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-columns::before {
+:root[data-ui-layout-scheme="classic"] .pf-time-columns::before {
   content: "";
   position: absolute;
   inset-inline: 0;
@@ -3578,44 +4287,44 @@ textarea {
   pointer-events: none;
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-column {
+:root[data-ui-layout-scheme="classic"] .pf-time-column {
   position: relative;
   z-index: 1;
   border-color: var(--pf-border-soft);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-column-scroll {
+:root[data-ui-layout-scheme="classic"] .pf-time-column-scroll {
   scrollbar-width: none;
   scroll-snap-type: y mandatory;
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-column-scroll::-webkit-scrollbar {
+:root[data-ui-layout-scheme="classic"] .pf-time-column-scroll::-webkit-scrollbar {
   display: none;
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option {
+:root[data-ui-layout-scheme="classic"] .pf-time-option {
   position: relative;
   z-index: 1;
   color: var(--pf-muted);
   scroll-snap-align: center;
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option:hover:not(:disabled) {
+:root[data-ui-layout-scheme="classic"] .pf-time-option:hover:not(:disabled) {
   color: var(--pf-text);
   background: color-mix(in srgb, var(--pf-accent) 8%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option:focus-visible {
+:root[data-ui-layout-scheme="classic"] .pf-time-option:focus-visible {
   color: var(--pf-text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 55%, transparent);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option[data-selected="true"] {
+:root[data-ui-layout-scheme="classic"] .pf-time-option[data-selected="true"] {
   background: transparent;
   color: var(--pf-text);
 }
 
-:root[data-ui-layout-scheme="classic"] .pf-workspace-time-option:disabled {
+:root[data-ui-layout-scheme="classic"] .pf-time-option:disabled {
   color: var(--pf-subtle);
   opacity: 1;
 }
@@ -4945,6 +5654,7 @@ textarea {
 .pf-shell-runtime-switch,
 .pf-shell-locale-switch {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 5px;
   padding: 5px;
@@ -5436,7 +6146,11 @@ textarea {
   background: color-mix(in srgb, var(--pf-deep) 5%, transparent);
 }
 
-.pf-shell-compact-quick.primary,
+.pf-shell-compact-quick.primary {
+  background: color-mix(in srgb, var(--pf-deep) 8%, transparent);
+  color: var(--pf-text);
+}
+
 .pf-shell-compact-quick[aria-current="page"],
 .pf-shell-compact-secondary[aria-current="page"],
 .pf-shell-compact-system[aria-pressed="true"] {
@@ -5669,6 +6383,10 @@ textarea {
     padding-bottom: 116px;
   }
 
+  .pf-workspace-home-greeting + .pf-workspace-home-section {
+    margin-top: 34px;
+  }
+
   .pf-workspace-quick-nav {
     left: 0;
     max-width: calc(100vw - 12px);
@@ -5872,7 +6590,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] textarea {
-  border-radius: var(--pf-radius-md);
+  border-radius: var(--pf-radius-workspace-input);
 }
 
 :root[data-ui-layout-scheme="workspace"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(.pf-composite-input):focus,
@@ -7602,14 +8320,18 @@ textarea {
 
 .pf-gallery-feed {
   background:
-    radial-gradient(circle at top right, rgb(29 78 216 / 0.18), transparent 26rem),
-    #07111d;
+    radial-gradient(circle at top right, rgb(59 130 246 / 0.12), transparent 26rem),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--pf-panel-soft) 92%, white),
+      color-mix(in srgb, var(--pf-bg-soft) 94%, white)
+    );
 }
 
 :root.dark .pf-gallery-feed {
   background:
     radial-gradient(circle at top right, rgb(129 140 248 / 0.16), transparent 26rem),
-    var(--pf-bg);
+    #07111d;
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-gallery-feed {
@@ -7620,6 +8342,10 @@ textarea {
       transparent 26rem
     ),
     color-mix(in srgb, var(--pf-bg-soft) 76%, transparent);
+}
+
+:root[data-ui-layout-scheme="workspace"] .pf-gallery-grid-card-surface {
+  --pf-action-radius: var(--pf-radius-md);
 }
 
 @media (min-width: 640px) {
@@ -8289,6 +9015,24 @@ textarea {
   color: rgb(100 116 139);
 }
 
+.pf-markdown-editor-inline-panel {
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.pf-markdown-editor-inline-panel:focus-within {
+  border-color: color-mix(in srgb, var(--pf-action-border-hover, rgb(99 102 241)) 72%, transparent);
+  box-shadow:
+    0 0 0 3px var(--pf-action-focus-ring, rgb(99 102 241 / 0.15)),
+    0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+:root[data-ui-layout-scheme="workspace"] textarea.pf-workspace-textarea.pf-markdown-editor-textarea:focus-visible {
+  box-shadow: var(--pf-settings-input-shadow) !important;
+}
+
 .copy-editor-card {
   position: relative;
   background-color: rgb(255 255 255 / 0.92);
@@ -8680,7 +9424,8 @@ textarea {
 }
 
 .pf-settings-nav-item,
-.pf-help-nav-item {
+.pf-help-nav-item,
+.pf-resource-library-group-nav-item {
   position: relative;
   overflow: hidden;
   border: 1px solid transparent;
@@ -8833,7 +9578,8 @@ textarea {
 }
 
 .pf-settings-nav-item:hover,
-.pf-help-nav-item:hover {
+.pf-help-nav-item:hover,
+.pf-resource-library-group-nav-item:hover {
   background: linear-gradient(
     90deg,
     rgb(100 116 139 / 0.13),
@@ -8843,7 +9589,8 @@ textarea {
   );
 }
 
-.pf-settings-nav-item[aria-current="page"] {
+.pf-settings-nav-item[aria-current="page"],
+.pf-resource-library-group-nav-item[aria-current="page"] {
   border-color: transparent;
   background: linear-gradient(
     90deg,
@@ -8868,7 +9615,8 @@ textarea {
 }
 
 :root.dark .pf-settings-nav-item:hover,
-:root.dark .pf-help-nav-item:hover {
+:root.dark .pf-help-nav-item:hover,
+:root.dark .pf-resource-library-group-nav-item:hover {
   background: linear-gradient(
     90deg,
     rgb(139 92 246 / 0.16),
@@ -8879,6 +9627,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-settings-nav-item[aria-current="page"],
+:root[data-ui-layout-scheme="workspace"] .pf-resource-library-group-nav-item[aria-current="page"],
 :root[data-ui-layout-scheme="workspace"] .pf-help-nav-item[aria-current="page"] {
   color: var(--pf-text);
 }
@@ -8911,7 +9660,7 @@ textarea {
 :root[data-ui-layout-scheme="workspace"] :is(.pf-workspace-subpage .pf-side-shell, .pf-app > main.pf-side-shell-with-toc)
   .pf-side-rail
   nav
-  :is(.pf-settings-nav-item, .pf-help-nav-item)[aria-current="page"] {
+  :is(.pf-settings-nav-item, .pf-help-nav-item, .pf-resource-library-group-nav-item)[aria-current="page"] {
   border-color: transparent;
   background: linear-gradient(
     90deg,
@@ -8924,7 +9673,7 @@ textarea {
 }
 
 :root[data-ui-layout-scheme="workspace"][data-workspace-appearance="dusk"]
-  :is(.pf-settings-nav-item, .pf-help-nav-item)[aria-current="page"] {
+  :is(.pf-settings-nav-item, .pf-help-nav-item, .pf-resource-library-group-nav-item)[aria-current="page"] {
   border-color: transparent;
   box-shadow: none;
 }

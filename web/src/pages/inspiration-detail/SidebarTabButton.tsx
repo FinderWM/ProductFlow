@@ -1,35 +1,45 @@
 import type { ReactNode } from "react";
 
-import { ActionButton } from "../../components/ActionButton";
+import type { LayoutActionAppearance } from "../../components/layoutActionButtons";
 
-interface SidebarTabButtonProps {
+interface SidebarRailTabProps {
   active: boolean;
+  appearance: LayoutActionAppearance;
   label: string;
   title: string;
   icon: ReactNode;
   onClick: () => void;
 }
 
-export function SidebarTabButton({
+function joinClassNames(parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(" ");
+}
+
+export function SidebarRailTab({
   active,
+  appearance,
   label,
   title,
   icon,
   onClick,
-}: SidebarTabButtonProps) {
+}: SidebarRailTabProps) {
   return (
-    <ActionButton
-      preset="secondary"
-      size="lg"
-      aria-pressed={active}
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
       title={title}
       onClick={onClick}
-      leadingIcon={icon}
-      className={`min-h-14 w-full min-w-0 flex-col gap-1 px-1 py-2 text-[10px] font-medium transition-spring [&_.pf-action-button__label]:text-center [&_.pf-action-button__label]:leading-tight ${
-        active ? "[&_.pf-action-button__icon]:scale-110" : ""
-      }`}
+      className={joinClassNames([
+        "pf-sidebar-rail-tab",
+        appearance === "workspace" ? "pf-sidebar-rail-tab--workspace" : "pf-sidebar-rail-tab--classic",
+        active ? "is-active" : "",
+      ])}
     >
-      {label}
-    </ActionButton>
+      <span className="pf-sidebar-rail-tab__icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="pf-sidebar-rail-tab__label">{label}</span>
+    </button>
   );
 }

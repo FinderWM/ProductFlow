@@ -12,14 +12,18 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+import { ClassicSelectField } from "../components/classicInputs";
+import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
 import { TopNav } from "../components/TopNav";
 import {
+  ClassicDateTimeRangeField,
   WorkspaceDateTimeRangeField,
   dateRangeFromDateTimeRange,
   workspaceQuickDateTimeRange,
   type WorkspaceDateTimeRange,
   type WorkspaceQuickRangeId,
 } from "../components/WorkspaceDateTimeRangeField";
+import { WorkspaceSelectField } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { useI18n } from "../lib/preferences";
@@ -31,18 +35,8 @@ import {
   WorkspaceUsageStatsContent,
 } from "./workspace/WorkspaceLandingPages";
 
-const INPUT_CLASS =
-  "h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm " +
-  "outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 " +
-  "dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400";
-
 const PANEL_CLASS =
   "pf-panel";
-
-const PRIMARY_BUTTON_CLASS =
-  "inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white " +
-  "shadow-sm shadow-indigo-500/20 transition hover:bg-indigo-500 disabled:opacity-50 " +
-  "dark:bg-violet-500 dark:hover:bg-violet-400";
 
 function successRate(summary: UserUsageStatsSummary | null | undefined): string {
   if (!summary || summary.attempt_count <= 0) {
@@ -203,11 +197,22 @@ function UsageStatsDetailPage() {
   const summary = usageQuery.data?.summary;
   const items = useMemo(() => usageQuery.data?.items ?? [], [usageQuery.data?.items]);
   const users = usageQuery.data?.users ?? [];
+  const userFilterOptions = useMemo(
+    () => [
+      { value: "", label: t("usageStats.allUsers") },
+      ...users.map((user) => ({
+        value: user.id,
+        label: user.display_name || user.username,
+      })),
+    ],
+    [t, users],
+  );
   const splitDetail = t("usageStats.metric.split", {
     text: summary?.text_attempt_count ?? 0,
     image: summary?.image_attempt_count ?? 0,
   });
   const isWorkspaceSubpage = activeScheme === "workspace";
+  const PageActionButton = actionButtonComponentForAppearance(isWorkspaceSubpage ? "workspace" : "classic");
   const refreshUsageStats = () => {
     if (
       range.start_date === appliedRange.start_date &&
@@ -249,53 +254,75 @@ function UsageStatsDetailPage() {
         <div className="space-y-5">
           <section className={`${PANEL_CLASS} p-5`}>
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <WorkspaceDateTimeRangeField
-                idPrefix="usage-stats-range"
-                value={range}
-                activeQuickRange={activeQuickRange}
-                onChange={(nextRange) => {
-                  setRange(nextRange);
-                  setActiveQuickRange(null);
-                }}
-                onQuickRangeChange={(id) => {
-                  setRange(workspaceQuickDateTimeRange(id));
-                  setActiveQuickRange(id);
-                }}
-                className="w-full xl:max-w-2xl"
-              />
+              {isWorkspaceSubpage ? (
+                <WorkspaceDateTimeRangeField
+                  idPrefix="usage-stats-range"
+                  value={range}
+                  activeQuickRange={activeQuickRange}
+                  onChange={(nextRange) => {
+                    setRange(nextRange);
+                    setActiveQuickRange(null);
+                  }}
+                  onQuickRangeChange={(id) => {
+                    setRange(workspaceQuickDateTimeRange(id));
+                    setActiveQuickRange(id);
+                  }}
+                  className="w-full xl:max-w-2xl"
+                />
+              ) : (
+                <ClassicDateTimeRangeField
+                  idPrefix="usage-stats-range"
+                  value={range}
+                  activeQuickRange={activeQuickRange}
+                  onChange={(nextRange) => {
+                    setRange(nextRange);
+                    setActiveQuickRange(null);
+                  }}
+                  onQuickRangeChange={(id) => {
+                    setRange(workspaceQuickDateTimeRange(id));
+                    setActiveQuickRange(id);
+                  }}
+                  className="w-full xl:max-w-2xl"
+                />
+              )}
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 {isAdmin ? (
                   <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
                     <span>{t("usageStats.userFilter")}</span>
-                    <select
-                      id="usage-stats-user-filter"
-                      name="usage_stats_user_filter"
-                      value={selectedUserId}
-                      onChange={(event) => setSelectedUserId(event.target.value)}
-                      className={`${INPUT_CLASS} w-full sm:w-48`}
-                    >
-                      <option value="">{t("usageStats.allUsers")}</option>
-                      {users.map((user) => (
-                        <option key={user.id} value={user.id}>
-                          {user.display_name || user.username}
-                        </option>
-                      ))}
-                    </select>
+                    {isWorkspaceSubpage ? (
+                      <WorkspaceSelectField
+                        id="usage-stats-user-filter"
+                        value={selectedUserId}
+                        onChange={setSelectedUserId}
+                        options={userFilterOptions}
+                        size="default"
+                        ariaLabel={t("usageStats.userFilter")}
+                        className="w-full sm:w-48"
+                      />
+                    ) : (
+                      <ClassicSelectField
+                        id="usage-stats-user-filter"
+                        value={selectedUserId}
+                        onChange={setSelectedUserId}
+                        options={userFilterOptions}
+                        size="default"
+                        ariaLabel={t("usageStats.userFilter")}
+                        className="w-full sm:w-48"
+                      />
+                    )}
                   </label>
                 ) : null}
-                <button
-                  type="button"
+                <PageActionButton
                   onClick={refreshUsageStats}
-                  disabled={usageQuery.isFetching || rangeInvalid}
-                  className={PRIMARY_BUTTON_CLASS}
+                  disabled={rangeInvalid}
+                  loading={usageQuery.isFetching}
+                  preset="primary"
+                  size="md"
+                  className="shrink-0"
+                  leadingIcon={<RefreshCw size={14} />}
                 >
-                  {usageQuery.isFetching ? (
-                    <Loader2 size={14} className="mr-2 animate-spin" />
-                  ) : (
-                    <RefreshCw size={14} className="mr-2" />
-                  )}
                   {t("statusPage.refresh")}
-                </button>
+                </PageActionButton>
               </div>
             </div>
             {rangeInvalid ? (

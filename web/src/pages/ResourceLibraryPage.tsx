@@ -4,27 +4,29 @@ import { Drawer } from "vaul";
 import { Archive, CheckCircle2, Download, Eye, Loader2, Pencil, Plus, Save, Trees, Upload, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+import { ClassicTextInput } from "../components/classicInputs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ClipboardImageButton } from "../components/ClipboardImageButton";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
-import { ImageDropZone } from "../components/ImageDropZone";
+import { LayoutActionDropZone } from "../components/LayoutActionDropZone";
+import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
+import {
+  actionButtonClassNameForAppearance,
+  actionButtonComponentForAppearance,
+  renderActionButtonInner,
+  transparentActionToneVars,
+  type LayoutActionAppearance,
+} from "../components/layoutActionButtons";
 import { ModalShell } from "../components/ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../components/ResourceGovernance";
 import { ResourceGroupChipEditor } from "../components/ResourceGroupChipEditor";
 import { TopNav } from "../components/TopNav";
+import { WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
-import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
-import type { ResourceLibraryAsset, ResourceLibraryGroup, ResourceLibrarySourceType } from "../lib/types";
+import type { ResourceLibraryAsset, ResourceLibraryGroup } from "../lib/types";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
-import {
-  WorkspaceErrorState,
-  WorkspaceHandoffButton,
-  WorkspaceLatestItem,
-  WorkspaceLoadingState,
-  WorkspacePageFrame,
-} from "./workspace/WorkspaceLandingPages";
 
 type PendingArchive =
   | { kind: "asset"; id: string; name: string }
@@ -32,35 +34,6 @@ type PendingArchive =
 
 const EMPTY_RESOURCE_LIBRARY_GROUPS: ResourceLibraryGroup[] = [];
 const EMPTY_RESOURCE_LIBRARY_ASSETS: ResourceLibraryAsset[] = [];
-const RESOURCE_LIBRARY_SOURCE_TYPES: ResourceLibrarySourceType[] = [
-  "source_asset",
-  "poster_variant",
-  "image_session_asset",
-  "enhance_job_result",
-  "upload",
-];
-const RESOURCE_LIBRARY_MAIN_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RESOURCE_LIBRARY_SECONDARY_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RESOURCE_LIBRARY_COMPACT_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RESOURCE_LIBRARY_ICON_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RESOURCE_LIBRARY_DANGER_ICON_ACTION_CLASS =
-  "pf-danger-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
-const RESOURCE_LIBRARY_GROUP_ACTION_CLASS =
-  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-slate-500 opacity-80 " +
-  "transition-all hover:bg-slate-950/[0.06] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 " +
-  "focus-visible:ring-slate-400/35 active:scale-95 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-100";
-const RESOURCE_LIBRARY_GROUP_DANGER_ACTION_CLASS =
-  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-slate-500 opacity-80 " +
-  "transition-all hover:bg-red-500/10 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 " +
-  "focus-visible:ring-red-400/30 active:scale-95 dark:text-slate-400 dark:hover:bg-red-500/15 dark:hover:text-red-200";
 const RESOURCE_LIBRARY_FEEDBACK_AUTO_DISMISS_MS = 1000;
 const RESOURCE_LIBRARY_MOBILE_GROUP_DRAWER_DESKTOP_QUERY = "(min-width: 1024px)";
 
@@ -70,6 +43,21 @@ function shouldUseDesktopResourceLibraryGroupRail(): boolean {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.detail : fallback;
+}
+
+function resourceLibraryActionAppearance(workspaceSubpage: boolean): LayoutActionAppearance {
+  return workspaceSubpage ? "workspace" : "classic";
+}
+
+function resourceLibraryActionButtonComponent(workspaceSubpage: boolean) {
+  return actionButtonComponentForAppearance(resourceLibraryActionAppearance(workspaceSubpage));
+}
+
+function resourceLibraryActionButtonClassName(
+  workspaceSubpage: boolean,
+  options?: Parameters<typeof actionButtonClassNameForAppearance>[1],
+) {
+  return actionButtonClassNameForAppearance(resourceLibraryActionAppearance(workspaceSubpage), options);
 }
 
 function sameIds(left: string[], right: string[]): boolean {
@@ -83,37 +71,23 @@ function groupIdsForAsset(asset: ResourceLibraryAsset, groups: ResourceLibraryGr
   return asset.group_ids.filter((groupId) => availableIds.has(groupId));
 }
 
-function resourceLibrarySourceLabelKey(sourceType: ResourceLibrarySourceType): TranslationKey {
-  switch (sourceType) {
-    case "source_asset":
-      return "resourceLibrary.source.sourceAsset";
-    case "poster_variant":
-      return "resourceLibrary.source.posterVariant";
-    case "image_session_asset":
-      return "resourceLibrary.source.imageSessionAsset";
-    case "enhance_job_result":
-      return "resourceLibrary.source.enhanceJobResult";
-    case "upload":
-      return "resourceLibrary.source.upload";
-    default:
-      return "resourceLibrary.source.upload";
-  }
-}
-
 function ResourceLibraryFeedbackDialog({
   successMessage,
   errorMessage,
+  workspaceSubpage = false,
   onCloseSuccess,
   onCloseError,
 }: {
   successMessage: string;
   errorMessage: string;
+  workspaceSubpage?: boolean;
   onCloseSuccess: () => void;
   onCloseError: () => void;
 }) {
   const { t } = useI18n();
   const titleId = useId();
   const descriptionId = useId();
+  const PageActionButton = resourceLibraryActionButtonComponent(workspaceSubpage);
   const open = Boolean(successMessage || errorMessage);
   const isError = Boolean(errorMessage);
   const message = errorMessage || successMessage;
@@ -153,15 +127,16 @@ function ResourceLibraryFeedbackDialog({
             </p>
           </div>
           {isError ? (
-            <button
+            <PageActionButton
               type="button"
               onClick={onCloseError}
-              className={RESOURCE_LIBRARY_ICON_ACTION_CLASS}
+              preset="secondary"
+              size="icon-sm"
               aria-label={t("resourceLibrary.close")}
               title={t("resourceLibrary.close")}
+              leadingIcon={<X size={16} />}
             >
-              <X size={16} />
-            </button>
+            </PageActionButton>
           ) : null}
         </div>
     </ModalShell>
@@ -177,6 +152,7 @@ interface ResourceLibraryGroupListProps {
   updatingGroupId: string | null;
   navClassName: string;
   showGroupActionsAlways?: boolean;
+  workspaceSubpage?: boolean;
   groupsLabel: string;
   allGroupsLabel: string;
   cancelLabel: string;
@@ -200,6 +176,7 @@ function ResourceLibraryGroupList({
   updatingGroupId,
   navClassName,
   showGroupActionsAlways = false,
+  workspaceSubpage = false,
   groupsLabel,
   allGroupsLabel,
   cancelLabel,
@@ -213,6 +190,11 @@ function ResourceLibraryGroupList({
   onSaveGroupName,
   onArchiveGroup,
 }: ResourceLibraryGroupListProps) {
+  const PageActionButton = resourceLibraryActionButtonComponent(workspaceSubpage);
+  const groupNavButtonClassName = (active: boolean, extraClassName = "") =>
+    `pf-resource-library-group-nav-item flex min-h-10 w-full items-center px-3 py-2 text-left text-sm ${
+      active ? "font-semibold text-slate-950 dark:text-white" : "text-slate-500 dark:text-slate-400"
+    } ${extraClassName}`.trim();
   const actionClassName = showGroupActionsAlways
     ? "absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5"
     : "pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 " +
@@ -225,9 +207,7 @@ function ResourceLibraryGroupList({
         type="button"
         onClick={() => onSelectGroup("")}
         aria-current={!selectedGroupId ? "page" : undefined}
-        className={`pf-settings-nav-item flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-          !selectedGroupId ? "font-semibold" : ""
-        }`}
+        className={groupNavButtonClassName(!selectedGroupId)}
       >
         <span className="min-w-0 whitespace-normal break-words leading-5">{allGroupsLabel}</span>
       </button>
@@ -237,26 +217,37 @@ function ResourceLibraryGroupList({
           <div key={group.id} className={`rounded-lg transition-colors ${selectedGroupId === group.id ? "font-semibold" : ""}`}>
             {editing ? (
               <div className="space-y-2 p-2">
-                <input
-                  id={`resource-library-edit-group-${group.id}`}
-                  name={`resource-library-edit-group-${group.id}`}
-                  value={editingGroupName}
-                  onChange={(event) => onEditingGroupNameChange(event.target.value)}
-                  className="pf-input-compact"
-                />
+                {workspaceSubpage ? (
+                  <WorkspaceTextInput
+                    id={`resource-library-edit-group-${group.id}`}
+                    name={`resource-library-edit-group-${group.id}`}
+                    value={editingGroupName}
+                    onChange={(event) => onEditingGroupNameChange(event.target.value)}
+                    size="compact"
+                  />
+                ) : (
+                  <ClassicTextInput
+                    id={`resource-library-edit-group-${group.id}`}
+                    name={`resource-library-edit-group-${group.id}`}
+                    value={editingGroupName}
+                    onChange={(event) => onEditingGroupNameChange(event.target.value)}
+                    size="compact"
+                  />
+                )}
                 <div className="flex justify-end gap-1">
-                  <button type="button" onClick={onCancelEditingGroup} className={RESOURCE_LIBRARY_COMPACT_ACTION_CLASS}>
+                  <PageActionButton type="button" onClick={onCancelEditingGroup} preset="secondary" size="sm">
                     {cancelLabel}
-                  </button>
-                  <button
+                  </PageActionButton>
+                  <PageActionButton
                     type="button"
                     onClick={() => onSaveGroupName(group.id)}
                     disabled={!editingGroupName.trim() || updateGroupPending}
-                    className={RESOURCE_LIBRARY_COMPACT_ACTION_CLASS}
+                    preset="secondary"
+                    size="sm"
+                    loading={updateGroupPending && updatingGroupId === group.id}
                   >
-                    {updateGroupPending && updatingGroupId === group.id ? <Loader2 size={12} className="mr-1 animate-spin" /> : null}
                     {saveLabel}
-                  </button>
+                  </PageActionButton>
                 </div>
               </div>
             ) : (
@@ -265,35 +256,33 @@ function ResourceLibraryGroupList({
                   type="button"
                   onClick={() => onSelectGroup(group.id)}
                   aria-current={selectedGroupId === group.id ? "page" : undefined}
-                  className="pf-settings-nav-item min-w-0 flex-1 rounded-lg px-3 py-2 pr-16 text-left text-sm"
+                  className={groupNavButtonClassName(selectedGroupId === group.id, "min-w-0 flex-1 pr-16")}
                 >
                   <span className="block min-w-0 whitespace-normal break-words leading-5">{group.name}</span>
                 </button>
                 <div className={actionClassName}>
-                  <button
-                    type="button"
+                  <PageActionButton
                     onClick={(event) => {
                       event.stopPropagation();
                       onStartEditingGroup(group);
                     }}
-                    className={RESOURCE_LIBRARY_GROUP_ACTION_CLASS}
+                    preset="secondary"
+                    size="icon-sm"
                     aria-label={renameGroupLabel}
                     title={renameGroupLabel}
-                  >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    type="button"
+                    leadingIcon={<Pencil size={13} />}
+                  />
+                  <PageActionButton
                     onClick={(event) => {
                       event.stopPropagation();
                       onArchiveGroup(group);
                     }}
-                    className={RESOURCE_LIBRARY_GROUP_DANGER_ACTION_CLASS}
+                    preset="danger"
+                    size="icon-sm"
                     aria-label={archiveGroupLabel}
                     title={archiveGroupLabel}
-                  >
-                    <Archive size={13} />
-                  </button>
+                    leadingIcon={<Archive size={13} />}
+                  />
                 </div>
               </div>
             )}
@@ -308,6 +297,7 @@ function ResourceLibraryCreateGroupDialog({
   open,
   name,
   pending,
+  workspaceSubpage = false,
   onNameChange,
   onCreate,
   onClose,
@@ -315,6 +305,7 @@ function ResourceLibraryCreateGroupDialog({
   open: boolean;
   name: string;
   pending: boolean;
+  workspaceSubpage?: boolean;
   onNameChange: (name: string) => void;
   onCreate: () => void;
   onClose: () => void;
@@ -322,6 +313,7 @@ function ResourceLibraryCreateGroupDialog({
   const { t } = useI18n();
   const titleId = useId();
   const inputId = useId();
+  const PageActionButton = resourceLibraryActionButtonComponent(workspaceSubpage);
 
   if (!open) {
     return null;
@@ -345,175 +337,77 @@ function ResourceLibraryCreateGroupDialog({
               {t("resourceLibrary.createGroup")}
             </h2>
           </div>
-          <button
+          <PageActionButton
             type="button"
             onClick={onClose}
             disabled={pending}
-            className={RESOURCE_LIBRARY_ICON_ACTION_CLASS}
+            preset="secondary"
+            size="icon-sm"
             aria-label={t("resourceLibrary.close")}
             title={t("resourceLibrary.close")}
+            leadingIcon={<X size={16} />}
           >
-            <X size={16} />
-          </button>
+          </PageActionButton>
         </div>
         <div className="space-y-4 px-5 py-5">
           <label htmlFor={inputId} className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
             {t("resourceLibrary.groupName")}
           </label>
-          <input
-            id={inputId}
-            value={name}
-            autoFocus
-            onChange={(event) => onNameChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                onCreate();
-              }
-            }}
-            disabled={pending}
-            className="pf-input disabled:opacity-60"
-            placeholder={t("resourceLibrary.groupNamePlaceholder")}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              id={inputId}
+              value={name}
+              autoFocus
+              onChange={(event) => onNameChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onCreate();
+                }
+              }}
+              disabled={pending}
+              size="default"
+              placeholder={t("resourceLibrary.groupNamePlaceholder")}
+            />
+          ) : (
+            <ClassicTextInput
+              id={inputId}
+              value={name}
+              autoFocus
+              onChange={(event) => onNameChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onCreate();
+                }
+              }}
+              disabled={pending}
+              size="default"
+              placeholder={t("resourceLibrary.groupNamePlaceholder")}
+            />
+          )}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
-          <button
-            type="button"
+          <PageActionButton
             onClick={onClose}
             disabled={pending}
-            className={RESOURCE_LIBRARY_SECONDARY_ACTION_CLASS}
+            preset="secondary"
+            size="md"
           >
             {t("common.cancel")}
-          </button>
-          <button
-            type="button"
+          </PageActionButton>
+          <PageActionButton
             onClick={onCreate}
             disabled={!name.trim() || pending}
-            className={RESOURCE_LIBRARY_MAIN_ACTION_CLASS}
+            preset="primary"
+            size="md"
+            leadingIcon={pending ? undefined : <Plus size={14} />}
+            loading={pending}
           >
-            {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Plus size={14} className="mr-2" />}
             {t("resourceLibrary.createGroup")}
-          </button>
+          </PageActionButton>
         </div>
     </ModalShell>
-  );
-}
-
-function ResourceLibraryWorkspaceLanding() {
-  const { t } = useI18n();
-  const navigate = useNavigate();
-  const groupsQuery = useQuery({
-    queryKey: ["resource-library-groups"],
-    queryFn: api.listResourceLibraryGroups,
-  });
-  const assetsQuery = useQuery({
-    queryKey: ["resource-library-assets", "all"],
-    queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
-  });
-
-  const groups = groupsQuery.data?.items ?? EMPTY_RESOURCE_LIBRARY_GROUPS;
-  const assets = assetsQuery.data?.items ?? EMPTY_RESOURCE_LIBRARY_ASSETS;
-  const latestAssets = assets.slice(0, 3);
-  const loading = groupsQuery.isLoading || assetsQuery.isLoading;
-  const failed = groupsQuery.isError || assetsQuery.isError;
-
-  const groupAssetCounts = useMemo(() => {
-    const counts = new Map(groups.map((group) => [group.id, 0]));
-    for (const asset of assets) {
-      for (const groupId of asset.group_ids) {
-        if (counts.has(groupId)) {
-          counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
-        }
-      }
-    }
-    return groups.slice(0, 4).map((group) => ({
-      group,
-      count: counts.get(group.id) ?? 0,
-    }));
-  }, [assets, groups]);
-
-  const sourceCounts = useMemo(
-    () =>
-      RESOURCE_LIBRARY_SOURCE_TYPES.map((sourceType) => ({
-        sourceType,
-        count: assets.filter((asset) => asset.source_type === sourceType).length,
-      })),
-    [assets],
-  );
-
-  const groupSummaryDetail = groupAssetCounts.length
-    ? groupAssetCounts
-        .slice(0, 2)
-        .map(({ group, count }) => `${group.name} ${count}`)
-        .join(" / ")
-    : t("resourceLibrary.noGroups");
-  const sourceSummaryDetail = sourceCounts
-    .filter((item) => item.count > 0)
-    .slice(0, 2)
-    .map((item) => `${t(resourceLibrarySourceLabelKey(item.sourceType))} ${item.count}`)
-    .join(" / ");
-  const openManagePage = () => navigate("/resource-library/manage");
-
-  return (
-    <WorkspacePageFrame
-      eyebrow={t("resourceLibrary.title")}
-      title={t("resourceLibrary.title")}
-      description={t("resourceLibrary.landingSubtitle")}
-    >
-      <div className="pf-workspace-menu-landing">
-        <section className="pf-workspace-menu-summary">
-          <span className="pf-workspace-eyebrow">{t("resourceLibrary.latestResources")}</span>
-
-          <div className="pf-workspace-latest-list">
-            {failed ? (
-              <WorkspaceErrorState message={t("resourceLibrary.loadFailed")} />
-            ) : loading ? (
-              <WorkspaceLoadingState label={t("resourceLibrary.loading")} />
-            ) : latestAssets.length ? (
-              latestAssets.map((asset) => (
-                <WorkspaceLatestItem
-                  key={asset.id}
-                  title={asset.original_filename}
-                  detail={`${t(resourceLibrarySourceLabelKey(asset.source_type))} / ${formatDateTime(asset.created_at)}`}
-                  thumbnailUrl={asset.thumbnail_url}
-                  onOpen={openManagePage}
-                />
-              ))
-            ) : (
-              <WorkspaceLatestItem
-                title={t("resourceLibrary.empty")}
-                detail={t("resourceLibrary.landingSubtitle")}
-                icon={Trees}
-              />
-            )}
-          </div>
-
-          <div className="pf-workspace-menu-summary-grid">
-            {[
-              { label: t("resourceLibrary.groupSummary"), value: groups.length, detail: groupSummaryDetail },
-              {
-                label: t("resourceLibrary.sourceOverview"),
-                value: assets.length,
-                detail: sourceSummaryDetail || t("resourceLibrary.empty"),
-              },
-            ].map((item) => (
-              <div key={item.label} className="pf-workspace-menu-summary-card">
-                <span className="pf-workspace-eyebrow">{item.label}</span>
-                <h3>{item.value}</h3>
-                <p className="pf-workspace-caption">{item.detail}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="pf-workspace-section-actions">
-            <WorkspaceHandoffButton onClick={openManagePage}>
-              {t("resourceLibrary.moreResources")}
-            </WorkspaceHandoffButton>
-          </div>
-        </section>
-        <aside className="pf-workspace-menu-summary-art" aria-hidden="true" />
-      </div>
-    </WorkspacePageFrame>
   );
 }
 
@@ -523,12 +417,9 @@ interface ResourceLibraryPageProps {
 
 export function ResourceLibraryPage({ mode = "auto" }: ResourceLibraryPageProps) {
   const { activeScheme } = useUiLayoutScheme();
+  const workspaceSubpage = activeScheme === "workspace";
 
-  if (activeScheme === "workspace" && mode !== "manage") {
-    return <ResourceLibraryWorkspaceLanding />;
-  }
-
-  return <ResourceLibraryManagePage subpage={mode === "manage"} workspaceSubpage={activeScheme === "workspace" && mode === "manage"} />;
+  return <ResourceLibraryManagePage subpage={mode === "manage" || workspaceSubpage} workspaceSubpage={workspaceSubpage} />;
 }
 
 function ResourceLibraryManagePage({
@@ -539,6 +430,7 @@ function ResourceLibraryManagePage({
   workspaceSubpage?: boolean;
 }) {
   const { t } = useI18n();
+  const PageActionButton = resourceLibraryActionButtonComponent(workspaceSubpage);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const mobileGroupDrawerButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -556,7 +448,14 @@ function ResourceLibraryManagePage({
   const [pendingArchive, setPendingArchive] = useState<PendingArchive | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-
+  const clipboardActionClassName = resourceLibraryActionButtonClassName(workspaceSubpage, {
+    preset: "secondary",
+    size: "lg",
+  });
+  const iconActionClassName = resourceLibraryActionButtonClassName(workspaceSubpage, {
+    preset: "secondary",
+    size: "icon-sm",
+  });
   const groupsQuery = useQuery({
     queryKey: ["resource-library-groups"],
     queryFn: api.listResourceLibraryGroups,
@@ -848,14 +747,14 @@ function ResourceLibraryManagePage({
             </div>
           </div>
           {!useFloatingGroupRail ? (
-            <button
-              type="button"
+            <PageActionButton
               onClick={openCreateGroupDialog}
-              className={RESOURCE_LIBRARY_MAIN_ACTION_CLASS}
+              preset="primary"
+              size="md"
+              leadingIcon={<Plus size={14} />}
             >
-              <Plus size={14} className="mr-2" />
               {t("resourceLibrary.createGroup")}
-            </button>
+            </PageActionButton>
           ) : null}
         </section>
 
@@ -897,6 +796,7 @@ function ResourceLibraryManagePage({
                 updateGroupPending={updateGroupMutation.isPending}
                 updatingGroupId={updateGroupMutation.variables?.groupId ?? null}
                 navClassName={workspaceSubpage ? "space-y-1 px-3 py-5" : "space-y-1"}
+                workspaceSubpage={workspaceSubpage}
                 groupsLabel={t("resourceLibrary.groups")}
                 allGroupsLabel={t("resourceLibrary.allGroups")}
                 cancelLabel={t("common.cancel")}
@@ -924,12 +824,14 @@ function ResourceLibraryManagePage({
                 </div>
               </div>
               <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                <ImageDropZone
+                <LayoutActionDropZone
+                  appearance={resourceLibraryActionAppearance(workspaceSubpage)}
                   ariaLabel={t("resourceLibrary.uploadAction")}
                   multiple
                   disabled={uploadAssetsMutation.isPending || groupsQuery.isLoading}
-                  className="flex min-h-12 cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm font-medium text-slate-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50/45 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-950/55 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10 dark:hover:text-violet-100"
-                  activeClassName="border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100"
+                  size="lg"
+                  fullWidth
+                  className="min-h-12 cursor-pointer"
                   onFiles={handleUploadAssetFiles}
                 >
                   {({ isDragging }) => (
@@ -942,10 +844,10 @@ function ResourceLibraryManagePage({
                       {isDragging ? t("resourceLibrary.dropUpload") : t("resourceLibrary.uploadAction")}
                     </span>
                   )}
-                </ImageDropZone>
+                </LayoutActionDropZone>
                 <ClipboardImageButton
                   rootClassName="w-full sm:min-w-72"
-                  buttonClassName={`${RESOURCE_LIBRARY_SECONDARY_ACTION_CLASS} min-h-12 w-full`}
+                  buttonClassName={`${clipboardActionClassName} min-h-12 w-full`}
                   multiple
                   disabled={uploadAssetsMutation.isPending || groupsQuery.isLoading}
                   label={t("common.pasteImage")}
@@ -981,10 +883,13 @@ function ResourceLibraryManagePage({
                       key={asset.id}
                       className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#0f1726]"
                     >
-                      <button
+                      <LayoutActionSurfaceButton
                         type="button"
+                        appearance={resourceLibraryActionAppearance(workspaceSubpage)}
+                        preset="secondary"
                         onClick={() => setPreviewAsset(asset)}
-                        className="block w-full bg-slate-100 dark:bg-slate-950"
+                        toneVars={transparentActionToneVars}
+                        className="block w-full overflow-hidden rounded-none bg-slate-100 p-0 dark:bg-slate-950"
                         aria-label={t("detail.previewImage", { alt: asset.original_filename })}
                         title={t("common.preview")}
                       >
@@ -995,7 +900,7 @@ function ResourceLibraryManagePage({
                           decoding="async"
                           className="aspect-square w-full object-cover"
                         />
-                      </button>
+                      </LayoutActionSurfaceButton>
                       <div className="space-y-3 p-3">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -1007,6 +912,7 @@ function ResourceLibraryManagePage({
                         </div>
                         <ResourceMetaBadges resource={asset} showReason />
                         <ResourceGroupChipEditor
+                          appearance={resourceLibraryActionAppearance(workspaceSubpage)}
                           groups={groups}
                           selectedIds={draftGroupIds}
                           disabled={assetBlocked || (updateAssetGroupsMutation.isPending && updateAssetGroupsMutation.variables?.assetId === asset.id)}
@@ -1023,27 +929,26 @@ function ResourceLibraryManagePage({
                           }}
                         />
                         <div className="flex items-center gap-2">
-                          <button
+                          <PageActionButton
                             type="button"
                             onClick={() => setPreviewAsset(asset)}
-                            className={RESOURCE_LIBRARY_ICON_ACTION_CLASS}
+                            preset="secondary"
+                            size="icon-sm"
                             aria-label={t("common.preview")}
                             title={t("common.preview")}
-                          >
-                            <Eye size={15} />
-                          </button>
+                            leadingIcon={<Eye size={15} />}
+                          />
                           <a
                             href={api.toApiUrl(asset.download_url)}
                             target="_blank"
                             rel="noreferrer"
-                            className={RESOURCE_LIBRARY_ICON_ACTION_CLASS}
+                            className={iconActionClassName}
                             aria-label={t("common.download")}
                             title={t("common.download")}
                           >
-                            <Download size={15} />
+                            {renderActionButtonInner({ leadingIcon: <Download size={15} /> })}
                           </a>
-                          <button
-                            type="button"
+                          <PageActionButton
                             onClick={() => handleSaveAssetGroups(asset)}
                             disabled={
                               !dirty ||
@@ -1052,25 +957,29 @@ function ResourceLibraryManagePage({
                               (updateAssetGroupsMutation.isPending &&
                                 updateAssetGroupsMutation.variables?.assetId === asset.id)
                             }
-                            className={`${RESOURCE_LIBRARY_MAIN_ACTION_CLASS} min-w-0 flex-1`}
+                            preset="primary"
+                            size="md"
+                            className="min-w-0 flex-1"
+                            leadingIcon={
+                              updateAssetGroupsMutation.isPending &&
+                              updateAssetGroupsMutation.variables?.assetId === asset.id ? undefined : <Save size={14} />
+                            }
+                            loading={
+                              updateAssetGroupsMutation.isPending &&
+                              updateAssetGroupsMutation.variables?.assetId === asset.id
+                            }
                           >
-                            {updateAssetGroupsMutation.isPending &&
-                            updateAssetGroupsMutation.variables?.assetId === asset.id ? (
-                              <Loader2 size={14} className="mr-1.5 animate-spin" />
-                            ) : (
-                              <Save size={14} className="mr-1.5" />
-                            )}
                             {t("common.save")}
-                          </button>
-                          <button
+                          </PageActionButton>
+                          <PageActionButton
                             type="button"
                             onClick={() => setPendingArchive({ kind: "asset", id: asset.id, name: asset.original_filename })}
-                            className={RESOURCE_LIBRARY_DANGER_ICON_ACTION_CLASS}
+                            preset="danger"
+                            size="icon-sm"
                             aria-label={t("resourceLibrary.archiveAsset")}
                             title={t("resourceLibrary.archiveAsset")}
-                          >
-                            <Archive size={15} />
-                          </button>
+                            leadingIcon={<Archive size={15} />}
+                          />
                         </div>
                       </div>
                     </article>
@@ -1136,20 +1045,26 @@ function ResourceLibraryManagePage({
                       </div>
                     </div>
                   </div>
-                  <button
+                  <PageActionButton
                     type="button"
                     aria-label={t("resourceLibrary.close")}
                     title={t("resourceLibrary.close")}
                     onClick={() => setMobileGroupDrawerOpen(false)}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white/85 text-slate-600 transition-colors active:scale-[0.98] hover:border-slate-300 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/75 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
-                  >
-                    <X size={18} />
-                  </button>
+                    preset="secondary"
+                    size="icon-lg"
+                    leadingIcon={<X size={18} />}
+                  />
                 </div>
-                <button type="button" onClick={openCreateGroupDialog} className={`${RESOURCE_LIBRARY_MAIN_ACTION_CLASS} mt-4 w-full justify-center`}>
-                  <Plus size={14} className="mr-2" />
+                <PageActionButton
+                  onClick={openCreateGroupDialog}
+                  preset="primary"
+                  size="md"
+                  fullWidth
+                  className="mt-4"
+                  leadingIcon={<Plus size={14} />}
+                >
                   {t("resourceLibrary.createGroup")}
-                </button>
+                </PageActionButton>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(env(safe-area-inset-bottom)+1rem)]">
                 <ResourceLibraryGroupList
@@ -1161,6 +1076,7 @@ function ResourceLibraryManagePage({
                   updatingGroupId={updateGroupMutation.variables?.groupId ?? null}
                   navClassName="space-y-1 px-3 py-5"
                   showGroupActionsAlways
+                  workspaceSubpage={workspaceSubpage}
                   groupsLabel={t("resourceLibrary.groups")}
                   allGroupsLabel={t("resourceLibrary.allGroups")}
                   cancelLabel={t("common.cancel")}
@@ -1184,6 +1100,7 @@ function ResourceLibraryManagePage({
         open={createGroupDialogOpen}
         name={newGroupName}
         pending={createGroupMutation.isPending}
+        workspaceSubpage={workspaceSubpage}
         onNameChange={(name) => {
           setNewGroupName(name);
           setMessage("");
@@ -1204,11 +1121,13 @@ function ResourceLibraryManagePage({
       <ResourceLibraryFeedbackDialog
         successMessage={message}
         errorMessage={error}
+        workspaceSubpage={workspaceSubpage}
         onCloseSuccess={() => setMessage("")}
         onCloseError={() => setError("")}
       />
       {previewAsset ? (
         <GalleryImagePreviewDialog
+          appearance={resourceLibraryActionAppearance(workspaceSubpage)}
           ariaLabel={t("detail.previewImage", { alt: previewAsset.original_filename })}
           imageUrl={api.toApiUrl(previewAsset.preview_url)}
           imageAlt={previewAsset.original_filename}
@@ -1244,6 +1163,7 @@ function ResourceLibraryManagePage({
 
       <ConfirmDialog
         open={Boolean(pendingArchive)}
+        appearance={resourceLibraryActionAppearance(workspaceSubpage)}
         title={
           pendingArchive?.kind === "group"
             ? t("resourceLibrary.archiveGroup")

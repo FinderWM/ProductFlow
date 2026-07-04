@@ -226,6 +226,83 @@ describe("draftFromNode", () => {
     });
   });
 
+  it("normalizes image-generation and direct-enhance sizes against the current capability limit", () => {
+    const imageNode: WorkflowNode = {
+      ...baseNode,
+      id: "image-node",
+      node_type: "image_generation",
+      config_json: {
+        instruction: "生成图片",
+        size: "2048x1152",
+      },
+      output_json: null,
+    };
+    const enhanceNode: WorkflowNode = {
+      ...baseNode,
+      id: "enhance-node",
+      node_type: "image_enhance",
+      config_json: {
+        strategy: "direct",
+        params: {
+          target_width: 1500,
+          target_height: 800,
+        },
+      },
+      output_json: null,
+    };
+
+    const imageDraft = draftFromNode(imageNode, inspiration);
+    const enhanceDraft = draftFromNode(enhanceNode, inspiration);
+
+    expect(nodeConfigFromDraft(imageNode, imageDraft, undefined, 1536)).toMatchObject({
+      size: "1536x864",
+    });
+    expect(nodeConfigFromDraft(enhanceNode, enhanceDraft, undefined, 1536)).toMatchObject({
+      params: {
+        target_width: 1504,
+        target_height: 800,
+      },
+    });
+  });
+
+  it("clamps tiled enhance tile base size to the current capability limit", () => {
+    const enhanceNode: WorkflowNode = {
+      ...baseNode,
+      id: "enhance-node",
+      node_type: "image_enhance",
+      config_json: {
+        strategy: "tiled",
+        params: {
+          scale: 4,
+          tile_base_size: 2048,
+          overlap_pct: 10,
+        },
+      },
+      output_json: null,
+    };
+
+    const draft = draftFromNode(enhanceNode, inspiration);
+
+    expect(
+      nodeConfigFromDraft(
+        enhanceNode,
+        {
+          ...draft,
+          imageEnhanceStrategy: "tiled",
+          imageEnhanceTileBaseSize: "4096",
+        },
+        undefined,
+        1536,
+      ),
+    ).toMatchObject({
+      params: {
+        scale: 4,
+        tile_base_size: 1536,
+        overlap_pct: 10,
+      },
+    });
+  });
+
   it("falls back from blank inspiration context text config to inspiration source note", () => {
     const node: WorkflowNode = {
       ...baseNode,

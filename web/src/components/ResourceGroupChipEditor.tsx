@@ -6,23 +6,21 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, Tags } from "lucide-react";
 
 import { FloatingSurface } from "./FloatingSurface";
+import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
 import type { ResourceLibraryGroup } from "../lib/types";
 
 const CHIP_BASE_CLASS =
   "inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold shadow-sm";
 const CHIP_DEFAULT_CLASS =
-  `${CHIP_BASE_CLASS} border-slate-200 bg-white/80 text-slate-600 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-300`;
+  `${CHIP_BASE_CLASS} pf-hairline bg-[rgba(255,255,255,0.8)] pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]`;
 const CHIP_OVERFLOW_CLASS =
-  `${CHIP_BASE_CLASS} border-slate-300 bg-slate-100 text-slate-700 cursor-pointer transition-colors hover:border-slate-400 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700`;
+  `${CHIP_BASE_CLASS} pf-hairline-strong pf-surface-soft pf-ink-muted cursor-pointer transition-colors hover:border-[color:var(--pf-border)] hover:bg-[color:var(--pf-border-soft)] dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)] dark:hover:bg-[color:var(--pf-border-soft)]`;
 const CHIP_UNGROUPED_CLASS =
-  `${CHIP_BASE_CLASS} border-dashed border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-500`;
-const TRIGGER_CLASS =
-  "pf-workspace-action-secondary inline-flex h-8 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-
+  `${CHIP_BASE_CLASS} border-dashed pf-hairline pf-surface-soft pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]`;
 const VISIBLE_CHIP_LIMIT = 3;
 
 interface ResourceGroupChipEditorProps {
+  appearance: LayoutActionAppearance;
   groups: ResourceLibraryGroup[];
   selectedIds: string[];
   disabled: boolean;
@@ -43,6 +41,7 @@ function ResourceGroupChip({ group }: { group: { id: string; name: string } }) {
 }
 
 export function ResourceGroupChipEditor({
+  appearance,
   groups,
   selectedIds,
   disabled,
@@ -53,6 +52,7 @@ export function ResourceGroupChipEditor({
   noGroupsLabel,
   onChange,
 }: ResourceGroupChipEditorProps) {
+  const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
   const generatedId = useId();
   const listboxId = `${generatedId}-listbox`;
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -115,9 +115,8 @@ export function ResourceGroupChipEditor({
       </div>
 
       <div className="flex justify-end">
-        <button
+        <ActionButtonComponent
           ref={buttonRef}
-          type="button"
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-controls={listboxId}
@@ -130,16 +129,19 @@ export function ResourceGroupChipEditor({
               setOpen(false);
             }
           }}
-          className={TRIGGER_CLASS}
+          preset="secondary"
+          size="sm"
+          leadingIcon={<Tags size={13} aria-hidden="true" />}
+          trailingIcon={
+            <ChevronDown
+              size={12}
+              className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+              aria-hidden="true"
+            />
+          }
         >
-          <Tags size={13} className="shrink-0" aria-hidden="true" />
-          <span>{editLabel}</span>
-          <ChevronDown
-            size={12}
-            className={`shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? "rotate-180" : ""}`}
-            aria-hidden="true"
-          />
-        </button>
+          {editLabel}
+        </ActionButtonComponent>
       </div>
 
       <FloatingSurface
@@ -153,7 +155,7 @@ export function ResourceGroupChipEditor({
           setOpen(next);
           // 关闭 Popover 时不重置 showAll，保持已展开的徽章可见，避免抖动
         }}
-        className="flex max-h-80 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10"
+        className="flex max-h-80 flex-col overflow-hidden rounded-xl border pf-hairline pf-surface p-1 text-sm shadow-xl shadow-slate-950/12 ring-1 ring-[color:var(--pf-border)] dark:border-[color:var(--pf-border)] dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-[color:var(--pf-border)]"
       >
         <div
           id={listboxId}
@@ -213,15 +215,15 @@ export function ResourceGroupChipEditor({
                   }}
                   className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
                     selected
-                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-50"
-                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                      ? "pf-surface-soft pf-ink dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]"
+                      : "pf-ink-muted hover:bg-[color:var(--pf-panel-soft)] hover:text-[color:var(--pf-text)] dark:text-[color:var(--pf-muted)] dark:hover:bg-[color:var(--pf-deep)] dark:hover:text-[#fff]"
                   }`}
                 >
                   <span
                     className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
                       selected
-                        ? "border-slate-900 bg-slate-900 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-950"
-                        : "pf-hairline-strong bg-white dark:border-slate-600 dark:bg-slate-950"
+                        ? "pf-hairline-strong bg-[color:var(--pf-deep)] text-[#fff] dark:border-[color:var(--pf-border-soft)] dark:bg-[color:var(--pf-border-soft)] dark:text-[color:var(--pf-text)]"
+                        : "pf-hairline-strong pf-surface dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]"
                     }`}
                     aria-hidden="true"
                   >
@@ -232,7 +234,7 @@ export function ResourceGroupChipEditor({
               );
             })
           ) : (
-            <div className="px-2.5 py-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+            <div className="px-2.5 py-2 text-xs font-medium pf-ink-muted dark:text-[color:var(--pf-muted)]">
               {noGroupsLabel}
             </div>
           )}

@@ -183,6 +183,7 @@ api.saveGalleryEntry(selectedRound.generated_asset.id, { tag_ids: selectedTagIds
 - Multipart fields currently mirrored from the backend:
   - `name: string`
   - `file?: File` -> form field `image`
+  - `image_source_asset_id?: string` -> form field `image_source_asset_id`
   - `referenceFiles?: File[]` -> repeated form field `reference_images`
   - `category?: string`
   - `price?: string`
@@ -196,8 +197,12 @@ api.saveGalleryEntry(selectedRound.generated_asset.id, { tag_ids: selectedTagIds
 - Keep backend field names in the DTO for optional form values such as `source_note` and `canvas_template_key`.
 - Keep `initial_workflow_entry` and `entry_text` in backend snake_case. Do not rename them to
   `initialWorkflowEntry` or `entryText` in the shared DTO.
-- `image` entry requires a main image before submit. `copy` and `tail` entries require `entry_text`. `blank` requires
-  neither image nor `entry_text`.
+- `image` entry requires a main image source before submit. The page may satisfy that requirement with either local `file`
+  upload or `image_source_asset_id` from the authenticated user's resource library. `copy` and `tail` entries require
+  `entry_text`. `blank` requires neither image nor `entry_text`.
+- Resource-library main-image selection remains a copy-on-create contract. The page submits `image_source_asset_id` only;
+  the backend copies that resource into a new inspiration `original_image` source asset. The frontend must not assume the
+  created inspiration will reuse the resource-library asset id directly.
 - `canvas_template_key` is the backend-recognized key. UI labels should be merchant-facing output plans, but the submitted
   value remains the key.
 - Blank/default inspiration-creation plans may submit an empty string or omit `canvas_template_key`; this is independent from
@@ -214,7 +219,7 @@ api.saveGalleryEntry(selectedRound.generated_asset.id, { tag_ids: selectedTagIds
 
 #### 4. Validation & Error Matrix
 
-- Missing `file` for `image` entry is handled by the page before calling the API.
+- Missing both `file` and `image_source_asset_id` for `image` entry is handled by the page before calling the API.
 - Missing `entry_text` for `copy` or `tail` entry is handled by the page before calling the API.
 - Invalid/unknown `canvas_template_key`, unknown `initial_workflow_entry`, or mismatched template entry is backend
   validation and surfaces through `ApiError.detail`.
@@ -224,6 +229,8 @@ api.saveGalleryEntry(selectedRound.generated_asset.id, { tag_ids: selectedTagIds
 
 - Good: `InspirationCreatePage` stores a selected plan key in component state, displays merchant-facing labels, and passes
   `canvas_template_key` plus `initial_workflow_entry` into `api.createProduct`.
+- Good: selecting a resource-library image as the main image submits `{ image_source_asset_id }` without constructing raw
+  `FormData` in the page and without faking a `File`.
 - Good: `copy` entry submits `{ initial_workflow_entry: "copy", entry_text }` without `file`.
 - Good: `blank` entry can submit no `file` and no `entry_text`, and may still pass a non-empty `canvas_template_key`.
 - Base: a no-template/basic option can use `""` while still sharing the typed DTO.

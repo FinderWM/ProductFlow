@@ -8,7 +8,14 @@ from sqlalchemy import case, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
-from inspiration_one_backend.config import Settings, build_settings_with_overrides, get_runtime_settings
+from inspiration_one_backend.config import (
+    IMAGE_GENERATION_DIMENSION_MULTIPLE,
+    IMAGE_GENERATION_MAX_MAX_DIMENSION,
+    IMAGE_GENERATION_MIN_MAX_DIMENSION,
+    Settings,
+    build_settings_with_overrides,
+    get_runtime_settings,
+)
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     DEFAULT_GENERATION_RESOURCE_GROUP_KEY,
@@ -60,9 +67,68 @@ def _as_aware_utc(value: datetime) -> datetime:
     return value
 
 
+def _normalize_provider_image_max_dimension(value: Any, *, strict: bool) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        if strict:
+            raise ValueError("供应商最大分辨率限制必须是整数")
+        return None
+
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        if not value.isdigit():
+            if strict:
+                raise ValueError("供应商最大分辨率限制必须是整数")
+            return None
+        value = int(value)
+    elif isinstance(value, float):
+        if not value.is_integer():
+            if strict:
+                raise ValueError("供应商最大分辨率限制必须是整数")
+            return None
+        value = int(value)
+    elif isinstance(value, int):
+        pass
+    else:
+        if strict:
+            raise ValueError("供应商最大分辨率限制必须是整数")
+        return None
+
+    normalized = int(value)
+    if normalized < IMAGE_GENERATION_MIN_MAX_DIMENSION or normalized > IMAGE_GENERATION_MAX_MAX_DIMENSION:
+        if strict:
+            min_dimension = IMAGE_GENERATION_MIN_MAX_DIMENSION
+            max_dimension = IMAGE_GENERATION_MAX_MAX_DIMENSION
+            raise ValueError(
+                f"供应商最大分辨率限制必须在 {min_dimension}-{max_dimension} 之间"
+            )
+        return None
+
+    effective_max = normalized - (normalized % IMAGE_GENERATION_DIMENSION_MULTIPLE)
+    if effective_max < IMAGE_GENERATION_MIN_MAX_DIMENSION:
+        effective_max = IMAGE_GENERATION_MIN_MAX_DIMENSION
+    return effective_max
+
+
+def _normalize_provider_profile_config(config: dict[str, Any] | None, *, strict: bool) -> dict[str, Any]:
+    normalized_config = dict(config or {})
+    raw_capabilities = normalized_config.get("capabilities")
+    capabilities = dict(raw_capabilities) if isinstance(raw_capabilities, dict) else {}
+    capabilities["image_max_dimension"] = _normalize_provider_image_max_dimension(
+        capabilities.get("image_max_dimension"),
+        strict=strict,
+    )
+    normalized_config["capabilities"] = capabilities
+    return normalized_config
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderCapabilities:
     """Provider-specific capability constraints."""
+
     image_max_dimension: int | None = None
 
 
@@ -147,8 +213,13 @@ def get_provider_capabilities(provider_profile: ProviderProfile | None) -> Provi
         return ProviderCapabilities()
 
     capabilities_dict = provider_profile.config_json.get("capabilities", {})
+    if not isinstance(capabilities_dict, dict):
+        capabilities_dict = {}
     return ProviderCapabilities(
-        image_max_dimension=capabilities_dict.get("image_max_dimension")
+        image_max_dimension=_normalize_provider_image_max_dimension(
+            capabilities_dict.get("image_max_dimension"),
+            strict=False,
+        )
     )
 
 
@@ -352,24 +423,47 @@ def list_provider_profiles(session: Session) -> list[ProviderProfile]:
 
 def list_generation_configs(session: Session) -> list[GenerationConfig]:
     ensure_provider_config_bootstrapped(session)
-    return list(
-        session.scalars(
-            select(GenerationConfig)
-            .options(
-                selectinload(GenerationConfig.provider_profile),
-                selectinload(GenerationConfig.resource_group),
-                selectinload(GenerationConfig.resource_group_links),
-                selectinload(GenerationConfig.state),
-            )
-            .where(GenerationConfig.archived_at.is_(None))
-            .order_by(
-                GenerationConfig.resource_group_id,
-                GenerationConfig.purpose,
-                GenerationConfig.priority.desc(),
-                GenerationConfig.created_at,
-            )
-        ).all()
+    return list_generation_configs_filtered(session)
+
+
+def list_generation_configs_filtered(
+    session: Session,
+    *,
+    purpose: str | None = None,
+    resource_group_id: str | None = None,
+    unbound_only: bool = False,
+) -> list[GenerationConfig]:
+    ensure_provider_config_bootstrapped(session)
+    statement = (
+        select(GenerationConfig)
+        .options(
+            selectinload(GenerationConfig.provider_profile),
+            selectinload(GenerationConfig.resource_group),
+            selectinload(GenerationConfig.resource_group_links),
+            selectinload(GenerationConfig.state),
+        )
+        .where(GenerationConfig.archived_at.is_(None))
+        .order_by(
+            GenerationConfig.resource_group_id,
+            GenerationConfig.purpose,
+            GenerationConfig.priority.desc(),
+            GenerationConfig.created_at,
+        )
     )
+    if purpose is not None:
+        statement = statement.where(GenerationConfig.purpose == purpose)
+    normalized_resource_group_id = _normalize_resource_group_id(resource_group_id)
+    if normalized_resource_group_id is not None:
+        statement = statement.join(
+            GenerationConfigResourceGroup,
+            GenerationConfigResourceGroup.generation_config_id == GenerationConfig.id,
+        ).where(GenerationConfigResourceGroup.resource_group_id == normalized_resource_group_id)
+    elif unbound_only:
+        statement = statement.outerjoin(
+            GenerationConfigResourceGroup,
+            GenerationConfigResourceGroup.generation_config_id == GenerationConfig.id,
+        ).where(GenerationConfigResourceGroup.generation_config_id.is_(None))
+    return list(session.scalars(statement).all())
 
 
 def list_generation_resource_groups(
@@ -531,7 +625,7 @@ def create_provider_profile(
         api_key=_normalize_optional_text(api_key),
         capabilities_json=normalized_capabilities,
         default_models_json=default_models or {},
-        config_json=config or {},
+        config_json=_normalize_provider_profile_config(config, strict=True),
         enabled=enabled,
     )
     session.add(profile)
@@ -586,7 +680,7 @@ def update_provider_profile(
     if default_models is not None:
         profile.default_models_json = default_models
     if config is not None:
-        profile.config_json = config
+        profile.config_json = _normalize_provider_profile_config(config, strict=True)
     if enabled is not None:
         profile.enabled = enabled
     session.commit()
@@ -1040,7 +1134,7 @@ def claim_generation_config(
     resource_group = require_generation_resource_group(session, resource_group_id, require_enabled=True)
 
     # Get global max dimension for resolution filtering
-    runtime_settings = get_runtime_settings(session)
+    runtime_settings = get_runtime_settings()
     global_max = runtime_settings.image_generation_max_dimension
 
     candidates = _candidate_generation_configs(
@@ -1373,8 +1467,7 @@ def _generation_config_exists(session: Session) -> bool:
 
 def _provider_config_exists(session: Session) -> bool:
     return bool(
-        session.scalar(select(ProviderProfile.id).limit(1))
-        or session.scalar(select(GenerationConfig.id).limit(1))
+        session.scalar(select(ProviderProfile.id).limit(1)) or session.scalar(select(GenerationConfig.id).limit(1))
     )
 
 
@@ -1514,9 +1607,7 @@ def _ensure_generation_config_states(session: Session) -> None:
 
 def _ensure_generation_config_resource_group_links(session: Session) -> None:
     configs = list(
-        session.scalars(
-            select(GenerationConfig).options(selectinload(GenerationConfig.resource_group_links))
-        ).all()
+        session.scalars(select(GenerationConfig).options(selectinload(GenerationConfig.resource_group_links))).all()
     )
     for generation_config in configs:
         if generation_config.resource_group_links:
@@ -1589,16 +1680,10 @@ def _normalize_generation_config_resource_group_ids(
     resource_group_id: str | None,
 ) -> list[str]:
     raw_ids = (
-        resource_group_ids
-        if resource_group_ids is not None
-        else ([resource_group_id] if resource_group_id else [])
+        resource_group_ids if resource_group_ids is not None else ([resource_group_id] if resource_group_id else [])
     )
     normalized_ids = _dedupe_ordered(
-        [
-            normalized_id
-            for value in raw_ids
-            if (normalized_id := _normalize_resource_group_id(value)) is not None
-        ]
+        [normalized_id for value in raw_ids if (normalized_id := _normalize_resource_group_id(value)) is not None]
     )
     for normalized_id in normalized_ids:
         require_generation_resource_group(session, normalized_id)
@@ -2078,9 +2163,7 @@ def _normalize_text_structured_output_dict(config: dict[str, Any]) -> dict[str, 
         return {
             TEXT_STRUCTURED_OUTPUT_ENABLED_KEY: legacy_enabled,
             TEXT_STRUCTURED_OUTPUT_MODE_KEY: (
-                TEXT_STRUCTURED_OUTPUT_MODE_JSON_OBJECT
-                if legacy_enabled
-                else TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA
+                TEXT_STRUCTURED_OUTPUT_MODE_JSON_OBJECT if legacy_enabled else TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA
             ),
         }
     if not isinstance(raw, dict):

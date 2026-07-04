@@ -4,6 +4,8 @@ import { useState } from "react";
 
 import { Save } from "lucide-react";
 
+import { ClassicTextInput } from "../../../components/classicInputs";
+import { WorkspaceTextInput } from "../../../components/workspaceInputs";
 import { useI18n } from "../../../lib/preferences";
 import {
   DEFAULT_NOTIFICATION_AUTO_CLOSE_MS,
@@ -13,10 +15,17 @@ import {
   writeNotificationAutoCloseMs,
 } from "../../../lib/notifications";
 import { SettingsFormField } from "./SettingsFormField";
-import { INPUT_CLASS, PANEL_CLASS, SETTINGS_COMPACT_ACTION_CLASS } from "./styles";
+import { PANEL_CLASS, useSettingsActionClassNames } from "./styles";
 
-export function NotificationSettingsPanel({ onSaved }: { onSaved: () => void }) {
+export function NotificationSettingsPanel({
+  onSaved,
+  workspaceSubpage = false,
+}: {
+  onSaved: () => void;
+  workspaceSubpage?: boolean;
+}) {
   const { t } = useI18n();
+  const { SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const [notificationAutoCloseMs, setNotificationAutoCloseMs] = useState(readNotificationAutoCloseMs);
   const saveNotificationSettings = () => {
     writeNotificationAutoCloseMs(notificationAutoCloseMs);
@@ -36,22 +45,37 @@ export function NotificationSettingsPanel({ onSaved }: { onSaved: () => void }) 
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <SettingsFormField label={t("settings.notification.autoCloseMs")}>
-          <input
-            type="number"
-            min={MIN_NOTIFICATION_AUTO_CLOSE_MS}
-            max={MAX_NOTIFICATION_AUTO_CLOSE_MS}
-            step={500}
-            value={notificationAutoCloseMs}
-            onChange={(event) => {
-              const nextValue = Number(event.target.value || DEFAULT_NOTIFICATION_AUTO_CLOSE_MS);
-              setNotificationAutoCloseMs(nextValue);
-            }}
-            className={INPUT_CLASS}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              type="number"
+              min={MIN_NOTIFICATION_AUTO_CLOSE_MS}
+              max={MAX_NOTIFICATION_AUTO_CLOSE_MS}
+              step={500}
+              value={notificationAutoCloseMs}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value || DEFAULT_NOTIFICATION_AUTO_CLOSE_MS);
+                setNotificationAutoCloseMs(nextValue);
+              }}
+              size="default"
+            />
+          ) : (
+            <ClassicTextInput
+              type="number"
+              min={MIN_NOTIFICATION_AUTO_CLOSE_MS}
+              max={MAX_NOTIFICATION_AUTO_CLOSE_MS}
+              step={500}
+              value={notificationAutoCloseMs}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value || DEFAULT_NOTIFICATION_AUTO_CLOSE_MS);
+                setNotificationAutoCloseMs(nextValue);
+              }}
+              size="default"
+            />
+          )}
         </SettingsFormField>
       </div>
       <div className="flex justify-end">
-        <button type="button" onClick={saveNotificationSettings} className={SETTINGS_COMPACT_ACTION_CLASS}>
+        <button type="button" onClick={saveNotificationSettings} className={SETTINGS_MAIN_ACTION_CLASS}>
           <Save size={14} className="mr-1.5" />
           {t("common.save")}
         </button>

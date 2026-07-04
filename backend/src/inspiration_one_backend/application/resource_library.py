@@ -79,6 +79,13 @@ class _SourceImage:
     storage_object: object
 
 
+def _read_resource_library_asset_content(asset: ResourceLibraryAsset, storage: LocalStorage) -> bytes:
+    try:
+        return storage.resolve(storage.object_key_for(asset)).read_bytes()
+    except (OSError, ValueError) as exc:
+        raise BusinessValidationError("资源文件不存在") from exc
+
+
 def _group_query():
     return select(ResourceLibraryGroup).options(selectinload(ResourceLibraryGroup.owner))
 
@@ -424,6 +431,41 @@ def archive_resource_library_asset(
     session.commit()
 
 
+def copy_resource_library_asset_to_inspiration_source_asset(
+    session: Session,
+    *,
+    asset_id: str,
+    inspiration_id: str,
+    actor_user_id: str,
+    kind: SourceAssetKind,
+    storage: LocalStorage | None = None,
+    asset: ResourceLibraryAsset | None = None,
+) -> SourceAsset:
+    asset = asset or _get_asset_or_raise(session, asset_id, actor_user_id=actor_user_id)
+    ensure_resource_usable(asset)
+    if asset.kind != ResourceLibraryAssetKind.IMAGE:
+        raise BusinessValidationError("只能加载图片资源")
+
+    storage = storage or LocalStorage()
+    content = _read_resource_library_asset_content(asset, storage)
+    relative_path = (
+        storage.save_inspiration_upload(inspiration_id, asset.original_filename, content)
+        if kind == SourceAssetKind.ORIGINAL_IMAGE
+        else storage.save_reference_upload(inspiration_id, asset.original_filename, content)
+    )
+    storage_metadata = storage.metadata_for(relative_path)
+    source_asset = SourceAsset(
+        inspiration_id=inspiration_id,
+        kind=kind,
+        original_filename=asset.original_filename,
+        mime_type=asset.mime_type,
+        **storage_metadata.as_model_kwargs(),
+    )
+    session.add(source_asset)
+    session.flush()
+    return source_asset
+
+
 def load_resource_library_asset_to_workflow_node(
     session: Session,
     *,
@@ -446,25 +488,15 @@ def load_resource_library_asset_to_workflow_node(
         missing_message="工作流节点不存在",
     )
     ensure_resource_usable(workflow.inspiration)
-    if workflow.inspiration.owner_user_id != asset.owner_user_id:
-        raise BusinessValidationError("只能加载自己的资源")
-
-    storage = storage or LocalStorage()
-    try:
-        content = storage.resolve(storage.object_key_for(asset)).read_bytes()
-    except (OSError, ValueError) as exc:
-        raise BusinessValidationError("资源文件不存在") from exc
-    relative_path = storage.save_reference_upload(workflow.inspiration_id, asset.original_filename, content)
-    storage_metadata = storage.metadata_for(relative_path)
-    source_asset = SourceAsset(
+    source_asset = copy_resource_library_asset_to_inspiration_source_asset(
+        session,
+        asset_id=asset_id,
         inspiration_id=workflow.inspiration_id,
+        actor_user_id=actor_user_id,
         kind=SourceAssetKind.REFERENCE_IMAGE,
-        original_filename=asset.original_filename,
-        mime_type=asset.mime_type,
-        **storage_metadata.as_model_kwargs(),
+        storage=storage,
+        asset=asset,
     )
-    session.add(source_asset)
-    session.flush()
     fill_reference_node(node, source_asset)
     workflow.updated_at = now_utc()
     workflow.inspiration.updated_at = now_utc()
@@ -501,10 +533,7 @@ def load_resource_library_asset_to_image_session(
         raise BusinessValidationError("只能加载自己的资源")
 
     storage = storage or LocalStorage()
-    try:
-        content = storage.resolve(storage.object_key_for(asset)).read_bytes()
-    except (OSError, ValueError) as exc:
-        raise BusinessValidationError("资源文件不存在") from exc
+    content = _read_resource_library_asset_content(asset, storage)
     relative_path = storage.save_image_session_reference(image_session.id, asset.original_filename, content)
     storage_metadata = storage.metadata_for(relative_path)
     session.add(

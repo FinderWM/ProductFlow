@@ -28,6 +28,8 @@ from inspiration_one_backend.domain.enums import (
     EnhanceSourceKind,
     EnhanceStrategy,
     ImageSessionAssetKind,
+    ImageToCodeDeliveryMode,
+    ImageToCodeSourceKind,
     JobStatus,
     PosterKind,
     ResourceLibraryAssetKind,
@@ -1576,6 +1578,41 @@ class EnhanceJobInput(Base):
     owner: Mapped[AuthUser] = relationship(
         primaryjoin=lambda: child_parent_join(EnhanceJobInput.owner_user_id, AuthUser.id),
         foreign_keys=lambda: [EnhanceJobInput.owner_user_id],
+    )
+
+
+class ImageToCodeJob(Base, TimestampMixin):
+    """图片转代码 durable 后台任务记录。"""
+
+    __tablename__ = "image_to_code_jobs"
+    __table_args__ = (
+        Index("ix_image_to_code_jobs_owner_status_created", "owner_user_id", "status", "created_at"),
+        Index("ix_image_to_code_jobs_source", "source_kind", "source_ref"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str] = mapped_column(String(36), default=ADMIN_USER_ID)
+    source_kind: Mapped[ImageToCodeSourceKind] = mapped_column(enum_value_column(ImageToCodeSourceKind))
+    source_ref: Mapped[str] = mapped_column(String(36))
+    source_width: Mapped[int] = mapped_column(Integer)
+    source_height: Mapped[int] = mapped_column(Integer)
+    source_mime_type: Mapped[str] = mapped_column(String(100))
+    delivery_mode: Mapped[ImageToCodeDeliveryMode] = mapped_column(enum_value_column(ImageToCodeDeliveryMode))
+    job_params_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[JobStatus] = mapped_column(enum_value_column(JobStatus), default=JobStatus.QUEUED)
+    progress_phase: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    progress_completed: Mapped[int] = mapped_column(Integer, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, default=0)
+    progress_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_manifest_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+
+    owner: Mapped[AuthUser] = relationship(
+        primaryjoin=lambda: child_parent_join(ImageToCodeJob.owner_user_id, AuthUser.id),
+        foreign_keys=lambda: [ImageToCodeJob.owner_user_id],
     )
 
 

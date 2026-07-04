@@ -13,13 +13,17 @@ from inspiration_one_backend.application.deck_generation_config import (
     resolve_deck_slide_size_for_execution,
 )
 from inspiration_one_backend.application.deck_status import derived_deck_status
+from inspiration_one_backend.application.enhance.execution import (
+    EnhanceExecutionRequest,
+    execute_enhance_execution,
+)
 from inspiration_one_backend.application.enhance.jobs import (
     _result_manifest as enhance_result_manifest,
 )
 from inspiration_one_backend.application.enhance.jobs import (
     create_enhance_input_blob,
 )
-from inspiration_one_backend.application.enhance.strategy import DirectParams, EnhanceContext, run_direct_strategy
+from inspiration_one_backend.application.enhance.strategy import DirectParams, run_direct_strategy
 from inspiration_one_backend.application.generation_config_runtime import (
     GenerationConfigSelection,
     GenerationConfigWaitError,
@@ -280,84 +284,86 @@ def enhance_deck_slide_material(
         deck=deck,
         purpose="image",
     )
-    claim = claim_runtime_generation_config(
-        purpose="image",
-        selection=selection,
-    )
-    try:
-        service = ImageChatService(generation_config_id=claim.generation_config_id)
-        ctx = EnhanceContext(
+    # Shared enhance execution claims runtime generation config through an independent session.
+    # Commit the current deck transaction first so SQLite and other multi-session runtimes do not hold a write lock.
+    session.commit()
+    outcome = execute_enhance_execution(
+        EnhanceExecutionRequest(
             session=session,
-            storage=storage,
-            service=service,
+            owner_user_id=owner_user_id,
+            strategy=EnhanceStrategy.DIRECT,
+            params={"target_width": target_width, "target_height": target_height},
+            generation_config_selection=selection,
             source_image_bytes=source_bytes,
             source_mime=source_mime_type,
             source_width=source_dimensions[0],
             source_height=source_dimensions[1],
             output_prefix=f"decks/{deck.id}/materials/{new_id()}",
+            strategy_runner=_run_deck_material_enhance_strategy,
+            storage=storage,
             reference_limit=1,
             quality_prompt=(prompt or "").strip() or None,
         )
-        result = run_direct_strategy(ctx, DirectParams(target_width=target_width, target_height=target_height))
-        if result.final_image_ref is None:
-            raise BusinessValidationError("图片增强结果不存在")
-        _final_path, final_mime_type = storage.resolve_for_variant(
-            result.final_image_ref,
-            "original",
-            fallback_media_type=source_mime_type,
-        )
-        input_blob = create_enhance_input_blob(
-            session,
-            content=source_bytes,
-            mime_type=source_mime_type,
-            owner_user_id=owner_user_id,
-            storage=storage,
-        )
-        job = EnhanceJob(
-            id=new_id(),
-            owner_user_id=owner_user_id,
-            source_kind=EnhanceSourceKind.ENHANCE_INPUT_BLOB,
-            source_ref=input_blob.id,
-            source_width=input_blob.width,
-            source_height=input_blob.height,
-            source_mime_type=input_blob.mime_type,
-            strategy=EnhanceStrategy.DIRECT,
-            params_json={"target_width": target_width, "target_height": target_height},
-            status=JobStatus.SUCCEEDED,
-            progress_completed=1,
-            progress_total=1,
-            progress_updated_at=_now(),
-            generation_config_mode=selection.mode,
-            requested_generation_config_id=selection.generation_config_id,
-            used_generation_config_id=claim.generation_config_id,
-            resource_group_id=claim.resource_group_id,
-            started_at=_now(),
-            finished_at=_now(),
-        )
-        manifest = enhance_result_manifest(job, result)
-        manifest["final_mime_type"] = final_mime_type
-        job.result_manifest_json = manifest
-        session.add(job)
+    )
+    result = outcome.result
+    if result.final_image_ref is None:
+        raise BusinessValidationError("图片增强结果不存在")
+    _final_path, final_mime_type = storage.resolve_for_variant(
+        result.final_image_ref,
+        "original",
+        fallback_media_type=source_mime_type,
+    )
+    input_blob = create_enhance_input_blob(
+        session,
+        content=source_bytes,
+        mime_type=source_mime_type,
+        owner_user_id=owner_user_id,
+        storage=storage,
+    )
+    job = EnhanceJob(
+        id=new_id(),
+        owner_user_id=owner_user_id,
+        source_kind=EnhanceSourceKind.ENHANCE_INPUT_BLOB,
+        source_ref=input_blob.id,
+        source_width=input_blob.width,
+        source_height=input_blob.height,
+        source_mime_type=input_blob.mime_type,
+        strategy=EnhanceStrategy.DIRECT,
+        params_json=dict(outcome.normalized_params),
+        status=JobStatus.SUCCEEDED,
+        progress_completed=result.completed_call_count or 1,
+        progress_total=result.completed_call_count or 1,
+        progress_updated_at=_now(),
+        generation_config_mode=selection.mode,
+        requested_generation_config_id=selection.generation_config_id,
+        used_generation_config_id=outcome.used_generation_config_id,
+        resource_group_id=outcome.used_resource_group_id,
+        started_at=_now(),
+        finished_at=_now(),
+    )
+    manifest = enhance_result_manifest(job, result)
+    manifest["final_mime_type"] = final_mime_type
+    job.result_manifest_json = manifest
+    session.add(job)
 
-        meta = storage.metadata_for(result.final_image_ref).as_model_kwargs()
-        slide.material_storage_path = meta["storage_path"]
-        slide.material_storage_backend = meta["storage_backend"]
-        slide.material_storage_bucket = meta["storage_bucket"]
-        slide.material_storage_object_key = meta["storage_object_key"]
-        slide.material_mime_type = final_mime_type
-        slide.material_source = DeckMaterialSource.ENHANCED
-        slide.material_enhance_job_id = job.id
-        session.commit()
-        release_runtime_generation_config(claim, success=True, user_id=owner_user_id, generated_unit_count=1)
-        session.refresh(slide)
-        return slide
-    except Exception as exc:  # noqa: BLE001
-        session.rollback()
-        release_runtime_generation_config(
-            claim,
-            success=False,
-            failure_reason=generation_failure_reason(exc),
-            timeout=generation_failure_is_timeout(exc),
-            throttled=generation_failure_is_throttled(exc),
-        )
-        raise
+    meta = storage.metadata_for(result.final_image_ref).as_model_kwargs()
+    slide.material_storage_path = meta["storage_path"]
+    slide.material_storage_backend = meta["storage_backend"]
+    slide.material_storage_bucket = meta["storage_bucket"]
+    slide.material_storage_object_key = meta["storage_object_key"]
+    slide.material_mime_type = final_mime_type
+    slide.material_source = DeckMaterialSource.ENHANCED
+    slide.material_enhance_job_id = job.id
+    session.commit()
+    session.refresh(slide)
+    return slide
+
+
+def _run_deck_material_enhance_strategy(ctx, params):
+    return run_direct_strategy(
+        ctx,
+        DirectParams(
+            target_width=int(params["target_width"]),
+            target_height=int(params["target_height"]),
+        ),
+    )

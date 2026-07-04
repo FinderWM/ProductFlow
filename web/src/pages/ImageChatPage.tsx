@@ -33,7 +33,15 @@ import { ImageToolControls } from "../components/ImageToolControls";
 import { ModalShell } from "../components/ModalShell";
 import { ParameterHelpLabel } from "../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../components/PromptPreviewDialog";
-import { ActionButton, actionButtonClassName } from "../components/ActionButton";
+import {
+  actionButtonClassNameForAppearance,
+  actionButtonComponentForAppearance,
+  actionButtonToneStyle,
+  actionSurfaceClassNameForAppearance,
+  transparentActionToneVars,
+  type ActionButtonToneVars,
+  type LayoutActionAppearance,
+} from "../components/layoutActionButtons";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -47,8 +55,14 @@ import {
 } from "../components/resource-library/SaveToResourceLibraryDialog";
 import { TopNav } from "../components/TopNav";
 import {
+  ClassicCheckbox,
+  ClassicSelectField,
+  ClassicTextInput,
+  ClassicTextarea,
+} from "../components/classicInputs";
+import {
   WorkspaceCheckbox,
-  WorkspaceSelectField as SelectField,
+  WorkspaceSelectField,
   WorkspaceTextInput,
   WorkspaceTextarea,
 } from "../components/workspaceInputs";
@@ -77,6 +91,7 @@ import {
 } from "../lib/rbac";
 import { useSessionState } from "../lib/session";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import { imageRoundSizeLabel, placeholderStatusClass, placeholderStatusLabel } from "./image-chat/display";
 import { ImageChatHistoryPanel } from "./image-chat/ImageChatHistoryPanel";
 import { ImageChatMainStage } from "./image-chat/ImageChatMainStage";
@@ -158,8 +173,6 @@ const IMAGE_CHAT_ENHANCE_DIRECT_PRESETS = [1024, 2048, 2560, 3072, 4096] as cons
 const IMAGE_CHAT_ENHANCE_SCALES = [2, 3, 4] as const;
 const ENHANCE_FINAL_MAX_EDGE = 16_384;
 const ENHANCE_FINAL_MAX_PIXELS = 120_000_000;
-const IMAGE_CHAT_SECONDARY_ICON_COMPACT_BUTTON_CLASS = actionButtonClassName({ preset: "secondary", size: "icon-sm" });
-const IMAGE_CHAT_DANGER_ICON_COMPACT_BUTTON_CLASS = actionButtonClassName({ preset: "danger", size: "icon-sm" });
 
 type ImageChatResizeTarget = "left" | "right" | "history";
 type ImageChatGenerationDraftMode = "new_round" | "retry";
@@ -275,6 +288,7 @@ export function ImageChatPage(props: ImageChatPageProps = {}) {
 
 function ImageChatWorkbenchPage() {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const sessionState = useSessionState();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -302,6 +316,35 @@ function ImageChatWorkbenchPage() {
   const mobileSettingsButtonRef = useRef<HTMLButtonElement | null>(null);
   const createSessionDialogTitleId = useId();
   const createSessionDialogDescriptionId = useId();
+  const workspaceSubpage = activeScheme === "workspace";
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const inputAppearance = workspaceSubpage ? "workspace" : "classic";
+  const ActionButton = actionButtonComponentForAppearance(actionAppearance);
+  const LayoutCheckbox = workspaceSubpage ? WorkspaceCheckbox : ClassicCheckbox;
+  const LayoutSelectField = workspaceSubpage ? WorkspaceSelectField : ClassicSelectField;
+  const LayoutTextInput = workspaceSubpage ? WorkspaceTextInput : ClassicTextInput;
+  const LayoutTextarea = workspaceSubpage ? WorkspaceTextarea : ClassicTextarea;
+  const secondaryIconCompactButtonClassName = actionButtonClassNameForAppearance(actionAppearance, {
+    preset: "secondary",
+    size: "icon-sm",
+  });
+  const dangerIconCompactButtonClassName = actionButtonClassNameForAppearance(actionAppearance, {
+    preset: "danger",
+    size: "icon-sm",
+  });
+  const previewSurfaceClassName = actionSurfaceClassNameForAppearance(actionAppearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "block w-full rounded-none border-0 shadow-none",
+  });
+  const ghostSurfaceToneVars: ActionButtonToneVars = {
+    ...transparentActionToneVars,
+    "--pf-action-bg-hover": "color-mix(in srgb, var(--pf-panel) 88%, transparent)",
+  };
+  const resizeHandleToneVars: ActionButtonToneVars = {
+    ...transparentActionToneVars,
+    "--pf-action-bg-hover": "color-mix(in srgb, var(--pf-accent) 14%, transparent)",
+  };
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     () => initialRouteState?.selectedSessionId ?? null,
@@ -564,6 +607,7 @@ function ImageChatWorkbenchPage() {
   const galleryTagsQuery = useQuery({
     queryKey: ["gallery-tags", "active"],
     queryFn: () => api.listGalleryTags(),
+    enabled: Boolean(galleryTagPickerAsset),
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
   const rbacUsersQuery = useQuery({
@@ -2436,6 +2480,7 @@ function ImageChatWorkbenchPage() {
           saveBlockedTitle={inspirationAttachBlockedTitle}
           editBlockedTitle={inspirationReferenceEditBlockedTitle}
           t={t}
+          appearance={actionAppearance}
         />
       </section>
     );
@@ -2447,7 +2492,7 @@ function ImageChatWorkbenchPage() {
         <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
           {t("chat.resourceGroup")}
         </div>
-        <SelectField
+        <LayoutSelectField
           value={selectedResourceGroupId ?? ""}
           options={[
             {
@@ -2463,9 +2508,8 @@ function ImageChatWorkbenchPage() {
           ]}
           onChange={handleGenerationResourceGroupChange}
           ariaLabel={t("chat.resourceGroup")}
-          radius="lg"
-          visualSize="sm"
           disabled={disabled}
+          size="compact"
         />
       </div>
     );
@@ -2512,7 +2556,7 @@ function ImageChatWorkbenchPage() {
           <ParameterHelpLabel label={label} helpKey={helpKey} uiType="imageChat" />
         </div>
         <div className="grid gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-          <SelectField
+          <LayoutSelectField
             value={mode}
             options={[
               { value: "auto", label: t("chat.generationConfigAuto") },
@@ -2520,18 +2564,16 @@ function ImageChatWorkbenchPage() {
             ]}
             onChange={(value) => onModeChange(value === "manual" ? "manual" : "auto")}
             ariaLabel={label}
-            radius="lg"
-            visualSize="sm"
             disabled={disabled}
+            size="compact"
           />
-          <SelectField
+          <LayoutSelectField
             value={mode === "manual" ? (configId ?? "") : ""}
             options={configOptions}
             onChange={(value) => onConfigIdChange(value || null)}
             ariaLabel={label}
-            radius="lg"
-            visualSize="sm"
             disabled={disabled || mode !== "manual"}
+            size="compact"
           />
         </div>
       </div>
@@ -2560,9 +2602,10 @@ function ImageChatWorkbenchPage() {
                 <button
                   type="button"
                   onClick={() => setReferencePreview({ asset, title: t("chat.baseImages") })}
-                  className="block w-full"
+                  className={previewSurfaceClassName}
                   title={asset.original_filename}
                   aria-label={t("detail.previewImage", { alt: asset.original_filename })}
+                  style={actionButtonToneStyle(transparentActionToneVars)}
                 >
                   <img
                     src={api.toApiUrl(asset.thumbnail_url)}
@@ -2581,7 +2624,7 @@ function ImageChatWorkbenchPage() {
                   disabled={Boolean(generationSettingsBlockedTitle)}
                   title={generationSettingsBlockedTitle ?? t("chat.removeBaseImage")}
                   aria-label={t("chat.removeBaseImage")}
-                  className={`absolute right-1 top-1 bg-white/92 dark:bg-slate-950/90 ${IMAGE_CHAT_DANGER_ICON_COMPACT_BUTTON_CLASS}`}
+                  className={`absolute right-1 top-1 bg-white/92 dark:bg-slate-950/90 ${dangerIconCompactButtonClassName}`}
                 >
                   <X size={13} />
                 </button>
@@ -2640,7 +2683,12 @@ function ImageChatWorkbenchPage() {
           onClick={() => setSessionFiltersExpanded((expanded) => !expanded)}
           aria-expanded={sessionFiltersExpanded}
           aria-label={sessionFiltersExpanded ? t("chat.sessionFiltersCollapse") : t("chat.sessionFiltersExpand")}
-          className="pf-image-chat-filter-toggle flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-slate-900/70 dark:focus-visible:ring-violet-400"
+          className={actionSurfaceClassNameForAppearance(actionAppearance, {
+            preset: "secondary",
+            focusWithin: true,
+            className: "pf-image-chat-filter-toggle flex w-full items-center justify-between gap-3 border-0 px-3 py-2.5 text-left shadow-none",
+          })}
+          style={actionButtonToneStyle(ghostSurfaceToneVars)}
         >
           <span className="min-w-0">
             <span className="flex items-center gap-2">
@@ -2668,7 +2716,7 @@ function ImageChatWorkbenchPage() {
               <span className="pf-workspace-muted mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                 {t("chat.sessionResourceGroupFilter")}
               </span>
-              <SelectField
+              <LayoutSelectField
                 value={selectedSessionResourceGroupId ?? ""}
                 options={[
                   { value: "", label: t("chat.allResourceGroups") },
@@ -2680,20 +2728,19 @@ function ImageChatWorkbenchPage() {
                 ]}
                 onChange={handleSessionResourceGroupFilterChange}
                 ariaLabel={t("chat.sessionResourceGroupFilter")}
-                radius="lg"
-                visualSize="sm"
                 disabled={generationResourceGroupsQuery.isLoading}
+                size="compact"
               />
             </label>
             {showSensitiveImageMaskPreference ? (
-              <WorkspaceCheckbox
+              <LayoutCheckbox
                 checked={maskSensitiveImages}
                 onChange={(event) => setMaskSensitiveImages(event.target.checked)}
                 variant="card"
                 wrapperClassName="pf-image-chat-filter-check px-2.5 py-2 text-xs font-semibold"
               >
                 {t("chat.maskSensitiveImages")}
-              </WorkspaceCheckbox>
+              </LayoutCheckbox>
             ) : null}
             {isAdmin ? (
               <>
@@ -2701,7 +2748,7 @@ function ImageChatWorkbenchPage() {
                   <span className="pf-workspace-muted mb-1.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                     {t("chat.sessionOwnerFilter")}
                   </span>
-                  <SelectField
+                  <LayoutSelectField
                     value={selectedSessionOwnerUserId}
                     options={sessionOwnerOptions}
                     onChange={handleSessionOwnerFilterChange}
@@ -2712,18 +2759,17 @@ function ImageChatWorkbenchPage() {
                     searchAriaLabel={t("chat.ownerSearch")}
                     searchLoading={rbacUsersQuery.isFetching}
                     searchLoadingLabel={t("app.loading")}
-                    radius="lg"
-                    visualSize="sm"
+                    size="compact"
                   />
                 </label>
-                <WorkspaceCheckbox
+                <LayoutCheckbox
                   checked={onlyDeletedSessions}
                   onChange={(event) => handleOnlyDeletedSessionsChange(event.target.checked)}
                   variant="card"
                   wrapperClassName="pf-image-chat-filter-check px-2.5 py-2 text-xs font-semibold"
                 >
                   {t("chat.onlyDeletedSessions")}
-                </WorkspaceCheckbox>
+                </LayoutCheckbox>
               </>
             ) : null}
           </div>
@@ -2737,6 +2783,7 @@ function ImageChatWorkbenchPage() {
       <ImageGenerationSettingsTabs
         value={settingsTab}
         onChange={setSettingsTab}
+        appearance={actionAppearance}
         basic={
           <div className="space-y-4">
             {renderSelectedBaseImagesPanel()}
@@ -2761,6 +2808,7 @@ function ImageChatWorkbenchPage() {
               onDelete={handleDeleteSessionReference}
               onPreview={(asset) => setReferencePreview({ asset, title: t("chat.sessionReferences") })}
               t={t}
+              appearance={actionAppearance}
             />
 
             {renderResourceGroupSelector({ disabled: Boolean(generationSettingsBlockedTitle) })}
@@ -2779,7 +2827,7 @@ function ImageChatWorkbenchPage() {
               <label className="mb-2 block text-sm font-semibold text-slate-950 dark:text-white" htmlFor={promptId}>
                 <ParameterHelpLabel label={t("chat.prompt")} helpKey="imageChatPrompt" uiType="imageChat" />
               </label>
-              <WorkspaceTextarea
+              <LayoutTextarea
                 id={promptId}
                 value={draft}
                 onChange={(event) => {
@@ -2790,7 +2838,7 @@ function ImageChatWorkbenchPage() {
                 title={generationSettingsBlockedTitle ?? t("chat.prompt")}
                 rows={6}
                 placeholder={isInspirationMode ? t("chat.inspirationPromptPlaceholder") : t("chat.freePromptPlaceholder")}
-                className="rounded-2xl"
+                className={workspaceSubpage ? "rounded-2xl" : undefined}
               />
               <div className="mt-2 grid gap-2">
                 {renderGenerationConfigSelector({
@@ -2868,7 +2916,7 @@ function ImageChatWorkbenchPage() {
               showToolOptions={false}
               helpUiType="imageChat"
               disabled={Boolean(generationSettingsBlockedTitle)}
-              appearance="workspace"
+              appearance={inputAppearance}
             />
           </div>
         }
@@ -2879,7 +2927,7 @@ function ImageChatWorkbenchPage() {
             helpUiType="imageChat"
             onChange={setToolOptions}
             disabled={Boolean(generationSettingsBlockedTitle)}
-            appearance="workspace"
+            appearance={inputAppearance}
           />
         }
       />
@@ -2933,14 +2981,13 @@ function ImageChatWorkbenchPage() {
               <span className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-200">
                 {t("chat.enhance.source")}
               </span>
-              <SelectField
+              <LayoutSelectField
                 value={enhanceSourceAssetId}
                 options={sourceOptions}
                 onChange={setEnhanceSourceAssetId}
                 ariaLabel={t("chat.enhance.source")}
-                radius="lg"
-                visualSize="sm"
                 disabled={Boolean(enhanceSettingsBlockedTitle)}
+                size="compact"
               />
             </label>
             {selectedEnhanceSourceAsset ? (
@@ -2952,7 +2999,8 @@ function ImageChatWorkbenchPage() {
                     title: t("chat.enhance.source"),
                   })
                 }
-                className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-left dark:border-slate-700 dark:bg-[#0b1220]"
+                className={`${previewSurfaceClassName} overflow-hidden rounded-xl text-left`}
+                style={actionButtonToneStyle(transparentActionToneVars)}
               >
                 <img
                   src={api.toApiUrl(selectedEnhanceSourceAsset.thumbnail_url || selectedEnhanceSourceAsset.preview_url)}
@@ -3011,7 +3059,7 @@ function ImageChatWorkbenchPage() {
               <div className="grid grid-cols-2 gap-2">
                 <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
                   {t("chat.enhance.width")}
-                  <WorkspaceTextInput
+                  <LayoutTextInput
                     value={enhanceDirectWidth}
                     onChange={(event) => setEnhanceDirectWidth(event.target.value)}
                     size="compact"
@@ -3022,7 +3070,7 @@ function ImageChatWorkbenchPage() {
                 </label>
                 <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
                   {t("chat.enhance.height")}
-                  <WorkspaceTextInput
+                  <LayoutTextInput
                     value={enhanceDirectHeight}
                     onChange={(event) => setEnhanceDirectHeight(event.target.value)}
                     size="compact"
@@ -3052,7 +3100,7 @@ function ImageChatWorkbenchPage() {
               </div>
               <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
                 {t("chat.enhance.tileBaseSize")}
-                <WorkspaceTextInput
+                <LayoutTextInput
                   value={enhanceTileBaseSize}
                   onChange={(event) => setEnhanceTileBaseSize(event.target.value)}
                   size="compact"
@@ -3081,7 +3129,7 @@ function ImageChatWorkbenchPage() {
 
           {activeEnhanceJob ? (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
-              <EnhanceJobProgress job={activeEnhanceJob} compact />
+              <EnhanceJobProgress appearance={actionAppearance} job={activeEnhanceJob} compact />
               {processingEnhanceJobId === activeEnhanceJob.id ? (
                 <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-300">
                   <Loader2 size={14} className="animate-spin" />
@@ -3233,7 +3281,7 @@ function ImageChatWorkbenchPage() {
           setErrorMessage(selectedResultResourceBlockedTitle);
         }
       }}
-      className={`${IMAGE_CHAT_SECONDARY_ICON_COMPACT_BUTTON_CLASS} w-8 bg-white/90 px-0 backdrop-blur-md aria-disabled:cursor-not-allowed aria-disabled:opacity-60 dark:bg-slate-950/82`}
+      className={`${secondaryIconCompactButtonClassName} w-8 bg-white/90 px-0 backdrop-blur-md aria-disabled:cursor-not-allowed aria-disabled:opacity-60 dark:bg-slate-950/82`}
       aria-disabled={Boolean(selectedResultResourceBlockedTitle)}
     >
       <Download size={14} />
@@ -3335,7 +3383,13 @@ function ImageChatWorkbenchPage() {
             aria-label={t("chat.resizeSessions")}
             title={t("chat.resizeSessionsTitle")}
             onPointerDown={(event) => handlePanelResizeStart("left", event)}
-            className="absolute right-[-5px] top-0 z-20 hidden h-full w-3 cursor-col-resize items-center justify-center transition-colors hover:bg-indigo-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-violet-500/15 lg:flex"
+            className={actionSurfaceClassNameForAppearance(actionAppearance, {
+              preset: "secondary",
+              focusWithin: true,
+              className:
+                "absolute right-[-5px] top-0 z-20 hidden h-full w-3 cursor-col-resize items-center justify-center border-0 shadow-none lg:flex",
+            })}
+            style={actionButtonToneStyle(resizeHandleToneVars)}
           >
             <span className="h-12 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
           </button>
@@ -3371,6 +3425,7 @@ function ImageChatWorkbenchPage() {
             deletionBlockedTitle={sessionListDeletionBlockedTitle}
             currentUser={currentUser}
             variant="desktop"
+            appearance={actionAppearance}
             maskSensitiveImages={maskSensitiveImages}
             onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession}
@@ -3392,7 +3447,7 @@ function ImageChatWorkbenchPage() {
               </ActionButton>
               <div className="min-w-0 flex-1 px-1 text-left">
                 {renameEnabled ? (
-                  <WorkspaceTextInput
+                  <LayoutTextInput
                     value={titleDraft}
                     onChange={(event) => setTitleDraft(event.target.value)}
                     onKeyDown={(event) => {
@@ -3479,6 +3534,7 @@ function ImageChatWorkbenchPage() {
               retryingTaskId={null}
               cancellingTaskId={cancelGenerationTaskMutation.isPending ? (cancelGenerationTaskMutation.variables?.taskId ?? null) : null}
               regenerating={generateMutation.isPending}
+              appearance={actionAppearance}
               maskSensitiveImages={maskSensitiveImages}
               generationBlockedTitle={selectedPlaceholderActionBlockedTitle}
               stageInfo={selectedRoundStageInfo}
@@ -3514,6 +3570,7 @@ function ImageChatWorkbenchPage() {
             selectedGeneratedAssetId={selectedGeneratedAssetId}
             selectedTaskPlaceholderId={selectedTaskPlaceholderId}
             selectedBaseAssetIds={selectedBaseAssetIds}
+            appearance={actionAppearance}
             style={historyPanelStyle}
             onResizeStart={(event) => handlePanelResizeStart("history", event)}
             onSelectRound={handleSelectHistoryRound}
@@ -3538,7 +3595,13 @@ function ImageChatWorkbenchPage() {
             aria-label={t("chat.resizeSettings")}
             title={t("chat.resizeSettingsTitle")}
             onPointerDown={(event) => handlePanelResizeStart("right", event)}
-            className="absolute left-[-5px] top-0 z-20 hidden h-full w-3 cursor-col-resize items-center justify-center transition-colors hover:bg-indigo-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-violet-500/15 lg:flex"
+            className={actionSurfaceClassNameForAppearance(actionAppearance, {
+              preset: "secondary",
+              focusWithin: true,
+              className:
+                "absolute left-[-5px] top-0 z-20 hidden h-full w-3 cursor-col-resize items-center justify-center border-0 shadow-none lg:flex",
+            })}
+            style={actionButtonToneStyle(resizeHandleToneVars)}
           >
             <span className="h-12 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
           </button>
@@ -3563,7 +3626,7 @@ function ImageChatWorkbenchPage() {
                 </ActionButton>
               </div>
               <div className="flex gap-2">
-                <WorkspaceTextInput
+                <LayoutTextInput
                   value={titleDraft}
                   onChange={(event) => setTitleDraft(event.target.value)}
                   disabled={!renameEnabled || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
@@ -3699,13 +3762,14 @@ function ImageChatWorkbenchPage() {
               isLoading={sessionsQuery.isLoading}
               selectedSessionId={selectedSessionId}
               deletingSessionId={deleteSessionMutation.isPending ? (deleteSessionMutation.variables ?? null) : null}
-              deletionEnabled={sessionDeletionEnabled}
-              deletionBlockedTitle={sessionListDeletionBlockedTitle}
-              currentUser={currentUser}
-              variant="mobile"
-              maskSensitiveImages={maskSensitiveImages}
-              onSelectSession={handleSelectSession}
-              onDeleteSession={handleDeleteSession}
+            deletionEnabled={sessionDeletionEnabled}
+            deletionBlockedTitle={sessionListDeletionBlockedTitle}
+            currentUser={currentUser}
+            variant="mobile"
+            appearance={actionAppearance}
+            maskSensitiveImages={maskSensitiveImages}
+            onSelectSession={handleSelectSession}
+            onDeleteSession={handleDeleteSession}
               t={t}
             />
           </Drawer.Content>
@@ -3764,6 +3828,7 @@ function ImageChatWorkbenchPage() {
               selectedTaskPlaceholderId={selectedTaskPlaceholderId}
               selectedBaseAssetIds={selectedBaseAssetIds}
               variant="mobileDrawer"
+              appearance={actionAppearance}
               onSelectRound={handleSelectHistoryRound}
               onAddRoundToBase={handleAddHistoryRoundToBase}
               onSelectPlaceholder={handleSelectHistoryPlaceholder}
@@ -3883,10 +3948,11 @@ function ImageChatWorkbenchPage() {
         </Drawer.Portal>
       </Drawer.Root>
       {promptPreview ? (
-        <PromptPreviewDialog preview={promptPreview} onClose={() => setPromptPreview(null)} />
+        <PromptPreviewDialog appearance={actionAppearance} preview={promptPreview} onClose={() => setPromptPreview(null)} />
       ) : null}
       {activePreviewRound ? (
         <GalleryImagePreviewDialog
+          appearance={actionAppearance}
           ariaLabel={t("chat.currentPreviewLabel")}
           imageUrl={api.toApiUrl(activePreviewRound.generated_asset.preview_url)}
           imageAlt={activePreviewRound.prompt || t("chat.currentResultAlt")}
@@ -3952,6 +4018,7 @@ function ImageChatWorkbenchPage() {
       ) : null}
       {referencePreview ? (
         <GalleryImagePreviewDialog
+          appearance={actionAppearance}
           ariaLabel={t("detail.previewImage", { alt: referencePreview.asset.original_filename })}
           imageUrl={api.toApiUrl(referencePreview.asset.preview_url)}
           imageAlt={referencePreview.asset.original_filename}
@@ -3973,6 +4040,7 @@ function ImageChatWorkbenchPage() {
       <ResourceLibraryModal
         open={resourceLibraryOpen}
         onClose={() => setResourceLibraryOpen(false)}
+        appearance={actionAppearance}
         canRead
         onSelectAsset={handleResourceLibraryAssetSelect}
         selectLabel={t("resourceLibrary.loadToImageSession")}
@@ -3981,6 +4049,7 @@ function ImageChatWorkbenchPage() {
         selectingAssetId={loadResourceLibraryReferenceMutation.variables ?? null}
       />
       <SaveToResourceLibraryDialog
+        appearance={actionAppearance}
         source={resourceLibrarySaveSource}
         canWrite={!resourceLibrarySaveGeneratedBlockedTitle}
         onClose={() => setResourceLibrarySaveSource(null)}
@@ -3991,7 +4060,9 @@ function ImageChatWorkbenchPage() {
       />
       <GalleryTagPickerDialog
         open={Boolean(galleryTagPickerAsset)}
+        appearance={actionAppearance}
         tags={galleryTags}
+        loading={galleryTagsQuery.isLoading}
         initialSelectedTagIds={[]}
         maxSelection={galleryEntryTagMaxSelection}
         required={galleryTagRequiredOnSave}
@@ -4034,7 +4105,7 @@ function ImageChatWorkbenchPage() {
                   <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                     {t("chat.resourceGroup")}
                   </span>
-                  <SelectField
+                  <LayoutSelectField
                     value={createSessionResourceGroupId}
                     options={[
                       {
@@ -4050,9 +4121,8 @@ function ImageChatWorkbenchPage() {
                     ]}
                     onChange={setCreateSessionResourceGroupId}
                     ariaLabel={t("chat.resourceGroup")}
-                    radius="lg"
-                    visualSize="sm"
                     disabled={createSessionMutation.isPending || generationResourceGroupsQuery.isLoading}
+                    size="compact"
                   />
                 </label>
               </div>
@@ -4080,6 +4150,7 @@ function ImageChatWorkbenchPage() {
       ) : null}
       <ConfirmDialog
         open={Boolean(pendingDeleteDialog)}
+        appearance={actionAppearance}
         title={pendingDeleteDialog?.title ?? ""}
         description={pendingDeleteDialog?.description ?? ""}
         confirmLabel={t("confirm.delete.confirm")}

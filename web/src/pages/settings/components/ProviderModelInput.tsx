@@ -5,15 +5,25 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Loader2, RefreshCw } from "lucide-react";
 
+import { ClassicTextInput } from "../../../components/classicInputs";
 import { FloatingSurface } from "../../../components/FloatingSurface";
 import { ParameterHelpLabel } from "../../../components/ParameterHelp";
+import { WorkspaceTextInput } from "../../../components/workspaceInputs";
 import { api } from "../../../lib/api";
 import type { ParameterHelpKey } from "../../../lib/parameterHelp";
 import { useI18n } from "../../../lib/preferences";
 import type { ProviderModel } from "../../../lib/types";
-import { filterProviderModels, providerModelsQueryKey, providerModelsStatusText } from "../providerModels";
+import {
+  canFetchProviderModels,
+  filterProviderModels,
+  PROVIDER_MODELS_QUERY_GC_TIME_MS,
+  PROVIDER_MODELS_QUERY_STALE_TIME_MS,
+  providerModelsQueryKey,
+  providerModelsStatusText,
+  shouldEnableProviderModelsQuery,
+} from "../providerModels";
 import type { ProviderModelKind } from "../types";
-import { INPUT_CLASS, SETTINGS_SQUARE_ACTION_CLASS } from "./styles";
+import { useSettingsActionClassNames } from "./styles";
 
 interface ProviderModelInputProps {
   idPrefix: string;
@@ -24,6 +34,7 @@ interface ProviderModelInputProps {
   providerProfileId: string;
   disabled?: boolean;
   helpKey?: ParameterHelpKey;
+  workspaceSubpage?: boolean;
   onChange: (value: string) => void;
 }
 
@@ -36,21 +47,28 @@ export function ProviderModelInput({
   providerProfileId,
   disabled = false,
   helpKey,
+  workspaceSubpage = false,
   onChange,
 }: ProviderModelInputProps) {
   const { t } = useI18n();
+  const { SETTINGS_SQUARE_ACTION_CLASS } = useSettingsActionClassNames();
   const reactId = useId();
   const inputId = `${idPrefix}-${reactId}`;
   const listboxId = `${inputId}-models`;
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const modelTriggerRef = useRef<HTMLDivElement | null>(null);
   const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [open, setOpen] = useState(false);
   const [activeModelId, setActiveModelId] = useState(value);
-  const canFetchModels = providerKind !== "mock" && Boolean(providerProfileId);
+  const [modelsQueryActivated, setModelsQueryActivated] = useState(false);
+  const canFetchModels = canFetchProviderModels(providerProfileId, providerKind);
+  const modelsQueryEnabled = shouldEnableProviderModelsQuery(providerProfileId, providerKind, modelsQueryActivated);
   const modelsQuery = useQuery({
     queryKey: providerModelsQueryKey(providerProfileId, providerKind),
     queryFn: () => api.listProviderModels(providerProfileId, providerKind),
-    enabled: canFetchModels,
+    enabled: modelsQueryEnabled,
+    staleTime: PROVIDER_MODELS_QUERY_STALE_TIME_MS,
+    gcTime: PROVIDER_MODELS_QUERY_GC_TIME_MS,
     retry: false,
   });
   const models = modelsQuery.data?.models ?? [];
@@ -60,6 +78,8 @@ export function ProviderModelInput({
       ? ""
       : !providerProfileId
         ? t("settings.provider.modelSelectProfileFirst")
+        : !modelsQueryEnabled && models.length === 0 && !modelsQuery.error
+          ? ""
         : modelsQuery.isLoading || modelsQuery.isFetching
           ? t("settings.provider.modelsLoading")
           : providerModelsStatusText(models, modelsQuery.error, t);
@@ -88,6 +108,40 @@ export function ProviderModelInput({
     }
   }, [models.length]);
 
+  useEffect(() => {
+    if (!canFetchModels || modelsQueryActivated) {
+      return;
+    }
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") {
+      setModelsQueryActivated(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setModelsQueryActivated(true);
+          observer.disconnect();
+        }
+      },
+      {
+        rootMargin: "240px 0px 240px 0px",
+        threshold: 0.01,
+      },
+    );
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [canFetchModels, modelsQueryActivated]);
+
+  function activateModelsQuery() {
+    if (canFetchModels) {
+      setModelsQueryActivated(true);
+    }
+  }
+
   function moveActiveModel(delta: number) {
     if (!filteredModels.length) {
       return;
@@ -109,60 +163,117 @@ export function ProviderModelInput({
   }
 
   return (
-    <div className="space-y-2">
+    <div ref={rootRef} className="space-y-2">
       <label htmlFor={inputId} className="block text-xs font-medium text-slate-600 dark:text-slate-300">
         {helpKey ? <ParameterHelpLabel label={label} helpKey={helpKey} uiType="settings" /> : label}
       </label>
       <div className="flex gap-2">
         <div ref={modelTriggerRef} className="relative min-w-0 flex-1">
-          <input
-            id={inputId}
-            role="combobox"
-            aria-expanded={modelOptionsOpen}
-            aria-controls={listboxId}
-            aria-autocomplete="list"
-            value={value}
-            onChange={(event) => {
-              onChange(event.target.value);
-              setActiveModelId(event.target.value);
-              if (canOpenModels) {
-                setOpen(true);
-              }
-            }}
-            onFocus={() => {
-              if (canOpenModels) {
-                setOpen(true);
-              }
-            }}
-            onKeyDown={(event) => {
-              if (!canOpenModels) {
-                return;
-              }
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setOpen(true);
-                moveActiveModel(1);
-                return;
-              }
-              if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setOpen(true);
-                moveActiveModel(-1);
-                return;
-              }
-              if (event.key === "Enter" && modelOptionsOpen && activeModel) {
-                event.preventDefault();
-                selectModel(activeModel);
-                return;
-              }
-              if (event.key === "Escape") {
-                setOpen(false);
-              }
-            }}
-            className={`${INPUT_CLASS} ${canOpenModels ? "pr-11" : ""}`}
-            placeholder={placeholder}
-            disabled={disabled}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              id={inputId}
+              role="combobox"
+              aria-expanded={modelOptionsOpen}
+              aria-controls={listboxId}
+              aria-autocomplete="list"
+              value={value}
+              onChange={(event) => {
+                activateModelsQuery();
+                onChange(event.target.value);
+                setActiveModelId(event.target.value);
+                if (canOpenModels) {
+                  setOpen(true);
+                }
+              }}
+              onFocus={() => {
+                activateModelsQuery();
+                if (canOpenModels) {
+                  setOpen(true);
+                }
+              }}
+              onKeyDown={(event) => {
+                if (!canOpenModels) {
+                  return;
+                }
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setOpen(true);
+                  moveActiveModel(1);
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setOpen(true);
+                  moveActiveModel(-1);
+                  return;
+                }
+                if (event.key === "Enter" && modelOptionsOpen && activeModel) {
+                  event.preventDefault();
+                  selectModel(activeModel);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  setOpen(false);
+                }
+              }}
+              className={canOpenModels ? "pr-11" : ""}
+              placeholder={placeholder}
+              disabled={disabled}
+              size="tall"
+            />
+          ) : (
+            <ClassicTextInput
+              id={inputId}
+              role="combobox"
+              aria-expanded={modelOptionsOpen}
+              aria-controls={listboxId}
+              aria-autocomplete="list"
+              value={value}
+              onChange={(event) => {
+                activateModelsQuery();
+                onChange(event.target.value);
+                setActiveModelId(event.target.value);
+                if (canOpenModels) {
+                  setOpen(true);
+                }
+              }}
+              onFocus={() => {
+                activateModelsQuery();
+                if (canOpenModels) {
+                  setOpen(true);
+                }
+              }}
+              onKeyDown={(event) => {
+                if (!canOpenModels) {
+                  return;
+                }
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setOpen(true);
+                  moveActiveModel(1);
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setOpen(true);
+                  moveActiveModel(-1);
+                  return;
+                }
+                if (event.key === "Enter" && modelOptionsOpen && activeModel) {
+                  event.preventDefault();
+                  selectModel(activeModel);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  setOpen(false);
+                }
+              }}
+              className={canOpenModels ? "pr-11" : ""}
+              placeholder={placeholder}
+              disabled={disabled}
+              size="tall"
+            />
+          )}
           {canOpenModels ? (
             <button
               type="button"
@@ -179,6 +290,7 @@ export function ProviderModelInput({
           <button
             type="button"
             onClick={() => {
+              activateModelsQuery();
               setOpen(false);
               void modelsQuery.refetch();
             }}

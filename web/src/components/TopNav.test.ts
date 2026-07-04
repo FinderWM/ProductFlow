@@ -8,6 +8,7 @@ import {
   getWorkspaceNavLayout,
   isPointerInWorkspaceThemeDockRevealZone,
   nextDesktopMoreMenuState,
+  shouldSuppressTopNavSelection,
   shouldCloseDesktopMoreOnBlur,
   workspaceTopNavTarget,
   type DesktopNavLayoutInput,
@@ -239,6 +240,17 @@ describe("workspaceTopNavTarget", () => {
 
   it("falls back to the normal top-level route without a workspace override", () => {
     expect(workspaceTopNavTarget({ to: "/workflow/templates" })).toBe("/workflow/templates");
+  });
+});
+
+describe("shouldSuppressTopNavSelection", () => {
+  it("suppresses first-level nav selection on the workspace home route", () => {
+    expect(shouldSuppressTopNavSelection("/inspirations", "workspace")).toBe(true);
+  });
+
+  it("keeps first-level nav selection on classic inspirations routes and workspace subpages", () => {
+    expect(shouldSuppressTopNavSelection("/inspirations", "classic")).toBe(false);
+    expect(shouldSuppressTopNavSelection("/inspirations/list", "workspace")).toBe(false);
   });
 });
 

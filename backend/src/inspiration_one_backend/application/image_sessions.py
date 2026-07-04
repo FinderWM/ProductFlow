@@ -846,6 +846,20 @@ def _execute_image_session_round_generation(
         generation_config_selection = _image_task_generation_config_selection(generation_task)
     if generation_config_selection is None:
         raise BusinessValidationError("请选择供应商生成分组")
+    logger.info(
+        "连续生图任务开始准备执行: task_id=%s image_session_id=%s generation_count=%s size=%s "
+        "generation_config_mode=%s requested_generation_config_id=%s resource_group_id=%s "
+        "base_asset_count=%s selected_reference_count=%s",
+        generation_task_id,
+        image_session_id,
+        generation_count,
+        size,
+        generation_config_selection.mode,
+        generation_config_selection.generation_config_id,
+        generation_config_selection.resource_group_id,
+        len(base_asset_ids or ([] if base_asset_id is None else [base_asset_id])),
+        len(selected_reference_asset_ids or []),
+    )
     normalized_tool_options = normalize_tool_options(tool_options)
     (
         normalized_size,
@@ -874,6 +888,16 @@ def _execute_image_session_round_generation(
         base_asset_ids=normalized_base_asset_ids,
         base_asset_id=normalized_base_asset_id,
         selected_reference_asset_ids=[],
+    )
+    logger.info(
+        "连续生图任务上下文已准备: task_id=%s image_session_id=%s normalized_size=%s "
+        "base_asset_count=%s manual_reference_count=%s has_previous_response_id=%s",
+        generation_task_id,
+        image_session_id,
+        normalized_size,
+        len(normalized_base_asset_ids),
+        len(manual_references),
+        previous_response_id is not None,
     )
 
     generation_group_id = generation_task.result_generation_group_id if generation_task else None
@@ -906,12 +930,26 @@ def _execute_image_session_round_generation(
     pending_provider_results = []
     session.commit()
     runtime_claim = claim_runtime_generation_config(purpose="image", selection=generation_config_selection)
+    logger.info(
+        "连续生图任务已获取生成配置: task_id=%s image_session_id=%s generation_config_id=%s resource_group_id=%s",
+        generation_task_id,
+        image_session_id,
+        runtime_claim.generation_config_id,
+        runtime_claim.resource_group_id,
+    )
     completed_candidates_at_claim = completed_candidates
     try:
         service = ImageChatService(generation_config_id=runtime_claim.generation_config_id)
     except BaseException:
         release_runtime_generation_config(runtime_claim, success=False, record_result=False)
         raise
+    logger.info(
+        "连续生图任务已初始化图片供应商: task_id=%s image_session_id=%s generation_config_id=%s provider_kind=%s",
+        generation_task_id,
+        image_session_id,
+        runtime_claim.generation_config_id,
+        service.provider_kind,
+    )
     provider_manual_references = _provider_manual_references_for_session_generation(
         provider_kind=service.provider_kind,
         manual_references=manual_references,
@@ -958,6 +996,16 @@ def _execute_image_session_round_generation(
         relative_path: str | None = None
         try:
             _raise_if_image_generation_task_cancelled(session, generation_task_id)
+            logger.info(
+                "连续生图任务开始调用图片供应商: task_id=%s image_session_id=%s generation_config_id=%s "
+                "provider_kind=%s candidate_index=%s candidate_count=%s",
+                generation_task_id,
+                image_session_id,
+                runtime_claim.generation_config_id,
+                service.provider_kind,
+                candidate_index,
+                generation_count,
+            )
             if generation_task_id is not None:
                 _update_image_generation_task_progress(
                     session,
@@ -1361,6 +1409,21 @@ def _reset_latest_failed_image_session_generation_task_from_submit(
         progress_phase="manual_retry_queued",
         result_generation_group_id=task.result_generation_group_id or new_id(),
     )
+    logger.info(
+        "连续生图手动重试任务已重置: task_id=%s session_id=%s generation_config_mode=%s "
+        "requested_generation_config_id=%s used_generation_config_id=%s resource_group_id=%s "
+        "attempts=%s result_generation_group_id=%s progress_phase=%s generation_count=%s",
+        task.id,
+        task.session_id,
+        task.generation_config_mode,
+        task.requested_generation_config_id,
+        task.used_generation_config_id,
+        task.resource_group_id,
+        task.attempts,
+        task.result_generation_group_id,
+        task.progress_phase,
+        task.generation_count,
+    )
     session.expire_all()
     return ImageSessionGenerationTaskCreationResult(
         task=session.get(ImageSessionGenerationTask, task.id) or task,
@@ -1422,6 +1485,18 @@ def submit_image_session_generation_task(
             actor_user_id=actor_user_id,
             actor_is_admin=actor_is_admin,
         )
+    logger.info(
+        "连续生图提交生成任务: action=%s task_id=%s image_session_id=%s retry_generation_task_id=%s "
+        "generation_config_mode=%s requested_generation_config_id=%s resource_group_id=%s generation_count=%s",
+        "retry" if retry_generation_task_id else "new",
+        result.task.id,
+        image_session_id,
+        retry_generation_task_id,
+        result.task.generation_config_mode,
+        result.task.requested_generation_config_id,
+        result.task.resource_group_id,
+        result.task.generation_count,
+    )
     enqueue_or_mark_failed(
         result.task.id,
         enqueue=enqueue or enqueue_image_session_generation_task,
@@ -1946,12 +2021,43 @@ def execute_image_session_generation_task(task_id: str) -> None:
     try:
         task = session.get(ImageSessionGenerationTask, task_id)
         if task is None:
+            logger.warning("连续生图worker收到不存在的任务: task_id=%s", task_id)
             return
+        logger.info(
+            "连续生图worker开始处理任务: task_id=%s status=%s progress_phase=%s attempts=%s "
+            "generation_config_mode=%s requested_generation_config_id=%s used_generation_config_id=%s "
+            "resource_group_id=%s",
+            task.id,
+            task.status,
+            task.progress_phase,
+            task.attempts,
+            task.generation_config_mode,
+            task.requested_generation_config_id,
+            task.used_generation_config_id,
+            task.resource_group_id,
+        )
         claim = _mark_image_generation_task_running(session, task)
         if not claim.claimed:
+            task = session.get(ImageSessionGenerationTask, task_id)
+            logger.info(
+                "连续生图worker未认领任务: task_id=%s status=%s progress_phase=%s attempts=%s should_requeue=%s",
+                task_id,
+                task.status if task is not None else None,
+                task.progress_phase if task is not None else None,
+                task.attempts if task is not None else None,
+                claim.should_requeue,
+            )
             if claim.should_requeue:
                 _requeue_image_generation_task_after_capacity_wait(task_id)
             return
+        task = session.get(ImageSessionGenerationTask, task_id)
+        logger.info(
+            "连续生图worker已认领任务: task_id=%s status=%s progress_phase=%s attempts=%s",
+            task_id,
+            task.status if task is not None else None,
+            task.progress_phase if task is not None else None,
+            task.attempts if task is not None else None,
+        )
         try:
             _execute_image_session_round_generation(
                 session,
@@ -1979,11 +2085,31 @@ def execute_image_session_generation_task(task_id: str) -> None:
                     completed=exc.completed_candidates,
                     requested=exc.requested_candidates,
                 )
-            task = session.get(ImageSessionGenerationTask, task_id)
-            if task is not None:
+            failed_task = session.get(ImageSessionGenerationTask, task_id)
+            logger.warning(
+                "连续生图任务执行失败: task_id=%s status=%s progress_phase=%s generation_config_mode=%s "
+                "requested_generation_config_id=%s used_generation_config_id=%s resource_group_id=%s "
+                "attempts=%s completed_candidates=%s requested_candidates=%s timed_out=%s "
+                "failure_category=%s failure_reason=%s safe_reason=%s",
+                task_id,
+                failed_task.status if failed_task is not None else None,
+                failed_task.progress_phase if failed_task is not None else None,
+                failed_task.generation_config_mode if failed_task is not None else None,
+                failed_task.requested_generation_config_id if failed_task is not None else None,
+                failed_task.used_generation_config_id if failed_task is not None else None,
+                failed_task.resource_group_id if failed_task is not None else None,
+                failed_task.attempts if failed_task is not None else None,
+                exc.completed_candidates,
+                exc.requested_candidates,
+                exc.timed_out,
+                exc.failure_decision.category if exc.failure_decision is not None else None,
+                reason,
+                exc.safe_reason,
+            )
+            if failed_task is not None:
                 _handle_image_generation_task_failure_safely(
                     session,
-                    task_id=task.id,
+                    task_id=failed_task.id,
                     reason=reason,
                     result_generation_group_id=exc.generation_group_id,
                     failure_decision=exc.failure_decision,
@@ -1996,6 +2122,21 @@ def execute_image_session_generation_task(task_id: str) -> None:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
             session.rollback()
+            failed_task = session.get(ImageSessionGenerationTask, task_id)
+            logger.exception(
+                "连续生图任务执行异常: task_id=%s status=%s progress_phase=%s generation_config_mode=%s "
+                "requested_generation_config_id=%s used_generation_config_id=%s resource_group_id=%s "
+                "attempts=%s error_type=%s",
+                task_id,
+                failed_task.status if failed_task is not None else None,
+                failed_task.progress_phase if failed_task is not None else None,
+                failed_task.generation_config_mode if failed_task is not None else None,
+                failed_task.requested_generation_config_id if failed_task is not None else None,
+                failed_task.used_generation_config_id if failed_task is not None else None,
+                failed_task.resource_group_id if failed_task is not None else None,
+                failed_task.attempts if failed_task is not None else None,
+                type(exc).__name__,
+            )
             _handle_image_generation_task_failure_safely(
                 session,
                 task_id=task_id,

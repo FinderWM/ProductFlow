@@ -1,6 +1,12 @@
 import { Sparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode, type UIEvent as ReactUIEvent } from "react";
 
+import {
+  actionButtonToneStyle,
+  actionSurfaceClassNameForAppearance,
+  transparentActionToneVars,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import { SensitiveImageOverlay, sensitiveImageClassName } from "../../components/SensitiveImageMask";
 import { api } from "../../lib/api";
 import { shouldMaskSensitiveImage } from "../../lib/sensitiveImages";
@@ -18,6 +24,7 @@ interface ImageChatMainStageProps {
   retryingTaskId: string | null;
   cancellingTaskId: string | null;
   regenerating: boolean;
+  appearance?: LayoutActionAppearance;
   maskSensitiveImages: boolean;
   generationBlockedTitle?: string | null;
   stageInfo?: ReactNode;
@@ -37,6 +44,7 @@ export function ImageChatMainStage({
   retryingTaskId,
   cancellingTaskId,
   regenerating,
+  appearance = "classic",
   maskSensitiveImages,
   generationBlockedTitle = null,
   stageInfo,
@@ -48,6 +56,12 @@ export function ImageChatMainStage({
   onRegenerateGenerationTask,
   t,
 }: ImageChatMainStageProps) {
+  const previewButtonClassName = actionSurfaceClassNameForAppearance(appearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl border-0 shadow-none",
+  });
+  const previewButtonStyle = actionButtonToneStyle(transparentActionToneVars, { display: "flex" });
   const selectedImageMasked = shouldMaskSensitiveImage(maskSensitiveImages, selectedRound?.resource_group);
   const selectedRoundIndex = selectedRound
     ? sessionRounds.findIndex((round) => round.generated_asset.id === selectedRound.generated_asset.id)
@@ -104,7 +118,7 @@ export function ImageChatMainStage({
   };
 
   return (
-    <div className="relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-600/80 dark:bg-[#121b2d] dark:shadow-[0_0_0_1px_rgba(139,92,246,0.10),0_24px_80px_rgba(0,0,0,0.35)] sm:min-h-[22rem] lg:min-h-[360px]">
+    <div className="relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-3xl border pf-hairline pf-surface shadow-sm dark:border-[color:var(--pf-border)] dark:bg-[#121b2d] dark:shadow-[0_0_0_1px_rgba(139,92,246,0.10),0_24px_80px_rgba(0,0,0,0.35)] sm:min-h-[22rem] lg:min-h-[360px]">
       <div className="absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:20px_20px] dark:bg-[radial-gradient(rgba(148,163,184,0.26)_1px,transparent_1px)]" />
       {stageInfo || stageActions ? (
         <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex flex-wrap items-start justify-end gap-2 sm:inset-x-4 sm:top-4">
@@ -131,9 +145,10 @@ export function ImageChatMainStage({
                   <button
                     type="button"
                     onClick={() => onPreviewRound(round)}
-                    className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400"
+                    className={previewButtonClassName}
                     aria-label={t("chat.previewCurrent")}
                     title={t("chat.previewCurrent")}
+                    style={previewButtonStyle}
                   >
                     <img
                       src={api.toApiUrl(round.generated_asset.preview_url)}
@@ -156,9 +171,10 @@ export function ImageChatMainStage({
             <button
               type="button"
               onClick={() => onPreviewRound(selectedRound)}
-              className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400"
+              className={previewButtonClassName}
               aria-label={t("chat.previewCurrent")}
               title={t("chat.previewCurrent")}
+              style={previewButtonStyle}
             >
               <img
                 src={api.toApiUrl(selectedRound.generated_asset.preview_url)}
@@ -180,7 +196,7 @@ export function ImageChatMainStage({
           </div>
           {sessionRounds.length > 1 && selectedRoundIndex >= 0 ? (
             <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex justify-center lg:hidden">
-              <span className="rounded-full border border-slate-200/90 bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-slate-700 shadow-sm shadow-slate-900/5 backdrop-blur-md dark:border-slate-600/70 dark:bg-slate-950/82 dark:text-slate-100">
+              <span className="rounded-full border border-[color:var(--pf-border-soft)] bg-[rgba(255,255,255,0.9)] px-2.5 py-1 text-[11px] font-semibold pf-ink-muted shadow-sm shadow-slate-900/5 backdrop-blur-md dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]">
                 {selectedRoundIndex + 1}/{sessionRounds.length}
               </span>
             </div>
@@ -193,18 +209,19 @@ export function ImageChatMainStage({
           cancelling={cancellingTaskId === selectedPlaceholder.task_id}
           regenerating={regenerating}
           actionBlockedTitle={generationBlockedTitle}
+          appearance={appearance}
           onRetry={onRetryGenerationTask}
           onCancel={onCancelGenerationTask}
           onRegenerate={onRegenerateGenerationTask}
           t={t}
         />
       ) : (
-        <div className="relative z-0 flex flex-col items-center gap-4 text-center text-slate-400 dark:text-slate-100">
-          <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-950/86 dark:text-violet-200 dark:ring-violet-400/35">
+        <div className="relative z-0 flex flex-col items-center gap-4 text-center pf-ink-muted dark:text-[color:var(--pf-muted)]">
+          <div className="flex h-16 w-16 items-center justify-center rounded-3xl pf-surface shadow-sm ring-1 ring-[color:var(--pf-border-soft)] dark:bg-[color:var(--pf-deep)] dark:text-violet-200 dark:ring-violet-400/35">
             <Sparkles size={28} />
           </div>
           <div>
-            <div className="text-sm font-semibold text-slate-600 dark:text-white">{t("chat.noResult")}</div>
+            <div className="text-sm font-semibold pf-ink-muted dark:text-[#fff]">{t("chat.noResult")}</div>
           </div>
         </div>
       )}

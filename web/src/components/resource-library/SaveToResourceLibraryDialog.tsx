@@ -5,8 +5,11 @@ import { Check, CheckCircle2, Image as ImageIcon, Loader2, Save, X } from "lucid
 import { api, ApiError } from "../../lib/api";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup, ResourceLibrarySourceType } from "../../lib/types";
-import { ActionButton } from "../ActionButton";
+import { actionButtonComponentForAppearance } from "../layoutActionButtons";
 import { ModalShell } from "../ModalShell";
+import { WorkspaceOptionToggle } from "../workspaceInputs";
+
+type SaveToResourceLibraryDialogAppearance = "classic" | "workspace";
 
 export interface ResourceLibrarySaveSource {
   source_type: ResourceLibrarySourceType;
@@ -18,6 +21,7 @@ export interface ResourceLibrarySaveSource {
 interface SaveToResourceLibraryDialogProps {
   source: ResourceLibrarySaveSource | null;
   canWrite: boolean;
+  appearance?: SaveToResourceLibraryDialogAppearance;
   onClose: () => void;
   onSaved?: (asset: ResourceLibraryAsset) => void;
 }
@@ -28,15 +32,18 @@ const RESOURCE_LIBRARY_SAVE_FEEDBACK_AUTO_DISMISS_MS = 1000;
 function ResourceLibrarySaveFeedbackDialog({
   successMessage,
   errorMessage,
+  appearance,
   onCloseSuccess,
   onCloseError,
 }: {
   successMessage: string;
   errorMessage: string;
+  appearance: SaveToResourceLibraryDialogAppearance;
   onCloseSuccess: () => void;
   onCloseError: () => void;
 }) {
   const { t } = useI18n();
+  const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
   const titleId = useId();
   const descriptionId = useId();
   const open = Boolean(successMessage || errorMessage);
@@ -78,7 +85,7 @@ function ResourceLibrarySaveFeedbackDialog({
             </p>
           </div>
           {isError ? (
-            <ActionButton
+            <ActionButtonComponent
               preset="secondary"
               size="icon-md"
               onClick={onCloseError}
@@ -86,7 +93,7 @@ function ResourceLibrarySaveFeedbackDialog({
               title={t("resourceLibrary.close")}
               leadingIcon={<X size={16} />}
             >
-            </ActionButton>
+            </ActionButtonComponent>
           ) : null}
         </div>
     </ModalShell>
@@ -96,10 +103,12 @@ function ResourceLibrarySaveFeedbackDialog({
 export function SaveToResourceLibraryDialog({
   source,
   canWrite,
+  appearance = "classic",
   onClose,
   onSaved,
 }: SaveToResourceLibraryDialogProps) {
   const { t } = useI18n();
+  const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
   const queryClient = useQueryClient();
   const open = Boolean(source);
   const titleId = useId();
@@ -230,7 +239,7 @@ export function SaveToResourceLibraryDialog({
                 <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{source.title}</div>
               ) : null}
             </div>
-            <ActionButton
+            <ActionButtonComponent
               preset="secondary"
               size="icon-md"
               onClick={onClose}
@@ -239,7 +248,7 @@ export function SaveToResourceLibraryDialog({
               title={t("resourceLibrary.close")}
               leadingIcon={<X size={18} />}
             >
-            </ActionButton>
+            </ActionButtonComponent>
           </div>
 
           <div className="space-y-4 px-5 py-4">
@@ -287,30 +296,32 @@ export function SaveToResourceLibraryDialog({
                     const alreadyLinked = existingGroupIds.has(group.id);
                     const selected = selectedGroupIds.includes(group.id);
                     return (
-                      <label
+                      <WorkspaceOptionToggle
                         key={group.id}
-                        className={`flex min-h-10 min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium ${
+                        checked={selected || alreadyLinked}
+                        disabled={!canWrite || saveMutation.isPending || alreadyLinked}
+                        layout="card"
+                        className={`min-h-10 w-full items-center px-3 py-2 text-sm font-medium ${
                           alreadyLinked
                             ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200"
-                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/55 dark:text-slate-200"
+                            : "justify-between"
                         }`}
+                        onChange={(checked) => toggleGroup(group.id, checked)}
                       >
-                        <input
-                          type="checkbox"
-                          checked={selected || alreadyLinked}
-                          onChange={(event) => toggleGroup(group.id, event.target.checked)}
-                          disabled={!canWrite || saveMutation.isPending || alreadyLinked}
-                          className="pf-checkbox shrink-0 rounded border-slate-300 disabled:opacity-70 dark:border-slate-600 dark:bg-slate-950"
-                        />
-                        <span className="min-w-0 flex-1 whitespace-normal break-words leading-5">{group.name}</span>
-                        {alreadyLinked ? (
-                          <span className="ml-auto shrink-0 text-[10px] font-semibold">
-                            {t("resourceLibrary.alreadyInLibrary")}
-                          </span>
-                        ) : selected ? (
-                          <Check size={14} className="ml-auto shrink-0 text-[var(--pf-accent,#047857)] dark:text-[var(--pf-accent,#a7f3d0)]" />
-                        ) : null}
-                      </label>
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <span className="min-w-0 flex-1 whitespace-normal break-words leading-5">{group.name}</span>
+                          {alreadyLinked ? (
+                            <span className="shrink-0 text-[10px] font-semibold">
+                              {t("resourceLibrary.alreadyInLibrary")}
+                            </span>
+                          ) : selected ? (
+                            <Check
+                              size={14}
+                              className="shrink-0 text-[var(--pf-accent,#047857)] dark:text-[var(--pf-accent,#a7f3d0)]"
+                            />
+                          ) : null}
+                        </span>
+                      </WorkspaceOptionToggle>
                     );
                   })}
                 </div>
@@ -323,15 +334,15 @@ export function SaveToResourceLibraryDialog({
           </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
-          <ActionButton
+          <ActionButtonComponent
             preset="secondary"
             size="md"
             onClick={onClose}
             disabled={saveMutation.isPending}
           >
             {t("common.cancel")}
-          </ActionButton>
-          <ActionButton
+          </ActionButtonComponent>
+          <ActionButtonComponent
             preset="primary"
             size="md"
             onClick={handleSave}
@@ -346,12 +357,13 @@ export function SaveToResourceLibraryDialog({
             leadingIcon={<Save size={15} />}
           >
             {t("resourceLibrary.saveToLibrary")}
-          </ActionButton>
+          </ActionButtonComponent>
         </div>
       </ModalShell>
     <ResourceLibrarySaveFeedbackDialog
       successMessage={successMessage}
       errorMessage={feedbackError}
+      appearance={appearance}
       onCloseSuccess={() => {
         setSuccessMessage("");
         onClose();

@@ -28,6 +28,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
 from inspiration_one_backend.infrastructure.queue import (
     recover_unfinished_enhance_jobs,
     recover_unfinished_image_session_generation_tasks,
+    recover_unfinished_image_to_code_jobs,
     recover_unfinished_workflow_runs,
 )
 from inspiration_one_backend.presentation.errors import register_exception_handlers
@@ -37,6 +38,7 @@ from inspiration_one_backend.presentation.routes.enhance import router as enhanc
 from inspiration_one_backend.presentation.routes.gallery import router as gallery_router
 from inspiration_one_backend.presentation.routes.generation_queue import router as generation_queue_router
 from inspiration_one_backend.presentation.routes.image_sessions import router as image_sessions_router
+from inspiration_one_backend.presentation.routes.image_to_code import router as image_to_code_router
 from inspiration_one_backend.presentation.routes.inspiration_workflows import router as inspiration_workflows_router
 from inspiration_one_backend.presentation.routes.inspirations import router as inspirations_router
 from inspiration_one_backend.presentation.routes.moderation import router as moderation_router
@@ -75,6 +77,7 @@ def create_app() -> FastAPI:
         recover_unfinished_workflow_runs()
         recover_unfinished_image_session_generation_tasks()
         recover_unfinished_enhance_jobs()
+        recover_unfinished_image_to_code_jobs()
         task_notification_listener = start_task_notification_listener()
         try:
             yield
@@ -111,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(inspiration_workflows_router)
     app.include_router(decks_router)
     app.include_router(enhance_router)
+    app.include_router(image_to_code_router)
     app.include_router(image_sessions_router)
     app.include_router(resource_library_router)
     app.include_router(moderation_router)

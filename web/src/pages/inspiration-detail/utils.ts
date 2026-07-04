@@ -103,6 +103,17 @@ export function pendingTailSplitPlan(node: WorkflowNode | null): TailSplitPlan |
   return output.latest_plan;
 }
 
+export function shouldLoadInspirationDetailTemplateCatalog(activeSidebarTab: string): boolean {
+  return activeSidebarTab === "templates";
+}
+
+export function shouldLoadInspirationDetailUserTemplateCategories(
+  activeSidebarTab: string,
+  canvasTemplateSaveOpen: boolean,
+): boolean {
+  return activeSidebarTab === "templates" || canvasTemplateSaveOpen;
+}
+
 export function configString(
   node: WorkflowNode | null,
   key: string,

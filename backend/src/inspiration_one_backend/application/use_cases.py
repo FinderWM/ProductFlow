@@ -25,6 +25,7 @@ from inspiration_one_backend.application.inspiration_workflow.templates import (
 )
 from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.application.ownership import ensure_actor_can_mutate_owner, resolve_owner_user_id
+from inspiration_one_backend.application.resource_library import copy_resource_library_asset_to_inspiration_source_asset
 from inspiration_one_backend.application.time import now_utc
 from inspiration_one_backend.domain.enums import (
     CopyStatus,
@@ -432,6 +433,7 @@ def create_inspiration(
     image_bytes: bytes | None,
     filename: str | None,
     content_type: str | None,
+    image_source_asset_id: str | None = None,
     reference_image_uploads: list[tuple[bytes, str, str]] | None = None,
     canvas_template_key: str | None = None,
     initial_workflow_entry: str | None = None,
@@ -478,7 +480,8 @@ def create_inspiration(
         initial_workflow_entry=workflow_entry,
         actor_user_id=resolved_owner_user_id,
     )
-    if image_bytes is None and workflow_entry == "image":
+    normalized_image_source_asset_id = (image_source_asset_id or "").strip() or None
+    if image_bytes is None and normalized_image_source_asset_id is None and workflow_entry == "image":
         raise BusinessValidationError("请先上传灵感图")
     storage = storage or LocalStorage()
     inspiration = Inspiration(
@@ -506,6 +509,15 @@ def create_inspiration(
         )
         session.add(original_source_asset)
         session.flush()
+    elif normalized_image_source_asset_id is not None:
+        original_source_asset = copy_resource_library_asset_to_inspiration_source_asset(
+            session,
+            asset_id=normalized_image_source_asset_id,
+            inspiration_id=inspiration.id,
+            actor_user_id=resolved_owner_user_id,
+            kind=SourceAssetKind.ORIGINAL_IMAGE,
+            storage=storage,
+        )
     context_document_asset: SourceAsset | None = None
     if context_document_upload is not None:
         document_path = storage.save_document_upload(

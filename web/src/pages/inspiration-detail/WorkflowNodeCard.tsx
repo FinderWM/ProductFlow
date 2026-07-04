@@ -12,6 +12,7 @@ import {
 import { formatDateTime } from "../../lib/format";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
+import type { LayoutActionAppearance } from "../../components/layoutActionButtons";
 import type { WorkflowNode } from "../../lib/types";
 import { readDeckNodeCardState } from "./deckNodeCardState";
 import { DownloadLink } from "./ImageDownloadComponents";
@@ -36,6 +37,7 @@ interface WorkflowNodeCardProps {
   secondarySelected: boolean;
   previewSelected: boolean;
   dragging: boolean;
+  appearance?: LayoutActionAppearance;
   onSelect: (event: ReactMouseEvent<HTMLElement>) => void;
   onPreviewImage?: (image: DownloadableImage) => void;
 }
@@ -48,6 +50,7 @@ export function WorkflowNodeCard({
   secondarySelected,
   previewSelected,
   dragging,
+  appearance = "classic",
   onSelect,
   onPreviewImage,
 }: WorkflowNodeCardProps) {
@@ -74,14 +77,14 @@ export function WorkflowNodeCard({
     ? "border-indigo-300 shadow-lg shadow-indigo-950/10 ring-2 ring-indigo-200/70 dark:border-violet-400 dark:shadow-indigo-950/30 dark:ring-violet-300/60"
     : secondarySelected || previewSelected
       ? "border-sky-300 shadow-md shadow-sky-950/5 ring-2 ring-sky-100 dark:border-sky-400 dark:shadow-sky-950/25 dark:ring-sky-300/45"
-      : "border-slate-200 dark:border-slate-500/85 dark:ring-1 dark:ring-slate-200/10";
+      : "pf-hairline dark:border-[color:var(--pf-border)] dark:ring-1 dark:ring-[color:var(--pf-border-soft)]";
 
   return (
     <div
       ref={nodeRef}
       data-workflow-node-id={node.id}
-      className={`nopan relative w-[272px] touch-none select-none rounded-2xl border bg-white/95 p-3 text-left shadow-sm backdrop-blur dark:bg-[#1c2940]/96 dark:shadow-[0_18px_42px_rgba(0,0,0,0.34)] transition-[border-color,box-shadow,transform] transition-spring animate-spring-node-in ${
-        dragging ? "cursor-grabbing" : "hover:-translate-y-0.5 hover:shadow-md dark:hover:border-slate-400/85 dark:hover:shadow-[0_20px_46px_rgba(0,0,0,0.42)]"
+      className={`nopan relative w-[272px] touch-none select-none rounded-2xl border bg-[rgba(255,255,255,0.95)] p-3 text-left shadow-sm backdrop-blur dark:bg-[#1c2940]/96 dark:shadow-[0_18px_42px_rgba(0,0,0,0.34)] transition-[border-color,box-shadow,transform] transition-spring animate-spring-node-in ${
+        dragging ? "cursor-grabbing" : "hover:-translate-y-0.5 hover:shadow-md dark:hover:border-[color:var(--pf-border)] dark:hover:shadow-[0_20px_46px_rgba(0,0,0,0.42)]"
       } ${selectedClassName} ${
         statusTone === "running"
           ? "animate-running-glow"
@@ -92,7 +95,7 @@ export function WorkflowNodeCard({
     >
       {primarySelected || secondarySelected || previewSelected ? (
         <div
-          className={`pointer-events-none absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full border bg-white shadow-sm dark:bg-[#111b2d] ${
+          className={`pointer-events-none absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full border pf-surface shadow-sm dark:bg-[#111b2d] ${
             primarySelected
               ? "border-indigo-200 text-indigo-600 dark:border-indigo-300 dark:text-indigo-200"
               : "border-sky-200 text-sky-600 dark:border-sky-300 dark:text-sky-200"
@@ -105,14 +108,14 @@ export function WorkflowNodeCard({
       <div onClick={onSelect} className="cursor-grab active:cursor-grabbing">
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="flex min-w-0 gap-2">
-            <span className="mt-0.5 rounded-xl border border-slate-200 bg-slate-50 p-1.5 text-slate-500 dark:border-slate-500/70 dark:bg-[#111b2d] dark:text-slate-100">
+            <span className="mt-0.5 rounded-xl border pf-hairline pf-surface-soft p-1.5 pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#111b2d] dark:text-[color:var(--pf-muted)]">
               <Icon size={14} />
             </span>
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
+              <div className="truncate text-sm font-semibold pf-ink dark:text-[#fff]">
                 {displayTitle}
               </div>
-              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-400 dark:text-slate-400">
+              <div className="mt-0.5 text-[10px] uppercase tracking-wider pf-ink-muted dark:text-[color:var(--pf-muted)]">
                 {displayLabel}
               </div>
             </div>
@@ -125,7 +128,7 @@ export function WorkflowNodeCard({
         </div>
         {image ? (
           <div
-            className={`relative mb-2 flex h-28 items-center justify-center overflow-hidden rounded-xl border border-zinc-100 p-2 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME} ${onPreviewImage ? "cursor-zoom-in" : ""}`}
+            className={`relative mb-2 flex h-28 items-center justify-center overflow-hidden rounded-xl border pf-hairline p-2 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME} ${onPreviewImage ? "cursor-zoom-in" : ""}`}
             onClick={onPreviewImage ? (e) => { e.stopPropagation(); onPreviewImage(image); } : undefined}
           >
             <img
@@ -133,18 +136,18 @@ export function WorkflowNodeCard({
               alt={image.alt}
               className="h-full w-full object-contain"
             />
-            <DownloadLink image={image} variant="overlay" />
+            <DownloadLink image={image} appearance={appearance} variant="overlay" />
             {imageWaiting ? (
-              <div className="absolute inset-x-2 bottom-2 flex items-center justify-center rounded-lg bg-white/90 px-2 py-1 text-[11px] font-medium text-indigo-700 shadow-sm ring-1 ring-indigo-100 backdrop-blur dark:bg-slate-950/90 dark:text-indigo-100 dark:ring-indigo-400/30">
+              <div className="absolute inset-x-2 bottom-2 flex items-center justify-center rounded-lg bg-[rgba(255,255,255,0.9)] px-2 py-1 text-[11px] font-medium text-indigo-700 shadow-sm ring-1 ring-indigo-100 backdrop-blur dark:bg-[color:var(--pf-deep)] dark:text-indigo-100 dark:ring-indigo-400/30">
                 <Loader2 size={11} className="mr-1 animate-spin" />
                 {waitingLabel}
               </div>
             ) : null}
           </div>
         ) : imageWaiting ? (
-          <div className="relative mb-2 flex h-28 flex-col items-center justify-center overflow-hidden rounded-xl border border-indigo-200/50 bg-indigo-950/10 text-indigo-700 dark:border-indigo-400/20 dark:bg-slate-950/30 dark:text-indigo-100 shadow-inner">
+          <div className="relative mb-2 flex h-28 flex-col items-center justify-center overflow-hidden rounded-xl border border-indigo-200/50 bg-indigo-950/10 text-indigo-700 dark:border-indigo-400/20 dark:bg-[color:var(--pf-deep)] dark:text-indigo-100 shadow-inner">
             <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-xl">
-              <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/5 via-indigo-900/10 to-purple-950/15 dark:from-slate-950/10 dark:to-slate-900/20" />
+              <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/5 via-indigo-900/10 to-purple-950/15 dark:from-[rgba(15,23,42,0.1)] dark:to-[rgba(15,23,42,0.2)]" />
               <div className="absolute left-[35%] bottom-0 w-3 h-3 rounded-full bg-indigo-400/60 blur-[2px] animate-particle-1" />
               <div className="absolute left-[50%] bottom-0 w-2.5 h-2.5 rounded-full bg-purple-400/50 blur-[1px] animate-particle-2" />
               <div className="absolute left-[42%] bottom-0 w-4 h-4 rounded-full bg-violet-400/40 blur-[3px] animate-particle-3" />
@@ -154,7 +157,7 @@ export function WorkflowNodeCard({
             </div>
             <div className="relative z-10 flex flex-col items-center justify-center">
               <Loader2 size={18} className="animate-spin text-indigo-500 dark:text-indigo-300 opacity-80" />
-              <div className="mt-2 text-xs font-semibold tracking-wide text-indigo-900 dark:text-indigo-200 bg-white/40 px-2 py-0.5 rounded-md backdrop-blur-sm shadow-sm dark:bg-slate-900/40">
+              <div className="mt-2 text-xs font-semibold tracking-wide text-indigo-900 dark:text-indigo-200 bg-[rgba(255,255,255,0.4)] px-2 py-0.5 rounded-md backdrop-blur-sm shadow-sm dark:bg-[color:var(--pf-deep)]">
                 {waitingLabel}
               </div>
             </div>
@@ -176,12 +179,12 @@ export function WorkflowNodeCard({
         {deckNodeState ? (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {deckNodeState.sourceItemCount > 0 ? (
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-200">
+              <span className="rounded-full border pf-hairline pf-surface-soft px-2 py-0.5 text-[10px] font-medium pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#111b2d] dark:text-[color:var(--pf-muted)]">
                 {t("detail.deck.sourceCount", { count: deckNodeState.sourceItemCount })}
               </span>
             ) : null}
             {deckNodeState.slideCount !== null ? (
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-200">
+              <span className="rounded-full border pf-hairline pf-surface-soft px-2 py-0.5 text-[10px] font-medium pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#111b2d] dark:text-[color:var(--pf-muted)]">
                 {t("detail.deck.slideCount", { count: deckNodeState.slideCount })}
               </span>
             ) : null}
@@ -201,7 +204,7 @@ export function WorkflowNodeCard({
           <div
             className={`rounded-lg border px-2.5 py-1.5 text-xs leading-relaxed ${
               node.status === "cancelled"
-                ? "border-zinc-100 bg-zinc-50 text-zinc-600 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300"
+                ? "pf-hairline pf-surface-soft pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#0b1220] dark:text-[color:var(--pf-muted)]"
                 : "border-red-100 bg-red-50 text-red-700 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-200"
             }`}
           >
@@ -230,7 +233,7 @@ export function WorkflowNodeCard({
           </div>
         ) : null}
       </div>
-      <div className="mt-3 flex items-center gap-2 text-[10px] text-zinc-400 dark:text-slate-300">
+      <div className="mt-3 flex items-center gap-2 text-[10px] pf-ink-muted dark:text-[color:var(--pf-muted)]">
         <span className="min-w-0 flex-1 truncate text-left leading-tight">
           {node.last_run_at ? t("detail.recent", { time: formatDateTime(node.last_run_at) }) : displayLabel}
         </span>

@@ -4,21 +4,17 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from inspiration_one_backend.application.enhance.execution import (
+    EnhanceExecutionRequest,
+    execute_enhance_execution,
+)
 from inspiration_one_backend.application.enhance.strategy import (
     DirectParams,
-    EnhanceContext,
     TiledParams,
     run_direct_strategy,
     run_tiled_strategy,
 )
-from inspiration_one_backend.application.generation_config_runtime import (
-    GenerationConfigSelection,
-    claim_runtime_generation_config,
-    generation_failure_is_throttled,
-    generation_failure_is_timeout,
-    generation_failure_reason,
-    release_runtime_generation_config,
-)
+from inspiration_one_backend.application.generation_config_runtime import GenerationConfigSelection
 from inspiration_one_backend.application.inspiration_workflow.artifacts import fill_reference_node, image_asset_output
 from inspiration_one_backend.application.inspiration_workflow.context import (
     collect_incoming_context,
@@ -37,7 +33,6 @@ from inspiration_one_backend.infrastructure.db.models import (
     new_id,
 )
 from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes, infer_extension
-from inspiration_one_backend.infrastructure.image.chat_service import ImageChatService
 from inspiration_one_backend.infrastructure.storage import LocalStorage
 
 
@@ -80,65 +75,47 @@ def execute_workflow_image_enhance(
             retry_hint="revise_input",
             failure_category="invalid_node_config",
         )
+    # Shared enhance execution claims runtime generation config through an independent session.
+    # Commit the current workflow transaction first so SQLite and other multi-session runtimes do not hold a write lock.
+    session.commit()
 
-    runtime_claim = claim_runtime_generation_config(
-        purpose="image",
-        selection=generation_config_selection,
-        session=session,
-    )
     try:
-        service = ImageChatService(generation_config_id=runtime_claim.generation_config_id)
-        ctx = EnhanceContext(
-            session=session,
-            storage=storage,
-            service=service,
-            source_image_bytes=source_bytes,
-            source_mime=source.mime_type or "image/png",
-            source_width=source_dimensions[0],
-            source_height=source_dimensions[1],
-            output_prefix=f"enhance/workflow/{node.id}/{new_id()}",
-            reference_limit=2,
-            quality_prompt=_optional_text(config.get("quality_prompt")),
-            progress_callback=(
-                lambda completed, total: _persist_node_run_progress(
-                    session,
-                    node_run_id=node_run_id,
-                    completed=completed,
-                    total=total,
-                )
-                if node_run_id
-                else None
-            ),
-        )
         strategy = EnhanceStrategy(config["strategy"])
-        if strategy == EnhanceStrategy.DIRECT:
-            result = run_direct_strategy(
-                ctx,
-                DirectParams(
-                    target_width=int(config["params"]["target_width"]),
-                    target_height=int(config["params"]["target_height"]),
+        outcome = execute_enhance_execution(
+            EnhanceExecutionRequest(
+                session=session,
+                owner_user_id=workflow.inspiration.owner_user_id,
+                strategy=strategy,
+                params=dict(config["params"]),
+                generation_config_selection=generation_config_selection,
+                source_image_bytes=source_bytes,
+                source_mime=source.mime_type or "image/png",
+                source_width=source_dimensions[0],
+                source_height=source_dimensions[1],
+                output_prefix=f"enhance/workflow/{node.id}/{new_id()}",
+                strategy_runner=lambda ctx, normalized_params: _run_workflow_strategy(
+                    ctx,
+                    strategy=strategy,
+                    params=normalized_params,
+                ),
+                storage=storage,
+                reference_limit=2,
+                quality_prompt=_optional_text(config.get("quality_prompt")),
+                progress_callback=(
+                    lambda completed, total: _persist_node_run_progress(
+                        session,
+                        node_run_id=node_run_id,
+                        completed=completed,
+                        total=total,
+                    )
+                    if node_run_id
+                    else None
                 ),
             )
-        else:
-            result = run_tiled_strategy(
-                ctx,
-                TiledParams(
-                    scale=int(config["params"]["scale"]),
-                    tile_base_size=int(config["params"]["tile_base_size"]),
-                    overlap_pct=int(config["params"].get("overlap_pct") or 10),
-                ),
-                backend_stitch=True,
-            )
-        used_generation_config_id = runtime_claim.generation_config_id
-        used_resource_group_id = runtime_claim.resource_group_id
-        release_runtime_generation_config(
-            runtime_claim,
-            success=True,
-            session=session,
-            user_id=workflow.inspiration.owner_user_id,
-            generated_unit_count=result.completed_call_count or 1,
         )
-        runtime_claim = None
+        result = outcome.result
+        used_generation_config_id = outcome.used_generation_config_id
+        used_resource_group_id = outcome.used_resource_group_id
         if not result.final_image_ref:
             raise WorkflowSafeExecutionError("图片增强结果不存在", retryable=True)
         enhanced_asset = _create_enhanced_source_asset(
@@ -164,7 +141,7 @@ def execute_workflow_image_enhance(
                 "filled_source_asset_ids": [enhanced_asset.id],
                 "filled_reference_node_ids": filled_reference_node_ids,
                 "strategy": strategy.value,
-                "params": dict(config["params"]),
+                "params": dict(outcome.normalized_params),
                 "source_asset_id": source.id,
                 "target_count": len(filled_reference_node_ids),
                 "generation_config_id": used_generation_config_id,
@@ -174,17 +151,8 @@ def execute_workflow_image_enhance(
             }
         )
         return output
-    except BaseException as exc:  # noqa: BLE001
+    except BaseException:  # noqa: BLE001
         session.rollback()
-        release_runtime_generation_config(
-            runtime_claim,
-            success=False,
-            user_id=workflow.inspiration.owner_user_id,
-            generated_unit_count=0,
-            failure_reason=generation_failure_reason(exc),
-            timeout=generation_failure_is_timeout(exc),
-            throttled=generation_failure_is_throttled(exc),
-        )
         raise
 
 
@@ -254,3 +222,28 @@ def _optional_text(value: object) -> str | None:
         return None
     value = value.strip()
     return value or None
+
+
+def _run_workflow_strategy(
+    ctx,
+    *,
+    strategy: EnhanceStrategy,
+    params: dict[str, Any],
+):
+    if strategy == EnhanceStrategy.DIRECT:
+        return run_direct_strategy(
+            ctx,
+            DirectParams(
+                target_width=int(params["target_width"]),
+                target_height=int(params["target_height"]),
+            ),
+        )
+    return run_tiled_strategy(
+        ctx,
+        TiledParams(
+            scale=int(params["scale"]),
+            tile_base_size=int(params["tile_base_size"]),
+            overlap_pct=int(params.get("overlap_pct") or 10),
+        ),
+        backend_stitch=True,
+    )

@@ -2,7 +2,9 @@
 
 import { Loader2, Save } from "lucide-react";
 
+import { ClassicTextInput, ClassicTextarea } from "../../../components/classicInputs";
 import { ImageSizePicker } from "../../../components/ImageSizePicker";
+import { WorkspaceTextInput, WorkspaceTextarea } from "../../../components/workspaceInputs";
 import { DEFAULT_IMAGE_SIZE_OPTIONS } from "../../../lib/imageSizes";
 import { useI18n } from "../../../lib/preferences";
 import type {
@@ -13,14 +15,16 @@ import type {
 } from "../configTestState";
 import { SettingsCollapsibleModule } from "./SettingsCollapsibleModule";
 import { SettingsFormField } from "./SettingsFormField";
-import { INPUT_CLASS, SETTINGS_COMPACT_ACTION_CLASS, TEXTAREA_CLASS } from "./styles";
+import { useSettingsActionClassNames } from "./styles";
 
 export function TextConfigTestPanel({
   state,
   onDraftChange,
+  workspaceSubpage = false,
 }: {
   state: TextConfigTestState;
   onDraftChange: (draft: TextConfigTestDraft) => void;
+  workspaceSubpage?: boolean;
 }) {
   const { t } = useI18n();
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
@@ -28,6 +32,7 @@ export function TextConfigTestPanel({
 
   return (
     <SettingsCollapsibleModule
+      appearance={workspaceSubpage ? "workspace" : "classic"}
       title={t("settings.generation.testTitle")}
       description={t("settings.generation.testDescription")}
       activitySignal={activitySignal}
@@ -37,40 +42,80 @@ export function TextConfigTestPanel({
       </p>
       <div className="grid gap-3 md:grid-cols-2">
         <SettingsFormField label={t("settings.generation.testInspirationName")}>
-          <input
-            value={state.draft.inspirationName}
-            onChange={(event) => onDraftChange({ ...state.draft, inspirationName: event.target.value })}
-            className={INPUT_CLASS}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={state.draft.inspirationName}
+              onChange={(event) => onDraftChange({ ...state.draft, inspirationName: event.target.value })}
+              size="tall"
+            />
+          ) : (
+            <ClassicTextInput
+              value={state.draft.inspirationName}
+              onChange={(event) => onDraftChange({ ...state.draft, inspirationName: event.target.value })}
+              size="tall"
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.testCategory")}>
-          <input
-            value={state.draft.category}
-            onChange={(event) => onDraftChange({ ...state.draft, category: event.target.value })}
-            className={INPUT_CLASS}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={state.draft.category}
+              onChange={(event) => onDraftChange({ ...state.draft, category: event.target.value })}
+              size="tall"
+            />
+          ) : (
+            <ClassicTextInput
+              value={state.draft.category}
+              onChange={(event) => onDraftChange({ ...state.draft, category: event.target.value })}
+              size="tall"
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.testPrice")}>
-          <input
-            value={state.draft.price}
-            onChange={(event) => onDraftChange({ ...state.draft, price: event.target.value })}
-            className={INPUT_CLASS}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={state.draft.price}
+              onChange={(event) => onDraftChange({ ...state.draft, price: event.target.value })}
+              size="tall"
+            />
+          ) : (
+            <ClassicTextInput
+              value={state.draft.price}
+              onChange={(event) => onDraftChange({ ...state.draft, price: event.target.value })}
+              size="tall"
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.testInstruction")}>
-          <input
-            value={state.draft.instruction}
-            onChange={(event) => onDraftChange({ ...state.draft, instruction: event.target.value })}
-            className={INPUT_CLASS}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={state.draft.instruction}
+              onChange={(event) => onDraftChange({ ...state.draft, instruction: event.target.value })}
+              size="tall"
+            />
+          ) : (
+            <ClassicTextInput
+              value={state.draft.instruction}
+              onChange={(event) => onDraftChange({ ...state.draft, instruction: event.target.value })}
+              size="tall"
+            />
+          )}
         </SettingsFormField>
       </div>
       <SettingsFormField label={t("settings.generation.testSourceNote")}>
-        <textarea
-          value={state.draft.sourceNote}
-          onChange={(event) => onDraftChange({ ...state.draft, sourceNote: event.target.value })}
-          className={`${TEXTAREA_CLASS} min-h-24 resize-y`}
-        />
+        {workspaceSubpage ? (
+          <WorkspaceTextarea
+            value={state.draft.sourceNote}
+            onChange={(event) => onDraftChange({ ...state.draft, sourceNote: event.target.value })}
+            className="min-h-24"
+          />
+        ) : (
+          <ClassicTextarea
+            value={state.draft.sourceNote}
+            onChange={(event) => onDraftChange({ ...state.draft, sourceNote: event.target.value })}
+            className="min-h-24"
+          />
+        )}
       </SettingsFormField>
       {runningCount > 0 ? (
         <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
@@ -91,17 +136,21 @@ export function ImageConfigTestPanel({
   state,
   onDraftChange,
   onSaveDraft,
+  workspaceSubpage = false,
 }: {
   state: ImageConfigTestState;
   onDraftChange: (draft: ImageConfigTestDraft) => void;
   onSaveDraft: () => void;
+  workspaceSubpage?: boolean;
 }) {
   const { t } = useI18n();
+  const { SETTINGS_COMPACT_ACTION_CLASS } = useSettingsActionClassNames();
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
   const activitySignal = runningCount > 0 ? `running:${runningCount}` : "";
 
   return (
     <SettingsCollapsibleModule
+      appearance={workspaceSubpage ? "workspace" : "classic"}
       title={t("settings.generation.imageTestTitle")}
       description={t("settings.generation.imageTestDescription")}
       activitySignal={activitySignal}
@@ -119,13 +168,22 @@ export function ImageConfigTestPanel({
         value={state.draft.size}
         presets={DEFAULT_IMAGE_SIZE_OPTIONS}
         onChange={(size) => onDraftChange({ ...state.draft, size })}
+        appearance={workspaceSubpage ? "workspace" : "classic"}
       />
       <SettingsFormField label={t("settings.generation.imageTestPrompt")}>
-        <textarea
-          value={state.draft.prompt}
-          onChange={(event) => onDraftChange({ ...state.draft, prompt: event.target.value })}
-          className={`${TEXTAREA_CLASS} min-h-28 resize-y`}
-        />
+        {workspaceSubpage ? (
+          <WorkspaceTextarea
+            value={state.draft.prompt}
+            onChange={(event) => onDraftChange({ ...state.draft, prompt: event.target.value })}
+            className="min-h-28"
+          />
+        ) : (
+          <ClassicTextarea
+            value={state.draft.prompt}
+            onChange={(event) => onDraftChange({ ...state.draft, prompt: event.target.value })}
+            className="min-h-28"
+          />
+        )}
       </SettingsFormField>
       {runningCount > 0 ? (
         <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">

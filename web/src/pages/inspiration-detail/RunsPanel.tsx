@@ -1,6 +1,10 @@
 import { useState } from "react";
-import { FileText, Loader2, RotateCcw, Layers3 } from "lucide-react";
+import { FileText, RotateCcw, Layers3 } from "lucide-react";
 
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
 import { formatDateTime } from "../../lib/format";
 import { useI18n } from "../../lib/preferences";
@@ -41,6 +45,7 @@ interface RunsPanelProps {
   retryableFailedNodeCount: number;
   retryFailedNodesBusy: boolean;
   retryFailedNodesTitle: string;
+  workspaceSubpage?: boolean;
   mutationBlockedTitle?: string | null;
   onRetryRun: (run: WorkflowRun) => void;
   onRetryFailedNodes: () => void;
@@ -81,11 +86,14 @@ export function RunsPanel({
   retryableFailedNodeCount,
   retryFailedNodesBusy,
   retryFailedNodesTitle,
+  workspaceSubpage = false,
   mutationBlockedTitle = null,
   onRetryRun,
   onRetryFailedNodes,
 }: RunsPanelProps) {
   const { t } = useI18n();
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const PageActionButton = actionButtonComponentForAppearance(actionAppearance);
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const retryFailedNodesDisabled =
     Boolean(mutationBlockedTitle) || retryFailedNodesBusy || failedNodeCount === 0 || retryableFailedNodeCount !== failedNodeCount;
@@ -127,20 +135,18 @@ export function RunsPanel({
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {failedNodeCount > 0 ? (
-            <button
-              type="button"
+            <PageActionButton
               onClick={onRetryFailedNodes}
               disabled={retryFailedNodesDisabled}
               title={retryFailedNodesTitle}
-              className="inline-flex items-center rounded-lg border border-red-200 bg-white px-2.5 py-1 text-[11px] font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/35 dark:bg-[#0b1220] dark:text-red-200 dark:hover:bg-red-500/12"
+              preset="secondary"
+              size="sm"
+              className="text-[11px]"
+              loading={retryFailedNodesBusy}
+              leadingIcon={retryFailedNodesBusy ? undefined : <RotateCcw size={12} />}
             >
-              {retryFailedNodesBusy ? (
-                <Loader2 size={12} className="mr-1 animate-spin" />
-              ) : (
-                <RotateCcw size={12} className="mr-1" />
-              )}
               {t("detail.failedNodesRetry.action", { count: failedNodeCount })}
-            </button>
+            </PageActionButton>
           ) : null}
           {latestRun ? (
             <div className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
@@ -193,20 +199,18 @@ export function RunsPanel({
                       {queueText ? <div className="mt-2 text-[11px] leading-5 text-zinc-500 dark:text-slate-400">{queueText}</div> : null}
                     </div>
                     {run.is_retryable ? (
-                      <button
-                        type="button"
+                      <PageActionButton
                         onClick={() => onRetryRun(run)}
                         disabled={runBusy || Boolean(mutationBlockedTitle)}
                         title={mutationBlockedTitle ?? t("detail.retry")}
-                        className="inline-flex shrink-0 items-center rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-60 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-red-400/50 dark:hover:bg-red-500/12 dark:hover:text-red-200"
+                        preset="secondary"
+                        size="sm"
+                        className="shrink-0 text-[11px]"
+                        loading={runBusy}
+                        leadingIcon={runBusy ? undefined : <RotateCcw size={12} />}
                       >
-                        {runBusy ? (
-                          <Loader2 size={12} className="mr-1 animate-spin" />
-                        ) : (
-                          <RotateCcw size={12} className="mr-1" />
-                        )}
                         {t("detail.retry")}
-                      </button>
+                      </PageActionButton>
                     ) : null}
                   </div>
                   <div className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2 dark:border-slate-700/70 dark:bg-[#0b1220]/70">
@@ -260,8 +264,7 @@ export function RunsPanel({
                               </div>
                             ) : null}
                             {promptItem ? (
-                              <button
-                                type="button"
+                              <PageActionButton
                                 onClick={() =>
                                   setPromptPreview({
                                     title: `${promptItem.title} Prompt`,
@@ -269,11 +272,13 @@ export function RunsPanel({
                                     meta: formatDateTime(run.started_at),
                                   })
                                 }
-                                className="mt-2 inline-flex max-w-full items-center rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:bg-violet-500/12 dark:hover:text-violet-100"
+                                preset="secondary"
+                                size="sm"
+                                className="mt-2 max-w-full text-[11px]"
+                                leadingIcon={<FileText size={12} />}
                               >
-                                <FileText size={12} className="mr-1 shrink-0" />
                                 <span className="truncate">{t("detail.nodeRunPrompt")}</span>
-                              </button>
+                              </PageActionButton>
                             ) : null}
                           </div>
                         );
@@ -307,7 +312,7 @@ export function RunsPanel({
         </div>
       )}
       {promptPreview ? (
-        <PromptPreviewDialog preview={promptPreview} onClose={() => setPromptPreview(null)} />
+        <PromptPreviewDialog appearance={actionAppearance} preview={promptPreview} onClose={() => setPromptPreview(null)} />
       ) : null}
     </section>
   );

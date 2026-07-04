@@ -36,6 +36,10 @@ import type {
 } from "@xyflow/react";
 import { CopyPlus, Focus, Grid, Loader2, Play, Presentation, Save, SkipForward, Sparkles, Trash2 } from "lucide-react";
 
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import type { InspirationWorkflow, WorkflowNode } from "../../lib/types";
 import { WorkflowNodeCard } from "./WorkflowNodeCard";
@@ -93,6 +97,7 @@ export interface WorkflowCanvasHandle {
 }
 
 interface WorkflowCanvasNodeData extends InspirationOneNodeData {
+  actionAppearance: LayoutActionAppearance;
   image: DownloadableImage | null;
   primarySelected: boolean;
   secondarySelected: boolean;
@@ -107,6 +112,7 @@ interface WorkflowCanvasNodeData extends InspirationOneNodeData {
 }
 
 interface WorkflowCanvasEdgeData extends InspirationOneEdgeData {
+  actionAppearance: LayoutActionAppearance;
   deleteLabel: string;
   disabled: boolean;
   laneOffset: number;
@@ -150,6 +156,7 @@ interface WorkflowCanvasProps {
   canvasMiniMapLabel: string;
   snapToGridLabel: string;
   autoLayoutLabel: string;
+  actionAppearance: LayoutActionAppearance;
   snapToGrid: boolean;
   onToggleSnapToGrid: () => void;
   onAutoLayout: () => void;
@@ -269,10 +276,12 @@ function WorkflowNodeToolbarIcon({
 function WorkflowNodeToolbarActions({
   target,
   items,
+  appearance,
   onAction,
 }: {
   target: WorkflowCanvasActionTarget;
   items: WorkflowCanvasActionItem[];
+  appearance: LayoutActionAppearance;
   onAction: (actionId: WorkflowCanvasActionId, target: WorkflowCanvasActionTarget) => void;
 }) {
   return (
@@ -291,14 +300,9 @@ function WorkflowNodeToolbarActions({
       >
         {items.map((item) => {
           const label = item.title ?? item.label ?? "";
-          const destructive = Boolean(item.destructive);
-          const toneClassName = item.disabled
-            ? "border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-500"
-            : destructive
-              ? "border-red-200 bg-red-50 text-red-600 hover:border-red-300 hover:bg-red-100 hover:text-red-700 dark:border-red-400/45 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/70 dark:hover:bg-red-500/18"
-              : "border-transparent bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-[#111a2b] dark:text-slate-100 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/14 dark:hover:text-violet-100";
+          const ActionButton = actionButtonComponentForAppearance(appearance);
           return (
-            <button
+            <ActionButton
               key={item.id}
               type="button"
               data-node-action
@@ -310,13 +314,13 @@ function WorkflowNodeToolbarActions({
                 }
               }}
               disabled={item.disabled}
-              className={`nodrag nopan nowheel inline-flex h-11 w-11 items-center justify-center rounded-lg border text-sm transition-colors disabled:cursor-not-allowed lg:h-9 lg:w-9 ${toneClassName}`}
+              preset={item.destructive ? "danger" : "secondary"}
+              size="icon-sm"
+              className="nodrag nopan nowheel h-11 w-11 text-sm lg:h-9 lg:w-9"
               aria-label={label}
               title={label}
-            >
-              <WorkflowNodeToolbarIcon icon={item.icon} pending={item.pending} />
-              <span className="sr-only">{label}</span>
-            </button>
+              leadingIcon={<WorkflowNodeToolbarIcon icon={item.icon} pending={item.pending} />}
+            />
           );
         })}
       </div>
@@ -346,6 +350,7 @@ function InspirationOneCanvasNode({ data, dragging, isConnectable }: NodeProps<W
         <WorkflowNodeToolbarActions
           target={data.actionToolbar.target}
           items={data.actionToolbar.items}
+          appearance={data.actionAppearance}
           onAction={data.onNodeAction}
         />
       ) : null}
@@ -365,6 +370,7 @@ function InspirationOneCanvasNode({ data, dragging, isConnectable }: NodeProps<W
         secondarySelected={data.secondarySelected}
         previewSelected={data.previewSelected}
         dragging={dragging}
+        appearance={data.actionAppearance}
         onSelect={(event) => {
           event.stopPropagation();
           data.onSelectNode(node.id, event);
@@ -405,6 +411,7 @@ function InspirationOneCanvasEdge({
   });
   const edgePath = edgeRoute.path;
   const trace = data?.trace ?? null;
+  const EdgeActionButton = actionButtonComponentForAppearance(data?.actionAppearance ?? "classic");
 
   const [isHovered, setIsHovered] = useState(false);
   const edgeStroke = trace?.color ?? (selected ? "#4f46e5" : isHovered ? "#64748b" : "#94a3b8");
@@ -447,10 +454,12 @@ function InspirationOneCanvasEdge({
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        <button
+        <EdgeActionButton
           type="button"
           data-node-action
-          className="nodrag nowheel nopan flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-500 shadow-sm transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:border-slate-800 dark:bg-[#0f1726]/95 dark:text-slate-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-200"
+          preset="danger"
+          size="icon-sm"
+          className="nodrag nowheel nopan h-6 w-6 rounded-full bg-white/95 dark:bg-[#0f1726]/95"
           onClick={(event) => {
             event.stopPropagation();
             data?.onDeleteEdge(id);
@@ -458,9 +467,8 @@ function InspirationOneCanvasEdge({
           disabled={data?.disabled ?? false}
           title={data?.deleteLabel}
           aria-label={data?.deleteLabel}
-        >
-          <Trash2 size={12} strokeWidth={2.2} />
-        </button>
+          leadingIcon={<Trash2 size={12} strokeWidth={2.2} />}
+        />
       </EdgeToolbar>
     </>
   );
@@ -740,6 +748,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
     canvasMiniMapLabel,
     snapToGridLabel,
     autoLayoutLabel,
+    actionAppearance,
     snapToGrid,
     onToggleSnapToGrid,
     onAutoLayout,
@@ -1013,6 +1022,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         data: {
           ...node.data,
           image: getNodeImage(workflowNode),
+          actionAppearance,
           primarySelected: node.id === selectedNodeId,
           secondarySelected: secondarySelectedNodeIds.has(node.id) && node.id !== selectedNodeId,
           previewSelected: previewSelectedNodeIds.has(node.id),
@@ -1027,6 +1037,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
       };
     });
   }, [
+    actionAppearance,
     canConnectNodes,
     canDragNodes,
     getNodeActionToolbar,
@@ -1073,6 +1084,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
       data: {
         workflowEdge: edge.data!.workflowEdge,
         ...edge.data,
+        actionAppearance,
         deleteLabel: deleteEdgeLabel,
         disabled: structureBusy,
         laneOffset: edgeLaneOffsets[edge.id] ?? 0,
@@ -1081,7 +1093,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
         onDeleteEdge,
       },
     }));
-  }, [deleteEdgeLabel, edgeLaneOffsets, edgeObstacles, edgeTraceMap, onDeleteEdge, structureBusy, workflow]);
+  }, [actionAppearance, deleteEdgeLabel, edgeLaneOffsets, edgeObstacles, edgeTraceMap, onDeleteEdge, structureBusy, workflow]);
 
   useEffect(() => {
     const instance = flowInstanceRef.current;

@@ -1,19 +1,28 @@
 """Integration tests for generation resolution limits across workflow and enhance APIs."""
 
 import pytest
+from helpers import _make_demo_image_bytes_with_size
 from sqlalchemy.orm import Session
 
-from inspiration_one_backend.application.enhance.jobs import create_enhance_job, EnhanceSourceKind, EnhanceStrategy
+from inspiration_one_backend.application.enhance.jobs import (
+    EnhanceSourceKind,
+    EnhanceStrategy,
+    create_enhance_input_blob,
+    create_enhance_job,
+)
 from inspiration_one_backend.domain.enums import JobStatus
 from inspiration_one_backend.domain.errors import BusinessValidationError
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     EnhanceJobInput,
     GenerationConfig,
-    GenerationResourceGroup,
     ProviderProfile,
 )
-from inspiration_one_backend.infrastructure.provider_config import IMAGE_PURPOSE, add_generation_config
+from inspiration_one_backend.infrastructure.provider_config import (
+    IMAGE_PURPOSE,
+    add_generation_config,
+    ensure_provider_config_bootstrapped,
+)
 
 
 @pytest.fixture
@@ -24,7 +33,7 @@ def test_provider_with_max_2048(db_session: Session) -> ProviderProfile:
         provider_type="openai_compatible",
         base_url="http://test.local",
         api_key="test_key",
-        capabilities_json=["image"],
+        capabilities_json=["image_images"],
         config_json={"capabilities": {"image_max_dimension": 2048}},
         enabled=True,
     )
@@ -41,7 +50,7 @@ def test_provider_with_max_1024(db_session: Session) -> ProviderProfile:
         provider_type="openai_compatible",
         base_url="http://test.local",
         api_key="test_key",
-        capabilities_json=["image"],
+        capabilities_json=["image_images"],
         config_json={"capabilities": {"image_max_dimension": 1024}},
         enabled=True,
     )
@@ -56,32 +65,19 @@ def test_generation_config_2048(
     test_provider_with_max_2048: ProviderProfile,
 ) -> GenerationConfig:
     """Create a generation config with provider_max=2048."""
-    resource_group = db_session.query(GenerationResourceGroup).filter_by(
-        key=DEFAULT_GENERATION_RESOURCE_GROUP_ID
-    ).first()
-    if not resource_group:
-        resource_group = GenerationResourceGroup(
-            key=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            name="默认分组",
-            enabled=True,
-        )
-        db_session.add(resource_group)
-        db_session.flush()
+    ensure_provider_config_bootstrapped(db_session)
 
     config = add_generation_config(
         db_session,
-        resource_group_id=resource_group.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         purpose=IMAGE_PURPOSE,
         name="配置2048",
-        provider_kind="mock",
-        provider_profile_id=None,
+        provider_kind="openai_images",
+        provider_profile_id=test_provider_with_max_2048.id,
         model_settings={"model": "dall-e-3"},
         config={},
         enabled=True,
     )
-    # Attach provider profile manually to bypass validation
-    config.provider_profile = test_provider_with_max_2048
-    db_session.flush()
     return config
 
 
@@ -91,47 +87,31 @@ def test_generation_config_1024(
     test_provider_with_max_1024: ProviderProfile,
 ) -> GenerationConfig:
     """Create a generation config with provider_max=1024."""
-    resource_group = db_session.query(GenerationResourceGroup).filter_by(
-        key=DEFAULT_GENERATION_RESOURCE_GROUP_ID
-    ).first()
-    if not resource_group:
-        resource_group = GenerationResourceGroup(
-            key=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
-            name="默认分组",
-            enabled=True,
-        )
-        db_session.add(resource_group)
-        db_session.flush()
+    ensure_provider_config_bootstrapped(db_session)
 
     config = add_generation_config(
         db_session,
-        resource_group_id=resource_group.id,
+        resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         purpose=IMAGE_PURPOSE,
         name="配置1024",
-        provider_kind="mock",
-        provider_profile_id=None,
+        provider_kind="openai_images",
+        provider_profile_id=test_provider_with_max_1024.id,
         model_settings={"model": "dall-e-3"},
         config={},
         enabled=True,
     )
-    # Attach provider profile manually to bypass validation
-    config.provider_profile = test_provider_with_max_1024
-    db_session.flush()
     return config
 
 
 @pytest.fixture
 def test_enhance_input(db_session: Session) -> EnhanceJobInput:
     """Create a test enhance input blob with 512×512 dimensions."""
-    enhance_input = EnhanceJobInput(
-        owner_user_id="test-user",
-        storage_path="test/enhance-input.png",
-        width=512,
-        height=512,
+    enhance_input = create_enhance_input_blob(
+        db_session,
+        content=_make_demo_image_bytes_with_size(512, 512),
         mime_type="image/png",
+        owner_user_id="test-user",
     )
-    db_session.add(enhance_input)
-    db_session.flush()
     return enhance_input
 
 
@@ -169,7 +149,7 @@ def test_enhance_direct_rejects_oversized(
             config.enabled = False
     db_session.flush()
 
-    with pytest.raises(BusinessValidationError, match="没有配置支持所需分辨率|生成配置暂时不可用"):
+    with pytest.raises(BusinessValidationError, match="没有配置支持所需分辨率|手动指定的生成配置不支持所需分辨率"):
         create_enhance_job(
             db_session,
             source_kind=EnhanceSourceKind.ENHANCE_INPUT_BLOB,
@@ -222,7 +202,7 @@ def test_enhance_manual_mode_filters_by_max_dimension(
             config.enabled = False
     db_session.flush()
 
-    with pytest.raises(BusinessValidationError, match="没有配置支持所需分辨率|生成配置暂时不可用"):
+    with pytest.raises(BusinessValidationError, match="手动指定的生成配置不支持所需分辨率"):
         create_enhance_job(
             db_session,
             source_kind=EnhanceSourceKind.ENHANCE_INPUT_BLOB,

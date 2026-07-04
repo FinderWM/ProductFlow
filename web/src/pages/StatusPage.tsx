@@ -14,32 +14,26 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+import { ClassicTextInput } from "../components/classicInputs";
+import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
 import { TopNav } from "../components/TopNav";
 import {
+  ClassicDateTimeRangeField,
   WorkspaceDateTimeRangeField,
   dateRangeFromDateTimeRange,
   workspaceQuickDateTimeRange,
   type WorkspaceDateTimeRange,
   type WorkspaceQuickRangeId,
 } from "../components/WorkspaceDateTimeRangeField";
+import { WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import type { GenerationConfigStatAggregate, GenerationConfigStatusConfig } from "../lib/types";
 import { useI18n } from "../lib/preferences";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 
-const INPUT_CLASS =
-  "h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm " +
-  "outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 " +
-  "dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:focus:border-violet-400";
-
 const PANEL_CLASS =
   "pf-panel";
-
-const PRIMARY_BUTTON_CLASS =
-  "inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white " +
-  "shadow-sm shadow-indigo-500/20 transition hover:bg-indigo-500 disabled:opacity-50 " +
-  "dark:bg-violet-500 dark:hover:bg-violet-400";
 
 function successRate(stat: GenerationConfigStatAggregate | null | undefined): string {
   if (!stat || stat.attempt_count <= 0) {
@@ -202,6 +196,7 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
     image: summary?.today_image_attempt_count ?? 0,
   });
   const isWorkspaceSubpage = activeScheme === "workspace" && mode === "detail";
+  const PageActionButton = actionButtonComponentForAppearance(isWorkspaceSubpage ? "workspace" : "classic");
   const refreshStatus = () => {
     if (range.start_date === appliedRange.start_date && range.end_date === appliedRange.end_date) {
       void statusQuery.refetch();
@@ -238,34 +233,49 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
         <div className="space-y-5">
           <section className={`${PANEL_CLASS} p-5`}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <WorkspaceDateTimeRangeField
-                idPrefix="status-page-range"
-                value={range}
-                activeQuickRange={activeQuickRange}
-                onChange={(nextRange) => {
-                  setRange(nextRange);
-                  setActiveQuickRange(null);
-                }}
-                onQuickRangeChange={(id) => {
-                  setRange(workspaceQuickDateTimeRange(id));
-                  setActiveQuickRange(id);
-                }}
-                className="w-full lg:max-w-2xl"
-              />
+              {isWorkspaceSubpage ? (
+                <WorkspaceDateTimeRangeField
+                  idPrefix="status-page-range"
+                  value={range}
+                  activeQuickRange={activeQuickRange}
+                  onChange={(nextRange) => {
+                    setRange(nextRange);
+                    setActiveQuickRange(null);
+                  }}
+                  onQuickRangeChange={(id) => {
+                    setRange(workspaceQuickDateTimeRange(id));
+                    setActiveQuickRange(id);
+                  }}
+                  className="w-full lg:max-w-2xl"
+                />
+              ) : (
+                <ClassicDateTimeRangeField
+                  idPrefix="status-page-range"
+                  value={range}
+                  activeQuickRange={activeQuickRange}
+                  onChange={(nextRange) => {
+                    setRange(nextRange);
+                    setActiveQuickRange(null);
+                  }}
+                  onQuickRangeChange={(id) => {
+                    setRange(workspaceQuickDateTimeRange(id));
+                    setActiveQuickRange(id);
+                  }}
+                  className="w-full lg:max-w-2xl"
+                />
+              )}
               <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-end">
-                  <button
-                    type="button"
+                  <PageActionButton
                     onClick={refreshStatus}
-                    disabled={statusQuery.isFetching || rangeInvalid}
-                    className={PRIMARY_BUTTON_CLASS}
+                    disabled={rangeInvalid}
+                    loading={statusQuery.isFetching}
+                    preset="primary"
+                    size="md"
+                    className="shrink-0"
+                    leadingIcon={<RefreshCw size={14} />}
                   >
-                    {statusQuery.isFetching ? (
-                      <Loader2 size={14} className="mr-2 animate-spin" />
-                    ) : (
-                      <RefreshCw size={14} className="mr-2" />
-                    )}
                     {t("statusPage.refresh")}
-                  </button>
+                  </PageActionButton>
                 </div>
               </div>
               {rangeInvalid ? (
@@ -344,13 +354,23 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
                       className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                       aria-hidden="true"
                     />
-                    <input
-                      type="search"
-                      value={configSearch}
-                      onChange={(event) => setConfigSearch(event.target.value)}
-                      placeholder={t("statusPage.configSearchPlaceholder")}
-                      className={`${INPUT_CLASS} w-full pl-9`}
-                    />
+                    {isWorkspaceSubpage ? (
+                      <WorkspaceTextInput
+                        type="search"
+                        value={configSearch}
+                        onChange={(event) => setConfigSearch(event.target.value)}
+                        placeholder={t("statusPage.configSearchPlaceholder")}
+                        className="pl-9"
+                      />
+                    ) : (
+                      <ClassicTextInput
+                        type="search"
+                        value={configSearch}
+                        onChange={(event) => setConfigSearch(event.target.value)}
+                        placeholder={t("statusPage.configSearchPlaceholder")}
+                        className="pl-9"
+                      />
+                    )}
                   </label>
                   {statusQuery.isFetching ? (
                     <span className="inline-flex items-center text-xs font-semibold text-slate-500 dark:text-slate-400">

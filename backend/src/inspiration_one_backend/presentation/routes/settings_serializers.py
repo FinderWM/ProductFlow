@@ -29,12 +29,28 @@ def _serialize_dt(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _serialize_provider_profile(profile) -> ProviderProfileResponse:
+def _serialize_api_key_preview(api_key: str | None) -> str | None:
+    if not api_key:
+        return None
+    prefix = api_key[:5]
+    suffix = api_key[-5:] if len(api_key) > 10 else ""
+    return f"{prefix}*****{suffix}"
+
+
+def _serialize_provider_profile(
+    profile,
+    *,
+    used_by_text_generation: bool = False,
+    used_by_image_generation: bool = False,
+) -> ProviderProfileResponse:
     return ProviderProfileResponse(
         id=profile.id,
         name=profile.name,
         provider_type=profile.provider_type,
         base_url=profile.base_url,
+        api_key_preview=_serialize_api_key_preview(profile.api_key),
+        used_by_text_generation=used_by_text_generation,
+        used_by_image_generation=used_by_image_generation,
         capabilities=list(profile.capabilities_json or []),
         default_models=dict(profile.default_models_json or {}),
         config=dict(profile.config_json or {}),
@@ -46,7 +62,11 @@ def _serialize_provider_profile(profile) -> ProviderProfileResponse:
     )
 
 
-def _serialize_generation_resource_group(group: GenerationResourceGroup) -> GenerationResourceGroupResponse:
+def _serialize_generation_resource_group(
+    group: GenerationResourceGroup,
+    *,
+    image_max_dimension: int | None = None,
+) -> GenerationResourceGroupResponse:
     return GenerationResourceGroupResponse(
         id=group.id,
         key=group.key,
@@ -54,6 +74,7 @@ def _serialize_generation_resource_group(group: GenerationResourceGroup) -> Gene
         description=group.description,
         sort_order=group.sort_order,
         enabled=group.enabled,
+        image_max_dimension=image_max_dimension,
         blur_images_by_default=group.blur_images_by_default,
         archived_at=_serialize_dt(group.archived_at),
         created_at=group.created_at.isoformat(),

@@ -1,8 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, Download, FolderPlus, Loader2, Plus, RefreshCcw, Sparkles, Trash2, Wand2 } from "lucide-react";
 
+import {
+  actionButtonClassNameForAppearance,
+  actionButtonComponentForAppearance,
+  renderActionButtonInner,
+  actionSurfaceClassNameForAppearance,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
+import { LayoutActionSurfaceButton } from "../../components/LayoutActionSurfaceButton";
 import { ResourceLibraryModal } from "../../components/resource-library/ResourceLibraryModal";
+import {
+  ClassicSelectField,
+  ClassicTextInput,
+  ClassicTextarea,
+} from "../../components/classicInputs";
+import {
+  WorkspaceSelectField as SelectField,
+  WorkspaceTextInput,
+  WorkspaceTextarea,
+} from "../../components/workspaceInputs";
 import { api } from "../../lib/api";
 import { exportDeckAsPptx } from "../../lib/deckPptxExport";
 import { useI18n } from "../../lib/preferences";
@@ -20,6 +38,7 @@ import {
 interface DeckPanelProps {
   inspirationId: string;
   onOpenWorkflowNode?: (nodeId: string) => void;
+  workspaceSubpage?: boolean;
 }
 
 const SLIDE_STATUS_LABEL: Record<string, string> = {
@@ -28,6 +47,12 @@ const SLIDE_STATUS_LABEL: Record<string, string> = {
   running: "生成中",
   completed: "已完成",
   failed: "失败",
+};
+
+const DECK_SELECTABLE_SURFACE_STYLE: CSSProperties = {
+  ["--pf-action-radius" as string]: "var(--pf-radius-md)",
+  ["--pf-action-shadow" as string]: "none",
+  ["--pf-action-shadow-hover" as string]: "none",
 };
 
 function errorMessage(error: unknown): string {
@@ -44,9 +69,20 @@ function deckIsActive(deck: Deck | undefined): boolean {
   return deck.slides.some((slide) => slide.slide_status === "queued" || slide.slide_status === "running");
 }
 
-export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps) {
+export function DeckPanel({ inspirationId, onOpenWorkflowNode, workspaceSubpage = false }: DeckPanelProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const ActionButton = actionButtonComponentForAppearance(actionAppearance);
+  const deckLegacyDownloadClassName = actionButtonClassNameForAppearance(actionAppearance, {
+    preset: "secondary",
+    size: "md",
+  });
+  const deckPanelStyleUploadClass = actionSurfaceClassNameForAppearance(actionAppearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "cursor-pointer px-2 py-1.5 text-xs",
+  });
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [sourceInput, setSourceInput] = useState("");
   const [styleKey, setStyleKey] = useState("clean_business");
@@ -199,6 +235,9 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
   const styles = stylesQuery.data ?? [];
   const generating = deckIsActive(deck);
   const workflowDeck = isWorkflowDeck(deck);
+  const LayoutSelectField = workspaceSubpage ? SelectField : ClassicSelectField;
+  const LayoutTextInput = workspaceSubpage ? WorkspaceTextInput : ClassicTextInput;
+  const LayoutTextarea = workspaceSubpage ? WorkspaceTextarea : ClassicTextarea;
 
   const decks = decksQuery.data ?? [];
   const sortedDecks = useMemo(() => decks, [decks]);
@@ -218,34 +257,35 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
       {/* 新建演示文稿 */}
       <section className="rounded-xl border border-slate-200/60 p-3 dark:border-white/10">
         <h3 className="mb-2 font-medium text-slate-700 dark:text-slate-200">{t("detail.deck.newLegacyTitle")}</h3>
-        <textarea
+        <LayoutTextarea
           value={sourceInput}
           onChange={(event) => setSourceInput(event.target.value)}
           placeholder={t("detail.deck.legacySourcePlaceholder")}
-          rows={3}
-          className="mb-2 w-full resize-none rounded-lg border border-slate-200/70 bg-white/60 px-3 py-2 text-slate-700 outline-none focus:border-indigo-400 dark:border-white/10 dark:bg-black/20 dark:text-slate-100"
+          size="default"
+          minRows={3}
+          className="mb-2"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <select
+          <LayoutSelectField
             value={styleKey}
-            onChange={(event) => setStyleKey(event.target.value)}
-            className="rounded-lg border border-slate-200/70 bg-white/60 px-2 py-1.5 dark:border-white/10 dark:bg-black/20"
-          >
-            {styles.map((style) => (
-              <option key={style.key} value={style.key}>
-                {style.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
+            onChange={setStyleKey}
+            size="compact"
+            ariaLabel={t("detail.deck.styleReference")}
+            options={styles.map((style) => ({
+              value: style.key,
+              label: style.label,
+            }))}
+          />
+          <ActionButton
             disabled={createMutation.isPending || !defaultGroupId}
             onClick={() => createMutation.mutate()}
-            className="btn-primary-spring inline-flex items-center gap-1 px-3 py-1.5 text-sm"
+            preset="primary"
+            size="md"
+            loading={createMutation.isPending}
+            leadingIcon={<Plus size={15} />}
           >
-            {createMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
             {t("detail.deck.outline")}
-          </button>
+          </ActionButton>
         </div>
       </section>
 
@@ -261,28 +301,28 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
 
               return (
                 <li key={item.id} className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
+                  <LayoutActionSurfaceButton
+                    appearance={actionAppearance}
+                    preset="secondary"
                     onClick={() => setSelectedDeckId(item.id)}
-                    className={`flex-1 truncate rounded-md px-2 py-1 text-left ${
-                      selectedDeckId === item.id ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15" : "hover:bg-slate-100 dark:hover:bg-white/5"
-                    }`}
+                    aria-pressed={selectedDeckId === item.id}
+                    style={DECK_SELECTABLE_SURFACE_STYLE}
+                    className="min-w-0 flex-1 px-2 py-1 text-left"
                   >
-                    {item.title}
-                    <span className="ml-2 text-xs text-slate-400">
+                    <span className="block truncate">{item.title}</span>
+                    <span className="mt-1 block text-xs text-slate-400">
                       {t("detail.deck.slideCount", { count: item.slide_count })} · {t(DECK_STATUS_LABEL_KEYS[item.status])}
                       {item.generated_slide_count > 0 ? ` · ${t("detail.deck.generatedCount", { count: item.generated_slide_count })}` : ""}
                     </span>
-                  </button>
+                  </LayoutActionSurfaceButton>
                   {accessoryKind === "openWorkflowNode" && itemWorkflowNodeId && onOpenWorkflowNode ? (
-                    <button
-                      type="button"
+                    <ActionButton
                       title={t("detail.deck.openCanvasNode")}
                       onClick={() => onOpenWorkflowNode(itemWorkflowNodeId)}
-                      className="rounded-md p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300"
-                    >
-                      <Sparkles size={15} />
-                    </button>
+                      preset="secondary"
+                      size="icon-sm"
+                      leadingIcon={<Sparkles size={15} />}
+                    />
                   ) : accessoryKind === "workflowDeleted" || accessoryKind === "workflowHint" ? (
                     <span
                       title={itemHasDeletedWorkflowNode ? t("detail.deck.sourceNodeDeleted") : t("detail.deck.dagDeckHint")}
@@ -291,14 +331,13 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
                       {itemHasDeletedWorkflowNode ? t("detail.deck.sourceNodeDeleted") : <Sparkles size={15} />}
                     </span>
                   ) : (
-                    <button
-                      type="button"
+                    <ActionButton
                       title={t("detail.deck.delete")}
                       onClick={() => deleteMutation.mutate(item.id)}
-                      className="rounded-md p-1 text-slate-400 hover:text-rose-500"
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                      preset="danger"
+                      size="icon-sm"
+                      leadingIcon={<Trash2 size={15} />}
+                    />
                   )}
                 </li>
               );
@@ -320,14 +359,15 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
                   {deck.title}
                 </div>
               ) : (
-                <input
+                <LayoutTextInput
                   key={deck.id}
                   defaultValue={deck.title}
                   onBlur={(event) => {
                     const next = event.target.value.trim();
                     if (next && next !== deck.title) renameMutation.mutate(next);
                   }}
-                  className="w-full truncate rounded-md bg-transparent font-medium text-slate-800 outline-none focus:bg-white/60 dark:text-slate-100 dark:focus:bg-black/20"
+                  size="compact"
+                  className="truncate font-medium"
                 />
               )}
               <div className="text-xs text-slate-400">
@@ -342,13 +382,13 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
                   {t("detail.deck.dagDeckHint")}
                 </div>
                 {canOpenWorkflowDeckNode(deck) && deck.workflow_node_id && onOpenWorkflowNode ? (
-                  <button
-                    type="button"
+                  <ActionButton
                     onClick={() => onOpenWorkflowNode(deck.workflow_node_id)}
-                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/15 dark:text-slate-200 dark:hover:bg-white/5"
+                    preset="secondary"
+                    size="sm"
                   >
                     {t("detail.deck.openCanvasNode")}
-                  </button>
+                  </ActionButton>
                 ) : hasDeletedWorkflowDeckNode(deck) ? (
                   <span className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
                     {t("detail.deck.sourceNodeDeleted")}
@@ -357,18 +397,17 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-2">
-                <select
+                <LayoutSelectField
                   value={deck.style_key ?? ""}
-                  onChange={(event) => styleMutation.mutate(event.target.value)}
-                  className="rounded-lg border border-slate-200/70 bg-white/60 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-black/20"
-                >
-                  {styles.map((style) => (
-                    <option key={style.key} value={style.key}>
-                      {style.label}
-                    </option>
-                  ))}
-                </select>
-                <label className="cursor-pointer rounded-lg border border-slate-300 px-2 py-1.5 text-xs dark:border-white/15">
+                  onChange={(value) => styleMutation.mutate(value)}
+                  size="compact"
+                  ariaLabel={t("detail.deck.styleReference")}
+                  options={styles.map((style) => ({
+                    value: style.key,
+                    label: style.label,
+                  }))}
+                />
+                <label className={deckPanelStyleUploadClass}>
                   {t("detail.deck.styleReference")}
                   <input
                     type="file"
@@ -381,23 +420,24 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
                     }}
                   />
                 </label>
-                <button
-                  type="button"
+                <ActionButton
                   disabled={generating || sampleMutation.isPending}
                   onClick={() => sampleMutation.mutate()}
-                  className="btn-secondary-spring px-3 py-1.5 text-xs"
+                  preset="secondary"
+                  size="sm"
                 >
                   {t("detail.deck.sample")}
-                </button>
-                <button
-                  type="button"
+                </ActionButton>
+                <ActionButton
                   disabled={generating || generateMutation.isPending}
                   onClick={() => generateMutation.mutate()}
-                  className="btn-primary-spring inline-flex items-center gap-1 px-3 py-1.5 text-sm"
+                  preset="primary"
+                  size="md"
+                  loading={generating || generateMutation.isPending}
+                  leadingIcon={<Sparkles size={15} />}
                 >
-                  {generating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
                   {generating ? t("detail.deck.generating") : t("detail.deck.generate")}
-                </button>
+                </ActionButton>
               </div>
             )}
           </div>
@@ -410,6 +450,7 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
                 index={index}
                 total={deck.slides.length}
                 readOnly={workflowDeck}
+                workspaceSubpage={workspaceSubpage}
                 onRegenerate={() => regenerateMutation.mutate(slide.id)}
                 onNotes={() => notesMutation.mutate(slide.id)}
                 onEnhance={() => enhanceMutation.mutate(slide.id)}
@@ -428,26 +469,29 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200/40 pt-3 dark:border-white/5">
-            <button
-              type="button"
+            <ActionButton
               disabled={exportMutation.isPending || !deckSupportsFrontendPptxExport(deck)}
               onClick={() => exportMutation.mutate()}
-              className="btn-secondary-spring inline-flex items-center gap-1 px-3 py-1.5"
+              preset="secondary"
+              size="md"
+              loading={exportMutation.isPending}
+              leadingIcon={<Download size={15} />}
               title={!deckSupportsFrontendPptxExport(deck) ? t("detail.deck.noGeneratedSlides") : t("detail.deck.exportPptx")}
             >
-              {exportMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
               {exportMutation.isPending && pptxProgress
                 ? t("detail.deck.exportingPptx", pptxProgress)
                 : t("detail.deck.exportPptx")}
-            </button>
+            </ActionButton>
             {deck.pptx_url ? (
               <a
                 href={deck.pptx_url}
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-white"
+                className={deckLegacyDownloadClassName}
                 download={`${deck.title}.pptx`}
               >
-                <Download size={15} />
-                {t("detail.deck.downloadLegacyPptx")}
+                {renderActionButtonInner({
+                  leadingIcon: <Download size={15} />,
+                  label: t("detail.deck.downloadLegacyPptx"),
+                })}
               </a>
             ) : null}
           </div>
@@ -457,6 +501,7 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode }: DeckPanelProps)
       <ResourceLibraryModal
         open={Boolean(materialSlideId) && deckAllowsLegacyMutation(deck)}
         onClose={() => setMaterialSlideId(null)}
+        appearance={workspaceSubpage ? "workspace" : "classic"}
         canRead
         selectLabel="设为配图"
         onSelectAsset={(asset) => {
@@ -473,6 +518,7 @@ interface DeckSlideCardProps {
   total: number;
   busy: boolean;
   readOnly: boolean;
+  workspaceSubpage?: boolean;
   onRegenerate: () => void;
   onNotes: () => void;
   onEnhance: () => void;
@@ -489,6 +535,7 @@ function DeckSlideCard({
   total,
   busy,
   readOnly,
+  workspaceSubpage = false,
   onRegenerate,
   onNotes,
   onEnhance,
@@ -499,6 +546,9 @@ function DeckSlideCard({
   onSaveToLibrary,
 }: DeckSlideCardProps) {
   const [notes, setNotes] = useState(slide.speaker_notes ?? "");
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const ActionButton = actionButtonComponentForAppearance(actionAppearance);
+  const LayoutTextarea = workspaceSubpage ? WorkspaceTextarea : ClassicTextarea;
   useEffect(() => {
     setNotes(slide.speaker_notes ?? "");
   }, [slide.speaker_notes]);
@@ -527,40 +577,83 @@ function DeckSlideCard({
           </div>
         )}
       </div>
-      <textarea
+      <LayoutTextarea
         value={notes}
         onChange={(event) => setNotes(event.target.value)}
         onBlur={() => {
           if (!readOnly && notes !== (slide.speaker_notes ?? "")) onSaveNotes(notes);
         }}
         placeholder="演讲备注"
-        rows={2}
+        minRows={2}
         readOnly={readOnly}
-        className="w-full resize-none rounded-md border border-slate-200/60 bg-white/40 px-2 py-1 text-[11px] text-slate-600 outline-none dark:border-white/10 dark:bg-black/20 dark:text-slate-300"
+        size="compact"
+        className="text-[11px] text-slate-600 dark:text-slate-300"
       />
       {!readOnly ? (
         <div className="flex flex-wrap items-center gap-1">
-        <button type="button" disabled={index === 0} onClick={onMoveUp} title="上移" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-30">
-          <ChevronUp size={14} />
-        </button>
-        <button type="button" disabled={index === total - 1} onClick={onMoveDown} title="下移" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-30">
-          <ChevronDown size={14} />
-        </button>
-        <button type="button" disabled={busy} onClick={onRegenerate} title="重新生成" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-40">
-          <RefreshCcw size={14} />
-        </button>
-        <button type="button" disabled={busy} onClick={onPickMaterial} title="选配图" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-40">
-          <Plus size={14} />
-        </button>
-        <button type="button" disabled={busy || !slide.material_url} onClick={onEnhance} title="增强配图" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-40">
-          <Wand2 size={14} />
-        </button>
-        <button type="button" disabled={busy} onClick={onNotes} title="生成演讲备注" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-40">
-          <Sparkles size={14} />
-        </button>
-        <button type="button" disabled={!slide.image_url} onClick={onSaveToLibrary} title="存资源库" className="rounded p-1 text-slate-500 hover:text-indigo-600 disabled:opacity-40">
-          <FolderPlus size={14} />
-        </button>
+          <ActionButton
+            type="button"
+            disabled={index === 0}
+            onClick={onMoveUp}
+            title="上移"
+            preset="secondary"
+            size="icon-sm"
+            leadingIcon={<ChevronUp size={14} />}
+          />
+          <ActionButton
+            type="button"
+            disabled={index === total - 1}
+            onClick={onMoveDown}
+            title="下移"
+            preset="secondary"
+            size="icon-sm"
+            leadingIcon={<ChevronDown size={14} />}
+          />
+          <ActionButton
+            type="button"
+            disabled={busy}
+            onClick={onRegenerate}
+            title="重新生成"
+            preset="secondary"
+            size="icon-sm"
+            leadingIcon={<RefreshCcw size={14} />}
+          />
+          <ActionButton
+            type="button"
+            disabled={busy}
+            onClick={onPickMaterial}
+            title="选配图"
+            preset="secondary"
+            size="icon-sm"
+            leadingIcon={<Plus size={14} />}
+          />
+          <ActionButton
+            type="button"
+            disabled={busy || !slide.material_url}
+            onClick={onEnhance}
+            title="增强配图"
+            preset="secondary"
+            size="icon-sm"
+            leadingIcon={<Wand2 size={14} />}
+          />
+          <ActionButton
+            type="button"
+            disabled={busy}
+            onClick={onNotes}
+            title="生成演讲备注"
+            preset="secondary"
+            size="icon-sm"
+            leadingIcon={<Sparkles size={14} />}
+          />
+          <ActionButton
+            type="button"
+            disabled={!slide.image_url}
+            onClick={onSaveToLibrary}
+            title="存资源库"
+            preset="secondary"
+            size="icon-sm"
+            leadingIcon={<FolderPlus size={14} />}
+          />
         </div>
       ) : null}
     </div>

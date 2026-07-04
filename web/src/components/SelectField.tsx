@@ -6,6 +6,7 @@ import {
   createFloatingTouchDismissProtection,
   isFloatingTouchDismissProtectionHit,
 } from "../lib/floatingSurface";
+import { stopPropagationBoundary } from "../lib/eventPropagation";
 import { FloatingSurface } from "./FloatingSurface";
 
 export interface SelectFieldOption {
@@ -19,7 +20,7 @@ export interface SelectFieldGroup {
   options: SelectFieldOption[];
 }
 
-interface SelectFieldProps {
+export interface SelectFieldProps {
   id?: string;
   value: string;
   options?: readonly SelectFieldOption[];
@@ -27,6 +28,8 @@ interface SelectFieldProps {
   onChange: (value: string) => void;
   ariaLabel?: string;
   className?: string;
+  buttonClassName?: string;
+  surfaceClassName?: string;
   disabled?: boolean;
   radius?: "lg" | "xl";
   visualSize?: "sm" | "md";
@@ -37,6 +40,7 @@ interface SelectFieldProps {
   searchLoading?: boolean;
   searchLoadingLabel?: string;
   emptyLabel?: string;
+  searchInputClassName?: string;
 }
 
 interface FlatOption extends SelectFieldOption {
@@ -64,9 +68,7 @@ function protectSelectFieldGhostTap(point: TouchPoint | null) {
     if (!isFloatingTouchDismissProtectionHit(protection, { x: clientX, y: clientY })) {
       return;
     }
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
+    stopPropagationBoundary(event, { preventDefault: true, immediate: true });
     // 不要立即清理，让 320ms 超时自然过期，以覆盖完整的触摸事件链
   };
 
@@ -103,6 +105,8 @@ export function SelectField({
   onChange,
   ariaLabel,
   className = "",
+  buttonClassName = "",
+  surfaceClassName = "",
   disabled = false,
   radius = "xl",
   visualSize = "md",
@@ -113,6 +117,7 @@ export function SelectField({
   searchLoading = false,
   searchLoadingLabel,
   emptyLabel,
+  searchInputClassName = "",
 }: SelectFieldProps) {
   const generatedId = useId();
   const buttonId = id ?? generatedId;
@@ -166,7 +171,7 @@ export function SelectField({
   const iconSize = visualSize === "sm" ? 14 : 16;
   const iconRightClassName = visualSize === "sm" ? "right-2.5" : "right-3";
   const dividerRightClassName = visualSize === "sm" ? "right-7" : "right-8";
-  const searchInputClassName =
+  const searchInputSizeClassName =
     visualSize === "sm"
       ? "h-8 pl-7 pr-8 text-xs"
       : "h-9 pl-8 pr-9 text-sm";
@@ -193,7 +198,7 @@ export function SelectField({
               }}
               aria-label={searchAriaLabel ?? searchPlaceholder}
               placeholder={searchPlaceholder}
-              className={`w-full rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-900 outline-none transition focus:border-[var(--pf-accent,#6366f1)] focus:bg-white focus:ring-2 focus:ring-[var(--pf-accent,#6366f1)]/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-[var(--pf-accent,#a78bfa)] dark:focus:bg-slate-950 dark:focus:ring-[var(--pf-accent,#a78bfa)]/20 ${searchInputClassName}`}
+              className={`w-full rounded-lg border border-slate-200 bg-slate-50 font-medium text-slate-900 outline-none transition focus:border-[var(--pf-accent,#6366f1)] focus:bg-white focus:ring-2 focus:ring-[var(--pf-accent,#6366f1)]/15 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-[var(--pf-accent,#a78bfa)] dark:focus:bg-slate-950 dark:focus:ring-[var(--pf-accent,#a78bfa)]/20 ${searchInputSizeClassName} ${searchInputClassName}`}
             />
             {searchLoading ? (
               <Loader2
@@ -315,7 +320,7 @@ export function SelectField({
             setOpen(false);
           }
         }}
-        className={`relative w-full border border-slate-300 bg-slate-50/90 text-left font-medium text-slate-900 shadow-sm shadow-slate-200/45 outline-none ring-1 ring-white/70 transition-colors hover:border-slate-400 hover:bg-white focus:border-[var(--pf-accent,#6366f1)] focus:bg-white focus:ring-2 focus:ring-[var(--pf-accent,#6366f1)]/15 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/25 dark:ring-slate-800 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:focus:border-[var(--pf-accent,#a78bfa)] dark:focus:bg-[#111b2d] dark:focus:ring-[var(--pf-accent,#a78bfa)]/20 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500 ${radiusClassName} ${sizeClassName}`}
+        className={`relative w-full border border-slate-300 bg-slate-50/90 text-left font-medium text-slate-900 shadow-sm shadow-slate-200/45 outline-none ring-1 ring-white/70 transition-colors hover:border-slate-400 hover:bg-white focus:border-[var(--pf-accent,#6366f1)] focus:bg-white focus:ring-2 focus:ring-[var(--pf-accent,#6366f1)]/15 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/25 dark:ring-slate-800 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:focus:border-[var(--pf-accent,#a78bfa)] dark:focus:bg-[#111b2d] dark:focus:ring-[var(--pf-accent,#a78bfa)]/20 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500 ${radiusClassName} ${sizeClassName} ${buttonClassName}`}
       >
         <span className="block truncate">{selectedOption?.label ?? ""}</span>
         <span
@@ -334,7 +339,7 @@ export function SelectField({
         layer="modal"
         matchTriggerWidth
         onOpenChange={setOpen}
-        className={`pf-select-field-surface flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10 ${menuTextClassName}`}
+        className={`pf-select-field-surface flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-950/12 ring-1 ring-slate-950/5 dark:border-slate-700 dark:bg-[#0f1726] dark:shadow-black/45 dark:ring-white/10 ${menuTextClassName} ${surfaceClassName}`}
       >
         {optionsContent}
       </FloatingSurface>
@@ -369,9 +374,7 @@ function SelectOptionButton({
     if (option.disabled || touchSelectionHandledRef.current) {
       return;
     }
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation?.();
+    stopPropagationBoundary(event, { preventDefault: true, immediate: true });
     protectSelectFieldGhostTap(point);
     touchSelectionHandledRef.current = true;
     onSelect(option);
@@ -388,29 +391,26 @@ function SelectOptionButton({
         if (event.pointerType === "touch") {
           touchSelectionHandledRef.current = false;
         }
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
       }}
       onPointerUp={(event) => {
         if (event.pointerType !== "touch") {
           return;
         }
         handleTouchSelection({ x: event.clientX, y: event.clientY }, event);
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
       }}
       onTouchStart={(event) => {
         touchSelectionHandledRef.current = false;
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
       }}
       onTouchEnd={(event) => {
         const touch = event.changedTouches[0] ?? event.touches[0];
         handleTouchSelection(touch ? { x: touch.clientX, y: touch.clientY } : null, event);
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
       }}
       onClick={(event) => {
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
         if (touchSelectionHandledRef.current) {
           touchSelectionHandledRef.current = false;
           return;

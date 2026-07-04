@@ -1,10 +1,12 @@
 import { useId } from "react";
-import { Loader2, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 
+import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
 import { ModalShell } from "./ModalShell";
 
 interface ConfirmDialogProps {
   open: boolean;
+  appearance: LayoutActionAppearance;
   title: string;
   description: string;
   error?: string;
@@ -18,6 +20,7 @@ interface ConfirmDialogProps {
 
 export function ConfirmDialog({
   open,
+  appearance,
   title,
   description,
   error = "",
@@ -36,9 +39,7 @@ export function ConfirmDialog({
     return null;
   }
 
-  const confirmClassName = destructive
-    ? "bg-red-600 text-white shadow-red-600/20 hover:bg-red-500 focus-visible:ring-red-500 dark:bg-red-500 dark:hover:bg-red-400"
-    : "bg-slate-950 text-white shadow-slate-950/15 hover:bg-slate-800 focus-visible:ring-slate-700 dark:bg-violet-500 dark:hover:bg-violet-400";
+  const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
 
   return (
     <ModalShell
@@ -72,23 +73,24 @@ export function ConfirmDialog({
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
-          <button
-            type="button"
+          <ActionButtonComponent
             onClick={onClose}
             disabled={busy}
-            className="pf-btn-secondary min-w-[72px] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+            preset="secondary"
+            size="md"
+            className="min-w-[72px]"
           >
             {cancelLabel}
-          </button>
-          <button
-            type="button"
+          </ActionButtonComponent>
+          <ActionButtonComponent
             onClick={onConfirm}
-            disabled={busy}
-            className={`inline-flex h-9 min-w-[72px] items-center justify-center rounded-lg px-3 text-sm font-semibold shadow-sm transition-colors focus:outline-none focus-visible:ring-2 disabled:opacity-60 ${confirmClassName}`}
+            loading={busy}
+            preset={destructive ? "danger" : "primary"}
+            size="md"
+            className="min-w-[72px]"
           >
-            {busy ? <Loader2 size={15} className="mr-2 animate-spin" /> : null}
             {confirmLabel}
-          </button>
+          </ActionButtonComponent>
         </div>
     </ModalShell>
   );

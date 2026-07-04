@@ -14,6 +14,8 @@ from inspiration_one_backend.domain.enums import (
     EnhanceSourceKind,
     EnhanceStrategy,
     ImageSessionAssetKind,
+    ImageToCodeDeliveryMode,
+    ImageToCodeSourceKind,
     JobStatus,
     PosterKind,
     ResourceLibraryAssetKind,
@@ -36,6 +38,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     ImageGalleryEntryTag,
     ImageSessionAsset,
     ImageSessionGenerationTask,
+    ImageToCodeJob,
     InspirationWorkflow,
     PosterVariant,
     ResourceLibraryAsset,
@@ -66,6 +69,9 @@ def test_sqlalchemy_enum_columns_use_application_values_without_database_constra
         (EnhanceJob.__table__.c.source_kind, EnhanceSourceKind),
         (EnhanceJob.__table__.c.strategy, EnhanceStrategy),
         (EnhanceJob.__table__.c.status, JobStatus),
+        (ImageToCodeJob.__table__.c.source_kind, ImageToCodeSourceKind),
+        (ImageToCodeJob.__table__.c.delivery_mode, ImageToCodeDeliveryMode),
+        (ImageToCodeJob.__table__.c.status, JobStatus),
         (CopySet.__table__.c.status, CopyStatus),
         (PosterVariant.__table__.c.kind, PosterKind),
         (ImageSessionGenerationTask.__table__.c.status, JobStatus),
@@ -224,6 +230,72 @@ def test_enhance_job_migration_schema_and_downgrade_support_sqlite(tmp_path: Pat
     table_names = set(inspector.get_table_names())
     assert "enhance_jobs" not in table_names
     assert "enhance_job_inputs" not in table_names
+    engine.dispose()
+    get_settings.cache_clear()
+
+
+def test_image_to_code_job_model_matches_migration_contract() -> None:
+    table = ImageToCodeJob.__table__
+    assert table.c.id.type.length == 36
+    assert not table.c.id.nullable
+    assert table.c.id.default is not None
+    assert table.c.id.default.arg.__name__ == new_id.__name__
+    assert table.c.owner_user_id.type.length == 36
+    assert table.c.source_kind.type.enums == [member.value for member in ImageToCodeSourceKind]
+    assert table.c.source_ref.type.length == 36
+    assert table.c.source_mime_type.type.length == 100
+    assert table.c.delivery_mode.type.enums == [member.value for member in ImageToCodeDeliveryMode]
+    assert not table.c.job_params_json.nullable
+    assert table.c.status.type.enums == [member.value for member in JobStatus]
+    assert table.c.progress_phase.type.length == 64
+    assert table.c.progress_phase.nullable
+    assert not table.c.progress_completed.nullable
+    assert not table.c.progress_total.nullable
+    assert table.c.progress_updated_at.nullable
+    assert table.c.result_manifest_json.nullable
+    assert table.c.last_error.nullable
+    assert table.c.started_at.nullable
+    assert table.c.finished_at.nullable
+    assert not table.c.attempts.nullable
+    assert {index.name for index in table.indexes} == {
+        "ix_image_to_code_jobs_owner_status_created",
+        "ix_image_to_code_jobs_source",
+    }
+    assert not table.foreign_keys
+    assert not [constraint for constraint in table.constraints if isinstance(constraint, sa.CheckConstraint)]
+
+
+def test_image_to_code_job_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "image-to-code-migration.db"
+    storage_root = tmp_path / "storage"
+    monkeypatch.setenv("ADMIN_ACCESS_KEY", "super-secret-admin-key")
+    monkeypatch.setenv("SESSION_SECRET", "super-secret-session-key-123")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/9")
+    monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    command.upgrade(config, "head")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    table_names = set(inspector.get_table_names())
+    assert "image_to_code_jobs" in table_names
+    assert {
+        "ix_image_to_code_jobs_owner_status_created",
+        "ix_image_to_code_jobs_source",
+    } <= {index["name"] for index in inspector.get_indexes("image_to_code_jobs")}
+    engine.dispose()
+
+    command.downgrade(config, "20260701_0067")
+
+    engine = sa.create_engine(f"sqlite:///{database_path}")
+    inspector = sa.inspect(engine)
+    table_names = set(inspector.get_table_names())
+    assert "image_to_code_jobs" not in table_names
     engine.dispose()
     get_settings.cache_clear()
 

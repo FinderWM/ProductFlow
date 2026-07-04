@@ -153,11 +153,58 @@ export const SETTINGS_GROUPS: TranslationKey[] = [
   "settings.groupExperience",
   "settings.groupSecurity",
 ];
+
+export const SETTINGS_DEFAULT_SECTION_ID: SettingsSectionId = "providers";
+export const SETTINGS_ROOT_PATH = "/settings";
+export const SETTINGS_GLOBAL_TEMPLATES_PATH = "/settings/global-templates";
+
+const SETTINGS_SECTION_PATH_SEGMENTS: Record<SettingsSectionId, string> = {
+  providers: "providers",
+  resourceGroups: "resource-groups",
+  text: "text",
+  image: "image",
+  prompts: "prompts",
+  upload: "upload",
+  queue: "queue",
+  globalTemplates: "global-templates-hub",
+  layoutAppearance: "layout-appearance",
+  loginPage: "login-page",
+  weather: "weather",
+  notifications: "notifications",
+  security: "security",
+  migration: "migration",
+};
+
+const SETTINGS_SECTION_IDS_BY_PATH_SEGMENT = Object.fromEntries(
+  Object.entries(SETTINGS_SECTION_PATH_SEGMENTS).map(([sectionId, pathSegment]) => [pathSegment, sectionId]),
+) as Record<string, SettingsSectionId>;
+
 const GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX = "全局生成配置 / ";
 const LEGACY_GENERATION_QUEUE_CATEGORY = "生成队列";
 
 export function settingsSectionIds(): SettingsSectionId[] {
   return SETTINGS_SECTIONS.map((section) => section.id);
+}
+
+export function settingsPathForSection(section: SettingsSectionId): string {
+  return `${SETTINGS_ROOT_PATH}/${SETTINGS_SECTION_PATH_SEGMENTS[section]}`;
+}
+
+export function settingsSectionFromPathSegment(pathSegment: string | undefined | null): SettingsSectionId | null {
+  if (!pathSegment) {
+    return null;
+  }
+  return SETTINGS_SECTION_IDS_BY_PATH_SEGMENT[pathSegment] ?? null;
+}
+
+export function isSettingsSectionPathname(pathname: string): boolean {
+  if (pathname === SETTINGS_ROOT_PATH) {
+    return true;
+  }
+  if (!pathname.startsWith(`${SETTINGS_ROOT_PATH}/`) || pathname === SETTINGS_GLOBAL_TEMPLATES_PATH) {
+    return false;
+  }
+  return settingsSectionFromPathSegment(pathname.slice(`${SETTINGS_ROOT_PATH}/`.length)) !== null;
 }
 
 export function shouldShowSettingsMigrationPanel(section: SettingsSectionId): boolean {

@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -15,10 +15,25 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+import {
+  ClassicCheckbox,
+  ClassicSelectField,
+  ClassicTextarea,
+  ClassicTextInput,
+} from "../components/classicInputs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../components/layoutActionButtons";
 import { ModalShell } from "../components/ModalShell";
-import { SelectField } from "../components/SelectField";
 import { TopNav } from "../components/TopNav";
+import {
+  WorkspaceCheckbox,
+  WorkspaceSelectField,
+  WorkspaceTextarea,
+  WorkspaceTextInput,
+} from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import type { TranslationKey } from "../lib/i18n";
@@ -32,6 +47,7 @@ import type {
   UpdateGlobalCanvasTemplateInput,
   UpdateUserTemplateGroupInput,
 } from "../lib/types";
+import { settingsPathForSection } from "./settings/sections";
 import { TemplateGraphPreview } from "./inspiration-detail/TemplateGroupsPanel";
 
 type TemplateManagementMode = "personal" | "global";
@@ -72,40 +88,36 @@ interface CopyGlobalDraft {
   sort_order: string;
 }
 
-const TEMPLATE_INPUT_CLASS =
-  "h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 " +
-  "placeholder:text-slate-400 outline-none transition-colors focus:border-indigo-500 focus:bg-white " +
-  "focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60 dark:border-slate-700 dark:bg-[#111b2d] " +
-  "dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]";
-const TEMPLATE_TEXTAREA_CLASS =
-  "w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-950 " +
-  "placeholder:text-slate-400 outline-none transition-colors focus:border-indigo-500 focus:bg-white " +
-  "focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60 dark:border-slate-700 dark:bg-[#111b2d] " +
-  "dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]";
 const TEMPLATE_PANEL_CLASS =
   "pf-settings-bordered-module rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 " +
   "dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25";
 const TEMPLATE_FIELD_CARD_CLASS =
   "pf-settings-field-card rounded-xl border border-slate-200 bg-slate-50/70 shadow-none dark:border-slate-700 dark:bg-[#0b1220]";
-const TEMPLATE_MAIN_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const TEMPLATE_SECONDARY_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const TEMPLATE_COMPACT_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const TEMPLATE_ICON_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const TEMPLATE_DANGER_ACTION_CLASS =
-  "pf-danger-action inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const TEMPLATE_DANGER_ICON_ACTION_CLASS =
-  "pf-danger-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const TEMPLATE_FEEDBACK_AUTO_DISMISS_MS = 1000;
+const TEMPLATE_ENTRY_SORT_ORDER: Record<CanvasTemplateEntryMode, number> = {
+  image: 0,
+  copy: 1,
+  tail: 2,
+};
+const TEMPLATE_SCOPE_SORT_ORDER: Record<CanvasTemplateScope, number> = {
+  global: 0,
+  user: 1,
+};
+
+interface TemplateManagementTemplateQueryInput {
+  scope: CanvasTemplateScope;
+  search?: string;
+  category_id?: string;
+  initial_workflow_entry?: CanvasTemplateEntryMode;
+}
+
+function templateActionAppearance(workspaceSubpage: boolean): LayoutActionAppearance {
+  return workspaceSubpage ? "workspace" : "classic";
+}
+
+function templateActionButtonComponent(workspaceSubpage: boolean) {
+  return actionButtonComponentForAppearance(templateActionAppearance(workspaceSubpage));
+}
 
 const ENTRY_OPTIONS: Array<{ value: EntryFilter; labelKey: TranslationKey }> = [
   { value: "all", labelKey: "templateManage.entryAll" },
@@ -119,6 +131,76 @@ const ENTRY_LABEL_KEYS: Record<CanvasTemplateEntryMode, TranslationKey> = {
   copy: "templateManage.entry.copy",
   tail: "templateManage.entry.tail",
 };
+
+export function templateManagementInitialWorkflowEntry(
+  entryFilter: EntryFilter,
+): CanvasTemplateEntryMode | undefined {
+  return entryFilter === "all" ? undefined : entryFilter;
+}
+
+export function templateManagementTemplateQueryInputs({
+  mode,
+  search,
+  categoryFilter,
+  entryFilter,
+}: {
+  mode: TemplateManagementMode;
+  search: string;
+  categoryFilter: string;
+  entryFilter: EntryFilter;
+}): TemplateManagementTemplateQueryInput[] {
+  const normalizedSearch = search.trim() || undefined;
+  const initial_workflow_entry = templateManagementInitialWorkflowEntry(entryFilter);
+
+  if (mode === "personal") {
+    return [
+      {
+        scope: "user",
+        search: normalizedSearch,
+        category_id: categoryFilter || undefined,
+        initial_workflow_entry,
+      },
+    ];
+  }
+
+  return [
+    {
+      scope: "global",
+      search: normalizedSearch,
+      category_id: categoryFilter || undefined,
+      initial_workflow_entry,
+    },
+    {
+      scope: "user",
+      search: normalizedSearch,
+      initial_workflow_entry,
+    },
+  ];
+}
+
+export function sortTemplateManagementTemplates(templates: CanvasTemplateSummary[]): CanvasTemplateSummary[] {
+  return [...templates].sort((left, right) => {
+    const entryOrder = TEMPLATE_ENTRY_SORT_ORDER[left.entry_mode] - TEMPLATE_ENTRY_SORT_ORDER[right.entry_mode];
+    if (entryOrder !== 0) {
+      return entryOrder;
+    }
+    const leftScope = left.scope ?? "user";
+    const rightScope = right.scope ?? "user";
+    const scopeOrder = TEMPLATE_SCOPE_SORT_ORDER[leftScope] - TEMPLATE_SCOPE_SORT_ORDER[rightScope];
+    if (scopeOrder !== 0) {
+      return scopeOrder;
+    }
+    const sortOrder = (left.sort_order ?? 100) - (right.sort_order ?? 100);
+    if (sortOrder !== 0) {
+      return sortOrder;
+    }
+    const titleOrder = left.title.localeCompare(right.title, "zh-Hans-CN");
+    if (titleOrder !== 0) {
+      return titleOrder;
+    }
+    return left.key.localeCompare(right.key, "zh-Hans-CN");
+  });
+}
 
 function categoryDraft(category?: CanvasTemplateCategory | null): CategoryDraft {
   return {
@@ -176,17 +258,20 @@ function templateAvailabilityClassName(template: CanvasTemplateSummary): string 
 function TemplateManagementFeedbackDialog({
   successMessage,
   errorMessage,
+  workspaceSubpage = false,
   onCloseSuccess,
   onCloseError,
 }: {
   successMessage: string;
   errorMessage: string;
+  workspaceSubpage?: boolean;
   onCloseSuccess: () => void;
   onCloseError: () => void;
 }) {
   const { t } = useI18n();
   const titleId = useId();
   const descriptionId = useId();
+  const PageActionButton = templateActionButtonComponent(workspaceSubpage);
   const open = Boolean(successMessage || errorMessage);
   const isError = Boolean(errorMessage);
   const message = errorMessage || successMessage;
@@ -234,15 +319,15 @@ function TemplateManagementFeedbackDialog({
             </p>
           </div>
           {isError ? (
-            <button
+            <PageActionButton
               type="button"
               onClick={onCloseError}
-              className={TEMPLATE_ICON_ACTION_CLASS}
+              preset="secondary"
+              size="icon-sm"
               aria-label={t("common.close")}
               title={t("common.close")}
-            >
-              <X size={16} />
-            </button>
+              leadingIcon={<X size={16} />}
+            />
           ) : null}
         </div>
     </ModalShell>
@@ -266,41 +351,55 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const [savedMessage, setSavedMessage] = useState("");
   const [error, setError] = useState("");
   const normalizedSearch = search.trim();
+  const templateQueryInputs = templateManagementTemplateQueryInputs({
+    mode,
+    search,
+    categoryFilter,
+    entryFilter,
+  });
+  const personalTemplateQueryInput = templateQueryInputs[0] ?? { scope: "user" as const };
+  const globalTemplateQueryInput = templateQueryInputs[0] ?? { scope: "global" as const };
+  const userTemplateQueryInput = templateQueryInputs[1] ?? { scope: "user" as const };
 
-  const templatesQuery = useQuery({
-    queryKey: ["canvas-templates", "manage", normalizedSearch, categoryFilter, scope, mode],
-    queryFn: () =>
-      api.listManageCanvasTemplates({
-        search: normalizedSearch || undefined,
-        category_id: mode === "personal" ? categoryFilter || undefined : undefined,
-        scope: mode === "global" ? undefined : scope,
-      }),
+  const personalTemplatesQuery = useQuery({
+    queryKey: ["canvas-templates", "manage", "personal", normalizedSearch, categoryFilter, entryFilter],
+    queryFn: () => api.listManageCanvasTemplates(personalTemplateQueryInput),
+    enabled: mode === "personal",
+    placeholderData: keepPreviousData,
+  });
+  const globalTemplatesQuery = useQuery({
+    queryKey: ["canvas-templates", "manage", "global", normalizedSearch, categoryFilter, entryFilter],
+    queryFn: () => api.listManageCanvasTemplates(globalTemplateQueryInput),
+    enabled: mode === "global",
+    placeholderData: keepPreviousData,
+  });
+  const userTemplatesQuery = useQuery({
+    queryKey: ["canvas-templates", "manage", "global-copy-sources", normalizedSearch, entryFilter],
+    queryFn: () => api.listManageCanvasTemplates(userTemplateQueryInput),
+    enabled: mode === "global",
+    placeholderData: keepPreviousData,
   });
   const categoriesQuery = useQuery({
     queryKey: ["canvas-template-categories", "manage", scope],
     queryFn: () => api.listManageCanvasTemplateCategories({ scope }),
-  });
-  const globalCategoriesQuery = useQuery({
-    queryKey: ["canvas-template-categories", "manage", "global"],
-    queryFn: () => api.listManageCanvasTemplateCategories({ scope: "global" }),
-    enabled: mode === "global",
+    placeholderData: keepPreviousData,
   });
 
   const categories = categoriesQuery.data?.items ?? [];
-  const globalCategories = globalCategoriesQuery.data?.items ?? [];
+  const globalCategories = mode === "global" ? categories : [];
+  const templateItems =
+    mode === "global"
+      ? sortTemplateManagementTemplates([
+          ...(globalTemplatesQuery.data?.items ?? []),
+          ...(userTemplatesQuery.data?.items ?? []),
+        ])
+      : sortTemplateManagementTemplates(personalTemplatesQuery.data?.items ?? []);
   const templates = useMemo(
     () =>
-      (templatesQuery.data?.items ?? [])
+      templateItems
         .filter((template) => template.kind === "full_canvas")
-        .filter((template) => {
-          if (!categoryFilter || mode === "personal") {
-            return true;
-          }
-          return template.scope === "user" || template.category_id === categoryFilter;
-        })
-        .filter((template) => entryFilter === "all" || template.entry_mode === entryFilter)
         .map((template) => localizeCanvasTemplateSummary(template, locale)),
-    [categoryFilter, entryFilter, locale, mode, templatesQuery.data?.items],
+    [locale, templateItems],
   );
 
   const invalidateTemplateData = async () => {
@@ -452,11 +551,24 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
 
   const pageTitle = mode === "global" ? t("templateManage.globalTitle") : t("templateManage.personalTitle");
   const pageDescription = mode === "global" ? t("templateManage.globalDescription") : t("templateManage.personalDescription");
-  const backPath = mode === "global" ? "/settings" : "/inspirations/new";
+  const backPath = mode === "global" ? settingsPathForSection("globalTemplates") : "/inspirations/new";
   const backLabel = mode === "global" ? t("templateManage.backToSettings") : t("templateManage.backToCreate");
-  const loading = templatesQuery.isLoading || categoriesQuery.isLoading || globalCategoriesQuery.isLoading;
-  const loadFailed = templatesQuery.isError || categoriesQuery.isError || globalCategoriesQuery.isError;
+  const templatesLoading =
+    mode === "global"
+      ? globalTemplatesQuery.isLoading || userTemplatesQuery.isLoading
+      : personalTemplatesQuery.isLoading;
+  const templatesFetching =
+    mode === "global"
+      ? globalTemplatesQuery.isFetching || userTemplatesQuery.isFetching
+      : personalTemplatesQuery.isFetching;
+  const loading = templatesLoading || categoriesQuery.isLoading;
+  const loadFailed =
+    categoriesQuery.isError ||
+    (mode === "global"
+      ? globalTemplatesQuery.isError || userTemplatesQuery.isError
+      : personalTemplatesQuery.isError);
   const isWorkspaceSubpage = activeScheme === "workspace";
+  const PageActionButton = templateActionButtonComponent(isWorkspaceSubpage);
 
   return (
     <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} min-h-[100dvh] text-slate-900 dark:text-slate-100`}>
@@ -473,14 +585,14 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
             <h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">{pageTitle}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">{pageDescription}</p>
           </div>
-          <button
-            type="button"
+          <PageActionButton
             onClick={() => navigate(backPath)}
-            className={TEMPLATE_SECONDARY_ACTION_CLASS}
+            preset="secondary"
+            size="md"
+            leadingIcon={<ArrowLeft size={15} />}
           >
-            <ArrowLeft size={15} className="mr-2" />
             {backLabel}
-          </button>
+          </PageActionButton>
         </header>
 
         {loadFailed ? (
@@ -500,57 +612,90 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   </span>
                   <span className="relative block">
                     <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      className={`${TEMPLATE_INPUT_CLASS} pl-9`}
-                      placeholder={t("templateFilter.searchPlaceholder")}
-                    />
+                    {isWorkspaceSubpage ? (
+                      <WorkspaceTextInput
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                        className="pl-9"
+                        placeholder={t("templateFilter.searchPlaceholder")}
+                      />
+                    ) : (
+                      <ClassicTextInput
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                        className="pl-9"
+                        placeholder={t("templateFilter.searchPlaceholder")}
+                      />
+                    )}
                   </span>
                 </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
-                    {t("templateManage.entry")}
-                  </span>
-                  <SelectField
-                    value={entryFilter}
-                    options={ENTRY_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
-                    onChange={(value) => setEntryFilter(value as EntryFilter)}
-                    radius="lg"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
-                    {t("templateFilter.category")}
-                  </span>
-                  <SelectField
-                    value={categoryFilter}
-                    options={[
-                      { value: "", label: t("templateFilter.allCategories") },
-                      ...categories.map((category) => ({ value: category.id, label: category.name })),
-                    ]}
-                    onChange={setCategoryFilter}
-                    radius="lg"
-                    disabled={categoriesQuery.isLoading}
-                  />
-                </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block min-w-0">
+                    <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      {t("templateManage.entry")}
+                    </span>
+                    {isWorkspaceSubpage ? (
+                      <WorkspaceSelectField
+                        value={entryFilter}
+                        options={ENTRY_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+                        onChange={(value) => setEntryFilter(value as EntryFilter)}
+                        size="default"
+                      />
+                    ) : (
+                      <ClassicSelectField
+                        value={entryFilter}
+                        options={ENTRY_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+                        onChange={(value) => setEntryFilter(value as EntryFilter)}
+                        radius="lg"
+                      />
+                    )}
+                  </label>
+                  <label className="block min-w-0">
+                    <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      {t("templateFilter.category")}
+                    </span>
+                    {isWorkspaceSubpage ? (
+                      <WorkspaceSelectField
+                        value={categoryFilter}
+                        options={[
+                          { value: "", label: t("templateFilter.allCategories") },
+                          ...categories.map((category) => ({ value: category.id, label: category.name })),
+                        ]}
+                        onChange={setCategoryFilter}
+                        size="default"
+                        disabled={categoriesQuery.isLoading}
+                      />
+                    ) : (
+                      <ClassicSelectField
+                        value={categoryFilter}
+                        options={[
+                          { value: "", label: t("templateFilter.allCategories") },
+                          ...categories.map((category) => ({ value: category.id, label: category.name })),
+                        ]}
+                        onChange={setCategoryFilter}
+                        radius="lg"
+                        disabled={categoriesQuery.isLoading}
+                      />
+                    )}
+                  </label>
+                </div>
               </div>
             </section>
 
             <section className={TEMPLATE_PANEL_CLASS}>
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateManage.categoryPanel")}</h2>
-                <button
-                  type="button"
+                <PageActionButton
                   onClick={() => {
                     setCategoryEditor(categoryDraft());
                     setCategoryEditorOpen(true);
                   }}
-                  className={TEMPLATE_MAIN_ACTION_CLASS}
+                  preset="primary"
+                  size="md"
+                  leadingIcon={<Plus size={13} />}
                 >
-                  <Plus size={13} className="mr-1.5" />
                   {t("templateManage.categoryCreate")}
-                </button>
+                </PageActionButton>
               </div>
               {categoryEditorOpen ? (
                 <form
@@ -560,36 +705,52 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                     saveCategoryMutation.mutate();
                   }}
                 >
-                  <input
-                    value={categoryEditor.name}
-                    onChange={(event) => setCategoryEditor((current) => ({ ...current, name: event.target.value }))}
-                    className={TEMPLATE_INPUT_CLASS}
-                    placeholder={t("templateManage.categoryName")}
-                    maxLength={120}
-                  />
-                  <input
-                    type="number"
-                    value={categoryEditor.sort_order}
-                    onChange={(event) => setCategoryEditor((current) => ({ ...current, sort_order: event.target.value }))}
-                    className={TEMPLATE_INPUT_CLASS}
-                    placeholder={t("templateManage.categorySort")}
-                  />
+                  {isWorkspaceSubpage ? (
+                    <>
+                      <WorkspaceTextInput
+                        value={categoryEditor.name}
+                        onChange={(event) => setCategoryEditor((current) => ({ ...current, name: event.target.value }))}
+                        size="default"
+                        placeholder={t("templateManage.categoryName")}
+                        maxLength={120}
+                      />
+                      <WorkspaceTextInput
+                        type="number"
+                        value={categoryEditor.sort_order}
+                        onChange={(event) => setCategoryEditor((current) => ({ ...current, sort_order: event.target.value }))}
+                        size="default"
+                        placeholder={t("templateManage.categorySort")}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <ClassicTextInput
+                        value={categoryEditor.name}
+                        onChange={(event) => setCategoryEditor((current) => ({ ...current, name: event.target.value }))}
+                        placeholder={t("templateManage.categoryName")}
+                        maxLength={120}
+                      />
+                      <ClassicTextInput
+                        type="number"
+                        value={categoryEditor.sort_order}
+                        onChange={(event) => setCategoryEditor((current) => ({ ...current, sort_order: event.target.value }))}
+                        placeholder={t("templateManage.categorySort")}
+                      />
+                    </>
+                  )}
                   <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCategoryEditorOpen(false)}
-                      className={TEMPLATE_COMPACT_ACTION_CLASS}
-                    >
+                    <PageActionButton onClick={() => setCategoryEditorOpen(false)} preset="secondary" size="sm">
                       {t("common.cancel")}
-                    </button>
-                    <button
+                    </PageActionButton>
+                    <PageActionButton
                       type="submit"
                       disabled={saveCategoryMutation.isPending || !categoryEditor.name.trim()}
-                      className={TEMPLATE_MAIN_ACTION_CLASS}
+                      preset="primary"
+                      size="md"
+                      loading={saveCategoryMutation.isPending}
                     >
-                      {saveCategoryMutation.isPending ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : null}
                       {t("templateManage.categorySave")}
-                    </button>
+                    </PageActionButton>
                   </div>
                 </form>
               ) : null}
@@ -604,27 +765,27 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                         <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{category.name}</div>
                         <div className="mt-0.5 text-xs text-slate-400">{category.sort_order}</div>
                       </div>
-                      <button
+                      <PageActionButton
                         type="button"
                         onClick={() => {
                           setCategoryEditor(categoryDraft(category));
                           setCategoryEditorOpen(true);
                         }}
-                        className={TEMPLATE_ICON_ACTION_CLASS}
+                        preset="secondary"
+                        size="icon-sm"
                         aria-label={t("templateManage.categorySave")}
                         title={t("templateManage.categorySave")}
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
+                        leadingIcon={<Pencil size={13} />}
+                      />
+                      <PageActionButton
                         type="button"
                         onClick={() => setPendingDelete({ kind: "category", id: category.id, name: category.name })}
-                        className={TEMPLATE_DANGER_ICON_ACTION_CLASS}
+                        preset="danger"
+                        size="icon-sm"
                         aria-label={t("templateManage.categoryDelete")}
                         title={t("templateManage.categoryDelete")}
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                        leadingIcon={<Trash2 size={13} />}
+                      />
                     </div>
                   ))
                 ) : (
@@ -644,7 +805,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   {t("templateFilter.scope")}: {mode === "global" ? t("templateFilter.scopeGlobal") : t("templateFilter.scopeUser")}
                 </p>
               </div>
-              {loading ? <Loader2 size={18} className="animate-spin text-slate-400" /> : null}
+              {templatesFetching || categoriesQuery.isFetching ? <Loader2 size={18} className="animate-spin text-slate-400" /> : null}
             </div>
 
             {!templates.length && !loading ? (
@@ -705,69 +866,136 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                             {t("templateManage.reviewNote", { note: template.review_note })}
                           </div>
                         ) : null}
-                        <input
-                          value={draft.title}
-                          onChange={(event) =>
-                            setTemplateDrafts((current) => ({
-                              ...current,
-                              [template.key]: { ...draft, title: event.target.value },
-                            }))
-                          }
-                          readOnly={!canEditTemplate}
-                          className={`${TEMPLATE_INPUT_CLASS} font-semibold`}
-                          placeholder={t("templateManage.templateTitle")}
-                          maxLength={255}
-                        />
-                        <textarea
-                          value={draft.description}
-                          onChange={(event) =>
-                            setTemplateDrafts((current) => ({
-                              ...current,
-                              [template.key]: { ...draft, description: event.target.value },
-                            }))
-                          }
-                          readOnly={!canEditTemplate}
-                          className={`${TEMPLATE_TEXTAREA_CLASS} min-h-20 resize-y`}
-                          placeholder={t("templateManage.templateDescription")}
-                          maxLength={1000}
-                        />
-                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
-                          <SelectField
-                            value={draft.category_id}
-                            options={[
-                              { value: "", label: t("templateFilter.allCategories") },
-                              ...categories.map((category) => ({ value: category.id, label: category.name })),
-                            ]}
-                            onChange={(value) =>
-                              setTemplateDrafts((current) => ({
-                                ...current,
-                                [template.key]: { ...draft, category_id: value },
-                              }))
-                            }
-                            ariaLabel={t("templateManage.templateCategory")}
-                            radius="lg"
-                            visualSize="sm"
-                            disabled={!canEditTemplate}
-                          />
-                          <input
-                            type="number"
-                            value={draft.sort_order}
+                        {isWorkspaceSubpage ? (
+                          <WorkspaceTextInput
+                            value={draft.title}
                             onChange={(event) =>
                               setTemplateDrafts((current) => ({
                                 ...current,
-                                [template.key]: { ...draft, sort_order: event.target.value },
+                                [template.key]: { ...draft, title: event.target.value },
                               }))
                             }
                             readOnly={!canEditTemplate}
-                            className={`${TEMPLATE_INPUT_CLASS} h-9`}
-                            placeholder={t("templateManage.templateSort")}
+                            className="font-semibold"
+                            placeholder={t("templateManage.templateTitle")}
+                            maxLength={255}
                           />
+                        ) : (
+                          <ClassicTextInput
+                            value={draft.title}
+                            onChange={(event) =>
+                              setTemplateDrafts((current) => ({
+                                ...current,
+                                [template.key]: { ...draft, title: event.target.value },
+                              }))
+                            }
+                            readOnly={!canEditTemplate}
+                            className="font-semibold"
+                            placeholder={t("templateManage.templateTitle")}
+                            maxLength={255}
+                          />
+                        )}
+                        {isWorkspaceSubpage ? (
+                          <WorkspaceTextarea
+                            value={draft.description}
+                            onChange={(event) =>
+                              setTemplateDrafts((current) => ({
+                                ...current,
+                                [template.key]: { ...draft, description: event.target.value },
+                              }))
+                            }
+                            readOnly={!canEditTemplate}
+                            className="min-h-20 resize-y"
+                            placeholder={t("templateManage.templateDescription")}
+                            maxLength={1000}
+                          />
+                        ) : (
+                          <ClassicTextarea
+                            value={draft.description}
+                            onChange={(event) =>
+                              setTemplateDrafts((current) => ({
+                                ...current,
+                                [template.key]: { ...draft, description: event.target.value },
+                              }))
+                            }
+                            readOnly={!canEditTemplate}
+                            className="min-h-20"
+                            placeholder={t("templateManage.templateDescription")}
+                            maxLength={1000}
+                          />
+                        )}
+                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
+                          {isWorkspaceSubpage ? (
+                            <WorkspaceSelectField
+                              value={draft.category_id}
+                              options={[
+                                { value: "", label: t("templateFilter.allCategories") },
+                                ...categories.map((category) => ({ value: category.id, label: category.name })),
+                              ]}
+                              onChange={(value) =>
+                                setTemplateDrafts((current) => ({
+                                  ...current,
+                                  [template.key]: { ...draft, category_id: value },
+                                }))
+                              }
+                              ariaLabel={t("templateManage.templateCategory")}
+                              size="compact"
+                              disabled={!canEditTemplate}
+                            />
+                          ) : (
+                            <ClassicSelectField
+                              value={draft.category_id}
+                              options={[
+                                { value: "", label: t("templateFilter.allCategories") },
+                                ...categories.map((category) => ({ value: category.id, label: category.name })),
+                              ]}
+                              onChange={(value) =>
+                                setTemplateDrafts((current) => ({
+                                  ...current,
+                                  [template.key]: { ...draft, category_id: value },
+                                }))
+                              }
+                              ariaLabel={t("templateManage.templateCategory")}
+                              radius="lg"
+                              size="compact"
+                              disabled={!canEditTemplate}
+                            />
+                          )}
+                          {isWorkspaceSubpage ? (
+                            <WorkspaceTextInput
+                              type="number"
+                              value={draft.sort_order}
+                              onChange={(event) =>
+                                setTemplateDrafts((current) => ({
+                                  ...current,
+                                  [template.key]: { ...draft, sort_order: event.target.value },
+                                }))
+                              }
+                              readOnly={!canEditTemplate}
+                              size="compact"
+                              className="h-9"
+                              placeholder={t("templateManage.templateSort")}
+                            />
+                          ) : (
+                            <ClassicTextInput
+                              type="number"
+                              value={draft.sort_order}
+                              onChange={(event) =>
+                                setTemplateDrafts((current) => ({
+                                  ...current,
+                                  [template.key]: { ...draft, sort_order: event.target.value },
+                                }))
+                              }
+                              readOnly={!canEditTemplate}
+                              size="compact"
+                              placeholder={t("templateManage.templateSort")}
+                            />
+                          )}
                         </div>
                         {canManageAvailability ? (
                           <div className={`${TEMPLATE_FIELD_CARD_CLASS} space-y-2 px-3 py-2`}>
-                            <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              <input
-                                type="checkbox"
+                            {isWorkspaceSubpage ? (
+                              <WorkspaceCheckbox
                                 checked={draft.enabled}
                                 onChange={(event) =>
                                   setTemplateDrafts((current) => ({
@@ -775,44 +1003,91 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                     [template.key]: { ...draft, enabled: event.target.checked },
                                   }))
                                 }
-                                className="h-4 w-4 accent-indigo-600"
-                              />
-                              {t("templateManage.templateEnabled")}
-                            </label>
-                            {!draft.enabled ? (
-                              <textarea
-                                value={draft.disabled_reason}
+                                wrapperClassName="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"
+                              >
+                                {t("templateManage.templateEnabled")}
+                              </WorkspaceCheckbox>
+                            ) : (
+                              <ClassicCheckbox
+                                checked={draft.enabled}
                                 onChange={(event) =>
                                   setTemplateDrafts((current) => ({
                                     ...current,
-                                    [template.key]: { ...draft, disabled_reason: event.target.value },
+                                    [template.key]: { ...draft, enabled: event.target.checked },
                                   }))
                                 }
-                                className={`${TEMPLATE_TEXTAREA_CLASS} min-h-16 resize-y text-xs leading-5`}
-                                placeholder={t("templateManage.disabledReasonPlaceholder")}
-                                maxLength={1000}
-                              />
+                                wrapperClassName="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"
+                              >
+                                {t("templateManage.templateEnabled")}
+                              </ClassicCheckbox>
+                            )}
+                            {!draft.enabled ? (
+                              isWorkspaceSubpage ? (
+                                <WorkspaceTextarea
+                                  value={draft.disabled_reason}
+                                  onChange={(event) =>
+                                    setTemplateDrafts((current) => ({
+                                      ...current,
+                                      [template.key]: { ...draft, disabled_reason: event.target.value },
+                                    }))
+                                  }
+                                  size="compact"
+                                  className="min-h-16 resize-y text-xs leading-5"
+                                  placeholder={t("templateManage.disabledReasonPlaceholder")}
+                                  maxLength={1000}
+                                />
+                              ) : (
+                                <ClassicTextarea
+                                  value={draft.disabled_reason}
+                                  onChange={(event) =>
+                                    setTemplateDrafts((current) => ({
+                                      ...current,
+                                      [template.key]: { ...draft, disabled_reason: event.target.value },
+                                    }))
+                                  }
+                                  size="compact"
+                                  className="min-h-16 text-xs leading-5"
+                                  placeholder={t("templateManage.disabledReasonPlaceholder")}
+                                  maxLength={1000}
+                                />
+                              )
                             ) : null}
                           </div>
                         ) : null}
                         {requiresReviewNote ? (
-                          <textarea
-                            value={draft.review_note}
-                            onChange={(event) =>
-                              setTemplateDrafts((current) => ({
-                                ...current,
-                                [template.key]: { ...draft, review_note: event.target.value },
-                              }))
-                            }
-                            className={`${TEMPLATE_TEXTAREA_CLASS} min-h-16 resize-y border-amber-200 bg-amber-50 text-xs leading-5 text-amber-950 focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100`}
-                            placeholder={t("templateManage.reviewNotePlaceholder")}
-                            maxLength={1000}
-                          />
+                          isWorkspaceSubpage ? (
+                            <WorkspaceTextarea
+                              value={draft.review_note}
+                              onChange={(event) =>
+                                setTemplateDrafts((current) => ({
+                                  ...current,
+                                  [template.key]: { ...draft, review_note: event.target.value },
+                                }))
+                              }
+                              size="compact"
+                              className="min-h-16 resize-y border-amber-200 bg-amber-50 text-xs leading-5 text-amber-950 focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                              placeholder={t("templateManage.reviewNotePlaceholder")}
+                              maxLength={1000}
+                            />
+                          ) : (
+                            <ClassicTextarea
+                              value={draft.review_note}
+                              onChange={(event) =>
+                                setTemplateDrafts((current) => ({
+                                  ...current,
+                                  [template.key]: { ...draft, review_note: event.target.value },
+                                }))
+                              }
+                              size="compact"
+                              className="min-h-16 border-amber-200 bg-amber-50 text-xs leading-5 text-amber-950 focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                              placeholder={t("templateManage.reviewNotePlaceholder")}
+                              maxLength={1000}
+                            />
+                          )
                         ) : null}
                         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
                           {mode === "global" && isUserTemplate ? (
-                            <button
-                              type="button"
+                            <PageActionButton
                               onClick={() =>
                                 setCopyGlobalDraft({
                                   template,
@@ -822,61 +1097,58 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                   sort_order: String(template.sort_order ?? 100),
                                 })
                               }
-                              className={TEMPLATE_SECONDARY_ACTION_CLASS}
+                              preset="secondary"
+                              size="md"
+                              leadingIcon={<CopyPlus size={13} />}
                             >
-                              <CopyPlus size={13} className="mr-1.5" />
                               {t("templateManage.copyGlobal")}
-                            </button>
+                            </PageActionButton>
                           ) : null}
                           {mode === "global" && isUserTemplate && template.review_status === "pending" ? (
                             <>
-                              <button
-                                type="button"
+                              <PageActionButton
                                 disabled={reviewTemplateMutation.isPending || !templateId}
                                 onClick={() => reviewTemplateMutation.mutate({ template, approved: false })}
-                                className={TEMPLATE_SECONDARY_ACTION_CLASS}
+                                preset="secondary"
+                                size="md"
                               >
                                 {t("templateManage.reviewReject")}
-                              </button>
-                              <button
-                                type="button"
+                              </PageActionButton>
+                              <PageActionButton
                                 disabled={reviewTemplateMutation.isPending || !templateId}
                                 onClick={() => reviewTemplateMutation.mutate({ template, approved: true })}
-                                className={TEMPLATE_MAIN_ACTION_CLASS}
+                                preset="primary"
+                                size="md"
                               >
                                 {t("templateManage.reviewApprove")}
-                              </button>
+                              </PageActionButton>
                             </>
                           ) : null}
                           {canManageAvailability && !canEditTemplate ? (
-                            <button
-                              type="button"
+                            <PageActionButton
                               disabled={saveTemplateMutation.isPending || !templateId}
                               onClick={() => saveTemplateMutation.mutate({ template, draft })}
-                              className={TEMPLATE_MAIN_ACTION_CLASS}
+                              preset="primary"
+                              size="md"
+                              loading={saveTemplateMutation.isPending}
+                              leadingIcon={<Save size={13} />}
                             >
-                              {saveTemplateMutation.isPending ? (
-                                <Loader2 size={13} className="mr-1.5 animate-spin" />
-                              ) : (
-                                <Save size={13} className="mr-1.5" />
-                              )}
                               {t("templateManage.templateSave")}
-                            </button>
+                            </PageActionButton>
                           ) : null}
                           {canEditTemplate ? (
                             <>
                               {mode === "personal" ? (
-                                <button
-                                  type="button"
+                                <PageActionButton
                                   onClick={() => setPendingDelete({ kind: "template", id: template.key, name: template.title })}
-                                  className={TEMPLATE_DANGER_ACTION_CLASS}
+                                  preset="danger"
+                                  size="md"
+                                  leadingIcon={<Trash2 size={13} />}
                                 >
-                                  <Trash2 size={13} className="mr-1.5" />
                                   {t("templateManage.templateDelete")}
-                                </button>
+                                </PageActionButton>
                               ) : null}
-                              <button
-                                type="button"
+                              <PageActionButton
                                 disabled={
                                   saveTemplateMutation.isPending ||
                                   !draft.title.trim() ||
@@ -884,11 +1156,13 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                                   (requiresReviewNote && !draft.review_note.trim())
                                 }
                                 onClick={() => saveTemplateMutation.mutate({ template, draft })}
-                                className={TEMPLATE_MAIN_ACTION_CLASS}
+                                preset="primary"
+                                size="md"
+                                loading={saveTemplateMutation.isPending}
+                                leadingIcon={<Save size={13} />}
                               >
-                                {saveTemplateMutation.isPending ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Save size={13} className="mr-1.5" />}
                                 {t("templateManage.templateSave")}
-                              </button>
+                              </PageActionButton>
                             </>
                           ) : null}
                         </div>
@@ -907,6 +1181,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
       <TemplateManagementFeedbackDialog
         successMessage={savedMessage}
         errorMessage={error}
+        workspaceSubpage={isWorkspaceSubpage}
         onCloseSuccess={() => setSavedMessage("")}
         onCloseError={() => setError("")}
       />
@@ -916,6 +1191,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
           draft={copyGlobalDraft}
           categories={globalCategories}
           busy={copyToGlobalMutation.isPending}
+          workspaceSubpage={isWorkspaceSubpage}
           onDraftChange={setCopyGlobalDraft}
           onClose={() => setCopyGlobalDraft(null)}
           onConfirm={() => copyToGlobalMutation.mutate()}
@@ -924,6 +1200,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
 
       <ConfirmDialog
         open={Boolean(pendingDelete)}
+        appearance={templateActionAppearance(isWorkspaceSubpage)}
         title={
           pendingDelete?.kind === "category"
             ? t("templateManage.confirmDeleteCategoryTitle")
@@ -960,6 +1237,7 @@ function CopyGlobalDialog({
   draft,
   categories,
   busy,
+  workspaceSubpage = false,
   onDraftChange,
   onClose,
   onConfirm,
@@ -967,6 +1245,7 @@ function CopyGlobalDialog({
   draft: CopyGlobalDraft;
   categories: CanvasTemplateCategory[];
   busy: boolean;
+  workspaceSubpage?: boolean;
   onDraftChange: (draft: CopyGlobalDraft) => void;
   onClose: () => void;
   onConfirm: () => void;
@@ -974,6 +1253,7 @@ function CopyGlobalDialog({
   const { t } = useI18n();
   const titleId = useId();
   const descriptionId = useId();
+  const PageActionButton = templateActionButtonComponent(workspaceSubpage);
 
   return (
     <ModalShell
@@ -993,66 +1273,100 @@ function CopyGlobalDialog({
               {t("templateManage.copyGlobalDescription")}
             </p>
           </div>
-          <button
+          <PageActionButton
             type="button"
             onClick={onClose}
             disabled={busy}
-            className={TEMPLATE_ICON_ACTION_CLASS}
+            preset="secondary"
+            size="icon-sm"
             aria-label={t("common.close")}
             title={t("common.close")}
-          >
-            <X size={16} />
-          </button>
+            leadingIcon={<X size={16} />}
+          />
         </div>
         <div className="space-y-3 px-5 py-4">
-          <SelectField
-            value={draft.category_id}
-            options={[
-              { value: "", label: t("templateManage.globalCategoryRequired") },
-              ...categories.map((category) => ({ value: category.id, label: category.name })),
-            ]}
-            onChange={(category_id) => onDraftChange({ ...draft, category_id })}
-            ariaLabel={t("templateManage.templateCategory")}
-            radius="lg"
-          />
-          <input
-            value={draft.title}
-            onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
-            className={TEMPLATE_INPUT_CLASS}
-            placeholder={t("templateManage.templateTitle")}
-          />
-          <textarea
-            value={draft.description}
-            onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
-            className={`${TEMPLATE_TEXTAREA_CLASS} min-h-20 resize-y`}
-            placeholder={t("templateManage.templateDescription")}
-          />
-          <input
-            type="number"
-            value={draft.sort_order}
-            onChange={(event) => onDraftChange({ ...draft, sort_order: event.target.value })}
-            className={TEMPLATE_INPUT_CLASS}
-            placeholder={t("templateManage.templateSort")}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceSelectField
+              value={draft.category_id}
+              options={[
+                { value: "", label: t("templateManage.globalCategoryRequired") },
+                ...categories.map((category) => ({ value: category.id, label: category.name })),
+              ]}
+              onChange={(category_id) => onDraftChange({ ...draft, category_id })}
+              ariaLabel={t("templateManage.templateCategory")}
+              size="default"
+            />
+          ) : (
+            <ClassicSelectField
+              value={draft.category_id}
+              options={[
+                { value: "", label: t("templateManage.globalCategoryRequired") },
+                ...categories.map((category) => ({ value: category.id, label: category.name })),
+              ]}
+              onChange={(category_id) => onDraftChange({ ...draft, category_id })}
+              ariaLabel={t("templateManage.templateCategory")}
+              radius="lg"
+            />
+          )}
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.title}
+              onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
+              size="default"
+              placeholder={t("templateManage.templateTitle")}
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.title}
+              onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
+              placeholder={t("templateManage.templateTitle")}
+            />
+          )}
+          {workspaceSubpage ? (
+            <WorkspaceTextarea
+              value={draft.description}
+              onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
+              className="min-h-20 resize-y"
+              placeholder={t("templateManage.templateDescription")}
+            />
+          ) : (
+            <ClassicTextarea
+              value={draft.description}
+              onChange={(event) => onDraftChange({ ...draft, description: event.target.value })}
+              className="min-h-20"
+              placeholder={t("templateManage.templateDescription")}
+            />
+          )}
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              type="number"
+              value={draft.sort_order}
+              onChange={(event) => onDraftChange({ ...draft, sort_order: event.target.value })}
+              size="default"
+              placeholder={t("templateManage.templateSort")}
+            />
+          ) : (
+            <ClassicTextInput
+              type="number"
+              value={draft.sort_order}
+              onChange={(event) => onDraftChange({ ...draft, sort_order: event.target.value })}
+              placeholder={t("templateManage.templateSort")}
+            />
+          )}
         </div>
         <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className={TEMPLATE_SECONDARY_ACTION_CLASS}
-          >
+          <PageActionButton onClick={onClose} disabled={busy} preset="secondary" size="md">
             {t("common.cancel")}
-          </button>
-          <button
-            type="button"
+          </PageActionButton>
+          <PageActionButton
             onClick={onConfirm}
             disabled={busy || !draft.category_id}
-            className={TEMPLATE_MAIN_ACTION_CLASS}
+            preset="primary"
+            size="md"
+            loading={busy}
           >
-            {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
             {t("templateManage.copyGlobal")}
-          </button>
+          </PageActionButton>
         </div>
     </ModalShell>
   );

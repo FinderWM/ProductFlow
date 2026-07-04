@@ -2,6 +2,11 @@
 // 从 SettingsPage.tsx 抽出的纯逻辑。
 
 import type { TranslationKey } from "../../lib/i18n";
+import {
+  IMAGE_GENERATION_DIMENSION_MULTIPLE,
+  IMAGE_GENERATION_MAX_MAX_DIMENSION,
+  IMAGE_GENERATION_MIN_MAX_DIMENSION,
+} from "../../lib/imageSizes";
 import type {
   GenerationConfig,
   GenerationResourceGroup,
@@ -55,6 +60,90 @@ export function providerDefaultEndpointLabelKey(profile: ProviderProfile): Trans
     : "settings.provider.defaultBaseUrl";
 }
 
+export const PROVIDER_IMAGE_MAX_DIMENSION_PRESETS = [1024, 1536, 2048, 3072, 3840] as const;
+export const PROVIDER_IMAGE_MAX_DIMENSION_GLOBAL_OPTION = "__global__";
+export const PROVIDER_IMAGE_MAX_DIMENSION_CUSTOM_OPTION = "__custom__";
+
+export type ProviderImageMaxDimensionMode = "preset" | "custom";
+
+function normalizeProviderImageMaxDimensionNumber(value: number): number {
+  const normalized = value - (value % IMAGE_GENERATION_DIMENSION_MULTIPLE);
+  return Math.max(IMAGE_GENERATION_MIN_MAX_DIMENSION, normalized);
+}
+
+export function coerceProviderImageMaxDimension(value: unknown): number | null {
+  if (value == null || typeof value === "boolean") {
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || !/^\d+$/.test(trimmed)) {
+      return null;
+    }
+    return coerceProviderImageMaxDimension(Number(trimmed));
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    return null;
+  }
+  if (value < IMAGE_GENERATION_MIN_MAX_DIMENSION || value > IMAGE_GENERATION_MAX_MAX_DIMENSION) {
+    return null;
+  }
+  return normalizeProviderImageMaxDimensionNumber(value);
+}
+
+export function parseProviderImageMaxDimensionDraft(raw: string): { value: number | null; invalid: boolean } {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { value: null, invalid: false };
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    return { value: null, invalid: true };
+  }
+  const parsed = Number(trimmed);
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed < IMAGE_GENERATION_MIN_MAX_DIMENSION ||
+    parsed > IMAGE_GENERATION_MAX_MAX_DIMENSION
+  ) {
+    return { value: null, invalid: true };
+  }
+  return { value: normalizeProviderImageMaxDimensionNumber(parsed), invalid: false };
+}
+
+function providerImageMaxDimensionUsesCustomMode(value: number | null): boolean {
+  return value != null && !PROVIDER_IMAGE_MAX_DIMENSION_PRESETS.includes(value as (typeof PROVIDER_IMAGE_MAX_DIMENSION_PRESETS)[number]);
+}
+
+function providerImageMaxDimensionFormState(
+  value: unknown,
+): Pick<ProviderProfileFormState, "image_max_dimension" | "image_max_dimension_mode" | "image_max_dimension_custom_value"> {
+  const normalized = coerceProviderImageMaxDimension(value);
+  const custom = providerImageMaxDimensionUsesCustomMode(normalized);
+  return {
+    image_max_dimension: normalized,
+    image_max_dimension_mode: custom ? "custom" : "preset",
+    image_max_dimension_custom_value: custom && normalized != null ? String(normalized) : "",
+  };
+}
+
+export function providerImageMaxDimensionSelectValue(
+  form: Pick<ProviderProfileFormState, "image_max_dimension" | "image_max_dimension_mode">,
+): string {
+  if (form.image_max_dimension_mode === "custom") {
+    return PROVIDER_IMAGE_MAX_DIMENSION_CUSTOM_OPTION;
+  }
+  if (form.image_max_dimension == null) {
+    return PROVIDER_IMAGE_MAX_DIMENSION_GLOBAL_OPTION;
+  }
+  return String(form.image_max_dimension);
+}
+
+export function providerImageMaxDimensionFormInvalid(
+  form: Pick<ProviderProfileFormState, "image_max_dimension_mode" | "image_max_dimension_custom_value">,
+): boolean {
+  return form.image_max_dimension_mode === "custom" && parseProviderImageMaxDimensionDraft(form.image_max_dimension_custom_value).invalid;
+}
+
 export interface ProviderProfileFormState {
   name: string;
   provider_type: ProviderType;
@@ -63,6 +152,8 @@ export interface ProviderProfileFormState {
   capabilities: ProviderCapability[];
   enabled: boolean;
   image_max_dimension: number | null;
+  image_max_dimension_mode: ProviderImageMaxDimensionMode;
+  image_max_dimension_custom_value: string;
 }
 
 export interface ProviderProfileUsage {
@@ -84,6 +175,8 @@ export const EMPTY_PROVIDER_FORM: ProviderProfileFormState = {
   capabilities: ["text_responses", "image_images"],
   enabled: true,
   image_max_dimension: null,
+  image_max_dimension_mode: "preset",
+  image_max_dimension_custom_value: "",
 };
 
 export const PROVIDER_CAPABILITY_OPTIONS: Array<{ value: ProviderCapability; labelKey: TranslationKey }> = [
@@ -94,6 +187,16 @@ export const PROVIDER_CAPABILITY_OPTIONS: Array<{ value: ProviderCapability; lab
   { value: "image_chat", labelKey: "settings.provider.capability.imageChat" },
   { value: "image_google_gemini", labelKey: "settings.provider.capability.imageGoogleGemini" },
 ];
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function providerImageMaxDimension(config: Record<string, unknown> | undefined): number | null {
+  const capabilities = asRecord(asRecord(config)?.capabilities);
+  const value = capabilities?.image_max_dimension;
+  return coerceProviderImageMaxDimension(value);
+}
 
 export function providerFormFromProfile(profile?: ProviderProfile | null): ProviderProfileFormState {
   if (!profile) {
@@ -106,7 +209,7 @@ export function providerFormFromProfile(profile?: ProviderProfile | null): Provi
     api_key: "",
     capabilities: profile.capabilities,
     enabled: profile.enabled,
-    image_max_dimension: profile.config_json?.capabilities?.image_max_dimension ?? null,
+    ...providerImageMaxDimensionFormState(providerImageMaxDimension(profile.config)),
   };
 }
 
@@ -143,6 +246,15 @@ export function providerUsageFromGenerationConfigs(
         generationConfig.provider_profile_id === profileId &&
         !generationConfig.archived_at,
     ),
+  };
+}
+
+export function providerUsageFromProfile(
+  profile: Pick<ProviderProfile, "used_by_text_generation" | "used_by_image_generation">,
+): ProviderProfileUsage {
+  return {
+    text: Boolean(profile.used_by_text_generation),
+    image: Boolean(profile.used_by_image_generation),
   };
 }
 
@@ -186,7 +298,7 @@ export function providerProfileCreatePayload(form: ProviderProfileFormState): Pr
     api_key: form.api_key.trim() || null,
     capabilities: form.capabilities,
     enabled: form.enabled,
-    config_json: {
+    config: {
       capabilities: {
         image_max_dimension: form.image_max_dimension,
       },
@@ -202,7 +314,7 @@ export function providerProfileUpdatePayload(form: ProviderProfileFormState): Pr
     api_key: form.api_key,
     capabilities: form.capabilities,
     enabled: form.enabled,
-    config_json: {
+    config: {
       capabilities: {
         image_max_dimension: form.image_max_dimension,
       },

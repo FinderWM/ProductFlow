@@ -1,23 +1,34 @@
 import { Loader2 } from "lucide-react";
-import { forwardRef, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
+import { forwardRef } from "react";
 
-export const ACTION_BUTTON_PRESETS = ["primary", "secondary", "danger"] as const;
-export type ActionButtonPreset = (typeof ACTION_BUTTON_PRESETS)[number];
-
-export const ACTION_BUTTON_SIZES = ["sm", "md", "lg", "icon-sm", "icon-md", "icon-lg"] as const;
-export type ActionButtonSize = (typeof ACTION_BUTTON_SIZES)[number];
-
-export type ActionButtonToneVarName =
-  | "--pf-action-bg"
-  | "--pf-action-bg-hover"
-  | "--pf-action-border"
-  | "--pf-action-border-hover"
-  | "--pf-action-text"
-  | "--pf-action-shadow"
-  | "--pf-action-shadow-hover"
-  | "--pf-action-focus-ring";
-
-export type ActionButtonToneVars = Partial<Record<ActionButtonToneVarName, string>>;
+export {
+  ACTION_BUTTON_PRESETS,
+  ACTION_BUTTON_SIZES,
+  ACTION_BUTTON_SIZE_CLASSNAME,
+  actionButtonToneStyle,
+  type ActionButtonPreset,
+  type ActionButtonSize,
+  type ActionButtonToneVarName,
+  type ActionButtonToneVars,
+} from "./actionButtonShared";
+import {
+  buildActionButtonClassName,
+  buildActionSurfaceClassName,
+  actionButtonToneStyle,
+  type ActionButtonPreset,
+  type ActionButtonSize,
+  type BaseActionButtonProps,
+} from "./actionButtonShared";
+export {
+  ClassicActionButton,
+  classicActionButtonClassName,
+  classicActionSurfaceClassName,
+} from "./ClassicActionButton";
+export {
+  WorkspaceActionButton,
+  workspaceActionButtonClassName,
+  workspaceActionSurfaceClassName,
+} from "./WorkspaceActionButton";
 
 export const ACTION_BUTTON_PRESET_CLASSNAME: Record<ActionButtonPreset, string> = {
   primary: "pf-action-button--primary",
@@ -31,19 +42,6 @@ export const ACTION_SURFACE_PRESET_CLASSNAME: Record<ActionButtonPreset, string>
   danger: "pf-action-surface--danger",
 };
 
-export const ACTION_BUTTON_SIZE_CLASSNAME: Record<ActionButtonSize, string> = {
-  sm: "pf-action-button--sm",
-  md: "pf-action-button--md",
-  lg: "pf-action-button--lg",
-  "icon-sm": "pf-action-button--icon-sm",
-  "icon-md": "pf-action-button--icon-md",
-  "icon-lg": "pf-action-button--icon-lg",
-};
-
-function joinClassNames(parts: Array<string | false | null | undefined>): string {
-  return parts.filter(Boolean).join(" ");
-}
-
 export function actionButtonClassName({
   preset = "primary",
   size = "md",
@@ -55,13 +53,14 @@ export function actionButtonClassName({
   fullWidth?: boolean;
   className?: string;
 } = {}): string {
-  return joinClassNames([
-    "pf-action-button",
-    ACTION_BUTTON_PRESET_CLASSNAME[preset],
-    ACTION_BUTTON_SIZE_CLASSNAME[size],
-    fullWidth ? "w-full" : "",
+  return buildActionButtonClassName({
+    baseClassName: "pf-action-button",
+    presetClassName: ACTION_BUTTON_PRESET_CLASSNAME,
+    preset,
+    size,
+    fullWidth,
     className,
-  ]);
+  });
 }
 
 export function actionSurfaceClassName({
@@ -73,30 +72,16 @@ export function actionSurfaceClassName({
   focusWithin?: boolean;
   className?: string;
 } = {}): string {
-  return joinClassNames([
-    "pf-action-surface",
-    ACTION_SURFACE_PRESET_CLASSNAME[preset],
-    focusWithin ? "pf-action-surface-focus" : "",
+  return buildActionSurfaceClassName({
+    baseClassName: "pf-action-surface",
+    presetClassName: ACTION_SURFACE_PRESET_CLASSNAME,
+    preset,
+    focusWithin,
     className,
-  ]);
+  });
 }
 
-export function actionButtonToneStyle(toneVars?: ActionButtonToneVars, style?: CSSProperties): CSSProperties | undefined {
-  if (!toneVars && !style) {
-    return undefined;
-  }
-  return { ...(toneVars ?? {}), ...(style ?? {}) } as CSSProperties;
-}
-
-export interface ActionButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  preset?: ActionButtonPreset;
-  size?: ActionButtonSize;
-  leadingIcon?: ReactNode;
-  trailingIcon?: ReactNode;
-  loading?: boolean;
-  fullWidth?: boolean;
-  toneVars?: ActionButtonToneVars;
-}
+export type ActionButtonProps = BaseActionButtonProps;
 
 export const ActionButton = forwardRef<HTMLButtonElement, ActionButtonProps>(function ActionButton(
   {

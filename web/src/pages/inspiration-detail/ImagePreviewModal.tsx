@@ -1,5 +1,9 @@
 import { X } from "lucide-react";
 
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import { ModalShell } from "../../components/ModalShell";
 import { ZoomableImage } from "../../components/ZoomableImage";
 import type { DownloadableImage } from "../../lib/image-downloads";
@@ -9,11 +13,13 @@ import { DownloadLink } from "./ImageDownloadComponents";
 
 interface ImagePreviewModalProps {
   image: DownloadableImage;
+  appearance?: LayoutActionAppearance;
   onClose: () => void;
 }
 
-export function ImagePreviewModal({ image, onClose }: ImagePreviewModalProps) {
+export function ImagePreviewModal({ image, appearance = "classic", onClose }: ImagePreviewModalProps) {
   const { t } = useI18n();
+  const ActionButton = actionButtonComponentForAppearance(appearance);
 
   return (
     <ModalShell
@@ -27,15 +33,14 @@ export function ImagePreviewModal({ image, onClose }: ImagePreviewModalProps) {
             {image.alt}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <DownloadLink image={image} />
-            <button
-              type="button"
+            <DownloadLink image={image} appearance={appearance} />
+            <ActionButton
               onClick={onClose}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800"
+              preset="secondary"
+              size="icon-sm"
               aria-label={t("detail.preview.close")}
-            >
-              <X size={16} />
-            </button>
+              leadingIcon={<X size={16} />}
+            />
           </div>
         </div>
         <ZoomableImage

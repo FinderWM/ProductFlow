@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 import type { ImageSizeOption } from "../lib/imageSizes";
 import {
@@ -18,6 +18,8 @@ import {
   resolveImageSize,
 } from "../lib/imageSizes";
 import { useI18n } from "../lib/preferences";
+import { ClassicOptionToggle, ClassicTextInput } from "./classicInputs";
+import { WorkspaceOptionToggle, WorkspaceTextInput } from "./workspaceInputs";
 
 interface ImageSizePickerProps {
   value: string;
@@ -25,6 +27,7 @@ interface ImageSizePickerProps {
   onChange: (value: string) => void;
   disabled?: boolean;
   maxDimension?: number;
+  appearance: "classic" | "workspace";
 }
 
 function splitSize(value: string, maxDimension?: number): { width: string; height: string } {
@@ -96,8 +99,20 @@ function frameClassName(aspect: string): string {
   return "h-8 w-10";
 }
 
-export function ImageSizePicker({ value, presets, onChange, disabled = false, maxDimension }: ImageSizePickerProps) {
+export function ImageSizePicker({
+  value,
+  presets,
+  onChange,
+  disabled = false,
+  maxDimension,
+  appearance,
+}: ImageSizePickerProps) {
   const { locale, t } = useI18n();
+  const aspectGroupName = useId();
+  const resolutionGroupName = useId();
+  const useWorkspaceInputs = appearance === "workspace";
+  const LayoutOptionToggle = useWorkspaceInputs ? WorkspaceOptionToggle : ClassicOptionToggle;
+  const LayoutTextInput = useWorkspaceInputs ? WorkspaceTextInput : ClassicTextInput;
   const aspectOptions = useMemo(() => buildImageAspectOptions(presets), [presets]);
   const aspectOptionValues = useMemo(() => new Set(aspectOptions.map((option) => option.value)), [aspectOptions]);
   const normalizedValue = normalizeImageSizeValue(value, maxDimension);
@@ -174,24 +189,32 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
         <div className="grid grid-cols-3 gap-2">
           {aspectOptions.map((option) => {
             const active = option.value === selectedAspect;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => selectAspect(option.value)}
-                disabled={disabled}
-                title={labelForImageAspect(option.value, locale)}
-                className={`flex h-16 flex-col items-center justify-center rounded-lg border px-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                  active
-                    ? "border-slate-900 bg-slate-50 text-slate-900 ring-2 ring-slate-900/10 dark:border-slate-100 dark:bg-slate-100/10 dark:text-slate-50 dark:ring-slate-100/20"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100"
-                }`}
-              >
+            const optionContent = (
+              <>
                 <span
                   className={`mb-1 flex items-center justify-center rounded-sm border-2 border-current text-[9px] font-black leading-none ${frameClassName(option.value)}`}
                 />
                 <span>{option.label}</span>
-              </button>
+              </>
+            );
+            return (
+              <LayoutOptionToggle
+                key={option.value}
+                checked={active}
+                disabled={disabled}
+                layout="card"
+                selectionMode="single"
+                name={aspectGroupName}
+                title={labelForImageAspect(option.value, locale)}
+                className="h-16 w-full items-center justify-center px-2 py-2 text-center text-xs font-semibold"
+                onChange={(checked) => {
+                  if (checked) {
+                    selectAspect(option.value);
+                  }
+                }}
+              >
+                <span className="flex min-w-0 flex-col items-center justify-center">{optionContent}</span>
+              </LayoutOptionToggle>
             );
           })}
         </div>
@@ -205,11 +228,12 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
           <span className="mb-1.5 block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
             {t("imageSize.customAspect")}
           </span>
-          <input
+          <LayoutTextInput
             value={customAspectDraft}
             onChange={(event) => updateCustomAspect(event.target.value)}
             disabled={disabled}
-            className="pf-input-compact w-full disabled:bg-slate-100 dark:disabled:bg-slate-950"
+            size="compact"
+            className="w-full disabled:bg-slate-100 dark:disabled:bg-slate-950"
             placeholder="4:5"
           />
           <span
@@ -236,26 +260,32 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
             {resolutionOptions.map((option) => {
               const active = option.value === normalizedValue;
               const display = getImageSizePresetDisplay(option, locale);
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(option.value);
-                  }}
-                  disabled={disabled}
-                  title={formatImageSizeValue(option.value)}
-                  className={`flex h-20 flex-col items-center justify-center rounded-lg border px-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                    active
-                      ? "border-slate-900 bg-slate-50 text-slate-900 ring-2 ring-slate-900/10 dark:border-slate-100 dark:bg-slate-100/10 dark:text-slate-50 dark:ring-slate-100/20"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-950/62 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100"
-                  }`}
-                >
+              const optionContent = (
+                <>
                   <span className="text-sm font-black">{display.tierLabel}</span>
                   <span className="mt-1 text-[10px] font-medium text-slate-400 dark:text-slate-500">
                     {display.dimensionLabel}
                   </span>
-                </button>
+                </>
+              );
+              return (
+                <LayoutOptionToggle
+                  key={option.value}
+                  checked={active}
+                  disabled={disabled}
+                  layout="card"
+                  selectionMode="single"
+                  name={resolutionGroupName}
+                  title={formatImageSizeValue(option.value)}
+                  className="h-20 w-full items-center justify-center px-2 py-2 text-center text-xs font-semibold"
+                  onChange={(checked) => {
+                    if (checked) {
+                      onChange(option.value);
+                    }
+                  }}
+                >
+                  <span className="flex min-w-0 flex-col items-center justify-center">{optionContent}</span>
+                </LayoutOptionToggle>
               );
             })}
           </div>
@@ -275,13 +305,14 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
             <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
               {t("imageSize.width")}
             </span>
-            <input
+            <LayoutTextInput
               value={width}
               inputMode="numeric"
               pattern="[0-9]*"
               onChange={(event) => updateCustom(event.target.value, height)}
               disabled={disabled}
-              className="pf-input-compact px-2 text-xs disabled:bg-slate-100 dark:disabled:bg-slate-950"
+              size="compact"
+              className="px-2 text-xs disabled:bg-slate-100 dark:disabled:bg-slate-950"
               placeholder="2048"
             />
           </label>
@@ -290,13 +321,14 @@ export function ImageSizePicker({ value, presets, onChange, disabled = false, ma
             <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
               {t("imageSize.height")}
             </span>
-            <input
+            <LayoutTextInput
               value={height}
               inputMode="numeric"
               pattern="[0-9]*"
               onChange={(event) => updateCustom(width, event.target.value)}
               disabled={disabled}
-              className="pf-input-compact px-2 text-xs disabled:bg-slate-100 dark:disabled:bg-slate-950"
+              size="compact"
+              className="px-2 text-xs disabled:bg-slate-100 dark:disabled:bg-slate-950"
               placeholder="2048"
             />
           </label>

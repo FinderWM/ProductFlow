@@ -7,7 +7,13 @@ from fastapi.testclient import TestClient
 from helpers import _execute_workflow_queue_inline, _login
 from sqlalchemy import select
 
-from inspiration_one_backend.domain.rbac import API_ENHANCE_GENERATE, API_ENHANCE_READ, API_GALLERY_TAGS_MANAGE
+from inspiration_one_backend.domain.rbac import (
+    API_ENHANCE_GENERATE,
+    API_ENHANCE_READ,
+    API_GALLERY_TAGS_MANAGE,
+    API_IMAGE_TO_CODE_GENERATE,
+    API_IMAGE_TO_CODE_READ,
+)
 from inspiration_one_backend.infrastructure.db.models import (
     DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     AuthRole,
@@ -204,12 +210,15 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
         "inspirations",
         "image_chat",
         "enhance",
+        "image_to_code",
         "gallery",
         "status",
         "usage_stats",
     }
     assert API_ENHANCE_READ in payload["api_permissions"]
     assert API_ENHANCE_GENERATE in payload["api_permissions"]
+    assert API_IMAGE_TO_CODE_READ in payload["api_permissions"]
+    assert API_IMAGE_TO_CODE_GENERATE in payload["api_permissions"]
     assert "resource_library:read" not in payload["api_permissions"]
     assert "resource_library:write" not in payload["api_permissions"]
     assert API_GALLERY_TAGS_MANAGE not in payload["api_permissions"]
@@ -239,6 +248,7 @@ def test_default_user_role_excludes_settings_and_rbac_permissions(configured_env
 
     generation_options = user_client.get("/api/settings/generation-config-options")
     assert generation_options.status_code == 200
+    assert all("provider_max_dimension" in item for item in generation_options.json())
 
     settings = user_client.get("/api/settings")
     assert settings.status_code == 403
@@ -423,6 +433,7 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
         lower_group_id,
         DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     ]
+    assert all("image_max_dimension" in group for group in admin_groups.json())
 
     created_user = admin_client.post(
         "/api/rbac/users",
@@ -472,6 +483,7 @@ def test_admin_can_grant_generation_resource_groups_to_user(configured_env: Path
     after_grant = user_client.get("/api/settings/my-generation-resource-groups")
     assert after_grant.status_code == 200
     assert [group["id"] for group in after_grant.json()] == [group_id, lower_group_id]
+    assert all("image_max_dimension" in group for group in after_grant.json())
 
     granted_user_page = admin_client.get(
         "/api/rbac/users",

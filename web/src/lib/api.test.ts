@@ -3,6 +3,42 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, resourceGroupMaxDimension } from "./api";
 import type { GenerationConfig } from "./types";
 
+function generationConfig(overrides: Partial<GenerationConfig> & Pick<GenerationConfig, "id" | "purpose">): GenerationConfig {
+  const resourceGroupId =
+    "resource_group_id" in overrides ? (overrides.resource_group_id ?? null) : "group-default";
+  const resourceGroupIds =
+    "resource_group_ids" in overrides
+      ? (overrides.resource_group_ids ?? [])
+      : resourceGroupId
+        ? [resourceGroupId]
+        : [];
+  return {
+    id: overrides.id,
+    resource_group_id: resourceGroupId,
+    resource_group_ids: resourceGroupIds,
+    purpose: overrides.purpose,
+    name: overrides.name ?? `${overrides.purpose} config`,
+    provider_kind: overrides.provider_kind ?? "openai_images",
+    provider_profile_id: overrides.provider_profile_id ?? "provider-1",
+    model_settings: overrides.model_settings ?? {},
+    config: overrides.config ?? {},
+    priority: overrides.priority ?? 100,
+    max_concurrency: overrides.max_concurrency ?? 1,
+    enabled: overrides.enabled ?? true,
+    effective_enabled: overrides.effective_enabled ?? overrides.enabled ?? true,
+    availability_window_minutes: overrides.availability_window_minutes ?? 10,
+    failure_threshold: overrides.failure_threshold ?? 3,
+    cooldown_minutes: overrides.cooldown_minutes ?? 10,
+    archived_at: overrides.archived_at ?? null,
+    created_at: overrides.created_at ?? "2024-01-01T00:00:00Z",
+    updated_at: overrides.updated_at ?? "2024-01-01T00:00:00Z",
+    state: overrides.state ?? null,
+    today_stat: overrides.today_stat ?? null,
+    latest_test_result: overrides.latest_test_result ?? null,
+    provider_max_dimension: overrides.provider_max_dimension ?? null,
+  };
+}
+
 function inspirationDetailResponse() {
   return new Response(
     JSON.stringify({
@@ -46,6 +82,7 @@ describe("api.createInspiration", () => {
       initial_workflow_entry: "copy",
       entry_text: "顺滑磁吸结构",
       file: image,
+      image_source_asset_id: "resource-asset-1",
       contextDocumentFile: documentFile,
     });
 
@@ -59,7 +96,27 @@ describe("api.createInspiration", () => {
     expect(body.get("entry_text")).toBe("顺滑磁吸结构");
     expect(body.get("dynamic_fields_json")).toBe(JSON.stringify({ magnetic: true, level: 3, note: null }));
     expect(body.get("image")).toBe(image);
+    expect(body.get("image_source_asset_id")).toBe("resource-asset-1");
     expect(body.get("context_document")).toBe(documentFile);
+  });
+});
+
+describe("api.getConfig", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("appends the active settings section when requesting runtime config", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await api.getConfig({ section: "queue" });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/settings?section=queue");
   });
 });
 
@@ -165,81 +222,56 @@ describe("api.getCurrentWeather", () => {
 
 describe("resourceGroupMaxDimension", () => {
   const mockConfigs: GenerationConfig[] = [
-    {
+    generationConfig({
       id: "config-1",
       resource_group_id: "group-a",
       resource_group_ids: ["group-a"],
       purpose: "image",
       name: "Config 1024",
-      provider_kind: "openai_images",
-      provider_profile_id: "provider-1",
       provider_max_dimension: 1024,
       model_settings: { model: "dall-e-3" },
-      config: {},
-      enabled: true,
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-01T00:00:00Z",
-    },
-    {
+    }),
+    generationConfig({
       id: "config-2",
       resource_group_id: "group-a",
       resource_group_ids: ["group-a"],
       purpose: "image",
       name: "Config 2048",
-      provider_kind: "openai_images",
       provider_profile_id: "provider-2",
       provider_max_dimension: 2048,
       model_settings: { model: "dall-e-3" },
-      config: {},
-      enabled: true,
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-01T00:00:00Z",
-    },
-    {
+    }),
+    generationConfig({
       id: "config-3",
       resource_group_id: "group-a",
       resource_group_ids: ["group-a"],
       purpose: "image",
       name: "Config 3840",
-      provider_kind: "openai_images",
       provider_profile_id: "provider-3",
       provider_max_dimension: 3840,
       model_settings: { model: "dall-e-3" },
-      config: {},
-      enabled: true,
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-01T00:00:00Z",
-    },
-    {
+    }),
+    generationConfig({
       id: "config-4",
       resource_group_id: "group-b",
       resource_group_ids: ["group-b"],
       purpose: "image",
       name: "Config 4096",
-      provider_kind: "openai_images",
       provider_profile_id: "provider-4",
       provider_max_dimension: 4096,
       model_settings: { model: "dall-e-3" },
-      config: {},
-      enabled: true,
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-01T00:00:00Z",
-    },
-    {
+    }),
+    generationConfig({
       id: "config-5",
       resource_group_id: "group-a",
       resource_group_ids: ["group-a"],
       purpose: "image",
       name: "Config Disabled",
-      provider_kind: "openai_images",
       provider_profile_id: "provider-5",
       provider_max_dimension: 8192,
       model_settings: { model: "dall-e-3" },
-      config: {},
       enabled: false,
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-01T00:00:00Z",
-    },
+    }),
   ];
 
   it("aggregates max dimension across multiple configs", () => {
@@ -269,6 +301,18 @@ describe("resourceGroupMaxDimension", () => {
     expect(result).toBe(3840);
   });
 
+  it("excludes effective disabled configs from aggregation", () => {
+    const result = resourceGroupMaxDimension(
+      [
+        { ...mockConfigs[0], resource_group_ids: ["group-a"], provider_max_dimension: 1024, effective_enabled: false },
+        { ...mockConfigs[1], resource_group_ids: ["group-a"], provider_max_dimension: 2048 },
+      ],
+      "group-a",
+      4096,
+    );
+    expect(result).toBe(2048);
+  });
+
   it("returns max from different resource group", () => {
     const result = resourceGroupMaxDimension(mockConfigs, "group-b", 3840);
     expect(result).toBe(4096);
@@ -296,5 +340,100 @@ describe("resourceGroupMaxDimension", () => {
     ];
     const result = resourceGroupMaxDimension(mixedConfigs, "group-a", 3840);
     expect(result).toBe(3840);
+  });
+});
+
+describe("image-to-code api helpers", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("serializes list filters into the image-to-code jobs query", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [], total: 0, limit: 20, offset: 40 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await api.listImageToCodeJobs({ limit: 20, offset: 40, status: "running" });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/api/image-to-code-jobs?limit=20&offset=40&status=running",
+    );
+  });
+
+  it("posts create payloads and hits cancel/retry detail endpoints", async () => {
+    const jobResponse = () =>
+      new Response(
+        JSON.stringify({
+          id: "job-1",
+          owner_user_id: "user-1",
+          source_kind: "resource_library_asset",
+          source_ref: "asset-1",
+          source_width: 1280,
+          source_height: 720,
+          source_mime_type: "image/png",
+          delivery_mode: "both",
+          params: {
+            page_type: "landing",
+            fidelity_mode: "balanced",
+            responsive_shell: true,
+            export_hd_preview: true,
+            notes: null,
+          },
+          status: "queued",
+          progress_phase: "queued",
+          progress_completed: 0,
+          progress_total: 4,
+          result_manifest: null,
+          last_error: null,
+          started_at: null,
+          finished_at: null,
+          created_at: "2026-07-03T10:00:00Z",
+          updated_at: "2026-07-03T10:00:00Z",
+        }),
+        {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jobResponse())
+      .mockResolvedValueOnce(jobResponse())
+      .mockResolvedValueOnce(jobResponse());
+
+    await api.createImageToCodeJob({
+      source_kind: "resource_library_asset",
+      source_ref: "asset-1",
+      delivery_mode: "both",
+      page_type: "landing",
+      fidelity_mode: "balanced",
+      responsive_shell: true,
+      export_hd_preview: true,
+      notes: "homepage",
+    });
+    await api.cancelImageToCodeJob("job-1");
+    await api.retryImageToCodeJob("job-1");
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/image-to-code-jobs");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({
+        source_kind: "resource_library_asset",
+        source_ref: "asset-1",
+        delivery_mode: "both",
+        page_type: "landing",
+        fidelity_mode: "balanced",
+        responsive_shell: true,
+        export_hd_preview: true,
+        notes: "homepage",
+      }),
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/api/image-to-code-jobs/job-1/cancel");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain("/api/image-to-code-jobs/job-1/retry");
+    expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
   });
 });

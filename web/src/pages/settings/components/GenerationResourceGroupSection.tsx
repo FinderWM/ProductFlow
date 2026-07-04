@@ -4,7 +4,9 @@ import { useId, useState } from "react";
 
 import { Loader2, Plus, Save, Trash2, X } from "lucide-react";
 
+import { ClassicTextInput, ClassicTextarea } from "../../../components/classicInputs";
 import { ModalShell } from "../../../components/ModalShell";
+import { WorkspaceTextInput, WorkspaceTextarea } from "../../../components/workspaceInputs";
 import { useI18n } from "../../../lib/preferences";
 import type { GenerationConfig, GenerationResourceGroup } from "../../../lib/types";
 import { settingsGenerationResourceGroupsInApiOrder } from "../providerForm";
@@ -17,14 +19,10 @@ import {
 } from "../resourceGroups";
 import { SettingsFormField } from "./SettingsFormField";
 import {
-  INPUT_CLASS,
   PANEL_CLASS,
   SETTINGS_BORDERED_MODULE_CLASS,
-  SETTINGS_DANGER_ICON_ACTION_CLASS,
   SETTINGS_FIELD_CARD_CLASS,
-  SETTINGS_ICON_ACTION_CLASS,
-  SETTINGS_MAIN_ACTION_CLASS,
-  TEXTAREA_CLASS,
+  useSettingsActionClassNames,
 } from "./styles";
 import { SettingsOptionToggle, SettingsSwitchToggle } from "./Toggles";
 
@@ -46,6 +44,7 @@ interface GenerationResourceGroupSectionProps {
   pending: boolean;
   archivingGroupId: string | null;
   canWrite: boolean;
+  workspaceSubpage?: boolean;
   onChange: (key: string, next: GenerationResourceGroupDraft) => void;
   onSave: (draft: GenerationResourceGroupDraft, options?: GenerationResourceGroupSaveOptions) => void;
   onArchive: (groupId: string) => void;
@@ -58,11 +57,13 @@ export function GenerationResourceGroupSection({
   pending,
   archivingGroupId,
   canWrite,
+  workspaceSubpage = false,
   onChange,
   onSave,
   onArchive,
 }: GenerationResourceGroupSectionProps) {
   const { t } = useI18n();
+  const { SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const activeGroups = settingsGenerationResourceGroupsInApiOrder(groups);
   const activeGenerationConfigs = generationConfigs.filter((config) => !config.archived_at);
@@ -106,6 +107,7 @@ export function GenerationResourceGroupSection({
             counts={counts}
             pending={pending || archivingGroupId === group?.id}
             canWrite={canWrite}
+            workspaceSubpage={workspaceSubpage}
             onChange={(next) => onChange(generationResourceGroupDraftKey(next), next)}
             onSave={() => onSave(draft)}
             onArchive={group ? () => onArchive(group.id) : undefined}
@@ -117,6 +119,7 @@ export function GenerationResourceGroupSection({
         draft={newDraft}
         pending={pending}
         canWrite={canWrite}
+        workspaceSubpage={workspaceSubpage}
         onChange={(next) => onChange(newDraftKey, next)}
         onSave={() => {
           onSave(newDraft, {
@@ -143,6 +146,7 @@ interface GenerationResourceGroupCreateDialogProps {
   draft: GenerationResourceGroupDraft;
   pending: boolean;
   canWrite: boolean;
+  workspaceSubpage?: boolean;
   onChange: (next: GenerationResourceGroupDraft) => void;
   onSave: () => void;
   onClose: () => void;
@@ -153,11 +157,13 @@ function GenerationResourceGroupCreateDialog({
   draft,
   pending,
   canWrite,
+  workspaceSubpage = false,
   onChange,
   onSave,
   onClose,
 }: GenerationResourceGroupCreateDialogProps) {
   const { t } = useI18n();
+  const { SETTINGS_ICON_ACTION_CLASS } = useSettingsActionClassNames();
   const titleId = useId();
 
   if (!open) {
@@ -200,6 +206,7 @@ function GenerationResourceGroupCreateDialog({
             counts={{ text: 0, image: 0 }}
             pending={pending}
             canWrite={canWrite}
+            workspaceSubpage={workspaceSubpage}
             onChange={onChange}
             onSave={onSave}
           />
@@ -214,6 +221,7 @@ interface GenerationResourceGroupCardProps {
   counts: { text: number; image: number };
   pending: boolean;
   canWrite: boolean;
+  workspaceSubpage?: boolean;
   onChange: (next: GenerationResourceGroupDraft) => void;
   onSave: () => void;
   onArchive?: () => void;
@@ -225,11 +233,13 @@ function GenerationResourceGroupCard({
   counts,
   pending,
   canWrite,
+  workspaceSubpage = false,
   onChange,
   onSave,
   onArchive,
 }: GenerationResourceGroupCardProps) {
   const { t } = useI18n();
+  const { SETTINGS_DANGER_ICON_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const isNew = !group;
 
   return (
@@ -274,42 +284,82 @@ function GenerationResourceGroupCard({
 
       <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_120px]">
         <SettingsFormField label={t("settings.resourceGroup.key")}>
-          <input
-            value={draft.key}
-            disabled={!canWrite}
-            onChange={(event) => onChange({ ...draft, key: event.target.value })}
-            className={INPUT_CLASS}
-            placeholder={t("settings.resourceGroup.keyPlaceholder")}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.key}
+              disabled={!canWrite}
+              onChange={(event) => onChange({ ...draft, key: event.target.value })}
+              size="tall"
+              placeholder={t("settings.resourceGroup.keyPlaceholder")}
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.key}
+              disabled={!canWrite}
+              onChange={(event) => onChange({ ...draft, key: event.target.value })}
+              size="tall"
+              placeholder={t("settings.resourceGroup.keyPlaceholder")}
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.resourceGroup.name")}>
-          <input
-            value={draft.name}
-            disabled={!canWrite}
-            onChange={(event) => onChange({ ...draft, name: event.target.value })}
-            className={INPUT_CLASS}
-            placeholder={t("settings.resourceGroup.namePlaceholder")}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.name}
+              disabled={!canWrite}
+              onChange={(event) => onChange({ ...draft, name: event.target.value })}
+              size="tall"
+              placeholder={t("settings.resourceGroup.namePlaceholder")}
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.name}
+              disabled={!canWrite}
+              onChange={(event) => onChange({ ...draft, name: event.target.value })}
+              size="tall"
+              placeholder={t("settings.resourceGroup.namePlaceholder")}
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.resourceGroup.sortOrder")}>
-          <input
-            value={draft.sort_order}
-            disabled={!canWrite}
-            onChange={(event) => onChange({ ...draft, sort_order: event.target.value })}
-            className={INPUT_CLASS}
-            type="number"
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.sort_order}
+              disabled={!canWrite}
+              onChange={(event) => onChange({ ...draft, sort_order: event.target.value })}
+              size="tall"
+              type="number"
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.sort_order}
+              disabled={!canWrite}
+              onChange={(event) => onChange({ ...draft, sort_order: event.target.value })}
+              size="tall"
+              type="number"
+            />
+          )}
         </SettingsFormField>
       </div>
       <div className="mt-3">
         <SettingsFormField label={t("settings.resourceGroup.descriptionLabel")}>
-          <textarea
-            value={draft.description}
-            disabled={!canWrite}
-            onChange={(event) => onChange({ ...draft, description: event.target.value })}
-            className={`${TEXTAREA_CLASS} min-h-20 resize-y`}
-            placeholder={t("settings.resourceGroup.descriptionPlaceholder")}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextarea
+              value={draft.description}
+              disabled={!canWrite}
+              onChange={(event) => onChange({ ...draft, description: event.target.value })}
+              className="min-h-20"
+              placeholder={t("settings.resourceGroup.descriptionPlaceholder")}
+            />
+          ) : (
+            <ClassicTextarea
+              value={draft.description}
+              disabled={!canWrite}
+              onChange={(event) => onChange({ ...draft, description: event.target.value })}
+              className="min-h-20"
+              placeholder={t("settings.resourceGroup.descriptionPlaceholder")}
+            />
+          )}
         </SettingsFormField>
       </div>
 
@@ -318,6 +368,7 @@ function GenerationResourceGroupCard({
           <SettingsSwitchToggle
             checked={draft.enabled}
             disabled={!canWrite}
+            workspaceSubpage={workspaceSubpage}
             onChange={(enabled) => onChange({ ...draft, enabled })}
           >
             {t("settings.resourceGroup.enabled")}
@@ -325,6 +376,7 @@ function GenerationResourceGroupCard({
           <SettingsOptionToggle
             checked={draft.blur_images_by_default}
             disabled={!canWrite}
+            workspaceSubpage={workspaceSubpage}
             onChange={(blur_images_by_default) => onChange({ ...draft, blur_images_by_default })}
           >
             {t("settings.resourceGroup.blurImagesByDefault")}

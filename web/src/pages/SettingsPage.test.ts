@@ -7,13 +7,16 @@ import {
   clearTextConfigJsonResponseFormatTestRecord,
   clearTextConfigTestRecord,
   draftsFromConfig,
+  filterConfigResponseForSettingsSection,
   filterProviderModels,
   filterProviderProfiles,
   archiveFailureMessage,
+  isSettingsSectionPathname,
   isLoginPageMode,
   isLoginPageTemplateId,
   loginPageTemplateConfigItem,
   loginPageTemplateIdFromConfigKey,
+  SETTINGS_DEFAULT_SECTION_ID,
   type GenerationConfigDraft,
   generationConfigDraft as generationConfigDraftFromConfig,
   generationConfigDraftAfterProviderProfileSelection,
@@ -45,6 +48,9 @@ import {
   providerUsageFromGenerationConfigs,
   providerUsageLabelKeys,
   parseLoginPageTemplateConfigDraft,
+  runtimeConfigSectionForSettingsSection,
+  settingsPathForSection,
+  settingsSectionFromPathSegment,
   serializeLoginPageTemplateConfigDraft,
   settingsSectionIds,
   settingsGenerationResourceGroupsInApiOrder,
@@ -105,6 +111,8 @@ function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProf
     name: overrides.name ?? "OpenRouter",
     provider_type: overrides.provider_type ?? "openai_compatible",
     base_url: "base_url" in overrides ? (overrides.base_url ?? null) : "https://openrouter.ai/api/v1",
+    api_key_preview:
+      "api_key_preview" in overrides ? (overrides.api_key_preview ?? null) : overrides.has_api_key === false ? null : "opena*****main1",
     capabilities: overrides.capabilities ?? ["text_responses", "image_images"],
     default_models: overrides.default_models ?? {},
     config: overrides.config ?? {},
@@ -148,6 +156,7 @@ function generationConfig(overrides: Partial<GenerationConfig> & Pick<Generation
     state: overrides.state ?? null,
     today_stat: overrides.today_stat ?? null,
     latest_test_result: overrides.latest_test_result ?? null,
+    provider_max_dimension: overrides.provider_max_dimension ?? null,
   };
 }
 
@@ -207,6 +216,7 @@ function generationResourceGroup(overrides: Partial<GenerationResourceGroup> = {
     description: overrides.description ?? null,
     sort_order: overrides.sort_order ?? 0,
     enabled: overrides.enabled ?? true,
+    image_max_dimension: overrides.image_max_dimension ?? null,
     blur_images_by_default: overrides.blur_images_by_default ?? false,
     archived_at: overrides.archived_at ?? null,
     created_at: overrides.created_at ?? "2026-05-13T00:00:00Z",
@@ -311,6 +321,70 @@ describe("SettingsPage generation config latest test result helpers", () => {
 });
 
 describe("SettingsPage draft helpers", () => {
+  it("maps settings sections to runtime-config query sections only when needed", () => {
+    expect(runtimeConfigSectionForSettingsSection("prompts")).toBe("prompts");
+    expect(runtimeConfigSectionForSettingsSection("upload")).toBe("upload");
+    expect(runtimeConfigSectionForSettingsSection("queue")).toBe("queue");
+    expect(runtimeConfigSectionForSettingsSection("layoutAppearance")).toBe("layoutAppearance");
+    expect(runtimeConfigSectionForSettingsSection("loginPage")).toBe("loginPage");
+    expect(runtimeConfigSectionForSettingsSection("security")).toBe("security");
+    expect(runtimeConfigSectionForSettingsSection("providers")).toBeNull();
+    expect(runtimeConfigSectionForSettingsSection("weather")).toBeNull();
+    expect(runtimeConfigSectionForSettingsSection("migration")).toBeNull();
+  });
+
+  it("maps settings submenus to stable route paths", () => {
+    expect(SETTINGS_DEFAULT_SECTION_ID).toBe("providers");
+    expect(settingsPathForSection("providers")).toBe("/settings/providers");
+    expect(settingsPathForSection("resourceGroups")).toBe("/settings/resource-groups");
+    expect(settingsPathForSection("globalTemplates")).toBe("/settings/global-templates-hub");
+    expect(settingsSectionFromPathSegment("providers")).toBe("providers");
+    expect(settingsSectionFromPathSegment("resource-groups")).toBe("resourceGroups");
+    expect(settingsSectionFromPathSegment("global-templates-hub")).toBe("globalTemplates");
+    expect(settingsSectionFromPathSegment("global-templates")).toBeNull();
+    expect(isSettingsSectionPathname("/settings")).toBe(true);
+    expect(isSettingsSectionPathname("/settings/providers")).toBe(true);
+    expect(isSettingsSectionPathname("/settings/resource-groups")).toBe(true);
+    expect(isSettingsSectionPathname("/settings/global-templates")).toBe(false);
+    expect(isSettingsSectionPathname("/settings/unknown")).toBe(false);
+  });
+
+  it("filters runtime config responses to the active settings submenu", () => {
+    const config = configResponse([
+      configItem({ key: "prompt_brief_system", category: "提示词", value: "brief" }),
+      configItem({ key: "poster_generation_mode", category: "海报与上传", value: "template" }),
+      configItem({ key: "image_tool_model", category: "图片工具参数", value: "" }),
+      configItem({
+        key: "text_generation_max_concurrent_tasks",
+        category: "全局生成配置 / 队列容量",
+        value: 3,
+      }),
+      configItem({ key: "ui_layout_scheme", category: "界面与外观", value: "classic" }),
+      configItem({ key: "login_page_mode", category: "登录页", value: "random" }),
+      configItem({ key: "auth_session_ttl_minutes", category: "安全与运维", value: 4320 }),
+    ]);
+
+    expect(filterConfigResponseForSettingsSection(config, "prompts").items.map((item) => item.key)).toEqual([
+      "prompt_brief_system",
+    ]);
+    expect(filterConfigResponseForSettingsSection(config, "upload").items.map((item) => item.key)).toEqual([
+      "poster_generation_mode",
+      "image_tool_model",
+    ]);
+    expect(filterConfigResponseForSettingsSection(config, "queue").items.map((item) => item.key)).toEqual([
+      "text_generation_max_concurrent_tasks",
+    ]);
+    expect(filterConfigResponseForSettingsSection(config, "layoutAppearance").items.map((item) => item.key)).toEqual([
+      "ui_layout_scheme",
+    ]);
+    expect(filterConfigResponseForSettingsSection(config, "loginPage").items.map((item) => item.key)).toEqual([
+      "login_page_mode",
+    ]);
+    expect(filterConfigResponseForSettingsSection(config, "security").items.map((item) => item.key)).toEqual([
+      "auth_session_ttl_minutes",
+    ]);
+  });
+
   it("documents every supported prompt placeholder in settings help", () => {
     const t = (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) =>
       translate("zh-CN", key, params);
@@ -722,6 +796,9 @@ describe("SettingsPage provider profile helpers", () => {
         api_key: "",
         capabilities: ["text_responses", "image_images"],
         enabled: true,
+        image_max_dimension: null,
+        image_max_dimension_mode: "preset",
+        image_max_dimension_custom_value: "",
       },
     });
   });
@@ -751,6 +828,7 @@ describe("SettingsPage provider profile helpers", () => {
       name: "Custom",
       base_url: null,
       capabilities: ["text_responses", "image_responses"],
+      config: { capabilities: { image_max_dimension: 3072 } },
       enabled: false,
       has_api_key: true,
     });
@@ -765,6 +843,9 @@ describe("SettingsPage provider profile helpers", () => {
         api_key: "",
         capabilities: ["text_responses", "image_responses"],
         enabled: false,
+        image_max_dimension: 3072,
+        image_max_dimension_mode: "preset",
+        image_max_dimension_custom_value: "",
       },
     });
     expect(providerFormFromProfile(profile).api_key).toBe("");
@@ -789,6 +870,9 @@ describe("SettingsPage provider profile helpers", () => {
         api_key: "",
         capabilities: ["image_google_gemini"],
         enabled: true,
+        image_max_dimension: null,
+        image_max_dimension_mode: "preset",
+        image_max_dimension_custom_value: "",
       },
     });
   });
@@ -801,6 +885,9 @@ describe("SettingsPage provider profile helpers", () => {
       api_key: "",
       capabilities: ["text_responses", "image_images"] as ProviderCapability[],
       enabled: true,
+      image_max_dimension: 2048,
+      image_max_dimension_mode: "preset" as const,
+      image_max_dimension_custom_value: "",
     };
 
     expect(providerProfileCreatePayload(form)).toEqual({
@@ -810,6 +897,11 @@ describe("SettingsPage provider profile helpers", () => {
       api_key: null,
       capabilities: ["text_responses", "image_images"],
       enabled: true,
+      config: {
+        capabilities: {
+          image_max_dimension: 2048,
+        },
+      },
     });
     expect(providerProfileUpdatePayload(form)).toEqual({
       name: "OpenRouter",
@@ -818,6 +910,11 @@ describe("SettingsPage provider profile helpers", () => {
       api_key: "",
       capabilities: ["text_responses", "image_images"],
       enabled: true,
+      config: {
+        capabilities: {
+          image_max_dimension: 2048,
+        },
+      },
     });
   });
 
@@ -829,6 +926,9 @@ describe("SettingsPage provider profile helpers", () => {
       api_key: "  google-key  ",
       capabilities: ["image_google_gemini"] as ProviderCapability[],
       enabled: true,
+      image_max_dimension: null,
+      image_max_dimension_mode: "preset" as const,
+      image_max_dimension_custom_value: "",
     };
 
     expect(providerProfileCreatePayload(form)).toEqual({
@@ -838,6 +938,11 @@ describe("SettingsPage provider profile helpers", () => {
       api_key: "google-key",
       capabilities: ["image_google_gemini"],
       enabled: true,
+      config: {
+        capabilities: {
+          image_max_dimension: null,
+        },
+      },
     });
     expect(providerProfileUpdatePayload(form)).toEqual({
       name: "Gemini",
@@ -846,6 +951,11 @@ describe("SettingsPage provider profile helpers", () => {
       api_key: "  google-key  ",
       capabilities: ["image_google_gemini"],
       enabled: true,
+      config: {
+        capabilities: {
+          image_max_dimension: null,
+        },
+      },
     });
   });
 

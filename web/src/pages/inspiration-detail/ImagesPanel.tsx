@@ -1,4 +1,8 @@
-import { Image as ImageIcon, Loader2, Save, X } from "lucide-react";
+import { Image as ImageIcon, Save, X } from "lucide-react";
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import {
   isResourceBlocked,
   ResourceBlockedNotice,
@@ -32,6 +36,7 @@ interface ImagesPanelProps {
   fillBlockedTitle?: string | null;
   resourceLibraryWriteDisabledTitle?: string | null;
   savingResourceLibrarySourceId?: string | null;
+  workspaceSubpage?: boolean;
 }
 
 export function ImagesPanel({
@@ -54,8 +59,11 @@ export function ImagesPanel({
   fillBlockedTitle = null,
   resourceLibraryWriteDisabledTitle = null,
   savingResourceLibrarySourceId = null,
+  workspaceSubpage = false,
 }: ImagesPanelProps) {
   const { t } = useI18n();
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const PageActionButton = actionButtonComponentForAppearance(actionAppearance);
   const canFillReference = Boolean(selectedReferenceNode);
   const inspirationBlocked = isResourceBlocked(inspiration);
   const selectedReferenceLabel = selectedReferenceNode ? workflowNodeDisplayTitle(selectedReferenceNode, t) : "";
@@ -83,15 +91,14 @@ export function ImagesPanel({
                   {artifactCount ? t("detail.downloadableCount", { count: artifactCount }) : t("detail.waitingAssets")}
                 </div>
               </div>
-              <button
-                type="button"
+              <PageActionButton
                 onClick={onClose}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                preset="secondary"
+                size="icon-md"
                 aria-label={t("resourceLibrary.close")}
                 title={t("resourceLibrary.close")}
-              >
-                <X size={18} />
-              </button>
+                leadingIcon={<X size={18} />}
+              />
             </div>
 
             <div className="shrink-0 border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/35 sm:px-5">
@@ -119,6 +126,7 @@ export function ImagesPanel({
                 <PosterThumb
                   poster={poster}
                   inspirationName={inspiration.name}
+                  appearance={actionAppearance}
                   onPreview={onPreviewImage}
                   onUseAsReference={
                     canFillReference
@@ -142,6 +150,7 @@ export function ImagesPanel({
                     disabled={!canSaveToResourceLibrary || posterBlocked || Boolean(resourceLibraryWriteDisabledTitle)}
                     saved={savedPosterIds.has(poster.id)}
                     title={resourceLibraryWriteDisabledTitle ?? t("resourceLibrary.saveToLibrary")}
+                    appearance={actionAppearance}
                     onClick={() => onSavePosterToResourceLibrary(poster)}
                   />
                 ) : null}
@@ -156,6 +165,7 @@ export function ImagesPanel({
                 <SourceAssetThumb
                   asset={asset}
                   inspiration={inspiration}
+                  appearance={actionAppearance}
                   onPreview={onPreviewImage}
                   onUseAsReference={
                     canFillReference
@@ -172,6 +182,7 @@ export function ImagesPanel({
                     disabled={!canSaveToResourceLibrary || assetBlocked || Boolean(resourceLibraryWriteDisabledTitle)}
                     saved={savedSourceAssetIds.has(asset.id)}
                     title={resourceLibraryWriteDisabledTitle ?? t("resourceLibrary.saveToLibrary")}
+                    appearance={actionAppearance}
                     onClick={() => onSaveSourceAssetToResourceLibrary(asset)}
                   />
                 ) : null}
@@ -195,26 +206,32 @@ function SaveToLibraryButton({
   disabled,
   saved,
   title,
+  appearance,
   onClick,
 }: {
   busy: boolean;
   disabled: boolean;
   saved: boolean;
   title: string;
+  appearance: LayoutActionAppearance;
   onClick: () => void;
 }) {
   const { t } = useI18n();
+  const ActionButton = actionButtonComponentForAppearance(appearance);
   return (
-    <button
-      type="button"
+    <ActionButton
       onClick={onClick}
       disabled={disabled || busy}
       title={title}
-      className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-3 text-xs font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+      preset="primary"
+      size="sm"
+      fullWidth
+      className="text-xs"
+      loading={busy}
+      leadingIcon={busy ? undefined : <Save size={14} />}
     >
-      {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
       {saved ? t("resourceLibrary.alreadyInLibrary") : t("resourceLibrary.saveToLibrary")}
-    </button>
+    </ActionButton>
   );
 }
 

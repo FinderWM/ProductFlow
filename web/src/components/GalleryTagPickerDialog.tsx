@@ -1,13 +1,16 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Check, Loader2, Tags, X } from "lucide-react";
 
-import { ModalShell } from "./ModalShell";
 import type { GalleryTag } from "../lib/types";
 import { useI18n } from "../lib/preferences";
+import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
+import { ModalShell } from "./ModalShell";
 
 interface GalleryTagPickerDialogProps {
   open: boolean;
+  appearance: LayoutActionAppearance;
   tags: GalleryTag[];
+  loading?: boolean;
   initialSelectedTagIds?: string[];
   title?: string;
   description?: string;
@@ -34,7 +37,9 @@ function uniqueExistingTagIds(tagIds: readonly string[], tags: readonly GalleryT
 
 export function GalleryTagPickerDialog({
   open,
+  appearance,
   tags,
+  loading = false,
   initialSelectedTagIds = [],
   title,
   description,
@@ -47,6 +52,7 @@ export function GalleryTagPickerDialog({
   onClose,
 }: GalleryTagPickerDialogProps) {
   const { t } = useI18n();
+  const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
   const titleId = useId();
   const descriptionId = useId();
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
@@ -109,21 +115,18 @@ export function GalleryTagPickerDialog({
   };
 
   const renderTagButton = (tag: GalleryTag, selected: boolean) => (
-    <button
+    <ActionButtonComponent
       key={tag.id}
-      type="button"
       onClick={() => (selected ? removeSelected(tag) : moveToSelected(tag))}
-      className={
-        selected
-          ? "inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg border border-slate-400 bg-slate-100 px-3 text-xs font-semibold text-slate-900 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-          : "inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800"
-      }
+      preset={selected ? "primary" : "secondary"}
+      size="sm"
+      leadingIcon={selected ? <Check size={13} /> : <Tags size={13} />}
+      trailingIcon={selected ? <X size={13} className="opacity-70" /> : undefined}
+      className="max-w-full min-w-0 [&_.pf-action-button__label]:truncate"
       title={tag.description || tag.name}
     >
-      {selected ? <Check size={13} className="shrink-0" /> : <Tags size={13} className="shrink-0" />}
-      <span className="min-w-0 truncate">{tag.name}</span>
-      {selected ? <X size={13} className="shrink-0 opacity-70" /> : null}
-    </button>
+      {tag.name}
+    </ActionButtonComponent>
   );
 
   const visibleError = localError || error;
@@ -154,15 +157,15 @@ export function GalleryTagPickerDialog({
             {dialogDescription}
           </p>
         </div>
-        <button
-          type="button"
+        <ActionButtonComponent
           onClick={onClose}
           disabled={busy}
           aria-label={t("common.close")}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:opacity-60 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-slate-500"
-        >
-          <X size={16} />
-        </button>
+          title={t("common.close")}
+          preset="secondary"
+          size="icon-sm"
+          leadingIcon={<X size={16} />}
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         <section className="space-y-2">
@@ -177,7 +180,12 @@ export function GalleryTagPickerDialog({
             </div>
           </div>
           <div className="flex min-h-12 flex-wrap content-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-950/35">
-            {selectedTags.length ? (
+            {loading ? (
+              <span className="inline-flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500">
+                <Loader2 size={14} className="animate-spin" />
+                {t("app.loading")}
+              </span>
+            ) : selectedTags.length ? (
               selectedTags.map((tag) => renderTagButton(tag, true))
             ) : (
               <span className="text-sm text-slate-400 dark:text-slate-500">{t("gallery.tags.noneSelected")}</span>
@@ -189,7 +197,12 @@ export function GalleryTagPickerDialog({
             {t("gallery.tags.unselected")}
           </div>
           <div className="flex min-h-20 flex-wrap content-start gap-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950/20">
-            {unselectedTags.length ? (
+            {loading ? (
+              <span className="inline-flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500">
+                <Loader2 size={14} className="animate-spin" />
+                {t("app.loading")}
+              </span>
+            ) : unselectedTags.length ? (
               unselectedTags.map((tag) => renderTagButton(tag, false))
             ) : (
               <span className="text-sm text-slate-400 dark:text-slate-500">{t("gallery.tags.noAvailable")}</span>
@@ -203,23 +216,25 @@ export function GalleryTagPickerDialog({
         ) : null}
       </div>
       <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
-        <button
-          type="button"
+        <ActionButtonComponent
           onClick={onClose}
           disabled={busy}
-          className="pf-btn-secondary min-w-20"
+          preset="secondary"
+          size="md"
+          className="min-w-20"
         >
           {t("common.cancel")}
-        </button>
-        <button
-          type="button"
+        </ActionButtonComponent>
+        <ActionButtonComponent
           onClick={handleConfirm}
-          disabled={busy}
-          className="pf-btn-primary min-w-20"
+          disabled={loading}
+          loading={busy || loading}
+          preset="primary"
+          size="md"
+          className="min-w-20"
         >
-          {busy ? <Loader2 size={15} className="mr-2 animate-spin" /> : null}
           {dialogConfirmLabel}
-        </button>
+        </ActionButtonComponent>
       </div>
     </ModalShell>
   );

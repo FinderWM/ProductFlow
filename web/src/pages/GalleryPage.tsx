@@ -4,6 +4,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,12 +26,19 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+import { ClassicTextInput, ClassicTextarea } from "../components/classicInputs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
+import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
+import {
+  actionButtonComponentForAppearance,
+  transparentActionToneVars,
+} from "../components/layoutActionButtons";
 import { ModalShell } from "../components/ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges } from "../components/ResourceGovernance";
 import { TopNav } from "../components/TopNav";
+import { WorkspaceTextInput, WorkspaceTextarea } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { formatDateTime } from "../lib/format";
@@ -48,8 +56,9 @@ import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import { galleryEntryAspectRatio, galleryEntrySizeLabel, galleryTileLayout } from "./gallery/helpers";
 import { galleryAdminRemovedLabel } from "./gallery/moderation";
 
-const TAG_FILTER_MORE_BUTTON_WIDTH = 104;
 const TAG_FILTER_ROW_GAP = 8;
+const TAG_FILTER_BUTTON_MAX_WIDTH = 260;
+const TAG_FILTER_MORE_BUTTON_FALLBACK_WIDTH = 128;
 const GALLERY_GRID_ENTER_MS = 260;
 
 interface GalleryTagFormState {
@@ -58,36 +67,85 @@ interface GalleryTagFormState {
   priority: string;
 }
 
-function estimateGalleryTagButtonWidth(tag: GalleryTag): number {
-  return Math.min(260, Math.max(72, tag.name.length * 15 + 44));
+function estimateGalleryTagTextWidth(text: string): number {
+  return Array.from(text).reduce((width, character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return width + (codePoint <= 0x7f ? 7 : 14);
+  }, 0);
 }
 
-function visibleGalleryFilterTags(tags: GalleryTag[], availableWidth: number): GalleryTag[] {
-  if (!availableWidth || tags.length <= 1) {
-    return tags;
+function estimateGalleryTagButtonWidth(tag: GalleryTag, selected: boolean): number {
+  const chromeWidth = selected ? 68 : 52;
+  const minWidth = selected ? 88 : 72;
+  return Math.min(
+    TAG_FILTER_BUTTON_MAX_WIDTH,
+    Math.max(minWidth, estimateGalleryTagTextWidth(tag.name) + chromeWidth),
+  );
+}
+
+function galleryTagButtonWidth(
+  tag: GalleryTag,
+  selected: boolean,
+  measuredWidths: Readonly<Record<string, number>>,
+): number {
+  return measuredWidths[tag.id] ?? estimateGalleryTagButtonWidth(tag, selected);
+}
+
+function fitGalleryFilterTagCount(
+  tags: GalleryTag[],
+  availableWidth: number,
+  selectedTagIds: ReadonlySet<string>,
+  measuredWidths: Readonly<Record<string, number>>,
+): number {
+  if (availableWidth <= 0) {
+    return 0;
   }
-  const reservedWidth = TAG_FILTER_MORE_BUTTON_WIDTH + TAG_FILTER_ROW_GAP;
   let usedWidth = 0;
-  const visible: GalleryTag[] = [];
+  let visibleCount = 0;
   for (const tag of tags) {
-    const nextWidth = estimateGalleryTagButtonWidth(tag) + (visible.length ? TAG_FILTER_ROW_GAP : 0);
-    if (usedWidth + nextWidth > Math.max(120, availableWidth - reservedWidth)) {
+    const nextWidth =
+      galleryTagButtonWidth(tag, selectedTagIds.has(tag.id), measuredWidths) + (visibleCount ? TAG_FILTER_ROW_GAP : 0);
+    if (usedWidth + nextWidth > availableWidth) {
       break;
     }
-    visible.push(tag);
+    visibleCount += 1;
     usedWidth += nextWidth;
   }
-  return visible.length ? visible : tags.slice(0, 1);
+  return visibleCount;
 }
 
-function galleryTagChipClass(selected: boolean): string {
-  return selected
-    ? "inline-flex h-8 max-w-full shrink-0 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-800 transition hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-    : "inline-flex h-8 max-w-full shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/90 px-3 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-200 dark:hover:border-violet-400/45 dark:hover:bg-violet-500/10";
+function visibleGalleryFilterTags(
+  tags: GalleryTag[],
+  rowWidth: number,
+  moreButtonWidth: number,
+  selectedTagIds: ReadonlySet<string>,
+  measuredWidths: Readonly<Record<string, number>>,
+): GalleryTag[] {
+  if (!rowWidth || tags.length <= 1) {
+    return tags;
+  }
+  if (fitGalleryFilterTagCount(tags, rowWidth, selectedTagIds, measuredWidths) >= tags.length) {
+    return tags;
+  }
+  const tagSlotWidth = Math.max(0, rowWidth - moreButtonWidth - TAG_FILTER_ROW_GAP);
+  return tags.slice(0, fitGalleryFilterTagCount(tags, tagSlotWidth, selectedTagIds, measuredWidths));
+}
+
+function elementContentWidth(element: HTMLElement): number {
+  const styles = window.getComputedStyle(element);
+  const paddingLeft = Number.parseFloat(styles.paddingLeft) || 0;
+  const paddingRight = Number.parseFloat(styles.paddingRight) || 0;
+  return Math.max(0, element.clientWidth - paddingLeft - paddingRight);
 }
 
 function stringArraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function numericRecordsEqual(left: Readonly<Record<string, number>>, right: Readonly<Record<string, number>>): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) => left[key] === right[key]);
 }
 
 function galleryTagFormFromTag(tag?: GalleryTag | null): GalleryTagFormState {
@@ -176,7 +234,9 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   const [moderationError, setModerationError] = useState("");
   const [gridContentWidth, setGridContentWidth] = useState<number | null>(null);
   const [isDesktopGrid, setIsDesktopGrid] = useState(false);
-  const [tagFilterWidth, setTagFilterWidth] = useState(0);
+  const [tagFilterRowWidth, setTagFilterRowWidth] = useState(0);
+  const [tagFilterMoreWidth, setTagFilterMoreWidth] = useState(TAG_FILTER_MORE_BUTTON_FALLBACK_WIDTH);
+  const [tagFilterButtonWidths, setTagFilterButtonWidths] = useState<Record<string, number>>({});
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [tagFilterDialogOpen, setTagFilterDialogOpen] = useState(false);
   const [tagFilterError, setTagFilterError] = useState("");
@@ -192,7 +252,9 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   const [galleryVisibleTotal, setGalleryVisibleTotal] = useState(0);
   const [galleryGridHoldHeight, setGalleryGridHoldHeight] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const tagFilterRef = useRef<HTMLDivElement | null>(null);
+  const tagFilterRowRef = useRef<HTMLDivElement | null>(null);
+  const tagFilterTagMeasureRef = useRef<HTMLDivElement | null>(null);
+  const tagFilterMoreMeasureRef = useRef<HTMLButtonElement | null>(null);
   const tagManageTitleId = useId();
   const tagManageDescriptionId = useId();
   const canViewDisabledGallery = hasSessionApiPermission(session, API_RESOURCES_MODERATE);
@@ -242,16 +304,27 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   const galleryTags = galleryTagsQuery.data ?? [];
   const manageableGalleryTags = manageGalleryTagsQuery.data ?? [];
   const galleryTagsById = useMemo(() => new Map(galleryTags.map((tag) => [tag.id, tag])), [galleryTags]);
-  const selectedTags = selectedTagIds.flatMap((tagId) => {
-    const tag = galleryTagsById.get(tagId);
-    return tag ? [tag] : [];
-  });
+  const selectedTagIdSet = useMemo(() => new Set(selectedTagIds), [selectedTagIds]);
+  const selectedTags = useMemo(
+    () =>
+      selectedTagIds.flatMap((tagId) => {
+        const tag = galleryTagsById.get(tagId);
+        return tag ? [tag] : [];
+      }),
+    [galleryTagsById, selectedTagIds],
+  );
   const orderedFilterTags = useMemo(() => {
-    const selected = new Set(selectedTagIds);
-    return [...selectedTags, ...galleryTags.filter((tag) => !selected.has(tag.id))];
-  }, [galleryTags, selectedTagIds, selectedTags]);
-  const visibleFilterTags = visibleGalleryFilterTags(orderedFilterTags, tagFilterWidth);
+    return [...selectedTags, ...galleryTags.filter((tag) => !selectedTagIdSet.has(tag.id))];
+  }, [galleryTags, selectedTagIdSet, selectedTags]);
+  const visibleFilterTags = visibleGalleryFilterTags(
+    orderedFilterTags,
+    tagFilterRowWidth,
+    tagFilterMoreWidth,
+    selectedTagIdSet,
+    tagFilterButtonWidths,
+  );
   const hiddenFilterTagCount = Math.max(0, galleryTags.length - visibleFilterTags.length);
+  const tagFilterMoreMeasureCount = hiddenFilterTagCount > 0 ? hiddenFilterTagCount : Math.max(1, galleryTags.length);
 
   const captureGalleryGridHeight = () => {
     if (!galleryRevealReady && galleryGridHoldHeight != null) {
@@ -300,28 +373,68 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
     };
   }, []);
 
-  useEffect(() => {
-    const updateTagFilterWidth = () => {
-      if (tagFilterRef.current) {
-        setTagFilterWidth(tagFilterRef.current.clientWidth);
+  useLayoutEffect(() => {
+    const updateTagFilterMetrics = () => {
+      if (tagFilterRowRef.current) {
+        setTagFilterRowWidth(elementContentWidth(tagFilterRowRef.current));
+      }
+      if (tagFilterMoreMeasureRef.current) {
+        const measuredMoreWidth = Math.ceil(tagFilterMoreMeasureRef.current.getBoundingClientRect().width);
+        if (measuredMoreWidth > 0) {
+          setTagFilterMoreWidth(measuredMoreWidth);
+        }
+      }
+      if (tagFilterTagMeasureRef.current) {
+        const measuredButtonWidths = Array.from(
+          tagFilterTagMeasureRef.current.querySelectorAll<HTMLElement>("[data-gallery-filter-tag-measure]"),
+        ).reduce<Record<string, number>>((widths, element) => {
+          const tagId = element.dataset.galleryFilterTagMeasure;
+          const width = Math.ceil(element.getBoundingClientRect().width);
+          if (tagId && width > 0) {
+            widths[tagId] = width;
+          }
+          return widths;
+        }, {});
+        setTagFilterButtonWidths((current) =>
+          numericRecordsEqual(current, measuredButtonWidths) ? current : measuredButtonWidths,
+        );
       }
     };
 
-    updateTagFilterWidth();
-    window.addEventListener("resize", updateTagFilterWidth);
+    updateTagFilterMetrics();
+    window.addEventListener("resize", updateTagFilterMetrics);
 
-    const filterElement = tagFilterRef.current;
+    const rowElement = tagFilterRowRef.current;
+    const tagMeasureElement = tagFilterTagMeasureRef.current;
+    const moreMeasureElement = tagFilterMoreMeasureRef.current;
     const resizeObserver =
-      typeof ResizeObserver === "undefined" || !filterElement ? null : new ResizeObserver(updateTagFilterWidth);
-    if (filterElement) {
-      resizeObserver?.observe(filterElement);
+      typeof ResizeObserver === "undefined" || (!rowElement && !tagMeasureElement && !moreMeasureElement)
+        ? null
+        : new ResizeObserver(updateTagFilterMetrics);
+    if (rowElement) {
+      resizeObserver?.observe(rowElement);
+    }
+    if (tagMeasureElement) {
+      resizeObserver?.observe(tagMeasureElement);
+    }
+    if (moreMeasureElement) {
+      resizeObserver?.observe(moreMeasureElement);
     }
 
     return () => {
-      window.removeEventListener("resize", updateTagFilterWidth);
+      window.removeEventListener("resize", updateTagFilterMetrics);
       resizeObserver?.disconnect();
     };
-  }, []);
+  }, [
+    activeScheme,
+    galleryInitialError,
+    galleryInitialLoading,
+    orderedFilterTags,
+    locale,
+    mode,
+    selectedTagIdSet,
+    tagFilterMoreMeasureCount,
+  ]);
 
   useEffect(() => {
     if (!galleryTagsQuery.data) {
@@ -552,6 +665,20 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
         ? t("gallery.promptCopyFailed")
         : t("gallery.copyPrompt");
   const isWorkspaceManage = activeScheme === "workspace" && mode === "manage";
+  const galleryActionAppearance = isWorkspaceManage ? "workspace" : "classic";
+  const GalleryActionButton = actionButtonComponentForAppearance(galleryActionAppearance);
+  const galleryFilterRowClassName = isWorkspaceManage
+    ? "relative mx-auto mb-4 flex max-w-7xl items-center gap-2 overflow-hidden rounded-xl border border-white/10 bg-white/5 px-3 py-2 dark:border-white/10"
+    : "relative mx-auto mb-4 flex max-w-7xl items-center gap-2 overflow-hidden rounded-xl border border-slate-200 bg-white/85 px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/70";
+  const galleryFilterEmptyTextClassName = isWorkspaceManage
+    ? "text-sm font-medium text-white/55 dark:text-slate-400"
+    : "text-sm font-medium text-slate-500 dark:text-slate-400";
+  const galleryLoadingStateClassName = isWorkspaceManage
+    ? "mx-auto flex min-h-[320px] max-w-7xl items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-sm font-semibold text-white/70 dark:border-slate-700 dark:bg-slate-950/25 dark:text-slate-300"
+    : "mx-auto flex min-h-[320px] max-w-7xl items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-sm font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/30 dark:text-slate-300";
+  const galleryEmptyStateClassName = isWorkspaceManage
+    ? "mx-auto flex min-h-[320px] max-w-7xl flex-col items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-center text-sm text-white/65 dark:border-slate-700 dark:bg-slate-950/25 dark:text-slate-400"
+    : "mx-auto flex min-h-[320px] max-w-7xl flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-950/30 dark:text-slate-400";
 
   const handleClosePreview = () => {
     if (previewBaseAsset) {
@@ -630,36 +757,36 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   };
 
   const manageTagButton = canManageGalleryTags ? (
-    <button
+    <GalleryActionButton
       type="button"
       onClick={openTagManageDialog}
-      className={
-        isWorkspaceManage
-          ? "inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:hover:bg-slate-800"
-          : "inline-flex h-9 items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-3 text-sm font-semibold text-white transition hover:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 dark:border-white/10 dark:bg-white/10"
-      }
+      preset="secondary"
+      size="lg"
+      leadingIcon={<Tags size={15} />}
     >
-      <Tags size={15} />
       {t("gallery.tags.manage")}
-    </button>
+    </GalleryActionButton>
   ) : null;
 
   const previewTagFooter = canManageGalleryTags && previewEntry ? (
-    <button
+    <GalleryActionButton
       type="button"
       onClick={() => {
         setEntryTagEditorEntry(previewEntry);
         setEntryTagEditError("");
       }}
-      className="pf-workspace-action-secondary inline-flex h-9 w-full items-center justify-center rounded-xl border px-3 text-xs font-semibold transition-all"
+      preset="secondary"
+      size="md"
+      fullWidth
+      leadingIcon={<Pencil size={15} />}
     >
-      <Pencil size={15} className="mr-2" />
       {t("gallery.tags.editEntry")}
-    </button>
+    </GalleryActionButton>
   ) : null;
 
   const previewDialog = previewEntry ? (
     <GalleryImagePreviewDialog
+      appearance={galleryActionAppearance}
       ariaLabel={t("gallery.previewLabel")}
       imageUrl={api.toApiUrl(previewEntry.image.preview_url)}
       imageAlt={previewEntry.prompt ?? previewEntry.image.original_filename}
@@ -702,16 +829,16 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                     {promptCopyTitle}
                   </span>
                 ) : null}
-                <button
+                <GalleryActionButton
                   type="button"
                   onClick={handleCopyPreviewPrompt}
                   disabled={!previewEntry.prompt?.trim()}
                   title={promptCopyTitle}
                   aria-label={t("gallery.copyPrompt")}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-500 dark:hover:bg-violet-500/15 dark:hover:text-violet-100 dark:focus-visible:ring-violet-400"
-                >
-                  {promptCopyState === "copied" ? <Check size={14} /> : <Copy size={14} />}
-                </button>
+                  preset="secondary"
+                  size="icon-sm"
+                  leadingIcon={promptCopyState === "copied" ? <Check size={14} /> : <Copy size={14} />}
+                />
               </div>
             </div>
             <div className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800 dark:text-slate-200">
@@ -723,13 +850,15 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
               <div className="text-xs font-bold uppercase text-slate-400 dark:text-slate-500">{t("gallery.baseImages")}</div>
               <div className="mt-2 grid gap-2">
                 {previewEntry.base_assets.map((asset) => (
-                  <button
+                  <LayoutActionSurfaceButton
                     type="button"
                     key={asset.id}
+                    appearance={galleryActionAppearance}
+                    preset="secondary"
                     onClick={() => setPreviewBaseAsset(asset)}
                     title={t("gallery.baseImagePreviewLabel")}
                     aria-label={`${t("gallery.baseImagePreviewLabel")}: ${asset.original_filename}`}
-                    className="flex min-w-0 items-center gap-3 rounded-md border border-slate-200 bg-slate-50/80 p-2 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-800 dark:bg-slate-950/30 dark:hover:border-violet-400/40 dark:hover:bg-violet-500/10 dark:focus-visible:ring-violet-400"
+                    className="flex min-w-0 items-center gap-3 p-2 text-left"
                   >
                     <img
                       src={api.toApiUrl(asset.thumbnail_url)}
@@ -747,7 +876,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                       </div>
                       <ResourceMetaBadges resource={asset} className="mt-1" />
                     </div>
-                  </button>
+                  </LayoutActionSurfaceButton>
                 ))}
               </div>
             </section>
@@ -769,6 +898,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   ) : null;
   const baseAssetPreviewDialog = previewBaseAsset ? (
     <GalleryImagePreviewDialog
+      appearance={galleryActionAppearance}
       ariaLabel={t("gallery.baseImagePreviewLabel")}
       imageUrl={api.toApiUrl(previewBaseAsset.preview_url)}
       imageAlt={previewBaseAsset.original_filename}
@@ -865,60 +995,103 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
 
             <section className={isWorkspaceManage ? "pf-gallery-feed p-0" : "pf-gallery-feed px-4 py-8 sm:px-6 lg:px-10"}>
               {!isWorkspaceManage ? (
-              <div className="mx-auto mb-6 flex max-w-7xl flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
+              <div className="mx-auto mb-6 flex max-w-7xl flex-col gap-4 border-b border-slate-200 pb-5 dark:border-slate-800 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <div className="text-xs font-bold uppercase text-indigo-300">{t("gallery.feed")}</div>
-                  <h2 className="mt-2 text-2xl font-black text-white">{t("gallery.works")}</h2>
+                  <div className="text-xs font-bold uppercase text-indigo-600 dark:text-indigo-300">{t("gallery.feed")}</div>
+                  <h2 className="mt-2 text-2xl font-black text-slate-950 dark:text-white">{t("gallery.works")}</h2>
                 </div>
                 <div className="flex flex-col gap-3 sm:items-end">
-                  <div className="text-sm font-medium text-white/55">
+                  <div className="text-sm font-medium text-slate-500 dark:text-slate-400">
                     {t("gallery.count", { count: displayedGalleryTotal })}
                   </div>
                   {manageTagButton}
                 </div>
               </div>
               ) : null}
-              <div
-                ref={tagFilterRef}
-                className="mx-auto mb-4 flex max-w-7xl items-center gap-2 overflow-hidden rounded-xl border border-white/10 bg-white/5 px-3 py-2 dark:border-white/10"
-              >
+              <div ref={tagFilterRowRef} className={galleryFilterRowClassName}>
                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                  {visibleFilterTags.length ? (
+                  {galleryTags.length ? (
                     visibleFilterTags.map((tag) => {
                       const selected = selectedTagIds.includes(tag.id);
                       return (
-                        <button
+                        <GalleryActionButton
                           key={tag.id}
                           type="button"
+                          data-gallery-filter-tag="true"
                           onClick={() => toggleFilterTag(tag)}
                           title={tag.description || tag.name}
-                          className={galleryTagChipClass(selected)}
+                          preset={selected ? "primary" : "secondary"}
+                          size="sm"
+                          className="max-w-full shrink-0 px-3 [&_.pf-action-button__label]:min-w-0 [&_.pf-action-button__label]:truncate"
+                          style={{ maxWidth: TAG_FILTER_BUTTON_MAX_WIDTH }}
+                          leadingIcon={selected ? <Check size={13} /> : <Tags size={13} />}
+                          trailingIcon={selected ? <X size={13} className="opacity-70" /> : undefined}
                         >
-                          {selected ? <Check size={13} className="shrink-0" /> : <Tags size={13} className="shrink-0" />}
-                          <span className="min-w-0 truncate">{tag.name}</span>
-                          {selected ? <X size={13} className="shrink-0 opacity-70" /> : null}
-                        </button>
+                          {tag.name}
+                        </GalleryActionButton>
                       );
                     })
                   ) : (
-                    <span className="text-sm font-medium text-white/55 dark:text-slate-400">
+                    <span className={galleryFilterEmptyTextClassName}>
                       {galleryTagsQuery.isLoading ? t("gallery.tags.loading") : t("gallery.tags.noAvailable")}
                     </span>
                   )}
                 </div>
-                {galleryTags.length ? (
-                  <button
+                <div
+                  ref={tagFilterTagMeasureRef}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-0 top-0 flex w-max items-center gap-2 opacity-0"
+                  style={{ visibility: "hidden" }}
+                >
+                  {orderedFilterTags.map((tag) => {
+                    const selected = selectedTagIdSet.has(tag.id);
+                    return (
+                      <GalleryActionButton
+                        key={tag.id}
+                        type="button"
+                        data-gallery-filter-tag-measure={tag.id}
+                        tabIndex={-1}
+                        preset={selected ? "primary" : "secondary"}
+                        size="sm"
+                        className="max-w-full shrink-0 px-3 [&_.pf-action-button__label]:min-w-0 [&_.pf-action-button__label]:truncate"
+                        style={{ maxWidth: TAG_FILTER_BUTTON_MAX_WIDTH }}
+                        leadingIcon={selected ? <Check size={13} /> : <Tags size={13} />}
+                        trailingIcon={selected ? <X size={13} className="opacity-70" /> : undefined}
+                      >
+                        {tag.name}
+                      </GalleryActionButton>
+                    );
+                  })}
+                </div>
+                <GalleryActionButton
+                  ref={tagFilterMoreMeasureRef}
+                  type="button"
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  preset="secondary"
+                  size="sm"
+                  className="pointer-events-none absolute left-0 top-0 gap-0 opacity-0"
+                  style={{ visibility: "hidden" }}
+                  leadingIcon={<MoreHorizontal size={14} />}
+                >
+                  {t("gallery.tags.more")}
+                  <span className="text-slate-400">+{tagFilterMoreMeasureCount}</span>
+                </GalleryActionButton>
+                {hiddenFilterTagCount > 0 ? (
+                  <GalleryActionButton
                     type="button"
                     onClick={() => {
                       setTagFilterDialogOpen(true);
                       setTagFilterError("");
                     }}
-                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+                    preset="secondary"
+                    size="sm"
+                    className="gap-0"
+                    leadingIcon={<MoreHorizontal size={14} />}
                   >
-                    <MoreHorizontal size={14} />
                     {t("gallery.tags.more")}
-                    {hiddenFilterTagCount > 0 ? <span className="text-slate-400">+{hiddenFilterTagCount}</span> : null}
-                  </button>
+                    <span className="text-slate-400">+{hiddenFilterTagCount}</span>
+                  </GalleryActionButton>
                 ) : null}
               </div>
               {tagFilterError ? (
@@ -971,10 +1144,17 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                           className={`group relative min-w-0 overflow-hidden rounded-md bg-transparent text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-[#0b4eea]/20 ${tileLayout.className}`}
                           style={tileStyle}
                         >
-                          <button
-                            type="button"
+                          <LayoutActionSurfaceButton
+                            appearance={galleryActionAppearance}
+                            preset="secondary"
+                            focusWithin
                             onClick={() => handleEntryClick(entry)}
-                            className="block h-full w-full text-left"
+                            toneVars={transparentActionToneVars}
+                            className={`block h-full w-full overflow-hidden rounded-none p-0 text-left ${
+                              isWorkspaceManage ? "pf-gallery-grid-card-surface" : ""
+                            }`}
+                            aria-label={t("detail.previewImage", { alt: entry.prompt ?? entry.image.original_filename })}
+                            title={t("common.preview")}
                           >
                             <div className="flex h-full w-full items-center justify-center overflow-hidden bg-transparent">
                               <div className="relative max-h-full max-w-full overflow-hidden bg-transparent" style={imageFrameStyle}>
@@ -1010,24 +1190,20 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                                 </div>
                               </div>
                             </div>
-                          </button>
+                          </LayoutActionSurfaceButton>
                           {canModerateGallery ? (
-                            <button
+                            <GalleryActionButton
                               type="button"
                               aria-label={moderationActionLabel}
                               title={moderationActionLabel}
                               onClick={handleModerationClick}
                               disabled={isModeratingEntry}
-                              className="absolute right-3 top-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/20 bg-slate-950/82 text-white shadow-sm backdrop-blur transition-colors hover:bg-slate-800 disabled:opacity-60 dark:border-white/15"
-                            >
-                              {isModeratingEntry ? (
-                                <Loader2 size={15} className="animate-spin" />
-                              ) : moderationEnabled ? (
-                                <Ban size={15} />
-                              ) : (
-                                <RotateCcw size={15} />
-                              )}
-                            </button>
+                              preset={moderationEnabled ? "danger" : "secondary"}
+                              size="icon-md"
+                              className="absolute right-3 top-3 z-20"
+                              loading={isModeratingEntry}
+                              leadingIcon={moderationEnabled ? <Ban size={15} /> : <RotateCcw size={15} />}
+                            />
                           ) : null}
                         </article>
                       );
@@ -1045,14 +1221,19 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                   <span className="sr-only">{t("app.loading")}</span>
                 </div>
               ) : galleryGridLoading ? (
-                <div className="mx-auto flex min-h-[320px] max-w-7xl items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-sm font-semibold text-white/70 dark:border-slate-700 dark:bg-slate-950/25 dark:text-slate-300">
+                <div className={galleryLoadingStateClassName}>
                   <Loader2 size={18} className="mr-2 animate-spin" />
                   {t("app.loading")}
                 </div>
               ) : (
-                <div className="mx-auto flex min-h-[320px] max-w-7xl flex-col items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-center text-sm text-white/65 dark:border-slate-700 dark:bg-slate-950/25 dark:text-slate-400">
-                  <ImageIcon size={30} className="mb-4 text-indigo-300" />
-                  <div className="text-2xl font-semibold text-white dark:text-white">{t("gallery.title")}</div>
+                <div className={galleryEmptyStateClassName}>
+                  <ImageIcon
+                    size={30}
+                    className={`mb-4 ${isWorkspaceManage ? "text-indigo-300" : "text-indigo-500 dark:text-indigo-300"}`}
+                  />
+                  <div className={`text-2xl font-semibold ${isWorkspaceManage ? "text-white dark:text-white" : "text-slate-950 dark:text-white"}`}>
+                    {t("gallery.title")}
+                  </div>
                   <div className="mt-3">{selectedTagIds.length ? t("gallery.tags.filterEmpty") : t("gallery.empty")}</div>
                 </div>
               )}
@@ -1068,6 +1249,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       {baseAssetPreviewDialog}
       <GalleryTagPickerDialog
         open={tagFilterDialogOpen}
+        appearance={galleryActionAppearance}
         tags={galleryTags}
         initialSelectedTagIds={selectedTagIds}
         title={t("gallery.tags.filter")}
@@ -1084,6 +1266,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       />
       <GalleryTagPickerDialog
         open={Boolean(entryTagEditorEntry)}
+        appearance={galleryActionAppearance}
         tags={galleryTags}
         initialSelectedTagIds={entryTagEditorEntry?.tags.map((tag) => tag.id) ?? []}
         title={t("gallery.tags.editEntry")}
@@ -1125,14 +1308,14 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                 {t("gallery.tags.manageDescription")}
               </p>
             </div>
-            <button
+            <GalleryActionButton
               type="button"
               onClick={closeTagManageDialog}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+              preset="secondary"
+              size="icon-sm"
               aria-label={t("common.close")}
-            >
-              <X size={16} />
-            </button>
+              leadingIcon={<X size={16} />}
+            />
           </div>
           <div className="grid min-h-0 flex-1 gap-0 overflow-hidden md:grid-cols-[minmax(0,1fr)_320px]">
             <div className="min-h-0 overflow-y-auto p-5">
@@ -1173,39 +1356,41 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                           ) : null}
                         </div>
                         <div className="flex items-center gap-2 sm:justify-end">
-                          <button
+                          <GalleryActionButton
                             type="button"
                             onClick={() => {
                               setEditingTag(tag);
                               setTagForm(galleryTagFormFromTag(tag));
                               setTagManageError("");
                             }}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+                            preset="secondary"
+                            size="icon-sm"
                             aria-label={t("gallery.tags.edit")}
                             title={t("gallery.tags.edit")}
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
+                            leadingIcon={<Pencil size={14} />}
+                          />
+                          <GalleryActionButton
                             type="button"
                             onClick={() => toggleGalleryTagMutation.mutate(tag)}
                             disabled={toggling}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800"
+                            preset="secondary"
+                            size="icon-sm"
                             aria-label={tag.enabled ? t("gallery.tags.disable") : t("gallery.tags.enable")}
                             title={tag.enabled ? t("gallery.tags.disable") : t("gallery.tags.enable")}
-                          >
-                            {toggling ? <Loader2 size={14} className="animate-spin" /> : tag.enabled ? <Ban size={14} /> : <RotateCcw size={14} />}
-                          </button>
-                          <button
+                            loading={toggling}
+                            leadingIcon={tag.enabled ? <Ban size={14} /> : <RotateCcw size={14} />}
+                          />
+                          <GalleryActionButton
                             type="button"
                             onClick={() => setDeleteTagTarget(tag)}
                             disabled={deleting}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:opacity-60 dark:border-red-400/35 dark:bg-slate-950/70 dark:text-red-300 dark:hover:bg-red-500/10"
+                            preset="danger"
+                            size="icon-sm"
                             aria-label={t("gallery.tags.delete")}
                             title={t("gallery.tags.delete")}
-                          >
-                            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                          </button>
+                            loading={deleting}
+                            leadingIcon={<Trash2 size={14} />}
+                          />
                         </div>
                       </div>
                     );
@@ -1228,33 +1413,61 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                 <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {t("gallery.tags.name")}
                 </span>
-                <input
-                  value={tagForm.name}
-                  onChange={(event) => setTagForm((current) => ({ ...current, name: event.target.value }))}
-                  className="pf-input"
-                />
+                {isWorkspaceManage ? (
+                  <WorkspaceTextInput
+                    value={tagForm.name}
+                    onChange={(event) => setTagForm((current) => ({ ...current, name: event.target.value }))}
+                    size="default"
+                  />
+                ) : (
+                  <ClassicTextInput
+                    value={tagForm.name}
+                    onChange={(event) => setTagForm((current) => ({ ...current, name: event.target.value }))}
+                    size="default"
+                  />
+                )}
               </label>
               <label className="mt-4 block">
                 <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {t("gallery.tags.description")}
                 </span>
-                <textarea
-                  value={tagForm.description}
-                  onChange={(event) => setTagForm((current) => ({ ...current, description: event.target.value }))}
-                  rows={4}
-                  className="pf-input h-auto py-2"
-                />
+                {isWorkspaceManage ? (
+                  <WorkspaceTextarea
+                    value={tagForm.description}
+                    onChange={(event) => setTagForm((current) => ({ ...current, description: event.target.value }))}
+                    rows={4}
+                    size="default"
+                    className="py-2"
+                  />
+                ) : (
+                  <ClassicTextarea
+                    value={tagForm.description}
+                    onChange={(event) => setTagForm((current) => ({ ...current, description: event.target.value }))}
+                    rows={4}
+                    size="default"
+                    className="py-2"
+                  />
+                )}
               </label>
               <label className="mt-4 block">
                 <span className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {t("gallery.tags.priority")}
                 </span>
-                <input
-                  type="number"
-                  value={tagForm.priority}
-                  onChange={(event) => setTagForm((current) => ({ ...current, priority: event.target.value }))}
-                  className="pf-input"
-                />
+                {isWorkspaceManage ? (
+                  <WorkspaceTextInput
+                    type="number"
+                    value={tagForm.priority}
+                    onChange={(event) => setTagForm((current) => ({ ...current, priority: event.target.value }))}
+                    size="default"
+                  />
+                ) : (
+                  <ClassicTextInput
+                    type="number"
+                    value={tagForm.priority}
+                    onChange={(event) => setTagForm((current) => ({ ...current, priority: event.target.value }))}
+                    size="default"
+                  />
+                )}
               </label>
               {tagManageError ? (
                 <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
@@ -1263,26 +1476,29 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
               ) : null}
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 {editingTag ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingTag(null);
-                      setTagForm(galleryTagFormFromTag());
-                      setTagManageError("");
-                    }}
-                    className="pf-btn-secondary inline-flex h-9 items-center rounded-xl px-3 text-sm font-medium"
-                  >
-                    {t("common.cancel")}
-                  </button>
-                ) : null}
-                <button
-                  type="submit"
-                  disabled={saveGalleryTagMutation.isPending}
-                  className="pf-btn-primary inline-flex h-9 items-center rounded-xl px-3 text-sm font-semibold"
+                <GalleryActionButton
+                  type="button"
+                  onClick={() => {
+                    setEditingTag(null);
+                    setTagForm(galleryTagFormFromTag());
+                    setTagManageError("");
+                  }}
+                  preset="secondary"
+                  size="md"
                 >
-                  {saveGalleryTagMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : <Save size={15} className="mr-2" />}
-                  {editingTag ? t("common.save") : t("common.create")}
-                </button>
+                  {t("common.cancel")}
+                </GalleryActionButton>
+              ) : null}
+              <GalleryActionButton
+                type="submit"
+                disabled={saveGalleryTagMutation.isPending}
+                preset="primary"
+                size="md"
+                loading={saveGalleryTagMutation.isPending}
+                leadingIcon={<Save size={15} />}
+              >
+                {editingTag ? t("common.save") : t("common.create")}
+              </GalleryActionButton>
               </div>
             </form>
           </div>
@@ -1290,6 +1506,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       ) : null}
       <ConfirmDialog
         open={Boolean(deleteTagTarget)}
+        appearance={galleryActionAppearance}
         title={t("gallery.tags.deleteConfirmTitle")}
         description={deleteTagTarget ? t("gallery.tags.deleteConfirm", { name: deleteTagTarget.name }) : ""}
         confirmLabel={t("gallery.tags.delete")}

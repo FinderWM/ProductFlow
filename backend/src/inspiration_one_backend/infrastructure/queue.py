@@ -107,15 +107,29 @@ def enqueue_workflow_node_run_later(node_run_id: str, *, delay_ms: int) -> None:
 def enqueue_image_session_generation_task(task_id: str) -> None:
     from inspiration_one_backend.workers import run_image_session_generation_task
 
-    get_broker()
+    broker = get_broker()
     run_image_session_generation_task.send(task_id)
+    logger.info(
+        "连续生图任务已发送到队列: task_id=%s actor=%s broker=%s delay_ms=%s",
+        task_id,
+        run_image_session_generation_task.actor_name,
+        type(broker).__name__,
+        0,
+    )
 
 
 def enqueue_image_session_generation_task_later(task_id: str, *, delay_ms: int) -> None:
     from inspiration_one_backend.workers import run_image_session_generation_task
 
-    get_broker()
+    broker = get_broker()
     run_image_session_generation_task.send_with_options(args=(task_id,), delay=delay_ms)
+    logger.info(
+        "连续生图任务已延迟发送到队列: task_id=%s actor=%s broker=%s delay_ms=%s",
+        task_id,
+        run_image_session_generation_task.actor_name,
+        type(broker).__name__,
+        delay_ms,
+    )
 
 
 def enqueue_deck_slide_generation_task(slide_id: str) -> None:
@@ -146,12 +160,36 @@ def enqueue_enhance_job_later(job_id: str, *, delay_ms: int) -> None:
     run_enhance_job.send_with_options(args=(job_id,), delay=delay_ms)
 
 
+def enqueue_image_to_code_job(job_id: str) -> None:
+    from inspiration_one_backend.workers import run_image_to_code_job
+
+    get_broker()
+    run_image_to_code_job.send(job_id)
+
+
+def enqueue_image_to_code_job_later(job_id: str, *, delay_ms: int) -> None:
+    from inspiration_one_backend.workers import run_image_to_code_job
+
+    get_broker()
+    run_image_to_code_job.send_with_options(args=(job_id,), delay=delay_ms)
+
+
 def recover_unfinished_enhance_jobs(
     *,
     reset_stale_running: bool = False,
     stale_running_after: timedelta = DEFAULT_STALE_RUNNING_AFTER,
 ) -> int:
     from inspiration_one_backend.application.enhance.jobs import recover_unfinished_enhance_jobs as recover
+
+    return recover(reset_stale_running=reset_stale_running, stale_running_after=stale_running_after)
+
+
+def recover_unfinished_image_to_code_jobs(
+    *,
+    reset_stale_running: bool = False,
+    stale_running_after: timedelta = DEFAULT_STALE_RUNNING_AFTER,
+) -> int:
+    from inspiration_one_backend.application.image_to_code.jobs import recover_unfinished_image_to_code_jobs as recover
 
     return recover(reset_stale_running=reset_stale_running, stale_running_after=stale_running_after)
 

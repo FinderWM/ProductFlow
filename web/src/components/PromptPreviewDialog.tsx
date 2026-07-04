@@ -3,6 +3,7 @@ import { Check, Copy, X } from "lucide-react";
 
 import { copyTextToClipboard } from "../lib/clipboard";
 import { useI18n } from "../lib/preferences";
+import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
 import { ModalShell } from "./ModalShell";
 
 export interface PromptPreview {
@@ -12,13 +13,15 @@ export interface PromptPreview {
 }
 
 interface PromptPreviewDialogProps {
+  appearance: LayoutActionAppearance;
   preview: PromptPreview;
   onClose: () => void;
 }
 
-export function PromptPreviewDialog({ preview, onClose }: PromptPreviewDialogProps) {
+export function PromptPreviewDialog({ appearance, preview, onClose }: PromptPreviewDialogProps) {
   const { t } = useI18n();
   const titleId = useId();
+  const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const copyTitle =
     copyState === "copied"
@@ -56,14 +59,14 @@ export function PromptPreviewDialog({ preview, onClose }: PromptPreviewDialogPro
             <div id={titleId} className="text-sm font-semibold text-slate-950">{preview.title}</div>
             {preview.meta ? <div className="mt-1 text-xs text-slate-500">{preview.meta}</div> : null}
           </div>
-          <button
-            type="button"
+          <ActionButtonComponent
             onClick={onClose}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            preset="secondary"
+            size="icon-sm"
             aria-label={t("promptPreview.close")}
-          >
-            <X size={16} />
-          </button>
+            title={t("promptPreview.close")}
+            leadingIcon={<X size={16} />}
+          />
         </div>
         <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
           <pre className="whitespace-pre-wrap break-words rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-800">
@@ -81,16 +84,16 @@ export function PromptPreviewDialog({ preview, onClose }: PromptPreviewDialogPro
                 {copyTitle}
               </span>
             ) : null}
-            <button
-              type="button"
+            <ActionButtonComponent
               onClick={handleCopy}
               title={copyTitle}
               aria-label={t("promptPreview.copy")}
-              className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:hover:text-white dark:focus-visible:ring-slate-500"
+              preset="secondary"
+              size="sm"
+              leadingIcon={copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}
             >
-              {copyState === "copied" ? <Check size={14} className="mr-1.5" /> : <Copy size={14} className="mr-1.5" />}
               {t("common.copy")}
-            </button>
+            </ActionButtonComponent>
           </div>
         </div>
     </ModalShell>

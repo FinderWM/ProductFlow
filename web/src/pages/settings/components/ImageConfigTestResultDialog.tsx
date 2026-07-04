@@ -1,21 +1,23 @@
 // 图片生成配置测试结果预览弹窗（含保存到画廊）。纯展示组件。
 
-import { GalleryHorizontalEnd, Loader2 } from "lucide-react";
+import { GalleryHorizontalEnd } from "lucide-react";
 
 import { GalleryImagePreviewDialog } from "../../../components/GalleryImagePreviewDialog";
+import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "../../../components/layoutActionButtons";
 import { api } from "../../../lib/api";
 import { formatImageSizeValue } from "../../../lib/imageSizes";
 import { useI18n } from "../../../lib/preferences";
 import type { ImageGenerationConfigTestResponse } from "../../../lib/types";
-import { SETTINGS_MAIN_ACTION_CLASS } from "./styles";
 
 export function ImageConfigTestResultDialog({
+  appearance,
   result,
   canSaveGallery,
   saving,
   onSave,
   onClose,
 }: {
+  appearance: LayoutActionAppearance;
   result: ImageGenerationConfigTestResponse;
   canSaveGallery: boolean;
   saving: boolean;
@@ -23,6 +25,7 @@ export function ImageConfigTestResultDialog({
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
   const saved = result.generated_asset.gallery_saved;
   const saveTitle = !canSaveGallery
     ? t("chat.permission.galleryWriteRequired")
@@ -32,6 +35,7 @@ export function ImageConfigTestResultDialog({
 
   return (
     <GalleryImagePreviewDialog
+      appearance={appearance}
       ariaLabel={t("settings.generation.imageTestPreviewLabel")}
       imageUrl={api.toApiUrl(result.generated_asset.preview_url)}
       imageAlt={result.round.prompt}
@@ -62,21 +66,19 @@ export function ImageConfigTestResultDialog({
       closeLabel={t("common.close")}
       onClose={onClose}
       footerExtra={
-        <button
-          type="button"
+        <ActionButtonComponent
           onClick={onSave}
-          disabled={!canSaveGallery || saving || saved}
+          disabled={!canSaveGallery || saved}
+          loading={saving}
           title={saveTitle}
           aria-label={saveTitle}
-          className={SETTINGS_MAIN_ACTION_CLASS}
+          preset="primary"
+          size="md"
+          fullWidth
+          leadingIcon={<GalleryHorizontalEnd size={16} />}
         >
-          {saving ? (
-            <Loader2 size={16} className="mr-2 animate-spin" />
-          ) : (
-            <GalleryHorizontalEnd size={16} className="mr-2" />
-          )}
           {saved ? t("chat.alreadyInGallery") : t("settings.generation.imageTestKeep")}
-        </button>
+        </ActionButtonComponent>
       }
     />
   );

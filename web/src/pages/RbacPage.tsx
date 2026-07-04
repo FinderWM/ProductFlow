@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -17,12 +17,18 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+import { ClassicOptionToggle, ClassicSelectField, ClassicTextInput } from "../components/classicInputs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
+import { LayoutSwitchTabs, type LayoutSwitchTabItem } from "../components/LayoutSwitchTabs";
+import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
 import { ModalShell } from "../components/ModalShell";
 import { TopNav } from "../components/TopNav";
+import { WorkspaceOptionToggle, WorkspaceSelectField, WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { useI18n } from "../lib/preferences";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import type {
   GenerationResourceGroup,
   RbacApiPermission,
@@ -34,30 +40,20 @@ import type {
 const RBAC_USER_PAGE_SIZE = 20;
 const RBAC_FEEDBACK_AUTO_DISMISS_MS = 1000;
 
-const RBAC_INPUT_CLASS =
-  "h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition-all " +
-  "placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 disabled:cursor-not-allowed disabled:opacity-60 " +
-  "dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20";
 const RBAC_PANEL_CLASS =
   "pf-settings-bordered-module rounded-xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 " +
   "dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25";
 const RBAC_FIELD_CARD_CLASS =
   "pf-settings-field-card rounded-xl border border-slate-200 bg-slate-50/70 shadow-none dark:border-slate-700 dark:bg-[#0b1220]";
-const RBAC_MAIN_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RBAC_SECONDARY_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RBAC_COMPACT_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border px-2.5 text-xs font-medium " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RBAC_ICON_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const RBAC_DANGER_ICON_ACTION_CLASS =
-  "pf-danger-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const RBAC_SELECTABLE_SURFACE_STYLE: CSSProperties = {
+  ["--pf-action-radius" as string]: "var(--pf-radius-md)",
+  ["--pf-action-shadow" as string]: "none",
+  ["--pf-action-shadow-hover" as string]: "none",
+};
+
+function rbacActionButtonComponent(workspaceSubpage: boolean) {
+  return actionButtonComponentForAppearance(workspaceSubpage ? "workspace" : "classic");
+}
 
 type RbacSectionId = "users" | "roles";
 
@@ -166,8 +162,16 @@ export function rbacUserResourceGroupIds(user: RbacUser): string[] {
 
 export function RbacPage() {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isWorkspaceSubpage = activeScheme === "workspace";
+  const actionAppearance = isWorkspaceSubpage ? "workspace" : "classic";
+  const PageActionButton = rbacActionButtonComponent(isWorkspaceSubpage);
+  const sectionTabs: readonly LayoutSwitchTabItem<RbacSectionId>[] = [
+    { value: "users", label: t("rbac.userManagement") },
+    { value: "roles", label: t("rbac.roleManagement") },
+  ];
   const [activeSection, setActiveSection] = useState<RbacSectionId>("users");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -213,9 +217,11 @@ export function RbacPage() {
     queryKey: ["rbac-permission-catalog"],
     queryFn: api.listRbacPermissionCatalog,
   });
+  const shouldLoadResourceGroupGrantData = Boolean(resourceGroupGrantUser && !resourceGroupGrantUser.is_admin);
   const generationResourceGroupsQuery = useQuery({
     queryKey: ["generation-resource-groups"],
-    queryFn: api.listGenerationResourceGroups,
+    queryFn: () => api.listGenerationResourceGroups(),
+    enabled: shouldLoadResourceGroupGrantData,
   });
   const roles = rolesQuery.data ?? [];
   const normalizedRoleSearch = roleSearch.trim().toLocaleLowerCase();
@@ -254,7 +260,7 @@ export function RbacPage() {
   const resourceGroupGrantsQuery = useQuery({
     queryKey: ["rbac-user-generation-resource-groups", resourceGroupGrantUser?.id ?? ""],
     queryFn: () => api.getUserGenerationResourceGroupGrants(resourceGroupGrantUser!.id),
-    enabled: Boolean(resourceGroupGrantUser && !resourceGroupGrantUser.is_admin),
+    enabled: shouldLoadResourceGroupGrantData,
   });
 
   const refreshCurrentUserList = async () => {
@@ -466,7 +472,8 @@ export function RbacPage() {
   const loading = usersQuery.isLoading || rolesQuery.isLoading;
   const permissionsLoading = permissionCatalogQuery.isLoading || rolePermissionsQuery.isLoading;
   const resourceGroupGrantsLoading =
-    generationResourceGroupsQuery.isLoading || resourceGroupGrantsQuery.isLoading;
+    shouldLoadResourceGroupGrantData &&
+    (generationResourceGroupsQuery.isLoading || resourceGroupGrantsQuery.isLoading);
   const userFiltersActive = Boolean(userSearch || userRoleFilter);
   const pendingUserActionBusy = resetPasswordMutation.isPending || updateUserMutation.isPending;
   const pendingUserActionTitle = pendingUserAction
@@ -522,28 +529,15 @@ export function RbacPage() {
           </div>
         ) : null}
 
-        <div
-          className="pf-settings-generation-tabs pf-workspace-horizontal-switch-tabs flex w-full max-w-md gap-3 sm:gap-6"
-          role="tablist"
-          aria-label={t("rbac.title")}
-        >
-          {(["users", "roles"] as const).map((section) => {
-            const active = activeSection === section;
-            return (
-              <button
-                key={section}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                aria-current={active ? "true" : undefined}
-                onClick={() => setActiveSection(section)}
-                className={`pf-settings-generation-tab flex-1 ${active ? "is-active" : ""}`}
-              >
-                {section === "users" ? t("rbac.userManagement") : t("rbac.roleManagement")}
-              </button>
-            );
-          })}
-        </div>
+        <LayoutSwitchTabs
+          appearance={actionAppearance}
+          value={activeSection}
+          items={sectionTabs}
+          ariaLabel={t("rbac.title")}
+          onChange={setActiveSection}
+          className="w-full max-w-md"
+          tabClassName="flex-1"
+        />
 
         {loading ? (
           <div className={`${RBAC_PANEL_CLASS} flex items-center gap-2 py-8 text-sm text-slate-500 dark:text-slate-400`}>
@@ -563,37 +557,65 @@ export function RbacPage() {
                   <h2 className="text-sm font-semibold">{t("rbac.createUser")}</h2>
                 </div>
                 <form className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr_auto]" onSubmit={handleCreateUser}>
-                  <input
-                    value={username}
-                    onChange={(event) => setUsername(event.target.value)}
-                    placeholder={t("rbac.username")}
-                    className={RBAC_INPUT_CLASS}
-                  />
-                  <input
-                    value={displayName}
-                    onChange={(event) => setDisplayName(event.target.value)}
-                    placeholder={t("rbac.displayName")}
-                    className={RBAC_INPUT_CLASS}
-                  />
-                  <select
-                    value={selectedRoleId}
-                    onChange={(event) => setRoleId(event.target.value)}
-                    className={RBAC_INPUT_CLASS}
-                  >
-                    {assignableRoles.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {role.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
+                  {isWorkspaceSubpage ? (
+                    <>
+                      <WorkspaceTextInput
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                        placeholder={t("rbac.username")}
+                        size="compact"
+                      />
+                      <WorkspaceTextInput
+                        value={displayName}
+                        onChange={(event) => setDisplayName(event.target.value)}
+                        placeholder={t("rbac.displayName")}
+                        size="compact"
+                      />
+                      <WorkspaceSelectField
+                        value={selectedRoleId}
+                        onChange={setRoleId}
+                        size="compact"
+                        options={assignableRoles.map((role) => ({
+                          value: role.id,
+                          label: role.name,
+                        }))}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <ClassicTextInput
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                        placeholder={t("rbac.username")}
+                        size="compact"
+                      />
+                      <ClassicTextInput
+                        value={displayName}
+                        onChange={(event) => setDisplayName(event.target.value)}
+                        placeholder={t("rbac.displayName")}
+                        size="compact"
+                      />
+                      <ClassicSelectField
+                        value={selectedRoleId}
+                        onChange={setRoleId}
+                        size="compact"
+                        options={assignableRoles.map((role) => ({
+                          value: role.id,
+                          label: role.name,
+                        }))}
+                      />
+                    </>
+                  )}
+                  <PageActionButton
                     type="submit"
                     disabled={createUserMutation.isPending}
-                    className={RBAC_MAIN_ACTION_CLASS}
+                    preset="primary"
+                    size="md"
+                    loading={createUserMutation.isPending}
+                    leadingIcon={<Plus size={15} />}
                   >
-                    {createUserMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-                    <span className="ml-1.5">{t("rbac.add")}</span>
-                  </button>
+                    {t("rbac.add")}
+                  </PageActionButton>
                 </form>
               </section>
             ) : null}
@@ -605,26 +627,47 @@ export function RbacPage() {
                     <h2 className="text-sm font-semibold">{t("rbac.createRole")}</h2>
                   </div>
                   <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]" onSubmit={handleCreateRole}>
-                    <input
-                      value={roleCode}
-                      onChange={(event) => setRoleCode(event.target.value)}
-                      placeholder={t("rbac.roleCode")}
-                      className={RBAC_INPUT_CLASS}
-                    />
-                    <input
-                      value={roleName}
-                      onChange={(event) => setRoleName(event.target.value)}
-                      placeholder={t("rbac.roleName")}
-                      className={RBAC_INPUT_CLASS}
-                    />
-                    <button
+                    {isWorkspaceSubpage ? (
+                      <>
+                        <WorkspaceTextInput
+                          value={roleCode}
+                          onChange={(event) => setRoleCode(event.target.value)}
+                          placeholder={t("rbac.roleCode")}
+                          size="compact"
+                        />
+                        <WorkspaceTextInput
+                          value={roleName}
+                          onChange={(event) => setRoleName(event.target.value)}
+                          placeholder={t("rbac.roleName")}
+                          size="compact"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <ClassicTextInput
+                          value={roleCode}
+                          onChange={(event) => setRoleCode(event.target.value)}
+                          placeholder={t("rbac.roleCode")}
+                          size="compact"
+                        />
+                        <ClassicTextInput
+                          value={roleName}
+                          onChange={(event) => setRoleName(event.target.value)}
+                          placeholder={t("rbac.roleName")}
+                          size="compact"
+                        />
+                      </>
+                    )}
+                    <PageActionButton
                       type="submit"
                       disabled={createRoleMutation.isPending}
-                      className={RBAC_MAIN_ACTION_CLASS}
+                      preset="primary"
+                      size="md"
+                      loading={createRoleMutation.isPending}
+                      leadingIcon={<Plus size={15} />}
                     >
-                      {createRoleMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-                      <span className="ml-1.5">{t("rbac.add")}</span>
-                    </button>
+                      {t("rbac.add")}
+                    </PageActionButton>
                   </form>
                 </section>
 
@@ -643,38 +686,48 @@ export function RbacPage() {
                       className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                       aria-hidden="true"
                     />
-                    <input
-                      value={roleSearch}
-                      onChange={(event) => setRoleSearch(event.target.value)}
-                      placeholder={t("rbac.roleSearchPlaceholder")}
-                      className={`${RBAC_INPUT_CLASS} pl-9 pr-9`}
-                    />
+                    {isWorkspaceSubpage ? (
+                      <WorkspaceTextInput
+                        value={roleSearch}
+                        onChange={(event) => setRoleSearch(event.target.value)}
+                        placeholder={t("rbac.roleSearchPlaceholder")}
+                        size="compact"
+                        className="pl-9 pr-9"
+                      />
+                    ) : (
+                      <ClassicTextInput
+                        value={roleSearch}
+                        onChange={(event) => setRoleSearch(event.target.value)}
+                        placeholder={t("rbac.roleSearchPlaceholder")}
+                        size="compact"
+                        className="pl-9 pr-9"
+                      />
+                    )}
                     {roleSearch ? (
-                      <button
+                      <PageActionButton
                         type="button"
                         onClick={() => setRoleSearch("")}
-                        className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:ring-violet-400/60"
+                        preset="secondary"
+                        size="icon-sm"
+                        className="absolute right-2 top-1/2 -translate-y-1/2"
                         aria-label={t("rbac.clearRoleSearch")}
                         title={t("rbac.clearRoleSearch")}
-                      >
-                        <X size={14} aria-hidden="true" />
-                      </button>
+                        leadingIcon={<X size={14} aria-hidden="true" />}
+                      />
                     ) : null}
                   </label>
 
                   {filteredRoles.length ? filteredRoles.map((role) => {
                     const active = selectedPermissionRole?.id === role.id;
                     return (
-                      <button
+                      <LayoutActionSurfaceButton
                         key={role.id}
-                        type="button"
+                        appearance={actionAppearance}
+                        preset="secondary"
                         aria-pressed={active}
                         onClick={() => setSelectedPermissionRoleId(role.id)}
-                        className={`pf-settings-provider-option flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left transition-all active:scale-[0.99] ${
-                          active
-                            ? "border-indigo-200 bg-indigo-50 text-indigo-950 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-50"
-                            : "border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900"
-                        }`}
+                        style={RBAC_SELECTABLE_SURFACE_STYLE}
+                        className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left active:scale-[0.99]"
                       >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-semibold">{role.name}</div>
@@ -692,7 +745,7 @@ export function RbacPage() {
                             {t("rbac.adminRole")}
                           </span>
                         ) : null}
-                      </button>
+                      </LayoutActionSurfaceButton>
                     );
                   }) : (
                     <div className={`${RBAC_FIELD_CARD_CLASS} border-dashed px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400`}>
@@ -709,8 +762,7 @@ export function RbacPage() {
                       {selectedPermissionRole ? selectedPermissionRole.name : emptyPermissionRoleMessage}
                     </p>
                   </div>
-                  <button
-                    type="button"
+                  <PageActionButton
                     disabled={
                       !selectedPermissionRole ||
                       selectedPermissionRole.is_admin ||
@@ -718,15 +770,13 @@ export function RbacPage() {
                       saveRolePermissionsMutation.isPending
                     }
                     onClick={() => saveRolePermissionsMutation.mutate()}
-                    className={RBAC_MAIN_ACTION_CLASS}
+                    preset="primary"
+                    size="md"
+                    loading={saveRolePermissionsMutation.isPending}
+                    leadingIcon={<Save size={15} />}
                   >
-                    {saveRolePermissionsMutation.isPending ? (
-                      <Loader2 size={15} className="animate-spin" />
-                    ) : (
-                      <Save size={15} />
-                    )}
-                    <span className="ml-1.5">{t("rbac.savePermissions")}</span>
-                  </button>
+                    {t("rbac.savePermissions")}
+                  </PageActionButton>
                 </div>
 
                 {!selectedPermissionRole ? (
@@ -755,6 +805,7 @@ export function RbacPage() {
                           <RbacOptionToggle
                             key={group.menuCode}
                             checked={rolePermissionDraft.menu_codes.includes(group.menuCode)}
+                            workspaceSubpage={isWorkspaceSubpage}
                             onChange={(checked) =>
                               setRolePermissionDraft((current) =>
                                 current ? toggleMenuPermissionDraft(current, group, checked) : current,
@@ -781,6 +832,7 @@ export function RbacPage() {
                                 <RbacOptionToggle
                                   key={permission.code}
                                   checked={rolePermissionDraft.api_permission_codes.includes(permission.code)}
+                                  workspaceSubpage={isWorkspaceSubpage}
                                   onChange={(checked) =>
                                     setRolePermissionDraft((current) =>
                                       current
@@ -835,49 +887,73 @@ export function RbacPage() {
                           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                           aria-hidden="true"
                         />
-                        <input
-                          value={userSearchDraft}
-                          onChange={(event) => setUserSearchDraft(event.target.value)}
-                          placeholder={t("rbac.userSearchPlaceholder")}
-                          className={`${RBAC_INPUT_CLASS} pl-9 pr-3`}
-                        />
+                        {isWorkspaceSubpage ? (
+                          <WorkspaceTextInput
+                            value={userSearchDraft}
+                            onChange={(event) => setUserSearchDraft(event.target.value)}
+                            placeholder={t("rbac.userSearchPlaceholder")}
+                            size="compact"
+                            className="pl-9 pr-3"
+                          />
+                        ) : (
+                          <ClassicTextInput
+                            value={userSearchDraft}
+                            onChange={(event) => setUserSearchDraft(event.target.value)}
+                            placeholder={t("rbac.userSearchPlaceholder")}
+                            size="compact"
+                            className="pl-9 pr-3"
+                          />
+                        )}
                       </div>
                     </label>
                     <label className="min-w-0">
                       <span className="sr-only">{t("rbac.userRoleFilter")}</span>
-                      <select
-                        value={userRoleFilter}
-                        onChange={(event) => {
-                          setUserRoleFilter(event.target.value);
-                          setUserPage(1);
-                        }}
-                        className={RBAC_INPUT_CLASS}
-                      >
-                        <option value="">{t("rbac.allRoles")}</option>
-                        {roles.map((role) => (
-                          <option key={role.id} value={role.id}>
-                            {role.name}
-                          </option>
-                        ))}
-                      </select>
+                      {isWorkspaceSubpage ? (
+                        <WorkspaceSelectField
+                          value={userRoleFilter}
+                          onChange={(value) => {
+                            setUserRoleFilter(value);
+                            setUserPage(1);
+                          }}
+                          size="compact"
+                          options={[
+                            { value: "", label: t("rbac.allRoles") },
+                            ...roles.map((role) => ({ value: role.id, label: role.name })),
+                          ]}
+                        />
+                      ) : (
+                        <ClassicSelectField
+                          value={userRoleFilter}
+                          onChange={(value) => {
+                            setUserRoleFilter(value);
+                            setUserPage(1);
+                          }}
+                          size="compact"
+                          options={[
+                            { value: "", label: t("rbac.allRoles") },
+                            ...roles.map((role) => ({ value: role.id, label: role.name })),
+                          ]}
+                        />
+                      )}
                     </label>
-                    <button
+                    <PageActionButton
                       type="submit"
                       disabled={usersQuery.isFetching}
-                      className={RBAC_MAIN_ACTION_CLASS}
+                      preset="primary"
+                      size="md"
+                      loading={usersQuery.isFetching}
                     >
-                      {usersQuery.isFetching ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : null}
                       {t("rbac.search")}
-                    </button>
+                    </PageActionButton>
                     {userFiltersActive ? (
-                      <button
-                        type="button"
+                      <PageActionButton
                         onClick={handleClearUserFilters}
                         disabled={usersQuery.isFetching}
-                        className={RBAC_SECONDARY_ACTION_CLASS}
+                        preset="secondary"
+                        size="md"
                       >
                         {t("rbac.clearFilters")}
-                      </button>
+                      </PageActionButton>
                     ) : null}
                   </form>
                 </div>
@@ -919,24 +995,22 @@ export function RbacPage() {
                               <div className="text-xs text-slate-500 dark:text-slate-400">{user.username}</div>
 	                            </td>
 	                            <td className="px-4 py-3">{user.role_name}</td>
-	                            <td className="px-4 py-3">
-	                              <button
-	                                type="button"
-	                                onClick={() => openResourceGroupGrantDialog(user)}
-	                                disabled={pendingUserActionBusy}
-	                                className={`inline-flex max-w-md items-center rounded-lg border px-2.5 py-1 text-left text-[11px] font-semibold transition-all active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 ${
-	                                  user.resource_groups.length
-	                                    ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100 dark:border-violet-400/40 dark:bg-violet-500/10 dark:text-violet-100 dark:hover:border-violet-300/60 dark:hover:bg-violet-500/16"
-	                                    : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-800"
-	                                }`}
-	                                aria-label={t("rbac.editResourceGroups")}
-	                                title={rbacUserResourceGroupSummary(user, t("rbac.noGrantedResourceGroups"))}
-	                              >
-	                                <span className="truncate">
-	                                  {rbacUserResourceGroupSummary(user, t("rbac.noGrantedResourceGroups"))}
-	                                </span>
-	                              </button>
-	                            </td>
+		                            <td className="px-4 py-3">
+		                              <PageActionButton
+		                                type="button"
+		                                onClick={() => openResourceGroupGrantDialog(user)}
+		                                disabled={pendingUserActionBusy}
+		                                preset="secondary"
+		                                size="sm"
+		                                className="max-w-md justify-start gap-0 text-left"
+		                                aria-label={t("rbac.editResourceGroups")}
+		                                title={rbacUserResourceGroupSummary(user, t("rbac.noGrantedResourceGroups"))}
+		                              >
+		                                <span className="truncate">
+		                                  {rbacUserResourceGroupSummary(user, t("rbac.noGrantedResourceGroups"))}
+		                                </span>
+		                              </PageActionButton>
+		                            </td>
 	                            <td className="px-4 py-3">
 	                              <div className="flex flex-col items-start gap-1">
 	                                <span className={rbacUserStatusBadgeClassName(user)}>
@@ -960,44 +1034,46 @@ export function RbacPage() {
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex justify-end gap-2">
-                                <button
+                                <PageActionButton
                                   type="button"
                                   onClick={() => openResourceGroupGrantDialog(user)}
                                   disabled={pendingUserActionBusy}
-                                  className={RBAC_ICON_ACTION_CLASS}
+                                  preset="secondary"
+                                  size="icon-sm"
                                   aria-label={t("rbac.editResourceGroups")}
                                   title={t("rbac.editResourceGroups")}
-                                >
-                                  <ShieldCheck size={14} aria-hidden="true" />
-                                </button>
+                                  leadingIcon={<ShieldCheck size={14} aria-hidden="true" />}
+                                />
                                 {!user.is_admin ? (
                                   <>
-                                    <button
+                                    <PageActionButton
                                       type="button"
                                       onClick={() => setPendingUserAction({ kind: "reset-password", user })}
                                       disabled={pendingUserActionBusy}
-                                      className={RBAC_ICON_ACTION_CLASS}
+                                      preset="secondary"
+                                      size="icon-sm"
                                       aria-label={t("rbac.resetPassword")}
                                       title={t("rbac.resetPassword")}
-                                    >
-                                      <KeyRound size={14} aria-hidden="true" />
-                                    </button>
-                                    <button
+                                      leadingIcon={<KeyRound size={14} aria-hidden="true" />}
+                                    />
+                                    <PageActionButton
                                       type="button"
                                       onClick={() =>
                                         setPendingUserAction({ kind: "set-enabled", user, enabled: !user.enabled })
                                       }
                                       disabled={pendingUserActionBusy}
-                                      className={user.enabled ? RBAC_DANGER_ICON_ACTION_CLASS : RBAC_ICON_ACTION_CLASS}
+                                      preset={user.enabled ? "danger" : "secondary"}
+                                      size="icon-sm"
                                       aria-label={user.enabled ? t("rbac.disable") : t("rbac.enable")}
                                       title={user.enabled ? t("rbac.disable") : t("rbac.enable")}
-                                    >
-                                      {user.enabled ? (
-                                        <Power size={14} aria-hidden="true" />
-                                      ) : (
-                                        <RefreshCcw size={14} aria-hidden="true" />
-                                      )}
-                                    </button>
+                                      leadingIcon={
+                                        user.enabled ? (
+                                          <Power size={14} aria-hidden="true" />
+                                        ) : (
+                                          <RefreshCcw size={14} aria-hidden="true" />
+                                        )
+                                      }
+                                    />
                                   </>
                                 ) : null}
                               </div>
@@ -1028,6 +1104,7 @@ export function RbacPage() {
                   totalPages={userTotalPages}
                   onPageChange={setUserPage}
                   disabled={usersQuery.isFetching}
+                  workspaceSubpage={isWorkspaceSubpage}
                 />
               </div>
             </section>
@@ -1038,6 +1115,7 @@ export function RbacPage() {
       </main>
       <ConfirmDialog
         open={Boolean(pendingUserAction)}
+        appearance={isWorkspaceSubpage ? "workspace" : "classic"}
         title={pendingUserActionTitle}
         description={pendingUserActionDescription}
         confirmLabel={pendingUserActionConfirmLabel}
@@ -1054,6 +1132,7 @@ export function RbacPage() {
         draft={resourceGroupGrantDraft}
         loading={resourceGroupGrantsLoading}
         busy={saveResourceGroupGrantsMutation.isPending}
+        workspaceSubpage={isWorkspaceSubpage}
         hasError={generationResourceGroupsQuery.isError || resourceGroupGrantsQuery.isError}
         onClose={() => {
           if (saveResourceGroupGrantsMutation.isPending) {
@@ -1077,6 +1156,7 @@ export function RbacPage() {
       <RbacFeedbackDialog
         successMessage={feedbackSuccess}
         errorMessage={feedbackError}
+        workspaceSubpage={isWorkspaceSubpage}
         onCloseSuccess={() => setFeedbackSuccess("")}
         onCloseError={() => setFeedbackError("")}
       />
@@ -1091,6 +1171,7 @@ interface ResourceGroupGrantDialogProps {
   draft: string[];
   loading: boolean;
   busy: boolean;
+  workspaceSubpage?: boolean;
   hasError: boolean;
   onClose: () => void;
   onSave: () => void;
@@ -1100,17 +1181,20 @@ interface ResourceGroupGrantDialogProps {
 function RbacFeedbackDialog({
   successMessage,
   errorMessage,
+  workspaceSubpage = false,
   onCloseSuccess,
   onCloseError,
 }: {
   successMessage: string;
   errorMessage: string;
+  workspaceSubpage?: boolean;
   onCloseSuccess: () => void;
   onCloseError: () => void;
 }) {
   const { t } = useI18n();
   const titleId = useId();
   const descriptionId = useId();
+  const PageActionButton = rbacActionButtonComponent(workspaceSubpage);
   const open = Boolean(successMessage || errorMessage);
   const isError = Boolean(errorMessage);
   const message = errorMessage || successMessage;
@@ -1158,15 +1242,15 @@ function RbacFeedbackDialog({
             </p>
           </div>
           {isError ? (
-            <button
+            <PageActionButton
               type="button"
               onClick={onCloseError}
-              className={RBAC_ICON_ACTION_CLASS}
+              preset="secondary"
+              size="icon-sm"
               aria-label={t("common.close")}
               title={t("common.close")}
-            >
-              <X size={15} />
-            </button>
+              leadingIcon={<X size={15} />}
+            />
           ) : null}
         </div>
     </ModalShell>
@@ -1180,12 +1264,14 @@ function ResourceGroupGrantDialog({
   draft,
   loading,
   busy,
+  workspaceSubpage = false,
   hasError,
   onClose,
   onSave,
   onToggleGroup,
 }: ResourceGroupGrantDialogProps) {
   const { t } = useI18n();
+  const PageActionButton = rbacActionButtonComponent(workspaceSubpage);
 
   if (!open || !user) {
     return null;
@@ -1209,16 +1295,16 @@ function ResourceGroupGrantDialog({
               {user.display_name} · {user.username}
             </p>
           </div>
-          <button
+          <PageActionButton
             type="button"
             onClick={onClose}
             disabled={busy}
-            className={RBAC_ICON_ACTION_CLASS}
+            preset="secondary"
+            size="icon-sm"
             aria-label={t("common.cancel")}
             title={t("common.cancel")}
-          >
-            <X size={15} />
-          </button>
+            leadingIcon={<X size={15} />}
+          />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
@@ -1243,6 +1329,7 @@ function ResourceGroupGrantDialog({
                   group={group}
                   checked={draft.includes(group.id)}
                   disabled={busy}
+                  workspaceSubpage={workspaceSubpage}
                   onToggle={(checked) => onToggleGroup(group.id, checked)}
                 />
               ))}
@@ -1255,23 +1342,19 @@ function ResourceGroupGrantDialog({
         </div>
 
         <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className={RBAC_SECONDARY_ACTION_CLASS}
-          >
+          <PageActionButton onClick={onClose} disabled={busy} preset="secondary" size="md">
             {t("common.cancel")}
-          </button>
-          <button
-            type="button"
+          </PageActionButton>
+          <PageActionButton
             onClick={onSave}
             disabled={readonly || loading || busy}
-            className={RBAC_MAIN_ACTION_CLASS}
+            preset="primary"
+            size="md"
+            loading={busy}
+            leadingIcon={<Save size={14} />}
           >
-            {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Save size={14} className="mr-1.5" />}
             {t("rbac.saveResourceGroups")}
-          </button>
+          </PageActionButton>
         </div>
     </ModalShell>
   );
@@ -1280,32 +1363,29 @@ function ResourceGroupGrantDialog({
 function RbacOptionToggle({
   checked,
   disabled = false,
+  workspaceSubpage = false,
   children,
   onChange,
 }: {
   checked: boolean;
   disabled?: boolean;
+  workspaceSubpage?: boolean;
   children: React.ReactNode;
   onChange: (checked: boolean) => void;
 }) {
-  return (
-    <label
-      className={`pf-settings-option-toggle flex min-h-10 max-w-full items-start gap-2 rounded-xl border py-2 pl-2.5 pr-3 text-sm transition-all ${
-        checked
-          ? "border-indigo-300 bg-indigo-50 text-slate-950 dark:border-violet-400/45 dark:bg-violet-500/14 dark:text-white"
-          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-900 dark:hover:text-white"
-      } ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer active:scale-[0.99]"}`}
+  return workspaceSubpage ? (
+    <WorkspaceOptionToggle
+      checked={checked}
+      disabled={disabled}
+      layout="card"
+      onChange={onChange}
     >
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-        className="peer sr-only"
-      />
-      <span className="pf-settings-option-toggle-control mt-0.5" aria-hidden="true" />
+      {children}
+    </WorkspaceOptionToggle>
+  ) : (
+    <ClassicOptionToggle checked={checked} disabled={disabled} layout="card" onChange={onChange}>
       <span className="min-w-0 leading-5">{children}</span>
-    </label>
+    </ClassicOptionToggle>
   );
 }
 
@@ -1313,16 +1393,23 @@ function ResourceGroupGrantCheckbox({
   group,
   checked,
   disabled,
+  workspaceSubpage = false,
   onToggle,
 }: {
   group: GenerationResourceGroup;
   checked: boolean;
   disabled: boolean;
+  workspaceSubpage?: boolean;
   onToggle: (checked: boolean) => void;
 }) {
   const { t } = useI18n();
   return (
-    <RbacOptionToggle checked={checked} disabled={disabled} onChange={onToggle}>
+    <RbacOptionToggle
+      checked={checked}
+      disabled={disabled}
+      workspaceSubpage={workspaceSubpage}
+      onChange={onToggle}
+    >
       <span className="min-w-0">
         <span className="flex flex-wrap items-center gap-2 font-medium text-slate-900 dark:text-slate-100">
           {group.name}
@@ -1346,37 +1433,40 @@ function RbacPagination({
   totalPages,
   onPageChange,
   disabled,
+  workspaceSubpage = false,
 }: {
   page: number;
   totalPages: number;
   onPageChange: (page: number) => void;
   disabled: boolean;
+  workspaceSubpage?: boolean;
 }) {
   const { t } = useI18n();
+  const PageActionButton = rbacActionButtonComponent(workspaceSubpage);
 
   return (
     <div className="inline-flex items-center gap-2">
-      <button
-        type="button"
+      <PageActionButton
         onClick={() => onPageChange(Math.max(1, page - 1))}
         disabled={disabled || page <= 1}
-        className={RBAC_COMPACT_ACTION_CLASS}
+        preset="secondary"
+        size="sm"
+        leadingIcon={<ChevronLeft size={14} aria-hidden="true" />}
       >
-        <ChevronLeft size={14} className="mr-1" aria-hidden="true" />
         {t("pagination.previous")}
-      </button>
+      </PageActionButton>
       <span className="min-w-16 text-center text-xs font-semibold tabular-nums text-slate-500 dark:text-slate-400">
         {page} / {totalPages}
       </span>
-      <button
-        type="button"
+      <PageActionButton
         onClick={() => onPageChange(Math.min(totalPages, page + 1))}
         disabled={disabled || page >= totalPages}
-        className={RBAC_COMPACT_ACTION_CLASS}
+        preset="secondary"
+        size="sm"
+        trailingIcon={<ChevronRight size={14} aria-hidden="true" />}
       >
         {t("pagination.next")}
-        <ChevronRight size={14} className="ml-1" aria-hidden="true" />
-      </button>
+      </PageActionButton>
     </div>
   );
 }

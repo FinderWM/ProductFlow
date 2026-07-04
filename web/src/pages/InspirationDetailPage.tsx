@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  ChangeEvent as ReactChangeEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   ChevronLeft,
@@ -30,7 +35,17 @@ import {
 import { useNavigate, useParams } from "react-router-dom";
 import { Drawer } from "vaul";
 
+import {
+  ClassicCheckbox,
+  ClassicSelectField,
+  ClassicTextInput,
+  ClassicTextarea,
+} from "../components/classicInputs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../components/layoutActionButtons";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -43,14 +58,24 @@ import {
   type ResourceLibrarySaveSource,
 } from "../components/resource-library/SaveToResourceLibraryDialog";
 import { ModalShell } from "../components/ModalShell";
-import { SelectField } from "../components/SelectField";
 import { TOP_CHROME_COLLAPSED_SAFE_HEIGHT_CLASS, TopNav } from "../components/TopNav";
+import {
+  WorkspaceCheckbox,
+  WorkspaceSelectField as SelectField,
+  WorkspaceTextInput,
+  WorkspaceTextarea,
+} from "../components/workspaceInputs";
 import { ZoomableImage } from "../components/ZoomableImage";
 import { api, ApiError } from "../lib/api";
+import {
+  generationConfigOptionsForPurpose,
+  generationConfigSelectionMaxDimension,
+} from "../lib/generationConfigs";
 import { DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS } from "../lib/imageToolOptions";
 import { DEFAULT_IMAGE_GENERATION_MAX_DIMENSION, buildImageSizeOptions } from "../lib/imageSizes";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import {
   API_INSPIRATIONS_GENERATE,
   API_INSPIRATIONS_WRITE,
@@ -95,7 +120,7 @@ import { resolveDeckEditorAutoOpenDecision } from "./inspiration-detail/deckEdit
 import { ImagesPanel } from "./inspiration-detail/ImagesPanel";
 import { InspectorPanel } from "./inspiration-detail/InspectorPanel";
 import { RunsPanel } from "./inspiration-detail/RunsPanel";
-import { SidebarTabButton } from "./inspiration-detail/SidebarTabButton";
+import { SidebarRailTab } from "./inspiration-detail/SidebarTabButton";
 import { DeckPanel } from "./inspiration-detail/DeckPanel";
 import { TemplateGroupsPanel } from "./inspiration-detail/TemplateGroupsPanel";
 import { TailSplitPlanDialog } from "./inspiration-detail/TailSplitPlanDialog";
@@ -159,6 +184,8 @@ import {
   isInspirationWorkflowStatusActive,
   mergeInspirationWorkflowStatusIntoDetail,
   outputStringArray,
+  shouldLoadInspirationDetailTemplateCatalog,
+  shouldLoadInspirationDetailUserTemplateCategories,
   outputText,
   pendingTailSplitPlan,
   readStoredNumber,
@@ -209,6 +236,15 @@ type PendingDeckSourcePreflight = {
   }>;
 };
 
+const DETAIL_TOOLBAR_BUTTON_CLASS_NAME =
+  "pf-sidebar-rail-action min-h-[3.5rem] min-w-0 flex-col gap-1 px-1.5 py-2 text-[10px]";
+const DETAIL_MOBILE_CANVAS_MODE_BUTTON_CLASS_NAME = "min-h-11 w-full justify-center px-2 text-xs";
+const DETAIL_MOBILE_STACKED_BUTTON_CLASS_NAME =
+  "min-h-14 min-w-0 flex-col gap-1 px-1 text-[10px] [&_.pf-action-button__label]:text-center " +
+  "[&_.pf-action-button__label]:leading-[1.05]";
+const DETAIL_PREVIEW_SAVE_BUTTON_CLASS_NAME =
+  "min-h-8 px-2.5 text-[10px] [&_.pf-action-button__label]:max-w-28 [&_.pf-action-button__label]:truncate";
+
 function resourceLibrarySourceFromPreviewImage(image: DownloadableImage): ResourceLibrarySaveSource | null {
   const source = (image as DownloadableImageWithResourceLibrarySource).resourceLibrarySource;
   return source
@@ -254,6 +290,14 @@ function referenceImageNodesMissingSucceededOutput(
 export function InspirationDetailPage() {
   const { t } = useI18n();
   const session = useSessionState();
+  const { activeScheme } = useUiLayoutScheme();
+  const workspaceSubpage = activeScheme === "workspace";
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const ActionButton = actionButtonComponentForAppearance(actionAppearance);
+  const LayoutTextInput = workspaceSubpage ? WorkspaceTextInput : ClassicTextInput;
+  const LayoutTextarea = workspaceSubpage ? WorkspaceTextarea : ClassicTextarea;
+  const LayoutSelectField = workspaceSubpage ? SelectField : ClassicSelectField;
+  const LayoutCheckbox = workspaceSubpage ? WorkspaceCheckbox : ClassicCheckbox;
   const { inspirationId = "" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -343,6 +387,11 @@ export function InspirationDetailPage() {
   const [error, setError] = useState("");
   const normalizedTemplateSearch = templateSearch.trim();
   const templateScopeParam = templateScope === "all" ? undefined : templateScope;
+  const shouldLoadTemplateCatalog = shouldLoadInspirationDetailTemplateCatalog(activeSidebarTab);
+  const shouldLoadUserTemplateCategories = shouldLoadInspirationDetailUserTemplateCategories(
+    activeSidebarTab,
+    canvasTemplateSaveOpen,
+  );
 
   const inspirationQuery = useQuery({
     queryKey: ["inspiration", inspirationId],
@@ -420,7 +469,8 @@ export function InspirationDetailPage() {
         scope: templateScopeParam,
         initial_workflow_entry: workflowInitialEntryMode,
       }),
-    enabled: Boolean(workflow),
+    enabled: Boolean(workflow && shouldLoadTemplateCatalog),
+    placeholderData: keepPreviousData,
   });
   const canvasTemplateCategoriesQuery = useQuery({
     queryKey: ["canvas-template-categories", templateScope],
@@ -428,10 +478,14 @@ export function InspirationDetailPage() {
       api.listCanvasTemplateCategories({
         scope: templateScopeParam,
       }),
+    enabled: shouldLoadTemplateCatalog,
+    placeholderData: keepPreviousData,
   });
   const userCanvasTemplateCategoriesQuery = useQuery({
     queryKey: ["canvas-template-categories", "user"],
     queryFn: () => api.listCanvasTemplateCategories({ scope: "user" }),
+    enabled: shouldLoadUserTemplateCategories,
+    placeholderData: keepPreviousData,
   });
   const workflowActive = hasActiveWorkflow(workflow);
   const workflowStatusQuery = useQuery({
@@ -461,25 +515,64 @@ export function InspirationDetailPage() {
     enabled: canReadGenerationQueue,
     refetchInterval: (query) => ((query.state.data?.active_count ?? 0) > 0 || workflowActive ? 1500 : false),
   });
-  const imageGenerationMaxDimension =
+  const globalImageGenerationMaxDimension =
     runtimeConfigQuery.data?.image_generation_max_dimension ?? DEFAULT_IMAGE_GENERATION_MAX_DIMENSION;
   const imageToolAllowedFields = runtimeConfigQuery.data?.image_tool_allowed_fields ?? DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS;
   const tailSplitterMaxItems =
     runtimeConfigQuery.data?.generation_tail_splitter_max_items ?? DEFAULT_GENERATION_TAIL_SPLITTER_MAX_ITEMS;
-  const imageSizeOptions = useMemo(
-    () => buildImageSizeOptions(imageGenerationMaxDimension),
-    [imageGenerationMaxDimension],
-  );
   const workflowResourceGroups = useMemo<GenerationResourceGroup[]>(
     () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
   const generationConfigOptions: GenerationConfigOption[] = generationConfigOptionsQuery.data ?? [];
+  const selectedDraftResourceGroup = useMemo(
+    () => workflowResourceGroups.find((group) => group.id === draft.resourceGroupId) ?? null,
+    [draft.resourceGroupId, workflowResourceGroups],
+  );
+  const selectedDraftImageGenerationConfigOptions = useMemo(
+    () => generationConfigOptionsForPurpose(generationConfigOptions, "image", draft.resourceGroupId),
+    [draft.generationConfigId, draft.generationConfigMode, draft.resourceGroupId, generationConfigOptions],
+  );
+  const imageGenerationMaxDimension = useMemo(
+    () =>
+      generationConfigSelectionMaxDimension({
+        mode: draft.generationConfigMode,
+        generationConfigId: draft.generationConfigId,
+        resourceGroupId: draft.resourceGroupId,
+        resourceGroupMaxDimension: selectedDraftResourceGroup?.image_max_dimension,
+        options: selectedDraftImageGenerationConfigOptions,
+        globalMaxDimension: globalImageGenerationMaxDimension,
+      }),
+    [
+      draft.generationConfigId,
+      draft.generationConfigMode,
+      draft.resourceGroupId,
+      globalImageGenerationMaxDimension,
+      selectedDraftImageGenerationConfigOptions,
+      selectedDraftResourceGroup,
+    ],
+  );
+  const imageSizeOptions = useMemo(
+    () => buildImageSizeOptions(imageGenerationMaxDimension),
+    [imageGenerationMaxDimension],
+  );
   const historyQuery = useQuery({
     queryKey: ["inspiration-history", inspirationId],
     queryFn: () => api.getInspirationHistory(inspirationId),
-    enabled: Boolean(inspirationId),
+    enabled: Boolean(inspirationId && galleryOpen),
+    placeholderData: keepPreviousData,
   });
+
+  useEffect(() => {
+    if (!canvasTemplateSaveOpen || canvasTemplateSaveCategoryId) {
+      return;
+    }
+    const firstCategoryId = userCanvasTemplateCategoriesQuery.data?.items?.[0]?.id ?? "";
+    if (!firstCategoryId) {
+      return;
+    }
+    setCanvasTemplateSaveCategoryId(firstCategoryId);
+  }, [canvasTemplateSaveCategoryId, canvasTemplateSaveOpen, userCanvasTemplateCategoriesQuery.data?.items]);
 
   const selectedNode = selectedNodeId
     ? workflow?.nodes.find((node) => node.id === selectedNodeId) ?? null
@@ -1655,7 +1748,7 @@ export function InspirationDetailPage() {
       assertInspirationWritable();
       return api.updateWorkflowNode(node.id, {
         title: draft.title,
-        config_json: nodeConfigFromDraft(node, draft, imageToolAllowedFields),
+        config_json: nodeConfigFromDraft(node, draft, imageToolAllowedFields, imageGenerationMaxDimension),
       });
     },
     onSuccess: (nextWorkflow) => {
@@ -2862,7 +2955,9 @@ export function InspirationDetailPage() {
         source_type: "poster_variant",
         source_ids: resourceLibraryPosterIds,
       }),
-    enabled: resourceLibraryPosterIds.length > 0,
+    enabled:
+      resourceLibraryPosterIds.length > 0 &&
+      (galleryOpen || previewResourceLibrarySource?.source_type === "poster_variant"),
   });
   const sourceAssetResourceLibraryStatusQuery = useQuery({
     queryKey: ["resource-library-source-status", "source_asset", resourceLibraryReferenceAssetIds],
@@ -3063,8 +3158,7 @@ export function InspirationDetailPage() {
       <span className="w-full text-center text-[10px] font-semibold leading-none text-slate-500">
         {t("detail.toolbar.runSection")}
       </span>
-      <button
-        type="button"
+      <ActionButton
         onClick={() => {
           if (canvasTemplateSaveDisabled) {
             setNotice("");
@@ -3082,7 +3176,10 @@ export function InspirationDetailPage() {
           setCanvasTemplateSaveOpen(true);
         }}
         disabled={createUserCanvasTemplateMutation.isPending || inspirationWriteBlocked || !workflow}
-        className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold"
+        preset="secondary"
+        size="md"
+        fullWidth
+        className={DETAIL_TOOLBAR_BUTTON_CLASS_NAME}
         title={
           workflowInitialEntryMode === "blank"
             ? t("detail.saveCanvasTemplateBlankDisabled")
@@ -3093,51 +3190,54 @@ export function InspirationDetailPage() {
             ? t("detail.saveCanvasTemplateBlankDisabled")
             : t("detail.saveCanvasTemplate")
         }
+        loading={createUserCanvasTemplateMutation.isPending}
+        leadingIcon={<Layers3 size={16} />}
       >
-        {createUserCanvasTemplateMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Layers3 size={16} />}
-        <span className="mt-1 leading-tight">{t("detail.saveCanvasTemplate")}</span>
-      </button>
-      <button
-        type="button"
+        {t("detail.toolbar.saveTemplateShort")}
+      </ActionButton>
+      <ActionButton
         onClick={() => void handleRunWorkflow(undefined)}
         disabled={fullWorkflowRunDisabled || !workflow}
-        className="btn-primary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold"
+        preset="primary"
+        size="md"
+        fullWidth
+        className={DETAIL_TOOLBAR_BUTTON_CLASS_NAME}
         title={fullWorkflowRunTitle}
         aria-label={fullWorkflowRunTitle}
+        loading={fullWorkflowRunSpinner}
+        leadingIcon={<Play size={17} />}
       >
-        {fullWorkflowRunSpinner ? <Loader2 size={17} className="animate-spin" /> : <Play size={17} />}
-        <span className="mt-1 leading-tight">{fullWorkflowRunLabel}</span>
-      </button>
+        {runSubmissionPending || activeWorkflowRunLabel ? fullWorkflowRunLabel : t("detail.toolbar.runCanvasShort")}
+      </ActionButton>
       {failedWorkflowNodes.length > 0 ? (
-        <button
-          type="button"
+        <ActionButton
           onClick={() => void handleRetryFailedWorkflowNodes()}
           disabled={retryFailedWorkflowNodesDisabled || !workflow}
-          className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold text-red-600 dark:text-red-200"
+          preset="danger"
+          size="md"
+          fullWidth
+          className={DETAIL_TOOLBAR_BUTTON_CLASS_NAME}
           title={failedWorkflowNodesRetryTitle}
           aria-label={failedWorkflowNodesRetryTitle}
+          loading={retryFailedWorkflowNodesMutation.isPending}
+          leadingIcon={<RotateCcw size={16} />}
         >
-          {retryFailedWorkflowNodesMutation.isPending ? (
-            <Loader2 size={16} className="animate-spin" />
-          ) : (
-            <RotateCcw size={16} />
-          )}
-          <span className="mt-1 leading-tight">
-            {t("detail.failedNodesRetry.action", { count: failedWorkflowNodes.length })}
-          </span>
-        </button>
+          {t("detail.toolbar.retryFailedShort")}
+        </ActionButton>
       ) : null}
-      <button
-        type="button"
+      <ActionButton
         onClick={() => workflowCanvasRef.current?.triggerAutoLayout()}
         disabled={autoLayoutBusy}
-        className="btn-secondary-spring flex w-full flex-col items-center rounded-lg px-1.5 py-2 text-xs font-semibold"
+        preset="secondary"
+        size="md"
+        fullWidth
+        className={DETAIL_TOOLBAR_BUTTON_CLASS_NAME}
         title={inspirationWriteBlocked ? inspirationWriteBlockedTitle : t("detail.autoLayout")}
         aria-label={inspirationWriteBlocked ? inspirationWriteBlockedTitle : t("detail.autoLayout")}
+        leadingIcon={<Sparkles size={16} />}
       >
-        <Sparkles size={16} />
-        <span className="mt-1 leading-tight">{t("detail.autoLayout")}</span>
-      </button>
+        {t("detail.toolbar.autoLayoutShort")}
+      </ActionButton>
       <div className="my-1 h-px w-11 self-center bg-slate-200/70 dark:bg-slate-800" />
       <span className="w-full text-center text-[10px] font-semibold leading-none text-slate-500">
         {t("detail.toolbar.addSection")}
@@ -3197,21 +3297,18 @@ export function InspirationDetailPage() {
               </span>
             </div>
             <div className="mt-4 flex justify-end">
-              <button
-                type="button"
+              <ActionButton
                 onClick={() => createNodeMutation.mutate(option.type)}
                 disabled={structureBusy || !workflow}
-                className="btn-primary-spring inline-flex h-9 items-center rounded-xl px-4 text-xs font-semibold"
+                preset="primary"
+                size="md"
                 title={inspirationWriteBlocked ? inspirationWriteBlockedTitle : t("detail.addNode", { label: optionLabel })}
                 aria-label={inspirationWriteBlocked ? inspirationWriteBlockedTitle : t("detail.addNode", { label: optionLabel })}
+                loading={creatingThisNode}
+                leadingIcon={<Plus size={13} />}
               >
-                {creatingThisNode ? (
-                  <Loader2 size={13} className="mr-1.5 animate-spin" />
-                ) : (
-                  <Plus size={13} className="mr-1.5" />
-                )}
                 {t("detail.template.add")}
-              </button>
+              </ActionButton>
             </div>
           </div>
         );
@@ -3330,13 +3427,14 @@ export function InspirationDetailPage() {
                   {t("detail.tailPlan.pendingDescription", { count: selectedTailPendingPlan.items.length })}
                 </div>
               </div>
-              <button
-                type="button"
+              <ActionButton
                 onClick={() => setTailPlanDialogOpen(true)}
-                className="shrink-0 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-fuchsia-700 ring-1 ring-fuchsia-200 transition-colors hover:bg-fuchsia-100 dark:bg-slate-950/80 dark:text-fuchsia-200 dark:ring-fuchsia-400/35 dark:hover:bg-fuchsia-500/10"
+                preset="secondary"
+                size="sm"
+                className="shrink-0"
               >
                 {t("detail.tailPlan.open")}
-              </button>
+              </ActionButton>
             </div>
           </div>
         ) : null}
@@ -3389,6 +3487,7 @@ export function InspirationDetailPage() {
           deckEditorOpen={deckEditorOpen}
           onOpenDeckEditor={() => setDeckEditorOpen(true)}
           onCloseDeckEditor={() => setDeckEditorOpen(false)}
+          workspaceSubpage={workspaceSubpage}
         />
       </div>
     ) : (
@@ -3402,7 +3501,11 @@ export function InspirationDetailPage() {
     <>
       {activeSidebarTab === "singleNode" ? renderSingleNodePanel() : null}
       {activeSidebarTab === "deck" ? (
-        <DeckPanel inspirationId={inspirationId} onOpenWorkflowNode={handleOpenWorkflowNodeFromDeck} />
+        <DeckPanel
+          inspirationId={inspirationId}
+          workspaceSubpage={workspaceSubpage}
+          onOpenWorkflowNode={handleOpenWorkflowNodeFromDeck}
+        />
       ) : null}
       {activeSidebarTab === "details" ? renderDetailsPanelContent() : null}
       {activeSidebarTab === "runs" ? (
@@ -3414,6 +3517,7 @@ export function InspirationDetailPage() {
           retryableFailedNodeCount={retryableFailedWorkflowNodes.length}
           retryFailedNodesBusy={retryFailedWorkflowNodesMutation.isPending}
           retryFailedNodesTitle={failedWorkflowNodesRetryTitle}
+          workspaceSubpage={workspaceSubpage}
           mutationBlockedTitle={inspirationGenerateBlocked ? inspirationGenerateBlockedTitle : null}
           onRetryRun={handleRetryWorkflowRun}
           onRetryFailedNodes={() => void handleRetryFailedWorkflowNodes()}
@@ -3448,6 +3552,7 @@ export function InspirationDetailPage() {
             applyTemplateGroupMutation.mutate(template);
           }}
           userTemplateBusy={userTemplateMutationBusy || inspirationWriteBlocked}
+          workspaceSubpage={workspaceSubpage}
           onRenameUserTemplate={(template, title) => {
             if (inspirationWriteBlocked) {
               showInspirationWriteBlockedError();
@@ -3544,15 +3649,15 @@ export function InspirationDetailPage() {
             }}
           >
             <div data-canvas-control className="pointer-events-none absolute right-3 top-3 z-30 lg:right-4 lg:top-4">
-              <button
-                type="button"
+              <ActionButton
                 onClick={() => setTopChromeCollapsed((collapsed) => !collapsed)}
-                className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200 bg-white/90 text-zinc-600 shadow-sm backdrop-blur transition-colors active:scale-[0.98] hover:bg-white hover:text-zinc-900 dark:border-slate-700/80 dark:bg-[#151f33]/92 dark:text-slate-300 dark:shadow-black/20 dark:hover:bg-[#1a2740] dark:hover:text-white lg:h-9 lg:w-9 lg:rounded-lg"
+                preset="secondary"
+                size="icon-lg"
+                className="pointer-events-auto backdrop-blur lg:h-9 lg:min-h-9 lg:min-w-9 lg:w-9"
                 aria-label={topChromeCollapsed ? t("detail.restoreCanvas") : t("detail.maximizeCanvas")}
                 title={topChromeCollapsed ? t("detail.restoreCanvas") : t("detail.maximizeCanvas")}
-              >
-                {topChromeCollapsed ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-              </button>
+                leadingIcon={topChromeCollapsed ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              />
             </div>
             <WorkflowCanvas
               ref={workflowCanvasRef}
@@ -3579,6 +3684,7 @@ export function InspirationDetailPage() {
               canvasMiniMapLabel={t("detail.canvasMiniMap")}
               snapToGridLabel={t("detail.snapToGrid")}
               autoLayoutLabel={t("detail.autoLayout")}
+              actionAppearance={actionAppearance}
               snapToGrid={snapToGrid}
               onToggleSnapToGrid={handleWorkflowCanvasToggleSnapToGrid}
               onAutoLayout={handleWorkflowCanvasAutoLayout}
@@ -3603,15 +3709,15 @@ export function InspirationDetailPage() {
                   <div className="flex items-center gap-2">
                     <Check size={16} strokeWidth={2.5} />
                     <span className="mr-auto">{t("detail.selectedCount", { count: selectedGroupCount })}</span>
-                    <button
-                      type="button"
+                    <ActionButton
                       onClick={clearMultiSelection}
-                      className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600 shadow-sm transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700 dark:border-red-400/40 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/60 dark:hover:bg-red-500/16 dark:hover:text-red-100 lg:h-8 lg:w-8"
+                      preset="danger"
+                      size="icon-lg"
+                      className="lg:h-8 lg:min-h-8 lg:min-w-8 lg:w-8"
                       aria-label={t("detail.clearSelection")}
                       title={t("detail.clearSelection")}
-                    >
-                      <X size={18} strokeWidth={2.5} />
-                    </button>
+                      leadingIcon={<X size={18} strokeWidth={2.5} />}
+                    />
                   </div>
                   {templateSaveOpen ? (
                     <form
@@ -3621,36 +3727,40 @@ export function InspirationDetailPage() {
                         createUserTemplateGroupMutation.mutate();
                       }}
                     >
-                      <input
+                      <LayoutTextInput
                         value={templateSaveTitle}
-                        onChange={(event) => setTemplateSaveTitle(event.target.value)}
-                        className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs text-slate-950 placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]"
+                        onChange={(event: ReactChangeEvent<HTMLInputElement>) => setTemplateSaveTitle(event.target.value)}
+                        size="compact"
                         placeholder={t("detail.templateName")}
                         maxLength={255}
                       />
-                      <input
+                      <LayoutTextInput
                         value={templateSaveDescription}
-                        onChange={(event) => setTemplateSaveDescription(event.target.value)}
-                        className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs text-slate-950 placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]"
+                        onChange={(event: ReactChangeEvent<HTMLInputElement>) =>
+                          setTemplateSaveDescription(event.target.value)
+                        }
+                        size="compact"
                         placeholder={t("detail.templateDescription")}
                         maxLength={1000}
                       />
                       <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
+                        <ActionButton
                           onClick={() => setTemplateSaveOpen(false)}
-                          className="btn-secondary-spring inline-flex h-9 items-center rounded-xl px-3 text-xs font-semibold"
+                          preset="secondary"
+                          size="md"
                         >
                           {t("detail.cancel")}
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
                           type="submit"
                           disabled={createUserTemplateGroupMutation.isPending || inspirationWriteBlocked}
                           title={inspirationWriteBlocked ? inspirationWriteBlockedTitle : t("detail.save")}
-                          className="btn-primary-spring inline-flex h-9 items-center rounded-xl px-3 text-xs font-semibold disabled:cursor-not-allowed"
+                          preset="primary"
+                          size="md"
+                          loading={createUserTemplateGroupMutation.isPending}
                         >
                           {t("detail.save")}
-                        </button>
+                        </ActionButton>
                       </div>
                     </form>
                   ) : null}
@@ -3665,24 +3775,67 @@ export function InspirationDetailPage() {
               className="absolute bottom-6 right-6 top-20 z-30 hidden min-h-0 w-[72px] flex-col items-center gap-2 overflow-y-auto overscroll-contain rounded-[24px] shadow-2xl glass-inspector p-2 pb-3 lg:flex"
             >
               {renderWorkflowToolbarButtons()}
-              <SidebarTabButton active={false} label={t("detail.tabSingleNode")} title={t("detail.tabSingleNode")} icon={<Plus size={17} />} onClick={() => openSidebarTab("singleNode")} />
-              <SidebarTabButton active={false} label={t("detail.tabTemplates")} title={t("detail.tabTemplates")} icon={<Layers3 size={17} />} onClick={() => openSidebarTab("templates")} />
-              {renderToolbarViewDivider()}
-              <SidebarTabButton active={false} label={t("detail.tabDetails")} title={t("detail.tabDetails")} icon={<Eye size={17} />} onClick={() => openSidebarTab("details")} />
-              <SidebarTabButton active={false} label={t("detail.tabRuns")} title={t("detail.runsTitle")} icon={<CircleDot size={17} />} onClick={() => openSidebarTab("runs")} />
-              <SidebarTabButton active={false} label={t("detail.tabImages")} title={t("detail.tabImages")} icon={<ImageIcon size={17} />} onClick={() => openSidebarTab("images")} />
-              <SidebarTabButton active={false} label="演示" title="演示" icon={<Presentation size={17} />} onClick={() => openSidebarTab("deck")} />
+              <div className="pf-sidebar-rail-tabs" role="tablist" aria-label={t("detail.mobileDetailsSheet")}>
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "singleNode"}
+                  label={t("detail.tabSingleNode")}
+                  title={t("detail.tabSingleNode")}
+                  icon={<Plus size={17} />}
+                  onClick={() => openSidebarTab("singleNode")}
+                />
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "templates"}
+                  label={t("detail.tabTemplates")}
+                  title={t("detail.tabTemplates")}
+                  icon={<Layers3 size={17} />}
+                  onClick={() => openSidebarTab("templates")}
+                />
+                {renderToolbarViewDivider()}
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "details"}
+                  label={t("detail.tabDetails")}
+                  title={t("detail.tabDetails")}
+                  icon={<Eye size={17} />}
+                  onClick={() => openSidebarTab("details")}
+                />
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "runs"}
+                  label={t("detail.tabRuns")}
+                  title={t("detail.runsTitle")}
+                  icon={<CircleDot size={17} />}
+                  onClick={() => openSidebarTab("runs")}
+                />
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={false}
+                  label={t("detail.tabImages")}
+                  title={t("detail.tabImages")}
+                  icon={<ImageIcon size={17} />}
+                  onClick={() => openSidebarTab("images")}
+                />
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "deck"}
+                  label="演示"
+                  title="演示"
+                  icon={<Presentation size={17} />}
+                  onClick={() => openSidebarTab("deck")}
+                />
+              </div>
 
               <div className="mt-auto flex w-full justify-center border-t pf-hairline pt-2 dark:border-white/5">
-                <button
-                  type="button"
+                <ActionButton
                   onClick={() => setSidebarCollapsed(false)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition-all hover:scale-105 hover:bg-white/40 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-200"
+                  preset="secondary"
+                  size="icon-md"
                   title={t("detail.expandSidebar")}
                   aria-label={t("detail.expandSidebar")}
-                >
-                  <ChevronLeft size={16} />
-                </button>
+                  leadingIcon={<ChevronLeft size={16} />}
+                />
               </div>
             </div>
           ) : (
@@ -3702,60 +3855,67 @@ export function InspirationDetailPage() {
 
             <div className="flex min-h-0 w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto overscroll-contain border-r pf-hairline bg-white/5 px-2 py-4 dark:border-white/5 dark:bg-black/10">
               {renderWorkflowToolbarButtons()}
-              <SidebarTabButton
-                active={activeSidebarTab === "singleNode"}
-                label={t("detail.tabSingleNode")}
-                title={t("detail.tabSingleNode")}
-                icon={<Plus size={17} />}
-                onClick={() => openSidebarTab("singleNode")}
-              />
-              <SidebarTabButton
-                active={activeSidebarTab === "templates"}
-                label={t("detail.tabTemplates")}
-                title={t("detail.tabTemplates")}
-                icon={<Layers3 size={17} />}
-                onClick={() => openSidebarTab("templates")}
-              />
-              {renderToolbarViewDivider()}
-              <SidebarTabButton
-                active={activeSidebarTab === "details"}
-                label={t("detail.tabDetails")}
-                title={t("detail.tabDetails")}
-                icon={<Eye size={17} />}
-                onClick={() => openSidebarTab("details")}
-              />
-              <SidebarTabButton
-                active={activeSidebarTab === "runs"}
-                label={t("detail.tabRuns")}
-                title={t("detail.runsTitle")}
-                icon={<CircleDot size={17} />}
-                onClick={() => openSidebarTab("runs")}
-              />
-              <SidebarTabButton
-                active={false}
-                label={t("detail.tabImages")}
-                title={t("detail.tabImages")}
-                icon={<ImageIcon size={17} />}
-                onClick={() => openSidebarTab("images")}
-              />
-              <SidebarTabButton
-                active={activeSidebarTab === "deck"}
-                label="演示"
-                title="演示"
-                icon={<Presentation size={17} />}
-                onClick={() => openSidebarTab("deck")}
-              />
+              <div className="pf-sidebar-rail-tabs" role="tablist" aria-label={t("detail.mobileDetailsSheet")}>
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "singleNode"}
+                  label={t("detail.tabSingleNode")}
+                  title={t("detail.tabSingleNode")}
+                  icon={<Plus size={17} />}
+                  onClick={() => openSidebarTab("singleNode")}
+                />
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "templates"}
+                  label={t("detail.tabTemplates")}
+                  title={t("detail.tabTemplates")}
+                  icon={<Layers3 size={17} />}
+                  onClick={() => openSidebarTab("templates")}
+                />
+                {renderToolbarViewDivider()}
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "details"}
+                  label={t("detail.tabDetails")}
+                  title={t("detail.tabDetails")}
+                  icon={<Eye size={17} />}
+                  onClick={() => openSidebarTab("details")}
+                />
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "runs"}
+                  label={t("detail.tabRuns")}
+                  title={t("detail.runsTitle")}
+                  icon={<CircleDot size={17} />}
+                  onClick={() => openSidebarTab("runs")}
+                />
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={false}
+                  label={t("detail.tabImages")}
+                  title={t("detail.tabImages")}
+                  icon={<ImageIcon size={17} />}
+                  onClick={() => openSidebarTab("images")}
+                />
+                <SidebarRailTab
+                  appearance={actionAppearance}
+                  active={activeSidebarTab === "deck"}
+                  label="演示"
+                  title="演示"
+                  icon={<Presentation size={17} />}
+                  onClick={() => openSidebarTab("deck")}
+                />
+              </div>
 
               <div className="mt-auto flex w-full justify-center border-t pf-hairline pt-2 dark:border-white/5">
-                <button
-                  type="button"
+                <ActionButton
                   onClick={() => setSidebarCollapsed(true)}
-                  className="btn-secondary-spring inline-flex h-9 w-9 items-center justify-center rounded-xl"
+                  preset="secondary"
+                  size="icon-md"
                   title={t("detail.collapseSidebar")}
                   aria-label={t("detail.collapseSidebar")}
-                >
-                  <ChevronRight size={16} />
-                </button>
+                  leadingIcon={<ChevronRight size={16} />}
+                />
               </div>
             </div>
 
@@ -3792,22 +3952,19 @@ export function InspirationDetailPage() {
         >
           <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-900/85">
             {mobileCanvasModeItems.map((item) => (
-              <button
+              <ActionButton
                 key={item.key}
-                type="button"
                 onClick={() => setMobileCanvasMode(item.key)}
-                className={`inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg px-2 text-xs font-semibold transition-colors active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400 ${
-                  mobileCanvasMode === item.key
-                    ? "bg-white text-indigo-700 shadow-sm dark:bg-violet-500/18 dark:text-violet-100 dark:ring-1 dark:ring-violet-300/35"
-                    : "text-slate-500 hover:bg-white/70 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                }`}
+                preset="secondary"
+                size="md"
+                className={DETAIL_MOBILE_CANVAS_MODE_BUTTON_CLASS_NAME}
                 aria-pressed={mobileCanvasMode === item.key}
                 aria-label={item.description}
                 title={item.description}
+                leadingIcon={item.icon}
               >
-                {item.icon}
-                <span className="truncate">{item.label}</span>
-              </button>
+                {item.label}
+              </ActionButton>
             ))}
           </div>
           <div
@@ -3815,52 +3972,48 @@ export function InspirationDetailPage() {
             aria-label={t("detail.mobileToolbar")}
             className="mt-1.5 grid grid-cols-6 gap-1"
           >
-            <button
-              type="button"
+            <ActionButton
               onClick={() => void handleRunWorkflow(undefined)}
               disabled={fullWorkflowRunDisabled || !workflow}
-              className="inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl bg-indigo-600 px-1 text-[10px] font-semibold leading-[1.05] text-white shadow-lg shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:via-violet-500 dark:to-fuchsia-500 dark:shadow-violet-900/45 dark:ring-1 dark:ring-violet-300/35"
+              preset="primary"
+              size="md"
+              className={DETAIL_MOBILE_STACKED_BUTTON_CLASS_NAME}
               title={fullWorkflowRunTitle}
               aria-label={fullWorkflowRunTitle}
+              loading={fullWorkflowRunSpinner}
+              leadingIcon={<Play size={17} />}
             >
-              {fullWorkflowRunSpinner ? <Loader2 size={17} className="mb-1 shrink-0 animate-spin" /> : <Play size={17} className="mb-1 shrink-0" />}
-              <span className="max-w-full text-center">{fullWorkflowRunLabel}</span>
-            </button>
+              {fullWorkflowRunLabel}
+            </ActionButton>
             {failedWorkflowNodes.length > 0 ? (
-              <button
-                type="button"
+              <ActionButton
                 onClick={() => void handleRetryFailedWorkflowNodes()}
                 disabled={retryFailedWorkflowNodesDisabled || !workflow}
-                className="btn-danger-spring inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl px-1 text-[10px] font-semibold leading-[1.05] disabled:cursor-not-allowed"
+                preset="danger"
+                size="md"
+                className={DETAIL_MOBILE_STACKED_BUTTON_CLASS_NAME}
                 title={failedWorkflowNodesRetryTitle}
                 aria-label={failedWorkflowNodesRetryTitle}
+                loading={retryFailedWorkflowNodesMutation.isPending}
+                leadingIcon={<RotateCcw size={16} />}
               >
-                {retryFailedWorkflowNodesMutation.isPending ? (
-                  <Loader2 size={16} className="mb-1 shrink-0 animate-spin" />
-                ) : (
-                  <RotateCcw size={16} className="mb-1 shrink-0" />
-                )}
-                <span className="max-w-full text-center">
-                  {t("detail.failedNodesRetry.action", { count: failedWorkflowNodes.length })}
-                </span>
-              </button>
+                {t("detail.failedNodesRetry.action", { count: failedWorkflowNodes.length })}
+              </ActionButton>
             ) : null}
             {sidebarTabItems.map((item) => (
-              <button
+              <ActionButton
                 key={item.key}
-                type="button"
                 onClick={() => openMobileSidebarTab(item.key)}
-                className={`inline-flex min-h-14 min-w-0 flex-col items-center justify-center rounded-xl border px-1 text-[10px] font-semibold leading-[1.05] text-slate-600 transition-colors active:scale-[0.98] hover:border-indigo-200 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400 ${
-                  activeSidebarTab === item.key && item.key !== "images"
-                    ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-violet-400/55 dark:bg-violet-500/18 dark:text-violet-100"
-                    : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
-                }`}
+                preset="secondary"
+                size="md"
+                className={DETAIL_MOBILE_STACKED_BUTTON_CLASS_NAME}
+                aria-pressed={activeSidebarTab === item.key && item.key !== "images"}
                 aria-label={item.label}
                 title={item.label}
+                leadingIcon={item.icon}
               >
-                {item.icon}
-                <span className="mt-1 max-w-full text-center">{item.label}</span>
-              </button>
+                {item.label}
+              </ActionButton>
             ))}
           </div>
         </div>
@@ -3907,14 +4060,13 @@ export function InspirationDetailPage() {
                 <span className="truncate text-sm font-semibold text-slate-950 dark:text-white">{activeSidebarTabItem.label}</span>
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
+                <ActionButton
                   onClick={() => setMobileDetailsSheetOpen(false)}
-                  className="btn-secondary-spring inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl"
+                  preset="secondary"
+                  size="icon-lg"
                   aria-label={t("detail.closeMobileSheet")}
-                >
-                  <X size={18} />
-                </button>
+                  leadingIcon={<X size={18} />}
+                />
               </div>
             </div>
             <div
@@ -3966,10 +4118,12 @@ export function InspirationDetailPage() {
         fillBlockedTitle={inspirationWriteBlocked ? inspirationWriteBlockedTitle : null}
         resourceLibraryWriteDisabledTitle={resourceLibraryWriteBlockedTitle}
         savingResourceLibrarySourceId={resourceLibrarySaveSource?.source_id ?? null}
+        workspaceSubpage={workspaceSubpage}
       />
       <ResourceLibraryModal
         open={resourceLibraryOpen}
         onClose={() => setResourceLibraryOpen(false)}
+        appearance={workspaceSubpage ? "workspace" : "classic"}
         canRead
         onSelectAsset={handleResourceLibraryAssetSelect}
         selectLabel={t("resourceLibrary.loadToCurrentNode")}
@@ -3978,6 +4132,7 @@ export function InspirationDetailPage() {
         selectingAssetId={loadResourceLibraryAssetMutation.variables ?? null}
       />
       <SaveToResourceLibraryDialog
+        appearance={workspaceSubpage ? "workspace" : "classic"}
         source={resourceLibrarySaveSource}
         canWrite={!resourceLibraryWriteBlockedTitle}
         onClose={() => setResourceLibrarySaveSource(null)}
@@ -3991,13 +4146,13 @@ export function InspirationDetailPage() {
         nodeTitle={selectedNode?.title ?? ""}
         plan={selectedTailPendingPlan}
         busy={applyTailSplitPlanMutation.isPending}
-        imageSizeOptions={imageSizeOptions}
-        imageGenerationMaxDimension={imageGenerationMaxDimension}
+        globalImageGenerationMaxDimension={globalImageGenerationMaxDimension}
         imageToolAllowedFields={imageToolAllowedFields}
         resourceGroups={workflowResourceGroups}
         generationConfigOptions={generationConfigOptions}
         canReusePublicCopyNode={selectedTailPublicReuseAvailability.canReusePublicCopyNode}
         canReusePublicReferenceNode={selectedTailPublicReuseAvailability.canReusePublicReferenceNode}
+        workspaceSubpage={workspaceSubpage}
         onClose={() => setTailPlanDialogOpen(false)}
         onConfirm={(itemIds, imageGenerationConfig, reuseOptions) =>
           void handleConfirmTailSplitPlan(itemIds, imageGenerationConfig, reuseOptions)
@@ -4019,14 +4174,13 @@ export function InspirationDetailPage() {
                 })}
               </p>
             </div>
-            <button
-              type="button"
+            <ActionButton
               onClick={() => setPendingDeckSourcePreflight(null)}
-              className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              preset="secondary"
+              size="icon-sm"
               aria-label={t("common.close")}
-            >
-              <X size={17} />
-            </button>
+              leadingIcon={<X size={17} />}
+            />
           </div>
           <div className="max-h-[50vh] overflow-y-auto px-5 py-4">
             <div className="space-y-2">
@@ -4042,37 +4196,37 @@ export function InspirationDetailPage() {
             </div>
           </div>
           <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
-            <button
-              type="button"
+            <ActionButton
               onClick={() => setPendingDeckSourcePreflight(null)}
-              className="pf-btn-secondary"
+              preset="secondary"
+              size="md"
             >
               {t("common.cancel")}
-            </button>
-            <button
-              type="button"
+            </ActionButton>
+            <ActionButton
               disabled={createDeckNodeFromSelectionMutation.isPending}
               onClick={() => {
                 createDeckNodeFromSelectionMutation.mutate({ nodeIds: pendingDeckSourcePreflight.allNodeIds });
                 setPendingDeckSourcePreflight(null);
               }}
-              className="pf-btn-secondary disabled:opacity-60"
+              preset="secondary"
+              size="md"
+              loading={createDeckNodeFromSelectionMutation.isPending}
             >
-              {createDeckNodeFromSelectionMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
               {t("detail.deck.createFromSelectionKeepUnavailable")}
-            </button>
-            <button
-              type="button"
+            </ActionButton>
+            <ActionButton
               disabled={createDeckNodeFromSelectionMutation.isPending}
               onClick={() => {
                 createDeckNodeFromSelectionMutation.mutate({ nodeIds: pendingDeckSourcePreflight.usableNodeIds });
                 setPendingDeckSourcePreflight(null);
               }}
-              className="pf-btn-primary disabled:opacity-60"
+              preset="primary"
+              size="md"
+              loading={createDeckNodeFromSelectionMutation.isPending}
             >
-              {createDeckNodeFromSelectionMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
               {t("detail.deck.createFromSelectionExcludeUnavailable")}
-            </button>
+            </ActionButton>
           </div>
         </ModalShell>
       ) : null}
@@ -4105,21 +4259,23 @@ export function InspirationDetailPage() {
               ) : null}
             </div>
             <div className="space-y-3 px-5 py-4">
-              <input
+              <LayoutTextInput
                 value={canvasTemplateSaveTitle}
-                onChange={(event) => setCanvasTemplateSaveTitle(event.target.value)}
-                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]"
+                onChange={(event: ReactChangeEvent<HTMLInputElement>) => setCanvasTemplateSaveTitle(event.target.value)}
+                size="tall"
                 placeholder={t("detail.templateName")}
                 maxLength={255}
               />
-              <textarea
+              <LayoutTextarea
                 value={canvasTemplateSaveDescription}
-                onChange={(event) => setCanvasTemplateSaveDescription(event.target.value)}
-                className="min-h-20 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-950 placeholder:text-slate-400 shadow-none transition-colors focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:bg-[#111b2d]"
+                onChange={(event: ReactChangeEvent<HTMLTextAreaElement>) =>
+                  setCanvasTemplateSaveDescription(event.target.value)
+                }
+                className="min-h-20"
                 placeholder={t("detail.templateDescription")}
                 maxLength={1000}
               />
-              <SelectField
+              <LayoutSelectField
                 value={canvasTemplateSaveCategoryId}
                 options={[
                   { value: "", label: t("detail.saveCanvasTemplateCategoryRequired") },
@@ -4128,17 +4284,16 @@ export function InspirationDetailPage() {
                 onChange={setCanvasTemplateSaveCategoryId}
                 ariaLabel={t("detail.saveCanvasTemplateCategoryRequired")}
                 disabled={userCanvasTemplateCategoriesQuery.isLoading}
-                radius="lg"
+                size="tall"
               />
-              <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={canvasTemplateRetainPromptText}
-                  onChange={(event) => setCanvasTemplateRetainPromptText(event.target.checked)}
-                  className="h-4 w-4 accent-[var(--pf-accent)]"
-                />
+              <LayoutCheckbox
+                checked={canvasTemplateRetainPromptText}
+                onChange={(event: ReactChangeEvent<HTMLInputElement>) =>
+                  setCanvasTemplateRetainPromptText(event.target.checked)
+                }
+              >
                 {t("detail.saveCanvasTemplateRetainPrompt")}
-              </label>
+              </LayoutCheckbox>
               {workflowInitialEntryMode === "blank" ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-200">
                   {t("detail.saveCanvasTemplateBlankDisabled")}
@@ -4146,15 +4301,15 @@ export function InspirationDetailPage() {
               ) : null}
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-950/45">
-              <button
-                type="button"
+              <ActionButton
                 onClick={() => setCanvasTemplateSaveOpen(false)}
                 disabled={createUserCanvasTemplateMutation.isPending}
-                className="btn-secondary-spring inline-flex h-9 items-center rounded-xl px-3 text-sm font-semibold disabled:opacity-60"
+                preset="secondary"
+                size="md"
               >
                 {t("common.cancel")}
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
                 type="submit"
                 disabled={
                   createUserCanvasTemplateMutation.isPending ||
@@ -4162,16 +4317,18 @@ export function InspirationDetailPage() {
                   !canvasTemplateSaveTitle.trim() ||
                   !canvasTemplateSaveCategoryId
                 }
-                className="btn-primary-spring inline-flex h-9 items-center rounded-xl px-3 text-sm font-semibold disabled:opacity-60"
+                preset="primary"
+                size="md"
+                loading={createUserCanvasTemplateMutation.isPending}
               >
-                {createUserCanvasTemplateMutation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
                 {t("detail.save")}
-              </button>
+              </ActionButton>
             </div>
         </ModalShell>
       ) : null}
       <ConfirmDialog
         open={Boolean(pendingDeleteDialog)}
+        appearance={actionAppearance}
         title={pendingDeleteDialog?.title ?? ""}
         description={pendingDeleteDialog?.description ?? ""}
         confirmLabel={t("confirm.delete.confirm")}
@@ -4200,6 +4357,7 @@ export function InspirationDetailPage() {
       />
       <ConfirmDialog
         open={Boolean(pendingHistoryDialog)}
+        appearance={actionAppearance}
         title={pendingHistoryDialog?.title ?? ""}
         description={pendingHistoryDialog?.description ?? ""}
         confirmLabel={t("detail.confirm.continue")}
@@ -4239,6 +4397,9 @@ function InspirationImagePreviewModal({
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
+  const actionAppearance: LayoutActionAppearance = activeScheme === "workspace" ? "workspace" : "classic";
+  const ActionButton = actionButtonComponentForAppearance(actionAppearance);
   const hasResourceLibraryAction = Boolean(resourceLibrarySource);
   const resourceLibraryLabel = resourceLibrarySaved
     ? t("resourceLibrary.alreadyInLibrary")
@@ -4255,34 +4416,29 @@ function InspirationImagePreviewModal({
         <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-slate-800">
           <div className="min-w-0 truncate text-sm font-medium text-zinc-800 dark:text-slate-100">{image.alt}</div>
           <div className="flex shrink-0 items-center gap-2">
-            <DownloadLink image={image} />
+            <DownloadLink image={image} appearance={actionAppearance} />
             {hasResourceLibraryAction ? (
-              <button
-                type="button"
+              <ActionButton
                 onClick={onSaveToResourceLibrary}
                 disabled={Boolean(resourceLibraryDisabledTitle) || resourceLibrarySaving}
                 title={resourceLibraryTitle}
                 aria-label={resourceLibraryTitle}
-                className="inline-flex min-h-8 items-center rounded border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+                preset="primary"
+                size="sm"
+                className={DETAIL_PREVIEW_SAVE_BUTTON_CLASS_NAME}
+                loading={resourceLibrarySaving}
+                leadingIcon={resourceLibrarySaved ? <Check size={12} /> : <Save size={12} />}
               >
-                {resourceLibrarySaving ? (
-                  <Loader2 size={12} className="mr-1.5 animate-spin" />
-                ) : resourceLibrarySaved ? (
-                  <Check size={12} className="mr-1.5" />
-                ) : (
-                  <Save size={12} className="mr-1.5" />
-                )}
-                <span className="max-w-28 truncate">{resourceLibraryLabel}</span>
-              </button>
+                {resourceLibraryLabel}
+              </ActionButton>
             ) : null}
-            <button
-              type="button"
+            <ActionButton
               onClick={onClose}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+              preset="secondary"
+              size="icon-sm"
               aria-label={t("detail.preview.close")}
-            >
-              <X size={16} />
-            </button>
+              leadingIcon={<X size={16} />}
+            />
           </div>
         </div>
         <ZoomableImage

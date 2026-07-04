@@ -14,6 +14,7 @@ import type {
   ConfigUpdateRequest,
   CurrentWeather,
   CreateEnhanceJobInput,
+  CreateImageToCodeJobInput,
   CreateCanvasTemplateCategoryInput,
   CreateGlobalCanvasTemplateInput,
   CopySet,
@@ -32,6 +33,8 @@ import type {
   GalleryTagUpdateInput,
   EnhanceJob,
   EnhanceJobListResponse,
+  ImageToCodeJob,
+  ImageToCodeJobListResponse,
   GenerationConfig,
   GenerationConfigCreateRequest,
   GenerationConfigOption,
@@ -60,6 +63,7 @@ import type {
   LoginPageTemplateId,
   ProviderConfigResponse,
   ProviderModelListResponse,
+  ProviderPurpose,
   ProviderProfile,
   ProviderProfileCreateRequest,
   ProviderProfileUpdateRequest,
@@ -514,11 +518,21 @@ export const api = {
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/inspirations/${inspirationId}/history${suffix}`);
   },
-  getConfig(): Promise<ConfigResponse> {
-    return request("/api/settings");
+  getConfig(input?: {
+    section?: "prompts" | "upload" | "queue" | "layoutAppearance" | "loginPage" | "security";
+  }): Promise<ConfigResponse> {
+    const params = new URLSearchParams();
+    if (input?.section) {
+      params.set("section", input.section);
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/settings${suffix}`);
   },
   getProviderConfig(): Promise<ProviderConfigResponse> {
     return request("/api/settings/provider-config");
+  },
+  listProviderProfiles(): Promise<ProviderProfile[]> {
+    return request("/api/settings/provider-profiles");
   },
   listProviderModels(profileId: string, providerKind: string): Promise<ProviderModelListResponse> {
     return request(
@@ -575,14 +589,34 @@ export const api = {
     const suffix = params.size ? `?${params.toString()}` : "";
     return request(`/api/usage-stats${suffix}`);
   },
-  listGenerationConfigs(): Promise<GenerationConfig[]> {
-    return request("/api/settings/generation-configs");
+  listGenerationConfigs(input?: {
+    purpose?: ProviderPurpose;
+    resource_group_id?: string | null;
+    unbound_only?: boolean;
+  }): Promise<GenerationConfig[]> {
+    const params = new URLSearchParams();
+    if (input?.purpose) {
+      params.set("purpose", input.purpose);
+    }
+    if (input?.resource_group_id) {
+      params.set("resource_group_id", input.resource_group_id);
+    }
+    if (input?.unbound_only) {
+      params.set("unbound_only", "true");
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/settings/generation-configs${suffix}`);
   },
   listGenerationConfigOptions(): Promise<GenerationConfigOption[]> {
     return request("/api/settings/generation-config-options");
   },
-  listGenerationResourceGroups(): Promise<GenerationResourceGroup[]> {
-    return request("/api/settings/generation-resource-groups");
+  listGenerationResourceGroups(input?: { include_image_max_dimension?: boolean }): Promise<GenerationResourceGroup[]> {
+    const params = new URLSearchParams();
+    if (input?.include_image_max_dimension === false) {
+      params.set("include_image_max_dimension", "false");
+    }
+    const suffix = params.size ? `?${params.toString()}` : "";
+    return request(`/api/settings/generation-resource-groups${suffix}`);
   },
   listMyGenerationResourceGroups(): Promise<GenerationResourceGroup[]> {
     return request("/api/settings/my-generation-resource-groups");
@@ -701,6 +735,35 @@ export const api = {
       method: "POST",
     });
   },
+  listImageToCodeJobs(input?: {
+    limit?: number;
+    offset?: number;
+    status?: JobStatus | null;
+  }): Promise<ImageToCodeJobListResponse> {
+    const params = new URLSearchParams({
+      limit: String(input?.limit ?? 50),
+      offset: String(input?.offset ?? 0),
+    });
+    if (input?.status) {
+      params.set("status", input.status);
+    }
+    return request(`/api/image-to-code-jobs?${params.toString()}`);
+  },
+  createImageToCodeJob(input: CreateImageToCodeJobInput): Promise<ImageToCodeJob> {
+    return request("/api/image-to-code-jobs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  getImageToCodeJob(jobId: string): Promise<ImageToCodeJob> {
+    return request(`/api/image-to-code-jobs/${encodeURIComponent(jobId)}`);
+  },
+  cancelImageToCodeJob(jobId: string): Promise<ImageToCodeJob> {
+    return request(`/api/image-to-code-jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+  },
+  retryImageToCodeJob(jobId: string): Promise<ImageToCodeJob> {
+    return request(`/api/image-to-code-jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+  },
   updateConfig(payload: ConfigUpdateRequest): Promise<ConfigResponse> {
     return request("/api/settings", {
       method: "PATCH",
@@ -751,6 +814,9 @@ export const api = {
     formData.set("resource_group_id", input.resource_group_id);
     if (input.file) {
       formData.set("image", input.file);
+    }
+    if (input.image_source_asset_id) {
+      formData.set("image_source_asset_id", input.image_source_asset_id);
     }
     input.referenceFiles?.forEach((referenceFile) => {
       formData.append("reference_images", referenceFile);
@@ -1601,16 +1667,17 @@ export const api = {
  * When provider_max_dimension is null, the provider has no limit (uses globalMax as ceiling).
  */
 export function resourceGroupMaxDimension(
-  configs: GenerationConfig[],
+  configs: Array<
+    Pick<GenerationConfig, "resource_group_ids" | "enabled" | "effective_enabled" | "provider_max_dimension">
+  >,
   resourceGroupId: string,
   globalMax: number,
 ): number {
   const groupConfigs = configs.filter(
-    (c) => c.resource_group_ids.includes(resourceGroupId) && c.enabled,
+    (c) => c.resource_group_ids.includes(resourceGroupId) && c.effective_enabled,
   );
   if (groupConfigs.length === 0) return globalMax;
   return Math.max(
     ...groupConfigs.map((c) => c.provider_max_dimension ?? globalMax),
   );
 }
-

@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 import { ModalShell } from "../../../components/ModalShell";
 import { useI18n } from "../../../lib/preferences";
 import type { PendingProviderDisable } from "../types";
-import { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } from "./styles";
+import { useSettingsActionClassNames } from "./styles";
 
 export function ProviderDisableConfirmDialog({
   pendingDisable,
@@ -21,6 +21,7 @@ export function ProviderDisableConfirmDialog({
   onConfirm: () => void;
 }) {
   const { t } = useI18n();
+  const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const titleId = useId();
 
   if (!pendingDisable) {

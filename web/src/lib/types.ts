@@ -23,6 +23,21 @@ export type EnhanceSourceKind =
   | "source_asset"
   | "image_session_asset"
   | "enhance_input_blob";
+export type ImageToCodeSourceKind = "resource_library_asset";
+export type ImageToCodeDeliveryMode = "static_site" | "figma_export" | "both";
+export type ImageToCodePageType = "landing" | "marketing" | "editorial";
+export type ImageToCodeFidelityMode = "balanced" | "visual_first" | "structure_first";
+export type ImageToCodeArtifactType =
+  | "source_snapshot"
+  | "preview_image"
+  | "site_zip"
+  | "site_index_html"
+  | "layers_manifest"
+  | "delivery_report_json"
+  | "delivery_report_md"
+  | "figma_layer_spec"
+  | "figma_import_zip"
+  | "figma_readme";
 export type EnhanceFinalStatus = "pending_upload" | "ready";
 export type EnhanceBlendEdge = "left" | "right" | "top" | "bottom";
 export type GenerationConfigSelectionMode = "auto" | "manual";
@@ -150,6 +165,101 @@ export interface EnhanceJob {
 
 export interface EnhanceJobListResponse {
   items: EnhanceJob[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ImageToCodeJobParams {
+  page_type: ImageToCodePageType;
+  fidelity_mode: ImageToCodeFidelityMode;
+  responsive_shell: boolean;
+  export_hd_preview: boolean;
+  notes: string | null;
+  retry_from_job_id?: string | null;
+}
+
+export interface ImageToCodeArtifact {
+  id: string;
+  type: ImageToCodeArtifactType;
+  label: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  preview_role: "primary" | "secondary" | "none";
+  download_url: string;
+}
+
+export interface ImageToCodeResultManifest {
+  input: {
+    filename: string;
+    mime_type: string;
+    width: number;
+    height: number;
+  };
+  params: ImageToCodeJobParams;
+  preview: {
+    preview_image_artifact_id?: string | null;
+    preview_image_url: string | null;
+    site_preview_url: string;
+    site_preview_enabled: boolean;
+    preview_asset_paths: string[];
+    preview_available: boolean;
+  };
+  static_site: {
+    page_title: string;
+    section_count: number;
+    theme_keywords: string[];
+    responsive_shell: boolean;
+    site_asset_count: number;
+  };
+  figma_export: {
+    node_count: number;
+    warning_count: number;
+    frame_width: number;
+    frame_height: number;
+  } | null;
+  warnings: string[];
+  retry_from_job_id: string | null;
+  artifacts: ImageToCodeArtifact[];
+  delivery_report: Record<string, unknown>;
+}
+
+export interface CreateImageToCodeJobInput {
+  source_kind: ImageToCodeSourceKind;
+  source_ref: string;
+  delivery_mode: ImageToCodeDeliveryMode;
+  page_type: ImageToCodePageType;
+  fidelity_mode: ImageToCodeFidelityMode;
+  responsive_shell: boolean;
+  export_hd_preview: boolean;
+  notes?: string | null;
+}
+
+export interface ImageToCodeJob {
+  id: string;
+  owner_user_id: string;
+  source_kind: ImageToCodeSourceKind;
+  source_ref: string;
+  source_width: number;
+  source_height: number;
+  source_mime_type: string;
+  delivery_mode: ImageToCodeDeliveryMode;
+  params: ImageToCodeJobParams;
+  status: JobStatus;
+  progress_phase: string | null;
+  progress_completed: number;
+  progress_total: number;
+  result_manifest: ImageToCodeResultManifest | null;
+  last_error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImageToCodeJobListResponse {
+  items: ImageToCodeJob[];
   total: number;
   limit: number;
   offset: number;
@@ -496,6 +606,7 @@ export interface GenerationResourceGroup {
   description?: string | null;
   sort_order: number;
   enabled: boolean;
+  image_max_dimension: number | null;
   blur_images_by_default: boolean;
   archived_at?: string | null;
   created_at: string;
@@ -688,6 +799,7 @@ export interface CreateInspirationInput {
   initial_workflow_entry?: InspirationInitialWorkflowEntry;
   entry_text?: string;
   file?: File;
+  image_source_asset_id?: string;
   contextDocumentFile?: File;
   referenceFiles?: File[];
 }
@@ -1457,6 +1569,9 @@ export interface ProviderProfile {
   name: string;
   provider_type: ProviderType;
   base_url: string | null;
+  api_key_preview: string | null;
+  used_by_text_generation?: boolean;
+  used_by_image_generation?: boolean;
   capabilities: ProviderCapability[];
   default_models: Record<string, unknown>;
   config: Record<string, unknown>;
@@ -1581,6 +1696,7 @@ export interface GenerationConfigOption {
   effective_enabled: boolean;
   priority: number;
   frozen_until: string | null;
+  provider_max_dimension: number | null;
 }
 
 export interface GenerationConfigStatusConfig {

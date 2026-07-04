@@ -27,6 +27,7 @@ class ApiPermissionDefinition:
 MENU_INSPIRATIONS = "inspirations"
 MENU_IMAGE_CHAT = "image_chat"
 MENU_ENHANCE = "enhance"
+MENU_IMAGE_TO_CODE = "image_to_code"
 MENU_GALLERY = "gallery"
 MENU_STATUS = "status"
 MENU_USAGE_STATS = "usage_stats"
@@ -44,6 +45,8 @@ API_IMAGE_CHAT_WRITE = "image_chat:write"
 API_IMAGE_CHAT_GENERATE = "image_chat:generate"
 API_ENHANCE_READ = "enhance:read"
 API_ENHANCE_GENERATE = "enhance:generate"
+API_IMAGE_TO_CODE_READ = "image_to_code:read"
+API_IMAGE_TO_CODE_GENERATE = "image_to_code:generate"
 API_GALLERY_READ = "gallery:read"
 API_GALLERY_WRITE = "gallery:write"
 API_GALLERY_TAGS_MANAGE = "gallery:tags_manage"
@@ -61,9 +64,10 @@ MENU_DEFINITIONS: tuple[MenuDefinition, ...] = (
     MenuDefinition(MENU_INSPIRATIONS, "灵感", 10),
     MenuDefinition(MENU_IMAGE_CHAT, "生图", 20),
     MenuDefinition(MENU_ENHANCE, "图片增强", 30),
-    MenuDefinition(MENU_GALLERY, "画廊", 40),
-    MenuDefinition(MENU_STATUS, "状态", 50),
-    MenuDefinition(MENU_USAGE_STATS, "个人统计", 60),
+    MenuDefinition(MENU_IMAGE_TO_CODE, "图片转代码", 40),
+    MenuDefinition(MENU_GALLERY, "画廊", 50),
+    MenuDefinition(MENU_STATUS, "状态", 60),
+    MenuDefinition(MENU_USAGE_STATS, "个人统计", 70),
     MenuDefinition(MENU_SETTINGS, "设置", 90),
     MenuDefinition(MENU_RBAC, "权限管理", 100),
 )
@@ -72,9 +76,7 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
     ApiPermissionDefinition(API_INSPIRATIONS_READ, MENU_INSPIRATIONS, "查看灵感", "查看灵感列表、详情和历史", 10),
     ApiPermissionDefinition(API_INSPIRATIONS_WRITE, MENU_INSPIRATIONS, "维护灵感", "创建、编辑、归档灵感资源", 20),
     ApiPermissionDefinition(API_INSPIRATIONS_GENERATE, MENU_INSPIRATIONS, "灵感生成", "发起灵感工作流生成", 30),
-    ApiPermissionDefinition(
-        API_DECK_READ, MENU_INSPIRATIONS, "查看演示文稿", "查看灵感下的演示文稿与幻灯片", 40
-    ),
+    ApiPermissionDefinition(API_DECK_READ, MENU_INSPIRATIONS, "查看演示文稿", "查看灵感下的演示文稿与幻灯片", 40),
     ApiPermissionDefinition(
         API_DECK_WRITE, MENU_INSPIRATIONS, "维护演示文稿", "编辑大纲、风格、配图与演示文稿管理", 50
     ),
@@ -86,6 +88,20 @@ API_PERMISSION_DEFINITIONS: tuple[ApiPermissionDefinition, ...] = (
     ApiPermissionDefinition(API_IMAGE_CHAT_GENERATE, MENU_IMAGE_CHAT, "连续生图生成", "发起连续生图生成任务", 30),
     ApiPermissionDefinition(API_ENHANCE_READ, MENU_ENHANCE, "查看图片增强", "查看图片增强任务和结果", 10),
     ApiPermissionDefinition(API_ENHANCE_GENERATE, MENU_ENHANCE, "图片增强生成", "发起、取消和保存图片增强任务", 20),
+    ApiPermissionDefinition(
+        API_IMAGE_TO_CODE_READ,
+        MENU_IMAGE_TO_CODE,
+        "查看图片转代码",
+        "查看图片转代码任务与结果",
+        10,
+    ),
+    ApiPermissionDefinition(
+        API_IMAGE_TO_CODE_GENERATE,
+        MENU_IMAGE_TO_CODE,
+        "图片转代码生成",
+        "发起、取消和重跑图片转代码任务",
+        20,
+    ),
     ApiPermissionDefinition(API_GALLERY_READ, MENU_GALLERY, "查看画廊", "查看画廊条目", 10),
     ApiPermissionDefinition(API_GALLERY_WRITE, MENU_GALLERY, "保存画廊", "将生成图保存到画廊", 20),
     ApiPermissionDefinition(
@@ -129,6 +145,7 @@ DEFAULT_ROLE_MENU_CODES = frozenset(
         MENU_INSPIRATIONS,
         MENU_IMAGE_CHAT,
         MENU_ENHANCE,
+        MENU_IMAGE_TO_CODE,
         MENU_GALLERY,
         MENU_STATUS,
         MENU_USAGE_STATS,
@@ -145,6 +162,8 @@ DEFAULT_ROLE_API_PERMISSION_CODES = frozenset(
         API_IMAGE_CHAT_GENERATE,
         API_ENHANCE_READ,
         API_ENHANCE_GENERATE,
+        API_IMAGE_TO_CODE_READ,
+        API_IMAGE_TO_CODE_GENERATE,
         API_GALLERY_READ,
         API_GALLERY_WRITE,
         API_STATUS_READ,

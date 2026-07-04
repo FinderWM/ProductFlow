@@ -1,7 +1,14 @@
 import { useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Plus } from "lucide-react";
 
-import { ActionButton } from "../../components/ActionButton";
+import {
+  actionButtonComponentForAppearance,
+  actionButtonToneStyle,
+  actionSurfaceClassNameForAppearance,
+  transparentActionToneVars,
+  type ActionButtonToneVars,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import type { PromptPreview } from "../../components/PromptPreviewDialog";
 import { getVerticalWheelMappedScrollLeft } from "./resizableLayout";
 import type { ImageHistoryBranch } from "./branching";
@@ -26,6 +33,7 @@ interface ImageChatHistoryPanelProps {
   selectedTaskPlaceholderId: string | null;
   selectedBaseAssetIds: string[];
   variant?: "desktop" | "mobileDrawer";
+  appearance?: LayoutActionAppearance;
   style?: CSSProperties;
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onSelectRound: (assetId: string) => void;
@@ -46,6 +54,7 @@ export function ImageChatHistoryPanel({
   selectedTaskPlaceholderId,
   selectedBaseAssetIds,
   variant = "desktop",
+  appearance = "classic",
   style,
   onResizeStart,
   onSelectRound,
@@ -59,6 +68,16 @@ export function ImageChatHistoryPanel({
   onPreviewPrompt,
   t,
 }: ImageChatHistoryPanelProps) {
+  const ActionButton = actionButtonComponentForAppearance(appearance);
+  const resizeHandleToneVars: ActionButtonToneVars = {
+    ...transparentActionToneVars,
+    "--pf-action-bg-hover": "color-mix(in srgb, var(--pf-accent) 14%, transparent)",
+  };
+  const resizeHandleClassName = actionSurfaceClassNameForAppearance(appearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "absolute inset-x-0 -top-1 z-20 hidden h-3 cursor-row-resize items-center justify-center border-0 shadow-none lg:flex",
+  });
   const desktopHistoryScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -102,6 +121,7 @@ export function ImageChatHistoryPanel({
                 selectedTaskPlaceholderId={selectedTaskPlaceholderId}
                 selectedBaseAssetIds={selectedBaseAssetIds}
                 variant="mobileDrawer"
+                appearance={appearance}
                 maskSensitiveImages={maskSensitiveImages}
                 onSelectRound={onSelectRound}
                 onAddRoundToBase={onAddRoundToBase}
@@ -133,7 +153,8 @@ export function ImageChatHistoryPanel({
           aria-label={t("chat.resizeHistory")}
           title={t("chat.resizeHistoryTitle")}
           onPointerDown={onResizeStart}
-          className="absolute inset-x-0 -top-1 z-20 hidden h-3 cursor-row-resize items-center justify-center transition-colors hover:bg-indigo-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:hover:bg-violet-500/15 lg:flex"
+          className={resizeHandleClassName}
+          style={actionButtonToneStyle(resizeHandleToneVars)}
         >
           <span className="h-1 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
         </button>
@@ -179,6 +200,7 @@ export function ImageChatHistoryPanel({
               selectedGeneratedAssetId={selectedGeneratedAssetId}
               selectedTaskPlaceholderId={selectedTaskPlaceholderId}
               selectedBaseAssetIds={selectedBaseAssetIds}
+              appearance={appearance}
               maskSensitiveImages={maskSensitiveImages}
               onSelectRound={onSelectRound}
               onAddRoundToBase={onAddRoundToBase}

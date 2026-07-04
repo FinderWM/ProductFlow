@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  Check,
   ChevronRight,
   Eye,
   EyeOff,
@@ -19,7 +18,13 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import { ClassicOptionToggle, ClassicSelectField, ClassicTextInput } from "../components/classicInputs";
 import { ImageDropZone } from "../components/ImageDropZone";
+import {
+  actionButtonComponentForAppearance,
+  actionSurfaceClassNameForAppearance,
+  type LayoutActionAppearance,
+} from "../components/layoutActionButtons";
 import { MarkdownEditor } from "../components/MarkdownEditor";
 import { ParameterHelpButton, ParameterHelpLabel } from "../components/ParameterHelp";
 import {
@@ -27,6 +32,8 @@ import {
   isResourceBlocked,
   ResourceMetaBadges,
 } from "../components/ResourceGovernance";
+import { ResourceLibraryModal } from "../components/resource-library/ResourceLibraryModal";
+import { WorkspaceOptionToggle, WorkspaceSelectField, WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import { dynamicFieldsToRecord, type DynamicFieldDraft } from "../lib/dynamicFields";
@@ -34,12 +41,14 @@ import { INSPIRATION_CONTEXT_MARKDOWN_MAX_LENGTH } from "../lib/markdown";
 import { useI18n } from "../lib/preferences";
 import { activeGenerationResourceGroupsInApiOrder } from "../lib/resourceGroups";
 import type { TranslationKey } from "../lib/i18n";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 import type {
   CanvasTemplateScope,
   CanvasTemplateSummary,
   GenerationResourceGroup,
-  ModerationFields,
   InspirationInitialWorkflowEntry,
+  ModerationFields,
+  ResourceLibraryAsset,
   WorkflowNodeType,
 } from "../lib/types";
 
@@ -87,9 +96,20 @@ const PREVIEW_MIN_WIDTH = 920;
 const PREVIEW_NODE_WIDTH = 248;
 const NODE_HEIGHT = 92;
 const PREVIEW_HEIGHT = 560;
+const MAIN_IMAGE_PREVIEW_MAX_WIDTH = 640;
+const MAIN_IMAGE_PREVIEW_MAX_HEIGHT = 360;
+const MAIN_IMAGE_PREVIEW_DEFAULT_SIZE = {
+  width: MAIN_IMAGE_PREVIEW_MAX_WIDTH,
+  height: MAIN_IMAGE_PREVIEW_MAX_HEIGHT,
+};
 const INSPIRATION_CREATE_FORM_ID = "inspiration-create-form";
 type MobileCreateStep = "entry" | "details" | "template";
 export type DocumentTextState = "idle" | "loading" | "ready" | "failed";
+
+interface ImageNaturalSize {
+  width: number;
+  height: number;
+}
 
 interface InspirationCreateReturnState {
   source?: "inspiration-list";
@@ -133,7 +153,6 @@ const stageLabelKeys: Record<string, TranslationKey> = {
 
 const stageOrder = ["image", "copy", "tail", "blank", "listing", "detail", "gallery", "content", "campaign"];
 const blankStageOrder = ["image", "copy", "tail", "blank", "listing", "detail", "gallery", "content", "campaign"];
-
 const toneClasses: Record<NonNullable<PreviewNode["tone"]>, string> = {
   input: "border-sky-100 bg-sky-50/90 text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/12 dark:text-sky-100",
   copy: "border-violet-100 bg-violet-50/90 text-violet-900 dark:border-violet-400/40 dark:bg-violet-500/16 dark:text-violet-100",
@@ -247,13 +266,47 @@ export function contextDocumentFileForSubmit(file: File | null): File | undefine
   return file ?? undefined;
 }
 
+export function constrainedMainImagePreviewSize(size: ImageNaturalSize | null): ImageNaturalSize {
+  if (!size || !Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width <= 0 || size.height <= 0) {
+    return MAIN_IMAGE_PREVIEW_DEFAULT_SIZE;
+  }
+  const scale = Math.min(MAIN_IMAGE_PREVIEW_MAX_WIDTH / size.width, MAIN_IMAGE_PREVIEW_MAX_HEIGHT / size.height);
+  return {
+    width: Math.max(1, Math.round(size.width * scale)),
+    height: Math.max(1, Math.round(size.height * scale)),
+  };
+}
+
 export function InspirationCreatePage() {
   const { locale, t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const workspaceSubpage = activeScheme === "workspace";
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const ActionButton = actionButtonComponentForAppearance(actionAppearance);
+  const createMainImageUploadClass = actionSurfaceClassNameForAppearance(actionAppearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className:
+      "pf-action-surface--compact-button pf-action-surface--dashed flex-1 min-w-[180px] cursor-pointer",
+  });
+  const createDocumentUploadClass = actionSurfaceClassNameForAppearance(actionAppearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "pf-action-surface--dashed flex cursor-pointer items-center justify-center px-3 py-3 text-xs font-medium",
+  });
+  const LayoutOptionToggle = workspaceSubpage ? WorkspaceOptionToggle : ClassicOptionToggle;
+  const LayoutSelectField = workspaceSubpage ? WorkspaceSelectField : ClassicSelectField;
+  const LayoutTextInput = workspaceSubpage ? WorkspaceTextInput : ClassicTextInput;
+  const markdownInputAppearance = workspaceSubpage ? "workspace" : "classic";
   const [name, setName] = useState("");
   const [longText, setLongText] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [selectedMainImageAsset, setSelectedMainImageAsset] = useState<ResourceLibraryAsset | null>(null);
+  const [mainImageResourceLibraryOpen, setMainImageResourceLibraryOpen] = useState(false);
+  const [uploadedMainImagePreviewUrl, setUploadedMainImagePreviewUrl] = useState<string | null>(null);
+  const [mainImageNaturalSize, setMainImageNaturalSize] = useState<ImageNaturalSize | null>(null);
   const [contextDocumentFile, setContextDocumentFile] = useState<File | null>(null);
   const [contextDocumentText, setContextDocumentText] = useState("");
   const [contextDocumentTextState, setContextDocumentTextState] = useState<DocumentTextState>("idle");
@@ -413,12 +466,17 @@ export function InspirationCreatePage() {
     setTemplateCategoryId("");
   };
 
-  const previewLabel = useMemo(() => {
+  useEffect(() => {
     if (!file) {
-      return mainImageRequired ? t("create.uploadIdle") : t("create.uploadOptional");
+      setUploadedMainImagePreviewUrl(null);
+      return;
     }
-    return file.name;
-  }, [file, mainImageRequired, t]);
+    const objectUrl = window.URL.createObjectURL(file);
+    setUploadedMainImagePreviewUrl(objectUrl);
+    return () => {
+      window.URL.revokeObjectURL(objectUrl);
+    };
+  }, [file]);
 
   useEffect(() => {
     if (!contextDocumentFile) {
@@ -466,7 +524,7 @@ export function InspirationCreatePage() {
     if (!selectedResourceGroupId) {
       return t("create.resourceGroupRequired");
     }
-    if (mainImageRequired && !file) {
+    if (mainImageRequired && !file && !selectedMainImageAsset) {
       return t("create.requiredImage");
     }
     if (initialWorkflowEntry === "copy" && !longText.trim()) {
@@ -508,6 +566,7 @@ export function InspirationCreatePage() {
         resource_group_id: selectedResourceGroupId ?? "",
         long_text: trimmedLongText || undefined,
         file: file ?? undefined,
+        image_source_asset_id: selectedMainImageAsset?.id ?? undefined,
         contextDocumentFile: contextDocumentFileForSubmit(contextDocumentFile),
         dynamic_fields: Object.keys(dynamicFieldsPayload).length ? dynamicFieldsPayload : undefined,
         canvas_template_key: selectedPlan.key || undefined,
@@ -534,7 +593,24 @@ export function InspirationCreatePage() {
   };
 
   const handleImageFiles = (files: File[]) => {
-    setFile(files[0] ?? null);
+    const nextFile = files[0] ?? null;
+    setFile(nextFile);
+    if (nextFile) {
+      setSelectedMainImageAsset(null);
+    }
+    setError("");
+  };
+
+  const handleSelectMainImageAsset = (asset: ResourceLibraryAsset) => {
+    setSelectedMainImageAsset(asset);
+    setMainImageResourceLibraryOpen(false);
+    setFile(null);
+    setError("");
+  };
+
+  const clearMainImage = () => {
+    setFile(null);
+    setSelectedMainImageAsset(null);
     setError("");
   };
 
@@ -588,6 +664,27 @@ export function InspirationCreatePage() {
     navigate("/inspirations/list");
   };
 
+  const hasMainImage = file !== null || selectedMainImageAsset !== null;
+  const mainImageName = file?.name ?? selectedMainImageAsset?.original_filename ?? "";
+  const mainImagePreviewUrl = selectedMainImageAsset
+    ? api.toApiUrl(selectedMainImageAsset.preview_url || selectedMainImageAsset.thumbnail_url)
+    : uploadedMainImagePreviewUrl;
+  const mainImagePreviewDisplaySize = constrainedMainImagePreviewSize(mainImageNaturalSize);
+  const mainImagePreviewFrameStyle = {
+    width: `${mainImagePreviewDisplaySize.width}px`,
+    aspectRatio: `${mainImagePreviewDisplaySize.width} / ${mainImagePreviewDisplaySize.height}`,
+  };
+  const mainImageSourceLabel = file
+    ? t("create.mainImageSourceUpload")
+    : selectedMainImageAsset
+      ? t("create.mainImageSourceLibrary")
+      : t("create.mainImageEmpty");
+  const mainImageUploadLabel = hasMainImage ? t("create.replaceMainImage") : t("create.uploadMainImage");
+
+  useEffect(() => {
+    setMainImageNaturalSize(null);
+  }, [mainImagePreviewUrl]);
+
   const templatePanelContent = (
     <>
       <div className="flex items-center justify-between gap-3">
@@ -598,15 +695,14 @@ export function InspirationCreatePage() {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
+          <ActionButton
             onClick={() => navigate("/workflow/templates")}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-500 transition-colors hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+            preset="secondary"
+            size="icon-sm"
             aria-label={t("templateManage.personalTitle")}
             title={t("templateManage.personalTitle")}
-          >
-            <Settings2 size={14} />
-          </button>
+            leadingIcon={<Settings2 size={14} />}
+          />
           {templatesQuery.isLoading ? <Loader2 size={16} className="animate-spin text-zinc-400" /> : null}
         </div>
       </div>
@@ -624,11 +720,12 @@ export function InspirationCreatePage() {
           </span>
           <span className="relative block">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-slate-500" />
-            <input
+            <LayoutTextInput
               value={templateSearch}
               onChange={(event) => setTemplateSearch(event.target.value)}
               maxLength={120}
-              className="h-9 w-full rounded-md border border-zinc-200 bg-white pl-8 pr-3 text-xs text-zinc-900 outline-none transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+              size="compact"
+              className="pl-8"
               placeholder={t("templateFilter.searchPlaceholder")}
             />
           </span>
@@ -638,27 +735,27 @@ export function InspirationCreatePage() {
             <span className="mb-1.5 block text-xs font-medium text-zinc-500 dark:text-slate-400">
               {t("templateFilter.category")}
             </span>
-            <select
+            <LayoutSelectField
               value={templateCategoryId}
-              onChange={(event) => setTemplateCategoryId(event.target.value)}
+              onChange={setTemplateCategoryId}
               disabled={templateCategoriesQuery.isLoading || templateCategoriesQuery.isError}
-              className="pf-input-compact disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="">{t("templateFilter.allCategories")}</option>
-              {templateCategories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
+              size="compact"
+              ariaLabel={t("templateFilter.category")}
+              options={[
+                { value: "", label: t("templateFilter.allCategories") },
+                ...templateCategories.map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                })),
+              ]}
+            />
           </label>
           <div>
             <div className="mb-1.5 text-xs font-medium text-zinc-500 dark:text-slate-400">
               {t("templateFilter.scope")}
             </div>
-            <div className="inline-flex h-9 overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 p-0.5 dark:border-slate-700 dark:bg-[#0b1220]">
+            <div className="flex flex-wrap gap-2">
               {(["all", "global", "user"] as const).map((scope) => {
-                const active = templateScope === scope;
                 const labelKey =
                   scope === "all"
                     ? "templateFilter.scopeAll"
@@ -666,18 +763,19 @@ export function InspirationCreatePage() {
                       ? "templateFilter.scopeGlobal"
                       : "templateFilter.scopeUser";
                 return (
-                  <button
+                  <LayoutOptionToggle
                     key={scope}
-                    type="button"
-                    onClick={() => handleTemplateScopeChange(scope)}
-                    className={`rounded px-2.5 text-xs font-medium transition-colors ${
-                      active
-                        ? "bg-white text-zinc-950 shadow-sm dark:bg-slate-800 dark:text-white"
-                        : "text-zinc-500 hover:text-zinc-900 dark:text-slate-400 dark:hover:text-slate-100"
-                    }`}
+                    checked={templateScope === scope}
+                    selectionMode="single"
+                    name="template-scope-filter"
+                    onChange={(checked) => {
+                      if (checked) {
+                        handleTemplateScopeChange(scope);
+                      }
+                    }}
                   >
                     {t(labelKey)}
-                  </button>
+                  </LayoutOptionToggle>
                 );
               })}
             </div>
@@ -697,27 +795,27 @@ export function InspirationCreatePage() {
             </div>
             <div className="space-y-2">
               {group.plans.map((option) => {
-                const selected = selectedPlan.key === option.key;
                 const optionBlocked = isResourceBlocked(option);
                 const optionBlockedTitle = getResourceBlockedActionTitle(option, t("resource.blockedAction"));
                 return (
-                  <button
+                  <LayoutOptionToggle
                     key={option.key || "blank"}
-                    type="button"
-                    onClick={() => {
+                    checked={selectedPlan.key === option.key}
+                    layout="card"
+                    selectionMode="single"
+                    name="canvas-template-plan"
+                    title={optionBlocked ? optionBlockedTitle : option.label}
+                    className={optionBlocked ? "w-full px-3 py-3 opacity-60 cursor-not-allowed" : "w-full px-3 py-3"}
+                    onChange={(checked) => {
+                      if (!checked) {
+                        return;
+                      }
                       if (optionBlocked) {
                         setError(optionBlockedTitle);
                         return;
                       }
                       setCanvasTemplateKey(option.key);
                     }}
-                    disabled={optionBlocked}
-                    title={optionBlocked ? optionBlockedTitle : option.label}
-                    className={`w-full rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                      selected
-                        ? "border-blue-500 bg-blue-50/50 shadow-[0_0_0_1px_rgb(59_130_246)] dark:border-violet-400 dark:bg-violet-500/18 dark:shadow-[0_0_0_1px_rgba(167,139,250,0.65)]"
-                        : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700/80 dark:bg-[#151f33] dark:hover:border-violet-400/45 dark:hover:bg-violet-500/12"
-                    }`}
                   >
                     <div className="flex min-w-0 items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
@@ -728,7 +826,6 @@ export function InspirationCreatePage() {
                           {option.description}
                         </p>
                       </div>
-                      {selected ? <Check size={14} className="mt-0.5 shrink-0 text-blue-600 dark:text-violet-200" /> : null}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       <TemplateChip>{option.shortLabel}</TemplateChip>
@@ -742,7 +839,7 @@ export function InspirationCreatePage() {
                       {option.referenceCount ? <TemplateChip>{t("create.referenceCount", { count: option.referenceCount })}</TemplateChip> : null}
                     </div>
                     <ResourceMetaBadges resource={option} className="mt-2" showReason />
-                  </button>
+                  </LayoutOptionToggle>
                 );
               })}
             </div>
@@ -794,14 +891,14 @@ export function InspirationCreatePage() {
               <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("create.description")}</p>
             </div>
           </div>
-          <button
-            type="button"
+          <ActionButton
             onClick={handleClose}
             aria-label={t("create.close")}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-200/70 text-zinc-500 transition-colors hover:bg-zinc-300 hover:text-zinc-900 dark:border dark:border-slate-700/80 dark:bg-[#151f33] dark:text-slate-300 dark:hover:bg-[#1a2740] dark:hover:text-white"
-          >
-            <X size={18} />
-          </button>
+            preset="secondary"
+            size="icon-lg"
+            className="shrink-0"
+            leadingIcon={<X size={18} />}
+          />
         </div>
 
         {error ? (
@@ -835,48 +932,52 @@ export function InspirationCreatePage() {
                   <span className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
                     {t("create.resourceGroup")} <span className="text-red-500">*</span>
                   </span>
-                  <select
+                  <LayoutSelectField
                     value={selectedResourceGroupId ?? ""}
-                    onChange={(event) => {
-                      setSelectedResourceGroupId(event.target.value || null);
+                    onChange={(value) => {
+                      setSelectedResourceGroupId(value || null);
                       setError("");
                     }}
                     disabled={generationResourceGroupsQuery.isLoading || !resourceGroups.length}
-                    className="pf-input-compact disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <option value="" disabled>
-                      {resourceGroups.length ? t("create.selectResourceGroup") : t("create.noResourceGroups")}
-                    </option>
-                    {resourceGroups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </select>
+                    size="compact"
+                    ariaLabel={t("create.resourceGroup")}
+                    options={[
+                      {
+                        value: "",
+                        label: resourceGroups.length ? t("create.selectResourceGroup") : t("create.noResourceGroups"),
+                        disabled: true,
+                      },
+                      ...resourceGroups.map((group) => ({
+                        value: group.id,
+                        label: group.name,
+                      })),
+                    ]}
+                  />
                 </label>
                 {INITIAL_WORKFLOW_ENTRY_OPTIONS.map((option) => {
-                  const active = initialWorkflowEntry === option.value;
                   const Icon = option.icon;
                   return (
-                    <button
+                    <LayoutOptionToggle
                       key={option.value}
-                      type="button"
-                      onClick={() => handleInitialWorkflowEntryChange(option.value)}
-                      className={`group flex items-start gap-3 rounded-xl border px-3 py-3 text-left transition-all active:scale-[0.99] md:items-center md:py-2.5 xl:items-start xl:py-3 ${
-                        active
-                          ? "border-indigo-300 bg-indigo-50 text-indigo-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] dark:border-violet-400/60 dark:bg-violet-500/12 dark:text-violet-100"
-                          : "border-zinc-200 bg-white text-zinc-700 hover:-translate-y-0.5 hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200 dark:hover:border-slate-500"
-                      }`}
+                      checked={initialWorkflowEntry === option.value}
+                      layout="card"
+                      selectionMode="single"
+                      name="initial-workflow-entry"
+                      className="w-full px-3 py-3 md:items-center md:py-2.5 xl:items-start xl:py-3"
+                      onChange={(checked) => {
+                        if (checked) {
+                          handleInitialWorkflowEntryChange(option.value);
+                        }
+                      }}
                     >
-                      <span className="mt-0.5 rounded-lg border border-current/20 p-2 opacity-90 transition-transform group-active:scale-95 md:mt-0 xl:mt-0.5">
+                      <span className="mt-0.5 rounded-lg border border-current/20 p-2 opacity-90 md:mt-0 xl:mt-0.5">
                         <Icon size={14} />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-semibold">{t(option.labelKey)}</span>
                         <span className="mt-1 block text-xs leading-5 text-current/75 md:line-clamp-1 xl:line-clamp-2">{t(option.descriptionKey)}</span>
                       </span>
-                      {active ? <Check size={16} className="mt-1 shrink-0" /> : null}
-                    </button>
+                    </LayoutOptionToggle>
                   );
                 })}
               </div>
@@ -907,7 +1008,7 @@ export function InspirationCreatePage() {
                 <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
                   {t("create.inspirationName")} <span className="text-red-500">*</span>
                 </label>
-                <input
+                <LayoutTextInput
                   type="text"
                   maxLength={60}
                   value={name}
@@ -915,7 +1016,7 @@ export function InspirationCreatePage() {
                     setName(event.target.value);
                     setError("");
                   }}
-                  className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                  size="tall"
                   placeholder={t("create.namePlaceholder")}
                 />
                 <div className="mt-1 text-right text-xs text-zinc-400 dark:text-slate-500">{name.length} / 60</div>
@@ -934,6 +1035,7 @@ export function InspirationCreatePage() {
                     setLongText(value);
                     setError("");
                   }}
+                  inputAppearance={markdownInputAppearance}
                   placeholder={t("create.longTextPlaceholder")}
                   helpText={entryTextHelpKey ? t(entryTextHelpKey) : t("create.longTextHelp")}
                 />
@@ -943,21 +1045,77 @@ export function InspirationCreatePage() {
                 <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
                   {t("create.mainImage")} {mainImageRequired ? <span className="text-red-500">*</span> : null}
                 </label>
-                <ImageDropZone
-                  ariaLabel={t("create.uploadAria")}
-                  className="flex aspect-[1.9] cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50/40 p-5 text-zinc-500 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10 md:aspect-[2.8] xl:aspect-[1.55]"
-                  onFiles={handleImageFiles}
-                >
-                  {({ isDragging }) => (
-                    <>
-                      <ImagePlus size={28} className="mb-2 text-zinc-400 dark:text-slate-500" />
-                      <p className="text-sm font-medium text-zinc-700 dark:text-slate-200">{isDragging ? t("create.uploadDrop") : previewLabel}</p>
-                      <p className="mt-1.5 text-xs text-zinc-500 dark:text-slate-400">
-                        {mainImageRequired ? t("create.uploadHint") : t("create.uploadOptionalHint")}
-                      </p>
-                    </>
-                  )}
-                </ImageDropZone>
+                <div className="space-y-3">
+                  <div
+                    className="relative mx-auto flex max-w-full items-center justify-center overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 shadow-sm dark:border-slate-700 dark:bg-slate-950/60"
+                    style={mainImagePreviewFrameStyle}
+                  >
+                    {mainImagePreviewUrl ? (
+                      <img
+                        src={mainImagePreviewUrl}
+                        alt={mainImageName || t("create.mainImage")}
+                        className="h-full w-full object-contain"
+                        onLoad={(event) => {
+                          const { naturalWidth, naturalHeight } = event.currentTarget;
+                          if (naturalWidth > 0 && naturalHeight > 0) {
+                            setMainImageNaturalSize({ width: naturalWidth, height: naturalHeight });
+                          }
+                        }}
+                        onError={() => setMainImageNaturalSize(null)}
+                      />
+                    ) : (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 px-5 text-center text-zinc-500 dark:text-slate-400">
+                        <ImagePlus size={28} className="opacity-70" />
+                        <p className="text-sm font-semibold text-zinc-700 dark:text-slate-200">{t("create.mainImageEmpty")}</p>
+                        <p className="text-xs">
+                          {mainImageRequired ? t("create.uploadHint") : t("create.uploadOptionalHint")}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-slate-400">
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 font-medium text-zinc-600 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200">
+                      {mainImageSourceLabel}
+                    </span>
+                    {hasMainImage ? <span className="min-w-0 flex-1 truncate">{mainImageName}</span> : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <ImageDropZone
+                      ariaLabel={t("create.uploadAria")}
+                      className={createMainImageUploadClass}
+                      activeClassName="pf-action-surface--active"
+                      disabled={createInspirationMutation.isPending}
+                      onFiles={handleImageFiles}
+                    >
+                      {({ isDragging }) => (
+                        <>
+                          <ImagePlus size={14} className="shrink-0 opacity-70" />
+                          <span className="min-w-0 truncate">{isDragging ? t("create.uploadDrop") : mainImageUploadLabel}</span>
+                        </>
+                      )}
+                    </ImageDropZone>
+                    <ActionButton
+                      onClick={() => setMainImageResourceLibraryOpen(true)}
+                      preset="secondary"
+                      size="sm"
+                      className="flex-1 min-w-[180px]"
+                      disabled={createInspirationMutation.isPending}
+                    >
+                      {t("create.selectMainImageFromLibrary")}
+                    </ActionButton>
+                    {hasMainImage ? (
+                      <ActionButton
+                        onClick={clearMainImage}
+                        preset="danger"
+                        size="sm"
+                        className="flex-1 min-w-[140px]"
+                        disabled={createInspirationMutation.isPending}
+                      >
+                        {t("create.clearMainImage")}
+                      </ActionButton>
+                    ) : null}
+                  </div>
+                </div>
               </div>
 
               <div className="mt-5 rounded-md border border-zinc-200 bg-zinc-50/60 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
@@ -997,27 +1155,28 @@ export function InspirationCreatePage() {
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 dark:border-slate-800">
-                        <button
-                          type="button"
+                        <ActionButton
                           onClick={() => setContextDocumentPreviewOpen((current) => !current)}
-                          className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                          aria-pressed={contextDocumentPreviewOpen}
+                          preset="secondary"
+                          size="sm"
                           aria-expanded={contextDocumentPreviewOpen}
                           aria-label={contextDocumentPreviewOpen ? t("create.hideDocumentPreview") : t("create.showDocumentPreview")}
                           title={contextDocumentPreviewOpen ? t("create.hideDocumentPreview") : t("create.showDocumentPreview")}
+                          leadingIcon={contextDocumentPreviewOpen ? <EyeOff size={13} /> : <Eye size={13} />}
                         >
-                          {contextDocumentPreviewOpen ? <EyeOff size={13} /> : <Eye size={13} />}
                           {contextDocumentPreviewOpen ? t("create.hideDocumentPreview") : t("create.showDocumentPreview")}
-                        </button>
-                        <button
-                          type="button"
+                        </ActionButton>
+                        <ActionButton
                           onClick={clearContextDocument}
-                          className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 dark:border-red-400/35 dark:bg-slate-950/40 dark:text-red-200 dark:hover:border-red-300/70 dark:hover:bg-red-500/10"
+                          preset="danger"
+                          size="sm"
                           aria-label={t("create.clearDocument")}
                           title={t("create.clearDocument")}
+                          leadingIcon={<X size={13} />}
                         >
-                          <X size={13} />
                           {t("create.clearDocument")}
-                        </button>
+                        </ActionButton>
                       </div>
                     </div>
                     {contextDocumentPreviewOpen && (contextDocumentTextState === "idle" || contextDocumentTextState === "loading") ? (
@@ -1037,6 +1196,7 @@ export function InspirationCreatePage() {
                         modalTitle={contextDocumentFile.name}
                         helpText={t("create.documentPreviewHelp")}
                         minRows={4}
+                        inputAppearance={markdownInputAppearance}
                         readOnly
                       />
                     ) : null}
@@ -1045,7 +1205,8 @@ export function InspirationCreatePage() {
                   <ImageDropZone
                     accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
                     ariaLabel={t("create.contextDocument")}
-                    className="flex cursor-pointer items-center justify-center rounded-md border border-dashed border-zinc-300 bg-white px-3 py-3 text-xs font-medium text-zinc-600 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:bg-violet-500/10"
+                    className={createDocumentUploadClass}
+                    activeClassName="pf-action-surface--active"
                     onFiles={handleDocumentFiles}
                   >
                     {({ isDragging }) => (
@@ -1072,41 +1233,41 @@ export function InspirationCreatePage() {
                       {t("create.dynamicFieldsHint")}
                     </div>
                   </div>
-                  <button
-                    type="button"
+                  <ActionButton
                     onClick={addDynamicField}
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 transition-colors hover:border-indigo-200 hover:text-indigo-700 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                    preset="secondary"
+                    size="icon-sm"
                     aria-label={t("create.addDynamicField")}
                     title={t("create.addDynamicField")}
-                  >
-                    <Plus size={14} />
-                  </button>
+                    leadingIcon={<Plus size={14} />}
+                  />
                 </div>
                 {dynamicFields.length ? (
                   <div className="space-y-2">
                     {dynamicFields.map((field) => (
                       <div key={field.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
-                        <input
+                        <LayoutTextInput
                           value={field.key}
                           onChange={(event) => updateDynamicField(field.id, { key: event.target.value })}
-                          className="min-w-0 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-900 outline-none transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                          size="compact"
+                          className="min-w-0"
                           placeholder={t("create.dynamicKey")}
                         />
-                        <input
+                        <LayoutTextInput
                           value={field.value}
                           onChange={(event) => updateDynamicField(field.id, { value: event.target.value })}
-                          className="min-w-0 rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-xs text-zinc-900 outline-none transition-shadow placeholder:text-zinc-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+                          size="compact"
+                          className="min-w-0"
                           placeholder={t("create.dynamicValue")}
                         />
-                        <button
-                          type="button"
+                        <ActionButton
                           onClick={() => removeDynamicField(field.id)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-200 bg-white text-red-600 transition-colors hover:bg-red-50 dark:border-red-400/35 dark:bg-[#111b2d] dark:text-red-200 dark:hover:bg-red-500/10"
+                          preset="danger"
+                          size="icon-md"
                           aria-label={t("create.removeDynamicField")}
                           title={t("create.removeDynamicField")}
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                          leadingIcon={<Trash2 size={13} />}
+                        />
                       </div>
                     ))}
                   </div>
@@ -1120,21 +1281,24 @@ export function InspirationCreatePage() {
               {error ? <div className="mt-4 hidden text-sm text-red-600 dark:text-red-300 md:block">{error}</div> : null}
 
               <div className="mt-6 hidden gap-3 md:flex">
-                <button
-                  type="button"
+                <ActionButton
                   onClick={handleClose}
-                  className="flex-1 rounded-md border border-zinc-200 px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors active:scale-[0.99] hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
+                  preset="secondary"
+                  size="lg"
+                  className="flex-1"
                 >
                   {t("create.cancel")}
-                </button>
-                <button
+                </ActionButton>
+                <ActionButton
                   type="submit"
                   disabled={createInspirationMutation.isPending}
-                  className="flex flex-1 items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors active:scale-[0.99] hover:bg-blue-700 disabled:opacity-50 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+                  loading={createInspirationMutation.isPending}
+                  preset="primary"
+                  size="lg"
+                  className="flex-1"
                 >
-                  {createInspirationMutation.isPending ? <Loader2 size={15} className="mr-2 animate-spin" /> : null}
                   {t("create.submit")}
-                </button>
+                </ActionButton>
               </div>
             </section>
 
@@ -1148,16 +1312,16 @@ export function InspirationCreatePage() {
       <div className="fixed inset-x-0 z-40 px-3 md:hidden" style={{ bottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
         <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_-6px_18px_rgba(15,23,42,0.12)] dark:border-slate-700 dark:bg-slate-950 dark:shadow-[0_-12px_28px_rgba(0,0,0,0.30)]">
           {mobileStep !== "entry" ? (
-            <button
-              type="button"
+            <ActionButton
               onClick={() => {
                 setError("");
                 setMobileStep(mobileStep === "template" ? "details" : "entry");
               }}
-              className="btn-secondary-spring inline-flex min-h-11 shrink-0 items-center rounded-xl px-3 text-xs font-semibold"
+              preset="secondary"
+              size="lg"
             >
               {t("create.mobileBack")}
-            </button>
+            </ActionButton>
           ) : null}
           <div className="min-w-0 flex-1 px-1">
             <div className="truncate text-[11px] font-medium text-slate-400 dark:text-slate-500">
@@ -1172,42 +1336,52 @@ export function InspirationCreatePage() {
             </div>
           </div>
           {mobileStep === "entry" ? (
-            <button
+            <ActionButton
               key="mobile-entry-next"
-              type="button"
               onClick={() => {
                 setError("");
                 setMobileStep("details");
               }}
-              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-md shadow-indigo-600/16 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+              preset="primary"
+              size="lg"
+              trailingIcon={<ChevronRight size={16} />}
             >
               {t("create.mobileNext")}
-              <ChevronRight size={16} className="ml-1" />
-            </button>
+            </ActionButton>
           ) : mobileStep === "details" ? (
-            <button
+            <ActionButton
               key="mobile-details-next"
-              type="button"
               onClick={handleMobileDetailsNext}
-              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-md shadow-indigo-600/16 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+              preset="primary"
+              size="lg"
+              leadingIcon={<Eye size={16} />}
             >
-              <Eye size={16} className="mr-1.5" />
               {t("create.mobilePreview")}
-            </button>
+            </ActionButton>
           ) : (
-            <button
+            <ActionButton
               key="mobile-submit"
               type="submit"
               form={INSPIRATION_CREATE_FORM_ID}
               disabled={createInspirationMutation.isPending}
-              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/16 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+              loading={createInspirationMutation.isPending}
+              preset="primary"
+              size="lg"
             >
-              {createInspirationMutation.isPending ? <Loader2 size={15} className="mr-1.5 animate-spin" /> : null}
               {t("create.submitShort")}
-            </button>
+            </ActionButton>
           )}
         </div>
       </div>
+      <ResourceLibraryModal
+        open={mainImageResourceLibraryOpen}
+        onClose={() => setMainImageResourceLibraryOpen(false)}
+        canRead
+        appearance={actionAppearance}
+        onSelectAsset={handleSelectMainImageAsset}
+        selectLabel={t("create.selectMainImageFromLibrary")}
+        selectDisabled={createInspirationMutation.isPending}
+      />
     </div>
   );
 }

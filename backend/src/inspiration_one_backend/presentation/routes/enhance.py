@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from inspiration_one_backend.application.enhance.execution import ENHANCE_FINAL_MAX_UPLOAD_BYTES
 from inspiration_one_backend.application.enhance.jobs import (
-    ENHANCE_FINAL_MAX_UPLOAD_BYTES,
     attach_enhance_job_to_image_session,
     cancel_enhance_job,
     count_enhance_jobs,

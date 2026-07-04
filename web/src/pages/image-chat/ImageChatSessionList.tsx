@@ -1,6 +1,12 @@
 import { Archive, History, MessagesSquare } from "lucide-react";
 
-import { ActionButton } from "../../components/ActionButton";
+import {
+  actionButtonComponentForAppearance,
+  actionButtonToneStyle,
+  actionSurfaceClassNameForAppearance,
+  transparentActionToneVars,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -23,6 +29,7 @@ interface ImageChatSessionListProps {
   deletionBlockedTitle?: string | null;
   currentUser?: SessionUser | null;
   variant: "desktop" | "mobile";
+  appearance?: LayoutActionAppearance;
   maskSensitiveImages: boolean;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -38,6 +45,7 @@ export function ImageChatSessionList({
   deletionBlockedTitle = null,
   currentUser = null,
   variant,
+  appearance = "classic",
   maskSensitiveImages,
   onSelectSession,
   onDeleteSession,
@@ -79,6 +87,7 @@ export function ImageChatSessionList({
             deletionBlockedTitle={deletionBlockedTitle}
             currentUser={currentUser}
             variant={variant}
+            appearance={appearance}
             maskSensitiveImages={maskSensitiveImages}
             onSelectSession={onSelectSession}
             onDeleteSession={onDeleteSession}
@@ -102,6 +111,7 @@ interface ImageChatSessionCardProps {
   deletionBlockedTitle: string | null;
   currentUser: SessionUser | null;
   variant: "desktop" | "mobile";
+  appearance: LayoutActionAppearance;
   maskSensitiveImages: boolean;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -116,11 +126,13 @@ function ImageChatSessionCard({
   deletionBlockedTitle,
   currentUser,
   variant,
+  appearance,
   maskSensitiveImages,
   onSelectSession,
   onDeleteSession,
   t,
 }: ImageChatSessionCardProps) {
+  const ActionButton = actionButtonComponentForAppearance(appearance);
   const cardStateClassName = active ? "pf-image-chat-session-card--active" : "pf-image-chat-session-card--idle";
   const cardClassName = `pf-image-chat-session-card ${cardStateClassName} group relative overflow-hidden rounded-2xl border transition-all ${
     variant === "desktop" ? "w-64 shrink-0 lg:w-auto " : ""
@@ -129,10 +141,14 @@ function ImageChatSessionCard({
       ? "border-indigo-300 bg-indigo-50 shadow-sm shadow-indigo-100 ring-1 ring-indigo-200/80 dark:border-violet-500/80 dark:bg-violet-500/14 dark:shadow-violet-950/30 dark:ring-violet-400/45"
       : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700/75 dark:bg-[#151f33] dark:hover:border-violet-500/45 dark:hover:bg-[#1a2740]"
   }`;
-  const selectClassName =
-    variant === "desktop"
-      ? "pf-image-chat-session-card-button flex w-full items-center gap-3 p-2.5 pr-10 text-left"
-      : "pf-image-chat-session-card-button flex min-h-20 w-full items-center gap-3 p-2.5 pr-12 text-left active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:focus-visible:ring-violet-400";
+  const selectClassName = actionSurfaceClassNameForAppearance(appearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className:
+      variant === "desktop"
+        ? "pf-image-chat-session-card-button flex w-full items-center gap-3 rounded-2xl border-0 p-2.5 pr-10 text-left shadow-none"
+        : "pf-image-chat-session-card-button flex min-h-20 w-full items-center gap-3 rounded-2xl border-0 p-2.5 pr-12 text-left shadow-none active:scale-[0.99]",
+  });
   const deleteClassName =
     variant === "desktop"
       ? "pf-image-chat-session-delete absolute right-2 top-2 bg-white/95 opacity-100 dark:bg-slate-950/88 md:opacity-0 md:group-hover:opacity-100"
@@ -147,7 +163,12 @@ function ImageChatSessionCard({
 
   return (
     <div className={cardClassName}>
-      <button type="button" onClick={() => onSelectSession(item.id)} className={selectClassName}>
+      <button
+        type="button"
+        onClick={() => onSelectSession(item.id)}
+        className={selectClassName}
+        style={actionButtonToneStyle(transparentActionToneVars)}
+      >
         <div className="pf-image-chat-session-thumb relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400 ring-1 ring-slate-200 dark:bg-[#0a1020] dark:text-slate-400 dark:ring-slate-600/80">
           {item.latest_generated_asset ? (
             <img

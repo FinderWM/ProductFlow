@@ -1,11 +1,14 @@
 // 设置页左侧导航栏：桌面侧栏 + 小窗左侧浮动抽屉。从 SettingsPage.tsx 抽出的展示型组件。
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Drawer } from "vaul";
 import { Search, Settings as SettingsIcon, X } from "lucide-react";
 
+import { ClassicTextInput } from "../../../components/classicInputs";
+import { WorkspaceTextInput } from "../../../components/workspaceInputs";
 import { cssLengthToPixels } from "../../../lib/cssLength";
 import { shouldPreventScrollChain } from "../../../lib/scrollChain";
 import { useI18n } from "../../../lib/preferences";
+import { useSettingsActionClassNames } from "./styles";
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, type SettingsSection, type SettingsSectionId } from "../sections";
 
 interface SettingsSideRailProps {
@@ -13,6 +16,7 @@ interface SettingsSideRailProps {
   onSearchChange: (value: string) => void;
   visibleSections: SettingsSection[];
   activeSection: SettingsSectionId;
+  workspaceSubpage?: boolean;
   onSectionChange: (section: SettingsSectionId) => void;
 }
 
@@ -22,23 +26,117 @@ function shouldUseDesktopSettingsRail(): boolean {
   return typeof window !== "undefined" && window.matchMedia(SETTINGS_MOBILE_NAV_DRAWER_DESKTOP_QUERY).matches;
 }
 
+interface CenteredRailScrollTopInput {
+  containerHeight: number;
+  contentHeight: number;
+  itemTop: number;
+  itemHeight: number;
+}
+
+export function centeredRailScrollTop({
+  containerHeight,
+  contentHeight,
+  itemTop,
+  itemHeight,
+}: CenteredRailScrollTopInput): number {
+  const maxScrollTop = Math.max(contentHeight - containerHeight, 0);
+  const centeredTop = itemTop + itemHeight / 2 - containerHeight / 2;
+  return Math.min(Math.max(centeredTop, 0), maxScrollTop);
+}
+
+interface RailVisibleWindowInput {
+  containerTop: number;
+  containerBottom: number;
+  safeTop: number;
+  viewportHeight: number;
+}
+
+interface RailVisibleWindow {
+  top: number;
+  bottom: number;
+  height: number;
+}
+
+export function railVisibleWindow({
+  containerTop,
+  containerBottom,
+  safeTop,
+  viewportHeight,
+}: RailVisibleWindowInput): RailVisibleWindow {
+  const top = Math.max(safeTop - containerTop, 0);
+  const bottom = Math.max(Math.min(containerBottom, viewportHeight) - containerTop, top);
+  return { top, bottom, height: bottom - top };
+}
+
+interface ShouldRestoreDesktopRailOnReloadInput {
+  navigationType: string | null;
+  contentHeight: number;
+  visibleTop: number;
+  visibleBottom: number;
+  itemTop: number;
+  itemHeight: number;
+}
+
+export function shouldRestoreDesktopRailOnReload({
+  navigationType,
+  contentHeight,
+  visibleTop,
+  visibleBottom,
+  itemTop,
+  itemHeight,
+}: ShouldRestoreDesktopRailOnReloadInput): boolean {
+  if (navigationType !== "reload") {
+    return false;
+  }
+  const visibleHeight = Math.max(visibleBottom - visibleTop, 0);
+  if (visibleHeight <= 0 || contentHeight <= visibleHeight + 1) {
+    return false;
+  }
+  const itemBottom = itemTop + itemHeight;
+  return itemTop < visibleTop || itemBottom > visibleBottom;
+}
+
+function readNavigationEntryType(): string | null {
+  if (typeof window === "undefined" || typeof window.performance === "undefined") {
+    return null;
+  }
+  const entries =
+    typeof window.performance.getEntriesByType === "function"
+      ? (window.performance.getEntriesByType("navigation") as PerformanceNavigationTiming[])
+      : [];
+  const [entry] = entries;
+  if (entry && typeof entry.type === "string") {
+    return entry.type;
+  }
+  const legacyNavigation = (window.performance as Performance & { navigation?: { type?: number } }).navigation;
+  return legacyNavigation?.type === 1 ? "reload" : null;
+}
+
 export function SettingsSideRail({
   search,
   onSearchChange,
   visibleSections,
   activeSection,
+  workspaceSubpage = false,
   onSectionChange,
 }: SettingsSideRailProps) {
   const { t } = useI18n();
+  const { SETTINGS_SQUARE_ACTION_CLASS } = useSettingsActionClassNames();
   const railRef = useRef<HTMLElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const mobileScrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const activeItemRef = useRef<HTMLButtonElement | null>(null);
   const mobileDrawerButtonRef = useRef<HTMLButtonElement | null>(null);
   const pendingRailScrollFrameRef = useRef(0);
   const resetScrollFrameRef = useRef(0);
   const resetScrollTailFrameRef = useRef(0);
+  const initialNavigationTypeRef = useRef<string | null>(readNavigationEntryType());
+  const pendingInitialDesktopRestoreRef = useRef(initialNavigationTypeRef.current === "reload");
   const [isPinned, setIsPinned] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [useFloatingRail, setUseFloatingRail] = useState(() => !shouldUseDesktopSettingsRail());
+  const [forceScrollableDesktopRail, setForceScrollableDesktopRail] = useState(false);
+  const visibleSectionIdsKey = visibleSections.map((section) => section.id).join("|");
 
   const activeMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
 
@@ -127,10 +225,11 @@ export function SettingsSideRail({
 
   useEffect(() => {
     if (useFloatingRail) {
+      setForceScrollableDesktopRail(false);
       return undefined;
     }
     const scrollArea = scrollAreaRef.current;
-    if (!scrollArea || isPinned) {
+    if (!scrollArea || isPinned || forceScrollableDesktopRail) {
       return;
     }
     window.cancelAnimationFrame(pendingRailScrollFrameRef.current);
@@ -151,7 +250,43 @@ export function SettingsSideRail({
       window.cancelAnimationFrame(resetScrollFrameRef.current);
       window.cancelAnimationFrame(resetScrollTailFrameRef.current);
     };
-  }, [isPinned, useFloatingRail]);
+  }, [forceScrollableDesktopRail, isPinned, useFloatingRail]);
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined" || useFloatingRail) {
+      return;
+    }
+    if (!pendingInitialDesktopRestoreRef.current) {
+      return;
+    }
+    const scrollArea = scrollAreaRef.current;
+    const activeItem = activeItemRef.current;
+    if (!scrollArea || !activeItem) {
+      setForceScrollableDesktopRail(false);
+      pendingInitialDesktopRestoreRef.current = false;
+      return;
+    }
+    const scrollAreaRect = scrollArea.getBoundingClientRect();
+    const itemRect = activeItem.getBoundingClientRect();
+    const visibleWindow = railVisibleWindow({
+      containerTop: scrollAreaRect.top,
+      containerBottom: scrollAreaRect.bottom,
+      safeTop: getSafeTop(),
+      viewportHeight: window.innerHeight,
+    });
+    const shouldRestore = shouldRestoreDesktopRailOnReload({
+      navigationType: initialNavigationTypeRef.current,
+      contentHeight: scrollArea.scrollHeight,
+      visibleTop: visibleWindow.top,
+      visibleBottom: visibleWindow.bottom,
+      itemTop: itemRect.top - scrollAreaRect.top,
+      itemHeight: itemRect.height,
+    });
+    setForceScrollableDesktopRail(shouldRestore);
+    if (!shouldRestore) {
+      pendingInitialDesktopRestoreRef.current = false;
+    }
+  }, [useFloatingRail, visibleSectionIdsKey]);
 
   useEffect(() => {
     if (useFloatingRail) {
@@ -175,7 +310,7 @@ export function SettingsSideRail({
         scrollArea.scrollHeight > scrollArea.clientHeight + 1 ||
         scrollArea.scrollWidth > scrollArea.clientWidth + 1;
 
-      if (!isPinned) {
+      if (!isPinned && !forceScrollableDesktopRail) {
         if (!railCanScrollWhenPinned || event.deltaY === 0) {
           return;
         }
@@ -224,7 +359,44 @@ export function SettingsSideRail({
       window.cancelAnimationFrame(pendingRailScrollFrameRef.current);
       rail.removeEventListener("wheel", handleWheel, { capture: true });
     };
-  }, [isPinned, useFloatingRail]);
+  }, [forceScrollableDesktopRail, isPinned, useFloatingRail]);
+
+  useLayoutEffect(() => {
+    const shouldRestoreMobileRail = useFloatingRail && mobileDrawerOpen;
+    const shouldRestoreDesktopRail = !useFloatingRail && pendingInitialDesktopRestoreRef.current && forceScrollableDesktopRail;
+    const activeItem = activeItemRef.current;
+    if (!activeItem) {
+      return;
+    }
+    const scrollContainer = shouldRestoreMobileRail
+      ? mobileScrollAreaRef.current
+      : shouldRestoreDesktopRail
+        ? scrollAreaRef.current
+        : null;
+    if (!scrollContainer) {
+      return;
+    }
+
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const itemRect = activeItem.getBoundingClientRect();
+    const itemTop = itemRect.top - containerRect.top + scrollContainer.scrollTop;
+    const nextScrollTop = centeredRailScrollTop({
+      containerHeight: scrollContainer.clientHeight,
+      contentHeight: scrollContainer.scrollHeight,
+      itemTop,
+      itemHeight: itemRect.height,
+    });
+    scrollContainer.scrollTo({ top: nextScrollTop, behavior: "auto" });
+    if (shouldRestoreDesktopRail) {
+      pendingInitialDesktopRestoreRef.current = false;
+    }
+  }, [
+    activeSection,
+    forceScrollableDesktopRail,
+    mobileDrawerOpen,
+    useFloatingRail,
+    visibleSectionIdsKey,
+  ]);
 
   function focusMobileDrawerTrigger() {
     if (typeof window === "undefined") {
@@ -243,20 +415,39 @@ export function SettingsSideRail({
   }
 
   const searchField = (
-    <label
-      htmlFor="settings-section-search"
-      className="pf-settings-search-shell mt-6 flex h-10 items-center gap-2 rounded-lg border pf-hairline bg-slate-50/50 px-3 text-sm text-slate-400 shadow-sm shadow-slate-200/20 dark:border-slate-700/40 dark:bg-[#0b1220]/50 dark:text-slate-500 dark:shadow-black/10"
-    >
-      <Search size={16} />
-      <input
-        id="settings-section-search"
-        name="settings_section_search"
-        value={search}
-        onChange={(event) => onSearchChange(event.target.value)}
-        placeholder={t("settings.searchPlaceholder")}
-        className="pf-composite-input pf-settings-search-input min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-sm text-slate-900 shadow-none outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
-      />
-    </label>
+    workspaceSubpage ? (
+      <label htmlFor="settings-section-search" className="relative mt-6 block">
+        <Search
+          size={16}
+          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+        />
+        <WorkspaceTextInput
+          id="settings-section-search"
+          name="settings_section_search"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={t("settings.searchPlaceholder")}
+          size="default"
+          className="pl-10"
+        />
+      </label>
+    ) : (
+      <label htmlFor="settings-section-search" className="relative mt-6 block">
+        <Search
+          size={16}
+          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
+        />
+        <ClassicTextInput
+          id="settings-section-search"
+          name="settings_section_search"
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={t("settings.searchPlaceholder")}
+          size="default"
+          className="pl-10"
+        />
+      </label>
+    )
   );
 
   const railNavigation = (
@@ -278,18 +469,17 @@ export function SettingsSideRail({
                 return (
                   <button
                     key={section.id}
+                    ref={active ? activeItemRef : null}
                     type="button"
                     aria-current={active ? "page" : undefined}
                     onClick={() => handleSectionSelect(section.id)}
                     className={`pf-settings-nav-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-all ${
-                      active
-                        ? "font-semibold text-indigo-700 bg-[linear-gradient(90deg,rgba(99,102,241,0.22),rgba(99,102,241,0.03)_32%,rgba(99,102,241,0.03)_68%,rgba(99,102,241,0.22))] dark:text-violet-100 dark:bg-[linear-gradient(90deg,rgba(139,92,246,0.32),rgba(139,92,246,0.04)_32%,rgba(139,92,246,0.04)_68%,rgba(139,92,246,0.32))]"
-                        : "text-slate-500 hover:text-slate-800 hover:bg-[linear-gradient(90deg,rgba(100,116,139,0.13),rgba(100,116,139,0.02)_32%,rgba(100,116,139,0.02)_68%,rgba(100,116,139,0.13))] dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-[linear-gradient(90deg,rgba(139,92,246,0.16),rgba(139,92,246,0.02)_32%,rgba(139,92,246,0.02)_68%,rgba(139,92,246,0.16))]"
+                      active ? "font-semibold text-slate-950 dark:text-white" : "text-slate-500 dark:text-slate-400"
                     }`}
                   >
                     <Icon
                       size={15}
-                      className={active ? "shrink-0 text-indigo-600 dark:text-violet-200" : "shrink-0 text-slate-400 dark:text-slate-500"}
+                      className={active ? "shrink-0" : "shrink-0 text-slate-400 dark:text-slate-500"}
                     />
                     <span className="truncate">{t(section.labelKey)}</span>
                   </button>
@@ -334,7 +524,13 @@ export function SettingsSideRail({
         overflowY: "auto",
         overscrollBehaviorY: "contain",
       }
-    : {
+    : forceScrollableDesktopRail
+      ? {
+          maxHeight: "calc(100dvh - var(--pf-top-chrome-safe-height))",
+          overflowY: "auto",
+          overscrollBehaviorY: "contain",
+        }
+      : {
         maxHeight: "none",
         overflow: "visible",
         overscrollBehavior: "auto",
@@ -419,14 +615,17 @@ export function SettingsSideRail({
                     aria-label={t("common.close")}
                     title={t("common.close")}
                     onClick={() => setMobileDrawerOpen(false)}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white/85 text-slate-600 transition-colors active:scale-[0.98] hover:border-slate-300 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950/75 dark:text-slate-300 dark:hover:border-violet-400/55 dark:hover:text-violet-100"
+                    className={`${SETTINGS_SQUARE_ACTION_CLASS} shrink-0`}
                   >
                     <X size={18} />
                   </button>
                 </div>
                 {searchField}
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+              <div
+                ref={mobileScrollAreaRef}
+                className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(env(safe-area-inset-bottom)+1rem)]"
+              >
                 {railNavigation}
               </div>
             </Drawer.Content>

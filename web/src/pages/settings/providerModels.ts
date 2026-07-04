@@ -5,8 +5,23 @@ import type { TranslateFunction } from "../../lib/preferences";
 import type { ProviderModel } from "../../lib/types";
 import type { ProviderModelKind } from "./types";
 
+export const PROVIDER_MODELS_QUERY_STALE_TIME_MS = Number.POSITIVE_INFINITY;
+export const PROVIDER_MODELS_QUERY_GC_TIME_MS = Number.POSITIVE_INFINITY;
+
 export function providerModelsQueryKey(profileId: string, providerKind: ProviderModelKind) {
   return ["provider-models", profileId, providerKind] as const;
+}
+
+export function canFetchProviderModels(providerProfileId: string, providerKind: ProviderModelKind): boolean {
+  return providerKind !== "mock" && Boolean(providerProfileId);
+}
+
+export function shouldEnableProviderModelsQuery(
+  providerProfileId: string,
+  providerKind: ProviderModelKind,
+  activated: boolean,
+): boolean {
+  return activated && canFetchProviderModels(providerProfileId, providerKind);
 }
 
 export function providerModelsStatusText(models: ProviderModel[], error: unknown, t: TranslateFunction): string {

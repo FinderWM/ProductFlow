@@ -391,6 +391,29 @@ class StorageService:
         self._write_relative(relative, content)
         return relative.as_posix()
 
+    def save_image_to_code_file(
+        self,
+        job_id: str,
+        relative_path: str,
+        content: bytes,
+        *,
+        content_type: str | None = None,
+        warm_variants: bool = False,
+    ) -> str:
+        normalized_job_id = job_id.strip().strip("/")
+        if not _safe_storage_path_segment(normalized_job_id):
+            raise ValueError("图片转代码任务标识无效")
+        nested_relative = Path(relative_path)
+        if not nested_relative.parts:
+            raise ValueError("图片转代码文件路径不能为空")
+        relative = self._validated_relative_path(
+            (Path("image-to-code") / normalized_job_id / nested_relative).as_posix()
+        )
+        self._write_relative(relative, content, content_type=content_type)
+        if warm_variants:
+            self._warm_image_variants(relative.as_posix())
+        return relative.as_posix()
+
     def delete_enhance_artifacts(self, job_or_run_id: str) -> None:
         normalized = job_or_run_id.strip().strip("/")
         if not normalized:
@@ -405,6 +428,12 @@ class StorageService:
             self._delete_tree(Path("enhance") / "node" / parts[1])
             return
         raise ValueError("增强产物删除前缀无效")
+
+    def delete_image_to_code_artifacts(self, job_id: str) -> None:
+        normalized = job_id.strip().strip("/")
+        if not _safe_storage_path_segment(normalized):
+            raise ValueError("图片转代码任务标识无效")
+        self._delete_tree(Path("image-to-code") / normalized)
 
     def resolve(self, relative_path: str) -> Path:
         """相对路径转可读的本地路径，防路径穿越攻击。"""

@@ -6,10 +6,12 @@ from sqlalchemy.orm import Session
 from inspiration_one_backend.infrastructure.db.models import GenerationConfig, ProviderProfile
 from inspiration_one_backend.infrastructure.provider_config import (
     ProviderCapabilities,
+    create_provider_profile,
     enforce_generation_config_resolution,
     get_provider_capabilities,
     parse_image_size_dimensions,
     resolve_effective_max_dimension,
+    update_provider_profile,
 )
 
 
@@ -50,6 +52,20 @@ def test_provider_capabilities_parsing_2048():
         api_key="key",
         capabilities_json=["image"],
         config_json={"capabilities": {"image_max_dimension": 2048}},
+    )
+    caps = get_provider_capabilities(profile)
+    assert caps.image_max_dimension == 2048
+
+
+def test_provider_capabilities_parsing_normalizes_step():
+    """JSON with image_max_dimension=2050 returns normalized 2048."""
+    profile = ProviderProfile(
+        name="测试",
+        provider_type="openai_compatible",
+        base_url="http://test",
+        api_key="key",
+        capabilities_json=["image"],
+        config_json={"capabilities": {"image_max_dimension": 2050}},
     )
     caps = get_provider_capabilities(profile)
     assert caps.image_max_dimension == 2048
@@ -214,3 +230,37 @@ def test_enforce_resolution_mock_profile():
     )
     # Should not raise
     enforce_generation_config_resolution(1024, 1024, config, None, 3840)
+
+
+def test_create_provider_profile_normalizes_image_max_dimension(db_session: Session):
+    """Create profile stores normalized provider image max dimension."""
+    profile = create_provider_profile(
+        db_session,
+        name="测试供应商",
+        provider_type="openai_compatible",
+        base_url="http://test",
+        api_key="key",
+        capabilities=["image_images"],
+        config={"capabilities": {"image_max_dimension": 2050}},
+    )
+    assert profile.config_json == {"capabilities": {"image_max_dimension": 2048}}
+
+
+def test_update_provider_profile_normalizes_image_max_dimension(db_session: Session):
+    """Update profile stores normalized provider image max dimension."""
+    profile = create_provider_profile(
+        db_session,
+        name="测试供应商",
+        provider_type="openai_compatible",
+        base_url="http://test",
+        api_key="key",
+        capabilities=["image_images"],
+        config={},
+    )
+
+    updated = update_provider_profile(
+        db_session,
+        profile.id,
+        config={"capabilities": {"image_max_dimension": 2817}},
+    )
+    assert updated.config_json == {"capabilities": {"image_max_dimension": 2816}}

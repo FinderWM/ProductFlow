@@ -1,4 +1,4 @@
-import type { GenerationConfigOption, ProviderPurpose } from "./types";
+import type { GenerationConfigOption, GenerationConfigSelectionMode, ProviderPurpose } from "./types";
 
 export function generationConfigResourceGroupIds(config: GenerationConfigOption): string[] {
   return config.resource_group_ids?.length
@@ -27,10 +27,62 @@ export function generationConfigOptionsForPurpose(
     .filter(
       (config) =>
         config.purpose === purpose &&
-        config.enabled &&
+        config.effective_enabled &&
         generationConfigBelongsToResourceGroup(config, resourceGroupId),
     )
     .sort((left, right) => right.priority - left.priority || left.name.localeCompare(right.name));
+}
+
+export function generationConfigOptionEffectiveMaxDimension(
+  config: Pick<GenerationConfigOption, "provider_max_dimension">,
+  globalMaxDimension: number,
+): number {
+  return config.provider_max_dimension ?? globalMaxDimension;
+}
+
+export function generationConfigOptionsMaxDimension(
+  options: Array<Pick<GenerationConfigOption, "provider_max_dimension">>,
+  globalMaxDimension: number,
+): number {
+  if (!options.length) {
+    return globalMaxDimension;
+  }
+  return Math.max(
+    ...options.map((config) => generationConfigOptionEffectiveMaxDimension(config, globalMaxDimension)),
+  );
+}
+
+export function generationConfigSelectionMaxDimension({
+  mode,
+  generationConfigId,
+  resourceGroupId,
+  resourceGroupMaxDimension,
+  options,
+  globalMaxDimension,
+}: {
+  mode: GenerationConfigSelectionMode;
+  generationConfigId: string | null;
+  resourceGroupId: string | null;
+  resourceGroupMaxDimension?: number | null;
+  options: Array<Pick<GenerationConfigOption, "id" | "provider_max_dimension">>;
+  globalMaxDimension: number;
+}): number {
+  if (mode === "manual" && generationConfigId) {
+    const selectedConfig = options.find((config) => config.id === generationConfigId);
+    if (selectedConfig) {
+      return Math.min(
+        generationConfigOptionEffectiveMaxDimension(selectedConfig, globalMaxDimension),
+        globalMaxDimension,
+      );
+    }
+  }
+  if (resourceGroupMaxDimension != null) {
+    return Math.min(resourceGroupMaxDimension, globalMaxDimension);
+  }
+  if (resourceGroupId) {
+    return Math.min(generationConfigOptionsMaxDimension(options, globalMaxDimension), globalMaxDimension);
+  }
+  return globalMaxDimension;
 }
 
 export function isGenerationConfigFrozenUntilActive(value: string | null | undefined): boolean {

@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { Check, ChevronDown } from "lucide-react";
 
+import { workspaceTextInputClassName } from "../../../components/workspaceInputs";
 import { FloatingSurface } from "../../../components/FloatingSurface";
 import type { GenerationResourceGroup } from "../../../lib/types";
 
@@ -20,6 +21,7 @@ export function GenerationResourceGroupMultiSelect({
   noSelectionLabel,
   selectedCountLabel,
   ariaLabel,
+  workspaceSubpage = false,
   onChange,
 }: {
   resourceGroups: GenerationResourceGroup[];
@@ -30,6 +32,7 @@ export function GenerationResourceGroupMultiSelect({
   noSelectionLabel: string;
   selectedCountLabel: (count: number) => string;
   ariaLabel: string;
+  workspaceSubpage?: boolean;
   onChange: (selectedIds: string[]) => void;
 }) {
   const generatedId = useId();
@@ -78,7 +81,14 @@ export function GenerationResourceGroupMultiSelect({
             setOpen(false);
           }
         }}
-        className="relative h-11 w-full rounded-lg border pf-hairline-strong bg-slate-50/90 pl-3 pr-10 text-left text-sm font-medium text-slate-900 shadow-sm shadow-slate-200/45 outline-none ring-1 ring-white/70 transition-colors hover:border-slate-400 hover:bg-white focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/25 dark:ring-slate-800 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:focus:border-violet-400 dark:focus:bg-[#111b2d] dark:focus:ring-violet-400/20 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+        className={
+          workspaceSubpage
+            ? workspaceTextInputClassName({
+                size: "tall",
+                className: "relative pl-4 pr-10 text-left font-medium",
+              })
+            : "relative h-11 w-full rounded-lg border pf-hairline-strong bg-slate-50/90 pl-3 pr-10 text-left text-sm font-medium text-slate-900 shadow-sm shadow-slate-200/45 outline-none ring-1 ring-white/70 transition-colors hover:border-slate-400 hover:bg-white focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none dark:border-slate-600 dark:bg-[#111b2d] dark:text-slate-100 dark:shadow-black/25 dark:ring-slate-800 dark:hover:border-slate-500 dark:hover:bg-[#15233a] dark:focus:border-violet-400 dark:focus:bg-[#111b2d] dark:focus:ring-violet-400/20 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
+        }
       >
         <span className="block truncate">{selectedLabel}</span>
         <span className="pointer-events-none absolute right-8 top-1/2 h-5 -translate-y-1/2 border-l pf-hairline-strong dark:border-slate-700" />

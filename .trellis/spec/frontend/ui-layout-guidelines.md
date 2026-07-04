@@ -23,6 +23,66 @@ Current contracts:
   element. The selected workspace appearance resolves the global `light` / `dark` theme so existing `dark:*` utilities stay
   readable.
 
+## Layout-Sensitive Component Family Ownership
+
+Use this gate before touching any layout-sensitive control:
+
+- Text inputs, prompt inputs, autosize canvas textareas, `textarea`, `select`, searchable dropdown inputs, date/time or
+  range pickers, checkbox, radio-like option toggles, switches, command buttons, icon buttons, and button-like upload/drop
+  surfaces.
+- Shared dialogs, drawers, popovers, resource-library surfaces, image-generation settings panels, markdown editors, and
+  page-local leaf components that can render below more than one layout scheme.
+
+Contract:
+
+- The route/page owner decides the active component family from a real layout source of truth: `LayoutSchemeRoute`,
+  `activeScheme`, `useUiLayoutScheme()`, or an explicit `appearance: "classic" | "workspace"` prop already chosen by a
+  caller.
+- `Classic*` controls are the final implementation only for confirmed classic branches. They must keep the classic
+  light/dark theme contract and must not depend on `pf-workspace-*`, `data-workspace-appearance`, or workspace-only input
+  tokens.
+- `Workspace*` controls are the final implementation only for confirmed workspace branches. They must use workspace
+  semantic classes/tokens and must not rely on classic controls being repainted by broad root selectors.
+- Shared leaves must not pick a family by themselves. They either receive `appearance: "classic" | "workspace"` and branch
+  internally, or receive already-selected layout-specific components/classes from the owner.
+- Compatibility bridges, root CSS fallbacks, and `Workspace*` components that delegate to classic remain migration aids
+  only. They do not satisfy this contract when the caller already knows the active layout.
+- Shell names are not layout proof. `pf-workspace`, `pf-workspace-subpage`, `pf-side-shell`, a workbench directory, or an
+  immersive visual shell can still render while the root scheme is classic.
+- Side-rail or left-column navigation entries remain navigation even when they are clickable and visually prominent.
+  Settings sections, help doc page entries, and resource-library group rails must stay on page-level navigation classes
+  with `aria-current`, not on `ClassicActionButton`, `WorkspaceActionButton`, `LayoutActionSurfaceButton`, or other
+  action-button helpers.
+
+Required family matrix:
+
+| Current render branch | Inputs/selects/toggles | Buttons/action surfaces | Shared leaf requirement |
+|---|---|---|---|
+| Confirmed `classic` | `ClassicTextInput`, `ClassicTextarea`, `ClassicSelectField`, `ClassicCheckbox`, `ClassicOptionToggle`, `ClassicSwitch`, `ClassicDateTimeRangeField`, or `LayoutDateTimeRangeField` with `appearance="classic"` | `ClassicActionButton`, `classicActionButtonClassName(...)`, `classicActionSurfaceClassName(...)` | Pass `appearance="classic"` or pass selected classic helpers |
+| Confirmed `workspace` | `WorkspaceTextInput`, `WorkspaceTextarea`, `WorkspaceSelectField`, `WorkspaceCheckbox`, `WorkspaceOptionToggle`, `WorkspaceSwitch`, `WorkspaceDateTimeRangeField`, or `LayoutDateTimeRangeField` with `appearance="workspace"` | `WorkspaceActionButton`, `workspaceActionButtonClassName(...)`, `workspaceActionSurfaceClassName(...)` | Pass `appearance="workspace"` or pass selected workspace helpers |
+| Unknown or mixed | No component family may be chosen yet | No component family may be chosen yet | Trace the caller and add an explicit layout contract |
+
+Blocking cases:
+
+- A known classic branch imports `WorkspaceTextInput`, `WorkspaceTextarea`, `WorkspaceSelectField`, `WorkspaceCheckbox`,
+  `WorkspaceOptionToggle`, `WorkspaceSwitch`, `WorkspaceDateTimeRangeField`, or workspace action helpers as the final
+  control path, instead of branching to `Classic*` or `LayoutDateTimeRangeField`.
+- A known workspace branch leaves `ClassicTextInput`, `ClassicTextarea`, `ClassicSelectField`, `ClassicCheckbox`,
+  `ClassicOptionToggle`, `ClassicSwitch`, or classic action helpers as the final control path.
+- A shared component defaults `appearance` to `"workspace"`, `"classic"`, or a visual guess instead of making the caller
+  choose.
+- A page-local class rewrites shared border, background, color, placeholder, focus, disabled, error, radius, or shadow
+  states that belong to the selected component family.
+
+Validation:
+
+- For each touched page or shared component, search for the opposite family imports and raw layout-sensitive controls before
+  handing off.
+- Boundary tests such as `web/src/pages/buttonLayoutBoundaries.test.ts` should fail when a migrated route regresses to an
+  implicit bridge, a workspace-only helper in classic, or a missing explicit `appearance` for a shared leaf.
+- Documentation-only updates use `git diff --check`; frontend implementation updates also run `pnpm --dir web lint`,
+  `pnpm --dir web test:run`, and `just web-build` unless a narrower gate is explicitly justified.
+
 ## Existing Layout Responsibilities
 
 ### Classic
@@ -109,6 +169,186 @@ Current workspace page surfaces include:
 - Special immersive tools: `/inspirations/:inspirationId`, `/image-chat/workbench`,
   `/inspirations/:inspirationId/image-chat`, and `/inspirations/new`.
 
+## Classic Visual Signature — Buttons
+
+Classic buttons are part of the default app shell language. They should read closer to TopNav controls, page tools, and
+panel actions than to workspace pills.
+
+### Classic Button Radius
+
+| Style | Radius | Description |
+|---|---|---|
+| `ClassicActionButton` / `classicActionButtonClassName(...)` | `var(--pf-radius-sm)` (8px) | Classic primary / secondary / danger action buttons |
+| `classicActionSurfaceClassName(...)` | `var(--pf-radius-sm)` (8px) | Classic button-like surfaces such as upload/drop zones |
+
+Mechanism:
+- Classic buttons must resolve through a classic-only component layer. Do not reuse workspace button classes in classic
+  routes just because the JSX structure is similar.
+- The target entry points are `ClassicActionButton`, `classicActionButtonClassName(...)`, and
+  `classicActionSurfaceClassName(...)`. Until implementation lands, treat this as the required end state.
+- Classic buttons use `--pf-panel`, `--pf-panel-soft`, `--pf-border`, `--pf-line-strong`, `--pf-text`, and `dark:*`
+  variants. They must not depend on `data-workspace-appearance` or workspace-only `pf-workspace-*` tokens.
+- Classic primary buttons should remain clearly actionable, but keep a small-to-medium radius, restrained shadow, and tool-button
+  density closer to `TopNav` than to workspace floating action pills.
+- Classic secondary buttons should look like standard app controls: medium radius, 1px border, panel-based background,
+  subtle hover tint, and low lift.
+- Classic danger buttons keep warning color semantics while preserving the same classic radius and interaction strength.
+- Icon and compact classic buttons should share the same density as classic page headers, side rails, and tool rows.
+- Shared leaf components that render in both layouts must branch explicitly by active layout or receive an explicit
+  `appearance` prop. A single unscoped button class is not an acceptable cross-layout solution.
+- Immersive creation/workbench pages such as `/inspirations/new`, `/image-chat/workbench`, and
+  `/inspirations/:inspirationId` still need an explicit scheme check. Their shell may look like workspace, but the root
+  route can still be classic.
+- Keep the executable source guard at `web/src/pages/buttonLayoutBoundaries.test.ts` in sync when expanding these
+  classic immersive routes or their page-local leaf components. The guard must fail if those files re-import the legacy
+  `ActionButton` bridge, pull in workspace button helpers directly, or omit explicit `appearance="classic"` on shared
+  resource-library dialogs used from classic-only routes.
+
+### Classic Button Interaction
+
+- Hover should emphasize tint and border change first; any lift should be smaller than workspace and may be zero.
+- Active should read as a compact press, not a floating card collapse.
+- Focus-visible must remain obvious in both `light` and `dark`.
+- Upload/drop zones that are visually button-like should use the classic surface helper instead of a workspace surface or
+  ad-hoc page-local chrome.
+
+## Classic Visual Signature — Inputs
+
+Classic inputs are part of the default app shell language. They should stay aligned with `input-premium`,
+`textarea-premium`, `TopNav`, and other classic panel controls instead of inheriting workspace glass/pill styling.
+
+### Layout-Specific Component Selection Rule
+
+- Layout ownership is determined by the route/page contract or the caller's explicit branch, not by which wrapper
+  happens to render acceptably under root CSS.
+- When a page or route is known to be classic in the current render branch, use `Classic*` input/button helpers
+  directly. Do not treat `Workspace*` components falling back to classic as the preferred classic API.
+- When a page or route is known to be workspace in the current render branch, use `Workspace*` input/button helpers
+  directly. Do not keep classic controls in place just because workspace root selectors can restyle some of them.
+- Shared leaf components, dialogs, drawers, and composite panels that may render in both layouts must either:
+  - branch explicitly by active scheme at the owner boundary, or
+  - accept an explicit `appearance: "classic" | "workspace"` prop and choose the component family internally.
+- Compatibility bridges such as `Workspace*` delegating to `Classic*`, legacy `ActionButton`, or root-scope CSS
+  fallbacks exist for migration/backward compatibility. They are not sufficient as the long-term layout-selection
+  mechanism when the caller already knows the active layout.
+- Do not infer classic/workspace ownership from shell class names such as `pf-workspace`, `pf-workspace-subpage`,
+  panel styling, or directory names. Immersive pages can still render under the classic root layout.
+
+### Input Family Boundary
+
+- The workspace input family is valid only in a confirmed workspace render branch:
+  `WorkspaceTextInput`, `WorkspaceTextarea`, `WorkspaceSelectField`, `WorkspaceCheckbox`, `WorkspaceOptionToggle`,
+  `WorkspaceSwitch`, `WorkspaceDateTimeRangeField`, and workspace-only settings input class helpers.
+- The classic input family is valid only in a confirmed classic render branch:
+  `ClassicTextInput`, `ClassicTextarea`, `ClassicSelectField`, `ClassicCheckbox`, `ClassicOptionToggle`,
+  `ClassicSwitch`, `ClassicDateTimeRangeField`, and future classic date/time or range-picker wrappers.
+- `LayoutDateTimeRangeField` is the allowed shared adapter for date/time ranges. It must require an explicit
+  `appearance: "classic" | "workspace"` prop from the owner and must use layout-neutral DOM class names such as
+  `pf-datetime-range-*` / `pf-time-*` instead of `pf-workspace-*`.
+- Date/time pickers, select triggers, searchable dropdown inputs, checkbox/radio-like toggles, prompt textareas, and
+  canvas autosize textareas are all layout-sensitive input controls. Do not treat only plain `<input type="text">` as
+  covered by this rule.
+- A classic branch must not import a `Workspace*` input as its final implementation even when that component currently
+  delegates to `Classic*`. Add a `Classic*` wrapper or a layout-aware adapter such as `LayoutDateTimeRangeField`
+  instead.
+- A workspace branch must not leave a `Classic*` input as its final implementation merely because root workspace CSS can
+  repaint native controls.
+- Shared components must not default `appearance` to `"workspace"` or infer it from wrapper CSS. The owner route/page
+  must pass `appearance`, or the owner must branch on `activeScheme` and pass the selected component family down.
+- Page-level sizing is allowed through component props such as `size`, `className`, `inputClassName`, `minRows`,
+  `minHeight`, or wrapper width classes. Page code must not redefine the shared border, background, color, placeholder,
+  focus, disabled, or error visual contract.
+
+Required decision order:
+
+1. Read the active layout from a real source of truth:
+   - route/page contract such as `LayoutSchemeRoute`
+   - page-level `activeScheme` / `useUiLayoutScheme()` branch
+   - explicit `appearance` prop already chosen by the caller
+2. If the current render branch is known:
+   - classic -> choose `Classic*` directly
+   - workspace -> choose `Workspace*` directly
+3. If the same leaf needs to render in both layouts:
+   - branch at the owner boundary and pass the chosen component family down, or
+   - require `appearance: "classic" | "workspace"` on the leaf and branch inside it
+4. If none of the above is available, stop and trace the actual caller/route contract. Do not guess from shell CSS,
+   folder names, or the page looking like a workbench.
+
+Wrong:
+
+```tsx
+// Classic route branch, but still relying on the workspace bridge because it "looks fine".
+<WorkspaceTextInput value={query} onChange={(event) => setQuery(event.target.value)} />
+```
+
+Correct:
+
+```tsx
+const LayoutTextInput = activeScheme === "workspace" ? WorkspaceTextInput : ClassicTextInput;
+
+<LayoutTextInput value={query} onChange={(event) => setQuery(event.target.value)} />
+```
+
+Wrong:
+
+```tsx
+export function SharedFilterRow() {
+  return <WorkspaceSelectField options={options} value={value} onChange={setValue} />;
+}
+```
+
+Correct:
+
+```tsx
+export function SharedFilterRow({
+  appearance,
+}: {
+  appearance: "classic" | "workspace";
+}) {
+  const LayoutSelectField = appearance === "workspace" ? WorkspaceSelectField : ClassicSelectField;
+  return <LayoutSelectField options={options} value={value} onChange={setValue} />;
+}
+```
+
+### Classic Input Entry Points
+
+| Entry | Description |
+|---|---|
+| `ClassicTextInput` / `classicTextInputClassName(...)` | Classic short text inputs |
+| `ClassicTextarea` / `classicTextareaClassName(...)` | Classic long text / prompt inputs with autosize support |
+| `ClassicSelectField` | Classic wrapper around `SelectField` for density and sizing |
+| `ClassicCheckbox` | Classic checkbox wrapper for inline or card-like boolean fields |
+| `ClassicOptionToggle` | Classic pill/card toggle for multi-select or radio-like option groups |
+| `ClassicSwitch` | Classic binary switch control |
+
+Mechanism:
+- Preferred classic input entry points live in `web/src/components/classicInputs.tsx`.
+- `ClassicTextInput` and `ClassicTextarea` must use `.input-premium` / `.textarea-premium` as the base visual contract.
+  They may add size, prompt, autosize, or layout classes, but must not depend on workspace-only `pf-workspace-*` tokens.
+- `ClassicTextarea` with `variant="prompt"` must keep a layout-specific writing-surface treatment:
+  - classic `light` uses a mist-inspired pale surface with dark readable ink
+  - classic `dark` keeps the existing deep slate writing surface
+  - do not reuse the workspace prompt gradient directly in classic
+- `ClassicSelectField` should keep search, keyboard navigation, and floating-menu behavior inside `SelectField`. The
+  classic wrapper only owns sizing/density hooks and must not fork the listbox interaction model.
+- `ClassicOptionToggle` and `ClassicSwitch` must reuse the existing `.pf-settings-option-toggle*` and
+  `.pf-settings-switch-toggle*` classic interaction classes. Do not duplicate checked/hover/focus/disabled state strings
+  page-by-page.
+- `ClassicCheckbox` may share structural helpers with workspace, but its wrapper/text surfaces must stay on the classic
+  light/dark theme model instead of workspace appearance tokens.
+- New classic-sensitive code should prefer explicit `Classic*` imports. Shared compatibility adapters such as
+  `WorkspaceTextInput` may delegate to `Classic*` internally when the active layout is not workspace, but that bridge is
+  for reuse compatibility, not the preferred long-term classic API.
+- Known classic pages must not import `WorkspaceTextInput`, `WorkspaceTextarea`, `WorkspaceSelectField`,
+  `WorkspaceCheckbox`, `WorkspaceOptionToggle`, or `WorkspaceSwitch` as their final layout choice. If both layouts are
+  possible, keep the explicit branch in the caller or pass `appearance="classic"` into the shared leaf.
+- If a shared leaf component needs to render in both layouts, branch by active scheme or require an explicit appearance
+  prop. Do not infer classic/workspace eligibility from shell CSS such as `pf-workspace`, `pf-workspace-subpage`, or
+  directory names.
+- If a classic immersive route must still preserve workspace rendering in the same file tree, use a thin layout adapter
+  such as `web/src/components/layoutActionButtons.ts` that maps `appearance` to `Classic*` / `Workspace*` helpers. The
+  adapter must stay a pure branch layer; it must not infer from shell CSS or revive legacy `ActionButton` as the default.
+
 ## Workspace Visual Signature — Inputs & Buttons
 
 The workspace layout intentionally uses **larger border-radius** and **pill-shaped buttons** as a visual differentiator
@@ -127,35 +367,116 @@ Mechanism:
 - Classic scheme continues to use `--pf-radius-md` (14px) for `.input-premium`/`.textarea-premium`.
 - **Do not hardcode** `rounded-md` / `rounded-lg` on workspace inputs. Use `.input-premium` or `.textarea-premium` class
   so the workspace override applies automatically.
+- The preferred workspace input entry points live in `web/src/components/workspaceInputs.tsx`:
+  - `WorkspaceTextInput`
+  - `WorkspaceTextarea`
+  - `WorkspaceSelectField`
+  - `WorkspaceCheckbox`
+  - `WorkspaceOptionToggle`
+  - `WorkspaceSwitch`
+- Use the shared `size` variants (`compact | default | tall`) and page-level `className` width/layout adjustments. Do not
+  re-declare border/background/focus/disabled visuals in page-local class constants for workspace forms.
+- `WorkspaceTextarea` owns autosize and prompt-variant behavior. Do not recreate per-page autosize hooks when a workspace
+  text field only needs `autosize`, `minRows`, `maxRows`, or `variant="prompt"`.
+- `WorkspaceSelectField` is a thin wrapper around `SelectField`. Keep option search, keyboard navigation, and floating
+  menu behavior in `SelectField`; workspace pages should only choose size/layout hooks through the wrapper.
+- Use `WorkspaceOptionToggle selectionMode="single"` for radio-like option groups such as strategy, aspect, resolution, or
+  scale choices. Keep the default multi-select mode for permission/resource-group checklists.
+- Shared pickers that still need classic compatibility, such as `ImageSizePicker`, should opt into workspace controls
+  through an explicit prop instead of changing their default rendering for every caller.
+- Shared long-text editors that may render in classic and workspace, such as `MarkdownEditor`, should expose an explicit
+  workspace-only appearance prop instead of flipping every caller to workspace input chrome by default.
+- Shared composite settings panels that embed multiple inputs, such as `ImageGenerationSettingsPanel` and
+  `ImageToolControls`, should also use an explicit workspace appearance prop when the same component must keep classic
+  callers on their existing control styling.
+- Known workspace pages must not leave layout-sensitive inputs on `Classic*` components as their final implementation
+  path once the page has an explicit workspace branch. Keep the branch at the page boundary or pass
+  `appearance="workspace"` through the shared leaf/component tree.
+- Workspace native `textarea` surfaces must use the same `--pf-radius-workspace-input` as short inputs. Do not leave
+  workspace textareas on the classic `--pf-radius-md` fallback.
 
-### Button Radius
+### Workspace Buttons
 
 | Style | Radius | Description |
 |---|---|---|
-| `.btn-primary-spring` | `var(--pf-radius-pill)` (999px) | Primary action buttons become pill-shaped in workspace |
-| `.btn-secondary-spring` | `var(--pf-radius-pill)` (999px) | Secondary buttons also become pill-shaped |
-| `.btn-workspace-primary` | `var(--pf-radius-pill)` (999px) | Dedicated class: pill + indigo-600 bg + semibold |
+| `WorkspaceActionButton` / `workspaceActionButtonClassName(...)` | `var(--pf-radius-pill)` (999px) | Workspace primary / secondary / danger actions |
+| `workspaceActionSurfaceClassName(...)` | `var(--pf-radius-pill)` (999px) | Workspace button-like surface for upload/drop zones and other non-button interactions |
+| Legacy `ActionButton` / `actionButtonClassName(...)` | classic default, workspace under root scope | Compatibility adapter for existing callers during migration |
+| `.btn-primary-spring` | `var(--pf-radius-pill)` (999px) | Legacy spring primary button still supported during migration |
+| `.btn-secondary-spring` | `var(--pf-radius-pill)` (999px) | Legacy spring secondary button still supported during migration |
 
 Mechanism:
-- Workspace scope overrides on `.btn-primary-spring` and `.btn-secondary-spring` add
-  `border-radius: var(--pf-radius-pill)` so all spring buttons become pills.
-- The standalone `.btn-workspace-primary` class provides a complete pill button style (indigo-600, white text, semibold,
-  h-10, gradient in dark mode) for use in workspace-only components.
-- **Do not hardcode** `rounded-lg bg-indigo-600` inline for action buttons in workspace pages. Use `.btn-primary-spring`
-  or `.btn-workspace-primary` so radius and color both resolve through the token system.
+- Workspace buttons must resolve through a workspace-only component layer for new code.
+- `ActionButton.tsx` remains as a legacy compatibility adapter. Its legacy `pf-action-button*` / `pf-action-surface*`
+  classes now render classic by default and switch to workspace visuals only when the root carries
+  `data-ui-layout-scheme="workspace"`.
+- The target workspace entry points are `WorkspaceActionButton`, `workspaceActionButtonClassName(...)`, and
+  `workspaceActionSurfaceClassName(...)`.
+- Workspace helpers resolve to workspace-scoped semantic classes, for example:
+  - `.pf-workspace-action-button`
+  - `.pf-workspace-action-button--primary`
+  - `.pf-workspace-action-button--secondary`
+  - `.pf-workspace-action-button--danger`
+  - size variants such as `.pf-workspace-action-button--sm`, `.pf-workspace-action-button--md`,
+    `.pf-workspace-action-button--lg`, `.pf-workspace-action-button--icon-sm`,
+    `.pf-workspace-action-button--icon-md`, `.pf-workspace-action-button--icon-lg`
+- Non-button interactive surfaces such as `ImageDropZone` should use the workspace surface helper, which resolves to
+  workspace-scoped classes such as:
+  - `.pf-workspace-action-surface`
+  - `.pf-workspace-action-surface--primary`
+  - `.pf-workspace-action-surface--secondary`
+  - `.pf-workspace-action-surface--danger`
+  - optional helpers such as `.pf-workspace-action-surface-focus` and `.pf-workspace-action-surface--dashed`
+- Button structure is fixed by the shared system: pill radius, 1px border, restrained 3D depth, hover lift, active press,
+  focus ring, and disabled state.
+- Toggle-like buttons that represent a selected option should use the workspace button system with `aria-pressed="true"`.
+  The shared CSS owns the selected color variables so pages do not need page-local active button color strings.
+- Button-like surfaces share the same radius, border, color variables, restrained 3D depth, hover state, and focus-within
+  ring. They must keep their original semantic element, such as `ImageDropZone`'s label + hidden input structure.
+- Visual customization happens through controlled CSS variables, not by rewriting the entire class string. Supported
+  variables are `--pf-action-bg`, `--pf-action-bg-hover`, `--pf-action-border`, `--pf-action-border-hover`,
+  `--pf-action-text`, `--pf-action-shadow`, `--pf-action-shadow-hover`, and `--pf-action-focus-ring`.
+- Legacy `.btn-primary-spring` / `.btn-secondary-spring` remain valid for existing pages, but new workspace pages should
+  prefer the workspace button helpers.
+- Legacy `ActionButton` helpers are acceptable only while migrating old callers. New layout-sensitive code should prefer
+  explicit classic/workspace helpers.
+- **Do not hardcode** `rounded-lg bg-indigo-600` inline for action buttons in workspace pages. Use the shared component or
+  helper so radius, depth, and state styling stay consistent.
+- Shared leaf modules such as resource-library dialogs, time-range controls, and settings style registries must not choose
+  workspace button helpers on their own. The caller must branch by layout or pass an explicit appearance prop.
 
 ### When to Use Each Button Class
 
 | Scenario | Class |
 |---|---|
-| Standard primary action in any layout | `.btn-primary-spring` |
-| Standard secondary action in any layout | `.btn-secondary-spring` |
-| Workspace-only primary action (no classic fallback needed) | `.btn-workspace-primary` |
+| New workspace primary / secondary / danger action | Workspace button component/helper |
+| New classic primary / secondary / danger action | Classic button component/helper |
+| Existing caller being migrated gradually | Legacy `ActionButton` / helper, then move to explicit layout entry |
+| Child component only accepts `className` or `buttonClassName` | Layout-specific helper chosen by the caller |
+| Upload/drop zone or other non-button button-like interaction | Layout-specific surface helper |
+| Rich selection cards with title + description + metadata | Keep a dedicated card/list selector, not a button component |
+| Existing page not migrated yet | Legacy `.btn-primary-spring` / `.btn-secondary-spring` |
+
+Card/list selectors such as template-plan choices, workflow entry cards, or clickable result rows should keep their own
+card semantics and selected-state styling. Layout button components are for command buttons and compact toggle controls,
+not for content-rich selection surfaces that need multi-line copy, metadata chips, or large click regions.
 
 ### Classic Scheme Isolation
 
-These overrides are scoped exclusively to `[data-ui-layout-scheme="workspace"]`. Classic scheme buttons retain their
-existing `border-radius` from `.btn-primary-spring` / `.btn-secondary-spring` base definitions (no pill shape).
+Classic pages must not import or render the workspace button system by default. In particular:
+
+- Do not make classic pages depend on `data-workspace-appearance`.
+- Do not use workspace pill radius, workspace action classes, or workspace surface classes in classic routes.
+- If a page file serves both layouts, branch explicitly by active layout before choosing a button helper or component.
+- Do not infer workspace button eligibility from shell CSS such as `pf-workspace`, `pf-workspace-subpage`, `pf-side-shell`,
+  or from the page living under a "workbench" directory. These are not proof that the current route is using workspace
+  scheme.
+- If a shared component must work in both layouts, require an explicit layout/appearance prop instead of silently choosing
+  workspace visuals.
+- Shared style registries or helper files that export button class constants must either export layout-aware helpers or be
+  split by layout. A layout-agnostic file must not hardcode workspace or legacy button classes for both callers.
+- Legacy `ActionButton` is the only temporary exception because its class layer now resolves by root scheme; treat it as a
+  migration bridge, not the long-term API.
 
 ---
 
@@ -536,6 +857,8 @@ Before reporting layout/theme work complete:
 - [ ] Backend settings/runtime/user-preference contracts are synchronized when layout schemes change.
 - [ ] `TopNav` targets, active states, overflow, compact/mobile controls, brand link, and account/logout surfaces are checked.
 - [ ] Every affected page has an explicit shell decision and no silent classic fallback.
+- [ ] Layout-sensitive input/button families are explicit: known classic branches do not land on `Workspace*`, known
+  workspace branches do not land on `Classic*`, and shared leaves branch by `activeScheme` or require `appearance`.
 - [ ] All visible UI chrome is localized in every supported locale.
 - [ ] Root `data-*` attributes and CSS selectors match the provider behavior.
 - [ ] Light/dark/appearance contrast is checked for hover, focus, active, disabled, expanded, loading, empty, error, and

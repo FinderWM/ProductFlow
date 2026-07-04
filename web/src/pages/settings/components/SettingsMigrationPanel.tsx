@@ -10,9 +10,7 @@ import { settingsImportSummaryCounts } from "../importExport";
 import {
   PANEL_CLASS,
   SETTINGS_BORDERED_MODULE_CLASS,
-  SETTINGS_COMPACT_ACTION_CLASS,
-  SETTINGS_MAIN_ACTION_CLASS,
-  SETTINGS_SECONDARY_ACTION_CLASS,
+  useSettingsActionClassNames,
 } from "./styles";
 
 interface SettingsMigrationPanelProps {
@@ -45,6 +43,7 @@ export function SettingsMigrationPanel({
   onCancelImport,
 }: SettingsMigrationPanelProps) {
   const { t } = useI18n();
+  const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const counts = importPreview ? settingsImportSummaryCounts(importPreview) : null;
   return (
     <section className="mb-8 space-y-4">
@@ -91,7 +90,7 @@ export function SettingsMigrationPanel({
             type="button"
             onClick={onChooseImportFile}
             disabled={!canMigrate || importPreviewBusy || importCommitBusy}
-            className={SETTINGS_SECONDARY_ACTION_CLASS}
+            className={SETTINGS_MAIN_ACTION_CLASS}
           >
             {importPreviewBusy ? (
               <Loader2 size={14} className="mr-2 animate-spin" />

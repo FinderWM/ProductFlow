@@ -24,6 +24,13 @@ import {
   isResourceBlocked,
   ResourceMetaBadges,
 } from "../../components/ResourceGovernance";
+import { ClassicOptionToggle, ClassicSelectField, ClassicTextInput } from "../../components/classicInputs";
+import { LayoutActionSurfaceButton } from "../../components/LayoutActionSurfaceButton";
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
+import { WorkspaceOptionToggle, WorkspaceSelectField, WorkspaceTextInput } from "../../components/workspaceInputs";
 import { localizeCanvasTemplateSummary } from "../../lib/canvasTemplateLocalization";
 import type { TranslationKey } from "../../lib/i18n";
 import { useI18n } from "../../lib/preferences";
@@ -94,6 +101,7 @@ interface TemplateGroupsPanelProps {
   userTemplateBusy: boolean;
   onRenameUserTemplate: (template: CanvasTemplateSummary, title: string) => void;
   onArchiveUserTemplate: (template: CanvasTemplateSummary) => void;
+  workspaceSubpage?: boolean;
 }
 
 function summarizeOutput(template: CanvasTemplateSummary, t: TFunction): string {
@@ -436,9 +444,11 @@ export function TemplateGraphPreview({
 
 function CompactTemplateGraphPreview({
   template,
+  appearance,
   onOpenPreview,
 }: {
   template: CanvasTemplateSummary;
+  appearance: LayoutActionAppearance;
   onOpenPreview: () => void;
 }) {
   const { locale, t } = useI18n();
@@ -447,13 +457,15 @@ function CompactTemplateGraphPreview({
 
   if (layout === null) {
     return (
-      <button
+      <LayoutActionSurfaceButton
         type="button"
+        appearance={appearance}
+        preset="secondary"
         onClick={onOpenPreview}
         className="flex h-28 w-full items-center justify-center bg-zinc-50 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-100 dark:bg-[#0b1220] dark:text-slate-500 dark:hover:bg-slate-900"
       >
         {t("detail.template.noPreview")}
-      </button>
+      </LayoutActionSurfaceButton>
     );
   }
 
@@ -475,8 +487,10 @@ function CompactTemplateGraphPreview({
     );
 
   return (
-    <button
+    <LayoutActionSurfaceButton
       type="button"
+      appearance={appearance}
+      preset="secondary"
       onClick={onOpenPreview}
       aria-label={t("detail.template.openPreview", { title: displayTemplate.title })}
       title={t("detail.template.openPreview", { title: displayTemplate.title })}
@@ -550,18 +564,21 @@ function CompactTemplateGraphPreview({
       <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 dark:border-slate-700 dark:bg-[#151f33]/90 dark:text-slate-300">
         <Maximize2 size={13} />
       </span>
-    </button>
+    </LayoutActionSurfaceButton>
   );
 }
 
 function TemplatePreviewDialog({
   template,
+  appearance,
   onClose,
 }: {
   template: CanvasTemplateSummary;
+  appearance: LayoutActionAppearance;
   onClose: () => void;
 }) {
   const { locale, t } = useI18n();
+  const ActionButton = actionButtonComponentForAppearance(appearance);
   const titleId = useId();
   const previewScrollRef = useRef<HTMLDivElement | null>(null);
   const previewDragRef = useRef<{
@@ -592,15 +609,14 @@ function TemplatePreviewDialog({
               </p>
             ) : null}
           </div>
-          <button
-            type="button"
+          <ActionButton
             onClick={onClose}
-            className="btn-secondary-spring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            preset="secondary"
+            size="icon-sm"
             aria-label={t("detail.preview.close")}
             title={t("detail.preview.close")}
-          >
-            <X size={16} />
-          </button>
+            leadingIcon={<X size={16} />}
+          />
         </div>
         <div
           ref={previewScrollRef}
@@ -670,6 +686,7 @@ export function TemplateGroupsPanel({
   userTemplateBusy,
   onRenameUserTemplate,
   onArchiveUserTemplate,
+  workspaceSubpage = false,
 }: TemplateGroupsPanelProps) {
   const { locale, t } = useI18n();
   const [editingTemplateKey, setEditingTemplateKey] = useState<string | null>(null);
@@ -705,6 +722,11 @@ export function TemplateGroupsPanel({
   const visibleTemplates = templates.filter(
     (template) => activeCategory === "all" || templateCategoryKey(template) === activeCategory,
   );
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const PageActionButton = actionButtonComponentForAppearance(actionAppearance);
+  const LayoutTextInput = workspaceSubpage ? WorkspaceTextInput : ClassicTextInput;
+  const LayoutSelectField = workspaceSubpage ? WorkspaceSelectField : ClassicSelectField;
+  const LayoutOptionToggle = workspaceSubpage ? WorkspaceOptionToggle : ClassicOptionToggle;
 
   return (
     <section className="space-y-3">
@@ -715,11 +737,12 @@ export function TemplateGroupsPanel({
           </span>
           <span className="relative block">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-            <input
+            <LayoutTextInput
               value={templateSearch}
               onChange={(event) => onTemplateSearchChange(event.target.value)}
               maxLength={120}
-              className="h-9 w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 text-xs text-slate-900 outline-none transition-shadow placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-400 dark:focus:ring-violet-400/20"
+              size="compact"
+              className="pl-8"
               placeholder={t("templateFilter.searchPlaceholder")}
             />
           </span>
@@ -729,28 +752,28 @@ export function TemplateGroupsPanel({
           <span className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400">
             {t("templateFilter.category")}
           </span>
-          <select
+          <LayoutSelectField
             value={selectedCategoryId}
-            onChange={(event) => onSelectedCategoryIdChange(event.target.value)}
+            onChange={onSelectedCategoryIdChange}
             disabled={categoriesLoading || categoriesError}
-            className="pf-input-compact text-xs disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <option value="">{t("templateFilter.allCategories")}</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
+            size="compact"
+            ariaLabel={t("templateFilter.category")}
+            options={[
+              { value: "", label: t("templateFilter.allCategories") },
+              ...categories.map((category) => ({
+                value: category.id,
+                label: category.name,
+              })),
+            ]}
+          />
         </label>
 
         <div>
           <div className="mb-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
             {t("templateFilter.scope")}
           </div>
-          <div className="inline-flex h-9 overflow-hidden rounded-md border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-[#151f33]">
+          <div className="flex flex-wrap gap-2">
             {(["all", "global", "user"] as const).map((scope) => {
-              const active = templateScope === scope;
               const labelKey =
                 scope === "all"
                   ? "templateFilter.scopeAll"
@@ -758,18 +781,19 @@ export function TemplateGroupsPanel({
                     ? "templateFilter.scopeGlobal"
                     : "templateFilter.scopeUser";
               return (
-                <button
+                <LayoutOptionToggle
                   key={scope}
-                  type="button"
-                  onClick={() => handleScopeChange(scope)}
-                  className={`rounded px-2.5 text-xs font-medium transition-colors ${
-                    active
-                      ? "bg-white text-slate-950 shadow-sm dark:bg-slate-800 dark:text-white"
-                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
-                  }`}
+                  checked={templateScope === scope}
+                  selectionMode="single"
+                  name="template-scope-filter"
+                  onChange={(checked) => {
+                    if (checked) {
+                      handleScopeChange(scope);
+                    }
+                  }}
                 >
                   {t(labelKey)}
-                </button>
+                </LayoutOptionToggle>
               );
             })}
           </div>
@@ -795,36 +819,34 @@ export function TemplateGroupsPanel({
         </div>
       ) : (
         <>
-          <div className="flex gap-1 overflow-x-auto border-b border-slate-200/50 pb-2 dark:border-slate-800">
-            {TEMPLATE_CATEGORY_ORDER.filter((category) => category.key === "all" || categoryCounts[category.key] > 0).map(
-              (category) => {
-                const active = activeCategory === category.key;
-                return (
-              <button
-                key={category.key}
-                type="button"
-                onClick={() => {
-                  setActiveCategory(category.key);
-                  const nextTemplate = templates.find(
-                    (template) => category.key === "all" || templateCategoryKey(template) === category.key,
-                  );
-                  setExpandedTemplateKey(nextTemplate?.key ?? null);
-                }}
-                className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
-                  active
-                    ? "border-slate-900 bg-slate-900 text-white dark:border-indigo-500/50 dark:bg-indigo-500/15 dark:text-indigo-200"
-                    : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-indigo-500/40 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-200"
-                }`}
-              >
-                {t(category.labelKey)}
-                <span className={active ? "ml-1 text-zinc-300" : "ml-1 text-zinc-400"}>
-                  {categoryCounts[category.key]}
-                </span>
-              </button>
-                );
-              },
-            )}
-          </div>
+	          <div className="flex gap-1 overflow-x-auto border-b border-slate-200/50 pb-2 dark:border-slate-800">
+	            {TEMPLATE_CATEGORY_ORDER.filter((category) => category.key === "all" || categoryCounts[category.key] > 0).map(
+	              (category) => {
+	                const active = activeCategory === category.key;
+	                return (
+	                  <PageActionButton
+	                    key={category.key}
+	                    type="button"
+	                    onClick={() => {
+	                      setActiveCategory(category.key);
+	                      const nextTemplate = templates.find(
+	                        (template) => category.key === "all" || templateCategoryKey(template) === category.key,
+	                      );
+	                      setExpandedTemplateKey(nextTemplate?.key ?? null);
+	                    }}
+	                    preset={active ? "primary" : "secondary"}
+	                    size="sm"
+	                    className="shrink-0 gap-1 px-2 text-[11px] font-medium"
+	                  >
+	                    {t(category.labelKey)}
+	                    <span className={active ? "text-zinc-300" : "text-zinc-400"}>
+	                      {categoryCounts[category.key]}
+	                    </span>
+	                  </PageActionButton>
+	                );
+	              },
+	            )}
+	          </div>
 
           {visibleTemplates.length ? null : (
             <div className="glass-empty-state flex min-h-[120px] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-zinc-500 dark:text-slate-400">
@@ -850,15 +872,16 @@ export function TemplateGroupsPanel({
             className="group overflow-hidden rounded-2xl shadow-sm transition-colors config-bubble hover:border-indigo-500/30 dark:hover:border-indigo-500/40"
           >
             <div className="flex items-center gap-2 px-2.5 py-2">
-              <button
-                type="button"
-                onClick={() => setExpandedTemplateKey(expanded ? null : template.key)}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-200"
-                aria-label={expanded ? t("detail.template.collapsePreview") : t("detail.template.expandPreview")}
-                title={expanded ? t("detail.template.collapsePreview") : t("detail.template.expandPreview")}
-              >
-                {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-              </button>
+	              <PageActionButton
+	                type="button"
+	                onClick={() => setExpandedTemplateKey(expanded ? null : template.key)}
+	                preset="secondary"
+	                size="icon-sm"
+	                className="text-zinc-400 hover:text-slate-900 dark:text-slate-400 dark:hover:text-indigo-200"
+	                aria-label={expanded ? t("detail.template.collapsePreview") : t("detail.template.expandPreview")}
+	                title={expanded ? t("detail.template.collapsePreview") : t("detail.template.expandPreview")}
+	                leadingIcon={expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+	              />
               <div className="min-w-0 flex-1 space-y-1.5 text-left">
                 <div className="min-w-0">
                   <h3 className="break-words text-sm font-semibold leading-5 text-zinc-950 dark:text-white">
@@ -903,51 +926,51 @@ export function TemplateGroupsPanel({
               <div className="flex shrink-0 items-center gap-1.5">
                 {isUserTemplate ? (
                   <>
-                    <button
-                      type="button"
+                    <PageActionButton
                       onClick={() => {
                         setEditingTemplateKey(template.key);
                         setEditingTitle(template.title);
                       }}
                       disabled={userTemplateBusy || templateBlocked}
-                      className="btn-secondary-spring inline-flex h-8 w-8 items-center justify-center rounded-md"
+                      preset="secondary"
+                      size="icon-sm"
                       aria-label={t("detail.template.rename")}
                       title={templateBlocked ? templateBlockedTitle : t("detail.template.rename")}
-                    >
-                      <Pencil size={13} />
-                    </button>
-                    <button
-                      type="button"
+                      leadingIcon={<Pencil size={13} />}
+                    />
+                    <PageActionButton
                       onClick={() => onArchiveUserTemplate(template)}
                       disabled={userTemplateBusy || templateBlocked}
-                      className="btn-danger-spring inline-flex h-8 w-8 items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-50"
+                      preset="danger"
+                      size="icon-sm"
                       aria-label={t("detail.template.delete")}
                       title={templateBlocked ? templateBlockedTitle : t("detail.template.delete")}
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                      leadingIcon={<Trash2 size={13} />}
+                    />
                   </>
                 ) : null}
-                <button
-                  type="button"
+                <PageActionButton
                   onClick={() => onApplyTemplate(template)}
                   disabled={structureBusy || applyBusy || templateBlocked}
                   title={templateBlocked ? templateBlockedTitle : t("detail.template.add")}
                   aria-label={templateBlocked ? templateBlockedTitle : t("detail.template.add")}
-                  className="btn-primary-spring inline-flex h-8 items-center rounded-xl px-3 text-xs font-semibold"
+                  preset="primary"
+                  size="sm"
+                  className="text-xs"
+                  loading={templateBusy}
+                  leadingIcon={templateBusy ? undefined : <Plus size={13} />}
                 >
-                  {templateBusy ? (
-                    <Loader2 size={13} className="mr-1.5 animate-spin" />
-                  ) : (
-                    <Plus size={13} className="mr-1.5" />
-                  )}
                   {t("detail.template.add")}
-                </button>
+                </PageActionButton>
               </div>
             </div>
             {expanded ? (
               <div className="border-t border-zinc-100 dark:border-slate-700 bg-slate-500/5 dark:bg-black/25">
-                <CompactTemplateGraphPreview template={displayTemplate} onOpenPreview={() => setPreviewTemplate(template)} />
+                <CompactTemplateGraphPreview
+                  template={displayTemplate}
+                  appearance={actionAppearance}
+                  onOpenPreview={() => setPreviewTemplate(template)}
+                />
               </div>
             ) : null}
             {editing ? (
@@ -963,28 +986,32 @@ export function TemplateGroupsPanel({
                   setEditingTemplateKey(null);
                 }}
               >
-                <input
+                <LayoutTextInput
                   value={editingTitle}
                   onChange={(event) => setEditingTitle(event.target.value)}
                   disabled={templateBlocked}
-                  className="h-8 min-w-0 flex-1 px-2 text-xs outline-none input-premium"
+                  size="compact"
+                  className="min-w-0 flex-1"
                   maxLength={255}
                 />
-                <button
-                  type="button"
+                <PageActionButton
                   onClick={() => setEditingTemplateKey(null)}
-                  className="btn-secondary-spring h-8 rounded-md px-3 text-xs font-medium"
+                  preset="secondary"
+                  size="sm"
+                  className="text-xs"
                 >
                   {t("detail.cancel")}
-                </button>
-                <button
+                </PageActionButton>
+                <PageActionButton
                   type="submit"
                   disabled={userTemplateBusy || templateBlocked || !editingTitle.trim()}
                   title={templateBlocked ? templateBlockedTitle : t("detail.save")}
-                  className="btn-primary-spring h-8 rounded-md px-3 text-xs font-medium"
+                  preset="primary"
+                  size="sm"
+                  className="text-xs"
                 >
                   {t("detail.save")}
-                </button>
+                </PageActionButton>
               </form>
             ) : null}
           </article>
@@ -994,7 +1021,11 @@ export function TemplateGroupsPanel({
         </>
       )}
       {previewTemplate ? (
-        <TemplatePreviewDialog template={previewTemplate} onClose={() => setPreviewTemplate(null)} />
+        <TemplatePreviewDialog
+          template={previewTemplate}
+          appearance={actionAppearance}
+          onClose={() => setPreviewTemplate(null)}
+        />
       ) : null}
     </section>
   );

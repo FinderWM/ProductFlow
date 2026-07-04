@@ -461,12 +461,13 @@ def test_generation_config_options_use_runtime_rbac_without_settings_permission(
             "resource_group_ids",
             "purpose",
             "name",
-                "provider_kind",
-                "enabled",
-                "effective_enabled",
-                "priority",
-                "frozen_until",
-            }
+            "provider_kind",
+            "enabled",
+            "effective_enabled",
+            "priority",
+            "frozen_until",
+            "provider_max_dimension",
+        }
         for item in payload
     )
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 import sys
 from pathlib import Path
 
@@ -8,6 +10,7 @@ import dramatiq
 from inspiration_one_backend.application.deck_generation_core import execute_deck_slide_generation_task
 from inspiration_one_backend.application.enhance.jobs import cleanup_expired_enhance_inputs, execute_enhance_job
 from inspiration_one_backend.application.image_sessions import execute_image_session_generation_task
+from inspiration_one_backend.application.image_to_code.jobs import execute_image_to_code_job
 from inspiration_one_backend.application.inspiration_workflows import (
     execute_inspiration_workflow_node_run,
     execute_inspiration_workflow_run,
@@ -33,11 +36,14 @@ from inspiration_one_backend.infrastructure.queue import (
     recover_unfinished_deck_slides,
     recover_unfinished_enhance_jobs,
     recover_unfinished_image_session_generation_tasks,
+    recover_unfinished_image_to_code_jobs,
     recover_unfinished_workflow_runs,
 )
 
 configure_logging()
 get_broker()
+
+logger = logging.getLogger(__name__)
 
 
 def get_image_session_worker_failsafe_time_limit_ms() -> int:
@@ -94,6 +100,12 @@ def run_enhance_job(job_id: str) -> None:
     execute_enhance_job(job_id)
 
 
+@dramatiq.actor(max_retries=0, time_limit=IMAGE_SESSION_WORKER_FAILSAFE_TIME_LIMIT_MS)
+def run_image_to_code_job(job_id: str) -> None:
+    """图片转代码 worker：执行分析、静态网页产出和 Figma 导出。"""
+    execute_image_to_code_job(job_id)
+
+
 assert_actor_uses_durable_generation_contract(WORKFLOW_RUN_GENERATION_TASK_CONTRACT, run_inspiration_workflow_run)
 assert_actor_uses_durable_generation_contract(
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
@@ -107,8 +119,22 @@ def _running_under_dramatiq_cli() -> bool:
 
 if _running_under_dramatiq_cli():
     cleanup_old_logs()
-    recover_unfinished_workflow_runs(reset_stale_running=True)
-    recover_unfinished_image_session_generation_tasks(reset_stale_running=True)
-    recover_unfinished_deck_slides(reset_stale_running=True)
-    recover_unfinished_enhance_jobs(reset_stale_running=True)
+    workflow_recovery = recover_unfinished_workflow_runs(reset_stale_running=True)
+    image_session_recovery = recover_unfinished_image_session_generation_tasks(reset_stale_running=True)
+    deck_recovery = recover_unfinished_deck_slides(reset_stale_running=True)
+    enhance_recovered = recover_unfinished_enhance_jobs(reset_stale_running=True)
+    image_to_code_recovered = recover_unfinished_image_to_code_jobs(reset_stale_running=True)
     cleanup_expired_enhance_inputs()
+    logger.info(
+        "Dramatiq worker启动完成: pid=%s image_session_actor=%s workflow_actor=%s "
+        "workflow_recovery_enqueued=%s image_session_recovery_enqueued=%s deck_recovery_enqueued=%s "
+        "enhance_recovery_enqueued=%s image_to_code_recovery_enqueued=%s",
+        os.getpid(),
+        run_image_session_generation_task.actor_name,
+        run_inspiration_workflow_run.actor_name,
+        workflow_recovery.enqueued_runs,
+        image_session_recovery.enqueued_tasks,
+        deck_recovery.enqueued_slides,
+        enhance_recovered,
+        image_to_code_recovered,
+    )

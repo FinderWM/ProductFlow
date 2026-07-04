@@ -54,6 +54,7 @@ router = APIRouter(
 async def create_inspiration_endpoint(
     name: str = Form(...),
     image: UploadFile | None = File(default=None),
+    image_source_asset_id: str | None = Form(default=None),
     reference_images: list[UploadFile] | None = File(default=None),
     category: str | None = Form(default=None),
     price: str | None = Form(default=None),
@@ -99,6 +100,7 @@ async def create_inspiration_endpoint(
         price=price,
         source_note=source_note,
         image_bytes=main_image.content if main_image is not None else None,
+        image_source_asset_id=image_source_asset_id,
         filename=main_image.filename if main_image is not None else None,
         content_type=main_image.mime_type if main_image is not None else None,
         reference_image_uploads=reference_payloads,

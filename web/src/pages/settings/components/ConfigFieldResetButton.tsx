@@ -3,7 +3,7 @@
 import { Loader2, RotateCcw } from "lucide-react";
 
 import { useI18n } from "../../../lib/preferences";
-import { SETTINGS_RESET_ACTION_CLASS } from "./styles";
+import { useSettingsActionClassNames } from "./styles";
 
 export function ConfigFieldResetButton({
   label,
@@ -17,6 +17,7 @@ export function ConfigFieldResetButton({
   onReset: () => void;
 }) {
   const { t } = useI18n();
+  const { SETTINGS_RESET_ACTION_CLASS } = useSettingsActionClassNames();
   return (
     <button
       type="button"

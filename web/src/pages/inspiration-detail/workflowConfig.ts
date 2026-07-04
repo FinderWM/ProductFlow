@@ -11,6 +11,11 @@ import {
   compactImageToolOptions,
   imageToolOptionsFromUnknown,
 } from "../../lib/imageToolOptions";
+import {
+  imageSizeValueFromDimensions,
+  normalizeImageSizeValue,
+  parseImageSizeValue,
+} from "../../lib/imageSizes";
 import { dynamicFieldsToRecord } from "../../lib/dynamicFields";
 import type { NodeConfigDraft } from "./types";
 import { defaultTitleForNodeType } from "./nodeDisplay";
@@ -255,6 +260,7 @@ export function nodeConfigFromDraft(
   node: WorkflowNode,
   draft: NodeConfigDraft,
   imageToolAllowedFields: readonly ImageToolOptionKey[] = DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS,
+  imageMaxDimension?: number,
 ): Record<string, unknown> {
   const base = { ...node.config_json };
   if (node.node_type === "inspiration_context") {
@@ -298,29 +304,39 @@ export function nodeConfigFromDraft(
     return {
       ...base,
       instruction: draft.instruction,
-      size: draft.size,
+      size: normalizeImageSizeValue(draft.size, imageMaxDimension) ?? "1024x1024",
       resource_group_id: draft.resourceGroupId,
       ...generationConfigFromDraft(draft),
       ...(toolOptions ? { tool_options: toolOptions } : { tool_options: null }),
     };
   }
   if (node.node_type === "image_enhance") {
-    const targetWidth = Number.parseInt(draft.imageEnhanceTargetWidth || "1024", 10);
-    const targetHeight = Number.parseInt(draft.imageEnhanceTargetHeight || "1024", 10);
+    const normalizedDirectSize = imageSizeValueFromDimensions(
+      draft.imageEnhanceTargetWidth || "1024",
+      draft.imageEnhanceTargetHeight || "1024",
+      imageMaxDimension,
+    );
+    const directSize = parseImageSizeValue(normalizedDirectSize ?? "1024x1024", imageMaxDimension) ?? {
+      width: 1024,
+      height: 1024,
+    };
     const scale = Number.parseInt(draft.imageEnhanceScale || "2", 10);
     const tileBaseSize = Number.parseInt(draft.imageEnhanceTileBaseSize || "1024", 10);
+    const maxTileBaseSize = Math.max(256, Math.min(2048, imageMaxDimension ?? 2048));
     return {
       ...base,
       strategy: draft.imageEnhanceStrategy,
       params:
         draft.imageEnhanceStrategy === "direct"
           ? {
-              target_width: Number.isFinite(targetWidth) ? targetWidth : 1024,
-              target_height: Number.isFinite(targetHeight) ? targetHeight : 1024,
+              target_width: directSize.width,
+              target_height: directSize.height,
             }
           : {
               scale: Number.isFinite(scale) ? Math.max(2, Math.min(4, scale)) : 2,
-              tile_base_size: Number.isFinite(tileBaseSize) ? Math.max(256, Math.min(2048, tileBaseSize)) : 1024,
+              tile_base_size: Number.isFinite(tileBaseSize)
+                ? Math.max(256, Math.min(maxTileBaseSize, tileBaseSize))
+                : Math.min(1024, maxTileBaseSize),
               overlap_pct: 10,
             },
       resource_group_id: draft.resourceGroupId,

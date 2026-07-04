@@ -417,6 +417,58 @@ def test_settings_api_has_no_extra_unlock_dependency(
     assert config.status_code == 200
 
 
+def test_settings_api_filters_runtime_config_by_section(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    section_expectations = {
+        "prompts": ({"prompt_brief_system"}, {"提示词"}),
+        "upload": (
+            {"poster_generation_mode", "upload_max_image_bytes", "image_tool_allowed_fields"},
+            {"海报与上传", "图片工具参数"},
+        ),
+        "layoutAppearance": ({"ui_layout_scheme", "gallery_show_generation_resource_group"}, {"界面与外观"}),
+        "loginPage": ({"login_page_mode", "login_page_fluid_mist_config"}, {"登录页"}),
+        "security": ({"auth_session_ttl_minutes", "deletion_enabled"}, {"安全与运维"}),
+    }
+
+    for section, (expected_keys, allowed_categories) in section_expectations.items():
+        response = client.get("/api/settings", params={"section": section})
+        assert response.status_code == 200
+        payload = response.json()["items"]
+        assert payload
+        keys = {item["key"] for item in payload}
+        categories = {item["category"] for item in payload}
+        assert expected_keys.issubset(keys)
+        assert categories.issubset(allowed_categories)
+
+    queue_response = client.get("/api/settings", params={"section": "queue"})
+    assert queue_response.status_code == 200
+    queue_payload = queue_response.json()["items"]
+    assert queue_payload
+    queue_keys = {item["key"] for item in queue_payload}
+    queue_categories = {item["category"] for item in queue_payload}
+    assert {"text_generation_max_concurrent_tasks", "image_generation_max_concurrent_tasks"}.issubset(queue_keys)
+    assert all(category == "生成队列" or category.startswith("全局生成配置 / ") for category in queue_categories)
+    assert "ui_layout_scheme" not in queue_keys
+
+
+def test_settings_api_rejects_unknown_runtime_section(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.get("/api/settings", params={"section": "providers"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "配置区块不支持"
+
+
 def test_public_login_page_config_returns_configured_template_without_auth(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
@@ -1191,6 +1243,7 @@ def test_provider_bootstrap_merges_matching_legacy_text_and_image_config(configu
     profile = payload["profiles"][0]
     assert profile["base_url"] == "http://localhost:3000/v1"
     assert profile["has_api_key"] is True
+    assert profile["api_key_preview"] == "share*****"
     assert "shared-key" not in str(payload)
     assert set(profile["capabilities"]) == {"text_responses", "image_images"}
     configs_by_purpose = {config["purpose"]: config for config in payload["generation_configs"]}
@@ -1257,6 +1310,163 @@ def test_provider_bootstrap_splits_different_legacy_connections(configured_env: 
     configs_by_purpose = {config["purpose"]: config for config in payload["generation_configs"]}
     assert configs_by_purpose["text"]["provider_profile_id"] == profiles_by_base_url["https://text.example/v1"]["id"]
     assert configs_by_purpose["image"]["provider_profile_id"] == profiles_by_base_url["https://image.example/v1"]["id"]
+
+
+def test_provider_profile_response_includes_masked_api_key_preview(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "预览网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://preview.example/v1",
+            "api_key": "preview-secret-key",
+            "capabilities": ["text_responses", "image_images"],
+            "default_models": {},
+            "config": {},
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["has_api_key"] is True
+    assert payload["api_key_preview"] == "previ*****t-key"
+    assert "preview-secret-key" not in str(payload)
+
+    listed = client.get("/api/settings/provider-config")
+    assert listed.status_code == 200
+    listed_profile = next(profile for profile in listed.json()["profiles"] if profile["id"] == payload["id"])
+    assert listed_profile["api_key_preview"] == "previ*****t-key"
+    assert "preview-secret-key" not in str(listed.json())
+
+
+def test_provider_profiles_endpoint_returns_usage_flags(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    created = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "文案网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://usage.example/v1",
+            "api_key": "usage-secret-key",
+            "capabilities": ["text_responses"],
+            "default_models": {"brief_model": "brief-usage", "copy_model": "copy-usage"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+
+    generation_config = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_ids": [DEFAULT_GENERATION_RESOURCE_GROUP_ID],
+            "name": "文案配置",
+            "purpose": "text",
+            "provider_kind": "openai",
+            "provider_profile_id": created.json()["id"],
+            "model_settings": {"brief_model": "brief-usage", "copy_model": "copy-usage"},
+            "config": {},
+            "priority": 100,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert generation_config.status_code == 200
+
+    listed = client.get("/api/settings/provider-profiles")
+    assert listed.status_code == 200
+    payload = next(profile for profile in listed.json() if profile["id"] == created.json()["id"])
+    assert payload["used_by_text_generation"] is True
+    assert payload["used_by_image_generation"] is False
+
+
+def test_generation_configs_endpoint_supports_purpose_and_group_filters(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    group = client.post(
+        "/api/settings/generation-resource-groups",
+        json={
+            "key": "seasonal",
+            "name": "季节图",
+            "description": "seasonal",
+            "sort_order": 120,
+            "enabled": True,
+            "blur_images_by_default": False,
+        },
+    )
+    assert group.status_code == 200
+    group_id = group.json()["id"]
+
+    seasonal_text = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_ids": [group_id],
+            "name": "季节文案",
+            "purpose": "text",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+            "config": {},
+            "priority": 100,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert seasonal_text.status_code == 200
+
+    unbound_text = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "resource_group_ids": [],
+            "name": "未绑定文案",
+            "purpose": "text",
+            "provider_kind": "mock",
+            "provider_profile_id": None,
+            "model_settings": {"brief_model": "mock-brief", "copy_model": "mock-copy"},
+            "config": {},
+            "priority": 80,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert unbound_text.status_code == 200
+
+    filtered_by_group = client.get(
+        "/api/settings/generation-configs",
+        params={"purpose": "text", "resource_group_id": group_id},
+    )
+    assert filtered_by_group.status_code == 200
+    assert [item["id"] for item in filtered_by_group.json()] == [seasonal_text.json()["id"]]
+
+    filtered_unbound = client.get(
+        "/api/settings/generation-configs",
+        params={"purpose": "text", "unbound_only": "true"},
+    )
+    assert filtered_unbound.status_code == 200
+    assert [item["id"] for item in filtered_unbound.json()] == [unbound_text.json()["id"]]
+
+    invalid = client.get(
+        "/api/settings/generation-configs",
+        params={"purpose": "text", "resource_group_id": group_id, "unbound_only": "true"},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "不能同时查询分组和未绑定配置"
 
 
 def test_generation_config_status_filters_date_range_and_splits_purpose_stats(configured_env: Path) -> None:

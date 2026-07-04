@@ -25,6 +25,7 @@ These files document the backend conventions that are actually present in this r
 | [Inspiration Workbench DAG](./inspiration-workflow-dag.md) | Canvas/workflow DAG templates, validation, and user-template contracts | Filled |
 | [Deck (PPT) Generation](./deck-generation.md) | Deck/DeckSlide schema, generation pipeline, image capacity pool, RBAC, runtime config, pptx export | Filled |
 | [Enhance Pipeline](./enhance-pipeline.md) | EnhanceJob model/API, strategy, storage, queue, final upload, and resource-library contracts | Filled |
+| [Image-to-Code Pipeline](./image-to-code-pipeline.md) | ImageToCodeJob API, preview delivery, local Figma export, queue recovery, and storage contracts | Filled |
 
 ---
 
@@ -48,6 +49,8 @@ Use this map when the change is feature-driven rather than file-driven:
   runtime config, pptx export): read `./deck-generation.md` and `./database-guidelines.md`.
 - Image enhancement jobs, Direct/Tiled strategy, final upload, enhance artifacts, or resource-library save from enhance:
   read `./enhance-pipeline.md`, `./database-guidelines.md`, and `./error-handling.md`.
+- Image-to-code jobs, preview HTML/assets, local Figma export bundles, or retry/cancel/recovery behavior: read
+  `./image-to-code-pipeline.md`, `./database-guidelines.md`, and `./error-handling.md`.
 
 If a feature is not represented here, update this map in the same change that adds or changes the feature contract.
 

@@ -1,5 +1,12 @@
 import { Download, Sparkles } from "lucide-react";
 
+import { LayoutActionSurfaceButton } from "../../components/LayoutActionSurfaceButton";
+import {
+  actionButtonClassNameForAppearance,
+  actionButtonComponentForAppearance,
+  transparentActionToneVars,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import { formatDateTime } from "../../lib/format";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
@@ -8,16 +15,22 @@ import { buildPosterDownload, buildSourceImageDownload } from "./imageDownloads"
 
 export function DownloadLink({
   image,
+  appearance,
   variant = "button",
 }: {
   image: DownloadableImage;
+  appearance: LayoutActionAppearance;
   variant?: "button" | "overlay";
 }) {
   const { t } = useI18n();
-  const className =
-    variant === "overlay"
-      ? "nodrag nopan nowheel absolute bottom-2 right-2 inline-flex items-center rounded bg-white/95 px-2 py-1 text-[10px] font-medium text-zinc-700 shadow-sm ring-1 ring-zinc-200 hover:bg-white dark:bg-slate-950/88 dark:text-slate-100 dark:ring-slate-700 dark:hover:bg-slate-900"
-      : "nodrag nopan nowheel inline-flex items-center rounded border border-zinc-200 bg-white px-2 py-1 text-[10px] font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:bg-violet-500/12 dark:hover:text-white";
+  const className = actionButtonClassNameForAppearance(appearance, {
+    preset: "secondary",
+    size: "sm",
+    className:
+      variant === "overlay"
+        ? "nodrag nopan nowheel absolute bottom-2 right-2 text-[10px] shadow-md backdrop-blur-sm"
+        : "nodrag nopan nowheel text-[10px]",
+  });
   return (
     <a
       data-node-action
@@ -40,6 +53,7 @@ export function PosterThumb({
   inspirationName,
   onPreview,
   onUseAsReference,
+  appearance,
   useAsReferenceDisabled = false,
   useAsReferenceBusy = false,
 }: {
@@ -47,18 +61,22 @@ export function PosterThumb({
   inspirationName: string;
   onPreview?: (image: DownloadableImage) => void;
   onUseAsReference?: () => void;
+  appearance: LayoutActionAppearance;
   useAsReferenceDisabled?: boolean;
   useAsReferenceBusy?: boolean;
 }) {
   const { t } = useI18n();
+  const ActionButton = actionButtonComponentForAppearance(appearance);
   const image = buildPosterDownload(inspirationName, poster, undefined, t);
   const thumbnailImage = buildPosterDownload(inspirationName, poster, poster.thumbnail_url, t);
   return (
     <div className="group overflow-hidden rounded-2xl shadow-sm transition-all hover:scale-[1.01] config-bubble">
-      <button
-        type="button"
+      <LayoutActionSurfaceButton
+        appearance={appearance}
+        preset="secondary"
         onClick={() => onPreview?.(image)}
-        className="block w-full"
+        toneVars={transparentActionToneVars}
+        className="block w-full overflow-hidden rounded-none p-0"
         aria-label={t("detail.previewImage", { alt: image.alt })}
       >
         <div className="aspect-square bg-zinc-100 dark:bg-[#0b1220]">
@@ -68,7 +86,7 @@ export function PosterThumb({
             className="h-full w-full object-cover transition-all duration-300 group-hover:scale-105"
           />
         </div>
-      </button>
+      </LayoutActionSurfaceButton>
       <div className="flex items-center justify-between gap-2 border-t border-zinc-100 px-2.5 py-1.5 text-[10px] text-zinc-500 dark:border-slate-800 dark:text-slate-400">
         <span className="min-w-0 truncate">
           {poster.kind === "main_image" ? t("detail.mainImage") : t("detail.promoImage")} ·{" "}
@@ -76,21 +94,22 @@ export function PosterThumb({
         </span>
         <div className="flex shrink-0 items-center gap-1">
           {onUseAsReference ? (
-            <button
+            <ActionButton
               data-node-action
-              type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 onUseAsReference();
               }}
               disabled={useAsReferenceDisabled || useAsReferenceBusy}
-              className="btn-secondary-spring inline-flex items-center rounded px-2 py-1 text-[10px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              preset="secondary"
+              size="sm"
+              className="px-2 py-1 text-[10px]"
               title={t("detail.fillCurrentNode")}
             >
               {useAsReferenceBusy ? t("detail.filling") : t("detail.fill")}
-            </button>
+            </ActionButton>
           ) : null}
-          <DownloadLink image={image} />
+          <DownloadLink image={image} appearance={appearance} />
         </div>
       </div>
     </div>
@@ -102,6 +121,7 @@ export function SourceAssetThumb({
   inspiration,
   onPreview,
   onUseAsReference,
+  appearance,
   useAsReferenceDisabled = false,
   useAsReferenceBusy = false,
 }: {
@@ -109,10 +129,12 @@ export function SourceAssetThumb({
   inspiration: InspirationDetail;
   onPreview?: (image: DownloadableImage) => void;
   onUseAsReference?: () => void;
+  appearance: LayoutActionAppearance;
   useAsReferenceDisabled?: boolean;
   useAsReferenceBusy?: boolean;
 }) {
   const { t } = useI18n();
+  const ActionButton = actionButtonComponentForAppearance(appearance);
   const image = buildSourceImageDownload(
     inspiration,
     asset,
@@ -129,10 +151,12 @@ export function SourceAssetThumb({
   );
   return (
     <div className="group overflow-hidden rounded-2xl shadow-sm transition-all hover:scale-[1.01] config-bubble">
-      <button
-        type="button"
+      <LayoutActionSurfaceButton
+        appearance={appearance}
+        preset="secondary"
         onClick={() => onPreview?.(image)}
-        className="block w-full"
+        toneVars={transparentActionToneVars}
+        className="block w-full overflow-hidden rounded-none p-0"
         aria-label={t("detail.previewImage", { alt: image.alt })}
       >
         <div className="flex aspect-square items-center justify-center bg-zinc-100 p-2 dark:bg-[#0b1220]">
@@ -142,28 +166,29 @@ export function SourceAssetThumb({
             className="h-full w-full object-contain transition-all duration-300 group-hover:scale-105"
           />
         </div>
-      </button>
+      </LayoutActionSurfaceButton>
       <div className="flex items-center justify-between gap-2 border-t border-zinc-100 px-2.5 py-1.5 text-[10px] text-zinc-500 dark:border-slate-800 dark:text-slate-400">
         <span className="min-w-0 truncate">
           {t("detail.referenceImage")} · {formatDateTime(asset.created_at)}
         </span>
         <div className="flex shrink-0 items-center gap-1">
           {onUseAsReference ? (
-            <button
+            <ActionButton
               data-node-action
-              type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 onUseAsReference();
               }}
               disabled={useAsReferenceDisabled || useAsReferenceBusy}
-              className="btn-secondary-spring inline-flex items-center rounded px-2 py-1 text-[10px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              preset="secondary"
+              size="sm"
+              className="px-2 py-1 text-[10px]"
               title={t("detail.fillCurrentNode")}
             >
               {useAsReferenceBusy ? t("detail.filling") : t("detail.fill")}
-            </button>
+            </ActionButton>
           ) : null}
-          <DownloadLink image={image} />
+          <DownloadLink image={image} appearance={appearance} />
         </div>
       </div>
       {onUseAsReference ? (

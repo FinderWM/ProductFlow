@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 
 import { Image, Loader2, RotateCcw, Save } from "lucide-react";
 
+import { ClassicSelectField, ClassicTextInput, ClassicTextarea } from "../../../components/classicInputs";
 import { ResourceLibraryModal } from "../../../components/resource-library/ResourceLibraryModal";
-import { SelectField } from "../../../components/SelectField";
+import { WorkspaceSelectField, WorkspaceTextInput, WorkspaceTextarea } from "../../../components/workspaceInputs";
 import { api } from "../../../lib/api";
 import { useI18n } from "../../../lib/preferences";
 import type { ConfigItem, LoginPageMode, LoginPageTemplateId, ResourceLibraryAsset } from "../../../lib/types";
@@ -25,11 +26,8 @@ import type { DraftValue } from "../types";
 import { ConfigField } from "./ConfigField";
 import { ConfigFieldResetButton } from "./ConfigFieldResetButton";
 import {
-  INPUT_CLASS,
-  SETTINGS_COMPACT_ACTION_CLASS,
   SETTINGS_FIELD_CARD_CLASS,
-  SETTINGS_MAIN_ACTION_CLASS,
-  TEXTAREA_CLASS,
+  useSettingsActionClassNames,
 } from "./styles";
 
 interface LoginPageSettingsPanelProps {
@@ -43,6 +41,7 @@ interface LoginPageSettingsPanelProps {
   assetsError: boolean;
   selectionSaving: boolean;
   templateConfigSaving: boolean;
+  workspaceSubpage?: boolean;
   onChange: (item: ConfigItem, value: DraftValue, touchedSecret?: boolean) => void;
   onReset: (item: ConfigItem) => void;
   onSaveSelection: (value: LoginPageMode) => void;
@@ -60,12 +59,14 @@ export function LoginPageSettingsPanel({
   assetsError,
   selectionSaving,
   templateConfigSaving,
+  workspaceSubpage = false,
   onChange,
   onReset,
   onSaveSelection,
   onSaveTemplateConfig,
 }: LoginPageSettingsPanelProps) {
   const { t } = useI18n();
+  const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const [resourceLibraryOpen, setResourceLibraryOpen] = useState(false);
   const selectionItem = items.find((item) => item.key === "login_page_mode");
   const selectionValue = selectionItem ? String(drafts[selectionItem.key] ?? draftFromItem(selectionItem)) : "random";
@@ -120,6 +121,7 @@ export function LoginPageSettingsPanel({
             isResetting={resettingKey === selectionItem.key}
             layout="card"
             disabled={disabled}
+            workspaceSubpage={workspaceSubpage}
             onChange={(nextValue, touchedSecret) => onChange(selectionItem, nextValue, touchedSecret)}
             onReset={() => onReset(selectionItem)}
           />
@@ -155,21 +157,39 @@ export function LoginPageSettingsPanel({
             <span id="login-page-edit-template-label" className="mb-1 block">
               {t("settings.loginPage.editTemplate")}
             </span>
-            <SelectField
-              id="login-page-edit-template"
-              value={editingTemplateId}
-              options={LOGIN_PAGE_TEMPLATE_IDS.map((templateId) => ({
-                value: templateId,
-                label: t(LOGIN_PAGE_TEMPLATE_LABEL_KEYS[templateId]),
-              }))}
-              onChange={(value) => {
-                if (isLoginPageTemplateId(value)) {
-                  setEditingTemplateId(value);
-                }
-              }}
-              ariaLabel={t("settings.loginPage.editTemplate")}
-              radius="xl"
-            />
+            {workspaceSubpage ? (
+              <WorkspaceSelectField
+                id="login-page-edit-template"
+                value={editingTemplateId}
+                options={LOGIN_PAGE_TEMPLATE_IDS.map((templateId) => ({
+                  value: templateId,
+                  label: t(LOGIN_PAGE_TEMPLATE_LABEL_KEYS[templateId]),
+                }))}
+                onChange={(value) => {
+                  if (isLoginPageTemplateId(value)) {
+                    setEditingTemplateId(value);
+                  }
+                }}
+                ariaLabel={t("settings.loginPage.editTemplate")}
+                size="tall"
+              />
+            ) : (
+              <ClassicSelectField
+                id="login-page-edit-template"
+                value={editingTemplateId}
+                options={LOGIN_PAGE_TEMPLATE_IDS.map((templateId) => ({
+                  value: templateId,
+                  label: t(LOGIN_PAGE_TEMPLATE_LABEL_KEYS[templateId]),
+                }))}
+                onChange={(value) => {
+                  if (isLoginPageTemplateId(value)) {
+                    setEditingTemplateId(value);
+                  }
+                }}
+                ariaLabel={t("settings.loginPage.editTemplate")}
+                radius="xl"
+              />
+            )}
           </div>
         </div>
 
@@ -287,24 +307,43 @@ export function LoginPageSettingsPanel({
                 ) : field.type === "textarea" ? (
                   <label key={field.key} className="space-y-2">
                     <span className="block text-sm font-medium text-zinc-900 dark:text-white">{t(field.labelKey)}</span>
-                    <textarea
-                      value={activeConfig[field.key] ?? ""}
-                      disabled={disabled}
-                      onChange={(event) => updateActiveConfigField(field.key, event.target.value)}
-                      rows={3}
-                      className={`${TEXTAREA_CLASS} resize-y leading-6`}
-                    />
+                    {workspaceSubpage ? (
+                      <WorkspaceTextarea
+                        value={activeConfig[field.key] ?? ""}
+                        disabled={disabled}
+                        onChange={(event) => updateActiveConfigField(field.key, event.target.value)}
+                        rows={3}
+                      />
+                    ) : (
+                      <ClassicTextarea
+                        value={activeConfig[field.key] ?? ""}
+                        disabled={disabled}
+                        onChange={(event) => updateActiveConfigField(field.key, event.target.value)}
+                        rows={3}
+                        className="leading-6"
+                      />
+                    )}
                   </label>
                 ) : (
                   <label key={field.key} className="space-y-2">
                     <span className="block text-sm font-medium text-zinc-900 dark:text-white">{t(field.labelKey)}</span>
-                    <input
-                      type="text"
-                      value={activeConfig[field.key] ?? ""}
-                      disabled={disabled}
-                      onChange={(event) => updateActiveConfigField(field.key, event.target.value)}
-                      className={INPUT_CLASS}
-                    />
+                    {workspaceSubpage ? (
+                      <WorkspaceTextInput
+                        type="text"
+                        value={activeConfig[field.key] ?? ""}
+                        disabled={disabled}
+                        onChange={(event) => updateActiveConfigField(field.key, event.target.value)}
+                        size="tall"
+                      />
+                    ) : (
+                      <ClassicTextInput
+                        type="text"
+                        value={activeConfig[field.key] ?? ""}
+                        disabled={disabled}
+                        onChange={(event) => updateActiveConfigField(field.key, event.target.value)}
+                        size="tall"
+                      />
+                    )}
                   </label>
                 ),
               )}
@@ -336,6 +375,7 @@ export function LoginPageSettingsPanel({
       open={resourceLibraryOpen}
       onClose={() => setResourceLibraryOpen(false)}
       canRead
+      appearance={workspaceSubpage ? "workspace" : "classic"}
       onSelectAsset={(asset) => {
         if (asset.kind !== "image") {
           return;

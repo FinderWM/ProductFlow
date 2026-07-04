@@ -1,6 +1,9 @@
 import { Loader2, OctagonX, RotateCcw, Sparkles } from "lucide-react";
 
-import { ActionButton } from "../../components/ActionButton";
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import { formatImageSizeValue } from "../../lib/imageSizes";
 import type { ImageSessionGenerationTask } from "../../lib/types";
 import {
@@ -19,6 +22,7 @@ interface GenerationCanvasPlaceholderProps {
   cancelling: boolean;
   regenerating: boolean;
   actionBlockedTitle?: string | null;
+  appearance?: LayoutActionAppearance;
   onRetry: (task: ImageSessionGenerationTask) => void;
   onCancel: (task: ImageSessionGenerationTask) => void;
   onRegenerate: (task: ImageSessionGenerationTask) => void;
@@ -31,11 +35,13 @@ export function GenerationCanvasPlaceholder({
   cancelling,
   regenerating,
   actionBlockedTitle = null,
+  appearance = "classic",
   onRetry,
   onCancel,
   onRegenerate,
   t,
 }: GenerationCanvasPlaceholderProps) {
+  const ActionButton = actionButtonComponentForAppearance(appearance);
   const active = candidate.status === "queued" || candidate.status === "running";
   const failed = candidate.status === "failed";
   const cancelled = candidate.status === "cancelled";

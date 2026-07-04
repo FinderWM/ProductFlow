@@ -19,15 +19,18 @@ import {
   X,
 } from "lucide-react";
 
+import { ClassicSelectField, ClassicTextInput } from "../../../components/classicInputs";
 import { ModalShell } from "../../../components/ModalShell";
-import { SelectField } from "../../../components/SelectField";
+import {
+  WorkspaceSelectField,
+  WorkspaceTextInput,
+} from "../../../components/workspaceInputs";
 import { formatDateTime } from "../../../lib/format";
 import { useI18n } from "../../../lib/preferences";
 import type {
   GenerationConfig,
   GenerationResourceGroup,
   ImageGenerationConfigTestResponse,
-  ProviderConfigResponse,
   ProviderProfile,
   TextGenerationConfigJsonResponseFormatTestResponse,
   TextGenerationConfigTestResponse,
@@ -52,8 +55,8 @@ import {
   generationConfigLatestTestTypeLabelKey,
   generationConfigProviderInterfaceLabelKey,
   generationConfigSuccessRate,
+  sortGenerationConfigsForDisplay,
   generationConfigTabClassName,
-  generationConfigsForPurpose,
   isTextStructuredOutputProviderKind,
   newGenerationConfigDraft,
   normalizedGenerationConfigProviderKind,
@@ -63,7 +66,7 @@ import {
   textStructuredOutputProviderInterfaceLabelKey,
   type GenerationConfigDraft,
 } from "../generationConfig";
-import { filterProviderProfiles, settingsGenerationResourceGroupsInApiOrder } from "../providerForm";
+import { filterProviderProfiles } from "../providerForm";
 import { generationConfigResourceGroupIds } from "../resourceGroups";
 import { ImageConfigTestPanel, TextConfigTestPanel } from "./ConfigTestPanels";
 import { GenerationConfigImageFields } from "./GenerationConfigImageFields";
@@ -71,14 +74,10 @@ import { GenerationResourceGroupMultiSelect } from "./GenerationResourceGroupMul
 import { ProviderModelInput } from "./ProviderModelInput";
 import { SettingsFormField } from "./SettingsFormField";
 import {
-  INPUT_CLASS,
   PANEL_CLASS,
   SETTINGS_BORDERED_MODULE_CLASS,
-  SETTINGS_COMPACT_ACTION_CLASS,
-  SETTINGS_DANGER_ICON_ACTION_CLASS,
   SETTINGS_FIELD_CARD_CLASS,
-  SETTINGS_ICON_ACTION_CLASS,
-  SETTINGS_MAIN_ACTION_CLASS,
+  useSettingsActionClassNames,
 } from "./styles";
 import { SettingsOptionToggle, SettingsSwitchToggle } from "./Toggles";
 
@@ -87,10 +86,14 @@ interface GenerationConfigSaveOptions {
 }
 
 interface GenerationConfigPoolSectionProps {
-  data: ProviderConfigResponse | undefined;
   purpose: "text" | "image";
+  profiles: ProviderProfile[];
+  resourceGroups: GenerationResourceGroup[];
+  generationConfigs: GenerationConfig[];
+  selectedResourceGroupId: string;
   drafts: Record<string, GenerationConfigDraft>;
   pending: boolean;
+  listRefreshing?: boolean;
   archivingConfigId: string | null;
   canWrite: boolean;
   textTestState?: TextConfigTestState;
@@ -109,8 +112,10 @@ interface GenerationConfigPoolSectionProps {
   onResetTextConfigTests?: (key: string) => void;
   onResetImageConfigTests?: (key: string) => void;
   onBeforeOpenCreate?: () => Promise<boolean> | boolean;
-  onRefreshSort: () => void;
+  onSelectedResourceGroupIdChange: (resourceGroupId: string) => void;
+  onRefreshConfigs: () => void;
   unfreezingConfigId: string | null;
+  workspaceSubpage?: boolean;
 }
 
 function isActiveFrozenUntil(value: string | null | undefined): boolean {
@@ -138,6 +143,7 @@ interface GenerationConfigCreateDialogProps {
   jsonResponseFormatTesting?: boolean;
   jsonResponseFormatTestResult?: TextGenerationConfigJsonResponseFormatTestResponse | null;
   jsonResponseFormatTestError?: string;
+  workspaceSubpage?: boolean;
   onChange: (next: GenerationConfigDraft) => void;
   onSave: () => void;
   onClose: () => void;
@@ -163,6 +169,7 @@ interface GenerationConfigBatchTestDialogProps {
   selectedIds: string[];
   concurrency: string;
   busy: boolean;
+  workspaceSubpage?: boolean;
   onSelectedIdsChange: (selectedIds: string[]) => void;
   onConcurrencyChange: (concurrency: string) => void;
   onClose: () => void;
@@ -177,12 +184,15 @@ function GenerationConfigBatchTestDialog({
   selectedIds,
   concurrency,
   busy,
+  workspaceSubpage = false,
   onSelectedIdsChange,
   onConcurrencyChange,
   onClose,
   onRun,
 }: GenerationConfigBatchTestDialogProps) {
   const { t } = useI18n();
+  const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_ICON_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } =
+    useSettingsActionClassNames();
   const titleId = useId();
   const selectedSet = new Set(selectedIds);
   const selectedCount = selectedIds.length;
@@ -260,23 +270,21 @@ function GenerationConfigBatchTestDialog({
             const latestDetail = latestTestResult ? generationConfigLatestTestDetail(latestTestResult, t) : "";
             const selected = selectedSet.has(item.config.id);
             return (
-              <label
+              <SettingsOptionToggle
                 key={item.config.id}
-                className={`flex gap-3 rounded-xl border p-3 transition ${
+                checked={selected}
+                disabled={busy || item.disabled}
+                workspaceSubpage={workspaceSubpage}
+                layout="card"
+                className={`w-full ${
                   item.disabled
                     ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900/45 dark:text-slate-400"
                     : selected
                       ? "border-indigo-300 bg-indigo-50/70 dark:border-violet-400/45 dark:bg-violet-500/12"
-                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-[#111b2d] dark:hover:border-slate-600"
-                } ${busy || item.disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+                      : "border-slate-200 bg-white dark:border-slate-700 dark:bg-[#111b2d]"
+                }`}
+                onChange={() => toggleItem(item.config.id)}
               >
-                <input
-                  type="checkbox"
-                  checked={selected}
-                  disabled={busy || item.disabled}
-                  onChange={() => toggleItem(item.config.id)}
-                  className="mt-1 h-4 w-4 rounded pf-hairline-strong text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-violet-400"
-                />
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-slate-950 dark:text-white">{item.config.name}</span>
@@ -320,7 +328,7 @@ function GenerationConfigBatchTestDialog({
                       : t("settings.generation.batchNoLatestTest")}
                   </span>
                 </span>
-              </label>
+              </SettingsOptionToggle>
             );
           })
         ) : (
@@ -332,15 +340,29 @@ function GenerationConfigBatchTestDialog({
       <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-950/45 sm:flex-row sm:items-center sm:justify-between">
         <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
           <span>{t("settings.generation.batchConcurrency")}</span>
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={concurrency}
-            disabled={busy}
-            onChange={(event) => onConcurrencyChange(event.target.value)}
-            className="pf-input-compact w-20"
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              type="number"
+              min={1}
+              max={20}
+              value={concurrency}
+              disabled={busy}
+              onChange={(event) => onConcurrencyChange(event.target.value)}
+              size="compact"
+              className="w-20"
+            />
+          ) : (
+            <ClassicTextInput
+              type="number"
+              min={1}
+              max={20}
+              value={concurrency}
+              disabled={busy}
+              onChange={(event) => onConcurrencyChange(event.target.value)}
+              size="compact"
+              className="w-20"
+            />
+          )}
         </label>
         <div className="flex justify-end gap-2">
           <button
@@ -383,6 +405,7 @@ function GenerationConfigCreateDialog({
   jsonResponseFormatTesting = false,
   jsonResponseFormatTestResult = null,
   jsonResponseFormatTestError = "",
+  workspaceSubpage = false,
   onChange,
   onSave,
   onClose,
@@ -391,6 +414,7 @@ function GenerationConfigCreateDialog({
   onTestJsonResponseFormat,
 }: GenerationConfigCreateDialogProps) {
   const { t } = useI18n();
+  const { SETTINGS_ICON_ACTION_CLASS } = useSettingsActionClassNames();
   const titleId = useId();
 
   if (!open) {
@@ -443,6 +467,7 @@ function GenerationConfigCreateDialog({
             jsonResponseFormatTesting={jsonResponseFormatTesting}
             jsonResponseFormatTestResult={jsonResponseFormatTestResult}
             jsonResponseFormatTestError={jsonResponseFormatTestError}
+            workspaceSubpage={workspaceSubpage}
             onChange={onChange}
             onSave={onSave}
             onTest={onTest}
@@ -455,10 +480,14 @@ function GenerationConfigCreateDialog({
 }
 
 export function GenerationConfigPoolSection({
-  data,
   purpose,
+  profiles,
+  resourceGroups,
+  generationConfigs,
+  selectedResourceGroupId,
   drafts,
   pending,
+  listRefreshing = false,
   archivingConfigId,
   canWrite,
   textTestState,
@@ -477,14 +506,14 @@ export function GenerationConfigPoolSection({
   onResetTextConfigTests,
   onResetImageConfigTests,
   onBeforeOpenCreate,
-  onRefreshSort,
+  onSelectedResourceGroupIdChange,
+  onRefreshConfigs,
   unfreezingConfigId,
+  workspaceSubpage = false,
 }: GenerationConfigPoolSectionProps) {
   const { t } = useI18n();
-  const profiles = data?.profiles ?? [];
-  const resourceGroups = settingsGenerationResourceGroupsInApiOrder(data?.generation_resource_groups);
+  const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const firstEnabledGroupId = resourceGroups.find((group) => group.enabled)?.id ?? "";
-  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string | null>(null);
   const [configSearch, setConfigSearch] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openingCreateDialog, setOpeningCreateDialog] = useState(false);
@@ -492,23 +521,20 @@ export function GenerationConfigPoolSection({
   const [batchSelectedIds, setBatchSelectedIds] = useState<string[]>([]);
   const [batchConcurrency, setBatchConcurrency] = useState("4");
   const [batchRunning, setBatchRunning] = useState(false);
-  const activeResourceGroupId = selectedResourceGroupId ?? firstEnabledGroupId;
+  const activeResourceGroupId = selectedResourceGroupId || "";
   const activeResourceGroup = resourceGroups.find((group) => group.id === activeResourceGroupId) ?? null;
   const activeResourceGroupName = activeResourceGroup?.name ?? t("settings.generation.unboundResourceGroup");
   useEffect(() => {
-    if (selectedResourceGroupId === null || selectedResourceGroupId === "") {
-      return;
+    if (selectedResourceGroupId && !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
+      onSelectedResourceGroupIdChange(firstEnabledGroupId || "");
     }
-    if (!resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
-      setSelectedResourceGroupId(firstEnabledGroupId || "");
-    }
-  }, [firstEnabledGroupId, resourceGroups, selectedResourceGroupId]);
-  const configsInActiveGroup = generationConfigsForPurpose(data, purpose).filter((config) =>
-    activeResourceGroupId
-      ? generationConfigResourceGroupIds(config).includes(activeResourceGroupId)
-      : generationConfigResourceGroupIds(config).length === 0,
+  }, [firstEnabledGroupId, onSelectedResourceGroupIdChange, resourceGroups, selectedResourceGroupId]);
+  const configs = filterGenerationConfigsByName(
+    sortGenerationConfigsForDisplay(
+      generationConfigs.filter((generationConfig) => generationConfig.purpose === purpose && !generationConfig.archived_at),
+    ),
+    configSearch,
   );
-  const configs = filterGenerationConfigsByName(configsInActiveGroup, configSearch);
   const newDraftKey = `new-${purpose}-${activeResourceGroupId || "unbound"}`;
   const newDraft =
     drafts[newDraftKey] ?? newGenerationConfigDraft(purpose, activeResourceGroupId);
@@ -614,13 +640,18 @@ export function GenerationConfigPoolSection({
   return (
     <section className="space-y-4">
       {purpose === "text" && textTestState && onTextTestDraftChange ? (
-        <TextConfigTestPanel state={textTestState} onDraftChange={onTextTestDraftChange} />
+        <TextConfigTestPanel
+          state={textTestState}
+          onDraftChange={onTextTestDraftChange}
+          workspaceSubpage={workspaceSubpage}
+        />
       ) : null}
       {purpose === "image" && imageTestState && onImageTestDraftChange && onSaveImageTestDraft ? (
         <ImageConfigTestPanel
           state={imageTestState}
           onDraftChange={onImageTestDraftChange}
           onSaveDraft={onSaveImageTestDraft}
+          workspaceSubpage={workspaceSubpage}
         />
       ) : null}
       <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-5`}>
@@ -640,14 +671,27 @@ export function GenerationConfigPoolSection({
                 size={16}
                 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               />
-              <input
-                type="search"
-                value={configSearch}
-                onChange={(event) => setConfigSearch(event.target.value)}
-                className={`${INPUT_CLASS} pl-10`}
-                placeholder={t("settings.generation.searchPlaceholder")}
-                aria-label={t("settings.generation.search")}
-              />
+              {workspaceSubpage ? (
+                <WorkspaceTextInput
+                  type="search"
+                  value={configSearch}
+                  onChange={(event) => setConfigSearch(event.target.value)}
+                  className="pl-10"
+                  size="tall"
+                  placeholder={t("settings.generation.searchPlaceholder")}
+                  aria-label={t("settings.generation.search")}
+                />
+              ) : (
+                <ClassicTextInput
+                  type="search"
+                  value={configSearch}
+                  onChange={(event) => setConfigSearch(event.target.value)}
+                  className="pl-10"
+                  size="tall"
+                  placeholder={t("settings.generation.searchPlaceholder")}
+                  aria-label={t("settings.generation.search")}
+                />
+              )}
             </label>
             <div className="flex flex-wrap gap-2">
               <button
@@ -680,7 +724,7 @@ export function GenerationConfigPoolSection({
               </button>
               <button
                 type="button"
-                onClick={onRefreshSort}
+                onClick={onRefreshConfigs}
                 className={SETTINGS_COMPACT_ACTION_CLASS}
               >
                 <RefreshCw size={14} className="mr-2" />
@@ -697,7 +741,7 @@ export function GenerationConfigPoolSection({
                 key={group.id}
                 type="button"
                 aria-current={active ? "true" : undefined}
-                onClick={() => setSelectedResourceGroupId(group.id)}
+                onClick={() => onSelectedResourceGroupIdChange(group.id)}
                 className={generationConfigTabClassName(active)}
               >
                 {group.enabled ? group.name : `${group.name} (${t("settings.resourceGroup.disabled")})`}
@@ -707,14 +751,20 @@ export function GenerationConfigPoolSection({
           <button
             type="button"
             aria-current={activeResourceGroupId === "" ? "true" : undefined}
-            onClick={() => setSelectedResourceGroupId("")}
+            onClick={() => onSelectedResourceGroupIdChange("")}
             className={generationConfigTabClassName(activeResourceGroupId === "")}
           >
             {t("settings.generation.unboundResourceGroup")}
           </button>
         </div>
+        {listRefreshing ? (
+          <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+            <Loader2 size={14} className="animate-spin" />
+            <span>{t("app.loading")}</span>
+          </div>
+        ) : null}
         {cards.length ? (
-          <div className="space-y-4">
+          <div className={`space-y-4 transition-opacity ${listRefreshing ? "opacity-75" : "opacity-100"}`}>
             {cards.map(({ key, draftKey, config, draft }) => {
               const testRecord = textConfigTestRecordForKey(textTestState, key);
               const imageTestRecord = imageConfigTestRecordForKey(imageTestState, key);
@@ -759,6 +809,7 @@ export function GenerationConfigPoolSection({
                   jsonResponseFormatTesting={Boolean(jsonResponseFormatTestRecord?.testing)}
                   jsonResponseFormatTestResult={jsonResponseFormatTestRecord?.result ?? null}
                   jsonResponseFormatTestError={jsonResponseFormatTestRecord?.error ?? ""}
+                  workspaceSubpage={workspaceSubpage}
                 />
               );
             })}
@@ -778,6 +829,7 @@ export function GenerationConfigPoolSection({
           )}
           concurrency={batchConcurrency}
           busy={batchRunning}
+          workspaceSubpage={workspaceSubpage}
           onSelectedIdsChange={setBatchSelectedIds}
           onConcurrencyChange={setBatchConcurrency}
           onClose={() => {
@@ -806,6 +858,7 @@ export function GenerationConfigPoolSection({
           jsonResponseFormatTesting={Boolean(newDraftJsonResponseFormatTestRecord?.testing)}
           jsonResponseFormatTestResult={newDraftJsonResponseFormatTestRecord?.result ?? null}
           jsonResponseFormatTestError={newDraftJsonResponseFormatTestRecord?.error ?? ""}
+          workspaceSubpage={workspaceSubpage}
           onChange={(next) => {
             onChange(newDraftKey, next);
           }}
@@ -816,7 +869,7 @@ export function GenerationConfigPoolSection({
                 const savedResourceGroupId = savedResourceGroupIds.includes(activeResourceGroupId)
                   ? activeResourceGroupId
                   : savedResourceGroupIds[0] ?? "";
-                setSelectedResourceGroupId(savedResourceGroupId);
+                onSelectedResourceGroupIdChange(savedResourceGroupId);
                 setConfigSearch("");
                 setCreateDialogOpen(false);
                 resetNewDraft();
@@ -871,6 +924,7 @@ interface GenerationConfigCardProps {
   jsonResponseFormatTesting?: boolean;
   jsonResponseFormatTestResult?: TextGenerationConfigJsonResponseFormatTestResponse | null;
   jsonResponseFormatTestError?: string;
+  workspaceSubpage?: boolean;
 }
 
 function GenerationConfigCard({
@@ -897,8 +951,11 @@ function GenerationConfigCard({
   jsonResponseFormatTesting = false,
   jsonResponseFormatTestResult = null,
   jsonResponseFormatTestError = "",
+  workspaceSubpage = false,
 }: GenerationConfigCardProps) {
   const { t } = useI18n();
+  const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_DANGER_ICON_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } =
+    useSettingsActionClassNames();
   const [providerProfileSearch, setProviderProfileSearch] = useState("");
   const isNew = !config;
   const providerKindOptions =
@@ -1168,13 +1225,23 @@ function GenerationConfigCard({
 
       <div className="grid gap-3 md:grid-cols-2">
         <SettingsFormField label={t("settings.generation.nameLabel")}>
-          <input
-            value={draft.name}
-            onChange={(event) => onChange({ ...draft, name: event.target.value })}
-            disabled={controlsDisabled}
-            className={INPUT_CLASS}
-            placeholder={t("settings.generation.namePlaceholder")}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.name}
+              onChange={(event) => onChange({ ...draft, name: event.target.value })}
+              disabled={controlsDisabled}
+              size="tall"
+              placeholder={t("settings.generation.namePlaceholder")}
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.name}
+              onChange={(event) => onChange({ ...draft, name: event.target.value })}
+              disabled={controlsDisabled}
+              size="tall"
+              placeholder={t("settings.generation.namePlaceholder")}
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.resourceGroups")}>
           <GenerationResourceGroupMultiSelect
@@ -1186,50 +1253,92 @@ function GenerationConfigCard({
             noSelectionLabel={t("settings.generation.noSelectedResourceGroups")}
             selectedCountLabel={(count) => t("settings.generation.selectedResourceGroupsCount", { count })}
             ariaLabel={t("settings.generation.resourceGroups")}
+            workspaceSubpage={workspaceSubpage}
             onChange={(resource_group_ids) => onChange({ ...draft, resource_group_ids })}
           />
         </SettingsFormField>
         <SettingsFormField label={t("settings.provider.apiInterfaceLabel")} helpKey="settingsProviderApiInterface">
-          <SelectField
-            value={draft.provider_kind}
-            options={providerKindOptions}
-            onChange={(value) => {
-              const provider_kind = normalizedGenerationConfigProviderKind(draft.purpose, value);
-              onChange({
-                ...draft,
-                provider_kind,
-                provider_profile_id: providerProfileIdAfterKindChange(profiles, draft, provider_kind),
-              });
-            }}
-            disabled={controlsDisabled}
-            radius="lg"
-          />
+          {workspaceSubpage ? (
+            <WorkspaceSelectField
+              value={draft.provider_kind}
+              options={providerKindOptions}
+              onChange={(value) => {
+                const provider_kind = normalizedGenerationConfigProviderKind(draft.purpose, value);
+                onChange({
+                  ...draft,
+                  provider_kind,
+                  provider_profile_id: providerProfileIdAfterKindChange(profiles, draft, provider_kind),
+                });
+              }}
+              disabled={controlsDisabled}
+              size="tall"
+            />
+          ) : (
+            <ClassicSelectField
+              value={draft.provider_kind}
+              options={providerKindOptions}
+              onChange={(value) => {
+                const provider_kind = normalizedGenerationConfigProviderKind(draft.purpose, value);
+                onChange({
+                  ...draft,
+                  provider_kind,
+                  provider_profile_id: providerProfileIdAfterKindChange(profiles, draft, provider_kind),
+                });
+              }}
+              disabled={controlsDisabled}
+              size="tall"
+            />
+          )}
         </SettingsFormField>
       </div>
 
       {draft.provider_kind !== "mock" ? (
         <SettingsFormField label={t("settings.provider.providerProfileLabel")} helpKey="settingsProviderProfile">
-          <SelectField
-            value={draft.provider_profile_id}
-            options={[
-              { value: "", label: t("settings.provider.selectProfile") },
-              ...selectableProfiles.map((profile) => ({ value: profile.id, label: profile.name })),
-            ]}
-            onChange={(value) => {
-              onChange(
-                generationConfigDraftAfterProviderProfileSelection(draft, profiles, value, {
-                  isNew,
-                }),
-              );
-              setProviderProfileSearch("");
-            }}
-            searchValue={providerProfileSearch}
-            onSearchChange={setProviderProfileSearch}
-            searchPlaceholder={t("settings.provider.profileSearchPlaceholder")}
-            searchAriaLabel={t("settings.provider.profileSearch")}
-            disabled={controlsDisabled}
-            radius="lg"
-          />
+          {workspaceSubpage ? (
+            <WorkspaceSelectField
+              value={draft.provider_profile_id}
+              options={[
+                { value: "", label: t("settings.provider.selectProfile") },
+                ...selectableProfiles.map((profile) => ({ value: profile.id, label: profile.name })),
+              ]}
+              onChange={(value) => {
+                onChange(
+                  generationConfigDraftAfterProviderProfileSelection(draft, profiles, value, {
+                    isNew,
+                  }),
+                );
+                setProviderProfileSearch("");
+              }}
+              searchValue={providerProfileSearch}
+              onSearchChange={setProviderProfileSearch}
+              searchPlaceholder={t("settings.provider.profileSearchPlaceholder")}
+              searchAriaLabel={t("settings.provider.profileSearch")}
+              disabled={controlsDisabled}
+              size="tall"
+            />
+          ) : (
+            <ClassicSelectField
+              value={draft.provider_profile_id}
+              options={[
+                { value: "", label: t("settings.provider.selectProfile") },
+                ...selectableProfiles.map((profile) => ({ value: profile.id, label: profile.name })),
+              ]}
+              onChange={(value) => {
+                onChange(
+                  generationConfigDraftAfterProviderProfileSelection(draft, profiles, value, {
+                    isNew,
+                  }),
+                );
+                setProviderProfileSearch("");
+              }}
+              searchValue={providerProfileSearch}
+              onSearchChange={setProviderProfileSearch}
+              searchPlaceholder={t("settings.provider.profileSearchPlaceholder")}
+              searchAriaLabel={t("settings.provider.profileSearch")}
+              disabled={controlsDisabled}
+              size="tall"
+            />
+          )}
         </SettingsFormField>
       ) : null}
 
@@ -1249,6 +1358,7 @@ function GenerationConfigCard({
               providerProfileId={draft.provider_profile_id}
               disabled={controlsDisabled}
               helpKey="settingsTextBriefModel"
+              workspaceSubpage={workspaceSubpage}
               onChange={(brief_model) => onChange({ ...draft, brief_model })}
             />
             <ProviderModelInput
@@ -1264,14 +1374,16 @@ function GenerationConfigCard({
               providerProfileId={draft.provider_profile_id}
               disabled={controlsDisabled}
               helpKey="settingsTextCopyModel"
+              workspaceSubpage={workspaceSubpage}
               onChange={(copy_model) => onChange({ ...draft, copy_model })}
             />
-          </div>
+            </div>
           {isTextStructuredOutputProviderKind(draft.provider_kind) ? (
             <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)] sm:items-end">
               <SettingsOptionToggle
                 checked={draft.structured_output_enabled}
                 disabled={controlsDisabled}
+                workspaceSubpage={workspaceSubpage}
                 onChange={(structured_output_enabled) =>
                   onChange({
                     ...draft,
@@ -1286,44 +1398,162 @@ function GenerationConfigCard({
                 {t("settings.provider.structuredOutput")}
               </SettingsOptionToggle>
               <SettingsFormField label={t("settings.provider.structuredOutputMode")}>
-                <SelectField
-                  value={draft.structured_output_mode}
-                  options={[
-                    { value: "json_schema", label: t("settings.provider.structuredOutputJsonSchema") },
-                    { value: "json_object", label: t("settings.provider.structuredOutputJsonObject") },
-                  ]}
-                  onChange={(value) =>
-                    onChange({
-                      ...draft,
-                      structured_output_mode: value === "json_object" ? "json_object" : "json_schema",
-                    })
-                  }
-                  disabled={controlsDisabled || !draft.structured_output_enabled}
-                  radius="lg"
-                />
+                {workspaceSubpage ? (
+                  <WorkspaceSelectField
+                    value={draft.structured_output_mode}
+                    options={[
+                      { value: "json_schema", label: t("settings.provider.structuredOutputJsonSchema") },
+                      { value: "json_object", label: t("settings.provider.structuredOutputJsonObject") },
+                    ]}
+                    onChange={(value) =>
+                      onChange({
+                        ...draft,
+                        structured_output_mode: value === "json_object" ? "json_object" : "json_schema",
+                      })
+                    }
+                    disabled={controlsDisabled || !draft.structured_output_enabled}
+                    size="tall"
+                  />
+                ) : (
+                  <ClassicSelectField
+                    value={draft.structured_output_mode}
+                    options={[
+                      { value: "json_schema", label: t("settings.provider.structuredOutputJsonSchema") },
+                      { value: "json_object", label: t("settings.provider.structuredOutputJsonObject") },
+                    ]}
+                    onChange={(value) =>
+                      onChange({
+                        ...draft,
+                        structured_output_mode: value === "json_object" ? "json_object" : "json_schema",
+                      })
+                    }
+                    disabled={controlsDisabled || !draft.structured_output_enabled}
+                    size="tall"
+                  />
+                )}
               </SettingsFormField>
             </div>
           ) : null}
         </div>
       ) : (
-        <GenerationConfigImageFields draft={draft} pending={controlsDisabled} onChange={onChange} configId={config?.id ?? "new"} />
+        <GenerationConfigImageFields
+          draft={draft}
+          pending={controlsDisabled}
+          onChange={onChange}
+          configId={config?.id ?? "new"}
+          workspaceSubpage={workspaceSubpage}
+        />
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <SettingsFormField label={t("settings.generation.priority")} helpKey="settingsGenerationPriority">
-          <input value={draft.priority} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, priority: event.target.value })} className={INPUT_CLASS} type="number" />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.priority}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, priority: event.target.value })}
+              size="tall"
+              type="number"
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.priority}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, priority: event.target.value })}
+              size="tall"
+              type="number"
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.maxConcurrency")} helpKey="settingsGenerationMaxConcurrency">
-          <input value={draft.max_concurrency} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, max_concurrency: event.target.value })} className={INPUT_CLASS} type="number" min={1} />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.max_concurrency}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, max_concurrency: event.target.value })}
+              size="tall"
+              type="number"
+              min={1}
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.max_concurrency}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, max_concurrency: event.target.value })}
+              size="tall"
+              type="number"
+              min={1}
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.availabilityWindow")} helpKey="settingsGenerationAvailabilityWindow">
-          <input value={draft.availability_window_minutes} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.availability_window_minutes}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })}
+              size="tall"
+              type="number"
+              min={1}
+              placeholder={t("settings.generation.runtimeDefault")}
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.availability_window_minutes}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, availability_window_minutes: event.target.value })}
+              size="tall"
+              type="number"
+              min={1}
+              placeholder={t("settings.generation.runtimeDefault")}
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.failureThreshold")} helpKey="settingsGenerationFailureThreshold">
-          <input value={draft.failure_threshold} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.failure_threshold}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })}
+              size="tall"
+              type="number"
+              min={1}
+              placeholder={t("settings.generation.runtimeDefault")}
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.failure_threshold}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, failure_threshold: event.target.value })}
+              size="tall"
+              type="number"
+              min={1}
+              placeholder={t("settings.generation.runtimeDefault")}
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.generation.cooldownMinutes")} helpKey="settingsGenerationCooldownMinutes">
-          <input value={draft.cooldown_minutes} disabled={controlsDisabled} onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })} className={INPUT_CLASS} type="number" min={1} placeholder={t("settings.generation.runtimeDefault")} />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={draft.cooldown_minutes}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })}
+              size="tall"
+              type="number"
+              min={1}
+              placeholder={t("settings.generation.runtimeDefault")}
+            />
+          ) : (
+            <ClassicTextInput
+              value={draft.cooldown_minutes}
+              disabled={controlsDisabled}
+              onChange={(event) => onChange({ ...draft, cooldown_minutes: event.target.value })}
+              size="tall"
+              type="number"
+              min={1}
+              placeholder={t("settings.generation.runtimeDefault")}
+            />
+          )}
         </SettingsFormField>
       </div>
 
@@ -1332,6 +1562,7 @@ function GenerationConfigCard({
           <SettingsSwitchToggle
             checked={draft.enabled}
             disabled={controlsDisabled}
+            workspaceSubpage={workspaceSubpage}
             onChange={(enabled) => onChange({ ...draft, enabled })}
           >
             {t("settings.generation.enabled")}

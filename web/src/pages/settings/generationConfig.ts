@@ -171,9 +171,20 @@ export function generationConfigsForPurpose(
   data: ProviderConfigResponse | undefined,
   purpose: "text" | "image",
 ): GenerationConfig[] {
-  return (data?.generation_configs ?? [])
-    .filter((generationConfig) => generationConfig.purpose === purpose && !generationConfig.archived_at)
-    .sort((left, right) => right.priority - left.priority || left.name.localeCompare(right.name));
+  return sortGenerationConfigsForDisplay(
+    (data?.generation_configs ?? []).filter(
+      (generationConfig) => generationConfig.purpose === purpose && !generationConfig.archived_at,
+    ),
+  );
+}
+
+export function sortGenerationConfigsForDisplay(configs: readonly GenerationConfig[]): GenerationConfig[] {
+  return [...configs].sort((left, right) => {
+    if (left.effective_enabled !== right.effective_enabled) {
+      return left.effective_enabled ? -1 : 1;
+    }
+    return right.priority - left.priority || left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+  });
 }
 
 function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfigDraft {

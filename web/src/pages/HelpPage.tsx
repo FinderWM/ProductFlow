@@ -18,11 +18,18 @@ import {
 import { useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { ClassicSelectField, ClassicTextInput } from "../components/classicInputs";
 import { FloatingSurface } from "../components/FloatingSurface";
-import { SelectField } from "../components/SelectField";
+import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
+import {
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../components/layoutActionButtons";
 import { TopNav } from "../components/TopNav";
+import { WorkspaceSelectField, WorkspaceTextInput } from "../components/workspaceInputs";
 import type { Locale } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 
 type SectionBlock =
   | {
@@ -79,12 +86,25 @@ interface SearchResult {
   score: number;
 }
 
-const HELP_PRIMARY_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const HELP_SECONDARY_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+const HELP_TITLE_BUTTON_CLASS =
+  "inline-flex items-center gap-2 px-3 py-2 text-left text-base font-semibold transition-colors " +
+  "hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:text-white " +
+  "dark:hover:text-violet-200 dark:focus-visible:ring-violet-400/60";
+const HELP_SEARCH_RESULT_BUTTON_CLASS =
+  "block w-full px-3 py-2.5 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 " +
+  "focus-visible:ring-inset focus-visible:ring-indigo-400 dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60";
+const HELP_PAGE_LINK_CLASS =
+  "pf-help-page-link rounded-lg border border-slate-200 px-4 py-3 text-left transition-all hover:-translate-y-0.5 " +
+  "hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700/80 " +
+  "dark:bg-[#0f1726] dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60";
+
+function helpNavItemClassName(active: boolean): string {
+  return `pf-help-nav-item flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-all ${
+    active
+      ? "font-semibold text-indigo-700 dark:text-violet-100"
+      : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+  }`;
+}
 
 const DOC_PAGES: DocPage[] = [
   {
@@ -2472,6 +2492,7 @@ function renderBlock(block: SectionBlock) {
 
 export function HelpPage() {
   const { locale, t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const searchTriggerRef = useRef<HTMLDivElement | null>(null);
@@ -2486,7 +2507,9 @@ export function HelpPage() {
   const pagesBySlug = useMemo(() => new Map(docPages.map((item) => [item.slug, item])), [docPages]);
   const searchResults = useMemo(() => searchDocPages(searchQuery, docPages), [docPages, searchQuery]);
   const normalizedSearchQuery = searchQuery.trim();
-
+  const isWorkspaceSubpage = activeScheme === "workspace";
+  const helpActionAppearance: LayoutActionAppearance = isWorkspaceSubpage ? "workspace" : "classic";
+  const PageActionButton = actionButtonComponentForAppearance(helpActionAppearance);
   const openPage = (slug: string) => {
     setSearchParams({ page: slug });
     setSearchQuery("");
@@ -2500,27 +2523,42 @@ export function HelpPage() {
       <main className="pf-side-shell pf-side-shell-with-toc flex-1">
         <aside className="pf-side-rail">
           <div className="border-b border-slate-200 px-5 py-5 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={() => openPage("overview")}
-              className="inline-flex items-center gap-2 rounded-lg text-left text-base font-semibold text-slate-950 transition-colors hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:text-white dark:hover:text-violet-200 dark:focus-visible:ring-violet-400/60"
-            >
+	            <LayoutActionSurfaceButton
+	              type="button"
+	              appearance={helpActionAppearance}
+	              preset="secondary"
+	              onClick={() => openPage("overview")}
+	              className={HELP_TITLE_BUTTON_CLASS}
+	            >
               <BookOpen size={18} className="text-indigo-600 dark:text-violet-300" />
               {t("help.title")}
-            </button>
+	            </LayoutActionSurfaceButton>
             <div ref={searchTriggerRef} className="relative mt-4">
               <label htmlFor="help-search" className="sr-only">
                 {t("help.search")}
               </label>
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-              <input
-                id="help-search"
-                type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder={t("help.search")}
-                className="pf-input-compact px-9"
-              />
+              {isWorkspaceSubpage ? (
+                <WorkspaceTextInput
+                  id="help-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t("help.search")}
+                  size="compact"
+                  className="px-9"
+                />
+              ) : (
+                <ClassicTextInput
+                  id="help-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t("help.search")}
+                  size="compact"
+                  className="px-9"
+                />
+              )}
               <FloatingSurface
                 open={Boolean(normalizedSearchQuery)}
                 triggerRef={searchTriggerRef}
@@ -2537,12 +2575,14 @@ export function HelpPage() {
                   {searchResults.length > 0 ? (
                     <div className="min-h-0 flex-1 overflow-y-auto py-1">
                       {searchResults.map((result) => (
-                        <button
-                          key={result.page.slug}
-                          type="button"
-                          onClick={() => openPage(result.page.slug)}
-                          className="block w-full px-3 py-2.5 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400 dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60"
-                        >
+	                        <LayoutActionSurfaceButton
+	                          key={result.page.slug}
+	                          type="button"
+	                          appearance={helpActionAppearance}
+	                          preset="secondary"
+	                          onClick={() => openPage(result.page.slug)}
+	                          className={HELP_SEARCH_RESULT_BUTTON_CLASS}
+	                        >
                           <div className="flex items-center gap-2">
                             <span className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">
                               {result.page.category}
@@ -2555,7 +2595,7 @@ export function HelpPage() {
                             <div className="mt-1 text-xs font-medium text-indigo-700 dark:text-violet-200">{result.matchedSectionTitle}</div>
                           ) : null}
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600 dark:text-slate-400">{result.preview}</p>
-                        </button>
+	                        </LayoutActionSurfaceButton>
                       ))}
                     </div>
                   ) : (
@@ -2583,11 +2623,7 @@ export function HelpPage() {
                         type="button"
                         onClick={() => openPage(item.slug)}
                         aria-current={active ? "page" : undefined}
-                        className={`pf-help-nav-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-all ${
-                          active
-                            ? "font-semibold text-indigo-700 dark:text-violet-100"
-                            : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-                        }`}
+	                        className={helpNavItemClassName(active)}
                       >
                         <Icon size={15} className={active ? "text-indigo-600 dark:text-violet-200" : "text-slate-400 dark:text-slate-500"} />
                         <span className="min-w-0 truncate">{item.title}</span>
@@ -2603,21 +2639,40 @@ export function HelpPage() {
             <label htmlFor="doc-page" className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">
               {t("help.pageSelect")}
             </label>
-            <SelectField
-              id="doc-page"
-              value={page.slug}
-              groups={navGroups.map((group) => ({
-                label: group.title,
-                options: group.pages
-                  .map((slug) => {
-                    const item = pagesBySlug.get(slug);
-                    return item ? { value: item.slug, label: item.title } : null;
-                  })
-                  .filter((item): item is { value: string; label: string } => Boolean(item)),
-              }))}
-              onChange={openPage}
-              radius="lg"
-            />
+            {isWorkspaceSubpage ? (
+              <WorkspaceSelectField
+                id="doc-page"
+                value={page.slug}
+                groups={navGroups.map((group) => ({
+                  label: group.title,
+                  options: group.pages
+                    .map((slug) => {
+                      const item = pagesBySlug.get(slug);
+                      return item ? { value: item.slug, label: item.title } : null;
+                    })
+                    .filter((item): item is { value: string; label: string } => Boolean(item)),
+                }))}
+                onChange={openPage}
+                size="default"
+              />
+            ) : (
+              <ClassicSelectField
+                id="doc-page"
+                value={page.slug}
+                groups={navGroups.map((group) => ({
+                  label: group.title,
+                  options: group.pages
+                    .map((slug) => {
+                      const item = pagesBySlug.get(slug);
+                      return item ? { value: item.slug, label: item.title } : null;
+                    })
+                    .filter((item): item is { value: string; label: string } => Boolean(item)),
+                }))}
+                onChange={openPage}
+                radius="lg"
+                size="default"
+              />
+            )}
           </div>
         </aside>
 
@@ -2646,29 +2701,33 @@ export function HelpPage() {
 
           <footer className="mt-12 grid max-w-3xl gap-3 border-t border-slate-200 pt-6 dark:border-slate-800 sm:grid-cols-2">
             {previousPage ? (
-              <button
-                type="button"
-                onClick={() => openPage(previousPage.slug)}
-                className="pf-help-page-link rounded-lg border border-slate-200 px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700/80 dark:bg-[#0f1726] dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60"
-              >
+	              <LayoutActionSurfaceButton
+	                type="button"
+	                appearance={helpActionAppearance}
+	                preset="secondary"
+	                onClick={() => openPage(previousPage.slug)}
+	                className={HELP_PAGE_LINK_CLASS}
+	              >
                 <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("help.previous")}</div>
                 <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{previousPage.title}</div>
-              </button>
+	              </LayoutActionSurfaceButton>
             ) : (
               <div />
             )}
             {nextPage ? (
-              <button
-                type="button"
-                onClick={() => openPage(nextPage.slug)}
-                className="pf-help-page-link rounded-lg border border-slate-200 px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700/80 dark:bg-[#0f1726] dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60 sm:text-right"
-              >
+	              <LayoutActionSurfaceButton
+	                type="button"
+	                appearance={helpActionAppearance}
+	                preset="secondary"
+	                onClick={() => openPage(nextPage.slug)}
+	                className={`${HELP_PAGE_LINK_CLASS} sm:text-right`}
+	              >
                 <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("help.next")}</div>
                 <div className="mt-1 inline-flex items-center text-sm font-semibold text-indigo-700 dark:text-violet-200">
                   {nextPage.title}
                   <ArrowRight size={14} className="ml-1" />
                 </div>
-              </button>
+	              </LayoutActionSurfaceButton>
             ) : null}
           </footer>
         </article>
@@ -2693,20 +2752,12 @@ export function HelpPage() {
                 {t("help.needAction")}
               </div>
               <div className="mt-3 grid gap-2">
-                <button
-                  type="button"
-                  onClick={() => navigate("/inspirations")}
-                  className={HELP_PRIMARY_ACTION_CLASS}
-                >
+                <PageActionButton onClick={() => navigate("/inspirations")} preset="primary" size="md">
                   {t("help.openInspirations")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate("/image-chat")}
-                  className={HELP_SECONDARY_ACTION_CLASS}
-                >
+                </PageActionButton>
+                <PageActionButton onClick={() => navigate("/image-chat")} preset="secondary" size="md">
                   {t("help.openImageChat")}
-                </button>
+                </PageActionButton>
               </div>
             </div>
           </div>

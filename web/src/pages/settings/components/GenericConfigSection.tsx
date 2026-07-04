@@ -13,8 +13,7 @@ import { ConfigField } from "./ConfigField";
 import {
   PANEL_CLASS,
   SETTINGS_BORDERED_MODULE_CLASS,
-  SETTINGS_COMPACT_ACTION_CLASS,
-  SETTINGS_MAIN_ACTION_CLASS,
+  useSettingsActionClassNames,
 } from "./styles";
 
 interface GenericConfigSectionProps {
@@ -26,6 +25,7 @@ interface GenericConfigSectionProps {
   resettingKey: string | null;
   disabled: boolean;
   saving: boolean;
+  workspaceSubpage?: boolean;
   onChange: (item: ConfigItem, nextValue: DraftValue, touchedSecret?: boolean) => void;
   onReset: (item: ConfigItem) => void;
   onDiscard: () => void;
@@ -41,12 +41,14 @@ export function GenericConfigSection({
   resettingKey,
   disabled,
   saving,
+  workspaceSubpage = false,
   onChange,
   onReset,
   onDiscard,
   onSubmit,
 }: GenericConfigSectionProps) {
   const { t } = useI18n();
+  const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   return (
     <form onSubmit={onSubmit} className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-2`}>
       {items.length ? (
@@ -62,14 +64,15 @@ export function GenericConfigSection({
                 {group.items.map((item) => (
                   <ConfigField
                     key={item.key}
-                    item={item}
-                    value={drafts[item.key] ?? draftFromItem(item)}
-                    secretTouched={Boolean(secretTouched[item.key])}
-                    isResetting={resettingKey === item.key}
-                    disabled={disabled}
-                    onChange={(nextValue, touchedSecret) => onChange(item, nextValue, touchedSecret)}
-                    onReset={() => onReset(item)}
-                  />
+                  item={item}
+                  value={drafts[item.key] ?? draftFromItem(item)}
+                  secretTouched={Boolean(secretTouched[item.key])}
+                  isResetting={resettingKey === item.key}
+                  disabled={disabled}
+                  workspaceSubpage={workspaceSubpage}
+                  onChange={(nextValue, touchedSecret) => onChange(item, nextValue, touchedSecret)}
+                  onReset={() => onReset(item)}
+                />
                 ))}
               </div>
             ))}
@@ -85,6 +88,7 @@ export function GenericConfigSection({
                 isResetting={resettingKey === item.key}
                 layout="card"
                 disabled={disabled}
+                workspaceSubpage={workspaceSubpage}
                 onChange={(nextValue, touchedSecret) => onChange(item, nextValue, touchedSecret)}
                 onReset={() => onReset(item)}
               />
@@ -99,6 +103,7 @@ export function GenericConfigSection({
               secretTouched={Boolean(secretTouched[item.key])}
               isResetting={resettingKey === item.key}
               disabled={disabled}
+              workspaceSubpage={workspaceSubpage}
               onChange={(nextValue, touchedSecret) => onChange(item, nextValue, touchedSecret)}
               onReset={() => onReset(item)}
             />

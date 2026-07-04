@@ -1,6 +1,13 @@
 import { Check, Image as ImageIcon, ImagePlus, Library, Loader2, Trash2 } from "lucide-react";
 
-import { ActionButton, actionButtonClassName, actionSurfaceClassName } from "../../components/ActionButton";
+import {
+  actionButtonComponentForAppearance,
+  actionButtonClassNameForAppearance,
+  actionButtonToneStyle,
+  actionSurfaceClassNameForAppearance,
+  transparentActionToneVars,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
 import { ClipboardImageButton } from "../../components/ClipboardImageButton";
 import { ImageDropZone } from "../../components/ImageDropZone";
 import { ParameterHelpLabel } from "../../components/ParameterHelp";
@@ -9,20 +16,29 @@ import {
   isResourceBlocked,
   ResourceMetaBadges,
 } from "../../components/ResourceGovernance";
+import { ClassicCheckbox, ClassicSelectField } from "../../components/classicInputs";
 import { WorkspaceCheckbox, WorkspaceSelectField } from "../../components/workspaceInputs";
 import { api } from "../../lib/api";
 import { formatImageSizeValue } from "../../lib/imageSizes";
 import type { ImageSessionAsset, ImageSessionRound, InspirationDetail, InspirationSummary, SourceAsset } from "../../lib/types";
 import type { ImageChatTranslate } from "./display";
 
-const IMAGE_CHAT_SECONDARY_ACTION_CLASS = actionButtonClassName({ preset: "secondary", size: "lg" });
-const IMAGE_CHAT_DANGER_ICON_ACTION_CLASS = actionButtonClassName({ preset: "danger", size: "icon-sm" });
-const IMAGE_CHAT_REFERENCE_LOAD_ACTION_CLASS = actionSurfaceClassName({
-  preset: "secondary",
-  focusWithin: true,
-  className:
-    "pf-action-surface--dashed flex h-full min-h-11 w-full items-center justify-center px-3 py-2 text-center text-sm font-semibold leading-4",
-});
+function imageChatSecondaryActionClassName(appearance: LayoutActionAppearance) {
+  return actionButtonClassNameForAppearance(appearance, { preset: "secondary", size: "lg" });
+}
+
+function imageChatDangerIconActionClassName(appearance: LayoutActionAppearance) {
+  return actionButtonClassNameForAppearance(appearance, { preset: "danger", size: "icon-sm" });
+}
+
+function imageChatReferenceLoadActionClassName(appearance: LayoutActionAppearance) {
+  return actionSurfaceClassNameForAppearance(appearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className:
+      "pf-action-surface--dashed flex h-full min-h-11 w-full items-center justify-center px-3 py-2 text-center text-sm font-semibold leading-4",
+  });
+}
 
 interface SessionReferencePanelProps {
   assets: ImageSessionAsset[];
@@ -40,6 +56,7 @@ interface SessionReferencePanelProps {
   onDelete: (assetId: string) => void;
   onPreview: (asset: ImageSessionAsset) => void;
   t: ImageChatTranslate;
+  appearance?: LayoutActionAppearance;
 }
 
 export function SessionReferencePanel({
@@ -58,7 +75,19 @@ export function SessionReferencePanel({
   onDelete,
   onPreview,
   t,
+  appearance = "classic",
 }: SessionReferencePanelProps) {
+  const ActionButton = actionButtonComponentForAppearance(appearance);
+  const useWorkspaceInputs = appearance === "workspace";
+  const LayoutCheckbox = useWorkspaceInputs ? WorkspaceCheckbox : ClassicCheckbox;
+  const secondaryActionClassName = imageChatSecondaryActionClassName(appearance);
+  const dangerIconActionClassName = imageChatDangerIconActionClassName(appearance);
+  const referenceLoadActionClassName = imageChatReferenceLoadActionClassName(appearance);
+  const previewButtonClassName = actionSurfaceClassNameForAppearance(appearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "block w-full rounded-none border-0 shadow-none",
+  });
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
       <div className="mb-2 text-sm font-semibold text-slate-950 dark:text-white">
@@ -69,7 +98,7 @@ export function SessionReferencePanel({
           ariaLabel={t("chat.uploadSessionReference")}
           multiple
           disabled={disabled || uploadBusy}
-          className={`${IMAGE_CHAT_REFERENCE_LOAD_ACTION_CLASS} cursor-pointer`}
+          className={`${referenceLoadActionClassName} cursor-pointer`}
           activeClassName="pf-action-surface--active"
           onFiles={onFiles}
         >
@@ -82,7 +111,7 @@ export function SessionReferencePanel({
         </ImageDropZone>
         <ClipboardImageButton
           rootClassName="min-w-0"
-          buttonClassName={`${IMAGE_CHAT_SECONDARY_ACTION_CLASS} h-full min-h-11 w-full whitespace-normal px-3 py-2 text-center leading-4`}
+          buttonClassName={`${secondaryActionClassName} h-full min-h-11 w-full whitespace-normal px-3 py-2 text-center leading-4`}
           multiple
           disabled={disabled || uploadBusy}
           label={t("common.pasteImage")}
@@ -132,7 +161,8 @@ export function SessionReferencePanel({
                   onClick={() => onPreview(asset)}
                   title={asset.original_filename}
                   aria-label={t("detail.previewImage", { alt: asset.original_filename })}
-                  className="block w-full"
+                  className={previewButtonClassName}
+                  style={actionButtonToneStyle(transparentActionToneVars)}
                 >
                   <img
                     src={api.toApiUrl(asset.thumbnail_url)}
@@ -146,7 +176,7 @@ export function SessionReferencePanel({
                   resource={asset}
                   className="absolute left-1 top-1 max-w-[calc(100%-2.5rem)]"
                 />
-                <WorkspaceCheckbox
+                <LayoutCheckbox
                   checked={selected}
                   size="sm"
                   disabled={selectionDisabled || selectionLimitReached || (assetBlocked && !selected)}
@@ -165,7 +195,7 @@ export function SessionReferencePanel({
                   title={assetBlocked ? assetBlockedTitle : t("chat.deleteSessionReference")}
                   loading={deleting}
                   leadingIcon={<Trash2 size={13} />}
-                  className={`absolute right-1 top-1 bg-white/90 opacity-100 dark:bg-slate-950/90 md:opacity-0 md:group-hover:opacity-100 ${IMAGE_CHAT_DANGER_ICON_ACTION_CLASS}`}
+                  className={`absolute right-1 top-1 bg-white/90 opacity-100 dark:bg-slate-950/90 md:opacity-0 md:group-hover:opacity-100 ${dangerIconActionClassName}`}
                 >
                 </ActionButton>
               </div>
@@ -194,6 +224,7 @@ interface InspirationAssociationPanelProps {
   saveBlockedTitle?: string | null;
   editBlockedTitle?: string | null;
   t: ImageChatTranslate;
+  appearance?: LayoutActionAppearance;
 }
 
 export function InspirationAssociationPanel({
@@ -213,7 +244,16 @@ export function InspirationAssociationPanel({
   saveBlockedTitle = null,
   editBlockedTitle = null,
   t,
+  appearance = "classic",
 }: InspirationAssociationPanelProps) {
+  const ActionButton = actionButtonComponentForAppearance(appearance);
+  const LayoutSelectField = appearance === "workspace" ? WorkspaceSelectField : ClassicSelectField;
+  const dangerIconActionClassName = imageChatDangerIconActionClassName(appearance);
+  const previewButtonClassName = actionSurfaceClassNameForAppearance(appearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "block w-full rounded-none border-0 shadow-none",
+  });
   const inspirationBlocked = isResourceBlocked(inspiration);
   const inspirationBlockedTitle = getResourceBlockedActionTitle(inspiration, t("resource.blockedAction"));
   const saveDisabled = attachBusy || !selectedRound || (!isInspirationMode && !targetInspirationId) || Boolean(saveBlockedTitle);
@@ -242,7 +282,7 @@ export function InspirationAssociationPanel({
       ) : (
         <label className="block">
           <span className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-200">{t("chat.targetInspiration")}</span>
-          <WorkspaceSelectField
+          <LayoutSelectField
             value={targetInspirationId}
             options={
               inspirations.length
@@ -272,7 +312,8 @@ export function InspirationAssociationPanel({
                   onClick={() => onPreviewReference(asset)}
                   title={asset.original_filename}
                   aria-label={t("detail.previewImage", { alt: asset.original_filename })}
-                  className="block w-full"
+                  className={previewButtonClassName}
+                  style={actionButtonToneStyle(transparentActionToneVars)}
                 >
                   <img
                     src={api.toApiUrl(asset.thumbnail_url)}
@@ -295,7 +336,7 @@ export function InspirationAssociationPanel({
                   title={editBlockedTitle ?? (assetBlocked ? assetBlockedTitle : t("chat.deleteInspirationReference"))}
                   loading={deleting}
                   leadingIcon={<Trash2 size={12} />}
-                  className={`absolute right-1 top-1 h-6 w-6 min-h-6 min-w-6 bg-white/90 opacity-100 dark:bg-slate-950/90 md:opacity-0 md:group-hover:opacity-100 ${IMAGE_CHAT_DANGER_ICON_ACTION_CLASS}`}
+                  className={`absolute right-1 top-1 h-6 w-6 min-h-6 min-w-6 bg-white/90 opacity-100 dark:bg-slate-950/90 md:opacity-0 md:group-hover:opacity-100 ${dangerIconActionClassName}`}
                 >
                 </ActionButton>
               </div>

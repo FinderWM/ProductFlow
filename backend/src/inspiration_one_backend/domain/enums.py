@@ -55,6 +55,20 @@ class EnhanceSourceKind(StrEnum):
     ENHANCE_INPUT_BLOB = "enhance_input_blob"
 
 
+class ImageToCodeSourceKind(StrEnum):
+    """图片转代码输入来源。首发仅支持资源库图片。"""
+
+    RESOURCE_LIBRARY_ASSET = "resource_library_asset"
+
+
+class ImageToCodeDeliveryMode(StrEnum):
+    """图片转代码交付模式。"""
+
+    STATIC_SITE = "static_site"
+    FIGMA_EXPORT = "figma_export"
+    BOTH = "both"
+
+
 class JobStatus(StrEnum):
     """连续生图任务状态：排队 -> 运行中 -> 成功/失败/取消。"""
 

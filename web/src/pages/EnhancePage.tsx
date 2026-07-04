@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
@@ -6,7 +6,6 @@ import {
   Eye,
   Image as ImageIcon,
   Loader2,
-  Maximize2,
   Play,
   RefreshCw,
   Save,
@@ -16,22 +15,41 @@ import {
 import { useSearchParams } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ClassicCheckbox, ClassicOptionToggle, ClassicSelectField } from "../components/classicInputs";
 import { EnhanceJobProgress } from "../components/EnhanceJobProgress";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
+import { ImageSizePicker } from "../components/ImageSizePicker";
+import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
+import { renderActionButtonInner } from "../components/actionButtonShared";
+import {
+  actionButtonClassNameForAppearance,
+  actionButtonComponentForAppearance,
+  type LayoutActionAppearance,
+} from "../components/layoutActionButtons";
 import { ResourceLibraryModal } from "../components/resource-library/ResourceLibraryModal";
 import { TopNav } from "../components/TopNav";
+import {
+  WorkspaceCheckbox,
+  WorkspaceOptionToggle,
+  WorkspaceSelectField,
+} from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { compositeEnhanceTiles, enhanceTileCallCount, estimateEnhanceTileCallCount } from "../lib/enhanceCompositor";
 import { formatDateTime } from "../lib/format";
+import { generationConfigOptionsForPurpose, generationConfigSelectionMaxDimension } from "../lib/generationConfigs";
 import type { TranslationKey } from "../lib/i18n";
+import { buildImageSizeOptions, imageSizeValueFromDimensions, parseImageSizeValue } from "../lib/imageSizes";
 import { useI18n } from "../lib/preferences";
+import { activeGenerationResourceGroupsInApiOrder, firstActiveGenerationResourceGroupId } from "../lib/resourceGroups";
 import type { CreateEnhanceJobInput, EnhanceJob, EnhanceStrategy, JobStatus, ResourceLibraryAsset } from "../lib/types";
+import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 
-const DIRECT_SIZE_PRESETS = [1024, 2048, 2560, 3072, 4096] as const;
 const TILED_SCALES = [2, 3, 4] as const;
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 const PAGE_SIZE = 20;
 const STATUS_FILTERS = ["all", "queued", "running", "succeeded", "failed", "cancelled"] as const;
+const ENHANCE_FINAL_MAX_EDGE = 16_384;
+const ENHANCE_FINAL_MAX_PIXELS = 120_000_000;
 
 type EnhanceStatusFilter = (typeof STATUS_FILTERS)[number];
 
@@ -73,17 +91,28 @@ function enhanceStatusLabelKey(status: EnhanceJob["status"]): TranslationKey {
 
 export function EnhancePage() {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const queryClient = useQueryClient();
+  const workspaceSubpage = activeScheme === "workspace";
+  const enhanceActionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
+  const ActionButton = actionButtonComponentForAppearance(enhanceActionAppearance);
+  const enhanceDownloadActionClass = actionButtonClassNameForAppearance(enhanceActionAppearance, {
+    preset: "secondary",
+    size: "md",
+  });
+  const LayoutCheckbox = workspaceSubpage ? WorkspaceCheckbox : ClassicCheckbox;
+  const LayoutOptionToggle = workspaceSubpage ? WorkspaceOptionToggle : ClassicOptionToggle;
+  const LayoutSelectField = workspaceSubpage ? WorkspaceSelectField : ClassicSelectField;
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedJobId = searchParams.get("job");
   const [resourceModalOpen, setResourceModalOpen] = useState(false);
   const [sourceAsset, setSourceAsset] = useState<ResourceLibraryAsset | null>(null);
   const [strategy, setStrategy] = useState<EnhanceStrategy>("direct");
-  const [directPreset, setDirectPreset] = useState<number | "custom">(2048);
-  const [customWidth, setCustomWidth] = useState("2048");
-  const [customHeight, setCustomHeight] = useState("2048");
+  const [directWidth, setDirectWidth] = useState("2048");
+  const [directHeight, setDirectHeight] = useState("2048");
   const [tiledScale, setTiledScale] = useState<(typeof TILED_SCALES)[number]>(2);
   const [autoSaveToLibrary, setAutoSaveToLibrary] = useState(true);
+  const [selectedResourceGroupId, setSelectedResourceGroupId] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<EnhanceStatusFilter>("all");
   const [pageIndex, setPageIndex] = useState(0);
   const [localError, setLocalError] = useState("");
@@ -96,6 +125,14 @@ export function EnhancePage() {
   const [sourceImageSize, setSourceImageSize] = useState<{ width: number; height: number } | null>(null);
 
   const runtimeQuery = useQuery({ queryKey: ["runtime-config"], queryFn: api.getRuntimeConfig });
+  const generationResourceGroupsQuery = useQuery({
+    queryKey: ["my-generation-resource-groups"],
+    queryFn: api.listMyGenerationResourceGroups,
+  });
+  const generationConfigOptionsQuery = useQuery({
+    queryKey: ["generation-config-options"],
+    queryFn: api.listGenerationConfigOptions,
+  });
   const statusQueryValue: JobStatus | null = statusFilter === "all" ? null : statusFilter;
   const pageOffset = pageIndex * PAGE_SIZE;
   const jobsQuery = useQuery({
@@ -114,11 +151,26 @@ export function EnhancePage() {
   const totalJobs = jobsQuery.data?.total ?? jobs.length;
   const totalPages = Math.max(1, Math.ceil(totalJobs / PAGE_SIZE));
   const selectedJob = selectedJobQuery.data ?? jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null;
-  const maxDimension = runtimeQuery.data?.image_generation_max_dimension ?? 4096;
-  const directWidth = directPreset === "custom" ? Number.parseInt(customWidth, 10) : directPreset;
-  const directHeight = directPreset === "custom" ? Number.parseInt(customHeight, 10) : directPreset;
-  const directSizeInvalid = !Number.isFinite(directWidth) || !Number.isFinite(directHeight) || directWidth <= 0 || directHeight <= 0;
-  const directSizeTooLarge = directWidth > maxDimension || directHeight > maxDimension;
+  const globalMaxDimension = runtimeQuery.data?.image_generation_max_dimension ?? 4096;
+  const resourceGroups = activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data);
+  const selectedResourceGroup = resourceGroups.find((group) => group.id === selectedResourceGroupId) ?? null;
+  const imageGenerationConfigOptions = generationConfigOptionsForPurpose(
+    generationConfigOptionsQuery.data ?? [],
+    "image",
+    selectedResourceGroupId || null,
+  );
+  const maxDimension = generationConfigSelectionMaxDimension({
+    mode: "auto",
+    generationConfigId: null,
+    resourceGroupId: selectedResourceGroupId || null,
+    resourceGroupMaxDimension: selectedResourceGroup?.image_max_dimension,
+    options: imageGenerationConfigOptions,
+    globalMaxDimension,
+  });
+  const directSizeOptions = useMemo(() => buildImageSizeOptions(maxDimension), [maxDimension]);
+  const directSizeValue = imageSizeValueFromDimensions(directWidth, directHeight, maxDimension) ?? "";
+  const directSize = parseImageSizeValue(directSizeValue, maxDimension);
+  const directSizeInvalid = directSize === null;
   const selectedCallCount = selectedJob?.result_manifest ? enhanceTileCallCount(selectedJob.result_manifest) : null;
   const tiledTileBaseSize = Math.min(1024, maxDimension);
   const estimatedTileCallCount = sourceImageSize
@@ -132,6 +184,12 @@ export function EnhancePage() {
   const estimatedTileCalls = sourceAsset
     ? t("enhance.tileCalls", { count: estimatedTileCallCount ?? t("common.unknown") })
     : "";
+  const tiledFinalTooLarge = Boolean(
+    sourceImageSize &&
+      (sourceImageSize.width * tiledScale > ENHANCE_FINAL_MAX_EDGE ||
+        sourceImageSize.height * tiledScale > ENHANCE_FINAL_MAX_EDGE ||
+        sourceImageSize.width * tiledScale * sourceImageSize.height * tiledScale > ENHANCE_FINAL_MAX_PIXELS),
+  );
 
   const createMutation = useMutation({
     mutationFn: (input: CreateEnhanceJobInput) => api.createEnhanceJob(input),
@@ -167,6 +225,21 @@ export function EnhancePage() {
     },
     onError: (error) => setLocalError(errorMessage(error, t("enhance.saveFailed"))),
   });
+
+  useEffect(() => {
+    if (!generationResourceGroupsQuery.isFetched) {
+      return;
+    }
+    if (!resourceGroups.length) {
+      if (selectedResourceGroupId) {
+        setSelectedResourceGroupId("");
+      }
+      return;
+    }
+    if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
+      setSelectedResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
+    }
+  }, [generationResourceGroupsQuery.isFetched, resourceGroups, selectedResourceGroupId]);
 
   useEffect(() => {
     if (!sourceAsset) {
@@ -234,19 +307,30 @@ export function EnhancePage() {
       setLocalError(t("enhance.error.invalidSize"));
       return;
     }
-    if (strategy === "direct" && directSizeTooLarge) {
-      setLocalError(t("enhance.error.sizeTooLarge"));
+    if (!selectedResourceGroupId) {
+      setLocalError(t("enhance.error.resourceGroupRequired"));
       return;
     }
-    const params =
-      strategy === "direct"
-        ? { target_width: directWidth, target_height: directHeight }
-        : { scale: tiledScale, tile_base_size: tiledTileBaseSize, overlap_pct: 10 };
+    if (strategy === "tiled" && tiledFinalTooLarge) {
+      setLocalError(t("enhance.error.finalSizeTooLarge"));
+      return;
+    }
+    let params: Record<string, unknown>;
+    if (strategy === "direct") {
+      if (!directSize) {
+        setLocalError(t("enhance.error.invalidSize"));
+        return;
+      }
+      params = { target_width: directSize.width, target_height: directSize.height };
+    } else {
+      params = { scale: tiledScale, tile_base_size: tiledTileBaseSize, overlap_pct: 10 };
+    }
     createMutation.mutate({
       source_kind: "resource_library_asset",
       source_ref: sourceAsset.id,
       strategy,
       params,
+      resource_group_id: selectedResourceGroupId,
       generation_config_mode: "auto",
     });
   }
@@ -269,15 +353,15 @@ export function EnhancePage() {
   const sourcePreviewUrl = sourceAsset ? api.toApiUrl(sourceAsset.preview_url || sourceAsset.thumbnail_url) : null;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-[#060a12] dark:text-slate-100">
+    <div className="min-h-screen pf-surface-soft pf-ink dark:bg-[#060a12] dark:text-[color:var(--pf-muted)]">
       <TopNav />
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 pb-10 pt-24 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-2 border-b border-slate-200 pb-4 dark:border-slate-800">
+        <header className="flex flex-col gap-2 border-b pf-hairline pb-4 dark:border-[color:var(--pf-border)]">
           <div className="flex items-center gap-2 text-xl font-semibold">
             <Sparkles size={20} className="text-indigo-600 dark:text-violet-300" />
             <h1>{t("enhance.title")}</h1>
           </div>
-          <p className="max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">{t("enhance.subtitle")}</p>
+          <p className="max-w-3xl text-sm leading-6 pf-ink-muted dark:text-[color:var(--pf-muted)]">{t("enhance.subtitle")}</p>
         </header>
 
         {localError ? (
@@ -292,165 +376,161 @@ export function EnhancePage() {
         ) : null}
 
         <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">{t("enhance.sourceImage")}</h2>
-            <div className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60">
+          <section className="rounded-xl border pf-hairline pf-surface p-4 shadow-sm dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
+            <h2 className="text-sm font-semibold pf-ink dark:text-[#fff]">{t("enhance.sourceImage")}</h2>
+            <div className="mt-3 overflow-hidden rounded-lg border pf-hairline pf-surface-soft dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
               {sourcePreviewUrl ? (
                 <img src={sourcePreviewUrl} alt="" className="aspect-video w-full object-cover" />
               ) : (
-                <div className="flex aspect-video items-center justify-center text-slate-400">
+                <div className="flex aspect-video items-center justify-center pf-ink-muted">
                   <ImageIcon size={30} />
                 </div>
               )}
             </div>
-            <div className="mt-3 min-h-10 text-sm text-slate-600 dark:text-slate-300">
+            <div className="mt-3 min-h-10 text-sm pf-ink-muted dark:text-[color:var(--pf-muted)]">
               {sourceAsset ? sourceAsset.original_filename : t("enhance.noSource")}
             </div>
-            <button
-              type="button"
+            <ActionButton
               onClick={() => setResourceModalOpen(true)}
-              className="pf-workspace-action-secondary mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-all active:scale-[0.98]"
+              preset="secondary"
+              size="md"
+              fullWidth
+              className="mt-3"
+              leadingIcon={<ImageIcon size={16} />}
             >
-              <ImageIcon size={16} />
               {sourceAsset ? t("enhance.changeSource") : t("enhance.selectSource")}
-            </button>
+            </ActionButton>
 
             <div className="mt-5 space-y-3">
-              <div className="text-sm font-semibold text-slate-900 dark:text-white">{t("enhance.strategy")}</div>
+              <div>
+                <div className="mb-2 text-sm font-semibold pf-ink dark:text-[#fff]">{t("enhance.resourceGroup")}</div>
+                <LayoutSelectField
+                  value={selectedResourceGroupId}
+                  options={[
+                    {
+                      value: "",
+                      label: resourceGroups.length ? t("enhance.selectResourceGroup") : t("enhance.noResourceGroups"),
+                      disabled: true,
+                    },
+                    ...resourceGroups.map((group) => ({
+                      value: group.id,
+                      label: group.name,
+                    })),
+                  ]}
+                  onChange={setSelectedResourceGroupId}
+                  ariaLabel={t("enhance.resourceGroup")}
+                  size="compact"
+                />
+              </div>
+              <div className="text-sm font-semibold pf-ink dark:text-[#fff]">{t("enhance.strategy")}</div>
               <div className="grid grid-cols-2 gap-2">
                 {(["direct", "tiled"] as EnhanceStrategy[]).map((item) => (
-                  <button
+                  <LayoutOptionToggle
                     key={item}
-                    type="button"
-                    onClick={() => setStrategy(item)}
-                    className={`rounded-lg border px-3 py-2 text-left text-sm font-semibold transition ${
-                      strategy === item
-                        ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                    }`}
+                    checked={strategy === item}
+                    layout="card"
+                    selectionMode="single"
+                    name="enhance-strategy"
+                    className="w-full items-center px-3 py-2 text-left text-sm font-semibold"
+                    onChange={(checked) => {
+                      if (checked) {
+                        setStrategy(item);
+                      }
+                    }}
                   >
                     {t(item === "direct" ? "enhance.strategy.direct" : "enhance.strategy.tiled")}
-                  </button>
+                  </LayoutOptionToggle>
                 ))}
               </div>
-              <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+              <p className="text-xs leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">
                 {t(strategy === "direct" ? "enhance.strategy.directHelp" : "enhance.strategy.tiledHelp")}
               </p>
             </div>
 
             {strategy === "direct" ? (
               <div className="mt-5 space-y-3">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">{t("enhance.directSize")}</div>
-                <div className="grid grid-cols-3 gap-2">
-                  {DIRECT_SIZE_PRESETS.map((size) => {
-                    const disabled = size > maxDimension;
-                    return (
-                      <button
-                        key={size}
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => setDirectPreset(size)}
-                        className={`h-9 rounded-lg border text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${
-                          directPreset === size
-                            ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                        }`}
-                      >
-                        {size}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    onClick={() => setDirectPreset("custom")}
-                    className={`h-9 rounded-lg border text-xs font-semibold ${
-                      directPreset === "custom"
-                        ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-                        : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                    }`}
-                  >
-                    <Maximize2 size={13} className="mx-auto" />
-                  </button>
-                </div>
-                {directPreset === "custom" ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                      {t("enhance.customWidth")}
-                      <input
-                        value={customWidth}
-                        onChange={(event) => setCustomWidth(event.target.value)}
-                        className="pf-input-compact mt-1 w-full"
-                        inputMode="numeric"
-                      />
-                    </label>
-                    <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                      {t("enhance.customHeight")}
-                      <input
-                        value={customHeight}
-                        onChange={(event) => setCustomHeight(event.target.value)}
-                        className="pf-input-compact mt-1 w-full"
-                        inputMode="numeric"
-                      />
-                    </label>
-                  </div>
-                ) : null}
+                <div className="text-sm font-semibold pf-ink dark:text-[#fff]">{t("enhance.directSize")}</div>
+                <ImageSizePicker
+                  value={directSizeValue}
+                  presets={directSizeOptions}
+                  maxDimension={maxDimension}
+                  appearance={workspaceSubpage ? "workspace" : "classic"}
+                  onChange={(value) => {
+                    const parsed = parseImageSizeValue(value, maxDimension);
+                    if (!parsed) {
+                      return;
+                    }
+                    setDirectWidth(String(parsed.width));
+                    setDirectHeight(String(parsed.height));
+                    setLocalError("");
+                  }}
+                />
               </div>
             ) : (
               <div className="mt-5 space-y-3">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">{t("enhance.tiledScale")}</div>
-                <div className="grid grid-cols-3 gap-2">
-                  {TILED_SCALES.map((scale) => (
-                    <button
+                <div className="text-sm font-semibold pf-ink dark:text-[#fff]">{t("enhance.tiledScale")}</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TILED_SCALES.map((scale) => (
+                    <LayoutOptionToggle
                       key={scale}
-                      type="button"
-                      onClick={() => setTiledScale(scale)}
-                      className={`h-9 rounded-lg border text-xs font-semibold ${
-                        tiledScale === scale
-                          ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-                          : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                      }`}
+                      checked={tiledScale === scale}
+                      selectionMode="single"
+                      name="enhance-tiled-scale"
+                      className="h-9 w-full justify-center text-xs font-semibold"
+                      onChange={(checked) => {
+                        if (checked) {
+                          setTiledScale(scale);
+                        }
+                      }}
                     >
                       {scale}x
-                    </button>
+                    </LayoutOptionToggle>
                   ))}
                 </div>
-                {estimatedTileCalls ? <p className="text-xs text-slate-500 dark:text-slate-400">{estimatedTileCalls}</p> : null}
+                {estimatedTileCalls ? <p className="text-xs pf-ink-muted dark:text-[color:var(--pf-muted)]">{estimatedTileCalls}</p> : null}
               </div>
             )}
 
-            <label className="mt-5 flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
-              <input
-                type="checkbox"
-                checked={autoSaveToLibrary}
-                onChange={(event) => setAutoSaveToLibrary(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-300"
-              />
-              {t("enhance.autoSaveToLibrary")}
-            </label>
-
-            <button
-              type="button"
-              onClick={submitJob}
-              disabled={createMutation.isPending || !sourceAsset || (strategy === "direct" && (directSizeInvalid || directSizeTooLarge))}
-              className="pf-workspace-action-primary mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            <LayoutCheckbox
+              checked={autoSaveToLibrary}
+              onChange={(event) => setAutoSaveToLibrary(event.target.checked)}
+              wrapperClassName="mt-5 text-sm pf-ink-muted dark:text-[color:var(--pf-muted)]"
             >
-              {createMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+              {t("enhance.autoSaveToLibrary")}
+            </LayoutCheckbox>
+
+            <ActionButton
+              onClick={submitJob}
+              disabled={
+                createMutation.isPending ||
+                !sourceAsset ||
+                !selectedResourceGroupId ||
+                (strategy === "direct" && directSizeInvalid) ||
+                (strategy === "tiled" && tiledFinalTooLarge)
+              }
+              loading={createMutation.isPending}
+              preset="primary"
+              size="lg"
+              fullWidth
+              className="mt-5"
+              leadingIcon={<Play size={16} />}
+            >
               {createMutation.isPending ? t("enhance.submitting") : t("enhance.submit")}
-            </button>
+            </ActionButton>
           </section>
 
           <div className="grid min-h-[680px] gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]">
-            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+            <section className="rounded-xl border pf-hairline pf-surface p-4 shadow-sm dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">{t("enhance.jobs")}</h2>
-                <button
-                  type="button"
+                <h2 className="text-sm font-semibold pf-ink dark:text-[#fff]">{t("enhance.jobs")}</h2>
+                <ActionButton
                   onClick={() => jobsQuery.refetch()}
-                  className="pf-workspace-action-secondary inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold"
+                  preset="secondary"
+                  size="sm"
+                  leadingIcon={<RefreshCw size={14} />}
                 >
-                  <RefreshCw size={14} />
                   {t("enhance.refresh")}
-                </button>
+                </ActionButton>
               </div>
               <div className="mb-3 flex flex-wrap gap-1.5">
                 {STATUS_FILTERS.map((item) => {
@@ -458,26 +538,23 @@ export function EnhancePage() {
                   const label =
                     item === "all" ? t("enhance.filter.all") : t(enhanceStatusLabelKey(item as JobStatus));
                   return (
-                    <button
+                    <ActionButton
                       key={item}
-                      type="button"
                       onClick={() => {
                         setStatusFilter(item);
                         setPageIndex(0);
                       }}
-                      className={`h-8 rounded-lg border px-2.5 text-xs font-semibold transition ${
-                        active
-                          ? "border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-violet-400/45 dark:bg-violet-500/15 dark:text-violet-100"
-                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
-                      }`}
+                      aria-pressed={active}
+                      preset="secondary"
+                      size="sm"
                     >
                       {label}
-                    </button>
+                    </ActionButton>
                   );
                 })}
               </div>
               {jobsQuery.isLoading ? (
-                <div className="flex min-h-40 items-center justify-center text-slate-400">
+                <div className="flex min-h-40 items-center justify-center pf-ink-muted">
                   <Loader2 size={22} className="animate-spin" />
                 </div>
               ) : jobsQuery.isError ? (
@@ -487,76 +564,78 @@ export function EnhancePage() {
               ) : jobs.length ? (
                 <div className="space-y-2">
                   {jobs.map((job) => (
-                    <button
+                    <LayoutActionSurfaceButton
                       key={job.id}
                       type="button"
+                      appearance={enhanceActionAppearance}
+                      preset="secondary"
                       onClick={() => setSearchParams({ job: job.id })}
-                      className={`block w-full rounded-lg border p-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-900/70 ${
+                      className={`block w-full p-3 text-left ${
                         selectedJob?.id === job.id
                           ? "border-indigo-300 bg-indigo-50/60 dark:border-violet-400/45 dark:bg-violet-500/10"
-                          : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950/40"
+                          : ""
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                        <span className="truncate text-sm font-semibold pf-ink dark:text-[#fff]">
                           {t(job.strategy === "direct" ? "enhance.strategy.direct" : "enhance.strategy.tiled")}
                         </span>
                         <span className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${jobStatusClass(job)}`}>
                           {t(enhanceStatusLabelKey(job.status))}
                         </span>
                       </div>
-                      <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      <div className="mt-2 text-xs pf-ink-muted dark:text-[color:var(--pf-muted)]">
                         {job.source_width}x{job.source_height} · {formatDateTime(job.created_at)}
                       </div>
-                    </button>
+                    </LayoutActionSurfaceButton>
                   ))}
                 </div>
               ) : (
-                <div className="flex min-h-40 items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                <div className="flex min-h-40 items-center justify-center text-sm pf-ink-muted dark:text-[color:var(--pf-muted)]">
                   {t("enhance.emptyJobs")}
                 </div>
               )}
-              <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              <div className="mt-3 flex items-center justify-between gap-2 border-t pf-hairline pt-3 text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
                 <span>{t("enhance.paginationSummary", { page: pageIndex + 1, totalPages, total: totalJobs })}</span>
                 <div className="flex gap-1.5">
-                  <button
-                    type="button"
+                  <ActionButton
                     onClick={() => setPageIndex((page) => Math.max(0, page - 1))}
                     disabled={pageIndex <= 0 || jobsQuery.isFetching}
-                    className="pf-workspace-action-secondary inline-flex h-8 items-center rounded-lg border px-2.5 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                    preset="secondary"
+                    size="sm"
                   >
                     {t("pagination.previous")}
-                  </button>
-                  <button
-                    type="button"
+                  </ActionButton>
+                  <ActionButton
                     onClick={() => setPageIndex((page) => page + 1)}
                     disabled={pageIndex + 1 >= totalPages || jobsQuery.isFetching}
-                    className="pf-workspace-action-secondary inline-flex h-8 items-center rounded-lg border px-2.5 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                    preset="secondary"
+                    size="sm"
                   >
                     {t("pagination.next")}
-                  </button>
+                  </ActionButton>
                 </div>
               </div>
             </section>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+            <section className="rounded-xl border pf-hairline pf-surface p-4 shadow-sm dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">{t("enhance.detail")}</h2>
+                <h2 className="text-sm font-semibold pf-ink dark:text-[#fff]">{t("enhance.detail")}</h2>
                 {selectedJob && isActiveJob(selectedJob) ? (
-                  <button
-                    type="button"
+                  <ActionButton
                     onClick={() => setCancelJob(selectedJob)}
-                    className="pf-danger-action inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold"
+                    preset="danger"
+                    size="sm"
+                    leadingIcon={<X size={14} />}
                   >
-                    <X size={14} />
                     {t("enhance.cancel")}
-                  </button>
+                  </ActionButton>
                 ) : null}
               </div>
               {selectedJob ? (
                 <div className="space-y-4">
-                  <EnhanceJobProgress job={selectedJob} onRetry={retryJob} />
-                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <EnhanceJobProgress appearance={enhanceActionAppearance} job={selectedJob} onRetry={retryJob} />
+                  <div className="grid grid-cols-2 gap-2 text-xs pf-ink-muted dark:text-[color:var(--pf-muted)]">
                     <div>{t("enhance.createdAt")}: {formatDateTime(selectedJob.created_at)}</div>
                     <div>{t("enhance.updatedAt")}: {formatDateTime(selectedJob.updated_at)}</div>
                     <div>{t("enhance.size")}: {selectedJob.source_width}x{selectedJob.source_height}</div>
@@ -564,12 +643,12 @@ export function EnhancePage() {
                   </div>
 
                   <div>
-                    <div className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">{t("enhance.preview")}</div>
-                    <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60">
+                    <div className="mb-2 text-sm font-semibold pf-ink dark:text-[#fff]">{t("enhance.preview")}</div>
+                    <div className="overflow-hidden rounded-lg border pf-hairline pf-surface-soft dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
                       {finalUrl ? (
                         <img src={finalUrl} alt="" className="max-h-[520px] w-full object-contain" />
                       ) : (
-                        <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                        <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 text-sm pf-ink-muted dark:text-[color:var(--pf-muted)]">
                           {compositingJobId === selectedJob.id ? <Loader2 size={22} className="animate-spin" /> : <ImageIcon size={28} />}
                           {compositingJobId === selectedJob.id ? t("enhance.compositing") : t("enhance.previewPending")}
                         </div>
@@ -580,35 +659,37 @@ export function EnhancePage() {
                   <div className="flex flex-wrap gap-2">
                     {finalUrl ? (
                       <>
-                        <button
-                          type="button"
+                        <ActionButton
                           onClick={() => setPreviewUrl(finalUrl)}
-                          className="pf-workspace-action-secondary inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold"
+                          preset="secondary"
+                          size="md"
+                          leadingIcon={<Eye size={16} />}
                         >
-                          <Eye size={16} />
                           {t("enhance.openFinal")}
-                        </button>
+                        </ActionButton>
                         <a
                           href={finalUrl}
                           download
-                          className="pf-workspace-action-secondary inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold"
+                          className={enhanceDownloadActionClass}
                         >
-                          <Download size={16} />
-                          {t("enhance.downloadFinal")}
+                          {renderActionButtonInner({
+                            leadingIcon: <Download size={16} />,
+                            label: t("enhance.downloadFinal"),
+                          })}
                         </a>
-                        <button
-                          type="button"
+                        <ActionButton
                           onClick={() => saveMutation.mutate(selectedJob.id)}
                           disabled={saveMutation.isPending || savedJobIds.has(selectedJob.id)}
-                          className="pf-workspace-action-primary inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                          loading={saveMutation.isPending && !savedJobIds.has(selectedJob.id)}
+                          preset="primary"
+                          size="md"
+                          leadingIcon={savedJobIds.has(selectedJob.id) ? <Check size={16} /> : <Save size={16} />}
                         >
-                          {savedJobIds.has(selectedJob.id) ? <Check size={16} /> : <Save size={16} />}
                           {savedJobIds.has(selectedJob.id) ? t("enhance.savedToLibrary") : t("enhance.saveToLibrary")}
-                        </button>
+                        </ActionButton>
                       </>
                     ) : selectedJob.status === "succeeded" && selectedJob.result_manifest?.final_status === "pending_upload" ? (
-                      <button
-                        type="button"
+                      <ActionButton
                         onClick={() => {
                           setProcessedFinalJobIds((previous) => {
                             const next = new Set(previous);
@@ -617,16 +698,18 @@ export function EnhancePage() {
                           });
                         }}
                         disabled={compositingJobId === selectedJob.id}
-                        className="pf-workspace-action-secondary inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                        loading={compositingJobId === selectedJob.id}
+                        preset="secondary"
+                        size="md"
+                        leadingIcon={<RefreshCw size={16} />}
                       >
-                        {compositingJobId === selectedJob.id ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                         {t("enhance.uploadFinal")}
-                      </button>
+                      </ActionButton>
                     ) : null}
                   </div>
                 </div>
               ) : (
-                <div className="flex min-h-80 items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                <div className="flex min-h-80 items-center justify-center text-sm pf-ink-muted dark:text-[color:var(--pf-muted)]">
                   {t("enhance.emptyJobs")}
                 </div>
               )}
@@ -639,6 +722,7 @@ export function EnhancePage() {
         open={resourceModalOpen}
         onClose={() => setResourceModalOpen(false)}
         canRead
+        appearance={workspaceSubpage ? "workspace" : "classic"}
         selectLabel={t("enhance.selectSource")}
         onSelectAsset={(asset) => {
           setSourceAsset(asset);
@@ -649,6 +733,7 @@ export function EnhancePage() {
       />
       <ConfirmDialog
         open={Boolean(cancelJob)}
+        appearance={enhanceActionAppearance}
         title={t("enhance.cancelTitle")}
         description={t("enhance.cancelDescription")}
         confirmLabel={t("enhance.cancel")}
@@ -659,6 +744,7 @@ export function EnhancePage() {
       />
       {previewUrl ? (
         <GalleryImagePreviewDialog
+          appearance={enhanceActionAppearance}
           ariaLabel={t("enhance.preview")}
           imageUrl={previewUrl}
           imageAlt={t("enhance.preview")}

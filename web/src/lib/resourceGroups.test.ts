@@ -14,6 +14,7 @@ function group(overrides: Partial<GenerationResourceGroup>): GenerationResourceG
     description: null,
     sort_order: 0,
     enabled: true,
+    image_max_dimension: null,
     blur_images_by_default: false,
     archived_at: null,
     created_at: "2026-06-01T00:00:00Z",

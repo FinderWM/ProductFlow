@@ -24,10 +24,16 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import { ClassicCheckbox, ClassicSelectField, ClassicTextInput } from "../components/classicInputs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { SensitiveImageOverlay, sensitiveImageClassName } from "../components/SensitiveImageMask";
-import { SelectField } from "../components/SelectField";
+import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
 import {
+  actionButtonComponentForAppearance,
+  transparentActionToneVars,
+} from "../components/layoutActionButtons";
+import { SensitiveImageOverlay, sensitiveImageClassName } from "../components/SensitiveImageMask";
+import {
+  ClassicDateTimeRangeField,
   WorkspaceDateTimeRangeField,
   datePartFromDateTimeLocal,
   workspaceQuickDateTimeRange,
@@ -41,6 +47,7 @@ import {
 } from "../components/ResourceGovernance";
 import { StatusPill } from "../components/StatusPill";
 import { TopNav } from "../components/TopNav";
+import { WorkspaceCheckbox, WorkspaceSelectField, WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
 import { formatDateTimeSeconds, formatPrice } from "../lib/format";
 import { useI18n } from "../lib/preferences";
@@ -105,6 +112,10 @@ interface InspirationListLocationState {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function inspirationActionButtonComponent(workspaceSubpage: boolean) {
+  return actionButtonComponentForAppearance(workspaceSubpage ? "workspace" : "classic");
 }
 
 function normalizeInspirationSearchFilters(filters: InspirationSearchFilters): InspirationSearchFilters {
@@ -472,16 +483,18 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
     setSearchDraft((current) => ({ ...current, updated_from: range.start_date, updated_to: range.end_date }));
   };
   const isWorkspaceSubpage = activeScheme === "workspace" && workspaceSubpage;
+  const PageActionButton = inspirationActionButtonComponent(isWorkspaceSubpage);
   const newInspirationButton = (
-    <button
-      type="button"
+    <PageActionButton
       onClick={openCreateInspiration}
       disabled={!canWriteInspirations}
       title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
-      className="inline-flex h-10 items-center justify-center rounded-full bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35"
+      preset="primary"
+      size="lg"
+      leadingIcon={<Plus size={16} />}
     >
-      <Plus size={16} className="mr-1.5" /> {t("inspirations.new")}
-    </button>
+      {t("inspirations.new")}
+    </PageActionButton>
   );
 
   const listContent = (
@@ -507,16 +520,15 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
                   {t("inspirations.paginationSummary", { page, totalPages, total })}
                 </p>
               </div>
-              <button
-                type="button"
+              <PageActionButton
                 onClick={openCreateInspiration}
                 disabled={!canWriteInspirations}
                 aria-label={t("inspirations.new")}
                 title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-600/20 transition-colors active:scale-[0.98] hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35 dark:ring-1 dark:ring-violet-300/35 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
-              >
-                <Plus size={18} aria-hidden="true" />
-              </button>
+                preset="primary"
+                size="icon-lg"
+                leadingIcon={<Plus size={18} aria-hidden="true" />}
+              />
             </div>
           </section>
 
@@ -564,6 +576,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
         activeCount={searchFilterCount}
         fetching={inspirationsQuery.isFetching}
         mobileOpen={mobileSearchOpen}
+        workspaceSubpage={isWorkspaceSubpage}
         onChange={setSearchDraft}
         onClear={clearSearch}
         onMobileToggle={() => setMobileSearchOpen((current) => !current)}
@@ -653,6 +666,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
                       key={inspiration.id}
                       inspiration={inspiration}
                       className={inspirations.length === 1 ? "md:col-span-2" : undefined}
+                      workspaceSubpage={isWorkspaceSubpage}
                       maskSensitiveImages={maskSensitiveImages}
                       deletionEnabled={deletionEnabled}
                       deleteBlockedTitle={
@@ -686,6 +700,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
                         <InspirationTableRow
                           key={inspiration.id}
                           inspiration={inspiration}
+                          workspaceSubpage={isWorkspaceSubpage}
                           maskSensitiveImages={maskSensitiveImages}
                           deletionEnabled={deletionEnabled}
                           deleteBlockedTitle={
@@ -706,34 +721,44 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
               <Search className="mx-auto mb-3 text-zinc-300 dark:text-slate-500" size={32} />
               <div className="font-medium text-zinc-900 dark:text-white">{t("inspirations.search.emptyTitle")}</div>
               <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("inspirations.search.emptyDescription")}</p>
-              <button
-                type="button"
+              <PageActionButton
                 onClick={clearSearch}
-                className="mt-5 inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-violet-500/10"
+                preset="secondary"
+                size="lg"
+                leadingIcon={<X size={16} />}
+                className="mt-5"
               >
-                <X size={16} className="mr-1.5" /> {t("inspirations.search.clear")}
-              </button>
+                {t("inspirations.search.clear")}
+              </PageActionButton>
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-zinc-300 bg-white px-6 py-16 text-center dark:border-slate-700/80 dark:bg-[#0f1726]">
               <ImageIcon className="mx-auto mb-3 text-zinc-300 dark:text-slate-500" size={32} />
               <div className="font-medium text-zinc-900 dark:text-white">{t("inspirations.emptyTitle")}</div>
               <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("inspirations.emptyDescription")}</p>
-              <button
-                type="button"
+              <PageActionButton
                 onClick={openCreateInspiration}
                 disabled={!canWriteInspirations}
                 title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
-                className="mt-5 inline-flex items-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-gradient-to-r dark:from-indigo-500 dark:to-violet-500 dark:shadow-violet-900/35"
+                preset="primary"
+                size="lg"
+                leadingIcon={<Plus size={16} />}
+                className="mt-5"
               >
-                <Plus size={16} className="mr-1.5" /> {t("inspirations.new")}
-              </button>
+                {t("inspirations.new")}
+              </PageActionButton>
             </div>
           )}
 
           {inspirations.length ? (
             <div className="hidden justify-end md:flex">
-              <Pagination page={page} totalPages={totalPages} onPageChange={setPage} disabled={inspirationsQuery.isFetching} />
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                disabled={inspirationsQuery.isFetching}
+                workspaceSubpage={isWorkspaceSubpage}
+              />
             </div>
           ) : null}
     </div>
@@ -762,11 +787,19 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
       )}
       {inspirations.length ? (
         <div className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 flex justify-center px-4 md:hidden">
-          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} disabled={inspirationsQuery.isFetching} floating />
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            disabled={inspirationsQuery.isFetching}
+            floating
+            workspaceSubpage={isWorkspaceSubpage}
+          />
         </div>
       ) : null}
       <ConfirmDialog
         open={Boolean(pendingDeleteInspiration)}
+        appearance={isWorkspaceSubpage ? "workspace" : "classic"}
         title={t("inspirations.deleteConfirmTitle")}
         description={
           pendingDeleteInspiration ? t("inspirations.deleteConfirm", { name: pendingDeleteInspiration.name }) : ""
@@ -788,6 +821,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
 function InspirationMobileCard({
   inspiration,
   className = "",
+  workspaceSubpage = false,
   maskSensitiveImages,
   deletionEnabled,
   deleteBlockedTitle = null,
@@ -797,6 +831,7 @@ function InspirationMobileCard({
 }: {
   inspiration: InspirationSummary;
   className?: string;
+  workspaceSubpage?: boolean;
   maskSensitiveImages: boolean;
   deletionEnabled: boolean;
   deleteBlockedTitle?: string | null;
@@ -805,6 +840,7 @@ function InspirationMobileCard({
   onDelete: () => void;
 }) {
   const { t } = useI18n();
+  const PageActionButton = inspirationActionButtonComponent(workspaceSubpage);
   const inspirationBlocked = isResourceBlocked(inspiration);
   const inspirationDeleted = isResourceDeleted(inspiration);
   const metadata = [
@@ -916,39 +952,44 @@ function InspirationMobileCard({
       }}
       className={`relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/50 outline-none [contain-intrinsic-size:144px] [content-visibility:auto] focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-[0_14px_38px_rgba(0,0,0,0.22)] dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950 ${className}`}
     >
-      <button
-        type="button"
-        onClick={handleDeleteClick}
-        onPointerDown={(event) => event.stopPropagation()}
-        disabled={isDeleting || !deletionEnabled || inspirationBlocked || inspirationDeleted || Boolean(deleteBlockedTitle)}
-        aria-label={
-          inspirationDeleted
-            ? t("resource.deleted")
-            : inspirationBlocked
-            ? getResourceBlockedActionTitle(inspiration, t("resource.blockedAction"))
-            : deleteBlockedTitle
-            ? deleteBlockedTitle
-            : deletionEnabled
-            ? t("inspirations.deleteInspiration", { name: inspiration.name })
-            : t("inspirations.deleteDisabled")
-        }
-        title={
-          inspirationDeleted
-            ? t("resource.deleted")
-            : inspirationBlocked
-            ? getResourceBlockedActionTitle(inspiration, t("resource.blockedAction"))
-            : deleteBlockedTitle
-              ? deleteBlockedTitle
-            : deletionEnabled
-              ? t("inspirations.delete")
-              : t("inspirations.deleteDisabled")
-        }
-        className="group/delete absolute inset-y-0 right-0 flex w-24 items-center justify-center border-l border-amber-300/60 bg-amber-500 text-sm font-semibold text-white transition-[background-color,filter] hover:bg-amber-600 hover:brightness-105 active:bg-amber-700 disabled:bg-amber-500/45 dark:border-amber-200/25 dark:bg-amber-500/80 dark:hover:bg-amber-500 dark:active:bg-amber-600"
+      <div
+        className="absolute inset-y-0 right-0 flex w-24 items-center justify-center border-l border-amber-200/70 bg-amber-50/80 dark:border-amber-200/20 dark:bg-amber-500/10"
         style={{ opacity: deleteOpacity, pointerEvents: deleteOpen ? "auto" : "none" }}
       >
-        <Archive size={17} className="mr-1.5 shrink-0 transition-transform group-hover/delete:scale-110 group-active/delete:scale-95" aria-hidden="true" />
-        <span className="whitespace-nowrap">{t("inspirations.delete")}</span>
-      </button>
+        <PageActionButton
+          onClick={handleDeleteClick}
+          onPointerDown={(event) => event.stopPropagation()}
+          disabled={isDeleting || !deletionEnabled || inspirationBlocked || inspirationDeleted || Boolean(deleteBlockedTitle)}
+          aria-label={
+            inspirationDeleted
+              ? t("resource.deleted")
+              : inspirationBlocked
+              ? getResourceBlockedActionTitle(inspiration, t("resource.blockedAction"))
+              : deleteBlockedTitle
+              ? deleteBlockedTitle
+              : deletionEnabled
+              ? t("inspirations.deleteInspiration", { name: inspiration.name })
+              : t("inspirations.deleteDisabled")
+          }
+          title={
+            inspirationDeleted
+              ? t("resource.deleted")
+              : inspirationBlocked
+              ? getResourceBlockedActionTitle(inspiration, t("resource.blockedAction"))
+              : deleteBlockedTitle
+                ? deleteBlockedTitle
+              : deletionEnabled
+                ? t("inspirations.delete")
+                : t("inspirations.deleteDisabled")
+          }
+          preset="danger"
+          size="sm"
+          className="min-w-[4.25rem]"
+          leadingIcon={<Archive size={14} aria-hidden="true" />}
+        >
+          {t("inspirations.delete")}
+        </PageActionButton>
+      </div>
       <div
         className={`cursor-pointer select-none rounded-l-2xl bg-white p-3 transition-[transform,background-color,box-shadow] dark:bg-[#0f1726] ${
           dragging ? "duration-0" : "duration-150"
@@ -997,6 +1038,7 @@ function InspirationMobileCard({
 
 function InspirationTableRow({
   inspiration,
+  workspaceSubpage = false,
   maskSensitiveImages,
   deletionEnabled,
   deleteBlockedTitle = null,
@@ -1005,6 +1047,7 @@ function InspirationTableRow({
   onDelete,
 }: {
   inspiration: InspirationSummary;
+  workspaceSubpage?: boolean;
   maskSensitiveImages: boolean;
   deletionEnabled: boolean;
   deleteBlockedTitle?: string | null;
@@ -1013,6 +1056,7 @@ function InspirationTableRow({
   onDelete: () => void;
 }) {
   const { t } = useI18n();
+  const PageActionButton = inspirationActionButtonComponent(workspaceSubpage);
   const inspirationBlocked = isResourceBlocked(inspiration);
   const inspirationDeleted = isResourceDeleted(inspiration);
   const pressOpen = usePressOpen(onOpen);
@@ -1072,11 +1116,11 @@ function InspirationTableRow({
       </td>
       <td className="px-5 py-4 text-right">
         <div className="flex items-center justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-          <button
-            type="button"
+          <PageActionButton
             onClick={handleDeleteClick}
             onPointerDown={(event) => event.stopPropagation()}
             disabled={isDeleting || !deletionEnabled || inspirationBlocked || inspirationDeleted || Boolean(deleteBlockedTitle)}
+            aria-label={t("inspirations.deleteInspiration", { name: inspiration.name })}
             title={
               inspirationDeleted
                 ? t("resource.deleted")
@@ -1088,10 +1132,12 @@ function InspirationTableRow({
                   ? t("inspirations.delete")
                   : t("inspirations.deleteDisabled")
             }
-            className="inline-flex items-center rounded-md px-2 py-1.5 text-sm font-medium text-amber-600 transition-colors hover:bg-amber-50 hover:text-amber-700 disabled:opacity-50 dark:text-amber-300 dark:hover:bg-amber-500/10 dark:hover:text-amber-100"
+            preset="danger"
+            size="sm"
+            leadingIcon={<Archive size={14} aria-hidden="true" />}
           >
-            <Archive size={14} className="mr-1" /> {t("inspirations.delete")}
-          </button>
+            {t("inspirations.delete")}
+          </PageActionButton>
         </div>
       </td>
     </tr>
@@ -1121,6 +1167,7 @@ function InspirationSearchPanel({
   activeCount,
   fetching,
   mobileOpen,
+  workspaceSubpage = false,
   onChange,
   onClear,
   onMobileToggle,
@@ -1144,6 +1191,7 @@ function InspirationSearchPanel({
   activeCount: number;
   fetching: boolean;
   mobileOpen: boolean;
+  workspaceSubpage?: boolean;
   onChange: (filters: InspirationSearchFilters) => void;
   onClear: () => void;
   onMobileToggle: () => void;
@@ -1154,12 +1202,10 @@ function InspirationSearchPanel({
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
 }) {
   const { t } = useI18n();
+  const PageActionButton = inspirationActionButtonComponent(workspaceSubpage);
+  const actionAppearance = workspaceSubpage ? "workspace" : "classic";
   const panelRef = useRef<HTMLFormElement | null>(null);
   const [singleRowLayoutAvailable, setSingleRowLayoutAvailable] = useState(false);
-  const fieldClassName =
-    "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm " +
-    "outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 " +
-    "dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-100 dark:focus:border-violet-400";
   const labelClassName = "text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500";
   const selectedResourceGroup = resourceGroups.find((group) => group.id === selectedResourceGroupId);
   const showSensitiveImageMaskPreference = shouldShowSensitiveImageMaskPreference(
@@ -1231,6 +1277,10 @@ function InspirationSearchPanel({
       ? "grid-cols-[minmax(13rem,1fr)_minmax(30rem,1.45fr)_minmax(10rem,0.75fr)_minmax(10rem,0.75fr)_minmax(8.5rem,auto)] items-end"
       : "grid-cols-[minmax(13rem,1fr)_minmax(30rem,1.45fr)_minmax(10rem,0.75fr)] items-end"
     : "md:grid-cols-2";
+  const searchToggleToneVars = {
+    ...transparentActionToneVars,
+    "--pf-action-bg-hover": "color-mix(in srgb, var(--pf-panel-soft) 88%, transparent)",
+  } as const;
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -1257,13 +1307,17 @@ function InspirationSearchPanel({
   return (
     <form ref={panelRef} onSubmit={onSubmit} className="pf-panel overflow-visible px-4 py-3 md:px-5 lg:py-4">
       <div className={`${compactLayout ? "flex" : "hidden"} items-center gap-2`}>
-        <button
+        <LayoutActionSurfaceButton
           type="button"
+          appearance={actionAppearance}
+          preset="secondary"
           onClick={onMobileToggle}
           aria-expanded={mobileOpen}
           aria-controls="inspiration-search-fields"
           aria-label={mobileOpen ? t("inspirations.search.collapse") : t("inspirations.search.expand")}
-          className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-1.5 py-1 text-left transition-colors active:scale-[0.99] hover:bg-slate-50 dark:hover:bg-violet-500/10"
+          toneVars={searchToggleToneVars}
+          className="flex min-w-0 flex-1 items-start gap-3 rounded-xl border-0 px-1.5 py-1 text-left shadow-none"
+          style={{ display: "flex" }}
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-violet-500/14 dark:text-violet-200">
             <Search size={16} aria-hidden="true" />
@@ -1301,17 +1355,18 @@ function InspirationSearchPanel({
             }`}
             aria-hidden="true"
           />
-        </button>
+        </LayoutActionSurfaceButton>
         {active ? (
-          <button
-            type="button"
+          <PageActionButton
             onClick={onClear}
             disabled={fetching}
             aria-label={t("inspirations.search.clear")}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 active:scale-[0.98] disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-violet-500/10 dark:hover:text-white"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
+            title={t("inspirations.search.clear")}
+            preset="secondary"
+            size="icon-lg"
+            className="shrink-0"
+            leadingIcon={<X size={16} aria-hidden="true" />}
+          />
         ) : null}
       </div>
 
@@ -1327,107 +1382,176 @@ function InspirationSearchPanel({
                 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
                 aria-hidden="true"
               />
-              <input
-                id="inspiration-search-title"
-                name="inspiration_search_title"
-                value={draft.title}
-                onChange={(event) => onChange({ ...draft, title: event.target.value })}
-                placeholder={t("inspirations.search.titlePlaceholder")}
-                className={`${fieldClassName} pl-9`}
-              />
+              {workspaceSubpage ? (
+                <WorkspaceTextInput
+                  id="inspiration-search-title"
+                  name="inspiration_search_title"
+                  value={draft.title}
+                  onChange={(event) => onChange({ ...draft, title: event.target.value })}
+                  placeholder={t("inspirations.search.titlePlaceholder")}
+                  className="pl-9"
+                />
+              ) : (
+                <ClassicTextInput
+                  id="inspiration-search-title"
+                  name="inspiration_search_title"
+                  value={draft.title}
+                  onChange={(event) => onChange({ ...draft, title: event.target.value })}
+                  placeholder={t("inspirations.search.titlePlaceholder")}
+                  size="tall"
+                  className="pl-9"
+                />
+              )}
             </div>
           </label>
 
-          <WorkspaceDateTimeRangeField
-            idPrefix="inspiration-updated-range"
-            value={{ start_date: draft.updated_from, end_date: draft.updated_to }}
-            onChange={(range) => onChange({ ...draft, updated_from: range.start_date, updated_to: range.end_date })}
-            onQuickRangeChange={onQuickRange}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceDateTimeRangeField
+              idPrefix="inspiration-updated-range"
+              value={{ start_date: draft.updated_from, end_date: draft.updated_to }}
+              onChange={(range) => onChange({ ...draft, updated_from: range.start_date, updated_to: range.end_date })}
+              onQuickRangeChange={onQuickRange}
+            />
+          ) : (
+            <ClassicDateTimeRangeField
+              idPrefix="inspiration-updated-range"
+              value={{ start_date: draft.updated_from, end_date: draft.updated_to }}
+              onChange={(range) => onChange({ ...draft, updated_from: range.start_date, updated_to: range.end_date })}
+              onQuickRangeChange={onQuickRange}
+            />
+          )}
 
           {isAdmin ? (
             <label className="space-y-2">
               <span className={labelClassName}>{t("inspirations.search.owner")}</span>
-              <SelectField
-                value={draft.owner_user_id}
-                options={ownerOptions}
-                onChange={(value) => onChange({ ...draft, owner_user_id: value })}
-                ariaLabel={t("inspirations.search.owner")}
-                searchValue={ownerSearch}
-                onSearchChange={onOwnerSearchChange}
-                searchPlaceholder={t("inspirations.search.ownerSearchPlaceholder")}
-                searchAriaLabel={t("inspirations.search.ownerSearch")}
-                searchLoading={usersLoading}
-                searchLoadingLabel={t("app.loading")}
-                radius="xl"
-                visualSize="md"
-              />
+              {workspaceSubpage ? (
+                <WorkspaceSelectField
+                  value={draft.owner_user_id}
+                  options={ownerOptions}
+                  onChange={(value) => onChange({ ...draft, owner_user_id: value })}
+                  ariaLabel={t("inspirations.search.owner")}
+                  searchValue={ownerSearch}
+                  onSearchChange={onOwnerSearchChange}
+                  searchPlaceholder={t("inspirations.search.ownerSearchPlaceholder")}
+                  searchAriaLabel={t("inspirations.search.ownerSearch")}
+                  searchLoading={usersLoading}
+                  searchLoadingLabel={t("app.loading")}
+                  size="default"
+                />
+              ) : (
+                <ClassicSelectField
+                  value={draft.owner_user_id}
+                  options={ownerOptions}
+                  onChange={(value) => onChange({ ...draft, owner_user_id: value })}
+                  ariaLabel={t("inspirations.search.owner")}
+                  searchValue={ownerSearch}
+                  onSearchChange={onOwnerSearchChange}
+                  searchPlaceholder={t("inspirations.search.ownerSearchPlaceholder")}
+                  searchAriaLabel={t("inspirations.search.ownerSearch")}
+                  searchLoading={usersLoading}
+                  searchLoadingLabel={t("app.loading")}
+                  size="default"
+                />
+              )}
             </label>
           ) : null}
 
           <label className="space-y-2">
             <span className={labelClassName}>{t("inspirations.resourceGroupFilter")}</span>
-            <SelectField
-              id="inspiration-resource-group-filter"
-              value={selectedResourceGroupId}
-              options={[
-                { value: "", label: t("inspirations.allResourceGroups") },
-                ...resourceGroups.map((group) => ({ value: group.id, label: group.name })),
-              ]}
-              onChange={onResourceGroupChange}
-              ariaLabel={t("inspirations.resourceGroupFilter")}
-              disabled={resourceGroupsLoading}
-              radius="xl"
-              visualSize="md"
-            />
+            {workspaceSubpage ? (
+              <WorkspaceSelectField
+                id="inspiration-resource-group-filter"
+                value={selectedResourceGroupId}
+                options={[
+                  { value: "", label: t("inspirations.allResourceGroups") },
+                  ...resourceGroups.map((group) => ({ value: group.id, label: group.name })),
+                ]}
+                onChange={onResourceGroupChange}
+                ariaLabel={t("inspirations.resourceGroupFilter")}
+                disabled={resourceGroupsLoading}
+                size="default"
+              />
+            ) : (
+              <ClassicSelectField
+                id="inspiration-resource-group-filter"
+                value={selectedResourceGroupId}
+                options={[
+                  { value: "", label: t("inspirations.allResourceGroups") },
+                  ...resourceGroups.map((group) => ({ value: group.id, label: group.name })),
+                ]}
+                onChange={onResourceGroupChange}
+                ariaLabel={t("inspirations.resourceGroupFilter")}
+                disabled={resourceGroupsLoading}
+                size="default"
+              />
+            )}
           </label>
 
           {isAdmin ? (
-            <label className="flex h-11 items-center gap-2 self-end rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-200">
-              <input
+            workspaceSubpage ? (
+              <WorkspaceCheckbox
                 id="inspiration-only-deleted-filter"
                 name="inspiration_only_deleted_filter"
-                type="checkbox"
                 checked={draft.only_deleted}
                 onChange={(event) => onChange({ ...draft, only_deleted: event.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
-              />
-              <span className="truncate">{t("inspirations.search.onlyDeleted")}</span>
-            </label>
+                wrapperClassName="flex h-11 items-center gap-2 self-end rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-200"
+              >
+                <span className="truncate">{t("inspirations.search.onlyDeleted")}</span>
+              </WorkspaceCheckbox>
+            ) : (
+              <ClassicCheckbox
+                id="inspiration-only-deleted-filter"
+                name="inspiration_only_deleted_filter"
+                checked={draft.only_deleted}
+                onChange={(event) => onChange({ ...draft, only_deleted: event.target.checked })}
+                wrapperClassName="flex h-11 items-center gap-2 self-end rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-200"
+                controlClassName="mt-0"
+              >
+                <span className="truncate">{t("inspirations.search.onlyDeleted")}</span>
+              </ClassicCheckbox>
+            )
           ) : null}
         </div>
 
         <div className="mt-4 flex shrink-0 justify-end gap-2">
-          <button
-            type="submit"
-            disabled={fetching}
-            className="inline-flex h-11 items-center justify-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-500 disabled:opacity-50 dark:bg-violet-500 dark:hover:bg-violet-400"
-          >
-            <Search size={16} className="mr-1.5" /> {t("inspirations.search.submit")}
-          </button>
-          <button
-            type="button"
+          <PageActionButton type="submit" disabled={fetching} preset="primary" size="lg" leadingIcon={<Search size={16} />}>
+            {t("inspirations.search.submit")}
+          </PageActionButton>
+          <PageActionButton
             onClick={onClear}
             disabled={!active || fetching}
-            className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-violet-500/10"
+            preset="secondary"
+            size="lg"
+            leadingIcon={<X size={16} />}
           >
-            <X size={16} className="mr-1.5" /> {t("inspirations.search.clear")}
-          </button>
+            {t("inspirations.search.clear")}
+          </PageActionButton>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           {showSensitiveImageMaskPreference ? (
-            <label className="inline-flex min-h-8 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 sm:ml-auto">
-              <input
+            workspaceSubpage ? (
+              <WorkspaceCheckbox
                 id="inspiration-mask-sensitive-images"
                 name="inspiration_mask_sensitive_images"
-                type="checkbox"
                 checked={maskSensitiveImages}
                 onChange={(event) => onMaskSensitiveImagesChange(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-950 dark:text-violet-400 dark:focus:ring-violet-400"
-              />
-              <span>{t("inspirations.maskSensitiveImages")}</span>
-            </label>
+                wrapperClassName="inline-flex min-h-8 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 sm:ml-auto"
+              >
+                <span>{t("inspirations.maskSensitiveImages")}</span>
+              </WorkspaceCheckbox>
+            ) : (
+              <ClassicCheckbox
+                id="inspiration-mask-sensitive-images"
+                name="inspiration_mask_sensitive_images"
+                checked={maskSensitiveImages}
+                onChange={(event) => onMaskSensitiveImagesChange(event.target.checked)}
+                wrapperClassName="inline-flex min-h-8 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 sm:ml-auto"
+                controlClassName="mt-0"
+              >
+                <span>{t("inspirations.maskSensitiveImages")}</span>
+              </ClassicCheckbox>
+            )
           ) : null}
         </div>
       </div>
@@ -1672,14 +1796,17 @@ function Pagination({
   onPageChange,
   disabled,
   floating = false,
+  workspaceSubpage = false,
 }: {
   page: number;
   totalPages: number;
   onPageChange: (page: number) => void;
   disabled: boolean;
   floating?: boolean;
+  workspaceSubpage?: boolean;
 }) {
   const { t } = useI18n();
+  const PageActionButton = inspirationActionButtonComponent(workspaceSubpage);
   const pageInputId = useId();
   const [draftPage, setDraftPage] = useState(String(page));
 
@@ -1708,49 +1835,78 @@ function Pagination({
           : "rounded-lg border-zinc-200 bg-white dark:border-slate-700/80 dark:bg-[#151f33] dark:shadow-black/20"
       }`}
     >
-      <button
-        type="button"
+      <PageActionButton
         onClick={() => onPageChange(Math.max(1, page - 1))}
         disabled={disabled || page <= 1}
-        className="inline-flex min-h-11 items-center rounded-md px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-violet-500/15 dark:hover:text-white xl:min-h-0 xl:px-2.5 xl:py-1.5"
+        preset="secondary"
+        size="md"
+        leadingIcon={<ArrowLeft size={13} aria-hidden="true" />}
       >
-        <ArrowLeft size={13} className="mr-1" /> {t("pagination.previous")}
-      </button>
+        {t("pagination.previous")}
+      </PageActionButton>
       <label className="flex items-center gap-1.5 px-1 text-xs tabular-nums text-zinc-500 dark:text-slate-400">
         <span className="sr-only">{t("pagination.pageInput")}</span>
-        <input
-          id={pageInputId}
-          name="inspiration_page"
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          value={draftPage}
-          disabled={disabled}
-          onBlur={commitPage}
-          onChange={(event) => setDraftPage(event.target.value.replace(/\D/g, ""))}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.currentTarget.blur();
-            }
-            if (event.key === "Escape") {
-              setDraftPage(String(page));
-              event.currentTarget.blur();
-            }
-          }}
-          className="pf-input-compact h-8 w-11 px-1.5 text-center text-xs font-semibold tabular-nums disabled:opacity-50 xl:h-7"
-          aria-label={t("pagination.pageInput")}
-        />
+        {workspaceSubpage ? (
+          <WorkspaceTextInput
+            id={pageInputId}
+            name="inspiration_page"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={draftPage}
+            disabled={disabled}
+            onBlur={commitPage}
+            onChange={(event) => setDraftPage(event.target.value.replace(/\D/g, ""))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.currentTarget.blur();
+              }
+              if (event.key === "Escape") {
+                setDraftPage(String(page));
+                event.currentTarget.blur();
+              }
+            }}
+            size="compact"
+            className="h-8 w-11 px-1.5 text-center text-xs font-semibold tabular-nums xl:h-7"
+            aria-label={t("pagination.pageInput")}
+          />
+        ) : (
+          <ClassicTextInput
+            id={pageInputId}
+            name="inspiration_page"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={draftPage}
+            disabled={disabled}
+            onBlur={commitPage}
+            onChange={(event) => setDraftPage(event.target.value.replace(/\D/g, ""))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.currentTarget.blur();
+              }
+              if (event.key === "Escape") {
+                setDraftPage(String(page));
+                event.currentTarget.blur();
+              }
+            }}
+            size="compact"
+            className="w-11 px-1.5 text-center font-semibold tabular-nums disabled:opacity-50 xl:h-7"
+            aria-label={t("pagination.pageInput")}
+          />
+        )}
         <span>/</span>
         <span>{totalPages}</span>
       </label>
-      <button
-        type="button"
+      <PageActionButton
         onClick={() => onPageChange(Math.min(totalPages, page + 1))}
         disabled={disabled || page >= totalPages}
-        className="inline-flex min-h-11 items-center rounded-md px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-violet-500/15 dark:hover:text-white xl:min-h-0 xl:px-2.5 xl:py-1.5"
+        preset="secondary"
+        size="md"
+        trailingIcon={<ArrowRight size={13} aria-hidden="true" />}
       >
-        {t("pagination.next")} <ArrowRight size={13} className="ml-1" />
-      </button>
+        {t("pagination.next")}
+      </PageActionButton>
     </div>
   );
 }

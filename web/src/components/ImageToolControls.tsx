@@ -4,7 +4,8 @@ import { useI18n } from "../lib/preferences";
 import type { ImageToolOptionKey, ImageToolOptions } from "../lib/types";
 import { ParameterHelpLabel } from "./ParameterHelp";
 import type { SelectFieldOption } from "./SelectField";
-import { SelectField } from "./SelectField";
+import { ClassicSelectField, ClassicTextInput } from "./classicInputs";
+import { WorkspaceSelectField, WorkspaceTextInput } from "./workspaceInputs";
 
 interface ImageToolControlsProps {
   value: ImageToolOptions;
@@ -13,6 +14,7 @@ interface ImageToolControlsProps {
   allowedFields?: readonly ImageToolOptionKey[];
   helpUiType?: ParameterHelpUiType;
   disabled?: boolean;
+  appearance: "classic" | "workspace";
 }
 
 function parseOptionalNumber(value: string): number | null {
@@ -30,6 +32,7 @@ export function ImageToolControls({
   allowedFields = DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS,
   helpUiType = "default",
   disabled = false,
+  appearance,
 }: ImageToolControlsProps) {
   const { t } = useI18n();
   const update = (next: Partial<ImageToolOptions>) => onChange({ ...value, ...next });
@@ -52,6 +55,7 @@ export function ImageToolControls({
             placeholder={t("imageTool.default")}
             onChange={(next) => update({ model: next || null })}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
         {allowed.has("quality") ? (
@@ -69,6 +73,7 @@ export function ImageToolControls({
               { value: "high", label: "High" },
             ]}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
         {allowed.has("output_format") ? (
@@ -85,6 +90,7 @@ export function ImageToolControls({
               { value: "webp", label: "WebP" },
             ]}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
         {allowed.has("output_compression") ? (
@@ -97,6 +103,7 @@ export function ImageToolControls({
             placeholder={t("imageTool.default")}
             onChange={(next) => update({ output_compression: parseOptionalNumber(next) })}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
         {allowed.has("background") ? (
@@ -113,6 +120,7 @@ export function ImageToolControls({
               { value: "transparent", label: "Transparent" },
             ]}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
         {allowed.has("moderation") ? (
@@ -128,6 +136,7 @@ export function ImageToolControls({
               { value: "low", label: "Low" },
             ]}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
         {allowed.has("action") ? (
@@ -144,6 +153,7 @@ export function ImageToolControls({
               { value: "edit", label: "Edit" },
             ]}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
         {allowed.has("input_fidelity") ? (
@@ -159,6 +169,7 @@ export function ImageToolControls({
               { value: "high", label: "High" },
             ]}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
         {allowed.has("partial_images") ? (
@@ -171,6 +182,7 @@ export function ImageToolControls({
             placeholder={t("imageTool.default")}
             onChange={(next) => update({ partial_images: parseOptionalNumber(next) })}
             disabled={disabled}
+            appearance={appearance}
           />
         ) : null}
       </div>
@@ -187,6 +199,7 @@ function CompactInput({
   helpUiType,
   onChange,
   disabled = false,
+  appearance,
 }: {
   label: string;
   value: string | number;
@@ -196,20 +209,32 @@ function CompactInput({
   helpUiType?: ParameterHelpUiType;
   onChange: (value: string) => void;
   disabled?: boolean;
+  appearance: "classic" | "workspace";
 }) {
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] font-semibold text-slate-500">
         {helpKey ? <ParameterHelpLabel label={label} helpKey={helpKey} uiType={helpUiType} /> : label}
       </span>
-      <input
-        value={value}
-        inputMode={inputMode}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        className="pf-input-compact w-full"
-      />
+      {appearance === "workspace" ? (
+        <WorkspaceTextInput
+          value={String(value)}
+          inputMode={inputMode}
+          placeholder={placeholder}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          size="compact"
+        />
+      ) : (
+        <ClassicTextInput
+          value={value}
+          inputMode={inputMode}
+          placeholder={placeholder}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          size="compact"
+        />
+      )}
     </label>
   );
 }
@@ -222,6 +247,7 @@ function CompactSelect({
   helpKey,
   helpUiType,
   disabled = false,
+  appearance,
 }: {
   label: string;
   value: string;
@@ -230,20 +256,30 @@ function CompactSelect({
   helpKey?: ParameterHelpKey;
   helpUiType?: ParameterHelpUiType;
   disabled?: boolean;
+  appearance: "classic" | "workspace";
 }) {
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] font-semibold text-slate-500">
         {helpKey ? <ParameterHelpLabel label={label} helpKey={helpKey} uiType={helpUiType} /> : label}
       </span>
-      <SelectField
-        value={value}
-        options={options}
-        onChange={onChange}
-        radius="lg"
-        visualSize="sm"
-        disabled={disabled}
-      />
+      {appearance === "workspace" ? (
+        <WorkspaceSelectField
+          value={value}
+          options={options}
+          onChange={onChange}
+          size="compact"
+          disabled={disabled}
+        />
+      ) : (
+        <ClassicSelectField
+          value={value}
+          options={options}
+          onChange={onChange}
+          size="compact"
+          disabled={disabled}
+        />
+      )}
     </label>
   );
 }

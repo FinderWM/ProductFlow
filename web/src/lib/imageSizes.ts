@@ -7,6 +7,12 @@ export interface ImageSizeOption {
   aspect: string;
 }
 
+export interface ImageSizePresetDefinition {
+  aspect: string;
+  value: string;
+  tierLabel?: string;
+}
+
 export interface ImageAspectValue {
   widthRatio: number;
   heightRatio: number;
@@ -48,49 +54,57 @@ const IMAGE_ASPECT_DISPLAY_ALIASES: Record<string, string> = {
 };
 const CUSTOM_ASPECT_SCALE_STEPS = [128, 256, 384, 512, 768];
 
-const BUILT_IN_IMAGE_SIZE_OPTIONS: ImageSizeOption[] = [
-  builtInImageSizeOption("1:1", "1024x1024"),
-  builtInImageSizeOption("1:1", "1536x1536"),
-  builtInImageSizeOption("1:1", "2048x2048"),
-  builtInImageSizeOption("1:1", "2880x2880", "2.8K"),
-  builtInImageSizeOption("4:5", "1024x1280"),
-  builtInImageSizeOption("4:5", "1536x1920"),
-  builtInImageSizeOption("4:5", "2048x2560"),
-  builtInImageSizeOption("4:5", "2560x3200"),
-  builtInImageSizeOption("5:4", "1280x1024"),
-  builtInImageSizeOption("5:4", "1920x1536"),
-  builtInImageSizeOption("5:4", "2560x2048"),
-  builtInImageSizeOption("5:4", "3200x2560"),
-  builtInImageSizeOption("2:3", "1024x1536"),
-  builtInImageSizeOption("2:3", "1280x1920"),
-  builtInImageSizeOption("2:3", "1536x2304"),
-  builtInImageSizeOption("2:3", "2048x3072"),
-  builtInImageSizeOption("3:2", "1536x1024"),
-  builtInImageSizeOption("3:2", "1920x1280"),
-  builtInImageSizeOption("3:2", "2304x1536"),
-  builtInImageSizeOption("3:2", "3072x2048"),
-  builtInImageSizeOption("3:4", "768x1024"),
-  builtInImageSizeOption("3:4", "1152x1536"),
-  builtInImageSizeOption("3:4", "1536x2048"),
-  builtInImageSizeOption("3:4", "2304x3072"),
-  builtInImageSizeOption("4:3", "1024x768"),
-  builtInImageSizeOption("4:3", "1536x1152"),
-  builtInImageSizeOption("4:3", "2048x1536"),
-  builtInImageSizeOption("4:3", "3072x2304"),
-  builtInImageSizeOption("9:16", "720x1280", "HD"),
-  builtInImageSizeOption("9:16", "1152x2048"),
-  builtInImageSizeOption("9:16", "1440x2560", "2.5K"),
-  builtInImageSizeOption("9:16", "2160x3840"),
-  builtInImageSizeOption("16:9", "1024x576"),
-  builtInImageSizeOption("16:9", "1280x720", "HD"),
-  builtInImageSizeOption("16:9", "2048x1152"),
-  builtInImageSizeOption("16:9", "2560x1440"),
-  builtInImageSizeOption("16:9", "3840x2160"),
-  builtInImageSizeOption("7:3", "1344x576"),
-  builtInImageSizeOption("7:3", "1792x768"),
-  builtInImageSizeOption("7:3", "2688x1152"),
-  builtInImageSizeOption("7:3", "3360x1440"),
+export const DEFAULT_IMAGE_SIZE_PRESET_DEFINITIONS: readonly ImageSizePresetDefinition[] = [
+  { aspect: "1:1", value: "1024x1024" },
+  { aspect: "1:1", value: "1536x1536" },
+  { aspect: "1:1", value: "2048x2048" },
+  { aspect: "1:1", value: "2880x2880", tierLabel: "2.8K" },
+  { aspect: "4:5", value: "1024x1280" },
+  { aspect: "4:5", value: "1536x1920" },
+  { aspect: "4:5", value: "2048x2560" },
+  { aspect: "4:5", value: "2560x3200" },
+  { aspect: "5:4", value: "1280x1024" },
+  { aspect: "5:4", value: "1920x1536" },
+  { aspect: "5:4", value: "2560x2048" },
+  { aspect: "5:4", value: "3200x2560" },
+  { aspect: "2:3", value: "1024x1536" },
+  { aspect: "2:3", value: "1280x1920" },
+  { aspect: "2:3", value: "1536x2304" },
+  { aspect: "2:3", value: "2048x3072" },
+  { aspect: "3:2", value: "1536x1024" },
+  { aspect: "3:2", value: "1920x1280" },
+  { aspect: "3:2", value: "2304x1536" },
+  { aspect: "3:2", value: "3072x2048" },
+  { aspect: "3:4", value: "768x1024" },
+  { aspect: "3:4", value: "1152x1536" },
+  { aspect: "3:4", value: "1536x2048" },
+  { aspect: "3:4", value: "2304x3072" },
+  { aspect: "4:3", value: "1024x768" },
+  { aspect: "4:3", value: "1536x1152" },
+  { aspect: "4:3", value: "2048x1536" },
+  { aspect: "4:3", value: "3072x2304" },
+  { aspect: "9:16", value: "720x1280", tierLabel: "HD" },
+  { aspect: "9:16", value: "1152x2048" },
+  { aspect: "9:16", value: "1440x2560", tierLabel: "2.5K" },
+  { aspect: "9:16", value: "2160x3840" },
+  { aspect: "16:9", value: "1024x576" },
+  { aspect: "16:9", value: "1280x720", tierLabel: "HD" },
+  { aspect: "16:9", value: "2048x1152" },
+  { aspect: "16:9", value: "2560x1440" },
+  { aspect: "16:9", value: "3840x2160" },
+  { aspect: "7:3", value: "1344x576" },
+  { aspect: "7:3", value: "1792x768" },
+  { aspect: "7:3", value: "2688x1152" },
+  { aspect: "7:3", value: "3360x1440" },
 ];
+
+function buildImageSizeOptionFromDefinition(definition: ImageSizePresetDefinition): ImageSizeOption {
+  return builtInImageSizeOption(definition.aspect, definition.value, definition.tierLabel);
+}
+
+const BUILT_IN_IMAGE_SIZE_OPTIONS: ImageSizeOption[] = DEFAULT_IMAGE_SIZE_PRESET_DEFINITIONS.map(
+  buildImageSizeOptionFromDefinition,
+);
 
 function builtInImageSizeOption(aspect: string, value: string, tierLabel?: string): ImageSizeOption {
   const parsed = parseImageSizeValue(value, DEFAULT_IMAGE_GENERATION_MAX_DIMENSION);
@@ -262,6 +276,19 @@ export function normalizeImageSizeDimensions(value: string, maxDimension?: numbe
   return resolution?.value ?? null;
 }
 
+export function imageSizeValueFromDimensions(
+  width: number | string,
+  height: number | string,
+  maxDimension?: number,
+): string | null {
+  const widthText = typeof width === "number" ? String(width) : width.trim();
+  const heightText = typeof height === "number" ? String(height) : height.trim();
+  if (!/^\d+$/.test(widthText) || !/^\d+$/.test(heightText)) {
+    return null;
+  }
+  return resolveImageSize(Number(widthText), Number(heightText), maxDimension)?.value ?? null;
+}
+
 export function parseImageAspectValue(value: string): ImageAspectValue | null {
   const match = value.trim().toLowerCase().match(/^(\d+)\s*[:/x×]\s*(\d+)$/u);
   if (!match) {
@@ -289,8 +316,11 @@ export function aspectFromImageSize(value: string, maxDimension?: number): strin
   return reduceImageAspect(parsed.width, parsed.height)?.value ?? null;
 }
 
-export function buildImageSizeOptions(maxDimension?: number): ImageSizeOption[] {
-  return BUILT_IN_IMAGE_SIZE_OPTIONS.filter((option) => {
+export function buildImageSizeOptions(
+  maxDimension?: number,
+  presetDefinitions: readonly ImageSizePresetDefinition[] = DEFAULT_IMAGE_SIZE_PRESET_DEFINITIONS,
+): ImageSizeOption[] {
+  return presetDefinitions.map(buildImageSizeOptionFromDefinition).filter((option) => {
     const parsed = parseImageSizeValue(option.value, DEFAULT_IMAGE_GENERATION_MAX_DIMENSION);
     if (!parsed) {
       return false;

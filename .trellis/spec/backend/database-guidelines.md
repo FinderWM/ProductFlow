@@ -340,6 +340,9 @@ ConfigDefinition(
   `base_url`, and can bind only to `provider_kind="google_gemini_image"`.
 - Google Gemini image configs store `model_settings_json.model`, `config_json.gemini_api_version` (`v1beta` by default,
   allowed values `v1` or `v1beta`), and optional `config_json.gemini_output_mime_type`.
+- `provider_profiles.config_json.capabilities.image_max_dimension` is an optional provider-side image long-edge ceiling.
+  `null` means follow the global runtime `image_generation_max_dimension`. Non-empty values must be integers in
+  `512-8192` and are normalized down to the shared `16px` generation step before being persisted or used for scheduling.
 - Provider factories and concrete clients must read API key, base URL, provider kind, and model through
   `resolve_*_provider_config()`. They must not fall back to old `Settings.text_api_key`,
   `Settings.image_api_key`, or provider kind fields.
@@ -376,6 +379,9 @@ ConfigDefinition(
   archived, frozen, over-capacity, profile-disabled, and capability-incompatible configs before claiming capacity with a
   conditional DB update on `generation_config_states.current_concurrency`. Unbound configs are excluded from group-scoped
   automatic claims.
+- Image resolution compatibility compares only the requested long edge against the normalized effective provider/global
+  max dimension. Aspect-ratio and pixel-budget calibration remain the responsibility of shared image-size normalization;
+  scheduler filtering must not special-case individual width/height combinations.
 - Manual scheduling targets the supplied config id but still respects selected-group membership, enabled state, profile
   availability, freeze state, and max concurrency. Capacity/freeze exhaustion returns `None` to keep durable tasks queued.
 - Manual unfreeze is a settings/provider-write operation, not a scheduler bypass. It clears
@@ -423,6 +429,10 @@ ConfigDefinition(
 - `google_gemini` profile with any capability except `image_google_gemini` -> provider profile create/update returns
   `400`.
 - `openai_compatible` profile with `image_google_gemini` -> provider profile create/update returns `400`.
+- Provider profile create/update with non-integer `config.capabilities.image_max_dimension` -> `400`,
+  `供应商最大分辨率限制必须是整数`.
+- Provider profile create/update with out-of-range `config.capabilities.image_max_dimension` -> `400`,
+  `供应商最大分辨率限制必须在 512-8192 之间`.
 - `google_gemini_image` config with `gemini_api_version` outside `v1` or `v1beta` -> config update returns
   `400`.
 - Missing `responses_background_enabled` -> only `openai_responses` image bindings fail. `openai_images` and `mock` must
@@ -449,6 +459,8 @@ ConfigDefinition(
   config per purpose.
 - Good: a Google Gemini profile has `provider_type="google_gemini"`, no `base_url`, capability
   `image_google_gemini`, and the image config stores `provider_kind="google_gemini_image"` plus Gemini-specific config.
+- Good: provider profile `image_max_dimension=2050` persists as `2048`, and the same normalized value is used by
+  settings serialization, generation-config option filtering, and runtime resolution checks.
 - Good: one image generation config can bind to `campaign` and `seasonal`; automatic claims for either group can select it
   while claims for other groups cannot.
 - Good: an operator manually unfreezes a config after confirming the provider has recovered; the next automatic or manual
@@ -472,6 +484,8 @@ ConfigDefinition(
 - Bootstrap test for matching legacy text/image URL and key producing one profile with merged capabilities.
 - Bootstrap test for different legacy URL/key pairs producing separate profiles.
 - API test that provider profile responses never include the raw key and blank-key update preserves the stored key.
+- Provider profile test that `config.capabilities.image_max_dimension` normalizes to the shared `16px` generation step on
+  create/update, and capability parsing returns the normalized value for scheduler/resource-group consumers.
 - Generation config validation test for required capabilities and active profile constraints.
 - Scheduler tests for priority selection, max concurrency, manual disabled/frozen/full config behavior, failure window,
   freeze count, stats counters, and SQLite naive datetime handling.

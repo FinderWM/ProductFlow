@@ -25,6 +25,7 @@ import {
   type FloatingPlacementResult,
   type FloatingTouchDismissProtection,
 } from "../lib/floatingSurface";
+import { stopPropagationBoundary } from "../lib/eventPropagation";
 import { shouldPreventScrollChain } from "../lib/scrollChain";
 
 interface FloatingSurfaceProps {
@@ -209,9 +210,7 @@ export function FloatingSurface({
       ) {
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
+      stopPropagationBoundary(event, { preventDefault: true, immediate: true });
       // 不要立即清理，让 320ms 超时自然过期，以覆盖完整的触摸事件链
     };
 
@@ -259,9 +258,7 @@ export function FloatingSurface({
       ) {
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
+      stopPropagationBoundary(event, { preventDefault: true, immediate: true });
       // 不要立即清理，让超时检查自然过期，以覆盖完整的触摸事件链
     };
 
@@ -322,8 +319,7 @@ export function FloatingSurface({
   }
 
   function handleTouchStart(event: TouchEvent<HTMLDivElement>) {
-    event.stopPropagation();
-    event.stopImmediatePropagation();
+    stopPropagationBoundary(event, { immediate: true });
     const touch = event.touches[0];
     const point = touch ? { x: touch.clientX, y: touch.clientY } : null;
     rememberTouchDismissProtection(point);
@@ -332,8 +328,7 @@ export function FloatingSurface({
   }
 
   function handleTouchMove(event: TouchEvent<HTMLDivElement>) {
-    event.stopPropagation();
-    event.stopImmediatePropagation();
+    stopPropagationBoundary(event, { immediate: true });
     const touch = event.touches[0];
     const previous = lastTouchPointRef.current;
     if (!touch || !previous) {
@@ -369,28 +364,23 @@ export function FloatingSurface({
           rememberTouchDismissProtection(point);
           rememberSurfaceTouchProtection(point);
         }
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
       }}
       onPointerUp={(event) => {
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
       }}
       onClick={(event) => {
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
       }}
       onWheel={handleWheel}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={(event) => {
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
         lastTouchPointRef.current = null;
       }}
       onTouchCancel={(event) => {
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        stopPropagationBoundary(event, { immediate: true });
         lastTouchPointRef.current = null;
       }}
       onKeyDown={handleKeyDown}

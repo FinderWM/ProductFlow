@@ -33,7 +33,13 @@ Workspace UI must use semantic tokens and classes from `web/src/index.css`:
 
 - Core colors: `--pf-bg`, `--pf-panel`, `--pf-panel-soft`, `--pf-border`, `--pf-line`, `--pf-line-strong`, `--pf-text`, `--pf-muted`, `--pf-subtle`, `--pf-accent`, `--pf-accent-2`, `--pf-danger`, `--pf-shadow`.
 - Settings input tokens: `--pf-settings-input-border`, `--pf-settings-input-bg`, `--pf-settings-input-bg-hover`, `--pf-settings-input-bg-focus`, `--pf-settings-input-bg-disabled`, `--pf-settings-input-color`, `--pf-settings-input-placeholder`, `--pf-settings-input-shadow`, `--pf-settings-input-shadow-focus`.
-- Action classes: `pf-workspace-action-primary`, `pf-workspace-action-secondary`, `pf-danger-action`.
+- Workspace action-button system: explicit `WorkspaceActionButton`, `workspaceActionButtonClassName(...)`, and
+  `workspaceActionSurfaceClassName(...)` plus the semantic workspace action classes they resolve to.
+- Legacy `ActionButton`, `actionButtonClassName(...)`, and `actionSurfaceClassName(...)` remain available for migration.
+  Their legacy classes now render workspace visuals only under the workspace root scope.
+- Workspace-looking shells inside classic routes are still classic callers. Shared controls must not infer workspace button
+  entry points merely because the surrounding layout uses `pf-workspace`, `pf-side-shell`, or other immersive shell
+  classes.
 
 Rules:
 
@@ -89,6 +95,15 @@ Navigation contract:
   `aria-current="page"` on the active item.
 - Mobile uses a grouped `SelectField` for section switching instead of showing the full side nav.
 - Section search filters visible nav items only. It must not remove the active content state or write settings.
+- When the browser reloads on a deeper settings sub-route, the desktop side rail may internally scroll just enough to
+  bring the active `pf-settings-nav-item` back into view, preferably near the middle of the visible rail window while
+  clamping at the top/bottom boundaries.
+- In-page section switches must not auto-scroll the desktop side rail. The restore-on-scroll behavior is reserved for the
+  browser reload recovery path, not for normal navigation clicks.
+- Settings side-rail entries are navigation, not command buttons. Keep them on `pf-settings-nav-item` with
+  `aria-current="page"` and page-local text/icon density; do not route them through
+  `actionSurfaceClassNameForAppearance(...)`, `ClassicActionButton`, `WorkspaceActionButton`, or other action-button
+  helpers.
 - The active content panel starts with a breadcrumb-like label, a section title, and the section description.
 - Hidden permission-gated sections are removed from navigation, not merely disabled.
 - Side rail wheel behavior may pass scroll to the page when the rail cannot consume more scroll.
@@ -104,15 +119,24 @@ Content routing contract:
 
 ## Settings Buttons
 
-Workspace settings buttons are compact by default:
+Workspace settings buttons are compact by default and should resolve through the workspace action-button system:
 
-- Primary writes or main create actions: `SETTINGS_MAIN_ACTION_CLASS`, height `h-9`, rounded `rounded-xl`, text `text-xs`, padding `px-3.5`.
-- Secondary actions: `SETTINGS_SECONDARY_ACTION_CLASS`, height `h-9`.
-- Compact utility actions: `SETTINGS_COMPACT_ACTION_CLASS`, height `h-8`, rounded `rounded-lg`.
-- Icon actions: `SETTINGS_ICON_ACTION_CLASS`, `h-8 w-8`.
-- Drawer submit actions: `SETTINGS_DRAWER_SUBMIT_ACTION_CLASS`, height `h-9`, full width only inside drawers/dialog footers.
-- Destructive icon actions: `SETTINGS_DANGER_ICON_ACTION_CLASS`, `h-8 w-8`.
-- Reset/destructive text actions: `SETTINGS_RESET_ACTION_CLASS`, height `h-8`.
+- Primary writes or main create actions: `SETTINGS_MAIN_ACTION_CLASS` -> legacy `actionButtonClassName({ preset: "primary", size: "md" })` during migration, then prefer `workspaceActionButtonClassName(...)`.
+- Secondary actions: `SETTINGS_SECONDARY_ACTION_CLASS` -> legacy `actionButtonClassName({ preset: "secondary", size: "md" })` during migration, then prefer `workspaceActionButtonClassName(...)`.
+- Compact utility actions: `SETTINGS_COMPACT_ACTION_CLASS` -> legacy `actionButtonClassName({ preset: "secondary", size: "sm" })` during migration, then prefer `workspaceActionButtonClassName(...)`.
+- Icon actions: `SETTINGS_ICON_ACTION_CLASS` -> legacy `actionButtonClassName({ preset: "secondary", size: "icon-sm" })` during migration, then prefer `workspaceActionButtonClassName(...)`.
+- Drawer submit actions: `SETTINGS_DRAWER_SUBMIT_ACTION_CLASS` -> legacy `actionButtonClassName({ preset: "primary", size: "md", fullWidth: true })` during migration, then prefer `workspaceActionButtonClassName(...)`.
+- Destructive icon actions: `SETTINGS_DANGER_ICON_ACTION_CLASS` -> legacy `actionButtonClassName({ preset: "danger", size: "icon-sm" })` during migration, then prefer `workspaceActionButtonClassName(...)`.
+- Reset/destructive text actions: `SETTINGS_RESET_ACTION_CLASS` -> legacy `actionButtonClassName({ preset: "danger", size: "sm" })` during migration, then prefer `workspaceActionButtonClassName(...)`.
+- When a page or child component only accepts `className`, keep using the shared constant/helper instead of recreating
+  `pf-workspace-action-*`, `pf-danger-action`, or `btn-*-spring` strings inline.
+- These helpers are not valid for classic-only code paths. If a child component renders under both layouts, route the
+  decision through an explicit layout prop instead of importing workspace helpers unconditionally.
+- Shared files such as `settings/components/styles.ts` are not automatically workspace-only just because most current
+  callers live under settings. If the same exported constants can reach classic-compatible settings subpages, they must be
+  split by layout or replaced with a layout-aware helper function.
+- The same rule applies to layout-sensitive input helpers or textarea/select wrappers exported from shared settings files.
+  If classic-compatible callers can reach them, they must branch by layout or require an explicit appearance prop.
 
 Placement rules:
 
@@ -255,7 +279,26 @@ Resource multi-select contract:
 
 ## Settings Inputs and Textareas
 
-Workspace settings inputs use the existing `INPUT_CLASS`, `TEXTAREA_CLASS`, and workspace CSS overrides.
+Workspace settings inputs are the workspace half of the layout-specific input system. New or migrated settings controls
+should use the `Workspace*` input family, or workspace-specific helpers selected by an explicit layout branch. Existing
+`INPUT_CLASS`, `TEXTAREA_CLASS`, `PROMPT_TEXTAREA_CLASS`, and workspace CSS overrides are not proof that a shared settings
+component is workspace-only.
+
+Scope boundary:
+
+- The source-of-truth family-selection rule lives in `ui-layout-guidelines.md` under "Layout-Sensitive Component Family
+  Ownership". This section only defines the workspace settings visual and interaction contract.
+- This section defines workspace-layout input styling only. It must not be used as the default contract for classic
+  layout pages.
+- If a settings component, dialog, drawer, or field helper can render under classic and workspace layouts, it must accept
+  `appearance: "classic" | "workspace"` or receive the selected input component family from its owner.
+- Classic callers must use `ClassicTextInput`, `ClassicTextarea`, `ClassicSelectField`, `ClassicCheckbox`,
+  `ClassicOptionToggle`, `ClassicSwitch`, or a classic-specific date/time wrapper. They must not import workspace input
+  helpers just because the surrounding shell uses `pf-workspace`.
+- Workspace callers must use the `Workspace*` input family or workspace-specific helpers. They must not leave classic
+  helpers in the final workspace branch when the control is layout-sensitive.
+- Do not let shared helpers default to workspace. A missing `appearance` prop should be treated as an incomplete layout
+  contract, not as permission to use workspace chrome.
 
 Gradient contract:
 
@@ -356,6 +399,14 @@ Provider create/edit drawer:
 - Editing never pre-fills the API key field; a blank API key means keep the existing key.
 - Provider type controls reset default capabilities according to provider type.
 - Capability choices use `pf-settings-provider-option` with clear selected state in `mist`, `sage`, and `dusk`.
+- Provider image max dimension uses a preset selector plus optional custom integer input. The selector must offer the
+  shared common long-edge presets plus a follow-global option; custom mode keeps a dedicated input instead of forcing
+  everything into one free-form field.
+- Custom provider image max dimension accepts only `512-8192` integer input, surfaces inline invalid state, and explains
+  that the saved value will align to the shared `16px` generation step so it stays consistent with image size/aspect
+  filtering in workbench, enhance, and deck flows.
+- Hydrating an existing provider profile should reopen this field in preset mode when the normalized value matches a
+  common preset, otherwise in custom mode with the normalized custom value shown.
 - Submit is disabled while pending or when required fields are missing.
 - Save success closes the drawer, refreshes provider-dependent caches, and shows the write feedback dialog.
 - Delete provider requires `ConfirmDialog`; failure stays on the confirm/error surface.
@@ -651,7 +702,7 @@ The workspace appearance selector is a right-bottom dock controlled by the works
 
 Good:
 
-- A new settings save button uses `pf-workspace-action-primary h-9`, writes through a mutation, opens `SettingsFeedbackDialog`, invalidates the affected query, and shows success for 1 second.
+- A new settings save button uses `SETTINGS_MAIN_ACTION_CLASS` or `actionButtonClassName({ preset: "primary", size: "md" })`, writes through a mutation, opens `SettingsFeedbackDialog`, invalidates the affected query, and shows success for 1 second.
 - A new searchable provider dropdown focuses and selects the search input on open, supports Arrow keys and Escape, and renders selected options with `aria-selected`.
 - A new status row displays state details in a `div` grid with gradient dividers and no pointer affordance.
 - A new RBAC user row keeps plain table-row semantics and exposes only compact action buttons for grants, password reset,

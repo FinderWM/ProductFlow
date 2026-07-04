@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useState,
+  type CSSProperties,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -30,16 +40,37 @@ import {
   Wand2,
 } from "lucide-react";
 
+import {
+  actionButtonClassNameForAppearance,
+  actionButtonComponentForAppearance,
+  actionSurfaceClassNameForAppearance,
+  transparentActionToneVars,
+  type LayoutActionAppearance,
+} from "../../components/layoutActionButtons";
+import type { BaseActionButtonProps } from "../../components/actionButtonShared";
 import { ClipboardImageButton } from "../../components/ClipboardImageButton";
+import {
+  ClassicCheckbox,
+  ClassicSelectField,
+  ClassicTextInput,
+  ClassicTextarea,
+} from "../../components/classicInputs";
 import { ImageDropZone } from "../../components/ImageDropZone";
 import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSettingsPanel";
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../../components/ImageGenerationSettingsTabs";
+import { ImageSizePicker } from "../../components/ImageSizePicker";
 import { ImageToolControls } from "../../components/ImageToolControls";
+import { LayoutActionSurfaceButton } from "../../components/LayoutActionSurfaceButton";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { ModalShell } from "../../components/ModalShell";
 import { ParameterHelpButton } from "../../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
-import { SelectField } from "../../components/SelectField";
+import {
+  WorkspaceCheckbox,
+  WorkspaceSelectField,
+  WorkspaceTextInput,
+  WorkspaceTextarea,
+} from "../../components/workspaceInputs";
 import { api, ApiError } from "../../lib/api";
 import { exportDeckAsPptx } from "../../lib/deckPptxExport";
 import { sanitizeFilenamePart, toImageUrl, type DownloadableImage } from "../../lib/image-downloads";
@@ -47,7 +78,11 @@ import {
   generationConfigOptionLabel,
   generationConfigOptionsForPurpose,
 } from "../../lib/generationConfigs";
-import type { ImageSizeOption } from "../../lib/imageSizes";
+import {
+  imageSizeValueFromDimensions,
+  parseImageSizeValue,
+  type ImageSizeOption,
+} from "../../lib/imageSizes";
 import { formatDateTime, formatPrice } from "../../lib/format";
 import type { TranslationKey, TranslationParams } from "../../lib/i18n";
 import { INSPIRATION_CONTEXT_MARKDOWN_MAX_LENGTH } from "../../lib/markdown";
@@ -91,7 +126,7 @@ import {
   workflowNodeStatusLabel,
   workflowRunQueueText,
 } from "./utils";
-import { TextArea } from "./TextArea";
+import { TextArea as BaseTextArea } from "./TextArea";
 
 type TFunction = (key: TranslationKey, params?: TranslationParams) => string;
 
@@ -103,14 +138,11 @@ const SAVE_STATUS_LABEL_KEYS: Record<SaveStatus, TranslationKey> = {
 };
 
 const SAVE_STATUS_CLASS_NAMES: Record<SaveStatus, string> = {
-  idle: "border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300",
+  idle: "pf-hairline pf-surface-soft pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#0b1220] dark:text-[color:var(--pf-muted)]",
   saving: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/35 dark:bg-blue-500/12 dark:text-blue-200",
   saved: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200",
   failed: "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/12 dark:text-red-200",
 };
-
-const ADD_COPY_FIELD_BUTTON_CLASS_NAME =
-  "copy-add-field inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold";
 
 const REFERENCE_ROLE_OPTIONS: Array<{ value: string; labelKey: TranslationKey }> = [
   { value: "reference", labelKey: "detail.referenceRole.reference" },
@@ -132,6 +164,87 @@ const INSPIRATION_CONTEXT_ENTRY_OPTIONS: Array<{ value: InspirationInitialWorkfl
   { value: "blank", labelKey: "detail.inspector.entryType.blank" },
 ];
 
+const InspectorInputLayoutContext = createContext(false);
+
+function useInspectorWorkspaceSubpage() {
+  return useContext(InspectorInputLayoutContext);
+}
+
+function LayoutTextInput(props: ComponentProps<typeof WorkspaceTextInput>) {
+  const workspaceSubpage = useInspectorWorkspaceSubpage();
+  return workspaceSubpage ? <WorkspaceTextInput {...props} /> : <ClassicTextInput {...props} />;
+}
+
+function LayoutTextarea(props: ComponentProps<typeof WorkspaceTextarea>) {
+  const workspaceSubpage = useInspectorWorkspaceSubpage();
+  return workspaceSubpage ? <WorkspaceTextarea {...props} /> : <ClassicTextarea {...props} />;
+}
+
+function LayoutSelectField(props: ComponentProps<typeof WorkspaceSelectField>) {
+  const workspaceSubpage = useInspectorWorkspaceSubpage();
+  return workspaceSubpage ? <WorkspaceSelectField {...props} /> : <ClassicSelectField {...props} />;
+}
+
+function LayoutCheckbox(props: ComponentProps<typeof WorkspaceCheckbox>) {
+  const workspaceSubpage = useInspectorWorkspaceSubpage();
+  return workspaceSubpage ? <WorkspaceCheckbox {...props} /> : <ClassicCheckbox {...props} />;
+}
+
+function TextArea(props: ComponentProps<typeof BaseTextArea>) {
+  const workspaceSubpage = useInspectorWorkspaceSubpage();
+  return <BaseTextArea {...props} workspaceSubpage={workspaceSubpage} />;
+}
+
+function layoutInputAppearance(workspaceSubpage: boolean) {
+  return workspaceSubpage ? "workspace" : "classic";
+}
+
+function useInspectorActionAppearance(): LayoutActionAppearance {
+  return useInspectorWorkspaceSubpage() ? "workspace" : "classic";
+}
+
+function ActionButton(props: BaseActionButtonProps) {
+  const appearance = useInspectorActionAppearance();
+  const ButtonComponent = actionButtonComponentForAppearance(appearance);
+  return <ButtonComponent {...props} />;
+}
+
+function inspectorAddCopyFieldButtonClassName(appearance: LayoutActionAppearance) {
+  return actionButtonClassNameForAppearance(appearance, {
+    preset: "secondary",
+    size: "sm",
+    className: "copy-add-field gap-1 text-[11px]",
+  });
+}
+
+function inspectorSecondaryFullButtonClassName(appearance: LayoutActionAppearance) {
+  return actionButtonClassNameForAppearance(appearance, {
+    preset: "secondary",
+    size: "md",
+    fullWidth: true,
+  });
+}
+
+function inspectorDocumentDropzoneClassName(appearance: LayoutActionAppearance) {
+  return actionSurfaceClassNameForAppearance(appearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "pf-action-surface--dashed flex cursor-pointer items-center justify-center px-3 py-4 text-xs font-medium",
+  });
+}
+
+function inspectorImageDropzoneClassName(appearance: LayoutActionAppearance) {
+  return actionSurfaceClassNameForAppearance(appearance, {
+    preset: "secondary",
+    focusWithin: true,
+    className: "pf-action-surface--dashed flex cursor-pointer items-center justify-center px-3 py-6 text-xs font-medium",
+  });
+}
+
+const INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE: CSSProperties = {
+  ["--pf-action-radius" as string]: "var(--pf-radius-sm)",
+};
+
 function referenceRolePresetValue(role: string): string {
   return REFERENCE_ROLE_OPTIONS.some((option) => option.value === role) ? role : "__custom__";
 }
@@ -145,7 +258,7 @@ function resourceGroupOptionLabel(group: GenerationResourceGroup, t: TFunction):
 function FieldLabel({
   label,
   helpKey,
-  className = "mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400",
+  className = "mb-1.5 text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]",
 }: {
   label: string;
   helpKey?: ParameterHelpKey;
@@ -158,11 +271,6 @@ function FieldLabel({
     </span>
   );
 }
-
-const INSPECTOR_TEXTAREA_LINE_HEIGHT_PX = 19;
-const INSPECTOR_TEXTAREA_VERTICAL_PADDING_PX = 16;
-const INSPECTOR_CLIPBOARD_IMAGE_BUTTON_CLASS =
-  "inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-slate-900 dark:hover:text-white";
 
 function InspectorTextArea({
   label,
@@ -183,41 +291,24 @@ function InspectorTextArea({
   onBlur?: () => void;
   helpKey?: ParameterHelpKey;
 }) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const textareaId = useId();
-  const minHeight = minRows * INSPECTOR_TEXTAREA_LINE_HEIGHT_PX + INSPECTOR_TEXTAREA_VERTICAL_PADDING_PX;
-
-  useLayoutEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
-      return;
-    }
-    textarea.style.height = "auto";
-    const maxHeight =
-      maxRows === undefined
-        ? Number.POSITIVE_INFINITY
-        : maxRows * INSPECTOR_TEXTAREA_LINE_HEIGHT_PX + INSPECTOR_TEXTAREA_VERTICAL_PADDING_PX;
-    const nextHeight = Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight));
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
-  }, [maxRows, minHeight, value]);
 
   return (
     <div className="block">
-      <div className="mb-1.5 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+      <div className="mb-1.5 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
         <label htmlFor={textareaId}>{label}</label>
         {helpKey ? <ParameterHelpButton helpKey={helpKey} uiType="inspirationDetail" /> : null}
       </div>
-      <textarea
+      <LayoutTextarea
         id={textareaId}
-        ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onBlur={onBlur}
         placeholder={placeholder}
-        rows={minRows}
-        style={{ minHeight }}
-        className="w-full resize-none px-3 py-2 text-xs leading-relaxed outline-none textarea-premium"
+        size="compact"
+        autosize
+        minRows={minRows}
+        maxRows={maxRows}
       />
     </div>
   );
@@ -262,6 +353,7 @@ interface InspectorPanelProps {
   deckEditorOpen?: boolean;
   onOpenDeckEditor?: () => void;
   onCloseDeckEditor?: () => void;
+  workspaceSubpage?: boolean;
 }
 
 export function InspectorPanel({
@@ -303,8 +395,10 @@ export function InspectorPanel({
   deckEditorOpen = false,
   onOpenDeckEditor,
   onCloseDeckEditor,
+  workspaceSubpage = false,
 }: InspectorPanelProps) {
   const { t } = useI18n();
+  const actionAppearance: LayoutActionAppearance = workspaceSubpage ? "workspace" : "classic";
   const [promptPreview, setPromptPreview] = useState<PromptPreview | null>(null);
   const icon = {
     inspiration_context: FileText,
@@ -324,9 +418,6 @@ export function InspectorPanel({
   const actionGridColumns = showRunAction && onCancelRun ? "grid-cols-2" : "grid-cols-1";
   const deleteActionDisabled = busy || deleteDisabled;
   const deleteActionTitle = deleteTitle ?? t("detail.delete");
-  const deleteActionClassName = deleteActionDisabled
-    ? "border border-slate-200 bg-slate-100 text-slate-400 shadow-none disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-500"
-    : "btn-danger-spring";
   const downstreamReferenceCount =
     node.node_type === "image_generation" || node.node_type === "image_enhance"
       ? new Set(
@@ -377,18 +468,19 @@ export function InspectorPanel({
   );
 
   return (
-    <div className="space-y-3">
+    <InspectorInputLayoutContext.Provider value={workspaceSubpage}>
+      <div className="space-y-3">
       <section className="config-bubble rounded-2xl p-4 shadow-sm">
         <div className="flex items-start gap-3">
           <span className="rounded-xl border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/15 dark:text-violet-100">
             <InspectorIcon size={16} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-base font-semibold text-zinc-950 dark:text-white">
+            <div className="truncate text-base font-semibold pf-ink dark:text-[#fff]">
               {displayTitle}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
+              <span className="rounded-full border pf-hairline pf-surface-soft px-2 py-0.5 text-[10px] font-medium pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#0b1220] dark:text-[color:var(--pf-muted)]">
                 {displayLabel}
               </span>
               <span
@@ -419,7 +511,7 @@ export function InspectorPanel({
               </span>
             </div>
             {node.last_run_at ? (
-              <div className="mt-2 text-[11px] text-zinc-400 dark:text-slate-400">
+              <div className="mt-2 text-[11px] pf-ink-muted dark:text-[color:var(--pf-muted)]">
                 {t("detail.inspector.lastRun", { time: formatDateTime(node.last_run_at) })}
               </div>
             ) : null}
@@ -427,10 +519,10 @@ export function InspectorPanel({
         </div>
 
         {activeRunContext ? (
-          <div className="mt-4 overflow-hidden rounded-2xl border border-blue-300/70 bg-blue-50/95 text-blue-950 shadow-[0_14px_28px_rgba(37,99,235,0.12)] dark:border-sky-300/45 dark:bg-sky-400/15 dark:text-white dark:shadow-[0_18px_36px_rgba(56,189,248,0.12)]">
+          <div className="mt-4 overflow-hidden rounded-2xl border border-blue-300/70 bg-blue-50/95 text-blue-950 shadow-[0_14px_28px_rgba(37,99,235,0.12)] dark:border-sky-300/45 dark:bg-sky-400/15 dark:text-[#fff] dark:shadow-[0_18px_36px_rgba(56,189,248,0.12)]">
             <div className="h-1 bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-600" />
             <div className="flex items-start gap-3 px-3 py-3">
-              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-500/25 dark:bg-sky-300 dark:text-slate-950 dark:shadow-sky-300/20">
+              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[#fff] shadow-lg shadow-blue-500/25 dark:bg-sky-300 dark:text-[color:var(--pf-text)] dark:shadow-sky-300/20">
                 <Loader2 size={15} className="animate-spin" />
               </span>
               <div className="min-w-0 flex-1 text-xs leading-5">
@@ -440,7 +532,7 @@ export function InspectorPanel({
                       ? t("detail.inspector.activeRunQueued")
                       : t("detail.inspector.activeRunRunning")}
                   </div>
-                  <span className="rounded-full border border-blue-300/70 bg-white/75 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:border-sky-200/35 dark:bg-white/10 dark:text-sky-100">
+                  <span className="rounded-full border border-blue-300/70 bg-[rgba(255,255,255,0.75)] px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:border-sky-200/35 dark:bg-[rgba(255,255,255,0.1)] dark:text-sky-100">
                     {workflowNodeStatusLabel(
                       { ...node, status: activeRunContext.nodeRun.status },
                       t,
@@ -474,49 +566,43 @@ export function InspectorPanel({
                 {runActionState.label}
               </div>
             ) : showRunAction ? (
-              <button
-                type="button"
+              <ActionButton
                 onClick={onRun}
                 disabled={runActionState.disabled}
-                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-primary-spring"
+                preset="primary"
+                size="md"
                 title={runActionState.title}
+                loading={runActionState.pending}
+                leadingIcon={<Play size={13} />}
               >
-                {runActionState.pending ? (
-                  <Loader2 size={13} className="mr-1.5 animate-spin" />
-                ) : (
-                  <Play size={13} className="mr-1.5" />
-                )}
                 {runActionState.label}
-              </button>
+              </ActionButton>
             ) : null}
             {onCancelRun ? (
-              <button
-                type="button"
+              <ActionButton
                 onClick={onCancelRun}
                 disabled={cancelBusy}
-                className="inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold btn-danger-spring"
+                preset="danger"
+                size="md"
                 title={t("detail.inspector.cancelCurrentRun")}
+                loading={cancelBusy}
+                leadingIcon={<OctagonX size={13} />}
               >
-                {cancelBusy ? (
-                  <Loader2 size={13} className="mr-1.5 animate-spin" />
-                ) : (
-                  <OctagonX size={13} className="mr-1.5" />
-                )}
                 {t("detail.cancel")}
-              </button>
+              </ActionButton>
             ) : null}
             {showDeleteAction ? (
-              <button
-                type="button"
+              <ActionButton
                 onClick={onDelete}
                 disabled={deleteActionDisabled}
                 title={deleteActionTitle}
-                className={`inline-flex items-center justify-center rounded-xl px-3 py-2.5 text-xs font-semibold ${deleteActionClassName} ${
-                  showActiveRunIndicator && onCancelRun ? "col-span-2" : ""
-                }`}
+                preset="danger"
+                size="md"
+                className={showActiveRunIndicator && onCancelRun ? "col-span-2" : ""}
+                leadingIcon={<Trash2 size={13} />}
               >
-                <Trash2 size={13} className="mr-1.5" /> {t("detail.delete")}
-              </button>
+                {t("detail.delete")}
+              </ActionButton>
             ) : null}
           </div>
         ) : null}
@@ -524,20 +610,20 @@ export function InspectorPanel({
 
       <section className="config-bubble rounded-2xl p-4 shadow-sm">
         <fieldset disabled={busy} className="min-w-0">
-          <div className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-slate-300">
+          <div className="mb-3 text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
             {t("detail.inspector.config")}
           </div>
           <label className="mb-3 block">
             <FieldLabel label={t("detail.inspector.nodeName")} />
-            <input
+            <LayoutTextInput
               value={draft.title}
               onChange={(event) =>
                 onDraftChange({ ...draft, title: event.target.value })
               }
-              className="w-full px-3 py-2.5 text-sm outline-none input-premium"
+              size="default"
             />
           </label>
-          <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
+          <div className="mb-3 rounded-md border pf-hairline pf-surface-soft px-3 py-2 text-xs leading-5 pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#0b1220] dark:text-[color:var(--pf-muted)]">
             {node.node_type === "image_generation"
               ? t("detail.inspector.description.imageGeneration")
               : node.node_type === "image_enhance"
@@ -634,6 +720,8 @@ export function InspectorPanel({
         {node.node_type === "image_enhance" ? (
           <ImageEnhanceInspector
             draft={draft}
+            imageSizeOptions={imageSizeOptions}
+            imageGenerationMaxDimension={imageGenerationMaxDimension}
             resourceGroups={resourceGroups}
             generationConfigOptions={imageGenerationConfigOptions}
             onDraftChange={onDraftChange}
@@ -673,7 +761,7 @@ export function InspectorPanel({
         </fieldset>
       </section>
       {node.attempt_count > 0 ? (
-        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 shadow-sm dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300">
+        <section className="rounded-2xl border pf-hairline pf-surface-soft p-3 text-xs leading-relaxed pf-ink-muted shadow-sm dark:border-[color:var(--pf-border)] dark:bg-[#0b1220] dark:text-[color:var(--pf-muted)]">
           {t("detail.nodeAttemptSummary", { attempts: node.attempt_count, retries: node.retry_count })}
         </section>
       ) : null}
@@ -681,7 +769,7 @@ export function InspectorPanel({
         <section
           className={`rounded-2xl border p-4 text-xs leading-relaxed shadow-sm ${
             node.status === "cancelled"
-              ? "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300"
+              ? "pf-hairline pf-surface-soft pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#0b1220] dark:text-[color:var(--pf-muted)]"
               : "border-red-200 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200"
           }`}
         >
@@ -706,9 +794,10 @@ export function InspectorPanel({
         </section>
       ) : null}
       {promptPreview ? (
-        <PromptPreviewDialog preview={promptPreview} onClose={() => setPromptPreview(null)} />
+        <PromptPreviewDialog appearance={actionAppearance} preview={promptPreview} onClose={() => setPromptPreview(null)} />
       ) : null}
-    </div>
+      </div>
+    </InspectorInputLayoutContext.Provider>
   );
 }
 
@@ -745,6 +834,9 @@ function InspirationContextInspector({
   busy: boolean;
   t: TFunction;
 }) {
+  const actionAppearance = useInspectorActionAppearance();
+  const clipboardButtonClassName = inspectorSecondaryFullButtonClassName(actionAppearance);
+  const documentDropzoneClassName = inspectorDocumentDropzoneClassName(actionAppearance);
   const addDynamicField = () => {
     onDraftChange({
       ...draft,
@@ -786,11 +878,12 @@ function InspirationContextInspector({
   const entryTypeLabelKey =
     INSPIRATION_CONTEXT_ENTRY_OPTIONS.find((option) => option.value === draft.entryType)?.labelKey ??
     "detail.inspector.entryType.image";
+  const inputAppearance = layoutInputAppearance(useInspectorWorkspaceSubpage());
 
   return (
     <div className="space-y-3">
       <div
-        className={`group relative flex h-40 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white/50 p-2 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-slate-800 dark:bg-slate-950/40 dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME} ${sourceImage ? "cursor-zoom-in" : ""}`}
+        className={`group relative flex h-40 items-center justify-center overflow-hidden rounded-2xl border pf-hairline bg-[rgba(255,255,255,0.5)] p-2 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME} ${sourceImage ? "cursor-zoom-in" : ""}`}
         onClick={sourceImage ? () => onPreviewImage(sourceImage) : undefined}
       >
         {sourceImage ? (
@@ -800,10 +893,10 @@ function InspirationContextInspector({
               alt={sourceImage.alt}
               className="h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03]"
             />
-            <DownloadLink image={sourceImage} variant="overlay" />
+            <DownloadLink image={sourceImage} appearance={actionAppearance} variant="overlay" />
           </>
         ) : (
-          <div className="text-xs text-zinc-400 dark:text-slate-500">{t("detail.inspector.noSourceImage")}</div>
+          <div className="text-xs pf-ink-muted dark:text-[color:var(--pf-muted)]">{t("detail.inspector.noSourceImage")}</div>
         )}
       </div>
       <SaveCurrentImageToResourceLibraryButton
@@ -817,7 +910,7 @@ function InspirationContextInspector({
       <ImageDropZone
         ariaLabel={sourceImage ? t("detail.inspector.replaceContextImage") : t("detail.inspector.uploadContextImage")}
         disabled={busy}
-        className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-slate-300 px-3 py-5 text-xs font-medium text-zinc-600 transition-all duration-300 hover:border-indigo-500 hover:bg-indigo-50/20 hover:text-indigo-600 dark:border-slate-700/80 dark:text-slate-300 dark:hover:border-violet-400 dark:hover:bg-violet-500/5 dark:hover:text-violet-200"
+        className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed pf-hairline-strong px-3 py-5 text-xs font-medium pf-ink-muted transition-all duration-300 hover:border-indigo-500 hover:bg-indigo-50/20 hover:text-indigo-600 dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)] dark:hover:border-violet-400 dark:hover:bg-violet-500/5 dark:hover:text-violet-200"
         activeClassName="border-indigo-500 bg-indigo-50/60 text-indigo-700 shadow-[0_0_0_4px_rgba(99,102,241,0.12)] dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100 dark:shadow-[0_0_0_4px_rgba(139,92,246,0.18)]"
         focusClassName="focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
         onFiles={(files) => {
@@ -839,7 +932,7 @@ function InspirationContextInspector({
         )}
       </ImageDropZone>
       <ClipboardImageButton
-        buttonClassName={INSPECTOR_CLIPBOARD_IMAGE_BUTTON_CLASS}
+        buttonClassName={clipboardButtonClassName}
         disabled={busy}
         label={t("common.pasteImage")}
         closeLabel={t("common.close")}
@@ -855,36 +948,38 @@ function InspirationContextInspector({
         onError={onClipboardError}
       />
       <label className="block">
-        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
           {t("detail.inspector.inspirationName")}
         </span>
-        <input
+        <LayoutTextInput
           value={draft.inspirationName}
           onChange={(event) =>
             onDraftChange({ ...draft, inspirationName: event.target.value })
           }
-          className="w-full px-3 py-2 text-xs outline-none input-premium"
+          size="compact"
         />
       </label>
       <div className="grid grid-cols-2 gap-2">
         <label className="block">
-          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
             {t("detail.inspector.ownerId")}
           </span>
-          <input
+          <LayoutTextInput
             value={draft.ownerId}
             readOnly
-            className="w-full px-3 py-2 text-xs text-zinc-500 outline-none input-premium dark:text-slate-300"
+            size="compact"
+            className="pf-ink-muted dark:text-[color:var(--pf-muted)]"
           />
         </label>
         <label className="block">
-          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+          <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
             {t("detail.inspector.entryType")}
           </span>
-          <input
+          <LayoutTextInput
             value={t(entryTypeLabelKey)}
             readOnly
-            className="w-full px-3 py-2 text-xs text-zinc-500 outline-none input-premium dark:text-slate-300"
+            size="compact"
+            className="pf-ink-muted dark:text-[color:var(--pf-muted)]"
           />
         </label>
       </div>
@@ -897,16 +992,17 @@ function InspirationContextInspector({
         maxLength={INSPIRATION_CONTEXT_MARKDOWN_MAX_LENGTH}
         minRows={5}
         disabled={busy}
+        inputAppearance={inputAppearance}
       />
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+      <div className="space-y-3 rounded-xl border pf-hairline pf-surface-soft px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <FieldLabel
               label={t("detail.inspector.contextDocument")}
               helpKey="inspirationContextDocument"
-              className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+              className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]"
             />
-            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+            <div className="mt-0.5 text-[11px] pf-ink-muted dark:text-[color:var(--pf-muted)]">
               {hasDocument
                 ? t("detail.inspector.contextDocumentLockedHint")
                 : t("detail.inspector.uploadContextDocument")}
@@ -919,32 +1015,32 @@ function InspirationContextInspector({
           ) : null}
         </div>
         {hasDocument ? (
-          <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 dark:border-slate-700 dark:bg-[#111b2d]">
+          <div className="rounded-xl border pf-hairline pf-surface px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[#111b2d]">
             <div className="flex min-w-0 items-start gap-2">
-              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border pf-hairline pf-surface-soft pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]">
                 <FileText size={15} />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-semibold text-slate-700 dark:text-slate-100">
+                <div className="truncate text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]">
                   {draft.documentFilename || t("detail.inspector.unnamedContextDocument")}
                 </div>
                 {draft.documentMimeType ? (
-                  <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500">
+                  <div className="mt-0.5 truncate text-[11px] pf-ink-muted dark:text-[color:var(--pf-muted)]">
                     {t("detail.inspector.documentMimeType", { mime: draft.documentMimeType })}
                   </div>
                 ) : null}
-                <div className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+                <div className="mt-1 text-[11px] leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">
                   {t("detail.inspector.removeContextDocumentHint")}
                 </div>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t pf-hairline pt-3 dark:border-[color:var(--pf-border)]">
               {draft.documentText ? (
-                <button
-                  type="button"
+                <ActionButton
                   onClick={() => setDocumentPreviewOpen((current) => !current)}
                   disabled={busy}
-                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+                  preset="secondary"
+                  size="sm"
                   aria-expanded={documentPreviewOpen}
                   aria-label={
                     documentPreviewOpen
@@ -956,22 +1052,22 @@ function InspirationContextInspector({
                       ? t("detail.inspector.hideDocumentPreview")
                       : t("detail.inspector.showDocumentPreview")
                   }
+                  leadingIcon={documentPreviewOpen ? <EyeOff size={12} /> : <Eye size={12} />}
                 >
-                  {documentPreviewOpen ? <EyeOff size={12} /> : <Eye size={12} />}
                   {documentPreviewOpen
                     ? t("detail.inspector.hideDocumentPreview")
                     : t("detail.inspector.showDocumentPreview")}
-                </button>
+                </ActionButton>
               ) : null}
-              <button
-                type="button"
+              <ActionButton
                 onClick={removeDocument}
                 disabled={busy}
-                className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/35 dark:bg-slate-950/40 dark:text-red-200 dark:hover:border-red-300/70 dark:hover:bg-red-500/10"
+                preset="danger"
+                size="sm"
+                leadingIcon={<Trash2 size={12} />}
               >
-                <Trash2 size={12} />
                 {t("detail.inspector.removeContextDocument")}
-              </button>
+              </ActionButton>
             </div>
           </div>
         ) : (
@@ -979,9 +1075,8 @@ function InspirationContextInspector({
             accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
             ariaLabel={t("detail.inspector.uploadContextDocument")}
             disabled={busy}
-            className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 px-3 py-4 text-xs font-medium text-zinc-600 transition-all duration-300 hover:border-indigo-500 hover:bg-indigo-50/20 hover:text-indigo-600 dark:border-slate-700/80 dark:text-slate-300 dark:hover:border-violet-400 dark:hover:bg-violet-500/5 dark:hover:text-violet-200"
-            activeClassName="border-indigo-500 bg-indigo-50/60 text-indigo-700 shadow-[0_0_0_4px_rgba(99,102,241,0.12)] dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100 dark:shadow-[0_0_0_4px_rgba(139,92,246,0.18)]"
-            focusClassName="focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
+            className={documentDropzoneClassName}
+            activeClassName="pf-action-surface--active"
             onFiles={(files) => {
               const file = files[0];
               if (file) {
@@ -1004,63 +1099,66 @@ function InspirationContextInspector({
             modalTitle={draft.documentFilename || t("detail.inspector.documentText")}
             helpText={t("detail.inspector.documentPreviewHelp")}
             minRows={4}
+            inputAppearance={inputAppearance}
             readOnly
           />
         ) : null}
       </div>
-      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+      <div className="space-y-2 rounded-xl border pf-hairline pf-surface-soft px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
         <div className="flex items-center justify-between gap-2">
           <FieldLabel
             label={t("detail.inspector.dynamicFields")}
             helpKey="inspirationContextDynamicFields"
-            className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+            className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]"
           />
-          <button
+          <ActionButton
             type="button"
             onClick={addDynamicField}
             disabled={busy}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition-colors hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300 dark:hover:border-violet-400/50 dark:hover:text-violet-100"
+            preset="secondary"
+            size="sm"
+            leadingIcon={<Plus size={12} />}
           >
-            <Plus size={12} className="mr-1" />
             {t("detail.inspector.addDynamicField")}
-          </button>
+          </ActionButton>
         </div>
         {draft.dynamicFields.length ? (
           <div className="space-y-2">
             {draft.dynamicFields.map((field) => (
               <div key={field.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
-                <input
+                <LayoutTextInput
                   value={field.key}
                   onChange={(event) => updateDynamicField(field.id, { key: event.target.value })}
-                  className="min-w-0 px-3 py-2 text-xs outline-none input-premium"
+                  size="compact"
+                  className="min-w-0"
                   placeholder={t("detail.inspector.dynamicKey")}
                 />
-                <input
+                <LayoutTextInput
                   value={field.value}
                   onChange={(event) => updateDynamicField(field.id, { value: event.target.value })}
-                  className="min-w-0 px-3 py-2 text-xs outline-none input-premium"
+                  size="compact"
+                  className="min-w-0"
                   placeholder={t("detail.inspector.dynamicValue")}
                 />
-                <button
-                  type="button"
+                <ActionButton
                   onClick={() => removeDynamicField(field.id)}
                   disabled={busy}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/35 dark:bg-[#111b2d] dark:text-red-200 dark:hover:bg-red-500/10"
+                  preset="danger"
+                  size="icon-md"
                   aria-label={t("detail.inspector.removeDynamicField")}
                   title={t("detail.inspector.removeDynamicField")}
-                >
-                  <Trash2 size={13} />
-                </button>
+                  leadingIcon={<Trash2 size={13} />}
+                />
               </div>
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed pf-hairline-strong px-3 py-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          <div className="rounded-lg border border-dashed pf-hairline-strong px-3 py-3 text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
             {t("detail.inspector.noDynamicFields")}
           </div>
         )}
       </div>
-      <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
+      <div className="rounded-md border pf-hairline pf-surface-soft px-3 py-2 text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#0b1220] dark:text-[color:var(--pf-muted)]">
         {t("detail.inspector.originalInspiration", { name: inspiration.name })}
         {inspiration.category ? ` · ${inspiration.category}` : ""}
         {inspiration.price ? ` · ${formatPrice(inspiration.price)}` : ""}
@@ -1106,38 +1204,46 @@ function ReferenceImageInspector({
   onPreviewImage: (image: DownloadableImage) => void;
   t: TFunction;
 }) {
+  const actionAppearance = useInspectorActionAppearance();
+  const clipboardButtonClassName = inspectorSecondaryFullButtonClassName(actionAppearance);
+  const imageDropzoneClassName = inspectorImageDropzoneClassName(actionAppearance);
+
   return (
     <div className="space-y-3">
       {image ? (
         <div
-          className={`group relative flex aspect-[4/3] min-h-[180px] w-full items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white/50 p-3 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-slate-800 dark:bg-slate-950/40 dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
+          className={`group relative flex aspect-[4/3] min-h-[180px] w-full items-center justify-center overflow-hidden rounded-2xl border pf-hairline bg-[rgba(255,255,255,0.5)] p-3 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
         >
-          <button
-            type="button"
+          <LayoutActionSurfaceButton
             onClick={() => onPreviewImage(image)}
-            className="flex h-full w-full items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+            appearance={actionAppearance}
+            preset="secondary"
+            focusWithin
+            toneVars={transparentActionToneVars}
+            style={INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE}
+            className="relative flex h-full w-full items-center justify-center overflow-hidden p-0"
             aria-label={t("detail.inspector.preview", { alt: image.alt })}
           >
             <img src={image.previewUrl} alt={image.alt} className="h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03]" />
-            <span className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-zinc-950/70 px-2 py-1 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-[color:var(--pf-deep)] px-2 py-1 text-[11px] font-medium text-[#fff] opacity-0 transition-opacity group-hover:opacity-100">
               {t("detail.inspector.clickPreview")}
             </span>
-          </button>
-          <DownloadLink image={image} variant="overlay" />
-          <button
-            type="button"
+          </LayoutActionSurfaceButton>
+          <DownloadLink image={image} appearance={actionAppearance} variant="overlay" />
+          <ActionButton
             onClick={(event) => {
               event.stopPropagation();
               onClearImage();
             }}
             disabled={busy}
-            className="nodrag nopan nowheel absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-200 bg-white/95 text-red-600 shadow-sm ring-1 ring-red-100 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-400/45 dark:bg-slate-950/88 dark:text-red-200 dark:ring-red-400/20 dark:hover:bg-red-500/12"
+            preset="danger"
+            size="icon-sm"
+            className="nodrag nopan nowheel absolute right-2 top-2"
             aria-label={t("detail.inspector.clearReferenceImage")}
             title={t("detail.inspector.clearReferenceImage")}
-          >
-            <Trash2 size={13} aria-hidden="true" />
-          </button>
-          <div className="absolute left-2 top-2 inline-flex items-center rounded-full border border-violet-400/60 bg-slate-950/88 px-2.5 py-1 text-[11px] font-semibold text-violet-100 shadow-lg shadow-violet-950/35 ring-1 ring-violet-300/20 backdrop-blur">
+            leadingIcon={<Trash2 size={13} aria-hidden="true" />}
+          />
+          <div className="absolute left-2 top-2 inline-flex items-center rounded-full border border-violet-400/60 bg-[color:var(--pf-deep)] px-2.5 py-1 text-[11px] font-semibold text-violet-100 shadow-lg shadow-violet-950/35 ring-1 ring-violet-300/20 backdrop-blur">
             <Sparkles size={12} className="mr-1 text-violet-300" />
             {t("detail.canUseAsReference")}
           </div>
@@ -1154,7 +1260,7 @@ function ReferenceImageInspector({
       <div className="block">
         <FieldLabel label={t("detail.inspector.role")} helpKey="referenceRole" />
         <div className="space-y-2">
-          <SelectField
+          <LayoutSelectField
             value={referenceRolePresetValue(draft.role)}
             options={[
               ...REFERENCE_ROLE_OPTIONS.map((option) => ({
@@ -1172,35 +1278,34 @@ function ReferenceImageInspector({
             radius="lg"
             visualSize="sm"
           />
-          <input
+          <LayoutTextInput
             value={draft.role}
             onChange={(event) =>
               onDraftChange({ ...draft, role: event.target.value })
             }
-            className="w-full px-3 py-2 text-xs outline-none input-premium"
+            size="compact"
             placeholder={t("detail.referenceRole.customPlaceholder")}
           />
         </div>
       </div>
       <label className="block">
-        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+        <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
           {t("detail.inspector.label")}
         </span>
-        <input
+        <LayoutTextInput
           value={draft.label}
           onChange={(event) =>
             onDraftChange({ ...draft, label: event.target.value })
           }
-          className="w-full px-3 py-2 text-xs outline-none input-premium"
+          size="compact"
           placeholder={t("detail.inspector.labelCompatPlaceholder")}
         />
       </label>
       <ImageDropZone
         ariaLabel={hasImage ? t("detail.inspector.replaceReference") : t("detail.inspector.uploadReference")}
         disabled={busy}
-        className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-slate-300 px-3 py-6 text-xs font-medium text-zinc-600 transition-all duration-300 hover:border-indigo-500 hover:bg-indigo-50/20 hover:text-indigo-600 dark:border-slate-700/80 dark:text-slate-300 dark:hover:border-violet-400 dark:hover:bg-violet-500/5 dark:hover:text-violet-200"
-        activeClassName="border-indigo-500 bg-indigo-50/60 text-indigo-700 shadow-[0_0_0_4px_rgba(99,102,241,0.12)] dark:border-violet-400 dark:bg-violet-500/12 dark:text-violet-100 dark:shadow-[0_0_0_4px_rgba(139,92,246,0.18)]"
-        focusClassName="focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-violet-400 dark:focus-visible:ring-offset-slate-950"
+        className={imageDropzoneClassName}
+        activeClassName="pf-action-surface--active"
         onFiles={(files) => {
           const file = files[0];
           if (file) {
@@ -1220,7 +1325,7 @@ function ReferenceImageInspector({
         )}
       </ImageDropZone>
       <ClipboardImageButton
-        buttonClassName={INSPECTOR_CLIPBOARD_IMAGE_BUTTON_CLASS}
+        buttonClassName={clipboardButtonClassName}
         disabled={busy}
         label={t("common.pasteImage")}
         closeLabel={t("common.close")}
@@ -1236,16 +1341,17 @@ function ReferenceImageInspector({
         onError={onClipboardError}
       />
       {onOpenResourceLibrary ? (
-        <button
-          type="button"
+        <ActionButton
           onClick={onOpenResourceLibrary}
           disabled={busy || Boolean(resourceLibraryDisabledTitle)}
           title={resourceLibraryDisabledTitle ?? t("resourceLibrary.open")}
-          className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-violet-400/55 dark:hover:bg-slate-900 dark:hover:text-white"
+          preset="secondary"
+          size="md"
+          fullWidth
+          leadingIcon={<FolderOpen size={14} />}
         >
-          <FolderOpen size={14} className="mr-2" />
           {t("resourceLibrary.open")}
-        </button>
+        </ActionButton>
       ) : null}
     </div>
   );
@@ -1271,16 +1377,18 @@ function SaveCurrentImageToResourceLibraryButton({
   }
 
   return (
-    <button
-      type="button"
+    <ActionButton
       onClick={() => onSaveSourceAssetToResourceLibrary(sourceAsset)}
       disabled={busy || Boolean(disabledTitle)}
       title={disabledTitle ?? t("resourceLibrary.saveToLibrary")}
-      className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-[#56B3FE] bg-gradient-to-r from-[#56B3FE] via-[#2F7CFF] to-[#8B5CF6] px-3 text-xs font-semibold text-white shadow-sm shadow-[#56B3FE]/25 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:border-[#7C3AED] hover:shadow-md hover:shadow-[#2F7CFF]/35 active:translate-y-px active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#56B3FE]/40 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:bg-none disabled:text-slate-500 disabled:shadow-none disabled:hover:border-slate-200 disabled:active:translate-y-0 disabled:active:scale-100 dark:disabled:border-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+      preset="primary"
+      size="md"
+      fullWidth
+      loading={busy}
+      leadingIcon={<Save size={14} />}
     >
-      {busy ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
       {saved ? t("resourceLibrary.alreadyInLibrary") : t("resourceLibrary.saveToLibrary")}
-    </button>
+    </ActionButton>
   );
 }
 
@@ -1298,12 +1406,12 @@ function ResourceGroupSelector({
   t: TFunction;
 }) {
   return (
-    <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+    <div className="space-y-2 rounded-xl border pf-hairline pf-surface-soft px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
       <FieldLabel
         label={label}
-        className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+        className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]"
       />
-      <SelectField
+      <LayoutSelectField
         value={draft.resourceGroupId ?? ""}
         options={[
           {
@@ -1501,38 +1609,40 @@ function DeckPreviewSurface({
   onPreviewImage: (image: DownloadableImage) => void;
   t: TFunction;
 }) {
+  const actionAppearance = useInspectorActionAppearance();
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/80 p-2 dark:border-slate-700 dark:bg-slate-950/55">
+    <div className="rounded-xl border pf-hairline bg-[rgba(255,255,255,0.8)] p-2 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <div className="truncate text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+        <div className="truncate text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
           {label}
         </div>
-        {caption ? <div className="truncate text-[10px] text-slate-500 dark:text-slate-400">{caption}</div> : null}
+        {caption ? <div className="truncate text-[10px] pf-ink-muted dark:text-[color:var(--pf-muted)]">{caption}</div> : null}
       </div>
       {image ? (
-        <div
-          className={`group relative overflow-hidden rounded-lg border border-slate-200 bg-white/70 dark:border-slate-700 dark:bg-slate-950/70 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
-        >
-          <button
-            type="button"
+        <div className={`relative ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}>
+          <LayoutActionSurfaceButton
+            appearance={actionAppearance}
+            preset="secondary"
             onClick={() => onPreviewImage(image)}
-            className={`block w-full ${aspectClassName}`}
+            className={`group relative w-full overflow-hidden p-0 ${aspectClassName}`}
+            style={INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE}
             aria-label={t("detail.previewImage", { alt: image.alt })}
           >
             <img
               src={thumbnailUrl || image.previewUrl}
               alt={image.alt}
-              className="h-full w-full object-contain bg-slate-100/70 p-1.5 transition-transform duration-300 ease-out group-hover:scale-[1.03] dark:bg-slate-950/80"
+              className="h-full w-full object-contain bg-[color:var(--pf-panel-soft)] p-1.5 transition-transform duration-300 ease-out group-hover:scale-[1.03] dark:bg-[color:var(--pf-deep)]"
             />
-            <span className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-zinc-950/70 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-[color:var(--pf-deep)] px-2 py-1 text-[10px] font-medium text-[#fff] opacity-0 transition-opacity group-hover:opacity-100">
               {t("detail.inspector.clickPreview")}
             </span>
-          </button>
-          <DownloadLink image={image} variant="overlay" />
+          </LayoutActionSurfaceButton>
+          <DownloadLink image={image} appearance={actionAppearance} variant="overlay" />
         </div>
       ) : (
         <div
-          className={`flex items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-3 text-center text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-400 ${aspectClassName}`}
+          className={`flex items-center justify-center rounded-lg border border-dashed pf-hairline bg-[color:var(--pf-panel-soft)] px-3 text-center text-[11px] pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)] ${aspectClassName}`}
         >
           {emptyLabel}
         </div>
@@ -1551,7 +1661,7 @@ function DeckMetaChip({
   return (
     <span
       title={title}
-      className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+      className="inline-flex items-center rounded-full border pf-hairline pf-surface px-2 py-0.5 text-[10px] font-medium pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]"
     >
       {label}
     </span>
@@ -1579,9 +1689,11 @@ function DeckSourceSection({
   onMoveSource: (sourceItemId: string, direction: -1 | 1) => void;
   t: TFunction;
 }) {
+  const actionAppearance = useInspectorActionAppearance();
+
   return (
     <div className="space-y-1.5">
-      <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{title}</div>
+      <div className="text-[11px] font-medium pf-ink-muted dark:text-[color:var(--pf-muted)]">{title}</div>
       {sources.length ? (
         sources.map((source) => {
           const sourceIndex = orderedSourceIds.indexOf(source.source_item_id);
@@ -1589,19 +1701,21 @@ function DeckSourceSection({
           return (
             <div
               key={source.source_item_id}
-              className={`rounded-lg border px-2.5 py-2 text-xs dark:border-slate-700 ${
+              className={`rounded-lg border px-2.5 py-2 text-xs dark:border-[color:var(--pf-border)] ${
                 source.selected
-                  ? "border-slate-200 bg-slate-50 dark:bg-[#0b1220]"
-                  : "border-slate-200/80 bg-slate-50/50 opacity-75 dark:bg-slate-950/40"
+                  ? "pf-hairline pf-surface-soft dark:bg-[#0b1220]"
+                  : "border-[color:var(--pf-border-soft)] bg-[color:var(--pf-panel-soft)] opacity-75 dark:bg-[color:var(--pf-deep)]"
               }`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 flex-1 gap-2.5">
                   {previewImage ? (
-                    <button
-                      type="button"
+                    <LayoutActionSurfaceButton
+                      appearance={actionAppearance}
+                      preset="secondary"
                       onClick={() => onPreviewImage(previewImage)}
-                      className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+                      className="group relative h-12 w-12 shrink-0 overflow-hidden p-0"
+                      style={INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE}
                       aria-label={t("detail.previewImage", { alt: previewImage.alt })}
                       title={t("detail.previewImage", { alt: previewImage.alt })}
                     >
@@ -1610,65 +1724,61 @@ function DeckSourceSection({
                         alt={previewImage.alt}
                         className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                       />
-                    </button>
+                    </LayoutActionSurfaceButton>
                   ) : null}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
+                      <ActionButton
                         disabled={actionBusy}
                         onClick={() => onToggleSelection(source.source_item_id, !source.selected)}
-                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                          source.selected
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-200"
-                            : "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
-                        }`}
+                        preset="secondary"
+                        size="sm"
+                        className="text-[10px]"
+                        aria-pressed={source.selected}
                       >
                         {source.selected ? t("detail.deck.sourceSelected") : t("detail.deck.sourceExcluded")}
-                      </button>
-                      <span className="truncate font-semibold text-slate-700 dark:text-slate-200">
+                      </ActionButton>
+                      <span className="truncate font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]">
                         {source.workflow_node_title}
                       </span>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                      <span className="shrink-0 rounded-full border pf-hairline pf-surface px-2 py-0.5 text-[10px] pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]">
                         {deckSourceKindLabel(source.kind, t)}
                       </span>
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">{source.source_item_id}</span>
+                      <span className="text-[10px] pf-ink-muted dark:text-[color:var(--pf-muted)]">{source.source_item_id}</span>
                     </div>
                     {source.summary ? (
-                      <div className="mt-1 line-clamp-3 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                      <div className="mt-1 line-clamp-3 text-[11px] leading-4 pf-ink-muted dark:text-[color:var(--pf-muted)]">
                         {source.summary}
                       </div>
                     ) : null}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
+                  <ActionButton
                     disabled={actionBusy || sourceIndex <= 0}
                     onClick={() => onMoveSource(source.source_item_id, -1)}
                     title={t("detail.deck.moveSourceUp")}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                  >
-                    <ChevronUp size={12} />
-                  </button>
-                  <button
-                    type="button"
+                    preset="secondary"
+                    size="icon-sm"
+                    leadingIcon={<ChevronUp size={12} />}
+                  />
+                  <ActionButton
                     disabled={actionBusy || sourceIndex < 0 || sourceIndex === orderedSourceIds.length - 1}
                     onClick={() => onMoveSource(source.source_item_id, 1)}
                     title={t("detail.deck.moveSourceDown")}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                  >
-                    <ChevronDown size={12} />
-                  </button>
+                    preset="secondary"
+                    size="icon-sm"
+                    leadingIcon={<ChevronDown size={12} />}
+                  />
                 </div>
               </div>
             </div>
           );
         })
       ) : (
-        <div className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+        <div className="rounded-lg border border-dashed pf-hairline-strong px-3 py-4 text-center text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
           {emptyLabel}
         </div>
       )}
@@ -1707,7 +1817,7 @@ function DeckGenerationInspectorSummary({
   const cardState = readDeckNodeCardState(node);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm dark:border-slate-700 dark:bg-[#0b1220]">
+    <div className="rounded-2xl border pf-hairline bg-[color:var(--pf-panel-soft)] p-4 shadow-sm dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
@@ -1727,17 +1837,18 @@ function DeckGenerationInspectorSummary({
                 <DeckMetaChip label={t("detail.deck.generatedCount", { count: cardState.generatedSlideCount })} />
               ) : null}
             </div>
-            <p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-300">{t("detail.deck.dagDeckHint")}</p>
+            <p className="mt-2 text-xs leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">{t("detail.deck.dagDeckHint")}</p>
           </div>
           {onOpenEditor ? (
-            <button
-              type="button"
+            <ActionButton
               onClick={onOpenEditor}
-              className="btn-secondary-spring inline-flex min-h-10 w-full shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold sm:w-auto"
+              preset="secondary"
+              size="md"
+              className="w-full sm:w-auto"
+              leadingIcon={<Maximize2 size={14} />}
             >
-              <Maximize2 size={14} />
               {t("detail.deck.openEditor")}
-            </button>
+            </ActionButton>
           ) : null}
         </div>
         {cardState?.sourceStale ? (
@@ -1771,24 +1882,23 @@ function DeckGenerationEditorDialog({
       onClose={onClose}
       ariaLabelledBy={headingId}
       panelElement="section"
-      overlayClassName="z-[90] bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:px-6 sm:py-6"
-      panelClassName="flex h-[min(92vh,58rem)] w-[min(96vw,78rem)] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#0f1726]"
+      overlayClassName="z-[90] bg-[color:var(--pf-deep)] px-3 py-4 backdrop-blur-sm sm:px-6 sm:py-6"
+      panelClassName="flex h-[min(92vh,58rem)] w-[min(96vw,78rem)] flex-col overflow-hidden rounded-[28px] border pf-hairline pf-surface shadow-2xl dark:border-[color:var(--pf-border)] dark:bg-[#0f1726]"
     >
-      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-700 sm:px-6">
+      <div className="flex items-start justify-between gap-4 border-b pf-hairline px-5 py-4 dark:border-[color:var(--pf-border)] sm:px-6">
         <div className="min-w-0 flex-1">
-          <h2 id={headingId} className="truncate text-base font-semibold text-slate-950 dark:text-white">
+          <h2 id={headingId} className="truncate text-base font-semibold pf-ink dark:text-[#fff]">
             {t("detail.deck.editorTitle", { title })}
           </h2>
-          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{t("detail.deck.dagDeckHint")}</p>
+          <p className="mt-1 text-xs leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">{t("detail.deck.dagDeckHint")}</p>
         </div>
-        <button
-          type="button"
+        <ActionButton
           onClick={onClose}
           aria-label={t("common.close")}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-        >
-          <X size={16} />
-        </button>
+          preset="secondary"
+          size="icon-md"
+          leadingIcon={<X size={16} />}
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
     </ModalShell>
@@ -2199,7 +2309,7 @@ function DeckGenerationInspector({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <FieldLabel label={t("detail.deck.planningStrategy")} />
-          <SelectField
+          <LayoutSelectField
             value={draft.deckPlanningStrategy}
             options={[
               { value: "hybrid", label: t("detail.deck.planningStrategy.hybrid") },
@@ -2219,7 +2329,7 @@ function DeckGenerationInspector({
         </label>
         <label className="block">
           <FieldLabel label={t("detail.deck.slideCountMode")} />
-          <SelectField
+          <LayoutSelectField
             value={draft.deckSlideCountMode}
             options={[
               { value: "auto", label: t("detail.deck.slideCountMode.auto") },
@@ -2240,7 +2350,7 @@ function DeckGenerationInspector({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label className="block">
           <FieldLabel label={t("detail.deck.style")} />
-          <SelectField
+          <LayoutSelectField
             value={draft.deckStyleKey}
             options={styles.map((style) => ({ value: style.key, label: style.label }))}
             onChange={(value) => {
@@ -2256,7 +2366,7 @@ function DeckGenerationInspector({
         </label>
         <label className="block">
           <FieldLabel label={t("detail.deck.slideImageSize")} />
-          <SelectField
+          <LayoutSelectField
             value={draft.deckSlideSize ?? ""}
             options={[
               { value: "", label: t("detail.deck.slideImageSize.default") },
@@ -2270,7 +2380,7 @@ function DeckGenerationInspector({
         </label>
         <label className="block">
           <FieldLabel label={t("detail.deck.maxSlides")} />
-          <input
+          <LayoutTextInput
             type="number"
             min={1}
             max={50}
@@ -2282,14 +2392,14 @@ function DeckGenerationInspector({
                 deckMaxSlides: Math.max(1, Math.min(50, Number.parseInt(event.target.value || "8", 10))),
               })
             }
-            className="w-full px-3 py-2 text-sm outline-none input-premium"
+            size="default"
           />
         </label>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="block">
           <FieldLabel label={t("detail.deck.groupBy")} />
-          <SelectField
+          <LayoutSelectField
             value={draft.deckGroupBy}
             options={[
               { value: "tail_item", label: t("detail.deck.groupBy.tailItem") },
@@ -2308,7 +2418,7 @@ function DeckGenerationInspector({
         </label>
         <label className="block">
           <FieldLabel label={t("detail.deck.perGroupImageCap")} />
-          <input
+          <LayoutTextInput
             type="number"
             min={1}
             max={12}
@@ -2319,37 +2429,33 @@ function DeckGenerationInspector({
                 deckPerGroupImageCap: Math.max(1, Math.min(12, Number.parseInt(event.target.value || "3", 10))),
               })
             }
-            className="w-full px-3 py-2 text-sm outline-none input-premium"
+            size="default"
           />
         </label>
-        <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200">
-          <input
-            type="checkbox"
-            checked={draft.deckSectionPages}
-            onChange={(event) => onDraftChange({ ...draft, deckSectionPages: event.target.checked })}
-            className="h-4 w-4 rounded border-slate-300"
-          />
+        <LayoutCheckbox
+          checked={draft.deckSectionPages}
+          onChange={(event) => onDraftChange({ ...draft, deckSectionPages: event.target.checked })}
+          variant="card"
+        >
           {t("detail.deck.sectionPages")}
-        </label>
+        </LayoutCheckbox>
       </div>
-      <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-200">
-        <input
-          type="checkbox"
-          checked={draft.deckIncludeTransitiveInputs}
-          onChange={(event) => onDraftChange({ ...draft, deckIncludeTransitiveInputs: event.target.checked })}
-          className="h-4 w-4 rounded border-slate-300"
-        />
+      <LayoutCheckbox
+        checked={draft.deckIncludeTransitiveInputs}
+        onChange={(event) => onDraftChange({ ...draft, deckIncludeTransitiveInputs: event.target.checked })}
+        variant="card"
+      >
         {t("detail.deck.includeTransitive")}
-      </label>
+      </LayoutCheckbox>
       {!deck ? (
         <label className="block">
           <FieldLabel label={t("detail.deck.deckTitle")} />
-          <input
+          <LayoutTextInput
             type="text"
             value={deckTitleDraft}
             disabled={actionBusy}
             onChange={(event) => setDeckTitleDraft(event.target.value)}
-            className="w-full px-3 py-2 text-sm outline-none input-premium"
+            size="default"
             placeholder={t("detail.deck.deckTitle")}
           />
         </label>
@@ -2362,23 +2468,24 @@ function DeckGenerationInspector({
         maxRows={6}
         placeholder={t("detail.deck.sourceInputPlaceholder")}
       />
-      <div className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+      <div className="rounded-xl border pf-hairline bg-[rgba(255,255,255,0.8)] p-3 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <FieldLabel label={t("detail.deck.sources")} className="text-xs font-semibold text-slate-700 dark:text-slate-200" />
-          <button
-            type="button"
+          <FieldLabel label={t("detail.deck.sources")} className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]" />
+          <ActionButton
             disabled={actionBusy}
             onClick={() => refreshSourcesMutation.mutate()}
-            className="inline-flex items-center rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            preset="secondary"
+            size="sm"
+            loading={refreshSourcesMutation.isPending}
+            leadingIcon={<RefreshCcw size={12} />}
           >
-            {refreshSourcesMutation.isPending ? <Loader2 size={12} className="mr-1 animate-spin" /> : <RefreshCcw size={12} className="mr-1" />}
             {t("detail.deck.refreshSources")}
-          </button>
+          </ActionButton>
         </div>
         {sourcesQuery.isLoading ? (
           <div className="space-y-2">
-            <div className="h-8 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
-            <div className="h-8 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+            <div className="h-8 animate-pulse rounded-lg pf-surface-soft dark:bg-[color:var(--pf-deep)]" />
+            <div className="h-8 animate-pulse rounded-lg pf-surface-soft dark:bg-[color:var(--pf-deep)]" />
           </div>
         ) : availableSources.length ? (
           <div className="space-y-3">
@@ -2406,7 +2513,7 @@ function DeckGenerationInspector({
             />
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          <div className="rounded-lg border border-dashed pf-hairline-strong px-3 py-5 text-center text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
             {t("detail.deck.noSources")}
           </div>
         )}
@@ -2423,7 +2530,7 @@ function DeckGenerationInspector({
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate font-semibold">{source.workflow_node_title}</span>
                   {source.kind ? (
-                    <span className="shrink-0 rounded-full border border-amber-200 bg-white/80 px-2 py-0.5 text-[10px] text-amber-700 dark:border-amber-300/20 dark:bg-slate-950/60 dark:text-amber-100">
+                    <span className="shrink-0 rounded-full border border-amber-200 bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] text-amber-700 dark:border-amber-300/20 dark:bg-[color:var(--pf-deep)] dark:text-amber-100">
                       {deckSourceKindLabel(source.kind, t)}
                     </span>
                   ) : null}
@@ -2441,42 +2548,45 @@ function DeckGenerationInspector({
         ) : null}
       </div>
       <div className="grid gap-2 sm:grid-cols-3">
-        <button
-          type="button"
+        <ActionButton
           disabled={actionBusy}
           onClick={() => outlineMutation.mutate()}
           title={t("detail.deck.outline")}
-          className="inline-flex min-h-10 items-center justify-center rounded-xl px-3 text-xs font-semibold btn-primary-spring disabled:cursor-not-allowed disabled:opacity-50"
+          preset={deck ? "secondary" : "primary"}
+          size="md"
+          loading={outlineMutation.isPending}
+          leadingIcon={<Settings2 size={13} />}
         >
-          {outlineMutation.isPending ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Settings2 size={13} className="mr-1.5" />}
           {deck ? t("detail.deck.refreshOutline") : t("detail.deck.outline")}
-        </button>
-        <button
-          type="button"
+        </ActionButton>
+        <ActionButton
           disabled={actionBusy || !deck || generating}
           onClick={() => sampleMutation.mutate()}
-          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+          preset="secondary"
+          size="md"
+          loading={sampleMutation.isPending}
+          leadingIcon={<Wand2 size={13} />}
         >
-          {sampleMutation.isPending ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Wand2 size={13} className="mr-1.5" />}
           {t("detail.deck.sample")}
-        </button>
-        <button
-          type="button"
+        </ActionButton>
+        <ActionButton
           disabled={actionBusy || !deck || generating}
           onClick={() => generateMutation.mutate()}
-          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+          preset="primary"
+          size="md"
+          loading={generateMutation.isPending || generating}
+          leadingIcon={<Sparkles size={13} />}
         >
-          {generateMutation.isPending || generating ? <Loader2 size={13} className="mr-1.5 animate-spin" /> : <Sparkles size={13} className="mr-1.5" />}
           {generating ? t("detail.deck.generating") : t("detail.deck.generate")}
-        </button>
+        </ActionButton>
       </div>
       {deck ? (
-        <div className="rounded-xl border border-slate-200 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+        <div className="rounded-xl border pf-hairline bg-[rgba(255,255,255,0.8)] p-3 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0 flex-1">
               <label className="block">
                 <FieldLabel label={t("detail.deck.deckTitle")} />
-                <input
+                <LayoutTextInput
                   type="text"
                   value={deckTitleDraft}
                   disabled={metadataMutation.isPending}
@@ -2487,36 +2597,37 @@ function DeckGenerationInspector({
                       event.currentTarget.blur();
                     }
                   }}
-                  className="w-full rounded-lg border border-transparent bg-transparent px-0 py-1 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-slate-200 focus:bg-white focus:px-2 dark:text-white dark:focus:border-slate-700 dark:focus:bg-slate-950"
+                  size="compact"
+                  className="font-semibold"
                   placeholder={t("detail.deck.deckTitle")}
                 />
               </label>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="text-[11px] pf-ink-muted dark:text-[color:var(--pf-muted)]">
                 {t(DECK_STATUS_LABEL_KEYS[deck.status])} · {t("detail.deck.slideCount", { count: deck.slides.length })} · {t("detail.deck.generatedCount", { count: deck.generated_slide_count })}
               </div>
-              <label className="mt-2 inline-flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={deck.speaker_notes_enabled}
-                  disabled={metadataMutation.isPending}
-                  onChange={(event) => metadataMutation.mutate({ speaker_notes_enabled: event.target.checked })}
-                  className="h-3.5 w-3.5 rounded border-slate-300"
-                />
+              <LayoutCheckbox
+                checked={deck.speaker_notes_enabled}
+                disabled={metadataMutation.isPending}
+                onChange={(event) => metadataMutation.mutate({ speaker_notes_enabled: event.target.checked })}
+                size="sm"
+                wrapperClassName="mt-2 text-[11px] font-medium pf-ink-muted dark:text-[color:var(--pf-muted)]"
+              >
                 {t("detail.deck.speakerNotesEnabled")}
-              </label>
+              </LayoutCheckbox>
             </div>
             {deck.generated_slide_count > 0 ? (
-              <button
-                type="button"
+              <ActionButton
                 disabled={exportMutation.isPending}
                 onClick={() => exportMutation.mutate()}
-                className="inline-flex items-center rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                preset="secondary"
+                size="sm"
+                loading={exportMutation.isPending}
+                leadingIcon={<Download size={12} />}
               >
-                {exportMutation.isPending ? <Loader2 size={12} className="mr-1 animate-spin" /> : <Download size={12} className="mr-1" />}
                 {exportMutation.isPending && pptxProgress
                   ? t("detail.deck.exportingPptx", pptxProgress)
                   : t("detail.deck.exportPptx")}
-              </button>
+              </ActionButton>
             ) : null}
           </div>
           <div className="space-y-2">
@@ -2632,6 +2743,8 @@ function DeckNodeSlideRow({
   const generatedImage = deckGeneratedSlidePreviewImage(slide, t);
   const materialPreviewImage = deckMaterialPreviewImage(slide, selectedBoundSource, t);
   const hasPreviewRail = Boolean(generatedImage || materialPreviewImage);
+  const actionAppearance = useInspectorActionAppearance();
+
   useEffect(() => {
     setTitleDraft(slide.title);
     setPointsDraft(deckPointsDraft(slide.points));
@@ -2670,120 +2783,118 @@ function DeckNodeSlideRow({
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-700 dark:bg-[#0b1220]">
+    <div className="rounded-lg border pf-hairline pf-surface-soft px-2.5 py-2 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
       <div className={`grid gap-3 ${hasPreviewRail ? "lg:grid-cols-[minmax(0,1fr)_11.5rem]" : ""}`}>
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white text-[11px] font-semibold text-slate-500 shadow-sm dark:bg-slate-950 dark:text-slate-300">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full pf-surface text-[11px] font-semibold pf-ink-muted shadow-sm dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]">
                 {index + 1}
               </span>
               <div className="min-w-0">
-                <div className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+                <div className="truncate text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]">
                   {titleDraft || slide.title}
                 </div>
-                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                <div className="mt-0.5 text-[11px] pf-ink-muted dark:text-[color:var(--pf-muted)]">
                   {t(DECK_SLIDE_STATUS_LABEL_KEYS[slide.slide_status])}
                 </div>
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-1">
-              <button
-                type="button"
+              <ActionButton
                 disabled={actionBusy || !canMoveUp}
                 onClick={onMoveUp}
                 aria-label={t("detail.deck.moveUp")}
                 title={t("detail.deck.moveUp")}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-              >
-                <ChevronUp size={13} />
-              </button>
-              <button
-                type="button"
+                preset="secondary"
+                size="icon-sm"
+                leadingIcon={<ChevronUp size={13} />}
+              />
+              <ActionButton
                 disabled={actionBusy || !canMoveDown}
                 onClick={onMoveDown}
                 aria-label={t("detail.deck.moveDown")}
                 title={t("detail.deck.moveDown")}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-              >
-                <ChevronDown size={13} />
-              </button>
-              <button
-                type="button"
+                preset="secondary"
+                size="icon-sm"
+                leadingIcon={<ChevronDown size={13} />}
+              />
+              <ActionButton
                 disabled={actionBusy}
                 onClick={commitSlideDraft}
                 aria-label={t("detail.deck.saveSlide")}
                 title={t("detail.deck.saveSlide")}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-              >
-                {updateBusy ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              </button>
-              <button
-                type="button"
+                preset="secondary"
+                size="icon-sm"
+                loading={updateBusy}
+                leadingIcon={<Save size={13} />}
+              />
+              <ActionButton
                 disabled={actionBusy || slide.slide_status === "queued" || slide.slide_status === "running"}
                 onClick={onRegenerate}
                 aria-label={t("detail.deck.regenerateSlide")}
                 title={t("detail.deck.regenerateSlide")}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-              >
-                {regenerateBusy ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
-              </button>
-              <button
-                type="button"
+                preset="secondary"
+                size="icon-sm"
+                loading={regenerateBusy}
+                leadingIcon={<Wand2 size={13} />}
+              />
+              <ActionButton
                 disabled={actionBusy}
                 onClick={onGenerateNotes}
                 aria-label={t("detail.deck.generateSpeakerNotes")}
                 title={t("detail.deck.generateSpeakerNotes")}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-              >
-                {notesBusy ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
-              </button>
-              <button
-                type="button"
+                preset="secondary"
+                size="icon-sm"
+                loading={notesBusy}
+                leadingIcon={<FileText size={13} />}
+              />
+              <ActionButton
                 disabled={actionBusy || !slide.material_url}
                 onClick={onEnhanceMaterial}
                 aria-label={t("detail.deck.enhanceMaterial")}
                 title={t("detail.deck.enhanceMaterial")}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:text-white"
-              >
-                {enhanceBusy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-              </button>
+                preset="secondary"
+                size="icon-sm"
+                loading={enhanceBusy}
+                leadingIcon={<Sparkles size={13} />}
+              />
             </div>
           </div>
           <div className="grid gap-2">
             <label className="block">
               <FieldLabel label={t("detail.deck.slideTitle")} />
-              <input
+              <LayoutTextInput
                 type="text"
                 value={titleDraft}
                 disabled={actionBusy}
                 onChange={(event) => setTitleDraft(event.target.value)}
                 onBlur={commitSlideDraft}
-                className="w-full px-3 py-2 text-xs outline-none input-premium"
+                size="compact"
                 placeholder={t("detail.deck.slideTitle")}
               />
             </label>
             <label className="block">
               <FieldLabel label={t("detail.deck.slidePoints")} />
-              <textarea
+              <LayoutTextarea
                 value={pointsDraft}
                 disabled={actionBusy}
                 onChange={(event) => setPointsDraft(event.target.value)}
                 onBlur={commitSlideDraft}
-                rows={3}
-                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+                size="compact"
+                minRows={3}
                 placeholder={t("detail.deck.slidePointsPlaceholder")}
               />
             </label>
             <label className="block">
               <FieldLabel label={t("detail.deck.speakerNotes")} />
-              <textarea
+              <LayoutTextarea
                 value={notesDraft}
                 disabled={actionBusy}
                 onChange={(event) => setNotesDraft(event.target.value)}
                 onBlur={commitSlideDraft}
-                rows={3}
-                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
+                size="compact"
+                minRows={3}
                 placeholder={t("detail.deck.speakerNotesPlaceholder")}
               />
             </label>
@@ -2793,7 +2904,7 @@ function DeckNodeSlideRow({
             plannedSourceRefs.length ||
             slidePlan.materialHint ||
             selectedSourceItemId ? (
-              <div className="border-t border-slate-200 pt-2 text-[11px] dark:border-slate-700">
+              <div className="border-t pf-hairline pt-2 text-[11px] dark:border-[color:var(--pf-border)]">
                 <div className="flex flex-wrap gap-1">
                   {slidePlan.pageType ? <DeckMetaChip label={deckPageTypeLabel(slidePlan.pageType, t)} /> : null}
                   {groupLabel ? <DeckMetaChip label={groupLabel} title={slidePlan.groupId ?? undefined} /> : null}
@@ -2801,7 +2912,7 @@ function DeckNodeSlideRow({
                 </div>
                 {plannedSourceRefs.length ? (
                   <div className="mt-2">
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
                       {t("detail.deck.plannedSources")}
                     </div>
                     <div className="flex flex-wrap gap-1">
@@ -2817,7 +2928,7 @@ function DeckNodeSlideRow({
                 ) : null}
                 {selectedSourceItemId ? (
                   <div className="mt-2">
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
                       {t("detail.deck.currentMaterial")}
                     </div>
                     <div className="flex flex-wrap gap-1">
@@ -2830,34 +2941,34 @@ function DeckNodeSlideRow({
                 ) : null}
                 {slidePlan.materialHint ? (
                   <div className="mt-2">
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
                       {t("detail.deck.materialHint")}
                     </div>
-                    <div className="leading-5 text-slate-600 dark:text-slate-300">{slidePlan.materialHint}</div>
+                    <div className="leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">{slidePlan.materialHint}</div>
                   </div>
                 ) : null}
               </div>
             ) : null}
             <div className="flex items-center gap-1.5">
-              <button
-                type="button"
+              <ActionButton
                 disabled={actionBusy}
                 onClick={() => onSetBindingSlideId(bindingOpen ? null : slide.id)}
-                className="inline-flex min-h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                preset="secondary"
+                size="sm"
+                leadingIcon={<ImageIcon size={12} />}
               >
-                <ImageIcon size={12} className="mr-1" />
                 {selectedSourceItemId ? t("detail.deck.changeMaterial") : t("detail.deck.bindMaterial")}
-              </button>
+              </ActionButton>
               {selectedSourceItemId ? (
-                <button
-                  type="button"
+                <ActionButton
                   disabled={actionBusy || unbindBusy}
                   onClick={() => onUnbind()}
-                  className="inline-flex min-h-8 items-center justify-center rounded-lg border border-red-200 bg-white px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-slate-950 dark:text-red-400 dark:hover:bg-red-950/30"
+                  preset="danger"
+                  size="sm"
+                  loading={unbindBusy}
                 >
-                  {unbindBusy ? <Loader2 size={12} className="mr-1 animate-spin" /> : null}
                   {t("detail.deck.unbindMaterial")}
-                </button>
+                </ActionButton>
               ) : null}
             </div>
           </div>
@@ -2909,15 +3020,17 @@ function DeckNodeSlideRow({
                   className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-2 text-[11px] transition-colors ${
                     isSelected
                       ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-sky-300/40 dark:bg-sky-400/15 dark:text-sky-100"
-                      : "border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                      : "pf-hairline pf-surface pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]"
                   }`}
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     {previewImage ? (
-                      <button
-                        type="button"
+                      <LayoutActionSurfaceButton
+                        appearance={actionAppearance}
+                        preset="secondary"
                         onClick={() => onPreviewImage(previewImage)}
-                        className="group relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+                        className="group relative h-11 w-11 shrink-0 overflow-hidden p-0"
+                        style={INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE}
                         aria-label={t("detail.previewImage", { alt: previewImage.alt })}
                         title={t("detail.previewImage", { alt: previewImage.alt })}
                       >
@@ -2926,9 +3039,9 @@ function DeckNodeSlideRow({
                           alt={previewImage.alt}
                           className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                         />
-                      </button>
+                      </LayoutActionSurfaceButton>
                     ) : (
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-500">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed pf-hairline-strong pf-surface-soft pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]">
                         <ImageIcon size={14} />
                       </div>
                     )}
@@ -2942,24 +3055,21 @@ function DeckNodeSlideRow({
                       </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
+                  <ActionButton
                     disabled={bindingBusy || isSelected}
                     onClick={() => onBind(source.source_item_id)}
-                    className={`inline-flex min-h-8 shrink-0 items-center justify-center rounded-lg border px-2 py-1 font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                      isSelected
-                        ? "border-blue-300 bg-blue-100 text-blue-700 dark:border-sky-300/40 dark:bg-sky-300/20 dark:text-sky-100"
-                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                    }`}
+                    preset="secondary"
+                    size="sm"
+                    aria-pressed={isSelected}
+                    loading={bindingBusy && isSelected}
                   >
-                    {bindingBusy && isSelected ? <Loader2 size={12} className="mr-1 animate-spin" /> : null}
                     {isSelected ? t("detail.deck.currentMaterial") : t("detail.deck.bindMaterial")}
-                  </button>
+                  </ActionButton>
                 </div>
               );
             })
           ) : (
-            <div className="rounded-lg border border-dashed border-slate-300 px-2 py-2 text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            <div className="rounded-lg border border-dashed pf-hairline-strong px-2 py-2 text-[11px] pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
               {t("detail.deck.noBindableSources")}
             </div>
           )}
@@ -2987,14 +3097,14 @@ function GenerationConfigSelector({
   t: TFunction;
 }) {
   return (
-    <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+    <div className="space-y-2 rounded-xl border pf-hairline pf-surface-soft px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
       <FieldLabel
         label={label}
         helpKey={helpKey}
-        className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+        className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]"
       />
       <div className="grid gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-        <SelectField
+        <LayoutSelectField
           value={mode}
           options={[
             { value: "auto", label: t("detail.inspector.generationConfigAuto") },
@@ -3011,7 +3121,7 @@ function GenerationConfigSelector({
           radius="lg"
           visualSize="sm"
         />
-        <SelectField
+        <LayoutSelectField
           value={mode === "manual" ? (generationConfigId ?? "") : ""}
           options={[
             {
@@ -3093,27 +3203,27 @@ function CopyNodeInspector({
       />
       <div className="block">
         <FieldLabel label={t("detail.inspector.tone")} helpKey="copyTone" />
-        <input
+        <LayoutTextInput
           value={draft.tone}
           onChange={(event) =>
             onDraftChange({ ...draft, tone: event.target.value })
           }
-          className="w-full px-3 py-2 text-xs outline-none input-premium"
+          size="compact"
         />
       </div>
       <div className="block">
         <FieldLabel label={t("detail.inspector.channel")} helpKey="copyChannel" />
-        <input
+        <LayoutTextInput
           value={draft.channel}
           onChange={(event) =>
             onDraftChange({ ...draft, channel: event.target.value })
           }
-          className="w-full px-3 py-2 text-xs outline-none input-premium"
+          size="compact"
         />
       </div>
       {hasCopy ? (
-        <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
-          <div className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+        <div className="space-y-3 rounded-2xl border pf-hairline bg-[color:var(--pf-panel-soft)] p-3 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
+          <div className="text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
             {t("detail.inspector.editCopy")}
           </div>
           {copyPayload ? (
@@ -3123,7 +3233,7 @@ function CopyNodeInspector({
               t={t}
             />
           ) : null}
-          <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-[11px] leading-5 text-zinc-500 dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-400">
+          <div className="rounded-md border pf-hairline pf-surface-soft px-3 py-2 text-[11px] leading-5 pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#151f33] dark:text-[color:var(--pf-muted)]">
             {t("detail.inspector.copyAutosave")}
           </div>
         </div>
@@ -3175,15 +3285,15 @@ function TailSplitterInspector({
       />
       <div className="block">
         <FieldLabel label={t("detail.inspector.tailMaxItems")} helpKey="tailMaxItems" />
-        <input
+        <LayoutTextInput
           type="number"
           min={1}
           max={tailSplitterMaxItems}
           value={draft.channel}
           onChange={(event) => onDraftChange({ ...draft, channel: event.target.value })}
-          className="w-full px-3 py-2 text-xs outline-none input-premium"
+          size="compact"
         />
-        <span className="mt-1 block text-[11px] leading-5 text-zinc-500 dark:text-slate-400">
+        <span className="mt-1 block text-[11px] leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">
           {t("detail.inspector.tailMaxItemsHint", { max: tailSplitterMaxItems })}
         </span>
       </div>
@@ -3210,19 +3320,21 @@ function TailSplitterInspector({
         t={t}
       />
       {appliedBatchCount > 0 && onCreateDeckFromTail ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-slate-900/45">
-          <div className="text-[11px] leading-5 text-zinc-500 dark:text-slate-400">
+        <div className="rounded-xl border pf-hairline pf-surface-soft px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)]">
+          <div className="text-[11px] leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">
             {t("detail.tailPlan.createDeckDescription", { count: appliedBatchCount })}
           </div>
-          <button
-            type="button"
+          <ActionButton
             onClick={() => onCreateDeckFromTail(node)}
             disabled={createDeckPending}
-            className="mt-3 inline-flex h-9 items-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-violet-500 dark:hover:bg-violet-400"
+            preset="primary"
+            size="md"
+            className="mt-3"
+            loading={createDeckPending}
+            leadingIcon={<Presentation size={14} />}
           >
-            {createDeckPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Presentation size={14} className="mr-2" />}
             {t("detail.tailPlan.createDeck")}
-          </button>
+          </ActionButton>
         </div>
       ) : null}
     </div>
@@ -3231,12 +3343,16 @@ function TailSplitterInspector({
 
 function ImageEnhanceInspector({
   draft,
+  imageSizeOptions,
+  imageGenerationMaxDimension,
   resourceGroups,
   generationConfigOptions,
   onDraftChange,
   t,
 }: {
   draft: NodeConfigDraft;
+  imageSizeOptions: ImageSizeOption[];
+  imageGenerationMaxDimension: number;
   resourceGroups: GenerationResourceGroup[];
   generationConfigOptions: GenerationConfigOption[];
   onDraftChange: (draft: NodeConfigDraft) => void;
@@ -3251,15 +3367,23 @@ function ImageEnhanceInspector({
     { value: "3", label: "3x" },
     { value: "4", label: "4x" },
   ];
+  const maxTileBaseSize = Math.max(256, Math.min(2048, imageGenerationMaxDimension));
+  const directSizeValue =
+    imageSizeValueFromDimensions(
+      draft.imageEnhanceTargetWidth,
+      draft.imageEnhanceTargetHeight,
+      imageGenerationMaxDimension,
+    ) ?? "";
+  const inputAppearance = layoutInputAppearance(useInspectorWorkspaceSubpage());
 
   return (
     <div className="space-y-3">
-      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+      <div className="space-y-2 rounded-xl border pf-hairline pf-surface-soft px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
         <FieldLabel
           label={t("enhance.strategy")}
-          className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+          className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]"
         />
-        <SelectField
+        <LayoutSelectField
           value={draft.imageEnhanceStrategy}
           options={strategyOptions}
           onChange={(value) =>
@@ -3272,7 +3396,7 @@ function ImageEnhanceInspector({
           radius="lg"
           visualSize="sm"
         />
-        <div className="text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+        <div className="text-[11px] leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">
           {draft.imageEnhanceStrategy === "tiled"
             ? t("enhance.strategy.tiledHelp")
             : t("enhance.strategy.directHelp")}
@@ -3280,45 +3404,34 @@ function ImageEnhanceInspector({
       </div>
 
       {draft.imageEnhanceStrategy === "direct" ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block">
-            <FieldLabel label={t("enhance.customWidth")} />
-            <input
-              type="number"
-              min={64}
-              step={16}
-              value={draft.imageEnhanceTargetWidth}
-              onChange={(event) =>
-                onDraftChange({
-                  ...draft,
-                  imageEnhanceTargetWidth: event.target.value,
-                })
+        <div className="space-y-2 rounded-xl border pf-hairline pf-surface-soft px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
+          <FieldLabel
+            label={t("enhance.directSize")}
+            className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]"
+          />
+          <ImageSizePicker
+            value={directSizeValue}
+            presets={imageSizeOptions}
+            maxDimension={imageGenerationMaxDimension}
+            appearance={inputAppearance}
+            onChange={(value) => {
+              const parsed = parseImageSizeValue(value, imageGenerationMaxDimension);
+              if (!parsed) {
+                return;
               }
-              className="w-full px-3 py-2 text-xs outline-none input-premium"
-            />
-          </label>
-          <label className="block">
-            <FieldLabel label={t("enhance.customHeight")} />
-            <input
-              type="number"
-              min={64}
-              step={16}
-              value={draft.imageEnhanceTargetHeight}
-              onChange={(event) =>
-                onDraftChange({
-                  ...draft,
-                  imageEnhanceTargetHeight: event.target.value,
-                })
-              }
-              className="w-full px-3 py-2 text-xs outline-none input-premium"
-            />
-          </label>
+              onDraftChange({
+                ...draft,
+                imageEnhanceTargetWidth: String(parsed.width),
+                imageEnhanceTargetHeight: String(parsed.height),
+              });
+            }}
+          />
         </div>
       ) : (
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-700 dark:bg-[#0b1220]">
+        <div className="space-y-3 rounded-xl border pf-hairline pf-surface-soft px-3 py-3 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
           <label className="block">
             <FieldLabel label={t("enhance.tiledScale")} />
-            <SelectField
+            <LayoutSelectField
               value={draft.imageEnhanceScale}
               options={scaleOptions}
               onChange={(value) =>
@@ -3334,10 +3447,10 @@ function ImageEnhanceInspector({
           </label>
           <label className="block">
             <FieldLabel label={t("enhance.tileBaseSize")} />
-            <input
+            <LayoutTextInput
               type="number"
               min={256}
-              max={2048}
+              max={maxTileBaseSize}
               step={128}
               value={draft.imageEnhanceTileBaseSize}
               onChange={(event) =>
@@ -3346,7 +3459,7 @@ function ImageEnhanceInspector({
                   imageEnhanceTileBaseSize: event.target.value,
                 })
               }
-              className="w-full px-3 py-2 text-xs outline-none input-premium"
+              size="compact"
             />
           </label>
           <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-[11px] leading-5 text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/10 dark:text-violet-100">
@@ -3558,7 +3671,7 @@ function CopySectionEditor({
       />
       {section.items.length ? (
         <div className="space-y-1.5">
-          <div className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+          <div className="text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
             {t("detail.inspector.items")}
           </div>
           <div className="space-y-1.5">
@@ -3652,17 +3765,14 @@ function CopyEditorRemoveButton({
   }
   return (
     <div className="flex justify-end">
-      <button
-        type="button"
+      <ActionButton
         onClick={onRemove}
-        className={`inline-flex items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-600 transition-colors hover:border-red-300 hover:bg-red-100 hover:text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/60 dark:hover:bg-red-500/16 ${
-          compact ? "h-7 w-7" : "h-8 w-8"
-        }`}
+        preset="danger"
+        size={compact ? "icon-sm" : "icon-md"}
         aria-label={label}
         title={label}
-      >
-        <Trash2 size={compact ? 12 : 14} />
-      </button>
+        leadingIcon={<Trash2 size={compact ? 12 : 14} />}
+      />
     </div>
   );
 }
@@ -3692,23 +3802,26 @@ function OptionalTextInput({
   helpKey?: ParameterHelpKey;
 }) {
   const [isEditing, setIsEditing] = useState(hasText(value));
+  const actionAppearance = useInspectorActionAppearance();
+  const addCopyFieldButtonClassName = inspectorAddCopyFieldButtonClassName(actionAppearance);
   const shouldShowInput = isEditing || hasText(value);
 
   if (!shouldShowInput) {
     return (
-      <button
-        type="button"
-        className={ADD_COPY_FIELD_BUTTON_CLASS_NAME}
+      <ActionButton
+        className={addCopyFieldButtonClassName}
         onClick={() => setIsEditing(true)}
+        preset="secondary"
+        size="sm"
+        leadingIcon={<Plus size={12} />}
       >
-        <Plus size={12} />
         {addLabel}
-      </button>
+      </ActionButton>
     );
   }
 
   const input = (
-    <input
+    <LayoutTextInput
       value={value}
       onChange={(event) => onChange(event.target.value)}
       onBlur={() => {
@@ -3717,7 +3830,7 @@ function OptionalTextInput({
         }
       }}
       placeholder={placeholder}
-      className="w-full px-3 py-2 text-xs outline-none input-premium"
+      size="compact"
     />
   );
 
@@ -3732,7 +3845,7 @@ function OptionalTextInput({
 
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-slate-400">
+      <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest pf-ink-muted dark:text-[color:var(--pf-muted)]">
         {label}
       </span>
       {input}
@@ -3756,18 +3869,21 @@ function OptionalTextArea({
   helpKey?: ParameterHelpKey;
 }) {
   const [isEditing, setIsEditing] = useState(hasText(value));
+  const actionAppearance = useInspectorActionAppearance();
+  const addCopyFieldButtonClassName = inspectorAddCopyFieldButtonClassName(actionAppearance);
   const shouldShowTextArea = isEditing || hasText(value);
 
   if (!shouldShowTextArea) {
     return (
-      <button
-        type="button"
-        className={ADD_COPY_FIELD_BUTTON_CLASS_NAME}
+      <ActionButton
+        className={addCopyFieldButtonClassName}
         onClick={() => setIsEditing(true)}
+        preset="secondary"
+        size="sm"
+        leadingIcon={<Plus size={12} />}
       >
-        <Plus size={12} />
         {addLabel}
-      </button>
+      </ActionButton>
     );
   }
 
@@ -3840,6 +3956,7 @@ function ImageGenerationInspector({
   const savedInstruction = node.output_json ? outputText(node.output_json, "instruction") : "";
   const previewText = savedInstruction || draft.instruction;
   const promptMeta = savedInstruction ? t("detail.inspector.savedPromptMeta") : t("detail.inspector.currentDraft");
+  const inputAppearance = layoutInputAppearance(useInspectorWorkspaceSubpage());
 
   return (
     <div className="space-y-3">
@@ -3853,15 +3970,15 @@ function ImageGenerationInspector({
         onChange={setSettingsTab}
         basic={
           <div className="space-y-3">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-[#0b1220]">
+            <div className="rounded-xl border pf-hairline pf-surface-soft px-3 py-2 dark:border-[color:var(--pf-border)] dark:bg-[#0b1220]">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">{t("detail.inspector.generationCount")}</div>
-                  <div className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+                  <div className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]">{t("detail.inspector.generationCount")}</div>
+                  <div className="mt-1 text-[11px] leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">
                     {t("detail.inspector.downstreamImageCount", { count: downstreamReferenceCount })}
                   </div>
                 </div>
-                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-[#151f33] dark:text-slate-200">
+                <span className="shrink-0 rounded-full border pf-hairline pf-surface px-2.5 py-1 text-xs font-semibold pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#151f33] dark:text-[color:var(--pf-muted)]">
                   {t("detail.inspector.imageCount", { count: downstreamReferenceCount })}
                 </span>
               </div>
@@ -3895,8 +4012,7 @@ function ImageGenerationInspector({
               t={t}
             />
             {previewText.trim() ? (
-              <button
-                type="button"
+              <ActionButton
                 onClick={() =>
                   onPreviewPrompt({
                     title: t("detail.inspector.imagePrompt"),
@@ -3904,17 +4020,20 @@ function ImageGenerationInspector({
                     meta: promptMeta,
                   })
                 }
-                className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-950 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-300 dark:hover:border-violet-400/45 dark:hover:bg-violet-500/12 dark:hover:text-white"
+                preset="secondary"
+                size="md"
+                fullWidth
+                leadingIcon={<FileText size={13} />}
               >
-                <FileText size={13} className="mr-1.5" />
                 {t("detail.inspector.reviewPrompt")}
-              </button>
+              </ActionButton>
             ) : null}
             <ImageGenerationSettingsPanel
               surface="plain"
               size={draft.size}
               sizeOptions={imageSizeOptions}
               maxDimension={imageGenerationMaxDimension}
+              appearance={inputAppearance}
               toolOptions={draft.toolOptions}
               allowedToolFields={imageToolAllowedFields}
               onSizeChange={(size) => onDraftChange({ ...draft, size })}
@@ -3929,13 +4048,14 @@ function ImageGenerationInspector({
             <FieldLabel
               label={t("detail.inspector.imageToolOptions")}
               helpKey="imageToolOptions"
-              className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+              className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]"
             />
             <ImageToolControls
               surface="plain"
               value={draft.toolOptions}
               allowedFields={imageToolAllowedFields}
               helpUiType="inspirationDetail"
+              appearance={inputAppearance}
               onChange={(toolOptions) => onDraftChange({ ...draft, toolOptions })}
             />
           </div>

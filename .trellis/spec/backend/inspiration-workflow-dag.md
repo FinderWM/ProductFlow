@@ -226,7 +226,9 @@ Keep the template as node and edge specs so application code can persist visible
 - API: `POST /api/inspirations` multipart form.
 - Existing required fields remain:
   - `name: str`
-  - `image: UploadFile`
+- Main-image inputs:
+  - `image: UploadFile | None`
+  - `image_source_asset_id: str | None`
 - Existing optional fields remain:
   - `reference_images: list[UploadFile] | None`
   - `category: str | None`
@@ -250,6 +252,12 @@ Keep the template as node and edge specs so application code can persist visible
 - Only `CanvasTemplate.kind == "full_canvas"` is valid at inspiration creation time.
 - Built-in/global ecommerce templates are complete `full_canvas` templates. Inspiration creation may materialize any usable
   catalog full-canvas template visible to the actor.
+- `image` entry may start from either a validated upload file or a resource-library asset id owned by the current actor.
+  `copy`, `tail`, and `blank` entries may omit both main-image inputs.
+- Resource-library main-image creation is copy-based. `create_inspiration` must read the selected library asset, validate
+  ownership/usability, copy the stored bytes into a new inspiration `SourceAssetKind.ORIGINAL_IMAGE`, and use that new
+  source-asset id in the `inspiration_context` config. Do not bind the resource-library asset id directly as the
+  inspiration main-image artifact.
 - `create_inspiration` owns the SQLAlchemy transaction. Template materialization helpers may `flush` rows to resolve ids, but
   must not `commit` independently.
 - Materialized `WorkflowNode` rows copy template `node_type`, `title`, `position_x`, `position_y`, and `config_json`.
@@ -269,6 +277,9 @@ Keep the template as node and edge specs so application code can persist visible
 ### 4. Validation & Error Matrix
 
 - `canvas_template_key` missing/blank/default alias -> create inspiration, no eager workflow row.
+- `initial_workflow_entry="image"` with neither `image` nor `image_source_asset_id` -> `BusinessValidationError("请先上传灵感图")`.
+- Missing, archived, foreign-owner, or hidden `image_source_asset_id` -> the existing resource-library missing/disabled
+  detail from the ownership and moderation guards.
 - Unknown non-default key -> `BusinessValidationError("画布模板不存在")` or equivalent template-missing `400`.
 - Disabled/unavailable template key -> `BusinessValidationError("画布模板不存在")` for catalog-hidden rows or
   `BusinessValidationError("资源已被管理员屏蔽，暂不可使用")` when resolved but not usable.
@@ -281,6 +292,8 @@ Keep the template as node and edge specs so application code can persist visible
 
 - Good: creating a inspiration with `ecommerce-main-image-v1` creates one active `InspirationWorkflow`, persists all template nodes
   and edges, and the detail workflow endpoint returns that workflow unchanged.
+- Good: creating an `image` entry from `image_source_asset_id` persists a brand-new `original_image` source asset for the
+  inspiration, and the workflow `inspiration_context.config_json.image_source_asset_id` points at that copied source asset.
 - Good: creating a copy-entry inspiration from a full-canvas template persists the submitted `entry_text` on the
   `inspiration_context` node so `/api/inspirations` can return the same six-character excerpt as non-template copy entries.
 - Good: creating a inspiration with no `canvas_template_key` creates only the inspiration/assets; opening the workflow later
@@ -297,6 +310,8 @@ Keep the template as node and edge specs so application code can persist visible
 - API test default inspiration creation without `canvas_template_key` succeeds and does not eagerly create a workflow.
 - API test explicit default alias preserves the same lazy behavior.
 - API test valid `full_canvas` key creates an active workflow immediately.
+- API test `image_source_asset_id` creation succeeds without multipart `image`, creates a copied `original_image` source
+  asset, and writes the copied id into the `inspiration_context` config.
 - API test persisted node and edge counts, node types, titles, positions, and config match the selected template.
 - Regression test layout-sensitive built-in templates, including the main-image output and downstream iteration node
   coordinates that the creation page preview mirrors.

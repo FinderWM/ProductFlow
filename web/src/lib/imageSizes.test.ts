@@ -6,6 +6,7 @@ import {
   buildCustomAspectSizeOptions,
   buildImageAspectOptions,
   buildImageSizeOptions,
+  imageSizeValueFromDimensions,
   formatImageAspectValue,
   getImageSizePresetDisplay,
   imageSizeOptionsForAspect,
@@ -69,6 +70,8 @@ describe("image size helpers", () => {
   it("normalizes and parses custom size strings", () => {
     expect(normalizeImageSizeValue("3840X2160")).toBe("3840x2160");
     expect(parseImageSizeValue("1280x720")).toEqual({ width: 1280, height: 720 });
+    expect(imageSizeValueFromDimensions("1500", "800")).toBe("1504x800");
+    expect(imageSizeValueFromDimensions(" ", "800")).toBeNull();
     expect(resolveImageSize(1500, 800)).toEqual({
       width: 1504,
       height: 800,
@@ -155,6 +158,16 @@ describe("image size helpers", () => {
       calibrated: true,
     });
     expect(normalizeImageSizeValue("3840X2160", 2048)).toBe("2048x1152");
+  });
+
+  it("accepts capability-provided preset definitions", () => {
+    expect(
+      buildImageSizeOptions(2048, [
+        { aspect: "1:1", value: "1024x1024" },
+        { aspect: "16:9", value: "1280x720", tierLabel: "HD" },
+        { aspect: "16:9", value: "3840x2160", tierLabel: "4K" },
+      ]).map((option) => option.value),
+    ).toEqual(["1024x1024", "1280x720"]);
   });
 
   it("derives preset display labels for the picker grid", () => {

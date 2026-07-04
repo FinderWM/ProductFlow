@@ -23,7 +23,8 @@ These files document the frontend conventions that are actually present in this 
 | [Type Safety](./type-safety.md) | Strict TS, DTO mirroring, ApiError, runtime validation reality | Filled |
 | [Inspiration Workbench DAG](./inspiration-workbench-dag.md) | Inspiration detail DAG workbench UI, API DTOs, and cache contracts | Filled |
 | [Resource Governance Guidelines](./resource-governance-guidelines.md) | Resource library, gallery governance, admin readonly, moderation UI contracts | Filled |
-| [UI Layout Guidelines](./ui-layout-guidelines.md) | Layout scheme, workspace appearance, navigation, shell, component color contract (dusk leak prevention), and verification contracts | Filled |
+| [UI Layout Guidelines](./ui-layout-guidelines.md) | Layout scheme, layout-specific input/button component families, workspace appearance, navigation, shell, component color contract (dusk leak prevention), and verification contracts | Filled |
+| [Image-to-Code Page](./image-to-code-page.md) | Image-to-code route, workspace controls, preview iframe, artifact actions, and typed query contracts | Filled |
 
 ---
 
@@ -37,11 +38,17 @@ Use this map when the change is feature-driven rather than file-driven:
   `./component-guidelines.md`, `./state-management.md`, `./type-safety.md`, and `../backend/database-guidelines.md`.
 - Workspace shell, top navigation, workspace home anchors, and appearance switching: read `./ui-layout-guidelines.md`,
   `./component-guidelines.md`, and `./state-management.md`.
+- Layout-sensitive inputs, buttons, selects, date/time controls, checkboxes, switches, or shared dialogs/drawers that can
+  render in both `classic` and `workspace`: read `./ui-layout-guidelines.md`, `./component-guidelines.md`, and
+  `./workspace-ui-interaction-guidelines.md` when the control is used inside settings/workspace surfaces.
 - RBAC-gated navigation or protected actions: read `./type-safety.md`, `./state-management.md`,
   and `../backend/error-handling.md`.
 - Image-chat handoff, generated asset gallery state, and resource-group URL state: read `./type-safety.md`,
   `./state-management.md`, `./component-guidelines.md`, `./resource-governance-guidelines.md`, and
   `../backend/database-guidelines.md`.
+- Image-to-code menu, preview iframe, local Figma summary/download UI, or image-to-code query/mutation state: read
+  `./image-to-code-page.md`, `./ui-layout-guidelines.md`, `./state-management.md`, and
+  `../backend/image-to-code-pipeline.md`.
 
 If a feature is not represented here, update this map in the same change that adds or changes the feature contract.
 

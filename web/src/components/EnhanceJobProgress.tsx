@@ -1,11 +1,13 @@
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, XCircle } from "lucide-react";
 
+import { actionButtonClassNameForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
 import type { TranslationKey } from "../lib/i18n";
 import { useEnhanceJob } from "../lib/hooks/useEnhanceJob";
 import { useI18n } from "../lib/preferences";
 import type { EnhanceJob, JobStatus } from "../lib/types";
 
 interface EnhanceJobProgressProps {
+  appearance: LayoutActionAppearance;
   jobId?: string | null;
   job?: EnhanceJob | null;
   onRetry?: (job: EnhanceJob) => void;
@@ -19,8 +21,8 @@ const STATUS_CONFIG: Record<
   queued: {
     labelKey: "enhance.status.queued",
     icon: Loader2,
-    className: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200",
-    barClassName: "bg-slate-500 dark:bg-slate-300",
+    className: "pf-hairline pf-surface-soft pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]",
+    barClassName: "bg-[color:var(--pf-border-soft)] dark:bg-[color:var(--pf-border-soft)]",
   },
   running: {
     labelKey: "enhance.status.running",
@@ -50,14 +52,20 @@ const STATUS_CONFIG: Record<
   },
 };
 
-export function EnhanceJobProgress({ jobId, job: providedJob, onRetry, compact = false }: EnhanceJobProgressProps) {
+export function EnhanceJobProgress({
+  appearance,
+  jobId,
+  job: providedJob,
+  onRetry,
+  compact = false,
+}: EnhanceJobProgressProps) {
   const { t } = useI18n();
   const jobQuery = useEnhanceJob(jobId, { enabled: !providedJob });
   const job = providedJob ?? jobQuery.data ?? null;
 
   if (!job) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+      <div className="flex items-center gap-2 text-sm pf-ink-muted dark:text-[color:var(--pf-muted)]">
         <Loader2 size={16} className="animate-spin" />
         {t("enhance.progress.loading")}
       </div>
@@ -70,6 +78,7 @@ export function EnhanceJobProgress({ jobId, job: providedJob, onRetry, compact =
   const completed = Math.min(total, Math.max(0, job.progress_completed || 0));
   const pct = job.status === "succeeded" ? 100 : Math.round((completed / total) * 100);
   const failed = job.status === "failed" || job.status === "cancelled";
+  const retryActionClassName = actionButtonClassNameForAppearance(appearance, { preset: "secondary", size: "sm" });
 
   return (
     <div className={compact ? "space-y-2" : "space-y-3"}>
@@ -78,11 +87,11 @@ export function EnhanceJobProgress({ jobId, job: providedJob, onRetry, compact =
           <Icon size={14} className={job.status === "queued" || job.status === "running" ? "animate-spin" : undefined} />
           {t(config.labelKey)}
         </span>
-        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+        <span className="text-xs font-medium pf-ink-muted dark:text-[color:var(--pf-muted)]">
           {t("enhance.progress.count", { completed, total, percent: pct })}
         </span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+      <div className="h-2 overflow-hidden rounded-full pf-surface-soft dark:bg-[color:var(--pf-deep)]">
         <div className={`h-full rounded-full transition-all ${config.barClassName}`} style={{ width: `${pct}%` }} />
       </div>
       {job.last_error ? (
@@ -94,7 +103,7 @@ export function EnhanceJobProgress({ jobId, job: providedJob, onRetry, compact =
         <button
           type="button"
           onClick={() => onRetry(job)}
-          className="pf-workspace-action-secondary inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-all active:scale-[0.98]"
+          className={retryActionClassName}
         >
           <RotateCcw size={14} />
           {t("enhance.action.retry")}

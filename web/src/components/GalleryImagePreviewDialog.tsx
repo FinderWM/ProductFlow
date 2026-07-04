@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { api } from "../lib/api";
 import { useI18n } from "../lib/preferences";
+import { actionButtonClassNameForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
 import { ModalShell } from "./ModalShell";
 import { ZoomableImage } from "./ZoomableImage";
 
@@ -11,14 +12,8 @@ export interface GalleryPreviewMetadataRow {
   value: string;
 }
 
-const GALLERY_PREVIEW_PRIMARY_ACTION_CLASS =
-  "pf-workspace-action-primary inline-flex h-9 w-full items-center justify-center whitespace-nowrap rounded-xl border px-3.5 text-xs font-semibold " +
-  "transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-const GALLERY_PREVIEW_ICON_ACTION_CLASS =
-  "pf-workspace-action-secondary inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-all " +
-  "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
-
 interface GalleryImagePreviewDialogProps {
+  appearance: LayoutActionAppearance;
   ariaLabel: string;
   imageUrl: string;
   imageAlt: string;
@@ -38,6 +33,7 @@ interface GalleryImagePreviewDialogProps {
 }
 
 export function GalleryImagePreviewDialog({
+  appearance,
   ariaLabel,
   imageUrl,
   imageAlt,
@@ -56,6 +52,15 @@ export function GalleryImagePreviewDialog({
   onClose,
 }: GalleryImagePreviewDialogProps) {
   const { t } = useI18n();
+  const closeActionClassName = actionButtonClassNameForAppearance(appearance, {
+    preset: "secondary",
+    size: "icon-md",
+  });
+  const downloadActionClassName = actionButtonClassNameForAppearance(appearance, {
+    preset: "primary",
+    size: "md",
+    fullWidth: true,
+  });
 
   return (
     <ModalShell
@@ -82,8 +87,9 @@ export function GalleryImagePreviewDialog({
             <button
               type="button"
               onClick={onClose}
-              className={GALLERY_PREVIEW_ICON_ACTION_CLASS}
+              className={closeActionClassName}
               aria-label={closeLabel}
+              title={closeLabel}
             >
               <X size={18} />
             </button>
@@ -117,7 +123,7 @@ export function GalleryImagePreviewDialog({
               href={api.toApiUrl(downloadUrl)}
               target="_blank"
               rel="noreferrer"
-              className={GALLERY_PREVIEW_PRIMARY_ACTION_CLASS}
+              className={downloadActionClassName}
             >
               <Download size={16} className="mr-2" />
               {downloadLabel}

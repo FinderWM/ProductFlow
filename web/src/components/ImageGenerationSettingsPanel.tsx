@@ -1,7 +1,8 @@
 import { ImageToolControls } from "./ImageToolControls";
 import { ImageSizePicker } from "./ImageSizePicker";
 import { ParameterHelpLabel } from "./ParameterHelp";
-import { SelectField } from "./SelectField";
+import { ClassicSelectField } from "./classicInputs";
+import { WorkspaceSelectField } from "./workspaceInputs";
 import type { ImageSizeOption } from "../lib/imageSizes";
 import { formatImageSizeValue } from "../lib/imageSizes";
 import type { ParameterHelpUiType } from "../lib/parameterHelp";
@@ -25,6 +26,7 @@ interface ImageGenerationSettingsPanelProps {
   showToolOptions?: boolean;
   helpUiType?: ParameterHelpUiType;
   disabled?: boolean;
+  appearance: "classic" | "workspace";
 }
 
 export function ImageGenerationSettingsPanel({
@@ -44,6 +46,7 @@ export function ImageGenerationSettingsPanel({
   showToolOptions = true,
   helpUiType = "default",
   disabled = false,
+  appearance,
 }: ImageGenerationSettingsPanelProps) {
   const { t } = useI18n();
   const showCount = generationCount !== undefined && generationCountOptions?.length && onGenerationCountChange;
@@ -61,6 +64,7 @@ export function ImageGenerationSettingsPanel({
         maxDimension={maxDimension}
         onChange={onSizeChange}
         disabled={disabled}
+        appearance={appearance}
       />
       {showCount ? (
         <label className="mt-3 block" htmlFor="image-generation-count">
@@ -74,16 +78,31 @@ export function ImageGenerationSettingsPanel({
           {generationCountDescription ? (
             <span className="mb-1.5 block text-[11px] leading-5 text-slate-500">{generationCountDescription}</span>
           ) : null}
-          <SelectField
-            id="image-generation-count"
-            value={String(generationCount)}
-            options={generationCountOptions.map((count) => ({
-              value: String(count),
-              label: t("imageSettings.candidateCount", { count }),
-            }))}
-            onChange={(nextValue) => onGenerationCountChange(Number(nextValue))}
-            disabled={disabled}
-          />
+          {appearance === "workspace" ? (
+            <WorkspaceSelectField
+              id="image-generation-count"
+              value={String(generationCount)}
+              options={generationCountOptions.map((count) => ({
+                value: String(count),
+                label: t("imageSettings.candidateCount", { count }),
+              }))}
+              onChange={(nextValue) => onGenerationCountChange(Number(nextValue))}
+              disabled={disabled}
+              size="compact"
+            />
+          ) : (
+            <ClassicSelectField
+              id="image-generation-count"
+              value={String(generationCount)}
+              options={generationCountOptions.map((count) => ({
+                value: String(count),
+                label: t("imageSettings.candidateCount", { count }),
+              }))}
+              onChange={(nextValue) => onGenerationCountChange(Number(nextValue))}
+              disabled={disabled}
+              size="compact"
+            />
+          )}
         </label>
       ) : null}
       {showToolOptions ? (
@@ -95,6 +114,7 @@ export function ImageGenerationSettingsPanel({
             helpUiType={helpUiType}
             onChange={onToolOptionsChange}
             disabled={disabled}
+            appearance={appearance}
           />
         </div>
       ) : null}

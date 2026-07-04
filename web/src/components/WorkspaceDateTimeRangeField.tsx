@@ -4,6 +4,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Clock, RotateCcw } from "lucid
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
 import { FloatingSurface } from "./FloatingSurface";
+import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
 
 export interface WorkspaceDateTimeRange {
   start_date: string;
@@ -339,7 +340,7 @@ function WorkspaceTimeColumns({
 
   return (
     <div
-      className="pf-workspace-time-columns grid grid-cols-3 overflow-hidden rounded-xl border bg-white/80 text-zinc-900 dark:bg-slate-950/70 dark:text-slate-100"
+      className="pf-time-columns grid grid-cols-3 overflow-hidden rounded-xl border bg-white/80 text-zinc-900 dark:bg-slate-950/70 dark:text-slate-100"
       role="group"
       aria-label={`${label} ${t("statusPage.time")}`}
     >
@@ -348,9 +349,9 @@ function WorkspaceTimeColumns({
         return (
           <div
             key={part}
-            className="pf-workspace-time-column min-w-0 border-r border-zinc-200/70 last:border-r-0 dark:border-slate-700/80"
+            className="pf-time-column min-w-0 border-r border-zinc-200/70 last:border-r-0 dark:border-slate-700/80"
           >
-            <div className="pf-workspace-time-column-scroll h-64 overflow-y-auto overscroll-contain py-[6.875rem]">
+            <div className="pf-time-column-scroll h-64 overflow-y-auto overscroll-contain py-[6.875rem]">
               {workspaceTimePartOptions(part).map((option) => {
                 const selected = option === selectedValues[part];
                 return (
@@ -369,12 +370,12 @@ function WorkspaceTimeColumns({
                     data-selected={selected ? "true" : undefined}
                     onFocus={onFocus}
                     onClick={() => {
-                      onFocus();
-                      onChange(boundary, part, option);
-                    }}
-                    onKeyDown={(event) => handleKeyDown(event, part)}
-                    className="pf-workspace-time-option flex h-9 w-full items-center justify-center gap-0.5 px-1 text-sm font-semibold tabular-nums outline-none transition data-[selected=true]:bg-zinc-100 data-[selected=true]:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-50 dark:data-[selected=true]:bg-slate-800 dark:data-[selected=true]:text-slate-50"
-                  >
+                    onFocus();
+                    onChange(boundary, part, option);
+                  }}
+                  onKeyDown={(event) => handleKeyDown(event, part)}
+                  className="pf-time-option flex h-9 w-full items-center justify-center gap-0.5 px-1 text-sm font-semibold tabular-nums outline-none transition data-[selected=true]:bg-zinc-100 data-[selected=true]:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-50 dark:data-[selected=true]:bg-slate-800 dark:data-[selected=true]:text-slate-50"
+                >
                     <span>{option}</span>
                     {selected ? (
                       <span className="text-[10px] font-semibold leading-none opacity-80">{partLabel}</span>
@@ -390,25 +391,29 @@ function WorkspaceTimeColumns({
   );
 }
 
-interface WorkspaceDateTimeRangeFieldProps {
+interface LayoutDateTimeRangeFieldProps {
   idPrefix: string;
   value: WorkspaceDateTimeRange;
   activeQuickRange?: WorkspaceQuickRangeId | null;
+  appearance: LayoutActionAppearance;
   disabled?: boolean;
   className?: string;
   onChange: (range: WorkspaceDateTimeRange) => void;
   onQuickRangeChange?: (rangeId: WorkspaceQuickRangeId) => void;
 }
 
-export function WorkspaceDateTimeRangeField({
+type SchemeDateTimeRangeFieldProps = Omit<LayoutDateTimeRangeFieldProps, "appearance">;
+
+export function LayoutDateTimeRangeField({
   idPrefix,
   value,
   activeQuickRange = null,
+  appearance,
   disabled = false,
   className = "",
   onChange,
   onQuickRangeChange,
-}: WorkspaceDateTimeRangeFieldProps) {
+}: LayoutDateTimeRangeFieldProps) {
   const { locale, t } = useI18n();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [timePickerBoundary, setTimePickerBoundary] = useState<WorkspaceRangeBoundary | null>(null);
@@ -450,6 +455,7 @@ export function WorkspaceDateTimeRangeField({
   const timeBoundaryTriggerRef = timeBoundary === "start" ? startTimeTriggerRef : endTimeTriggerRef;
   const clearRangeLabel = `${t("inspirations.search.clear")} ${t("statusPage.rangeTitle")}`;
   const canClearRange = Boolean(!disabled && (value.start_date || value.end_date));
+  const ClearActionButton = actionButtonComponentForAppearance(appearance);
 
   const commitLinkedRange = (nextRange: WorkspaceDateTimeRange, changedBoundary: WorkspaceRangeBoundary) => {
     const linkedRange = clampDraftRange(nextRange, changedBoundary);
@@ -540,7 +546,7 @@ export function WorkspaceDateTimeRangeField({
   }, [disabled]);
 
   return (
-    <div className={`pf-workspace-datetime-range relative min-w-0 space-y-2 ${className}`}>
+    <div className={`pf-datetime-range-field relative min-w-0 space-y-2 ${className}`}>
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
           {t("statusPage.rangeTitle")}
@@ -553,7 +559,7 @@ export function WorkspaceDateTimeRangeField({
               onClick={() => onQuickRangeChange?.(rangeId)}
               disabled={disabled}
               aria-current={activeQuickRange === rangeId ? "true" : undefined}
-              className="pf-workspace-date-quick inline-flex h-[15px] items-center justify-center rounded-md border px-1 text-[10px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-50"
+              className="pf-datetime-range-quick inline-flex h-[15px] items-center justify-center rounded-md border px-1 text-[10px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t(WORKSPACE_QUICK_RANGE_LABEL_KEYS[rangeId])}
             </button>
@@ -569,7 +575,7 @@ export function WorkspaceDateTimeRangeField({
           aria-controls={rangePanelId}
           disabled={disabled}
           onClick={() => setPickerOpen((current) => !current)}
-          className="pf-workspace-date-range-shell pf-workspace-date-range-trigger flex min-w-0 h-11 flex-1 items-center gap-2 rounded-xl border px-3 text-left shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+          className="pf-datetime-range-shell pf-datetime-range-trigger flex min-w-0 h-11 flex-1 items-center gap-2 rounded-xl border px-3 text-left shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span className={`min-w-0 flex-1 truncate text-sm ${displayStart ? "font-medium" : "font-normal text-[color:var(--pf-subtle)]"}`}>
             {displayStart || t("statusPage.startDate")}
@@ -581,16 +587,16 @@ export function WorkspaceDateTimeRangeField({
             {displayEnd || t("statusPage.endDate")}
           </span>
         </button>
-        <button
-          type="button"
+        <ClearActionButton
           disabled={!canClearRange}
           aria-label={clearRangeLabel}
           title={clearRangeLabel}
           onClick={handleRangeClear}
-          className="pf-workspace-date-range-clear inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-zinc-600 shadow-sm outline-none transition hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-300 dark:hover:text-slate-50"
-        >
-          <RotateCcw size={15} aria-hidden="true" />
-        </button>
+          preset="secondary"
+          size="icon-lg"
+          className="shrink-0"
+          leadingIcon={<RotateCcw size={15} aria-hidden="true" />}
+        />
       </div>
       <FloatingSurface
         open={pickerOpen}
@@ -600,13 +606,13 @@ export function WorkspaceDateTimeRangeField({
         minWidth={320}
         margin={12}
         onOpenChange={setPickerOpen}
-        className="pf-workspace-date-range-popover grid w-[min(34rem,calc(100vw-1.5rem))] gap-3 overflow-auto rounded-2xl border p-3 shadow-xl"
+        className="pf-datetime-range-popover grid w-[min(34rem,calc(100vw-1.5rem))] gap-3 overflow-auto rounded-2xl border p-3 shadow-xl"
       >
         <div id={rangePanelId} role="dialog" aria-modal="false" aria-label={t("statusPage.rangeTitle")}>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem]">
             <div className="grid content-start gap-2 lg:order-2">
               <div
-                className="pf-workspace-date-boundary rounded-xl border p-3 transition"
+                className="pf-datetime-range-boundary rounded-xl border p-3 transition"
                 data-active-boundary={activeBoundary === "start" ? "true" : undefined}
               >
                 <button
@@ -614,7 +620,7 @@ export function WorkspaceDateTimeRangeField({
                   type="button"
                   aria-pressed={activeBoundary === "start"}
                   onClick={() => handleBoundarySelect("start")}
-                  className="pf-workspace-date-boundary-button w-full text-left outline-none"
+                  className="pf-datetime-range-boundary-button w-full text-left outline-none"
                 >
                   <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--pf-muted)]">
                     <CalendarDays size={14} aria-hidden="true" />
@@ -632,7 +638,7 @@ export function WorkspaceDateTimeRangeField({
                   aria-expanded={timePickerBoundary === "start"}
                   aria-controls={timePanelId}
                   onClick={() => handleTimeTriggerSelect("start")}
-                  className="pf-workspace-time-trigger mt-2 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 text-left text-sm font-semibold outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
+                  className="pf-time-trigger mt-2 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 text-left text-sm font-semibold outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Clock size={14} className="shrink-0" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate tabular-nums">
@@ -641,7 +647,7 @@ export function WorkspaceDateTimeRangeField({
                 </button>
               </div>
               <div
-                className="pf-workspace-date-boundary rounded-xl border p-3 transition"
+                className="pf-datetime-range-boundary rounded-xl border p-3 transition"
                 data-active-boundary={activeBoundary === "end" ? "true" : undefined}
               >
                 <button
@@ -649,7 +655,7 @@ export function WorkspaceDateTimeRangeField({
                   type="button"
                   aria-pressed={activeBoundary === "end"}
                   onClick={() => handleBoundarySelect("end")}
-                  className="pf-workspace-date-boundary-button w-full text-left outline-none"
+                  className="pf-datetime-range-boundary-button w-full text-left outline-none"
                 >
                   <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--pf-muted)]">
                     <CalendarDays size={14} aria-hidden="true" />
@@ -667,7 +673,7 @@ export function WorkspaceDateTimeRangeField({
                   aria-expanded={timePickerBoundary === "end"}
                   aria-controls={timePanelId}
                   onClick={() => handleTimeTriggerSelect("end")}
-                  className="pf-workspace-time-trigger mt-2 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 text-left text-sm font-semibold outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
+                  className="pf-time-trigger mt-2 flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 text-left text-sm font-semibold outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Clock size={14} className="shrink-0" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate tabular-nums">
@@ -685,7 +691,7 @@ export function WorkspaceDateTimeRangeField({
                     setTimePickerBoundary(null);
                     setVisibleMonth((current) => addCalendarMonths(current, -1));
                   }}
-                  className="pf-workspace-date-nav inline-flex h-8 w-8 items-center justify-center rounded-lg border transition"
+                  className="pf-datetime-range-nav inline-flex h-8 w-8 items-center justify-center rounded-lg border transition"
                   aria-label={t("statusPage.previousMonth")}
                 >
                   <ChevronLeft size={16} aria-hidden="true" />
@@ -697,7 +703,7 @@ export function WorkspaceDateTimeRangeField({
                     setTimePickerBoundary(null);
                     setVisibleMonth((current) => addCalendarMonths(current, 1));
                   }}
-                  className="pf-workspace-date-nav inline-flex h-8 w-8 items-center justify-center rounded-lg border transition"
+                  className="pf-datetime-range-nav inline-flex h-8 w-8 items-center justify-center rounded-lg border transition"
                   aria-label={t("statusPage.nextMonth")}
                 >
                   <ChevronRight size={16} aria-hidden="true" />
@@ -726,7 +732,7 @@ export function WorkspaceDateTimeRangeField({
                       data-in-range={isInRange ? "true" : undefined}
                       data-outside-month={day.currentMonth ? undefined : "true"}
                       data-today={day.today ? "true" : undefined}
-                      className="pf-workspace-date-day inline-flex aspect-square min-h-8 items-center justify-center rounded-lg text-sm font-semibold tabular-nums transition"
+                      className="pf-datetime-range-day inline-flex aspect-square min-h-8 items-center justify-center rounded-lg text-sm font-semibold tabular-nums transition"
                       aria-label={dayLabelFormatter.format(new Date(`${day.date}T00:00:00`))}
                     >
                       {day.dayOfMonth}
@@ -749,7 +755,7 @@ export function WorkspaceDateTimeRangeField({
               setTimePickerBoundary(null);
             }
           }}
-          className="pf-workspace-time-popover w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border p-2 shadow-xl"
+          className="pf-time-popover w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border p-2 shadow-xl"
         >
           <div
             id={timePanelId}
@@ -771,4 +777,12 @@ export function WorkspaceDateTimeRangeField({
       </FloatingSurface>
     </div>
   );
+}
+
+export function WorkspaceDateTimeRangeField(props: SchemeDateTimeRangeFieldProps) {
+  return <LayoutDateTimeRangeField {...props} appearance="workspace" />;
+}
+
+export function ClassicDateTimeRangeField(props: SchemeDateTimeRangeFieldProps) {
+  return <LayoutDateTimeRangeField {...props} appearance="classic" />;
 }

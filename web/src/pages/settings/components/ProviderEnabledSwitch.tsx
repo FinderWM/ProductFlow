@@ -2,6 +2,9 @@
 
 import { Loader2 } from "lucide-react";
 
+import { ClassicSwitch } from "../../../components/classicInputs";
+import { WorkspaceSwitch } from "../../../components/workspaceInputs";
+
 interface ProviderEnabledSwitchProps {
   checked: boolean;
   disabled: boolean;
@@ -9,6 +12,7 @@ interface ProviderEnabledSwitchProps {
   title?: string;
   ariaLabel: string;
   describedBy?: string;
+  workspaceSubpage?: boolean;
   onToggle: (checked: boolean) => void;
 }
 
@@ -19,35 +23,54 @@ export function ProviderEnabledSwitch({
   title,
   ariaLabel,
   describedBy,
+  workspaceSubpage = false,
   onToggle,
 }: ProviderEnabledSwitchProps) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={ariaLabel}
-      aria-describedby={describedBy}
-      title={title}
-      disabled={disabled}
-      onClick={(event) => {
-        event.stopPropagation();
-        onToggle(!checked);
-      }}
+  return workspaceSubpage ? (
+    <div
+      onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition ${
-        checked
-          ? "border-indigo-500 bg-indigo-600 dark:border-violet-400 dark:bg-violet-500"
-          : "pf-hairline-strong bg-slate-200 dark:border-slate-700 dark:bg-slate-800"
-      } ${disabled ? "cursor-not-allowed opacity-55" : "hover:brightness-105"}`}
+      title={title}
     >
-      <span
-        className={`inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm transition ${
-          checked ? "translate-x-5" : "translate-x-0.5"
-        }`}
-      >
-        {loading ? <Loader2 size={12} className="animate-spin" /> : null}
-      </span>
-    </button>
+      <WorkspaceSwitch
+        checked={checked}
+        disabled={disabled}
+        ariaLabel={ariaLabel}
+        ariaDescribedBy={describedBy}
+        className="min-h-0 gap-0 border-0 bg-transparent p-0 shadow-none hover:bg-transparent dark:bg-transparent"
+        controlClassName="relative"
+        controlContent={
+          loading ? (
+            <span className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center text-slate-500 dark:text-slate-100">
+              <Loader2 size={11} className="animate-spin" />
+            </span>
+          ) : null
+        }
+        onChange={onToggle}
+      />
+    </div>
+  ) : (
+    <div
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      title={title}
+    >
+      <ClassicSwitch
+        checked={checked}
+        disabled={disabled}
+        ariaLabel={ariaLabel}
+        ariaDescribedBy={describedBy}
+        className="min-h-0 gap-0 border-0 bg-transparent p-0 shadow-none hover:bg-transparent dark:bg-transparent"
+        controlClassName="relative"
+        controlContent={
+          loading ? (
+            <span className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center text-slate-500 dark:text-slate-100">
+              <Loader2 size={11} className="animate-spin" />
+            </span>
+          ) : null
+        }
+        onChange={onToggle}
+      />
+    </div>
   );
 }

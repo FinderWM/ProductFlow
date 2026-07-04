@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Layers3,
   Loader2,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
+import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { cssLengthToPixels } from "../lib/cssLength";
@@ -29,11 +30,9 @@ import type {
   ConfigResponse,
   LoginPageMode,
   LoginPageTemplateId,
-  ProviderConfigResponse,
   GenerationConfig,
   GenerationConfigCreateRequest,
   GenerationConfigUpdateRequest,
-  GenerationResourceGroup,
   GenerationResourceGroupCreateRequest,
   GenerationResourceGroupUpdateRequest,
   ProviderProfile,
@@ -91,7 +90,11 @@ import {
 import { configItemHelpContent } from "./settings/configHelp";
 import {
   SETTINGS_SECTIONS,
+  SETTINGS_DEFAULT_SECTION_ID,
   configCategoryGroups,
+  isSettingsSectionPathname,
+  settingsPathForSection,
+  settingsSectionFromPathSegment,
   itemsForSection,
   settingsSectionIds,
   shouldShowGlobalTemplatesPanel,
@@ -102,9 +105,6 @@ import {
   archiveFailureMessage,
   imageGenerationConfigTestPayload,
   imageGenerationConfigTestResultWithGalleryEntry,
-  providerConfigWithGenerationConfig,
-  providerConfigWithGenerationResourceGroup,
-  providerConfigWithProviderProfile,
   textGenerationConfigJsonResponseFormatTestPayload,
   textGenerationConfigTestPayload,
 } from "./settings/providerConfigOps";
@@ -143,7 +143,6 @@ import {
 import {
   PANEL_CLASS,
   SETTINGS_BORDERED_MODULE_CLASS,
-  SETTINGS_MAIN_ACTION_CLASS,
 } from "./settings/components/styles";
 import { NotificationSettingsPanel } from "./settings/components/NotificationSettingsPanel";
 import { LoginPageSettingsPanel } from "./settings/components/LoginPageSettingsPanel";
@@ -169,11 +168,12 @@ export {
 export { filterProviderModels } from "./settings/providerModels";
 export { filterProviderProfiles, filterProviderProfilesByName } from "./settings/providerForm";
 export {
+  SETTINGS_DEFAULT_SECTION_ID,
   archiveFailureMessage,
   configCategoryGroups,
-  providerConfigWithGenerationConfig,
-  providerConfigWithGenerationResourceGroup,
-  providerConfigWithProviderProfile,
+  isSettingsSectionPathname,
+  settingsPathForSection,
+  settingsSectionFromPathSegment,
   settingsSectionIds,
   shouldShowSettingsMigrationPanel,
 };
@@ -209,6 +209,11 @@ export { configValuesFromChangedDrafts, draftsFromConfig };
 export { generationConfigResourceGroupIds };
 export { configItemHelpContent };
 export {
+  providerConfigWithGenerationConfig,
+  providerConfigWithGenerationResourceGroup,
+  providerConfigWithProviderProfile,
+} from "./settings/providerConfigOps";
+export {
   generationConfigsUsingProvider,
   providerDisableBlocked,
   providerDrawerCreateState,
@@ -240,18 +245,51 @@ type PendingGenerationArchive =
   | { kind: "resourceGroup"; id: string; name: string }
   | { kind: "generationConfig"; id: string; name: string };
 
-interface ProviderSettingsRefreshOptions {
-  includeProviderModels?: boolean;
-  includeResourceGroups?: boolean;
-  includeRuntimeConfig?: boolean;
+const SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS = 1000;
+const SETTINGS_RUNTIME_CONFIG_SECTIONS = [
+  "prompts",
+  "upload",
+  "queue",
+  "layoutAppearance",
+  "loginPage",
+  "security",
+] as const;
+
+type SettingsRuntimeConfigSection = (typeof SETTINGS_RUNTIME_CONFIG_SECTIONS)[number];
+
+export function runtimeConfigSectionForSettingsSection(
+  section: SettingsSectionId,
+): SettingsRuntimeConfigSection | null {
+  return SETTINGS_RUNTIME_CONFIG_SECTIONS.includes(section as SettingsRuntimeConfigSection)
+    ? (section as SettingsRuntimeConfigSection)
+    : null;
 }
 
-const SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS = 1000;
+export function filterConfigResponseForSettingsSection(
+  config: ConfigResponse,
+  section: SettingsSectionId,
+): ConfigResponse {
+  return { items: itemsForSection(config, section) };
+}
+
+function configQueryKeyForSettingsSection(section: SettingsRuntimeConfigSection) {
+  return ["config", section] as const;
+}
+
+function setRuntimeConfigSectionCaches(queryClient: ReturnType<typeof useQueryClient>, config: ConfigResponse) {
+  for (const section of SETTINGS_RUNTIME_CONFIG_SECTIONS) {
+    queryClient.setQueryData(
+      configQueryKeyForSettingsSection(section),
+      filterConfigResponseForSettingsSection(config, section),
+    );
+  }
+}
 
 export function SettingsPage() {
   const { t } = useI18n();
   const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
+  const { sectionSlug } = useParams<{ sectionSlug?: string }>();
   const queryClient = useQueryClient();
   const session = useSessionState();
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -263,7 +301,6 @@ export function SettingsPage() {
   const [pendingResetItem, setPendingResetItem] = useState<ConfigItem | null>(null);
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>("providers");
   const [sectionSearch, setSectionSearch] = useState("");
   const [providerProfileForm, setProviderProfileForm] = useState<ProviderProfileFormState>(EMPTY_PROVIDER_FORM);
   const [editingProviderProfileId, setEditingProviderProfileId] = useState<string | null>(null);
@@ -274,6 +311,8 @@ export function SettingsPage() {
   const [pendingGenerationArchiveError, setPendingGenerationArchiveError] = useState("");
   const [togglingProviderProfileId, setTogglingProviderProfileId] = useState<string | null>(null);
   const [generationConfigDrafts, setGenerationConfigDrafts] = useState<Record<string, GenerationConfigDraft>>({});
+  const [selectedTextResourceGroupId, setSelectedTextResourceGroupId] = useState<string | null>(null);
+  const [selectedImageResourceGroupId, setSelectedImageResourceGroupId] = useState<string | null>(null);
   const [archivingGenerationConfigId, setArchivingGenerationConfigId] = useState<string | null>(null);
   const [unfreezingGenerationConfigId, setUnfreezingGenerationConfigId] = useState<string | null>(null);
   const [generationResourceGroupDrafts, setGenerationResourceGroupDrafts] = useState<
@@ -302,25 +341,120 @@ export function SettingsPage() {
   const [imageConfigTestPreview, setImageConfigTestPreview] = useState<ImageGenerationConfigTestResponse | null>(null);
   const [imageConfigTestGalleryAssetId, setImageConfigTestGalleryAssetId] = useState<string | null>(null);
   const [imageConfigTestGalleryTagError, setImageConfigTestGalleryTagError] = useState("");
+  const matchedSection = settingsSectionFromPathSegment(sectionSlug);
+  const activeSection = matchedSection ?? SETTINGS_DEFAULT_SECTION_ID;
+  const previousActiveSectionRef = useRef<SettingsSectionId>(activeSection);
+
+  const genericSection = ["prompts", "upload", "queue", "layoutAppearance", "security"].includes(activeSection);
+  const activeRuntimeConfigSection = runtimeConfigSectionForSettingsSection(activeSection);
+  const shouldLoadConfig = activeRuntimeConfigSection !== null;
+  const shouldLoadProviderProfiles = activeSection === "providers" || activeSection === "text" || activeSection === "image";
+  const shouldLoadGenerationResourceGroups =
+    activeSection === "resourceGroups" || activeSection === "text" || activeSection === "image";
+  const shouldLoadAllGenerationConfigs = activeSection === "resourceGroups";
+  const shouldLoadImageTestSupport = activeSection === "image" || Boolean(imageConfigTestGalleryAssetId);
 
   const configQuery = useQuery({
-    queryKey: ["config"],
-    queryFn: api.getConfig,
+    queryKey: activeRuntimeConfigSection ? configQueryKeyForSettingsSection(activeRuntimeConfigSection) : ["config", "inactive"],
+    queryFn: async () =>
+      filterConfigResponseForSettingsSection(
+        await api.getConfig({ section: activeRuntimeConfigSection ?? undefined }),
+        activeSection,
+      ),
+    enabled: shouldLoadConfig,
   });
 
   const runtimeConfigQuery = useQuery({
     queryKey: ["runtime-config"],
     queryFn: api.getRuntimeConfig,
+    enabled: shouldLoadImageTestSupport,
   });
 
   const galleryTagsQuery = useQuery({
     queryKey: ["gallery-tags", "active"],
     queryFn: () => api.listGalleryTags(),
+    enabled: shouldLoadImageTestSupport,
   });
 
-  const providerConfigQuery = useQuery({
-    queryKey: ["provider-config"],
-    queryFn: api.getProviderConfig,
+  const providerProfilesQuery = useQuery({
+    queryKey: ["provider-profiles"],
+    queryFn: api.listProviderProfiles,
+    enabled: shouldLoadProviderProfiles,
+  });
+
+  const generationResourceGroupsQuery = useQuery({
+    queryKey: ["generation-resource-groups", "settings"],
+    queryFn: () => api.listGenerationResourceGroups({ include_image_max_dimension: false }),
+    enabled: shouldLoadGenerationResourceGroups,
+  });
+
+  const generationResourceGroups = settingsGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data ?? []);
+  const firstEnabledGenerationResourceGroupId =
+    generationResourceGroups.find((group) => group.enabled)?.id ?? "";
+  const effectiveSelectedTextResourceGroupId =
+    selectedTextResourceGroupId ?? firstEnabledGenerationResourceGroupId;
+  const effectiveSelectedImageResourceGroupId =
+    selectedImageResourceGroupId ?? firstEnabledGenerationResourceGroupId;
+
+  useEffect(() => {
+    if (selectedTextResourceGroupId && !generationResourceGroups.some((group) => group.id === selectedTextResourceGroupId)) {
+      setSelectedTextResourceGroupId(firstEnabledGenerationResourceGroupId || "");
+    }
+  }, [firstEnabledGenerationResourceGroupId, generationResourceGroups, selectedTextResourceGroupId]);
+
+  useEffect(() => {
+    if (
+      selectedImageResourceGroupId &&
+      !generationResourceGroups.some((group) => group.id === selectedImageResourceGroupId)
+    ) {
+      setSelectedImageResourceGroupId(firstEnabledGenerationResourceGroupId || "");
+    }
+  }, [firstEnabledGenerationResourceGroupId, generationResourceGroups, selectedImageResourceGroupId]);
+
+  const resourceGroupGenerationConfigsQuery = useQuery({
+    queryKey: ["generation-configs", "all", "resource-groups"],
+    queryFn: () => api.listGenerationConfigs(),
+    enabled: shouldLoadAllGenerationConfigs,
+  });
+
+  const textGenerationConfigsQuery = useQuery({
+    queryKey: [
+      "generation-configs",
+      "text",
+      effectiveSelectedTextResourceGroupId || "__unbound__",
+    ],
+    queryFn: () =>
+      effectiveSelectedTextResourceGroupId
+        ? api.listGenerationConfigs({
+            purpose: "text",
+            resource_group_id: effectiveSelectedTextResourceGroupId,
+          })
+        : api.listGenerationConfigs({
+            purpose: "text",
+            unbound_only: true,
+          }),
+    enabled: activeSection === "text" && generationResourceGroupsQuery.isSuccess,
+    placeholderData: keepPreviousData,
+  });
+
+  const imageGenerationConfigsQuery = useQuery({
+    queryKey: [
+      "generation-configs",
+      "image",
+      effectiveSelectedImageResourceGroupId || "__unbound__",
+    ],
+    queryFn: () =>
+      effectiveSelectedImageResourceGroupId
+        ? api.listGenerationConfigs({
+            purpose: "image",
+            resource_group_id: effectiveSelectedImageResourceGroupId,
+          })
+        : api.listGenerationConfigs({
+            purpose: "image",
+            unbound_only: true,
+          }),
+    enabled: activeSection === "image" && generationResourceGroupsQuery.isSuccess,
+    placeholderData: keepPreviousData,
   });
 
   const loginPageAssetsQuery = useQuery({
@@ -349,34 +483,44 @@ export function SettingsPage() {
     resetDraftsFromConfig(configQuery.data);
   }, [configQuery.data, resetDraftsFromConfig]);
 
-  useEffect(() => {
-    const firstEnabledGroupId =
-      settingsGenerationResourceGroupsInApiOrder(providerConfigQuery.data?.generation_resource_groups).find(
-        (group) => group.enabled,
-      )?.id ?? "";
-    const nextDrafts: Record<string, GenerationConfigDraft> = {
-      "new-text": newGenerationConfigDraft("text", firstEnabledGroupId),
-      "new-image": newGenerationConfigDraft("image", firstEnabledGroupId),
-    };
-    for (const generationConfig of providerConfigQuery.data?.generation_configs ?? []) {
-      if (!generationConfig.archived_at) {
-        nextDrafts[generationConfig.id] = generationConfigDraft(generationConfig);
-      }
+  const hydrateGenerationConfigDrafts = useCallback((generationConfigs: GenerationConfig[] | undefined) => {
+    if (!generationConfigs?.length) {
+      return;
     }
-    setGenerationConfigDrafts(nextDrafts);
-  }, [providerConfigQuery.data]);
+    setGenerationConfigDrafts((current) => {
+      const nextDrafts = { ...current };
+      for (const generationConfig of generationConfigs) {
+        if (!generationConfig.archived_at) {
+          nextDrafts[generationConfig.id] = generationConfigDraft(generationConfig);
+        }
+      }
+      return nextDrafts;
+    });
+  }, []);
+
+  useEffect(() => {
+    hydrateGenerationConfigDrafts(resourceGroupGenerationConfigsQuery.data);
+  }, [hydrateGenerationConfigDrafts, resourceGroupGenerationConfigsQuery.data]);
+
+  useEffect(() => {
+    hydrateGenerationConfigDrafts(textGenerationConfigsQuery.data);
+  }, [hydrateGenerationConfigDrafts, textGenerationConfigsQuery.data]);
+
+  useEffect(() => {
+    hydrateGenerationConfigDrafts(imageGenerationConfigsQuery.data);
+  }, [hydrateGenerationConfigDrafts, imageGenerationConfigsQuery.data]);
 
   useEffect(() => {
     const nextDrafts: Record<string, GenerationResourceGroupDraft> = {
       "new-generation-resource-group": emptyGenerationResourceGroupDraft(),
     };
-    for (const group of providerConfigQuery.data?.generation_resource_groups ?? []) {
+    for (const group of generationResourceGroupsQuery.data ?? []) {
       if (!group.archived_at) {
         nextDrafts[group.id] = generationResourceGroupDraft(group);
       }
     }
     setGenerationResourceGroupDrafts(nextDrafts);
-  }, [providerConfigQuery.data]);
+  }, [generationResourceGroupsQuery.data]);
 
   const activeMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
   const activeItems = itemsForSection(configQuery.data, activeSection);
@@ -409,43 +553,91 @@ export function SettingsPage() {
     const nextTop = Math.max(window.scrollY + contentSection.getBoundingClientRect().top - safeTop, 0);
     window.scrollTo({ top: nextTop, behavior: "auto" });
   }, []);
-  const handleActiveSectionChange = useCallback((section: SettingsSectionId) => {
-    setActiveSection(section);
+
+  useEffect(() => {
+    if (!sectionSlug || matchedSection !== null) {
+      return;
+    }
+    navigate(settingsPathForSection(SETTINGS_DEFAULT_SECTION_ID), { replace: true });
+  }, [matchedSection, navigate, sectionSlug]);
+
+  useEffect(() => {
+    if (previousActiveSectionRef.current === activeSection) {
+      return;
+    }
+    previousActiveSectionRef.current = activeSection;
     setSavedMessage("");
     setError("");
     window.requestAnimationFrame(scrollActiveSectionToTop);
-  }, [scrollActiveSectionToTop]);
+  }, [activeSection, scrollActiveSectionToTop]);
 
-  const refreshProviderSettingsQueries = useCallback(
+  const handleActiveSectionChange = useCallback((section: SettingsSectionId) => {
+    if (section === activeSection) {
+      return;
+    }
+    navigate(settingsPathForSection(section));
+  }, [activeSection, navigate]);
+
+  const refreshSettingsQueries = useCallback(
     async ({
-      includeProviderModels = false,
-      includeResourceGroups = false,
+      includeConfig = false,
       includeRuntimeConfig = false,
-    }: ProviderSettingsRefreshOptions = {}) => {
-      const refreshes = [
-        queryClient.invalidateQueries({ queryKey: ["provider-config"] }),
-        queryClient.invalidateQueries({ queryKey: ["generation-config-options"] }),
-        queryClient.invalidateQueries({ queryKey: ["generation-config-status"] }),
-      ];
+      includeProviderModels = false,
+      includeProviderProfiles = false,
+      includeGenerationResourceGroups = false,
+      includeGenerationConfigs = false,
+      includeGenerationConfigOptions = false,
+      includeGenerationConfigStatus = false,
+      includeMyGenerationResourceGroups = false,
+    }: {
+      includeConfig?: boolean;
+      includeRuntimeConfig?: boolean;
+      includeProviderModels?: boolean;
+      includeProviderProfiles?: boolean;
+      includeGenerationResourceGroups?: boolean;
+      includeGenerationConfigs?: boolean;
+      includeGenerationConfigOptions?: boolean;
+      includeGenerationConfigStatus?: boolean;
+      includeMyGenerationResourceGroups?: boolean;
+    } = {}) => {
+      const refreshes: Array<Promise<unknown>> = [];
+      if (includeConfig) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["config"] }));
+      }
+      if (includeRuntimeConfig) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["runtime-config"] }));
+      }
       if (includeProviderModels) {
         refreshes.push(queryClient.invalidateQueries({ queryKey: ["provider-models"] }));
       }
-      if (includeResourceGroups) {
-        refreshes.push(queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] }));
+      if (includeProviderProfiles) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["provider-profiles"] }));
       }
-      if (includeRuntimeConfig) {
-        refreshes.push(queryClient.invalidateQueries({ queryKey: ["config"] }));
-        refreshes.push(queryClient.invalidateQueries({ queryKey: ["runtime-config"] }));
+      if (includeGenerationResourceGroups) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["generation-resource-groups"] }));
+      }
+      if (includeGenerationConfigs) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["generation-configs"] }));
+      }
+      if (includeGenerationConfigOptions) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["generation-config-options"] }));
+      }
+      if (includeGenerationConfigStatus) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["generation-config-status"] }));
+      }
+      if (includeMyGenerationResourceGroups) {
+        refreshes.push(queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] }));
       }
       await Promise.all(refreshes);
     },
     [queryClient],
   );
-  const refreshProviderConfigFromApi = useCallback(async (): Promise<ProviderConfigResponse | null> => {
+
+  const refreshProviderProfilesFromApi = useCallback(async (): Promise<ProviderProfile[] | null> => {
     setError("");
     setSavedMessage("");
     try {
-      const result = await providerConfigQuery.refetch();
+      const result = await providerProfilesQuery.refetch();
       if (result.error) {
         setError(result.error instanceof ApiError ? result.error.detail : t("settings.provider.saveFailed"));
         return null;
@@ -455,46 +647,24 @@ export function SettingsPage() {
       setError(fetchError instanceof ApiError ? fetchError.detail : t("settings.provider.saveFailed"));
       return null;
     }
-  }, [providerConfigQuery, t]);
-  const reconcileProviderProfileCache = useCallback(
-    async (profile: ProviderProfile, options: ProviderSettingsRefreshOptions = {}) => {
-      await queryClient.cancelQueries({ queryKey: ["provider-config"] });
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithProviderProfile(current, profile),
-      );
-      await refreshProviderSettingsQueries(options);
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithProviderProfile(current, profile),
-      );
-    },
-    [queryClient, refreshProviderSettingsQueries],
-  );
-  const reconcileGenerationConfigCache = useCallback(
-    async (generationConfig: GenerationConfig, options: ProviderSettingsRefreshOptions = {}) => {
-      await queryClient.cancelQueries({ queryKey: ["provider-config"] });
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationConfig(current, generationConfig),
-      );
-      await refreshProviderSettingsQueries(options);
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationConfig(current, generationConfig),
-      );
-    },
-    [queryClient, refreshProviderSettingsQueries],
-  );
-  const reconcileGenerationResourceGroupCache = useCallback(
-    async (group: GenerationResourceGroup, options: ProviderSettingsRefreshOptions = {}) => {
-      await queryClient.cancelQueries({ queryKey: ["provider-config"] });
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationResourceGroup(current, group),
-      );
-      await refreshProviderSettingsQueries(options);
-      queryClient.setQueryData<ProviderConfigResponse | undefined>(["provider-config"], (current) =>
-        providerConfigWithGenerationResourceGroup(current, group),
-      );
-    },
-    [queryClient, refreshProviderSettingsQueries],
-  );
+  }, [providerProfilesQuery, t]);
+
+  const refreshGenerationSectionInputsFromApi = useCallback(async (): Promise<boolean> => {
+    setError("");
+    setSavedMessage("");
+    try {
+      const results = await Promise.all([providerProfilesQuery.refetch(), generationResourceGroupsQuery.refetch()]);
+      const failedResult = results.find((result) => result.error);
+      if (failedResult?.error) {
+        setError(failedResult.error instanceof ApiError ? failedResult.error.detail : t("settings.provider.saveFailed"));
+        return false;
+      }
+      return true;
+    } catch (fetchError) {
+      setError(fetchError instanceof ApiError ? fetchError.detail : t("settings.provider.saveFailed"));
+      return false;
+    }
+  }, [generationResourceGroupsQuery, providerProfilesQuery, t]);
 
   useEffect(() => {
     if (!savedMessage) {
@@ -506,7 +676,7 @@ export function SettingsPage() {
 
   const applyConfigResponse = useCallback(
     (data: ConfigResponse, message: string) => {
-      queryClient.setQueryData(["config"], data);
+      setRuntimeConfigSectionCaches(queryClient, data);
       void queryClient.invalidateQueries({ queryKey: ["runtime-config"] });
       void queryClient.invalidateQueries({ queryKey: ["session"] });
       setError("");
@@ -639,17 +809,22 @@ export function SettingsPage() {
     },
     onSuccess: async (data) => {
       if (data.config) {
-        queryClient.setQueryData(["config"], data.config);
+        setRuntimeConfigSectionCaches(queryClient, data.config);
       }
       if (data.provider_config) {
-        queryClient.setQueryData(["provider-config"], data.provider_config);
+        queryClient.setQueryData(["provider-profiles"], data.provider_config.profiles);
+        queryClient.setQueryData(["generation-resource-groups", "settings"], data.provider_config.generation_resource_groups);
       }
-      await queryClient.invalidateQueries({ queryKey: ["config"] });
-      await queryClient.invalidateQueries({ queryKey: ["provider-config"] });
-      await queryClient.invalidateQueries({ queryKey: ["my-generation-resource-groups"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-options"] });
-      await queryClient.invalidateQueries({ queryKey: ["generation-config-status"] });
-      await queryClient.invalidateQueries({ queryKey: ["runtime-config"] });
+      await refreshSettingsQueries({
+        includeConfig: true,
+        includeRuntimeConfig: true,
+        includeProviderProfiles: true,
+        includeGenerationResourceGroups: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
       await queryClient.invalidateQueries({ queryKey: ["canvas-templates"] });
       await queryClient.invalidateQueries({ queryKey: ["canvas-template-categories"] });
@@ -674,7 +849,18 @@ export function SettingsPage() {
   const createProviderProfileMutation = useMutation({
     mutationFn: () => api.createProviderProfile(providerProfileCreatePayload(providerProfileForm)),
     onSuccess: async (profile) => {
-      await reconcileProviderProfileCache(profile, { includeProviderModels: true });
+      queryClient.setQueryData<ProviderProfile[]>(["provider-profiles"], (current = []) => {
+        const nextProfiles = current.filter((item) => item.id !== profile.id);
+        return [...nextProfiles, profile];
+      });
+      await refreshSettingsQueries({
+        includeProviderModels: true,
+        includeProviderProfiles: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       setProviderProfileForm(EMPTY_PROVIDER_FORM);
       setEditingProviderProfileId(null);
       setProviderDrawerOpen(false);
@@ -695,7 +881,17 @@ export function SettingsPage() {
       return api.updateProviderProfile(editingProviderProfileId, providerProfileUpdatePayload(providerProfileForm));
     },
     onSuccess: async (profile) => {
-      await reconcileProviderProfileCache(profile, { includeProviderModels: true });
+      queryClient.setQueryData<ProviderProfile[]>(["provider-profiles"], (current = []) =>
+        current.map((item) => (item.id === profile.id ? profile : item)),
+      );
+      await refreshSettingsQueries({
+        includeProviderModels: true,
+        includeProviderProfiles: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       setProviderProfileForm(EMPTY_PROVIDER_FORM);
       setEditingProviderProfileId(null);
       setProviderDrawerOpen(false);
@@ -711,7 +907,17 @@ export function SettingsPage() {
   const deleteProviderProfileMutation = useMutation({
     mutationFn: (profileId: string) => api.archiveProviderProfile(profileId),
     onSuccess: async (profile) => {
-      await reconcileProviderProfileCache(profile, { includeProviderModels: true });
+      queryClient.setQueryData<ProviderProfile[]>(["provider-profiles"], (current = []) =>
+        current.filter((item) => item.id !== profile.id),
+      );
+      await refreshSettingsQueries({
+        includeProviderModels: true,
+        includeProviderProfiles: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       setPendingDeleteProviderProfile(null);
       setError("");
       setSavedMessage(t("settings.provider.deletedMessage"));
@@ -732,7 +938,16 @@ export function SettingsPage() {
       setSavedMessage("");
     },
     onSuccess: async (profile) => {
-      await reconcileProviderProfileCache(profile);
+      queryClient.setQueryData<ProviderProfile[]>(["provider-profiles"], (current = []) =>
+        current.map((item) => (item.id === profile.id ? profile : item)),
+      );
+      await refreshSettingsQueries({
+        includeProviderProfiles: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       setPendingProviderDisable(null);
       setError("");
       setSavedMessage(t("settings.provider.saved"));
@@ -753,7 +968,16 @@ export function SettingsPage() {
         : api.createGenerationConfig(payload as GenerationConfigCreateRequest);
     },
     onSuccess: async (generationConfig) => {
-      await reconcileGenerationConfigCache(generationConfig, { includeRuntimeConfig: true });
+      setGenerationConfigDrafts((current) => ({ ...current, [generationConfig.id]: generationConfigDraft(generationConfig) }));
+      await refreshSettingsQueries({
+        includeConfig: true,
+        includeRuntimeConfig: true,
+        includeProviderProfiles: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       setError("");
       setSavedMessage(t("settings.generation.saved"));
     },
@@ -772,7 +996,20 @@ export function SettingsPage() {
       setSavedMessage("");
     },
     onSuccess: async (generationConfig) => {
-      await reconcileGenerationConfigCache(generationConfig, { includeRuntimeConfig: true });
+      setGenerationConfigDrafts((current) => {
+        const nextDrafts = { ...current };
+        delete nextDrafts[generationConfig.id];
+        return nextDrafts;
+      });
+      await refreshSettingsQueries({
+        includeConfig: true,
+        includeRuntimeConfig: true,
+        includeProviderProfiles: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       setPendingGenerationArchive(null);
       setPendingGenerationArchiveError("");
       setError("");
@@ -795,7 +1032,12 @@ export function SettingsPage() {
       setSavedMessage("");
     },
     onSuccess: async (generationConfig) => {
-      await reconcileGenerationConfigCache(generationConfig);
+      setGenerationConfigDrafts((current) => ({ ...current, [generationConfig.id]: generationConfigDraft(generationConfig) }));
+      await refreshSettingsQueries({
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+      });
       setError("");
       setSavedMessage(t("settings.generation.unfrozen"));
     },
@@ -813,8 +1055,14 @@ export function SettingsPage() {
         ? api.updateGenerationResourceGroup(draft.id, payload as GenerationResourceGroupUpdateRequest)
         : api.createGenerationResourceGroup(payload as GenerationResourceGroupCreateRequest);
     },
-    onSuccess: async (group) => {
-      await reconcileGenerationResourceGroupCache(group, { includeResourceGroups: true });
+    onSuccess: async () => {
+      await refreshSettingsQueries({
+        includeGenerationResourceGroups: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       setError("");
       setSavedMessage(t("settings.resourceGroup.saved"));
     },
@@ -833,7 +1081,18 @@ export function SettingsPage() {
       setSavedMessage("");
     },
     onSuccess: async (group) => {
-      await reconcileGenerationResourceGroupCache(group, { includeResourceGroups: true });
+      setGenerationResourceGroupDrafts((current) => {
+        const nextDrafts = { ...current };
+        delete nextDrafts[group.id];
+        return nextDrafts;
+      });
+      await refreshSettingsQueries({
+        includeGenerationResourceGroups: true,
+        includeGenerationConfigs: true,
+        includeGenerationConfigOptions: true,
+        includeGenerationConfigStatus: true,
+        includeMyGenerationResourceGroups: true,
+      });
       setPendingGenerationArchive(null);
       setPendingGenerationArchiveError("");
       setError("");
@@ -870,7 +1129,7 @@ export function SettingsPage() {
       );
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      void refreshSettingsQueries({ includeGenerationConfigs: true });
     },
   });
 
@@ -901,7 +1160,7 @@ export function SettingsPage() {
       );
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      void refreshSettingsQueries({ includeGenerationConfigs: true });
     },
   });
 
@@ -927,7 +1186,7 @@ export function SettingsPage() {
       );
     },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["provider-config"] });
+      void refreshSettingsQueries({ includeGenerationConfigs: true });
     },
   });
 
@@ -969,7 +1228,9 @@ export function SettingsPage() {
     mutationFn: api.destroySession,
     onSuccess: async () => {
       queryClient.removeQueries({ queryKey: ["config"] });
-      queryClient.removeQueries({ queryKey: ["provider-config"] });
+      queryClient.removeQueries({ queryKey: ["provider-profiles"] });
+      queryClient.removeQueries({ queryKey: ["generation-resource-groups"] });
+      queryClient.removeQueries({ queryKey: ["generation-configs"] });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
       navigate("/login", { replace: true });
     },
@@ -1004,21 +1265,31 @@ export function SettingsPage() {
   const providerPending = providerProfilePending || saveGenerationConfigMutation.isPending;
   const resourceGroupPending =
     saveGenerationResourceGroupMutation.isPending || archiveGenerationResourceGroupMutation.isPending;
+  const providerProfiles = providerProfilesQuery.data ?? [];
+  const resourceGroupGenerationConfigs = resourceGroupGenerationConfigsQuery.data ?? [];
+  const textGenerationConfigs = textGenerationConfigsQuery.data ?? [];
+  const imageGenerationConfigs = imageGenerationConfigsQuery.data ?? [];
+  const visibleGenerationConfigs =
+    activeSection === "text"
+      ? textGenerationConfigs
+      : activeSection === "image"
+        ? imageGenerationConfigs
+        : resourceGroupGenerationConfigs;
   const requestGenerationResourceGroupArchive = useCallback(
     (groupId: string) => {
-      const group = providerConfigQuery.data?.generation_resource_groups.find((item) => item.id === groupId);
+      const group = generationResourceGroups.find((item) => item.id === groupId);
       setPendingGenerationArchiveError("");
       setPendingGenerationArchive({ kind: "resourceGroup", id: groupId, name: group?.name ?? groupId });
     },
-    [providerConfigQuery.data],
+    [generationResourceGroups],
   );
   const requestGenerationConfigArchive = useCallback(
     (configId: string) => {
-      const config = providerConfigQuery.data?.generation_configs.find((item) => item.id === configId);
+      const config = visibleGenerationConfigs.find((item) => item.id === configId);
       setPendingGenerationArchiveError("");
       setPendingGenerationArchive({ kind: "generationConfig", id: configId, name: config?.name ?? configId });
     },
-    [providerConfigQuery.data],
+    [visibleGenerationConfigs],
   );
   const pendingGenerationArchiveBusy =
     pendingGenerationArchive?.kind === "resourceGroup"
@@ -1044,12 +1315,29 @@ export function SettingsPage() {
       : pendingGenerationArchive?.kind === "generationConfig"
         ? t("settings.generation.archive")
         : "";
-
-  const loadingMain = configQuery.isLoading || providerConfigQuery.isLoading;
-  const genericSection = ["prompts", "upload", "queue", "layoutAppearance", "security"].includes(
-    activeSection,
-  );
+  const loadingMain =
+    (shouldLoadConfig && configQuery.isLoading) ||
+    (activeSection === "providers" && providerProfilesQuery.isLoading) ||
+    (activeSection === "resourceGroups" &&
+      (generationResourceGroupsQuery.isLoading || resourceGroupGenerationConfigsQuery.isLoading)) ||
+    (activeSection === "text" &&
+      (providerProfilesQuery.isLoading || generationResourceGroupsQuery.isLoading || textGenerationConfigsQuery.isLoading)) ||
+    (activeSection === "image" &&
+      (providerProfilesQuery.isLoading || generationResourceGroupsQuery.isLoading || imageGenerationConfigsQuery.isLoading));
+  const activeSectionError =
+    activeSection === "providers"
+      ? providerProfilesQuery.error
+      : activeSection === "resourceGroups"
+        ? generationResourceGroupsQuery.error ?? resourceGroupGenerationConfigsQuery.error
+        : activeSection === "text"
+          ? providerProfilesQuery.error ?? generationResourceGroupsQuery.error ?? textGenerationConfigsQuery.error
+          : activeSection === "image"
+            ? providerProfilesQuery.error ?? generationResourceGroupsQuery.error ?? imageGenerationConfigsQuery.error
+            : shouldLoadConfig
+              ? configQuery.error
+              : null;
   const isWorkspaceSubpage = activeScheme === "workspace";
+  const PageActionButton = actionButtonComponentForAppearance(isWorkspaceSubpage ? "workspace" : "classic");
 
   return (
     <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} flex min-h-dvh flex-col dark:text-slate-100`}>
@@ -1102,9 +1390,9 @@ export function SettingsPage() {
               <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
                 <Loader2 size={22} className="animate-spin" />
               </div>
-            ) : configQuery.isError ? (
+            ) : activeSectionError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                {configQuery.error instanceof ApiError ? configQuery.error.detail : t("settings.loadFailed")}
+                {activeSectionError instanceof ApiError ? activeSectionError.detail : t("settings.loadFailed")}
               </div>
             ) : (
               <div className="pf-side-shell pf-settings-shell min-h-0 flex-1">
@@ -1113,6 +1401,7 @@ export function SettingsPage() {
                   onSearchChange={setSectionSearch}
                   visibleSections={visibleSections}
                   activeSection={activeSection}
+                  workspaceSubpage={isWorkspaceSubpage}
                   onSectionChange={handleActiveSectionChange}
                 />
 
@@ -1176,20 +1465,21 @@ export function SettingsPage() {
                           {t("settings.section.globalTemplatesDescription")}
                         </p>
                       </div>
-                      <button
-                        type="button"
+                      <PageActionButton
                         onClick={() => navigate("/settings/global-templates")}
                         disabled={!canManageGlobalTemplates}
-                        className={SETTINGS_MAIN_ACTION_CLASS}
+                        preset="primary"
+                        size="md"
+                        leadingIcon={<Layers3 size={14} />}
                       >
-                        <Layers3 size={14} className="mr-2" />
                         {t("nav.globalTemplates")}
-                      </button>
+                      </PageActionButton>
                     </div>
                   ) : null}
                   {activeSection === "weather" ? (
                     <div className="space-y-5">
                       <WeatherSettingsPanel
+                        workspaceSubpage={isWorkspaceSubpage}
                         onSaved={() => {
                           setError("");
                           setSavedMessage(t("settings.weather.saved"));
@@ -1199,6 +1489,7 @@ export function SettingsPage() {
                   ) : null}
                   {activeSection === "notifications" ? (
                     <NotificationSettingsPanel
+                      workspaceSubpage={isWorkspaceSubpage}
                       onSaved={() => {
                         setError("");
                         setSavedMessage(t("settings.notification.saved"));
@@ -1208,13 +1499,14 @@ export function SettingsPage() {
                   <div>
                     {activeSection === "providers" ? (
                       <ProvidersSection
-                        data={providerConfigQuery.data}
+                        profiles={providerProfiles}
                         profileForm={providerProfileForm}
                         editingProfileId={editingProviderProfileId}
                         drawerOpen={providerDrawerOpen}
                         pending={providerProfilePending}
                         togglingProfileId={togglingProviderProfileId}
                         canWrite={canWriteProviderSettings}
+                        workspaceSubpage={isWorkspaceSubpage}
                         onProfileFormChange={setProviderProfileForm}
                         onOpenCreate={() => {
                           if (!canWriteProviderSettings) {
@@ -1231,11 +1523,11 @@ export function SettingsPage() {
                           if (!canWriteProviderSettings) {
                             return;
                           }
-                          const latestProviderConfig = await refreshProviderConfigFromApi();
-                          if (!latestProviderConfig) {
+                          const latestProfiles = await refreshProviderProfilesFromApi();
+                          if (!latestProfiles) {
                             return;
                           }
-                          const latestProfile = latestProviderConfig.profiles.find(
+                          const latestProfile = latestProfiles.find(
                             (candidate) => candidate.id === profile.id && !candidate.archived_at,
                           );
                           if (!latestProfile) {
@@ -1274,21 +1566,33 @@ export function SettingsPage() {
                           setSavedMessage("");
                           setPendingDeleteProviderProfile(profile);
                         }}
-                        onToggleProfileEnabled={(profileId, enabled) => {
+                        onToggleProfileEnabled={async (profileId, enabled) => {
                           if (!canWriteProviderSettings) {
                             return;
                           }
                           if (!enabled) {
-                            const usedGenerationConfigs = generationConfigsUsingProvider(
-                              providerConfigQuery.data?.generation_configs ?? [],
-                              profileId,
-                            );
-                            const profile = providerConfigQuery.data?.profiles.find((item) => item.id === profileId);
-                            if (profile && usedGenerationConfigs.length) {
-                              setError("");
-                              setSavedMessage("");
-                              setPendingProviderDisable({ profile, generationConfigs: usedGenerationConfigs });
-                              return;
+                            const profile = providerProfiles.find((item) => item.id === profileId);
+                            if (profile && (profile.used_by_text_generation || profile.used_by_image_generation)) {
+                              try {
+                                const usedGenerationConfigs = generationConfigsUsingProvider(
+                                  await api.listGenerationConfigs(),
+                                  profileId,
+                                );
+                                if (usedGenerationConfigs.length) {
+                                  setError("");
+                                  setSavedMessage("");
+                                  setPendingProviderDisable({ profile, generationConfigs: usedGenerationConfigs });
+                                  return;
+                                }
+                              } catch (mutationError) {
+                                setSavedMessage("");
+                                setError(
+                                  mutationError instanceof ApiError
+                                    ? mutationError.detail
+                                    : t("settings.provider.saveFailed"),
+                                );
+                                return;
+                              }
                             }
                           }
                           updateProviderProfileEnabledMutation.mutate({ profileId, enabled });
@@ -1298,12 +1602,13 @@ export function SettingsPage() {
 
                     {activeSection === "resourceGroups" ? (
                       <GenerationResourceGroupSection
-                        groups={providerConfigQuery.data?.generation_resource_groups ?? []}
-                        generationConfigs={providerConfigQuery.data?.generation_configs ?? []}
+                        groups={generationResourceGroups}
+                        generationConfigs={resourceGroupGenerationConfigs}
                         drafts={generationResourceGroupDrafts}
                         pending={resourceGroupPending}
                         archivingGroupId={archivingGenerationResourceGroupId}
                         canWrite={canWriteProviderSettings}
+                        workspaceSubpage={isWorkspaceSubpage}
                         onChange={(key, next) => {
                           setGenerationResourceGroupDrafts((current) => ({ ...current, [key]: next }));
                           setSavedMessage("");
@@ -1331,12 +1636,17 @@ export function SettingsPage() {
                     {activeSection === "text" ? (
                       <GenerationConfigPoolSection
                         key="text-generation-configs"
-                        data={providerConfigQuery.data}
                         purpose="text"
+                        profiles={providerProfiles}
+                        resourceGroups={generationResourceGroups}
+                        generationConfigs={textGenerationConfigs}
+                        selectedResourceGroupId={effectiveSelectedTextResourceGroupId}
                         drafts={generationConfigDrafts}
                         pending={providerPending}
+                        listRefreshing={textGenerationConfigsQuery.isFetching}
                         archivingConfigId={archivingGenerationConfigId}
                         canWrite={canWriteProviderSettings}
+                        workspaceSubpage={isWorkspaceSubpage}
                         textTestState={textConfigTestState}
                         jsonResponseFormatTestState={textConfigJsonResponseFormatTestState}
                         onChange={(key, next, options) => {
@@ -1397,9 +1707,10 @@ export function SettingsPage() {
                             clearTextConfigJsonResponseFormatTestRecord(current, key),
                           );
                         }}
-                        onBeforeOpenCreate={async () => Boolean(await refreshProviderConfigFromApi())}
-                        onRefreshSort={() => {
-                          void refreshProviderSettingsQueries();
+                        onBeforeOpenCreate={refreshGenerationSectionInputsFromApi}
+                        onSelectedResourceGroupIdChange={setSelectedTextResourceGroupId}
+                        onRefreshConfigs={() => {
+                          void textGenerationConfigsQuery.refetch();
                         }}
                         unfreezingConfigId={unfreezingGenerationConfigId}
                       />
@@ -1408,12 +1719,17 @@ export function SettingsPage() {
                     {activeSection === "image" ? (
                       <GenerationConfigPoolSection
                         key="image-generation-configs"
-                        data={providerConfigQuery.data}
                         purpose="image"
+                        profiles={providerProfiles}
+                        resourceGroups={generationResourceGroups}
+                        generationConfigs={imageGenerationConfigs}
+                        selectedResourceGroupId={effectiveSelectedImageResourceGroupId}
                         drafts={generationConfigDrafts}
                         pending={providerPending}
+                        listRefreshing={imageGenerationConfigsQuery.isFetching}
                         archivingConfigId={archivingGenerationConfigId}
                         canWrite={canWriteProviderSettings}
+                        workspaceSubpage={isWorkspaceSubpage}
                         imageTestState={imageConfigTestState}
                         onChange={(key, next, options) => {
                           setGenerationConfigDrafts((current) => ({ ...current, [key]: next }));
@@ -1470,9 +1786,10 @@ export function SettingsPage() {
                         onResetImageConfigTests={(key) => {
                           setImageConfigTestState((current) => clearImageConfigTestRecord(current, key));
                         }}
-                        onBeforeOpenCreate={async () => Boolean(await refreshProviderConfigFromApi())}
-                        onRefreshSort={() => {
-                          void refreshProviderSettingsQueries();
+                        onBeforeOpenCreate={refreshGenerationSectionInputsFromApi}
+                        onSelectedResourceGroupIdChange={setSelectedImageResourceGroupId}
+                        onRefreshConfigs={() => {
+                          void imageGenerationConfigsQuery.refetch();
                         }}
                         unfreezingConfigId={unfreezingGenerationConfigId}
                       />
@@ -1492,6 +1809,7 @@ export function SettingsPage() {
                             assetsError={loginPageAssetsQuery.isError}
                             selectionSaving={saveLoginPageSelectionMutation.isPending}
                             templateConfigSaving={saveLoginPageTemplateConfigMutation.isPending}
+                            workspaceSubpage={isWorkspaceSubpage}
                             onChange={(item, nextValue, touchedSecret) => {
                               setDrafts((current) => ({ ...current, [item.key]: nextValue }));
                               setSavedMessage("");
@@ -1539,6 +1857,7 @@ export function SettingsPage() {
                         resettingKey={resettingKey}
                         disabled={!canWriteRuntimeSettings}
                         saving={saveMutation.isPending}
+                        workspaceSubpage={isWorkspaceSubpage}
                         onChange={(item, nextValue, touchedSecret) => {
                           setDrafts((current) => ({ ...current, [item.key]: nextValue }));
                           setSavedMessage("");
@@ -1571,6 +1890,7 @@ export function SettingsPage() {
         />
         {imageConfigTestPreview ? (
           <ImageConfigTestResultDialog
+            appearance={isWorkspaceSubpage ? "workspace" : "classic"}
             result={imageConfigTestPreview}
             canSaveGallery={canSaveImageConfigTestGallery}
             saving={saveImageConfigTestGalleryMutation.isPending}
@@ -1586,6 +1906,7 @@ export function SettingsPage() {
         ) : null}
         <GalleryTagPickerDialog
           open={Boolean(imageConfigTestGalleryAssetId)}
+          appearance={isWorkspaceSubpage ? "workspace" : "classic"}
           tags={galleryTags}
           initialSelectedTagIds={[]}
           maxSelection={galleryEntryTagMaxSelection}
@@ -1607,6 +1928,7 @@ export function SettingsPage() {
         />
         <ConfirmDialog
           open={exportConfirmOpen}
+          appearance={isWorkspaceSubpage ? "workspace" : "classic"}
           title={t("settings.migration.exportConfirmTitle")}
           description={t("settings.migration.exportConfirm")}
           confirmLabel={t("settings.migration.exportConfirmLabel")}
@@ -1618,6 +1940,7 @@ export function SettingsPage() {
         />
         <ConfirmDialog
           open={Boolean(pendingResetItem)}
+          appearance={isWorkspaceSubpage ? "workspace" : "classic"}
           title={t("settings.restoreDefaultConfirmTitle")}
           description={
             pendingResetItem
@@ -1643,6 +1966,7 @@ export function SettingsPage() {
         />
         <ConfirmDialog
           open={Boolean(pendingDeleteProviderProfile)}
+          appearance={isWorkspaceSubpage ? "workspace" : "classic"}
           title={t("settings.provider.deleteConfirmTitle")}
           description={
             pendingDeleteProviderProfile
@@ -1678,6 +2002,7 @@ export function SettingsPage() {
         />
         <ConfirmDialog
           open={Boolean(pendingGenerationArchive)}
+          appearance={isWorkspaceSubpage ? "workspace" : "classic"}
           title={pendingGenerationArchiveTitle}
           description={pendingGenerationArchiveDescription}
           error={pendingGenerationArchiveError}

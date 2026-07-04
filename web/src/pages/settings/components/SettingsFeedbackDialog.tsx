@@ -6,7 +6,7 @@ import { CheckCircle2, X } from "lucide-react";
 
 import { ModalShell } from "../../../components/ModalShell";
 import { useI18n } from "../../../lib/preferences";
-import { SETTINGS_ICON_ACTION_CLASS } from "./styles";
+import { useSettingsActionClassNames } from "./styles";
 
 export function SettingsFeedbackDialog({
   successMessage,
@@ -20,6 +20,7 @@ export function SettingsFeedbackDialog({
   onCloseError: () => void;
 }) {
   const { t } = useI18n();
+  const { SETTINGS_ICON_ACTION_CLASS } = useSettingsActionClassNames();
   const titleId = useId();
   const descriptionId = useId();
   const open = Boolean(errorMessage || successMessage);

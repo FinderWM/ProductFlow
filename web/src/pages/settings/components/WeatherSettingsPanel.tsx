@@ -4,7 +4,8 @@ import { useState } from "react";
 
 import { Save } from "lucide-react";
 
-import { SelectField } from "../../../components/SelectField";
+import { ClassicSelectField, ClassicTextInput } from "../../../components/classicInputs";
+import { WorkspaceSelectField, WorkspaceTextInput } from "../../../components/workspaceInputs";
 import { useI18n } from "../../../lib/preferences";
 import {
   MAX_WEATHER_REFRESH_MINUTES,
@@ -17,10 +18,17 @@ import {
   writeWeatherSourceId,
 } from "../../../lib/weatherSources";
 import { SettingsFormField } from "./SettingsFormField";
-import { INPUT_CLASS, PANEL_CLASS, SETTINGS_COMPACT_ACTION_CLASS } from "./styles";
+import { PANEL_CLASS, useSettingsActionClassNames } from "./styles";
 
-export function WeatherSettingsPanel({ onSaved }: { onSaved: () => void }) {
+export function WeatherSettingsPanel({
+  onSaved,
+  workspaceSubpage = false,
+}: {
+  onSaved: () => void;
+  workspaceSubpage?: boolean;
+}) {
   const { t } = useI18n();
+  const { SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const [weatherSettings, setWeatherSettings] = useState(readWeatherSettings);
   const saveWeatherSettings = () => {
     const sourceId = normalizeWeatherSourceId(weatherSettings.sourceId);
@@ -42,35 +50,64 @@ export function WeatherSettingsPanel({ onSaved }: { onSaved: () => void }) {
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <SettingsFormField label={t("settings.weather.source")}>
-          <SelectField
-            value={weatherSettings.sourceId}
-            options={WEATHER_SOURCE_IDS.map((sourceId) => ({
-              value: sourceId,
-              label: t(weatherSources[sourceId].labelKey),
-            }))}
-            onChange={(value) => {
-              const sourceId = normalizeWeatherSourceId(value);
-              setWeatherSettings((current) => ({ ...current, sourceId }));
-            }}
-            radius="lg"
-          />
+          {workspaceSubpage ? (
+            <WorkspaceSelectField
+              value={weatherSettings.sourceId}
+              options={WEATHER_SOURCE_IDS.map((sourceId) => ({
+                value: sourceId,
+                label: t(weatherSources[sourceId].labelKey),
+              }))}
+              onChange={(value) => {
+                const sourceId = normalizeWeatherSourceId(value);
+                setWeatherSettings((current) => ({ ...current, sourceId }));
+              }}
+              size="default"
+            />
+          ) : (
+            <ClassicSelectField
+              value={weatherSettings.sourceId}
+              options={WEATHER_SOURCE_IDS.map((sourceId) => ({
+                value: sourceId,
+                label: t(weatherSources[sourceId].labelKey),
+              }))}
+              onChange={(value) => {
+                const sourceId = normalizeWeatherSourceId(value);
+                setWeatherSettings((current) => ({ ...current, sourceId }));
+              }}
+              radius="lg"
+            />
+          )}
         </SettingsFormField>
         <SettingsFormField label={t("settings.weather.refreshMinutes")}>
-          <input
-            type="number"
-            min={MIN_WEATHER_REFRESH_MINUTES}
-            max={MAX_WEATHER_REFRESH_MINUTES}
-            value={weatherSettings.refreshMinutes}
-            onChange={(event) => {
-              const nextValue = Number(event.target.value);
-              setWeatherSettings((current) => ({ ...current, refreshMinutes: nextValue }));
-            }}
-            className={INPUT_CLASS}
-          />
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              type="number"
+              min={MIN_WEATHER_REFRESH_MINUTES}
+              max={MAX_WEATHER_REFRESH_MINUTES}
+              value={weatherSettings.refreshMinutes}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                setWeatherSettings((current) => ({ ...current, refreshMinutes: nextValue }));
+              }}
+              size="default"
+            />
+          ) : (
+            <ClassicTextInput
+              type="number"
+              min={MIN_WEATHER_REFRESH_MINUTES}
+              max={MAX_WEATHER_REFRESH_MINUTES}
+              value={weatherSettings.refreshMinutes}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                setWeatherSettings((current) => ({ ...current, refreshMinutes: nextValue }));
+              }}
+              size="default"
+            />
+          )}
         </SettingsFormField>
       </div>
       <div className="flex justify-end">
-        <button type="button" onClick={saveWeatherSettings} className={SETTINGS_COMPACT_ACTION_CLASS}>
+        <button type="button" onClick={saveWeatherSettings} className={SETTINGS_MAIN_ACTION_CLASS}>
           <Save size={14} className="mr-1.5" />
           {t("common.save")}
         </button>

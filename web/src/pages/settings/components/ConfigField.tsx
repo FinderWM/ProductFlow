@@ -3,12 +3,13 @@
 import { useI18n } from "../../../lib/preferences";
 import type { ConfigItem } from "../../../lib/types";
 import { ParameterHelpLabel } from "../../../components/ParameterHelp";
-import { SelectField } from "../../../components/SelectField";
+import { ClassicSelectField, ClassicTextInput, ClassicTextarea } from "../../../components/classicInputs";
+import { WorkspaceSelectField, WorkspaceTextInput, WorkspaceTextarea } from "../../../components/workspaceInputs";
 import { configItemHelpContent } from "../configHelp";
 import { sourceClassName, sourceLabel } from "../configSource";
 import type { DraftValue } from "../types";
 import { ConfigFieldResetButton } from "./ConfigFieldResetButton";
-import { INPUT_CLASS, PROMPT_TEXTAREA_CLASS, SETTINGS_FIELD_CARD_CLASS, TEXTAREA_CLASS } from "./styles";
+import { SETTINGS_FIELD_CARD_CLASS } from "./styles";
 import { SettingsOptionToggle, SettingsSwitchToggle } from "./Toggles";
 
 interface ConfigFieldProps {
@@ -18,6 +19,7 @@ interface ConfigFieldProps {
   isResetting: boolean;
   disabled?: boolean;
   layout?: "row" | "card";
+  workspaceSubpage?: boolean;
   onChange: (value: DraftValue, touchedSecret?: boolean) => void;
   onReset: () => void;
 }
@@ -29,6 +31,7 @@ export function ConfigField({
   isResetting,
   disabled = false,
   layout = "row",
+  workspaceSubpage = false,
   onChange,
   onReset,
 }: ConfigFieldProps) {
@@ -68,6 +71,7 @@ export function ConfigField({
             key={`${item.key}-${option.value}`}
             checked={selectedMultiValues.includes(option.value)}
             disabled={disabled}
+            workspaceSubpage={workspaceSubpage}
             onChange={() => toggleMultiValue(option.value)}
           >
             {option.label}
@@ -75,47 +79,85 @@ export function ConfigField({
         ))}
       </div>
     ) : item.input_type === "select" ? (
-      <SelectField
-        id={item.key}
-        value={String(value)}
-        options={item.options}
-        onChange={onChange}
-        disabled={disabled}
-        radius="xl"
-      />
+      workspaceSubpage ? (
+        <WorkspaceSelectField
+          id={item.key}
+          value={String(value)}
+          options={item.options}
+          onChange={onChange}
+          disabled={disabled}
+          size="tall"
+        />
+      ) : (
+        <ClassicSelectField
+          id={item.key}
+          value={String(value)}
+          options={item.options}
+          onChange={onChange}
+          disabled={disabled}
+          radius="xl"
+        />
+      )
     ) : item.input_type === "textarea" ? (
-      <textarea
-        id={item.key}
-        value={String(value)}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        rows={item.key.startsWith("prompt_") ? 10 : 3}
-        className={`${item.key.startsWith("prompt_") ? PROMPT_TEXTAREA_CLASS : TEXTAREA_CLASS} ${
-          item.key.startsWith("prompt_") ? "min-h-[240px]" : ""
-        } resize-y leading-6`}
-      />
+      workspaceSubpage ? (
+        <WorkspaceTextarea
+          id={item.key}
+          value={String(value)}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          rows={item.key.startsWith("prompt_") ? 10 : 3}
+          variant={item.key.startsWith("prompt_") ? "prompt" : "default"}
+          className={item.key.startsWith("prompt_") ? "min-h-[240px]" : undefined}
+        />
+      ) : (
+        <ClassicTextarea
+          id={item.key}
+          value={String(value)}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          rows={item.key.startsWith("prompt_") ? 10 : 3}
+          variant={item.key.startsWith("prompt_") ? "prompt" : "default"}
+          className={item.key.startsWith("prompt_") ? "min-h-[240px]" : "leading-6"}
+        />
+      )
     ) : item.input_type === "boolean" ? (
       <SettingsSwitchToggle
         inputId={item.key}
         checked={Boolean(value)}
         disabled={disabled}
+        workspaceSubpage={workspaceSubpage}
         onChange={(checked) => onChange(checked)}
       >
         {Boolean(value) ? t("settings.enabled") : t("settings.disabled")}
       </SettingsSwitchToggle>
     ) : (
-      <input
-        id={item.key}
-        type={item.input_type === "password" ? "password" : item.input_type === "number" ? "number" : "text"}
-        value={String(value)}
-        min={item.minimum ?? undefined}
-        max={item.maximum ?? undefined}
-        placeholder={item.secret && item.has_value ? t("settings.secretPlaceholder") : item.description || undefined}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value, item.secret)}
-        className={INPUT_CLASS}
-        autoComplete={item.secret ? "new-password" : undefined}
-      />
+      workspaceSubpage ? (
+        <WorkspaceTextInput
+          id={item.key}
+          type={item.input_type === "password" ? "password" : item.input_type === "number" ? "number" : "text"}
+          value={String(value)}
+          min={item.minimum ?? undefined}
+          max={item.maximum ?? undefined}
+          placeholder={item.secret && item.has_value ? t("settings.secretPlaceholder") : item.description || undefined}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value, item.secret)}
+          size="tall"
+          autoComplete={item.secret ? "new-password" : undefined}
+        />
+      ) : (
+        <ClassicTextInput
+          id={item.key}
+          type={item.input_type === "password" ? "password" : item.input_type === "number" ? "number" : "text"}
+          value={String(value)}
+          min={item.minimum ?? undefined}
+          max={item.maximum ?? undefined}
+          placeholder={item.secret && item.has_value ? t("settings.secretPlaceholder") : item.description || undefined}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value, item.secret)}
+          size="tall"
+          autoComplete={item.secret ? "new-password" : undefined}
+        />
+      )
     );
 
   if (layout === "card") {

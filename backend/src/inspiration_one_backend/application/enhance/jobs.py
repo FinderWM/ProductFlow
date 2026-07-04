@@ -12,14 +12,17 @@ from sqlalchemy.orm import Session, selectinload
 
 from inspiration_one_backend.application.admission import generation_running_capacity_available
 from inspiration_one_backend.application.auth import require_generation_resource_group_for_user
+from inspiration_one_backend.application.enhance.execution import (
+    EnhanceExecutionRequest,
+    execute_enhance_execution,
+    validate_enhance_final_resource_bounds,
+    validate_enhance_generation_config_selection,
+    validate_enhance_params,
+)
 from inspiration_one_backend.application.generation_config_runtime import (
     GenerationConfigSelection,
     GenerationConfigWaitError,
-    claim_runtime_generation_config,
-    generation_failure_is_throttled,
-    generation_failure_is_timeout,
     generation_failure_reason,
-    release_runtime_generation_config,
 )
 from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.application.ownership import ensure_actor_can_mutate_owner
@@ -29,7 +32,6 @@ from inspiration_one_backend.application.resource_library import (
     save_resource_library_asset_from_source,
 )
 from inspiration_one_backend.application.time import now_utc
-from inspiration_one_backend.config import get_runtime_settings
 from inspiration_one_backend.domain.enums import (
     EnhanceSourceKind,
     EnhanceStrategy,
@@ -55,7 +57,6 @@ from inspiration_one_backend.infrastructure.db.models import (
 )
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
 from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes, infer_extension
-from inspiration_one_backend.infrastructure.image.chat_service import ImageChatService
 from inspiration_one_backend.infrastructure.provider_config import IMAGE_PURPOSE, generation_config_resource_group_ids
 from inspiration_one_backend.infrastructure.storage import LocalStorage
 
@@ -73,9 +74,6 @@ logger = logging.getLogger(__name__)
 
 ENHANCE_INPUT_TTL = timedelta(days=7)
 ENHANCE_CAPACITY_RETRY_DELAY_MS = 2000
-ENHANCE_FINAL_MAX_PIXELS = 120_000_000
-ENHANCE_FINAL_MAX_EDGE = 16_384
-ENHANCE_FINAL_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 ENHANCE_CANCELLED_REASON = "已取消"
 
 SOURCE_ASSET_IMAGE_KINDS = frozenset(
@@ -186,7 +184,12 @@ def create_enhance_job(
         actor_is_admin=actor_is_admin,
         storage=storage,
     )
-    normalized_params, required_max_dimension = validate_enhance_params(strategy=strategy, params=params, source=source)
+    normalized_params, required_max_dimension = validate_enhance_params(
+        strategy=strategy,
+        params=params,
+        source_width=source.width,
+        source_height=source.height,
+    )
     selection = _authorized_image_generation_config_selection(
         session,
         resource_group_id=resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID,
@@ -194,6 +197,11 @@ def create_enhance_job(
         generation_config_id=generation_config_id,
         actor_user_id=actor_user_id,
         actor_is_admin=actor_is_admin,
+        required_max_dimension=required_max_dimension,
+    )
+    validate_enhance_generation_config_selection(
+        session,
+        selection=selection,
         required_max_dimension=required_max_dimension,
     )
     job = EnhanceJob(
@@ -287,8 +295,6 @@ def cancel_enhance_job(
 def execute_enhance_job(job_id: str) -> None:
     session = get_session_factory()()
     storage = LocalStorage()
-    claim = None
-    completed_call_count = 0
     job: EnhanceJob | None = None
     try:
         job = session.get(EnhanceJob, job_id)
@@ -301,18 +307,7 @@ def execute_enhance_job(job_id: str) -> None:
             return
         source = load_enhance_source_for_job(session, job, storage=storage)
         try:
-            claim = claim_runtime_generation_config(
-                purpose="image",
-                selection=_job_generation_config_selection(job),
-            )
-            job.used_generation_config_id = claim.generation_config_id
-            job.resource_group_id = claim.resource_group_id
-            session.commit()
-            service = ImageChatService(generation_config_id=claim.generation_config_id)
-
             def progress_callback(completed: int, total: int) -> None:
-                nonlocal completed_call_count
-                completed_call_count = completed
                 _update_job_progress(
                     session,
                     job_id=job.id,
@@ -320,31 +315,36 @@ def execute_enhance_job(job_id: str) -> None:
                     total=total,
                 )
 
-            ctx = EnhanceContext(
-                session=session,
-                storage=storage,
-                service=service,
-                source_image_bytes=source.content,
-                source_mime=source.mime_type,
-                source_width=source.width,
-                source_height=source.height,
-                output_prefix=f"enhance/{job.id}",
-                reference_limit=2,
-                progress_callback=progress_callback,
-                cancel_check=lambda: _job_cancelled(session, job_id),
+            outcome = execute_enhance_execution(
+                EnhanceExecutionRequest(
+                    session=session,
+                    owner_user_id=job.owner_user_id,
+                    strategy=job.strategy,
+                    params=dict(job.params_json or {}),
+                    generation_config_selection=_job_generation_config_selection(job),
+                    source_image_bytes=source.content,
+                    source_mime=source.mime_type,
+                    source_width=source.width,
+                    source_height=source.height,
+                    output_prefix=f"enhance/{job.id}",
+                    strategy_runner=lambda ctx, normalized_params: _run_job_strategy(
+                        job,
+                        ctx,
+                        normalized_params=normalized_params,
+                    ),
+                    storage=storage,
+                    reference_limit=2,
+                    progress_callback=progress_callback,
+                    cancel_check=lambda: _job_cancelled(session, job_id),
+                    post_result_check=lambda _result: _raise_if_job_cancelled(session, job.id),
+                )
             )
-            result = _run_strategy(job, ctx)
-            completed_call_count = result.completed_call_count
-            if _job_cancelled(session, job.id):
-                raise EnhanceCancelledError("图片增强已取消")
+            job.used_generation_config_id = outcome.used_generation_config_id
+            job.resource_group_id = outcome.used_resource_group_id
+            if job.params_json != outcome.normalized_params:
+                job.params_json = outcome.normalized_params
+            result = outcome.result
             _mark_enhance_job_succeeded(session, job_id=job.id, result=result)
-            release_runtime_generation_config(
-                claim,
-                success=True,
-                user_id=job.owner_user_id,
-                generated_unit_count=completed_call_count or 1,
-            )
-            claim = None
         except GenerationConfigWaitError:
             session.rollback()
             _reset_running_job_to_queued(session, job_id)
@@ -353,30 +353,10 @@ def execute_enhance_job(job_id: str) -> None:
             session.rollback()
             storage.delete_enhance_artifacts(job_id)
             _mark_enhance_job_cancelled(session, job_id)
-            if claim is not None:
-                release_runtime_generation_config(
-                    claim,
-                    success=False,
-                    user_id=job.owner_user_id,
-                    generated_unit_count=max(0, completed_call_count),
-                    failure_reason=ENHANCE_CANCELLED_REASON,
-                )
-                claim = None
         except Exception as exc:
             session.rollback()
             storage.delete_enhance_artifacts(job_id)
             _mark_enhance_job_failed(session, job_id, generation_failure_reason(exc))
-            if claim is not None and job is not None:
-                release_runtime_generation_config(
-                    claim,
-                    success=False,
-                    user_id=job.owner_user_id,
-                    generated_unit_count=max(0, completed_call_count),
-                    failure_reason=generation_failure_reason(exc),
-                    timeout=generation_failure_is_timeout(exc),
-                    throttled=generation_failure_is_throttled(exc),
-                )
-                claim = None
     finally:
         session.close()
 
@@ -405,7 +385,7 @@ def upload_enhance_final(
     actual = image_dimensions_from_bytes(content)
     if actual != expected:
         raise BusinessValidationError("拼接结果尺寸不匹配")
-    _validate_final_resource_bounds(width=expected[0], height=expected[1], byte_count=len(content))
+    validate_enhance_final_resource_bounds(width=expected[0], height=expected[1], byte_count=len(content))
     storage_key = storage.save_enhance_final(f"enhance/{job.id}", content, suffix=infer_extension(mime_type))
     manifest["final_image_ref"] = storage_key
     manifest["final_status"] = "ready"
@@ -724,43 +704,6 @@ def load_enhance_source(
     raise BusinessValidationError("暂不支持该增强来源")
 
 
-def validate_enhance_params(
-    *,
-    strategy: EnhanceStrategy,
-    params: dict[str, Any],
-    source: LoadedEnhanceSource,
-) -> tuple[dict[str, Any], int]:
-    """Validate enhance params and return (normalized_params, required_max_dimension)."""
-    settings = get_runtime_settings()
-    if strategy == EnhanceStrategy.DIRECT:
-        target_width = _positive_int(params.get("target_width"), "目标宽度")
-        target_height = _positive_int(params.get("target_height"), "目标高度")
-        max_dim = int(settings.image_generation_max_dimension)
-        if target_width > max_dim or target_height > max_dim:
-            raise BusinessValidationError(f"目标尺寸不能超过生图最大单边 {max_dim}")
-        required_max_dimension = max(target_width, target_height)
-        return ({"target_width": target_width, "target_height": target_height}, required_max_dimension)
-
-    if strategy == EnhanceStrategy.TILED:
-        scale = _positive_int(params.get("scale"), "增强倍数")
-        if scale not in {2, 3, 4}:
-            raise BusinessValidationError("分块增强倍数只能是 2、3 或 4")
-        tile_base_size = _positive_int(params.get("tile_base_size", 1024), "分块尺寸")
-        overlap_pct = _non_negative_int(params.get("overlap_pct", 10), "重叠比例")
-        if overlap_pct != 10:
-            raise BusinessValidationError("分块重叠比例固定为 10")
-        max_dim = int(settings.image_generation_max_dimension)
-        if tile_base_size > max_dim:
-            raise BusinessValidationError(f"单块尺寸不能超过生图最大单边 {max_dim}")
-        final_width = source.width * scale
-        final_height = source.height * scale
-        _validate_final_resource_bounds(width=final_width, height=final_height, byte_count=0)
-        required_max_dimension = max(final_width, final_height)
-        return ({"scale": scale, "tile_base_size": tile_base_size, "overlap_pct": overlap_pct}, required_max_dimension)
-
-    raise BusinessValidationError("暂不支持该增强策略")
-
-
 def cleanup_expired_enhance_inputs(
     session: Session | None = None,
     *,
@@ -870,6 +813,12 @@ def _run_strategy(job: EnhanceJob, ctx: EnhanceContext) -> EnhanceResult:
     raise BusinessValidationError("暂不支持该增强策略")
 
 
+def _run_job_strategy(job: EnhanceJob, ctx: EnhanceContext, *, normalized_params: dict[str, Any]) -> EnhanceResult:
+    if job.params_json != normalized_params:
+        job.params_json = normalized_params
+    return _run_strategy(job, ctx)
+
+
 def _mark_enhance_job_running(session: Session, job: EnhanceJob) -> EnhanceJobClaimResult:
     if job.status != JobStatus.QUEUED:
         return EnhanceJobClaimResult(claimed=False)
@@ -914,6 +863,11 @@ def _job_cancelled(session: Session, job_id: str) -> bool:
         return True
     session.refresh(job)
     return job.status == JobStatus.CANCELLED
+
+
+def _raise_if_job_cancelled(session: Session, job_id: str) -> None:
+    if _job_cancelled(session, job_id):
+        raise EnhanceCancelledError("图片增强已取消")
 
 
 def _mark_enhance_job_succeeded(session: Session, *, job_id: str, result: EnhanceResult) -> None:
@@ -1155,37 +1109,6 @@ def _loaded_source_from_storage(
         height=dimensions[1],
         owner_user_id=owner_user_id,
     )
-
-
-def _positive_int(value: Any, label: str) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise BusinessValidationError(f"{label}必须是整数") from exc
-    if parsed <= 0:
-        raise BusinessValidationError(f"{label}必须大于 0")
-    return parsed
-
-
-def _non_negative_int(value: Any, label: str) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise BusinessValidationError(f"{label}必须是整数") from exc
-    if parsed < 0:
-        raise BusinessValidationError(f"{label}不能小于 0")
-    return parsed
-
-
-def _validate_final_resource_bounds(*, width: int, height: int, byte_count: int) -> None:
-    if width <= 0 or height <= 0:
-        raise BusinessValidationError("图片尺寸无效")
-    if width > ENHANCE_FINAL_MAX_EDGE or height > ENHANCE_FINAL_MAX_EDGE:
-        raise BusinessValidationError(f"拼接结果单边不能超过 {ENHANCE_FINAL_MAX_EDGE}")
-    if width * height > ENHANCE_FINAL_MAX_PIXELS:
-        raise BusinessValidationError(f"拼接结果像素不能超过 {ENHANCE_FINAL_MAX_PIXELS}")
-    if byte_count > 0 and byte_count > ENHANCE_FINAL_MAX_UPLOAD_BYTES:
-        raise BusinessValidationError("拼接结果文件过大")
 
 
 def _suppress_storage_errors():

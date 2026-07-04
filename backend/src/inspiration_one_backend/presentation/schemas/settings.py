@@ -90,6 +90,9 @@ class ProviderProfileResponse(BaseModel):
     name: str
     provider_type: str
     base_url: str | None = None
+    api_key_preview: str | None = None
+    used_by_text_generation: bool = False
+    used_by_image_generation: bool = False
     capabilities: list[str]
     default_models: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
@@ -107,6 +110,7 @@ class GenerationResourceGroupResponse(BaseModel):
     description: str | None = None
     sort_order: int
     enabled: bool
+    image_max_dimension: int | None = None
     blur_images_by_default: bool = False
     archived_at: str | None = None
     created_at: str
@@ -220,6 +224,7 @@ class GenerationConfigOptionResponse(BaseModel):
     effective_enabled: bool
     priority: int
     frozen_until: str | None = None
+    provider_max_dimension: int | None = None
 
 
 class GenerationConfigStatusConfigResponse(BaseModel):

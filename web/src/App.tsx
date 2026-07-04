@@ -13,6 +13,7 @@ import {
   API_GALLERY_READ,
   API_GLOBAL_TEMPLATES_MANAGE,
   API_IMAGE_CHAT_READ,
+  API_IMAGE_TO_CODE_READ,
   API_INSPIRATIONS_READ,
   API_INSPIRATIONS_WRITE,
   API_SETTINGS_READ,
@@ -24,14 +25,19 @@ import {
 import { SessionStateProvider } from "./lib/session";
 import { SessionActionsProvider } from "./lib/sessionActions";
 import { TaskNotificationBridge } from "./lib/taskNotifications";
+import { TopNavStateProvider } from "./lib/topNavState";
 import type { SessionState } from "./lib/types";
 import { UiLayoutSchemeProvider, useUiLayoutScheme } from "./lib/uiLayoutSchemePreference";
+import { SETTINGS_DEFAULT_SECTION_ID, settingsPathForSection } from "./pages/settings/sections";
 
 const GalleryPage = lazy(() =>
   import("./pages/GalleryPage").then((module) => ({ default: module.GalleryPage })),
 );
 const EnhancePage = lazy(() =>
   import("./pages/EnhancePage").then((module) => ({ default: module.EnhancePage })),
+);
+const ImageToCodePage = lazy(() =>
+  import("./pages/ImageToCodePage").then((module) => ({ default: module.ImageToCodePage })),
 );
 const HelpPage = lazy(() =>
   import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })),
@@ -91,11 +97,12 @@ const menuHomeRoutes: Array<{
   { code: "inspirations", to: "/inspirations", requiredPermission: API_INSPIRATIONS_READ },
   { code: "resource_library", to: "/resource-library", hasAccess: (sessionState) => Boolean(sessionState?.authenticated) },
   { code: "enhance", to: "/enhance", requiredPermission: API_ENHANCE_READ },
+  { code: "image_to_code", to: "/image-to-code", requiredPermission: API_IMAGE_TO_CODE_READ },
   { code: "image_chat", to: "/image-chat", requiredPermission: API_IMAGE_CHAT_READ },
   { code: "gallery", to: "/gallery", requiredPermission: API_GALLERY_READ },
   { code: "status", to: "/status", requiredPermission: API_STATUS_READ },
   { code: "usage_stats", to: "/usage-stats", requiredPermission: API_USAGE_STATS_READ },
-  { code: "settings", to: "/settings", requiredPermission: API_SETTINGS_READ },
+  { code: "settings", to: settingsPathForSection(SETTINGS_DEFAULT_SECTION_ID), requiredPermission: API_SETTINGS_READ },
   { code: "rbac", to: "/rbac", hasAccess: hasRbacManagementAccess },
 ];
 
@@ -185,45 +192,46 @@ function AppRoutes() {
   return (
     <SessionStateProvider value={sessionState}>
       <SessionActionsProvider value={{ logout: authenticated ? () => logoutMutation.mutate() : undefined }}>
-        <UiLayoutSchemeProvider enabled={authenticated}>
-          <CurrentWeatherProvider enabled={authenticated}>
-            {authenticated ? <GlobalBrandMark to={defaultAuthenticatedPath} /> : null}
-            <TaskNotificationBridge enabled={authenticated} />
-            <Suspense fallback={<LoadingScreen />}>
-              <Routes>
-                <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
-                <Route
-                  path="/login/command-orbit"
-                  element={<LoginPage authenticated={authenticated} templateId="command-orbit" />}
-                />
-                <Route
-                  path="/login/fluid-mist"
-                  element={<LoginPage authenticated={authenticated} templateId="fluid-mist" />}
-                />
-                <Route
-                  path="/login/image-lab"
-                  element={<LoginPage authenticated={authenticated} templateId="image-lab" />}
-                />
-                <Route
-                  path="/inspirations"
-                  element={menuRoute(
-                    "inspirations",
-                    <LayoutSchemeRoute classic={<InspirationListPage />} workspace={<WorkspaceHomePage />} />,
-                  )}
-                />
-                <Route path="/inspirations/list" element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />
-                <Route path="/inspirations/all" element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />
-                <Route
-                  path="/inspirations/new"
-                  element={permissionRoute(
-                    "inspirations",
-                    API_INSPIRATIONS_WRITE,
-                    <>
-                      <TopNav />
-                      <InspirationCreatePage />
-                    </>,
-                  )}
-                />
+        <TopNavStateProvider enabled={authenticated}>
+          <UiLayoutSchemeProvider enabled={authenticated}>
+            <CurrentWeatherProvider enabled={authenticated}>
+              {authenticated ? <GlobalBrandMark to={defaultAuthenticatedPath} /> : null}
+              <TaskNotificationBridge enabled={authenticated} />
+              <Suspense fallback={<LoadingScreen />}>
+                <Routes>
+                  <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
+                  <Route
+                    path="/login/command-orbit"
+                    element={<LoginPage authenticated={authenticated} templateId="command-orbit" />}
+                  />
+                  <Route
+                    path="/login/fluid-mist"
+                    element={<LoginPage authenticated={authenticated} templateId="fluid-mist" />}
+                  />
+                  <Route
+                    path="/login/image-lab"
+                    element={<LoginPage authenticated={authenticated} templateId="image-lab" />}
+                  />
+                  <Route
+                    path="/inspirations"
+                    element={menuRoute(
+                      "inspirations",
+                      <LayoutSchemeRoute classic={<InspirationListPage />} workspace={<WorkspaceHomePage />} />,
+                    )}
+                  />
+                  <Route path="/inspirations/list" element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />
+                  <Route path="/inspirations/all" element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />
+                  <Route
+                    path="/inspirations/new"
+                    element={permissionRoute(
+                      "inspirations",
+                      API_INSPIRATIONS_WRITE,
+                      <>
+                        <TopNav />
+                        <InspirationCreatePage />
+                      </>,
+                    )}
+                  />
                 <Route path="/workflow/templates" element={menuRoute("inspirations", <TemplateManagementPage mode="personal" />)} />
                 <Route
                   path="/image-chat"
@@ -242,6 +250,7 @@ function AppRoutes() {
                   element={menuRoute("resource_library", <ResourceLibraryPage mode="manage" />)}
                 />
                 <Route path="/enhance" element={menuRoute("enhance", <EnhancePage />)} />
+                <Route path="/image-to-code" element={menuRoute("image_to_code", <ImageToCodePage />)} />
                 <Route
                   path="/gallery"
                   element={menuRoute(
@@ -252,11 +261,18 @@ function AppRoutes() {
                 <Route path="/gallery/browse" element={menuRoute("gallery", <GalleryPage mode="manage" />)} />
                 <Route path="/gallery/manage" element={menuRoute("gallery", <GalleryPage mode="manage" />)} />
                 <Route path="/help" element={authenticatedRoute(<HelpPage />)} />
-                <Route path="/settings" element={menuRoute("settings", <SettingsPage />)} />
+                <Route
+                  path="/settings"
+                  element={menuRoute(
+                    "settings",
+                    <Navigate to={settingsPathForSection(SETTINGS_DEFAULT_SECTION_ID)} replace />,
+                  )}
+                />
                 <Route
                   path="/settings/global-templates"
                   element={permissionRoute("settings", API_GLOBAL_TEMPLATES_MANAGE, <TemplateManagementPage mode="global" />)}
                 />
+                <Route path="/settings/:sectionSlug" element={menuRoute("settings", <SettingsPage />)} />
                 <Route path="/rbac" element={menuRoute("rbac", <RbacPage />)} />
                 <Route
                   path="/status"
@@ -280,10 +296,11 @@ function AppRoutes() {
                   element={menuRoute("inspirations", <InspirationDetailPage />)}
                 />
                 <Route path="*" element={<Navigate to={authenticated ? defaultAuthenticatedPath : "/login"} replace />} />
-              </Routes>
-            </Suspense>
-          </CurrentWeatherProvider>
-        </UiLayoutSchemeProvider>
+                </Routes>
+              </Suspense>
+            </CurrentWeatherProvider>
+          </UiLayoutSchemeProvider>
+        </TopNavStateProvider>
       </SessionActionsProvider>
     </SessionStateProvider>
   );

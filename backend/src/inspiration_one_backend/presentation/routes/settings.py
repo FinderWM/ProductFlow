@@ -84,8 +84,10 @@ from inspiration_one_backend.infrastructure.provider_config import (
     ensure_provider_config_bootstrapped,
     generation_config_effective_enabled,
     generation_config_resource_group_ids,
+    get_provider_capabilities,
     is_real_image_provider_kind,
     list_generation_configs,
+    list_generation_configs_filtered,
     list_generation_resource_groups,
     list_provider_profiles,
     resolve_image_provider_config_from_draft,
@@ -180,6 +182,16 @@ READ_GENERATION_RUNTIME_PERMISSION = Depends(
     require_any_api_permission(API_INSPIRATIONS_READ, API_IMAGE_CHAT_READ, API_SETTINGS_READ)
 )
 AUTH_SESSION_TTL_CONFIG_KEY = "auth_session_ttl_minutes"
+GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX = "全局生成配置 / "
+LEGACY_GENERATION_QUEUE_CATEGORY = "生成队列"
+RUNTIME_CONFIG_SECTION_IDS = {
+    "prompts",
+    "upload",
+    "queue",
+    "layoutAppearance",
+    "loginPage",
+    "security",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,11 +290,35 @@ def _login_page_template_config_key(template_id: str) -> str:
     return config_key
 
 
-def _serialize_config(session: Session) -> ConfigResponse:
+def _config_definition_matches_section(definition: Any, section: str) -> bool:
+    category = definition.category
+    if section == "prompts":
+        return category == "提示词"
+    if section == "upload":
+        return category in {"海报与上传", "图片工具参数"}
+    if section == "queue":
+        return category == LEGACY_GENERATION_QUEUE_CATEGORY or category.startswith(
+            GLOBAL_GENERATION_CONFIG_CATEGORY_PREFIX
+        )
+    if section == "layoutAppearance":
+        return category == "界面与外观"
+    if section == "loginPage":
+        return category == "登录页"
+    if section == "security":
+        return category == "安全与运维"
+    return False
+
+
+def _serialize_config(session: Session, *, section: str | None = None) -> ConfigResponse:
     db_values = _load_database_values(session)
     settings = get_runtime_settings()
     items: list[ConfigItemResponse] = []
-    for definition in CONFIG_DEFINITIONS:
+    definitions = (
+        [definition for definition in CONFIG_DEFINITIONS if _config_definition_matches_section(definition, section)]
+        if section is not None
+        else CONFIG_DEFINITIONS
+    )
+    for definition in definitions:
         source = "database" if definition.key in db_values else "env_default"
         raw_value = getattr(settings, definition.key)
         effective_value = (
@@ -522,6 +558,33 @@ def _filter_generation_configs_by_available_groups(
     ]
 
 
+def _generation_resource_group_image_max_dimensions(
+    generation_configs: list[GenerationConfig],
+    *,
+    available_resource_group_ids: set[str] | None = None,
+) -> dict[str, int | None]:
+    max_dimensions: dict[str, int | None] = {}
+    for generation_config in generation_configs:
+        if generation_config.purpose != "image" or not generation_config_effective_enabled(generation_config):
+            continue
+        provider_max_dimension = get_provider_capabilities(generation_config.provider_profile).image_max_dimension
+        for group_id in _visible_generation_config_resource_group_ids(
+            generation_config,
+            available_resource_group_ids=available_resource_group_ids,
+        ):
+            if group_id not in max_dimensions:
+                max_dimensions[group_id] = provider_max_dimension
+                continue
+            current_max = max_dimensions[group_id]
+            if provider_max_dimension is None:
+                max_dimensions[group_id] = None
+                continue
+            if current_max is None:
+                continue
+            max_dimensions[group_id] = max(current_max, provider_max_dimension)
+    return max_dimensions
+
+
 def _active_generation_config_is_frozen(generation_config: GenerationConfig, *, now: datetime) -> bool:
     frozen_until = generation_config.state.frozen_until if generation_config.state is not None else None
     if frozen_until is None:
@@ -696,6 +759,7 @@ def _resolve_image_generation_config_for_test(
 def _serialize_generation_config_option(generation_config: GenerationConfig) -> GenerationConfigOptionResponse:
     state = generation_config.state
     resource_group_ids = generation_config_resource_group_ids(generation_config)
+    provider_max_dimension = get_provider_capabilities(generation_config.provider_profile).image_max_dimension
     return GenerationConfigOptionResponse(
         id=generation_config.id,
         resource_group_id=resource_group_ids[0] if resource_group_ids else None,
@@ -707,6 +771,7 @@ def _serialize_generation_config_option(generation_config: GenerationConfig) -> 
         effective_enabled=generation_config_effective_enabled(generation_config),
         priority=generation_config.priority,
         frozen_until=_serialize_dt(state.frozen_until) if state else None,
+        provider_max_dimension=provider_max_dimension,
     )
 
 
@@ -788,10 +853,23 @@ def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
     generation_configs = list_generation_configs(session)
     today_stats = _today_generation_config_stats(session)
     latest_test_results = _latest_generation_config_test_results(session, generation_configs)
+    group_max_dimensions = _generation_resource_group_image_max_dimensions(generation_configs)
+    provider_usage_by_profile = _provider_profile_usage_by_profile_id(session)
     return ProviderConfigResponse(
-        profiles=[_serialize_provider_profile(profile) for profile in list_provider_profiles(session)],
+        profiles=[
+            _serialize_provider_profile(
+                profile,
+                used_by_text_generation=provider_usage_by_profile.get(profile.id, _ProviderProfileUsage()).text,
+                used_by_image_generation=provider_usage_by_profile.get(profile.id, _ProviderProfileUsage()).image,
+            )
+            for profile in list_provider_profiles(session)
+        ],
         generation_resource_groups=[
-            _serialize_generation_resource_group(group) for group in list_generation_resource_groups(session)
+            _serialize_generation_resource_group(
+                group,
+                image_max_dimension=group_max_dimensions.get(group.id),
+            )
+            for group in list_generation_resource_groups(session)
         ],
         generation_configs=[
             _serialize_generation_config(
@@ -802,6 +880,42 @@ def _serialize_provider_config(session: Session) -> ProviderConfigResponse:
             for generation_config in generation_configs
         ],
         status_summary=_serialize_generation_config_status_summary(session, include_configs=False),
+    )
+
+
+@dataclass(slots=True)
+class _ProviderProfileUsage:
+    text: bool = False
+    image: bool = False
+
+
+def _provider_profile_usage_by_profile_id(session: Session) -> dict[str, _ProviderProfileUsage]:
+    rows = session.execute(
+        select(GenerationConfig.provider_profile_id, GenerationConfig.purpose)
+        .where(
+            GenerationConfig.archived_at.is_(None),
+            GenerationConfig.provider_profile_id.is_not(None),
+        )
+        .distinct()
+    ).all()
+    usage_by_profile_id: dict[str, _ProviderProfileUsage] = {}
+    for profile_id, purpose in rows:
+        if profile_id is None:
+            continue
+        usage = usage_by_profile_id.setdefault(profile_id, _ProviderProfileUsage())
+        if purpose == "text":
+            usage.text = True
+        elif purpose == "image":
+            usage.image = True
+    return usage_by_profile_id
+
+
+def _serialize_provider_profile_with_usage(session: Session, profile: ProviderProfile) -> ProviderProfileResponse:
+    usage = _provider_profile_usage_by_profile_id(session).get(profile.id, _ProviderProfileUsage())
+    return _serialize_provider_profile(
+        profile,
+        used_by_text_generation=usage.text,
+        used_by_image_generation=usage.image,
     )
 
 
@@ -1063,8 +1177,14 @@ def _apply_settings_import_bundle(session: Session, bundle: _SettingsImportBundl
 
 
 @router.get("", response_model=ConfigResponse, dependencies=[READ_SETTINGS_PERMISSION])
-def get_config_endpoint(session: Session = Depends(get_session)) -> ConfigResponse:
-    return _serialize_config(session)
+def get_config_endpoint(
+    section: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+) -> ConfigResponse:
+    normalized_section = str(section or "").strip() or None
+    if normalized_section is not None and normalized_section not in RUNTIME_CONFIG_SECTION_IDS:
+        raise HTTPException(status_code=400, detail="配置区块不支持")
+    return _serialize_config(session, section=normalized_section)
 
 
 @router.get(
@@ -1101,13 +1221,47 @@ def get_generation_config_status_endpoint(
 
 
 @router.get(
+    "/provider-profiles",
+    response_model=list[ProviderProfileResponse],
+    dependencies=[READ_SETTINGS_PERMISSION],
+)
+def list_provider_profiles_endpoint(
+    session: Session = Depends(get_session),
+) -> list[ProviderProfileResponse]:
+    usage_by_profile_id = _provider_profile_usage_by_profile_id(session)
+    return [
+        _serialize_provider_profile(
+            profile,
+            used_by_text_generation=usage_by_profile_id.get(profile.id, _ProviderProfileUsage()).text,
+            used_by_image_generation=usage_by_profile_id.get(profile.id, _ProviderProfileUsage()).image,
+        )
+        for profile in list_provider_profiles(session)
+    ]
+
+
+@router.get(
     "/generation-configs",
     response_model=list[GenerationConfigResponse],
     dependencies=[READ_SETTINGS_PERMISSION],
 )
-def list_generation_configs_endpoint(session: Session = Depends(get_session)) -> list[GenerationConfigResponse]:
+def list_generation_configs_endpoint(
+    purpose: str | None = Query(default=None),
+    resource_group_id: str | None = Query(default=None),
+    unbound_only: bool = Query(default=False),
+    session: Session = Depends(get_session),
+) -> list[GenerationConfigResponse]:
     ensure_provider_config_bootstrapped(session)
-    generation_configs = list_generation_configs(session)
+    normalized_purpose = str(purpose or "").strip() or None
+    if normalized_purpose is not None and normalized_purpose not in {"text", "image"}:
+        raise HTTPException(status_code=400, detail="生成配置用途不支持")
+    if resource_group_id and unbound_only:
+        raise HTTPException(status_code=400, detail="不能同时查询分组和未绑定配置")
+    generation_configs = list_generation_configs_filtered(
+        session,
+        purpose=normalized_purpose,
+        resource_group_id=resource_group_id,
+        unbound_only=unbound_only,
+    )
     today_stats = _today_generation_config_stats(session)
     latest_test_results = _latest_generation_config_test_results(session, generation_configs)
     return [
@@ -1177,10 +1331,18 @@ def update_user_ui_preferences_endpoint(
     dependencies=[READ_SETTINGS_PERMISSION],
 )
 def list_generation_resource_groups_endpoint(
+    include_image_max_dimension: bool = Query(default=True),
     session: Session = Depends(get_session),
 ) -> list[GenerationResourceGroupResponse]:
     ensure_provider_config_bootstrapped(session)
-    return [_serialize_generation_resource_group(group) for group in list_generation_resource_groups(session)]
+    group_max_dimensions: dict[str, int | None] = {}
+    if include_image_max_dimension:
+        generation_configs = list_generation_configs(session)
+        group_max_dimensions = _generation_resource_group_image_max_dimensions(generation_configs)
+    return [
+        _serialize_generation_resource_group(group, image_max_dimension=group_max_dimensions.get(group.id))
+        for group in list_generation_resource_groups(session)
+    ]
 
 
 @router.post(
@@ -1205,7 +1367,7 @@ def create_generation_resource_group_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_generation_resource_group(group)
+    return _serialize_generation_resource_group(group, image_max_dimension=None)
 
 
 @router.patch(
@@ -1233,7 +1395,9 @@ def update_generation_resource_group_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_generation_resource_group(group)
+    generation_configs = list_generation_configs(session)
+    group_max_dimensions = _generation_resource_group_image_max_dimensions(generation_configs)
+    return _serialize_generation_resource_group(group, image_max_dimension=group_max_dimensions.get(group.id))
 
 
 @router.delete(
@@ -1250,7 +1414,9 @@ def archive_generation_resource_group_endpoint(
         group = archive_generation_resource_group(session, resource_group_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_generation_resource_group(group)
+    generation_configs = list_generation_configs(session)
+    group_max_dimensions = _generation_resource_group_image_max_dimensions(generation_configs)
+    return _serialize_generation_resource_group(group, image_max_dimension=group_max_dimensions.get(group.id))
 
 
 @router.get(
@@ -1263,7 +1429,19 @@ def list_my_generation_resource_groups_endpoint(
     session: Session = Depends(get_session),
 ) -> list[GenerationResourceGroupResponse]:
     groups = list_available_generation_resource_groups_for_user(session, user=current_user)
-    return [_serialize_generation_resource_group(group) for group in groups]
+    available_resource_group_ids = {group.id for group in groups}
+    generation_configs = _filter_generation_configs_by_available_groups(
+        list_generation_configs(session),
+        available_resource_group_ids=available_resource_group_ids,
+    )
+    group_max_dimensions = _generation_resource_group_image_max_dimensions(
+        generation_configs,
+        available_resource_group_ids=available_resource_group_ids,
+    )
+    return [
+        _serialize_generation_resource_group(group, image_max_dimension=group_max_dimensions.get(group.id))
+        for group in groups
+    ]
 
 
 @router.post(
@@ -1719,7 +1897,7 @@ def create_provider_profile_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_provider_profile(profile)
+    return _serialize_provider_profile_with_usage(session, profile)
 
 
 @router.patch(
@@ -1749,7 +1927,7 @@ def update_provider_profile_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_provider_profile(profile)
+    return _serialize_provider_profile_with_usage(session, profile)
 
 
 @router.delete(
@@ -1766,7 +1944,7 @@ def archive_provider_profile_endpoint(
         profile = archive_provider_profile(session, profile_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_provider_profile(profile)
+    return _serialize_provider_profile_with_usage(session, profile)
 
 
 @router.get("/runtime", response_model=RuntimeConfigResponse, dependencies=[READ_GENERATION_RUNTIME_PERMISSION])

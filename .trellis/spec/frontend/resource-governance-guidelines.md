@@ -80,6 +80,12 @@ For admin cross-user views:
 
 - The public/browse gallery remains image-led. Admin governance controls are compact per-entry or preview actions, not bulk
   table tooling.
+- Classic gallery feed chrome must follow the active `light` / `dark` theme. Do not hard-code the feed section, header,
+  filter bar, loading state, or empty state as a dark-only presentation zone when the page is rendering through the
+  classic layout.
+- When a gallery image card uses an action-surface helper inside the `workspace` layout, it must override the default
+  pill action radius with a gallery-specific semantic class. Do not let workspace button chrome clip image-led cards into
+  circular or capsule thumbnails.
 - Remove/restore buttons must stop event propagation so they do not open or change the selected preview unintentionally.
 - Disabled entries should show a clear admin-removed label and preserve enough metadata to identify what is being governed.
 - Workspace home gallery previews must not request disabled entries; only gallery management surfaces may opt in with

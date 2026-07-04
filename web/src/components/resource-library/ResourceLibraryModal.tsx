@@ -7,15 +7,21 @@ import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup } from "../../lib/types";
-import { ActionButton, actionButtonClassName } from "../ActionButton";
 import { GalleryImagePreviewDialog } from "../GalleryImagePreviewDialog";
+import {
+  actionButtonClassNameForAppearance,
+  actionButtonComponentForAppearance,
+} from "../layoutActionButtons";
 import { ModalShell } from "../ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../ResourceGovernance";
+
+type ResourceLibraryModalAppearance = "classic" | "workspace";
 
 interface ResourceLibraryModalProps {
   open: boolean;
   onClose: () => void;
   canRead: boolean;
+  appearance?: ResourceLibraryModalAppearance;
   onSelectAsset?: (asset: ResourceLibraryAsset) => void;
   selectLabel?: string;
   selectDisabled?: boolean;
@@ -28,12 +34,12 @@ interface ResourceLibraryModalProps {
 
 const EMPTY_RESOURCE_LIBRARY_GROUPS: ResourceLibraryGroup[] = [];
 const EMPTY_RESOURCE_LIBRARY_ASSETS: ResourceLibraryAsset[] = [];
-const RESOURCE_LIBRARY_MODAL_ICON_ACTION_CLASS = actionButtonClassName({ preset: "secondary", size: "icon-sm" });
 
 export function ResourceLibraryModal({
   open,
   onClose,
   canRead,
+  appearance = "classic",
   onSelectAsset,
   selectLabel,
   selectDisabled = false,
@@ -44,6 +50,8 @@ export function ResourceLibraryModal({
   footer = null,
 }: ResourceLibraryModalProps) {
   const { t } = useI18n();
+  const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
+  const iconActionClassName = actionButtonClassNameForAppearance(appearance, { preset: "secondary", size: "icon-sm" });
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [previewAsset, setPreviewAsset] = useState<ResourceLibraryAsset | null>(null);
 
@@ -104,7 +112,7 @@ export function ResourceLibraryModal({
                 {selectedGroup ? selectedGroup.name : t("resourceLibrary.allGroups")} · {assetCountLabel}
               </div>
             </div>
-            <ActionButton
+            <ActionButtonComponent
               preset="secondary"
               size="icon-md"
               onClick={onClose}
@@ -113,7 +121,7 @@ export function ResourceLibraryModal({
               title={t("resourceLibrary.close")}
               leadingIcon={<X size={18} />}
             >
-            </ActionButton>
+            </ActionButtonComponent>
           </div>
 
           {!canRead ? (
@@ -210,7 +218,7 @@ export function ResourceLibraryModal({
                               ))}
                             </div>
                             <div className="flex items-center gap-1">
-                              <ActionButton
+                              <ActionButtonComponent
                                 preset="secondary"
                                 size="icon-sm"
                                 onClick={() => setPreviewAsset(asset)}
@@ -218,19 +226,19 @@ export function ResourceLibraryModal({
                                 title={t("common.preview")}
                                 leadingIcon={<Eye size={14} />}
                               >
-                              </ActionButton>
+                              </ActionButtonComponent>
                               <a
                                 href={api.toApiUrl(asset.download_url)}
                                 target="_blank"
                                 rel="noreferrer"
-                                className={RESOURCE_LIBRARY_MODAL_ICON_ACTION_CLASS}
+                                className={iconActionClassName}
                                 aria-label={t("common.download")}
                                 title={t("common.download")}
                               >
                                 <Download size={14} />
                               </a>
                               {onSelectAsset ? (
-                                <ActionButton
+                                <ActionButtonComponent
                                   preset="primary"
                                   size="sm"
                                   onClick={() => onSelectAsset(asset)}
@@ -241,7 +249,7 @@ export function ResourceLibraryModal({
                                   className="ml-auto min-w-0 max-w-full [&_.pf-action-button__label]:truncate"
                                 >
                                   {selectLabel ?? t("resourceLibrary.select")}
-                                </ActionButton>
+                                </ActionButtonComponent>
                               ) : null}
                             </div>
                           </div>
@@ -263,6 +271,7 @@ export function ResourceLibraryModal({
 
       {previewAsset ? (
         <GalleryImagePreviewDialog
+          appearance={appearance}
           ariaLabel={t("detail.previewImage", { alt: previewAsset.original_filename })}
           imageUrl={api.toApiUrl(previewAsset.preview_url)}
           imageAlt={previewAsset.original_filename}

@@ -11,6 +11,8 @@ import {
   isImageWorkflowNodeWaiting,
   mergeInspirationWorkflowStatusIntoDetail,
   outputStringArray,
+  shouldLoadInspirationDetailTemplateCatalog,
+  shouldLoadInspirationDetailUserTemplateCategories,
   shouldRefreshInspirationWorkflowDetailFromStatus,
   workflowNodeActivityText,
   workflowNodeRunDurationText,
@@ -161,6 +163,17 @@ function workflowRunStatus(
 }
 
 describe("inspiration-detail utils", () => {
+  it("loads template catalog only when the templates sidebar tab is active", () => {
+    expect(shouldLoadInspirationDetailTemplateCatalog("templates")).toBe(true);
+    expect(shouldLoadInspirationDetailTemplateCatalog("details")).toBe(false);
+  });
+
+  it("loads user template categories for the templates tab or the save-canvas-template dialog", () => {
+    expect(shouldLoadInspirationDetailUserTemplateCategories("templates", false)).toBe(true);
+    expect(shouldLoadInspirationDetailUserTemplateCategories("details", true)).toBe(true);
+    expect(shouldLoadInspirationDetailUserTemplateCategories("details", false)).toBe(false);
+  });
+
   it("reads string arrays from output_json before config_json and filters non-strings", () => {
     const node: WorkflowNode = {
       ...baseNode,

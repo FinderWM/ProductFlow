@@ -12,6 +12,8 @@ function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProf
     name: overrides.name ?? "OpenRouter",
     provider_type: overrides.provider_type ?? "openai_compatible",
     base_url: "base_url" in overrides ? (overrides.base_url ?? null) : "https://openrouter.ai/api/v1",
+    api_key_preview:
+      "api_key_preview" in overrides ? (overrides.api_key_preview ?? null) : overrides.has_api_key === false ? null : "opena*****main1",
     capabilities: overrides.capabilities ?? ["text_responses", "image_images"],
     default_models: overrides.default_models ?? {},
     config: overrides.config ?? {},
@@ -49,6 +51,7 @@ function generationConfig(
     state: overrides.state ?? null,
     today_stat: overrides.today_stat ?? null,
     latest_test_result: overrides.latest_test_result ?? null,
+    provider_max_dimension: overrides.provider_max_dimension ?? null,
   };
 }
 

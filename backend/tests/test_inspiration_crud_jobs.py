@@ -220,6 +220,63 @@ def test_inspiration_create_materializes_full_canvas_template(configured_env: Pa
     assert workflow_response.json()["id"] == workflow.id
 
 
+def test_inspiration_create_accepts_resource_library_main_image(configured_env: Path, db_session) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    original = client.post(
+        "/api/inspirations",
+        data={"name": "原始资源图", "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID},
+        files={"image": ("source.png", _make_demo_image_bytes(), "image/png")},
+    )
+    assert original.status_code == 201
+    original_source_asset = next(
+        asset for asset in original.json()["source_assets"] if asset["kind"] == "original_image"
+    )
+
+    default_group_id = client.get("/api/resource-library/groups").json()["items"][0]["id"]
+    saved = client.post(
+        "/api/resource-library/assets/save",
+        json={
+            "source_type": "source_asset",
+            "source_id": original_source_asset["id"],
+            "group_ids": [default_group_id],
+        },
+    )
+    assert saved.status_code == 201
+
+    created = client.post(
+        "/api/inspirations",
+        data={
+            "name": "资源库主图创建",
+            "resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+            "initial_workflow_entry": "image",
+            "image_source_asset_id": saved.json()["id"],
+        },
+    )
+    assert created.status_code == 201
+    payload = created.json()
+    copied_original_asset = next(asset for asset in payload["source_assets"] if asset["kind"] == "original_image")
+    assert copied_original_asset["id"] != original_source_asset["id"]
+    assert copied_original_asset["original_filename"] == saved.json()["original_filename"]
+
+    workflow_response = client.get(f"/api/inspirations/{payload['id']}/workflow")
+    assert workflow_response.status_code == 200
+    context_node = next(
+        node for node in workflow_response.json()["nodes"] if node["node_type"] == "inspiration_context"
+    )
+    assert context_node["config_json"]["image_source_asset_id"] == copied_original_asset["id"]
+
+    db_session.expire_all()
+    copied_assets = db_session.query(SourceAsset).filter_by(inspiration_id=payload["id"]).all()
+    assert len(copied_assets) == 1
+    assert copied_assets[0].kind == SourceAssetKind.ORIGINAL_IMAGE
+    assert copied_assets[0].id == copied_original_asset["id"]
+
+
 def test_inspiration_create_rejects_invalid_canvas_template_key(configured_env: Path) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
