@@ -379,7 +379,7 @@ export function generationConfigBatchFailedSelectableIds(
   items: Array<{ config: Pick<GenerationConfig, "id" | "latest_test_result">; disabled: boolean }>,
 ): string[] {
   return items
-    .filter((item) => !item.disabled && item.config.latest_test_result?.status === "failed")
+    .filter((item) => !item.disabled && generationConfigHasFailedLatestTest(item.config))
     .map((item) => item.config.id);
 }
 
@@ -468,4 +468,20 @@ export function filterGenerationConfigsByName(configs: GenerationConfig[], query
     return configs;
   }
   return configs.filter((config) => config.name.toLowerCase().includes(normalizedQuery));
+}
+
+export function generationConfigHasFailedLatestTest(
+  config: Pick<GenerationConfig, "latest_test_result">,
+): boolean {
+  return config.latest_test_result?.status === "failed";
+}
+
+export function filterGenerationConfigsByLatestTestFailure(
+  configs: GenerationConfig[],
+  failedOnly: boolean,
+): GenerationConfig[] {
+  if (!failedOnly) {
+    return configs;
+  }
+  return configs.filter(generationConfigHasFailedLatestTest);
 }

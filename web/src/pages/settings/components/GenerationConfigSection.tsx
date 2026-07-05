@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   FileJson,
+  Filter,
   Image,
   Loader2,
   MessageSquareText,
@@ -47,6 +48,7 @@ import {
 } from "../configTestState";
 import {
   filterGenerationConfigsByName,
+  filterGenerationConfigsByLatestTestFailure,
   generationConfigBatchFailedSelectableIds,
   generationConfigBatchSelectableIds,
   generationConfigDraft,
@@ -515,6 +517,7 @@ export function GenerationConfigPoolSection({
   const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const firstEnabledGroupId = resourceGroups.find((group) => group.enabled)?.id ?? "";
   const [configSearch, setConfigSearch] = useState("");
+  const [failedOnly, setFailedOnly] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [openingCreateDialog, setOpeningCreateDialog] = useState(false);
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
@@ -529,12 +532,14 @@ export function GenerationConfigPoolSection({
       onSelectedResourceGroupIdChange(firstEnabledGroupId || "");
     }
   }, [firstEnabledGroupId, onSelectedResourceGroupIdChange, resourceGroups, selectedResourceGroupId]);
-  const configs = filterGenerationConfigsByName(
+  const searchedConfigs = filterGenerationConfigsByName(
     sortGenerationConfigsForDisplay(
       generationConfigs.filter((generationConfig) => generationConfig.purpose === purpose && !generationConfig.archived_at),
     ),
     configSearch,
   );
+  const failedConfigs = filterGenerationConfigsByLatestTestFailure(searchedConfigs, true);
+  const configs = failedOnly ? failedConfigs : searchedConfigs;
   const newDraftKey = `new-${purpose}-${activeResourceGroupId || "unbound"}`;
   const newDraft =
     drafts[newDraftKey] ?? newGenerationConfigDraft(purpose, activeResourceGroupId);
@@ -696,6 +701,15 @@ export function GenerationConfigPoolSection({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                aria-pressed={failedOnly}
+                onClick={() => setFailedOnly((value) => !value)}
+                className={SETTINGS_COMPACT_ACTION_CLASS}
+              >
+                <Filter size={14} className="mr-2" />
+                {t("settings.generation.failedOnlyFilter", { count: String(failedConfigs.length) })}
+              </button>
+              <button
+                type="button"
                 onClick={openBatchDialog}
                 disabled={!canWrite || batchRunning || (purpose === "text" ? !onTestTextConfig : !onTestImageConfig)}
                 className={SETTINGS_COMPACT_ACTION_CLASS}
@@ -816,7 +830,7 @@ export function GenerationConfigPoolSection({
           </div>
         ) : (
           <div className="rounded-xl border border-dashed pf-hairline-strong bg-white px-6 py-10 text-center text-sm font-medium text-slate-500 shadow-sm shadow-slate-200/60 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-400 dark:shadow-black/25">
-            {t("settings.generation.searchEmpty")}
+            {t(failedOnly ? "settings.generation.failedOnlyEmpty" : "settings.generation.searchEmpty")}
           </div>
         )}
         <GenerationConfigBatchTestDialog

@@ -1184,6 +1184,8 @@ export const zhCN = {
   "settings.generation.searchPlaceholder": "按名称搜索配置",
   "settings.generation.search": "搜索生成配置列表",
   "settings.generation.searchEmpty": "没有匹配的生成配置。",
+  "settings.generation.failedOnlyFilter": "仅测试失败 ({count})",
+  "settings.generation.failedOnlyEmpty": "当前筛选下没有测试失败的生成配置。",
   "settings.generation.refreshSort": "刷新排序",
   "settings.generation.testStructuredOutput": "测试结构化输出",
   "settings.generation.batchTest": "批量测试",

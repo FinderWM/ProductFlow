@@ -8,6 +8,8 @@ import {
   clearTextConfigTestRecord,
   draftsFromConfig,
   filterConfigResponseForSettingsSection,
+  filterGenerationConfigsByLatestTestFailure,
+  filterGenerationConfigsByName,
   filterProviderModels,
   filterProviderProfiles,
   archiveFailureMessage,
@@ -1356,6 +1358,41 @@ describe("SettingsPage provider profile helpers", () => {
     ];
 
     expect(generationConfigBatchFailedSelectableIds(items)).toEqual(["failed"]);
+  });
+
+  it("filters generation config lists by failed latest test after name search", () => {
+    const configs = [
+      generationConfig({
+        id: "openai-failed",
+        purpose: "text",
+        name: "OpenAI failed config",
+        latest_test_result: generationConfigTestResult({ status: "failed" }),
+      }),
+      generationConfig({
+        id: "openai-passed",
+        purpose: "text",
+        name: "OpenAI passed config",
+        latest_test_result: generationConfigTestResult({ status: "success" }),
+      }),
+      generationConfig({
+        id: "mock-failed",
+        purpose: "text",
+        name: "Mock failed config",
+        latest_test_result: generationConfigTestResult({ status: "failed" }),
+      }),
+      generationConfig({ id: "openai-untested", purpose: "text", name: "OpenAI untested config" }),
+    ];
+
+    const searchedConfigs = filterGenerationConfigsByName(configs, "openai");
+
+    expect(filterGenerationConfigsByLatestTestFailure(searchedConfigs, false).map((config) => config.id)).toEqual([
+      "openai-failed",
+      "openai-passed",
+      "openai-untested",
+    ]);
+    expect(filterGenerationConfigsByLatestTestFailure(searchedConfigs, true).map((config) => config.id)).toEqual([
+      "openai-failed",
+    ]);
   });
 
   it("merges provider profile mutation responses into provider config cache", () => {

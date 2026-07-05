@@ -1186,6 +1186,8 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "settings.generation.searchPlaceholder": "名前で設定を検索",
   "settings.generation.search": "生成設定一覧を検索",
   "settings.generation.searchEmpty": "一致する生成設定はありません。",
+  "settings.generation.failedOnlyFilter": "失敗のみ ({count})",
+  "settings.generation.failedOnlyEmpty": "現在のフィルターに一致する失敗した生成設定はありません。",
   "settings.generation.refreshSort": "並び順を更新",
   "settings.generation.testStructuredOutput": "構造化出力をテスト",
   "settings.generation.batchTest": "一括テスト",

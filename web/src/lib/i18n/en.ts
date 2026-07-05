@@ -1186,6 +1186,8 @@ export const enUS: Record<keyof typeof zhCN, string> = {
   "settings.generation.searchPlaceholder": "Search configs by name",
   "settings.generation.search": "Search generation config list",
   "settings.generation.searchEmpty": "No matching generation configs.",
+  "settings.generation.failedOnlyFilter": "Failed only ({count})",
+  "settings.generation.failedOnlyEmpty": "No failed generation configs match the current filters.",
   "settings.generation.refreshSort": "Refresh sort",
   "settings.generation.testStructuredOutput": "Test structured output",
   "settings.generation.batchTest": "Batch test",

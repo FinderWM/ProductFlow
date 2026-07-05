@@ -177,7 +177,11 @@ export {
   settingsSectionIds,
   shouldShowSettingsMigrationPanel,
 };
-export { filterGenerationConfigsByName, providerProfilesForGenerationConfig } from "./settings/generationConfig";
+export {
+  filterGenerationConfigsByLatestTestFailure,
+  filterGenerationConfigsByName,
+  providerProfilesForGenerationConfig,
+} from "./settings/generationConfig";
 export {
   generationConfigBatchFailedSelectableIds,
   generationConfigBatchSelectableIds,
