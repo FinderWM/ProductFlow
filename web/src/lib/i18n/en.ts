@@ -1101,7 +1101,7 @@ export const enUS: Record<keyof typeof zhCN, string> = {
   "settings.resourceGroup.blurImagesByDefault": "Mask list images by default",
   "settings.provider.edit": "Edit provider",
   "settings.provider.create": "New provider",
-  "settings.provider.closeDrawer": "Close provider drawer",
+  "settings.provider.closeDrawer": "Close provider dialog",
   "settings.provider.basicInfo": "Basic info",
   "settings.provider.nameLabel": "Provider name",
   "settings.provider.namePlaceholder": "Provider name",

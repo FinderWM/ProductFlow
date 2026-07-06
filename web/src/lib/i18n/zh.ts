@@ -1099,7 +1099,7 @@ export const zhCN = {
   "settings.resourceGroup.blurImagesByDefault": "列表图片默认遮罩",
   "settings.provider.edit": "编辑供应商",
   "settings.provider.create": "新增供应商",
-  "settings.provider.closeDrawer": "关闭供应商抽屉",
+  "settings.provider.closeDrawer": "关闭供应商弹窗",
   "settings.provider.basicInfo": "基本信息",
   "settings.provider.nameLabel": "供应商名称",
   "settings.provider.namePlaceholder": "供应商名称",

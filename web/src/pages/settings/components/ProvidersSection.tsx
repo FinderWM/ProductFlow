@@ -1,4 +1,4 @@
-// 供应商档案区块簇：列表(ProvidersSection) + 档案卡片(Card) + 创建/编辑抽屉(Drawer)。
+// 供应商档案区块簇：列表(ProvidersSection) + 档案卡片(Card) + 创建/编辑弹窗(Dialog)。
 // 从 SettingsPage.tsx 整簇抽出，行为不变。仅 ProvidersSection 对外导出。
 
 import { useId, useState } from "react";
@@ -186,7 +186,7 @@ export function ProvidersSection({
         </div>
       )}
 
-      <ProviderProfileDrawer
+      <ProviderProfileDialog
         open={drawerOpen}
         form={profileForm}
         editingProfileId={editingProfileId}
@@ -365,7 +365,7 @@ function ProviderProfileCard({
   );
 }
 
-interface ProviderProfileDrawerProps {
+interface ProviderProfileDialogProps {
   open: boolean;
   form: ProviderProfileFormState;
   editingProfileId: string | null;
@@ -379,7 +379,7 @@ interface ProviderProfileDrawerProps {
   onSubmit: () => void;
 }
 
-function ProviderProfileDrawer({
+function ProviderProfileDialog({
   open,
   form,
   editingProfileId,
@@ -391,7 +391,7 @@ function ProviderProfileDrawer({
   onFormChange,
   onClose,
   onSubmit,
-}: ProviderProfileDrawerProps) {
+}: ProviderProfileDialogProps) {
   const { t } = useI18n();
   const { SETTINGS_DRAWER_SUBMIT_ACTION_CLASS, SETTINGS_ICON_ACTION_CLASS } = useSettingsActionClassNames();
   const titleId = useId();
@@ -473,132 +473,130 @@ function ProviderProfileDrawer({
     <ModalShell
       onClose={onClose}
       ariaLabelledBy={titleId}
-      overlayClassName="z-[80] bg-[color:var(--pf-deep)] backdrop-blur-sm"
-      overlayProps={{ style: { alignItems: "stretch", justifyContent: "flex-end" } }}
-      panelElement="aside"
-      panelClassName="relative flex h-full w-full max-w-full flex-col overflow-hidden pf-surface shadow-2xl shadow-slate-950/25 dark:bg-[#121722] sm:max-w-[448px]"
+      overlayClassName="z-[80] bg-slate-950/20 px-3 py-4 backdrop-blur-[1px] dark:bg-slate-950/40 sm:px-6 sm:py-8"
+      panelElement="form"
+      panelProps={{
+        onSubmit: (event) => {
+          event.preventDefault();
+          if (!canWrite) {
+            return;
+          }
+          onSubmit();
+        },
+      }}
+      panelClassName="relative flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border pf-hairline pf-surface shadow-2xl shadow-slate-950/20 dark:border-[color:var(--pf-border)] dark:bg-[#121722] sm:max-h-[86dvh]"
     >
-        <div className="flex h-[74px] items-center justify-between border-b pf-hairline px-6 dark:border-[color:var(--pf-border)]">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="text-indigo-600 dark:text-violet-400">
-              {editingProfileId ? <Pencil size={17} /> : <Plus size={18} />}
-            </span>
-            <h2 id={titleId} className="truncate text-lg font-bold pf-ink dark:text-[#fff]">
-              {editingProfileId ? t("settings.provider.edit") : t("settings.provider.create")}
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className={SETTINGS_ICON_ACTION_CLASS}
-            aria-label={t("settings.provider.closeDrawer")}
-            title={t("settings.provider.closeDrawer")}
-          >
-            <X size={16} />
-          </button>
+      <div className="flex shrink-0 items-center justify-between border-b pf-hairline px-5 py-4 dark:border-[color:var(--pf-border)] sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="text-indigo-600 dark:text-violet-400">
+            {editingProfileId ? <Pencil size={17} /> : <Plus size={18} />}
+          </span>
+          <h2 id={titleId} className="truncate text-lg font-bold pf-ink dark:text-[#fff]">
+            {editingProfileId ? t("settings.provider.edit") : t("settings.provider.create")}
+          </h2>
         </div>
-
-        <form
-          className="flex min-h-0 flex-1 flex-col"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!canWrite) {
-              return;
-            }
-            onSubmit();
-          }}
+        <button
+          type="button"
+          onClick={onClose}
+          className={SETTINGS_ICON_ACTION_CLASS}
+          aria-label={t("settings.provider.closeDrawer")}
+          title={t("settings.provider.closeDrawer")}
         >
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-6">
-            <div className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]">
-              {t("settings.provider.basicInfo")}
-            </div>
-            <SettingsFormField label={t("settings.provider.nameLabel")}>
-              <ProviderDrawerTextInput
-                value={form.name}
-                onChange={(name) => onFormChange({ ...form, name })}
-                placeholder={t("settings.provider.namePlaceholder")}
-                disabled={!canWrite}
-                workspaceSubpage={workspaceSubpage}
-              />
-            </SettingsFormField>
-            <SettingsFormField label={t("settings.provider.typeLabel")} helpKey="settingsProviderType">
-              {workspaceSubpage ? (
-                <WorkspaceSelectField
-                  value={form.provider_type}
-                  options={[
-                    { value: "openai_compatible", label: t("settings.provider.type.openaiCompatible") },
-                    { value: "google_gemini", label: t("settings.provider.type.googleGemini") },
-                  ]}
-                  onChange={(value) =>
-                    handleProviderTypeChange(value === "google_gemini" ? "google_gemini" : "openai_compatible")
-                  }
-                  disabled={!canWrite}
-                  size="tall"
-                />
-              ) : (
-                <ClassicSelectField
-                  value={form.provider_type}
-                  options={[
-                    { value: "openai_compatible", label: t("settings.provider.type.openaiCompatible") },
-                    { value: "google_gemini", label: t("settings.provider.type.googleGemini") },
-                  ]}
-                  onChange={(value) =>
-                    handleProviderTypeChange(value === "google_gemini" ? "google_gemini" : "openai_compatible")
-                  }
-                  disabled={!canWrite}
-                  size="tall"
-                />
-              )}
-            </SettingsFormField>
-            {form.provider_type === "openai_compatible" ? (
-              <SettingsFormField label={t("settings.provider.baseUrlLabel")} helpKey="settingsProviderBaseUrl">
-                <ProviderDrawerTextInput
-                  value={form.base_url}
-                  onChange={(base_url) => onFormChange({ ...form, base_url })}
-                  placeholder={t("settings.provider.baseUrlPlaceholder")}
-                  icon={<Link2 size={16} />}
-                  disabled={!canWrite}
-                  workspaceSubpage={workspaceSubpage}
-                />
-              </SettingsFormField>
-            ) : (
-              <div className="rounded-xl border pf-hairline pf-surface-soft px-4 py-3 text-xs leading-5 pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#171f30] dark:text-[color:var(--pf-muted)]">
-                {t("settings.provider.googleBaseUrlUnsupported")}
-              </div>
-            )}
-            <SettingsFormField label={t("settings.provider.apiKeyLabel")}>
-              <div className="space-y-2">
-                <ProviderDrawerTextInput
-                  type="password"
-                  value={form.api_key}
-                  onChange={(api_key) => onFormChange({ ...form, api_key })}
-                  placeholder={
-                    editingProfileId
-                      ? t("settings.provider.keepKeyPlaceholder")
-                      : t("settings.provider.apiKeyPlaceholder")
-                  }
-                  icon={<KeyRound size={16} />}
-                  autoComplete="new-password"
-                  disabled={!canWrite}
-                  workspaceSubpage={workspaceSubpage}
-                />
-                {editingProfileId && apiKeyPreview ? (
-                  <p className="text-xs leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">
-                    {t("settings.provider.apiKeyPreview", { value: apiKeyPreview })}
-                  </p>
-                ) : null}
-              </div>
-            </SettingsFormField>
-            <div className="grid gap-2">
-              <div className="text-xs font-medium pf-ink-muted dark:text-[color:var(--pf-muted)]">
-                <ParameterHelpLabel
-                  label={t("settings.provider.capabilitiesLabel")}
-                  helpKey="settingsProviderCapabilities"
-                  uiType="settings"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {capabilityOptions.map((option) => (
+          <X size={16} />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+        <div className="text-xs font-semibold pf-ink-muted dark:text-[color:var(--pf-muted)]">
+          {t("settings.provider.basicInfo")}
+        </div>
+        <SettingsFormField label={t("settings.provider.nameLabel")}>
+          <ProviderDrawerTextInput
+            value={form.name}
+            onChange={(name) => onFormChange({ ...form, name })}
+            placeholder={t("settings.provider.namePlaceholder")}
+            disabled={!canWrite}
+            workspaceSubpage={workspaceSubpage}
+          />
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.provider.typeLabel")} helpKey="settingsProviderType">
+          {workspaceSubpage ? (
+            <WorkspaceSelectField
+              value={form.provider_type}
+              options={[
+                { value: "openai_compatible", label: t("settings.provider.type.openaiCompatible") },
+                { value: "google_gemini", label: t("settings.provider.type.googleGemini") },
+              ]}
+              onChange={(value) =>
+                handleProviderTypeChange(value === "google_gemini" ? "google_gemini" : "openai_compatible")
+              }
+              disabled={!canWrite}
+              size="tall"
+            />
+          ) : (
+            <ClassicSelectField
+              value={form.provider_type}
+              options={[
+                { value: "openai_compatible", label: t("settings.provider.type.openaiCompatible") },
+                { value: "google_gemini", label: t("settings.provider.type.googleGemini") },
+              ]}
+              onChange={(value) =>
+                handleProviderTypeChange(value === "google_gemini" ? "google_gemini" : "openai_compatible")
+              }
+              disabled={!canWrite}
+              size="tall"
+            />
+          )}
+        </SettingsFormField>
+        {form.provider_type === "openai_compatible" ? (
+          <SettingsFormField label={t("settings.provider.baseUrlLabel")} helpKey="settingsProviderBaseUrl">
+            <ProviderDrawerTextInput
+              value={form.base_url}
+              onChange={(base_url) => onFormChange({ ...form, base_url })}
+              placeholder={t("settings.provider.baseUrlPlaceholder")}
+              icon={<Link2 size={16} />}
+              disabled={!canWrite}
+              workspaceSubpage={workspaceSubpage}
+            />
+          </SettingsFormField>
+        ) : (
+          <div className="rounded-xl border pf-hairline pf-surface-soft px-4 py-3 text-xs leading-5 pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[#171f30] dark:text-[color:var(--pf-muted)]">
+            {t("settings.provider.googleBaseUrlUnsupported")}
+          </div>
+        )}
+        <SettingsFormField label={t("settings.provider.apiKeyLabel")}>
+          <div className="space-y-2">
+            <ProviderDrawerTextInput
+              type="password"
+              value={form.api_key}
+              onChange={(api_key) => onFormChange({ ...form, api_key })}
+              placeholder={
+                editingProfileId
+                  ? t("settings.provider.keepKeyPlaceholder")
+                  : t("settings.provider.apiKeyPlaceholder")
+              }
+              icon={<KeyRound size={16} />}
+              autoComplete="new-password"
+              disabled={!canWrite}
+              workspaceSubpage={workspaceSubpage}
+            />
+            {editingProfileId && apiKeyPreview ? (
+              <p className="text-xs leading-5 pf-ink-muted dark:text-[color:var(--pf-muted)]">
+                {t("settings.provider.apiKeyPreview", { value: apiKeyPreview })}
+              </p>
+            ) : null}
+          </div>
+        </SettingsFormField>
+        <div className="grid gap-2">
+          <div className="text-xs font-medium pf-ink-muted dark:text-[color:var(--pf-muted)]">
+            <ParameterHelpLabel
+              label={t("settings.provider.capabilitiesLabel")}
+              helpKey="settingsProviderCapabilities"
+              uiType="settings"
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {capabilityOptions.map((option) => (
               <ProviderCapabilityToggle
                 key={option.value}
                 option={option}
@@ -607,132 +605,125 @@ function ProviderProfileDrawer({
                 workspaceSubpage={workspaceSubpage}
                 onToggle={() => toggleCapability(option.value)}
               />
-                ))}
-              </div>
-            </div>
+            ))}
+          </div>
+        </div>
 
-            <div className="border-t pf-hairline pt-4 dark:border-[color:var(--pf-border)]">
-              <SettingsFormField
-                label={t("settings.provider.imageMaxDimension")}
-                helpKey="settings.config.provider_image_max_dimension"
-                helpContent={{
-                  title: t("settings.provider.imageMaxDimension"),
-                  description: t("settings.provider.imageMaxDimensionHelp"),
-                }}
-              >
-                <div className="space-y-3">
+        <div className="border-t pf-hairline pt-4 dark:border-[color:var(--pf-border)]">
+          <SettingsFormField
+            label={t("settings.provider.imageMaxDimension")}
+            helpKey="settings.config.provider_image_max_dimension"
+            helpContent={{
+              title: t("settings.provider.imageMaxDimension"),
+              description: t("settings.provider.imageMaxDimensionHelp"),
+            }}
+          >
+            <div className="space-y-3">
+              {workspaceSubpage ? (
+                <WorkspaceSelectField
+                  value={providerImageMaxDimensionSelectValue(form)}
+                  options={imageMaxDimensionOptions}
+                  onChange={handleImageMaxDimensionSelectChange}
+                  disabled={!canWrite || pending}
+                  size="tall"
+                />
+              ) : (
+                <ClassicSelectField
+                  value={providerImageMaxDimensionSelectValue(form)}
+                  options={imageMaxDimensionOptions}
+                  onChange={handleImageMaxDimensionSelectChange}
+                  disabled={!canWrite || pending}
+                  size="tall"
+                />
+              )}
+              {form.image_max_dimension_mode === "custom" ? (
+                <div className="space-y-2">
                   {workspaceSubpage ? (
-                    <WorkspaceSelectField
-                      value={providerImageMaxDimensionSelectValue(form)}
-                      options={imageMaxDimensionOptions}
-                      onChange={handleImageMaxDimensionSelectChange}
+                    <WorkspaceTextInput
+                      type="number"
+                      min={String(IMAGE_GENERATION_MIN_MAX_DIMENSION)}
+                      max={String(IMAGE_GENERATION_MAX_MAX_DIMENSION)}
+                      step={String(IMAGE_GENERATION_DIMENSION_MULTIPLE)}
+                      value={form.image_max_dimension_custom_value}
+                      placeholder={t("settings.provider.imageMaxDimensionCustomPlaceholder")}
                       disabled={!canWrite || pending}
+                      onChange={(event) => handleImageMaxDimensionCustomChange(event.target.value)}
                       size="tall"
+                      className={
+                        imageMaxDimensionInvalid
+                          ? "border-rose-300 text-rose-700 placeholder:text-rose-300 dark:border-rose-500/70 dark:text-rose-100"
+                          : undefined
+                      }
                     />
                   ) : (
-                    <ClassicSelectField
-                      value={providerImageMaxDimensionSelectValue(form)}
-                      options={imageMaxDimensionOptions}
-                      onChange={handleImageMaxDimensionSelectChange}
+                    <ClassicTextInput
+                      type="number"
+                      min={String(IMAGE_GENERATION_MIN_MAX_DIMENSION)}
+                      max={String(IMAGE_GENERATION_MAX_MAX_DIMENSION)}
+                      step={String(IMAGE_GENERATION_DIMENSION_MULTIPLE)}
+                      value={form.image_max_dimension_custom_value}
+                      placeholder={t("settings.provider.imageMaxDimensionCustomPlaceholder")}
                       disabled={!canWrite || pending}
+                      onChange={(event) => handleImageMaxDimensionCustomChange(event.target.value)}
                       size="tall"
+                      className={
+                        imageMaxDimensionInvalid
+                          ? "border-rose-300 text-rose-700 placeholder:text-rose-300 dark:border-rose-500/70 dark:text-rose-100"
+                          : undefined
+                      }
                     />
                   )}
-                  {form.image_max_dimension_mode === "custom" ? (
-                    <div className="space-y-2">
-                      {workspaceSubpage ? (
-                        <WorkspaceTextInput
-                          type="number"
-                          min={String(IMAGE_GENERATION_MIN_MAX_DIMENSION)}
-                          max={String(IMAGE_GENERATION_MAX_MAX_DIMENSION)}
-                          step={String(IMAGE_GENERATION_DIMENSION_MULTIPLE)}
-                          value={form.image_max_dimension_custom_value}
-                          placeholder={t("settings.provider.imageMaxDimensionCustomPlaceholder")}
-                          disabled={!canWrite || pending}
-                          onChange={(event) => handleImageMaxDimensionCustomChange(event.target.value)}
-                          size="tall"
-                          className={
-                            imageMaxDimensionInvalid
-                              ? "border-rose-300 text-rose-700 placeholder:text-rose-300 dark:border-rose-500/70 dark:text-rose-100"
-                              : undefined
-                          }
-                        />
-                      ) : (
-                        <ClassicTextInput
-                          type="number"
-                          min={String(IMAGE_GENERATION_MIN_MAX_DIMENSION)}
-                          max={String(IMAGE_GENERATION_MAX_MAX_DIMENSION)}
-                          step={String(IMAGE_GENERATION_DIMENSION_MULTIPLE)}
-                          value={form.image_max_dimension_custom_value}
-                          placeholder={t("settings.provider.imageMaxDimensionCustomPlaceholder")}
-                          disabled={!canWrite || pending}
-                          onChange={(event) => handleImageMaxDimensionCustomChange(event.target.value)}
-                          size="tall"
-                          className={
-                            imageMaxDimensionInvalid
-                              ? "border-rose-300 text-rose-700 placeholder:text-rose-300 dark:border-rose-500/70 dark:text-rose-100"
-                              : undefined
-                          }
-                        />
-                      )}
-                      <p
-                        className={`text-xs leading-5 ${
-                          imageMaxDimensionInvalid
-                            ? "text-rose-600 dark:text-rose-300"
-                            : "pf-ink-muted dark:text-[color:var(--pf-muted)]"
-                        }`}
-                      >
-                        {imageMaxDimensionInvalid
-                          ? t("settings.provider.imageMaxDimensionCustomInvalid", {
-                              min: IMAGE_GENERATION_MIN_MAX_DIMENSION,
-                              max: IMAGE_GENERATION_MAX_MAX_DIMENSION,
-                            })
-                          : form.image_max_dimension_custom_value.trim() &&
-                              imageMaxDimensionDraft.value != null &&
-                              imageMaxDimensionDraft.value !== Number(form.image_max_dimension_custom_value)
-                            ? t("settings.provider.imageMaxDimensionCustomNormalized", {
-                                value: imageMaxDimensionDraft.value,
-                              })
-                            : t("settings.provider.imageMaxDimensionCustomHint", {
-                                min: IMAGE_GENERATION_MIN_MAX_DIMENSION,
-                                max: IMAGE_GENERATION_MAX_MAX_DIMENSION,
-                                multiple: IMAGE_GENERATION_DIMENSION_MULTIPLE,
-                              })}
-                      </p>
-                    </div>
-                  ) : null}
+                  <p
+                    className={`text-xs leading-5 ${
+                      imageMaxDimensionInvalid
+                        ? "text-rose-600 dark:text-rose-300"
+                        : "pf-ink-muted dark:text-[color:var(--pf-muted)]"
+                    }`}
+                  >
+                    {imageMaxDimensionInvalid
+                      ? t("settings.provider.imageMaxDimensionCustomInvalid", {
+                          min: IMAGE_GENERATION_MIN_MAX_DIMENSION,
+                          max: IMAGE_GENERATION_MAX_MAX_DIMENSION,
+                        })
+                      : form.image_max_dimension_custom_value.trim() &&
+                          imageMaxDimensionDraft.value != null &&
+                          imageMaxDimensionDraft.value !== Number(form.image_max_dimension_custom_value)
+                        ? t("settings.provider.imageMaxDimensionCustomNormalized", {
+                            value: imageMaxDimensionDraft.value,
+                          })
+                        : t("settings.provider.imageMaxDimensionCustomHint", {
+                            min: IMAGE_GENERATION_MIN_MAX_DIMENSION,
+                            max: IMAGE_GENERATION_MAX_MAX_DIMENSION,
+                            multiple: IMAGE_GENERATION_DIMENSION_MULTIPLE,
+                          })}
+                  </p>
                 </div>
-              </SettingsFormField>
+              ) : null}
             </div>
+          </SettingsFormField>
+        </div>
 
-            <div className="border-t pf-hairline pt-4 dark:border-[color:var(--pf-border)]">
-              <ProviderDrawerEnableToggle
-                checked={form.enabled}
-                disabled={!canWrite || pending}
-                blocked={enableToggleBlocked}
-                workspaceSubpage={workspaceSubpage}
-                onToggle={(enabled) => onFormChange({ ...form, enabled })}
-              />
-            </div>
-          </div>
+        <div className="border-t pf-hairline pt-4 dark:border-[color:var(--pf-border)]">
+          <ProviderDrawerEnableToggle
+            checked={form.enabled}
+            disabled={!canWrite || pending}
+            blocked={enableToggleBlocked}
+            workspaceSubpage={workspaceSubpage}
+            onToggle={(enabled) => onFormChange({ ...form, enabled })}
+          />
+        </div>
+      </div>
 
-          <div className="shrink-0 border-t pf-hairline pf-surface px-6 py-5 dark:border-[color:var(--pf-border)] dark:bg-[#121722]">
-            <button
-              type="submit"
-              disabled={
-                !canWrite ||
-                pending ||
-                !form.name.trim() ||
-                !form.capabilities.length ||
-                imageMaxDimensionInvalid
-              }
-              className={SETTINGS_DRAWER_SUBMIT_ACTION_CLASS}
-            >
-              {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
-              {t("detail.save")}
-            </button>
-          </div>
-        </form>
+      <div className="shrink-0 border-t pf-hairline pf-surface px-5 py-4 dark:border-[color:var(--pf-border)] dark:bg-[#121722] sm:px-6">
+        <button
+          type="submit"
+          disabled={!canWrite || pending || !form.name.trim() || !form.capabilities.length || imageMaxDimensionInvalid}
+          className={SETTINGS_DRAWER_SUBMIT_ACTION_CLASS}
+        >
+          {pending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
+          {t("detail.save")}
+        </button>
+      </div>
     </ModalShell>
   );
 }

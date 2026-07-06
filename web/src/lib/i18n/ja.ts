@@ -1101,7 +1101,7 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "settings.resourceGroup.blurImagesByDefault": "一覧画像を既定でマスク",
   "settings.provider.edit": "プロバイダを編集",
   "settings.provider.create": "新規プロバイダ",
-  "settings.provider.closeDrawer": "プロバイダドロワーを閉じる",
+  "settings.provider.closeDrawer": "プロバイダダイアログを閉じる",
   "settings.provider.basicInfo": "基本情報",
   "settings.provider.nameLabel": "プロバイダ名",
   "settings.provider.namePlaceholder": "プロバイダ名",
