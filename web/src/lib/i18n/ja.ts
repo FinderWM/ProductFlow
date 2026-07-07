@@ -2303,6 +2303,7 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "help.previous": "前へ",
   "help.next": "次へ",
   "help.onThisPage": "このページ",
+  "help.backToTop": "ページ上部へ戻る",
   "help.needAction": "作業を続けますか？",
   "help.openInspirations": "インスピレーションワークベンチを開く",
   "help.openImageChat": "画像チャットを開く",

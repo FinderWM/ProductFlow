@@ -2303,6 +2303,7 @@ export const enUS: Record<keyof typeof zhCN, string> = {
   "help.previous": "Previous",
   "help.next": "Next",
   "help.onThisPage": "On this page",
+  "help.backToTop": "Back to top",
   "help.needAction": "Continue working?",
   "help.openInspirations": "Open inspiration workbench",
   "help.openImageChat": "Open image chat",

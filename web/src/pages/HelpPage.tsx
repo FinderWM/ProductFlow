@@ -1,4 +1,5 @@
 import {
+  ArrowUp,
   ArrowRight,
   BookOpen,
   Box,
@@ -15,7 +16,7 @@ import {
   TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ClassicSelectField, ClassicTextInput } from "../components/classicInputs";
@@ -27,8 +28,11 @@ import {
 } from "../components/layoutActionButtons";
 import { TopNav } from "../components/TopNav";
 import { WorkspaceSelectField, WorkspaceTextInput } from "../components/workspaceInputs";
+import { cssLengthToPixels } from "../lib/cssLength";
 import type { Locale } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
+import { shouldPreventScrollChain } from "../lib/scrollChain";
+import { desktopSideRailLayoutStyles } from "../lib/sideRailLayout";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
 
 type SectionBlock =
@@ -86,10 +90,6 @@ interface SearchResult {
   score: number;
 }
 
-const HELP_TITLE_BUTTON_CLASS =
-  "inline-flex items-center gap-2 px-3 py-2 text-left text-base font-semibold transition-colors " +
-  "hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:text-white " +
-  "dark:hover:text-violet-200 dark:focus-visible:ring-violet-400/60";
 const HELP_SEARCH_RESULT_BUTTON_CLASS =
   "block w-full px-3 py-2.5 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 " +
   "focus-visible:ring-inset focus-visible:ring-indigo-400 dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60";
@@ -97,6 +97,13 @@ const HELP_PAGE_LINK_CLASS =
   "pf-help-page-link rounded-lg border border-slate-200 px-4 py-3 text-left transition-all hover:-translate-y-0.5 " +
   "hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700/80 " +
   "dark:bg-[#0f1726] dark:hover:bg-violet-500/12 dark:focus-visible:ring-violet-400/60";
+const HELP_DESKTOP_RAIL_QUERY = "(min-width: 1024px)";
+const HELP_BACK_TO_TOP_INLINE_OFFSET_PX = 20;
+const HELP_BACK_TO_TOP_BOTTOM_OFFSET_PX = 96;
+
+function shouldUseDesktopHelpRail(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(HELP_DESKTOP_RAIL_QUERY).matches;
+}
 
 function helpNavItemClassName(active: boolean): string {
   return `pf-help-nav-item flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-all ${
@@ -2495,8 +2502,15 @@ export function HelpPage() {
   const { activeScheme } = useUiLayoutScheme();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const helpRailRef = useRef<HTMLElement | null>(null);
+  const helpRailScrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const helpTocRef = useRef<HTMLElement | null>(null);
   const searchTriggerRef = useRef<HTMLDivElement | null>(null);
+  const pendingHelpRailScrollFrameRef = useRef(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isDesktopHelpRail, setIsDesktopHelpRail] = useState(() => shouldUseDesktopHelpRail());
+  const [isHelpRailPinned, setIsHelpRailPinned] = useState(false);
+  const [backToTopRightOffset, setBackToTopRightOffset] = useState<number | null>(null);
   const docPages = getHelpDocsForLocale(locale);
   const navGroups = getHelpNavGroupsForLocale(locale);
   const page = findPage(searchParams.get("page"), docPages);
@@ -2510,9 +2524,223 @@ export function HelpPage() {
   const isWorkspaceSubpage = activeScheme === "workspace";
   const helpActionAppearance: LayoutActionAppearance = isWorkspaceSubpage ? "workspace" : "classic";
   const PageActionButton = actionButtonComponentForAppearance(helpActionAppearance);
+
+  function getSafeTop(): number {
+    const rootStyle = window.getComputedStyle(document.documentElement);
+    const rootFontSize = Number.parseFloat(rootStyle.fontSize) || 16;
+    return cssLengthToPixels(rootStyle.getPropertyValue("--pf-top-chrome-safe-height"), rootFontSize);
+  }
+
+  function shouldPinHelpRail(rail: HTMLElement): boolean {
+    const shell = rail.parentElement;
+    if (!shell) {
+      return false;
+    }
+    const shellTopInDocument = shell.getBoundingClientRect().top + window.scrollY;
+    return window.scrollY >= shellTopInDocument - getSafeTop() - 1;
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return undefined;
+    }
+    const mediaQuery = window.matchMedia(HELP_DESKTOP_RAIL_QUERY);
+    const handleViewportChange = (event?: MediaQueryListEvent) => {
+      const useDesktopRail = event?.matches ?? mediaQuery.matches;
+      setIsDesktopHelpRail(useDesktopRail);
+      if (!useDesktopRail) {
+        setIsHelpRailPinned(false);
+      }
+    };
+    handleViewportChange();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleViewportChange);
+      return () => mediaQuery.removeEventListener("change", handleViewportChange);
+    }
+    mediaQuery.addListener(handleViewportChange);
+    return () => mediaQuery.removeListener(handleViewportChange);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined" || !isDesktopHelpRail) {
+      return undefined;
+    }
+    let frameId = 0;
+    const rail = helpRailRef.current;
+    const shell = rail?.parentElement;
+    if (!rail || !shell) {
+      return undefined;
+    }
+    const updatePinnedState = () => {
+      frameId = 0;
+      const currentRail = helpRailRef.current;
+      if (!currentRail) {
+        return;
+      }
+      const nextPinned = shouldPinHelpRail(currentRail);
+      setIsHelpRailPinned((currentPinned) => (currentPinned === nextPinned ? currentPinned : nextPinned));
+    };
+    const schedulePinnedStateUpdate = () => {
+      if (frameId) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(updatePinnedState);
+    };
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            schedulePinnedStateUpdate();
+          });
+    resizeObserver?.observe(rail);
+    resizeObserver?.observe(shell);
+    schedulePinnedStateUpdate();
+    window.addEventListener("scroll", schedulePinnedStateUpdate, { passive: true });
+    window.addEventListener("resize", schedulePinnedStateUpdate);
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener("scroll", schedulePinnedStateUpdate);
+      window.removeEventListener("resize", schedulePinnedStateUpdate);
+    };
+  }, [isDesktopHelpRail]);
+
+  useEffect(() => {
+    if (!isDesktopHelpRail) {
+      return undefined;
+    }
+    const rail = helpRailRef.current;
+    if (!rail || typeof window === "undefined") {
+      return undefined;
+    }
+    const handleWheel = (event: WheelEvent) => {
+      const scrollArea = helpRailScrollAreaRef.current;
+      if (!scrollArea) {
+        return;
+      }
+      const shellTop = rail.parentElement?.getBoundingClientRect().top ?? 0;
+      const safeTop = getSafeTop();
+      const distanceToPin = Math.max(shellTop - safeTop, 0);
+      const pinnedScrollableHeight = Math.max(window.innerHeight - safeTop, 0);
+      const railCanScrollWhenPinned = scrollArea.scrollHeight > pinnedScrollableHeight + 1;
+      const railCanScrollNow =
+        scrollArea.scrollHeight > scrollArea.clientHeight + 1 ||
+        scrollArea.scrollWidth > scrollArea.clientWidth + 1;
+
+      if (!isHelpRailPinned) {
+        if (!railCanScrollWhenPinned || event.deltaY === 0) {
+          return;
+        }
+        event.preventDefault();
+        if (event.deltaY < 0) {
+          window.scrollBy({ top: event.deltaY, behavior: "auto" });
+          return;
+        }
+
+        const pageDelta = Math.min(event.deltaY, distanceToPin);
+        if (pageDelta !== 0) {
+          window.scrollBy({ top: pageDelta, behavior: "auto" });
+        }
+
+        const reachedPinnedThreshold = distanceToPin - pageDelta <= 1;
+        if (!reachedPinnedThreshold) {
+          return;
+        }
+
+        setIsHelpRailPinned(true);
+        const remainingDelta = Math.max(event.deltaY - pageDelta, 0);
+        if (remainingDelta > 0) {
+          window.cancelAnimationFrame(pendingHelpRailScrollFrameRef.current);
+          pendingHelpRailScrollFrameRef.current = window.requestAnimationFrame(() => {
+            const currentRail = helpRailRef.current;
+            const currentScrollArea = helpRailScrollAreaRef.current;
+            if (!currentRail || !currentScrollArea || !shouldPinHelpRail(currentRail)) {
+              return;
+            }
+            currentScrollArea.scrollTop += remainingDelta;
+          });
+        }
+        return;
+      }
+
+      if (!railCanScrollNow) {
+        return;
+      }
+
+      if (shouldPreventScrollChain(scrollArea, event.target, event.deltaX, event.deltaY)) {
+        event.preventDefault();
+      }
+    };
+    rail.addEventListener("wheel", handleWheel, { passive: false, capture: true });
+    return () => {
+      window.cancelAnimationFrame(pendingHelpRailScrollFrameRef.current);
+      rail.removeEventListener("wheel", handleWheel, { capture: true });
+    };
+  }, [isDesktopHelpRail, isHelpRailPinned]);
+
+  const { railStyle: helpRailStyle, scrollAreaStyle: helpRailScrollAreaStyle } = desktopSideRailLayoutStyles({
+    isPinned: isDesktopHelpRail && isHelpRailPinned,
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+    let frameId = 0;
+    const updateBackToTopPosition = () => {
+      frameId = 0;
+      const toc = helpTocRef.current;
+      if (!toc) {
+        setBackToTopRightOffset(null);
+        return;
+      }
+      const tocRect = toc.getBoundingClientRect();
+      if (tocRect.width <= 0) {
+        setBackToTopRightOffset(null);
+        return;
+      }
+      const nextRightOffset = Math.max(
+        window.innerWidth - tocRect.right + HELP_BACK_TO_TOP_INLINE_OFFSET_PX,
+        HELP_BACK_TO_TOP_INLINE_OFFSET_PX,
+      );
+      setBackToTopRightOffset((currentOffset) =>
+        currentOffset !== null && Math.abs(currentOffset - nextRightOffset) < 1 ? currentOffset : nextRightOffset,
+      );
+    };
+    const scheduleBackToTopPositionUpdate = () => {
+      if (frameId) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(updateBackToTopPosition);
+    };
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            scheduleBackToTopPositionUpdate();
+          });
+    if (helpTocRef.current) {
+      resizeObserver?.observe(helpTocRef.current);
+    }
+    scheduleBackToTopPositionUpdate();
+    window.addEventListener("resize", scheduleBackToTopPositionUpdate);
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleBackToTopPositionUpdate);
+    };
+  }, [activeScheme]);
+
   const openPage = (slug: string) => {
     setSearchParams({ page: slug });
     setSearchQuery("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const scrollHelpPageToTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -2521,68 +2749,62 @@ export function HelpPage() {
       <TopNav breadcrumbs={t("help.breadcrumb")} onHome={() => navigate("/inspirations")} />
 
       <main className="pf-side-shell pf-side-shell-with-toc flex-1">
-        <aside className="pf-side-rail">
-          <div className="border-b border-slate-200 px-5 py-5 dark:border-slate-800">
-	            <LayoutActionSurfaceButton
-	              type="button"
-	              appearance={helpActionAppearance}
-	              preset="secondary"
-	              onClick={() => openPage("overview")}
-	              className={HELP_TITLE_BUTTON_CLASS}
-	            >
-              <BookOpen size={18} className="text-indigo-600 dark:text-violet-300" />
-              {t("help.title")}
-	            </LayoutActionSurfaceButton>
-            <div ref={searchTriggerRef} className="relative mt-4">
-              <label htmlFor="help-search" className="sr-only">
-                {t("help.search")}
-              </label>
-              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-              {isWorkspaceSubpage ? (
-                <WorkspaceTextInput
-                  id="help-search"
-                  type="search"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder={t("help.search")}
-                  size="compact"
-                  className="px-9"
+        <aside ref={helpRailRef} className="pf-side-rail" style={helpRailStyle}>
+          <div ref={helpRailScrollAreaRef} style={helpRailScrollAreaStyle}>
+            <div className="border-b border-slate-200 px-5 py-5 dark:border-slate-800">
+              <div ref={searchTriggerRef} className="relative">
+                <label htmlFor="help-search" className="sr-only">
+                  {t("help.search")}
+                </label>
+                <Search
+                  size={15}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
                 />
-              ) : (
-                <ClassicTextInput
-                  id="help-search"
-                  type="search"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder={t("help.search")}
-                  size="compact"
-                  className="px-9"
-                />
-              )}
-              <FloatingSurface
-                open={Boolean(normalizedSearchQuery)}
-                triggerRef={searchTriggerRef}
-                preferredPlacement="bottom-start"
-                layer="modal"
-                matchTriggerWidth
-                onOpenChange={(open) => {
-                  if (!open) {
-                    setSearchQuery("");
-                  }
-                }}
-                className="pf-help-search-surface flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700/80 dark:bg-[#151f33] dark:shadow-black/30"
-              >
+                {isWorkspaceSubpage ? (
+                  <WorkspaceTextInput
+                    id="help-search"
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder={t("help.search")}
+                    size="compact"
+                    className="px-9"
+                  />
+                ) : (
+                  <ClassicTextInput
+                    id="help-search"
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder={t("help.search")}
+                    size="compact"
+                    className="px-9"
+                  />
+                )}
+                <FloatingSurface
+                  open={Boolean(normalizedSearchQuery)}
+                  triggerRef={searchTriggerRef}
+                  preferredPlacement="bottom-start"
+                  layer="modal"
+                  matchTriggerWidth
+                  onOpenChange={(open) => {
+                    if (!open) {
+                      setSearchQuery("");
+                    }
+                  }}
+                  className="pf-help-search-surface flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700/80 dark:bg-[#151f33] dark:shadow-black/30"
+                >
                   {searchResults.length > 0 ? (
                     <div className="min-h-0 flex-1 overflow-y-auto py-1">
                       {searchResults.map((result) => (
-	                        <LayoutActionSurfaceButton
-	                          key={result.page.slug}
-	                          type="button"
-	                          appearance={helpActionAppearance}
-	                          preset="secondary"
-	                          onClick={() => openPage(result.page.slug)}
-	                          className={HELP_SEARCH_RESULT_BUTTON_CLASS}
-	                        >
+                        <LayoutActionSurfaceButton
+                          key={result.page.slug}
+                          type="button"
+                          appearance={helpActionAppearance}
+                          preset="secondary"
+                          onClick={() => openPage(result.page.slug)}
+                          className={HELP_SEARCH_RESULT_BUTTON_CLASS}
+                        >
                           <div className="flex items-center gap-2">
                             <span className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:text-slate-400">
                               {result.page.category}
@@ -2595,15 +2817,15 @@ export function HelpPage() {
                             <div className="mt-1 text-xs font-medium text-indigo-700 dark:text-violet-200">{result.matchedSectionTitle}</div>
                           ) : null}
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600 dark:text-slate-400">{result.preview}</p>
-	                        </LayoutActionSurfaceButton>
+                        </LayoutActionSurfaceButton>
                       ))}
                     </div>
                   ) : (
                     <div className="px-3 py-3 text-sm text-slate-500 dark:text-slate-400">{t("help.noSearchResults")}</div>
                   )}
-              </FloatingSurface>
+                </FloatingSurface>
+              </div>
             </div>
-          </div>
 
           <nav className="hidden space-y-6 px-3 py-5 lg:block" aria-label={t("help.nav")}>
             {navGroups.map((group) => (
@@ -2623,7 +2845,7 @@ export function HelpPage() {
                         type="button"
                         onClick={() => openPage(item.slug)}
                         aria-current={active ? "page" : undefined}
-	                        className={helpNavItemClassName(active)}
+                        className={helpNavItemClassName(active)}
                       >
                         <Icon size={15} className={active ? "text-indigo-600 dark:text-violet-200" : "text-slate-400 dark:text-slate-500"} />
                         <span className="min-w-0 truncate">{item.title}</span>
@@ -2673,6 +2895,7 @@ export function HelpPage() {
                 size="default"
               />
             )}
+          </div>
           </div>
         </aside>
 
@@ -2732,7 +2955,7 @@ export function HelpPage() {
           </footer>
         </article>
 
-        <aside className="pf-side-toc hidden px-5 py-10 lg:block">
+        <aside ref={helpTocRef} className="pf-side-toc hidden px-5 py-10 lg:block">
           <div className="pf-side-toc-inner">
             <div className="text-sm font-semibold text-slate-950 dark:text-white">{t("help.onThisPage")}</div>
             <nav className="mt-3 space-y-2" aria-label={t("help.onThisPage")}>
@@ -2760,6 +2983,23 @@ export function HelpPage() {
                 </PageActionButton>
               </div>
             </div>
+          </div>
+          <div
+            className="fixed z-50 flex justify-end"
+            style={{
+              right: backToTopRightOffset ?? HELP_BACK_TO_TOP_INLINE_OFFSET_PX,
+              bottom: HELP_BACK_TO_TOP_BOTTOM_OFFSET_PX,
+            }}
+          >
+            <PageActionButton
+              type="button"
+              onClick={scrollHelpPageToTop}
+              preset="secondary"
+              size="icon-md"
+              title={t("help.backToTop")}
+              aria-label={t("help.backToTop")}
+              leadingIcon={<ArrowUp size={16} aria-hidden="true" />}
+            />
           </div>
         </aside>
       </main>

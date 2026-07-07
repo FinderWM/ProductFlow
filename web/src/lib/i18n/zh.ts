@@ -2299,6 +2299,7 @@ export const zhCN = {
   "help.previous": "上一页",
   "help.next": "下一页",
   "help.onThisPage": "本页内容",
+  "help.backToTop": "回到顶部",
   "help.needAction": "需要继续操作？",
   "help.openInspirations": "打开灵感工作台",
   "help.openImageChat": "打开文/图生图",

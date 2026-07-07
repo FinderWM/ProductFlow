@@ -1,5 +1,5 @@
 // 设置页左侧导航栏：桌面侧栏 + 小窗左侧浮动抽屉。从 SettingsPage.tsx 抽出的展示型组件。
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Drawer } from "vaul";
 import { Search, Settings as SettingsIcon, X } from "lucide-react";
 
@@ -7,6 +7,7 @@ import { ClassicTextInput } from "../../../components/classicInputs";
 import { WorkspaceTextInput } from "../../../components/workspaceInputs";
 import { cssLengthToPixels } from "../../../lib/cssLength";
 import { shouldPreventScrollChain } from "../../../lib/scrollChain";
+import { desktopSideRailLayoutStyles } from "../../../lib/sideRailLayout";
 import { useI18n } from "../../../lib/preferences";
 import { useSettingsActionClassNames } from "./styles";
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, type SettingsSection, type SettingsSectionId } from "../sections";
@@ -23,8 +24,6 @@ interface SettingsSideRailProps {
 }
 
 const SETTINGS_MOBILE_NAV_DRAWER_DESKTOP_QUERY = "(min-width: 1024px)";
-const SETTINGS_DESKTOP_RAIL_TOP = "var(--pf-top-chrome-safe-height)";
-const SETTINGS_DESKTOP_RAIL_HEIGHT = "calc(100dvh - var(--pf-top-chrome-safe-height))";
 
 function shouldUseDesktopSettingsRail(): boolean {
   return typeof window !== "undefined" && window.matchMedia(SETTINGS_MOBILE_NAV_DRAWER_DESKTOP_QUERY).matches;
@@ -100,70 +99,7 @@ export function shouldRestoreDesktopRailOnReload({
   return itemTop < visibleTop || itemBottom > visibleBottom;
 }
 
-interface SettingsDesktopRailLayoutStylesInput {
-  isPinned: boolean;
-  forceScrollableDesktopRail: boolean;
-}
-
-interface SettingsDesktopRailLayoutStyles {
-  railStyle: CSSProperties;
-  scrollAreaStyle: CSSProperties;
-}
-
-export function settingsDesktopRailLayoutStyles({
-  isPinned,
-  forceScrollableDesktopRail,
-}: SettingsDesktopRailLayoutStylesInput): SettingsDesktopRailLayoutStyles {
-  if (isPinned) {
-    return {
-      railStyle: {
-        position: "sticky",
-        top: SETTINGS_DESKTOP_RAIL_TOP,
-        height: SETTINGS_DESKTOP_RAIL_HEIGHT,
-        maxHeight: SETTINGS_DESKTOP_RAIL_HEIGHT,
-        overflow: "hidden",
-      },
-      scrollAreaStyle: {
-        height: "100%",
-        maxHeight: "100%",
-        overflowY: "auto",
-        overscrollBehaviorY: "contain",
-      },
-    };
-  }
-
-  if (forceScrollableDesktopRail) {
-    return {
-      railStyle: {
-        position: "static",
-        top: "auto",
-        height: "auto",
-        maxHeight: SETTINGS_DESKTOP_RAIL_HEIGHT,
-        overflow: "hidden",
-      },
-      scrollAreaStyle: {
-        maxHeight: SETTINGS_DESKTOP_RAIL_HEIGHT,
-        overflowY: "auto",
-        overscrollBehaviorY: "contain",
-      },
-    };
-  }
-
-  return {
-    railStyle: {
-      position: "static",
-      top: "auto",
-      height: "auto",
-      maxHeight: "none",
-      overflow: "visible",
-    },
-    scrollAreaStyle: {
-      maxHeight: "none",
-      overflow: "visible",
-      overscrollBehavior: "auto",
-    },
-  };
-}
+export { desktopSideRailLayoutStyles as settingsDesktopRailLayoutStyles } from "../../../lib/sideRailLayout";
 
 function readNavigationEntryType(): string | null {
   if (typeof window === "undefined" || typeof window.performance === "undefined") {
@@ -587,7 +523,7 @@ export function SettingsSideRail({
     </>
   );
 
-  const { railStyle, scrollAreaStyle } = settingsDesktopRailLayoutStyles({
+  const { railStyle, scrollAreaStyle } = desktopSideRailLayoutStyles({
     isPinned,
     forceScrollableDesktopRail,
   });
