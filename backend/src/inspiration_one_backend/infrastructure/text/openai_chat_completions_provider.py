@@ -33,6 +33,12 @@ from inspiration_one_backend.infrastructure.provider_config import (
     resolve_text_provider_config,
 )
 from inspiration_one_backend.infrastructure.text.base import TextProvider
+from inspiration_one_backend.infrastructure.text.prompt_context import (
+    BRIEF_SYSTEM_FALLBACK,
+    COPY_SYSTEM_FALLBACK,
+    build_brief_user_content,
+    build_copy_user_content,
+)
 from inspiration_one_backend.infrastructure.text.structured_output import (
     BRIEF_SCHEMA,
     COPY_SCHEMA,
@@ -132,15 +138,8 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
     def generate_brief(self, inspiration: InspirationInput) -> tuple[CreativeBriefPayload, str]:
         response_text = self._chat_completion(
             model=self.brief_model,
-            instructions=text_or_default(self.brief_system_prompt, "请输出简洁、结构化的中文 JSON。"),
-            content=(
-                f"灵感产物名：{inspiration.name}\n"
-                f"类目：{inspiration.category or '未提供'}\n"
-                f"价格：{inspiration.price or '未提供'}\n"
-                f"灵感产物描述/补充说明：{inspiration.source_note or '未提供'}\n"
-                "请输出字段：positioning、audience、selling_angles(3到5条)、"
-                "taboo_phrases、poster_style_hint。"
-            ),
+            instructions=text_or_default(self.brief_system_prompt, BRIEF_SYSTEM_FALLBACK),
+            content=build_brief_user_content(inspiration),
             structured_schema=BRIEF_SCHEMA,
         )
         payload = CreativeBriefPayload.model_validate(self._read_output_json(response_text))
@@ -155,37 +154,10 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
     ) -> tuple[CopyPayloadV2, str]:
         config = config or CopyNodeConfigV2()
         reference_images = reference_images or []
-        reference_lines = [
-            (
-                f"{index}. {reference.label or reference.filename}"
-                f"（角色：{reference.role or '参考图'}，类型：{reference.mime_type}，文件：{reference.filename}）"
-            )
-            for index, reference in enumerate(reference_images, start=1)
-        ]
-        reference_text = "\n".join(reference_lines) if reference_lines else "未连接"
         response_text = self._chat_completion(
             model=self.copy_model,
-            instructions=text_or_default(self.copy_system_prompt, "请输出中文 JSON，不要输出 markdown。"),
-            content=(
-                f"灵感产物名：{inspiration.name}\n"
-                f"类目：{inspiration.category or '未提供'}\n"
-                f"价格：{inspiration.price or '未提供'}\n"
-                f"灵感产物描述/补充说明：{inspiration.source_note or '未提供'}\n"
-                f"参考图：{reference_text}\n"
-                f"文案用途：{config.purpose or '未指定'}\n"
-                f"输出模式：{config.output_mode}\n"
-                f"渠道：{config.channel or '未指定'}\n"
-                f"语气：{config.tone or '未指定'}\n"
-                f"本轮文案要求：{config.instruction or '按灵感产物和场景自由组织文案'}\n"
-                f"可选槽位：{[slot.model_dump(mode='json') for slot in config.requested_slots]}\n"
-                f"灵感产物定位：{brief.positioning}\n"
-                f"目标人群：{brief.audience}\n"
-                f"卖点角度：{', '.join(brief.selling_angles)}\n"
-                f"禁忌表达：{', '.join(brief.taboo_phrases) or '无'}\n"
-                "请输出 v2 JSON 外壳：version=2、purpose、summary、content、visual_guidance。\n"
-                "content.kind 必须是 freeform、blocks 或 layout_brief。"
-                "不要为了满足固定字段编造 CTA、海报标题或固定 3 到 5 条卖点。"
-            ),
+            instructions=text_or_default(self.copy_system_prompt, COPY_SYSTEM_FALLBACK),
+            content=build_copy_user_content(inspiration, brief, config, reference_images),
             structured_schema=COPY_SCHEMA,
         )
         raw_payload = self._read_output_json(response_text)

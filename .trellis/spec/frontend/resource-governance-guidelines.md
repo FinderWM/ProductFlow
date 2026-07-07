@@ -35,6 +35,8 @@ This spec complements:
   requirements just to make the frontend navigation work.
 - Save-to-gallery state comes from the generated asset DTO (`gallery_saved`, `gallery_entry_id`), not from scanning gallery
   pagination.
+- Gallery entries and resource-library assets own their saved image paths. Source ids are lineage/idempotency metadata, not
+  runtime read dependencies.
 - Gallery tags are global gallery-only tags. They must not reuse generation resource groups or generation group grants.
 
 ## API And Type Surfaces
@@ -59,8 +61,9 @@ Resource governance mutations can affect more than the page that issued them:
 - Gallery tag create/update/delete/entry-assignment mutations must invalidate `["gallery-tags"]` and `["gallery"]`, and
   prune selected disabled/deleted tag ids from local filter state after active tags refetch.
 - Resource-library save/delete/group changes must invalidate resource-library asset/group/source-status queries.
-- Upstream resource disable/restore can change downstream effective availability. Invalidate or refresh the visible detail,
-  gallery, image-session, and resource-library queries that can display derived availability.
+- Upstream resource disable/restore can change downstream effective availability for source assets, poster variants,
+  image sessions, and image-session assets. Gallery/resource-library rows saved from those sources remain governed by their
+  own rows, so invalidate those queries only when their own rows, tags, groups, or displayed lineage metadata changed.
 
 Prefer precise `setQueryData` when the changed object is already in cache and the patch is simple. Use invalidation when
 effective availability can cascade through parent resources.
@@ -83,13 +86,31 @@ For admin cross-user views:
 - Classic gallery feed chrome must follow the active `light` / `dark` theme. Do not hard-code the feed section, header,
   filter bar, loading state, or empty state as a dark-only presentation zone when the page is rendering through the
   classic layout.
-- When a gallery image card uses an action-surface helper inside the `workspace` layout, it must override the default
-  pill action radius with a gallery-specific semantic class. Do not let workspace button chrome clip image-led cards into
-  circular or capsule thumbnails.
+- Image cards whose only action is opening an image preview must use `MediaPreviewTrigger`, not
+  `LayoutActionSurfaceButton`, raw `<button>` wrappers, or action-surface class helpers. The preview trigger may keep
+  click and keyboard activation, but the visible surface stays a media card/image instead of workspace button chrome.
+- Keep action surfaces for real controls: upload/drop zones, selection cards, history/session/job selection, navigation,
+  and admin governance actions.
 - Remove/restore buttons must stop event propagation so they do not open or change the selected preview unintentionally.
 - Disabled entries should show a clear admin-removed label and preserve enough metadata to identify what is being governed.
 - Workspace home gallery previews must not request disabled entries; only gallery management surfaces may opt in with
   `include_disabled=true` and the proper permission.
+
+Wrong:
+
+```tsx
+<LayoutActionSurfaceButton onClick={() => setPreviewAsset(asset)}>
+  <img src={api.toApiUrl(asset.thumbnail_url)} alt={asset.original_filename} />
+</LayoutActionSurfaceButton>
+```
+
+Correct:
+
+```tsx
+<MediaPreviewTrigger onPreview={() => setPreviewAsset(asset)}>
+  <img src={api.toApiUrl(asset.thumbnail_url)} alt={asset.original_filename} />
+</MediaPreviewTrigger>
+```
 
 ## Gallery Tag UI
 
@@ -191,9 +212,14 @@ api.saveGalleryEntry(asset.id, { tag_ids: selectedTagIds });
   must not offer loading another user's resource into the current user's workflow/session.
 - Resource-library saves from source should present reuse semantics. Do not imply that saving from a generated image creates
   a new generated asset.
+- Resource-library saves from source create a resource-library-owned image path while keeping `source_type` /
+  `source_resource_id` for source-status display and idempotency.
 - Loading a resource-library asset into a workflow/session may create a new reference upload under the current backend
   behavior; do not describe that path as the same as source save.
 - Group changes should use the typed API helper and refresh the asset list/source status surfaces that show membership.
+- Asset thumbnails in `ResourceLibraryPage` and `ResourceLibraryModal` follow the media preview contract above. The
+  thumbnail is image content with a preview affordance; select, download, upload, and group editing remain separate
+  controls.
 
 ### Resource Library Card Group Chip Editor
 
@@ -302,4 +328,16 @@ Correct:
 
 ```tsx
 const saved = asset.gallery_saved;
+```
+
+Wrong:
+
+```tsx
+const previewUrl = api.toApiUrl(`/api/image-session-assets/${entry.image_session_asset_id}/download`);
+```
+
+Correct:
+
+```tsx
+const previewUrl = api.toApiUrl(entry.image.preview_url);
 ```

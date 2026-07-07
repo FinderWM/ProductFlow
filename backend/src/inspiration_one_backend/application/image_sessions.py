@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from time import perf_counter
@@ -193,8 +192,11 @@ def _get_image_session_or_raise(
     *,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
+    include_temporary_test: bool = False,
 ) -> ImageSession:
     stmt = _image_session_query().where(ImageSession.id == image_session_id)
+    if not include_temporary_test:
+        stmt = stmt.where(ImageSession.is_temporary_test.is_(False))
     if actor_user_id is not None and not actor_is_admin:
         stmt = stmt.where(ImageSession.owner_user_id == actor_user_id, ImageSession.deleted_at.is_(None))
     image_session = session.scalar(stmt)
@@ -461,6 +463,7 @@ def list_image_sessions(
         stmt = stmt.where(ImageSession.inspiration_id.is_(None))
     else:
         stmt = stmt.where(ImageSession.inspiration_id == inspiration_id)
+    stmt = stmt.where(ImageSession.is_temporary_test.is_(False))
     normalized_group_id = (resource_group_id or "").strip() or None
     if normalized_group_id is not None:
         if normalized_group_id == DEFAULT_GENERATION_RESOURCE_GROUP_ID:
@@ -603,6 +606,7 @@ def test_image_generation_config(
         inspiration_id=None,
         resource_group_id=resource_group.id,
         title=_image_generation_config_test_session_title(provider_config),
+        is_temporary_test=True,
     )
     session.add(image_session)
     session.flush()
@@ -663,9 +667,6 @@ def test_image_generation_config(
         session.commit()
     except BaseException:
         session.rollback()
-        if relative_path is not None:
-            with suppress(ValueError, OSError):
-                storage.delete_image_with_variants(relative_path)
         raise
     session.expire_all()
     return ImageGenerationConfigTestResult(
@@ -674,6 +675,7 @@ def test_image_generation_config(
             image_session.id,
             actor_user_id=owner_user_id,
             actor_is_admin=actor_is_admin,
+            include_temporary_test=True,
         ),
         round_id=round_item.id,
         duration_ms=duration_ms,
@@ -684,6 +686,75 @@ def test_image_generation_config(
 def _image_generation_config_test_session_title(provider_config: ResolvedImageProviderConfig) -> str:
     subject = provider_config.generation_config_name or provider_config.model or provider_config.provider_kind
     return f"图片配置测试 - {subject}"[:255]
+
+
+def _get_temporary_image_generation_config_test_session_or_raise(
+    session: Session,
+    *,
+    image_session_id: str,
+    actor_user_id: str,
+    actor_is_admin: bool = False,
+) -> ImageSession:
+    image_session = _get_image_session_or_raise(
+        session,
+        image_session_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        include_temporary_test=True,
+    )
+    if not image_session.is_temporary_test or image_session.deleted_at is not None:
+        raise NotFoundError("图片配置测试结果不存在")
+    ensure_actor_can_mutate_owner(
+        owner_user_id=image_session.owner_user_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+        missing_message="图片配置测试结果不存在",
+    )
+    return image_session
+
+
+def keep_image_generation_config_test_session(
+    session: Session,
+    *,
+    image_session_id: str,
+    actor_user_id: str,
+    actor_is_admin: bool = False,
+) -> ImageSession:
+    image_session = _get_temporary_image_generation_config_test_session_or_raise(
+        session,
+        image_session_id=image_session_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
+    image_session.is_temporary_test = False
+    image_session.updated_at = now_utc()
+    session.commit()
+    session.expire_all()
+    return _get_image_session_or_raise(
+        session,
+        image_session.id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
+
+
+def abandon_image_generation_config_test_session(
+    session: Session,
+    *,
+    image_session_id: str,
+    actor_user_id: str,
+    actor_is_admin: bool = False,
+) -> None:
+    image_session = _get_temporary_image_generation_config_test_session_or_raise(
+        session,
+        image_session_id=image_session_id,
+        actor_user_id=actor_user_id,
+        actor_is_admin=actor_is_admin,
+    )
+    image_session.deleted_at = now_utc()
+    image_session.deleted_by_user_id = actor_user_id
+    image_session.updated_at = image_session.deleted_at
+    session.commit()
 
 
 def update_image_session(
@@ -812,12 +883,9 @@ def delete_image_session_reference_image(
         raise BusinessValidationError("只能删除会话参考图")
     ensure_resource_usable(asset)
 
-    storage = storage or LocalStorage()
-    storage_path = storage.object_key_for(asset)
     session.delete(asset)
     image_session.updated_at = now_utc()
     session.commit()
-    storage.delete_image_with_variants(storage_path)
     session.expire_all()
     return _get_image_session_or_raise(session, image_session.id)
 
@@ -1147,9 +1215,6 @@ def _execute_image_session_round_generation(
             completed_candidates += 1
         except BaseException as exc:  # noqa: BLE001
             session.rollback()
-            if relative_path is not None:
-                with suppress(ValueError, OSError):
-                    storage.delete_image_with_variants(relative_path)
             if isinstance(exc, ImageSessionGenerationCancelledError):
                 release_claim(success=False, record_result=False)
                 raise

@@ -4,6 +4,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
+from math import gcd
 from typing import Any
 
 from sqlalchemy import and_, desc, func, insert, or_, select, update
@@ -25,10 +26,11 @@ from inspiration_one_backend.infrastructure.db.models import (
     ImageSession,
     ImageSessionAsset,
     ImageSessionRound,
-    Inspiration,
     new_id,
     utcnow,
 )
+from inspiration_one_backend.infrastructure.image.base import infer_extension
+from inspiration_one_backend.infrastructure.storage import LocalStorage
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,10 +55,18 @@ class GalleryEntryListResult:
     next_offset: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class GalleryStorageBackfillResult:
+    scanned: int
+    updated: int
+    skipped: int
+
+
 _NATURAL_SORT_TOKEN_RE = re.compile(r"(\d+)")
 GALLERY_TAG_NAME_MAX_LENGTH = 120
 GALLERY_TAG_DESCRIPTION_MAX_LENGTH = 500
 GALLERY_TAG_DELETE_LINK_BATCH_SIZE = 500
+GALLERY_SOURCE_TYPE_IMAGE_SESSION_ASSET = "image_session_asset"
 
 
 def _natural_name_key(value: str) -> tuple[int | str, ...]:
@@ -309,30 +319,13 @@ def replace_gallery_entry_tags(
 def _gallery_entry_query(*, include_tags: bool = False):
     options = [
         selectinload(ImageGalleryEntry.disabled_by),
+        selectinload(ImageGalleryEntry.owner),
         selectinload(ImageGalleryEntry.asset)
         .selectinload(ImageSessionAsset.session)
         .selectinload(ImageSession.inspiration),
-        selectinload(ImageGalleryEntry.asset)
-        .selectinload(ImageSessionAsset.session)
-        .selectinload(ImageSession.assets)
-        .selectinload(ImageSessionAsset.gallery_entry),
-        selectinload(ImageGalleryEntry.asset)
-        .selectinload(ImageSessionAsset.session)
-        .selectinload(ImageSession.assets)
-        .selectinload(ImageSessionAsset.disabled_by),
-        selectinload(ImageGalleryEntry.asset)
-        .selectinload(ImageSessionAsset.session)
-        .selectinload(ImageSession.disabled_by),
-        selectinload(ImageGalleryEntry.asset)
-        .selectinload(ImageSessionAsset.session)
-        .selectinload(ImageSession.inspiration)
-        .selectinload(Inspiration.disabled_by),
-        selectinload(ImageGalleryEntry.owner),
         selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.owner),
-        selectinload(ImageGalleryEntry.asset).selectinload(ImageSessionAsset.disabled_by),
         selectinload(ImageGalleryEntry.round),
         selectinload(ImageGalleryEntry.resource_group),
-        selectinload(ImageGalleryEntry.round).selectinload(ImageSessionRound.resource_group),
     ]
     if include_tags:
         options.append(selectinload(ImageGalleryEntry.tag_links).selectinload(ImageGalleryEntryTag.tag))
@@ -351,40 +344,10 @@ def _apply_gallery_entry_list_filters(
 ):
     normalized_group_id = (resource_group_id or "").strip() or None
     if normalized_group_id is not None:
-        statement = statement.outerjoin(
-            ImageSessionRound,
-            ImageGalleryEntry.image_session_round_id == ImageSessionRound.id,
-        ).where(
-            or_(
-                ImageGalleryEntry.resource_group_id == normalized_group_id,
-                and_(
-                    ImageGalleryEntry.resource_group_id.is_(None),
-                    ImageSessionRound.resource_group_id == normalized_group_id,
-                ),
-            )
-        )
+        statement = statement.where(ImageGalleryEntry.resource_group_id == normalized_group_id)
     if include_disabled:
         return statement
-    return (
-        statement.join(
-            ImageSessionAsset,
-            ImageGalleryEntry.image_session_asset_id == ImageSessionAsset.id,
-        )
-        .join(
-            ImageSession,
-            ImageSessionAsset.session_id == ImageSession.id,
-        )
-        .outerjoin(
-            Inspiration,
-            ImageSession.inspiration_id == Inspiration.id,
-        )
-        .where(
-            ImageGalleryEntry.enabled.is_(True),
-            ImageSessionAsset.enabled.is_(True),
-            ImageSession.enabled.is_(True),
-            or_(ImageSession.inspiration_id.is_(None), Inspiration.enabled.is_(True)),
-        )
-    )
+    return statement.where(ImageGalleryEntry.enabled.is_(True))
 
 
 def _view_counts_for_entries(session: Session, entry_ids: list[str]) -> dict[str, int]:
@@ -508,9 +471,216 @@ def list_gallery_entries(
 def _get_gallery_entry_by_asset_id(session: Session, image_session_asset_id: str) -> ImageGalleryEntry | None:
     return session.scalar(
         _gallery_entry_query(include_tags=True).where(
-            ImageGalleryEntry.image_session_asset_id == image_session_asset_id
+            or_(
+                ImageGalleryEntry.image_session_asset_id == image_session_asset_id,
+                and_(
+                    ImageGalleryEntry.source_type == GALLERY_SOURCE_TYPE_IMAGE_SESSION_ASSET,
+                    ImageGalleryEntry.source_resource_id == image_session_asset_id,
+                ),
+            )
         )
     )
+
+
+def _read_stored_image_content(stored_object: object, storage: LocalStorage, *, missing_message: str) -> bytes:
+    try:
+        return storage.resolve(storage.object_key_for(stored_object)).read_bytes()
+    except (OSError, ValueError) as exc:
+        raise BusinessValidationError(missing_message) from exc
+
+
+def _image_size_from_provider_output(provider_output_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(provider_output_json, dict):
+        return None
+    metadata = provider_output_json.get("_inspiration_one")
+    if not isinstance(metadata, dict):
+        return None
+    actual_size = metadata.get("actual_image_size")
+    if isinstance(actual_size, str) and actual_size:
+        return actual_size
+    return None
+
+
+def _provider_notes_from_output(provider_output_json: dict[str, Any] | None) -> list[str]:
+    if not isinstance(provider_output_json, dict):
+        return []
+    metadata = provider_output_json.get("_inspiration_one")
+    if not isinstance(metadata, dict):
+        return []
+    notes = metadata.get("notes")
+    if not isinstance(notes, list):
+        return []
+    return [str(item) for item in notes if item]
+
+
+def _aspect_ratio_from_size(size: str | None) -> str | None:
+    if not size:
+        return None
+    match = re.match(r"^\s*(\d+)x(\d+)\s*$", size)
+    if not match:
+        return None
+    width = int(match.group(1))
+    height = int(match.group(2))
+    if width <= 0 or height <= 0:
+        return None
+    divisor = gcd(width, height)
+    return f"{width // divisor}:{height // divisor}"
+
+
+def _asset_reference_snapshot(asset: ImageSessionAsset, *, role: str, source_kind: str) -> dict[str, Any]:
+    return {
+        "storage_path": asset.storage_path,
+        "storage_backend": asset.storage_backend,
+        "storage_bucket": asset.storage_bucket,
+        "storage_object_key": asset.storage_object_key,
+        "original_filename": asset.original_filename,
+        "mime_type": asset.mime_type,
+        "role": role,
+        "source_kind": source_kind,
+        "source_id": asset.id,
+    }
+
+
+def _reference_image_snapshots(image_session: ImageSession, round_item: ImageSessionRound) -> list[dict[str, Any]]:
+    assets_by_id = {asset.id: asset for asset in image_session.assets}
+    snapshots: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    selected_reference_ids = set(round_item.selected_reference_asset_ids or [])
+
+    def append(asset_id: str | None, *, role: str) -> None:
+        if not asset_id or asset_id in seen:
+            return
+        asset = assets_by_id.get(asset_id)
+        if asset is None:
+            return
+        seen.add(asset_id)
+        snapshots.append(
+            _asset_reference_snapshot(
+                asset,
+                role=role,
+                source_kind=GALLERY_SOURCE_TYPE_IMAGE_SESSION_ASSET,
+            )
+        )
+
+    if round_item.base_asset_id not in selected_reference_ids:
+        append(round_item.base_asset_id, role="base_asset")
+    for asset_id in round_item.base_asset_ids or []:
+        if asset_id in selected_reference_ids:
+            continue
+        append(asset_id, role="base_asset")
+    for asset_id in round_item.selected_reference_asset_ids or []:
+        append(asset_id, role="selected_reference")
+    return snapshots
+
+
+def _finish_temporary_test_session(image_session: ImageSession, *, actor_user_id: str | None) -> bool:
+    if not image_session.is_temporary_test or image_session.deleted_at is not None:
+        return False
+    image_session.deleted_at = utcnow()
+    image_session.deleted_by_user_id = actor_user_id
+    image_session.updated_at = image_session.deleted_at
+    return True
+
+
+def backfill_gallery_entry_storage(
+    session: Session,
+    *,
+    storage: LocalStorage | None = None,
+    limit: int | None = None,
+) -> GalleryStorageBackfillResult:
+    """Copy legacy gallery entries into gallery-owned storage paths.
+
+    This is intentionally an application-level backfill because Alembic cannot read or write object storage safely.
+    """
+    storage = storage or LocalStorage()
+    statement = _gallery_entry_query().order_by(None).order_by(ImageGalleryEntry.created_at, ImageGalleryEntry.id)
+    if limit is not None:
+        statement = statement.limit(max(1, int(limit)))
+    entries = list(session.scalars(statement).all())
+    scanned = 0
+    updated = 0
+    skipped = 0
+    for entry in entries:
+        scanned += 1
+        changed = _backfill_gallery_entry_snapshot_fields(entry)
+        if (entry.storage_path or "").startswith("gallery/"):
+            if changed:
+                updated += 1
+            continue
+        try:
+            source_content = _read_stored_image_content(entry, storage, missing_message="画廊图片文件不存在")
+        except BusinessValidationError:
+            if entry.asset is None:
+                skipped += 1
+                continue
+            try:
+                source_content = _read_stored_image_content(entry.asset, storage, missing_message="画廊图片文件不存在")
+            except BusinessValidationError:
+                skipped += 1
+                continue
+        relative_path = storage.save_gallery_entry_image(
+            entry.owner_user_id,
+            entry.original_filename or f"gallery-{entry.id}.png",
+            source_content,
+        )
+        for key, value in storage.metadata_for(relative_path).as_model_kwargs().items():
+            setattr(entry, key, value)
+        changed = True
+        if changed:
+            updated += 1
+    if updated:
+        session.commit()
+    return GalleryStorageBackfillResult(scanned=scanned, updated=updated, skipped=skipped)
+
+
+def _backfill_gallery_entry_snapshot_fields(entry: ImageGalleryEntry) -> bool:
+    changed = False
+    asset = entry.asset
+    round_item = entry.round
+    if asset is not None:
+        for field_name in ("original_filename", "mime_type"):
+            if not getattr(entry, field_name, None):
+                setattr(entry, field_name, getattr(asset, field_name))
+                changed = True
+    if round_item is not None:
+        field_pairs = (
+            ("prompt", "prompt"),
+            ("size", "size"),
+            ("model_name", "model_name"),
+            ("provider_name", "provider_name"),
+            ("prompt_version", "prompt_version"),
+            ("provider_response_id", "provider_response_id"),
+            ("image_generation_call_id", "image_generation_call_id"),
+            ("generation_config_id", "generation_config_id"),
+            ("generation_group_id", "generation_group_id"),
+            ("candidate_index", "candidate_index"),
+            ("candidate_count", "candidate_count"),
+        )
+        for entry_field, round_field in field_pairs:
+            if getattr(entry, entry_field, None) is None and getattr(round_item, round_field, None) is not None:
+                setattr(entry, entry_field, getattr(round_item, round_field))
+                changed = True
+        actual_size = _image_size_from_provider_output(round_item.provider_output_json)
+        if entry.actual_size is None and actual_size is not None:
+            entry.actual_size = actual_size
+            changed = True
+        if entry.aspect_ratio is None:
+            aspect_ratio = _aspect_ratio_from_size(entry.actual_size or entry.size or round_item.size)
+            if aspect_ratio is not None:
+                entry.aspect_ratio = aspect_ratio
+                changed = True
+        if entry.provider_notes_json is None:
+            entry.provider_notes_json = _provider_notes_from_output(round_item.provider_output_json)
+            changed = True
+        image_session = asset.session if asset is not None else round_item.session
+        if entry.reference_images_json is None and image_session is not None:
+            entry.reference_images_json = _reference_image_snapshots(image_session, round_item)
+            changed = True
+    if entry.source_type is None and entry.image_session_asset_id is not None:
+        entry.source_type = GALLERY_SOURCE_TYPE_IMAGE_SESSION_ASSET
+        entry.source_resource_id = entry.image_session_asset_id
+        changed = True
+    return changed
 
 
 def save_generated_asset_to_gallery(
@@ -520,12 +690,14 @@ def save_generated_asset_to_gallery(
     tag_ids: Iterable[str] | None = None,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
+    storage: LocalStorage | None = None,
 ) -> GallerySaveResult:
     asset = session.scalar(
         select(ImageSessionAsset)
         .options(
             selectinload(ImageSessionAsset.owner),
             selectinload(ImageSessionAsset.session).selectinload(ImageSession.inspiration),
+            selectinload(ImageSessionAsset.session).selectinload(ImageSession.assets),
         )
         .where(ImageSessionAsset.id == image_session_asset_id)
     )
@@ -544,7 +716,13 @@ def save_generated_asset_to_gallery(
     existing = _get_gallery_entry_by_asset_id(session, image_session_asset_id)
     if existing is not None:
         ensure_resource_usable(existing)
+        if _finish_temporary_test_session(asset.session, actor_user_id=actor_user_id):
+            session.commit()
+            session.expire_all()
+            existing = _get_gallery_entry_by_asset_id(session, image_session_asset_id) or existing
         return GallerySaveResult(entry=existing, created=False)
+    if asset.session.is_temporary_test and asset.session.deleted_at is not None:
+        raise NotFoundError("图片配置测试结果不存在")
 
     normalized_tag_ids = _normalize_active_gallery_tag_ids(
         session,
@@ -556,13 +734,45 @@ def save_generated_asset_to_gallery(
     round_item = session.scalar(select(ImageSessionRound).where(ImageSessionRound.generated_asset_id == asset.id))
     if round_item is None:
         raise NotFoundError("生成记录不存在")
+    image_session = asset.session
+    storage = storage or LocalStorage()
+    source_content = _read_stored_image_content(asset, storage, missing_message="会话图片文件不存在")
+    relative_path = storage.save_gallery_entry_image(
+        asset.owner_user_id,
+        asset.original_filename or f"gallery-{asset.id}{infer_extension(asset.mime_type)}",
+        source_content,
+    )
+    storage_metadata = storage.metadata_for(relative_path)
+    actual_size = _image_size_from_provider_output(round_item.provider_output_json)
+    snapshot_size = actual_size or round_item.size
 
     entry = ImageGalleryEntry(
         owner_user_id=asset.owner_user_id,
         image_session_asset_id=asset.id,
         image_session_round_id=round_item.id,
+        original_filename=asset.original_filename,
+        mime_type=asset.mime_type,
+        prompt=round_item.prompt,
+        size=round_item.size,
+        actual_size=actual_size,
+        aspect_ratio=_aspect_ratio_from_size(snapshot_size),
+        model_name=round_item.model_name,
+        provider_name=round_item.provider_name,
+        prompt_version=round_item.prompt_version,
+        provider_response_id=round_item.provider_response_id,
+        image_generation_call_id=round_item.image_generation_call_id,
+        generation_config_id=round_item.generation_config_id,
+        generation_group_id=round_item.generation_group_id,
+        candidate_index=round_item.candidate_index,
+        candidate_count=round_item.candidate_count,
+        provider_notes_json=_provider_notes_from_output(round_item.provider_output_json),
+        reference_images_json=_reference_image_snapshots(image_session, round_item),
+        source_type=GALLERY_SOURCE_TYPE_IMAGE_SESSION_ASSET,
+        source_resource_id=asset.id,
         resource_group_id=round_item.resource_group_id or DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+        **storage_metadata.as_model_kwargs(),
     )
+    _finish_temporary_test_session(image_session, actor_user_id=actor_user_id)
     session.add(entry)
     try:
         session.flush()
@@ -573,6 +783,10 @@ def save_generated_asset_to_gallery(
         session.rollback()
         existing = _get_gallery_entry_by_asset_id(session, image_session_asset_id)
         if existing is not None:
+            if _finish_temporary_test_session(asset.session, actor_user_id=actor_user_id):
+                session.commit()
+                session.expire_all()
+                existing = _get_gallery_entry_by_asset_id(session, image_session_asset_id) or existing
             return GallerySaveResult(entry=existing, created=False)
         raise
     session.expire_all()

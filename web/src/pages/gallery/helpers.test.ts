@@ -15,7 +15,7 @@ function renderedGridHeight(rowSpan: number): number {
 }
 
 function entry(overrides: Partial<GalleryEntry>): GalleryEntry {
-  return {
+  const base: GalleryEntry = {
     id: "gallery-1",
     image_session_asset_id: "asset-1",
     image_session_round_id: "round-1",
@@ -38,11 +38,13 @@ function entry(overrides: Partial<GalleryEntry>): GalleryEntry {
     prompt: "prompt",
     size: "2048x2048",
     actual_size: "1024x1024",
+    aspect_ratio: "1:1",
     model_name: "mock",
     provider_name: "mock",
     prompt_version: "v1",
     provider_response_id: null,
     image_generation_call_id: null,
+    generation_config_id: null,
     generation_group_id: null,
     resource_group_id: defaultResourceGroup.id,
     resource_group: defaultResourceGroup,
@@ -52,12 +54,13 @@ function entry(overrides: Partial<GalleryEntry>): GalleryEntry {
     base_assets: [],
     base_asset_id: null,
     selected_reference_asset_ids: [],
+    reference_images: [],
     provider_notes: [],
     tags: [],
     view_count: 0,
     created_at: createdAt,
-    ...overrides,
   };
+  return { ...base, ...overrides };
 }
 
 describe("gallery helpers", () => {

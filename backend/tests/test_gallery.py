@@ -25,6 +25,42 @@ from inspiration_one_backend.infrastructure.db.session import get_session_factor
 from inspiration_one_backend.presentation.api import create_app
 
 
+def _make_gallery_entry(
+    asset: ImageSessionAsset,
+    round_item: ImageSessionRound,
+    **overrides,
+) -> ImageGalleryEntry:
+    storage_path = overrides.pop("storage_path", f"gallery/{asset.owner_user_id}/images/{asset.id}.png")
+    resource_group_id = overrides.pop("resource_group_id", round_item.resource_group_id)
+    return ImageGalleryEntry(
+        owner_user_id=asset.owner_user_id,
+        image_session_asset_id=asset.id,
+        image_session_round_id=round_item.id,
+        original_filename=asset.original_filename,
+        mime_type=asset.mime_type,
+        storage_path=storage_path,
+        storage_backend=overrides.pop("storage_backend", "local"),
+        storage_bucket=overrides.pop("storage_bucket", None),
+        storage_object_key=overrides.pop("storage_object_key", storage_path),
+        prompt=round_item.prompt,
+        size=round_item.size,
+        actual_size=round_item.size,
+        aspect_ratio="1:1",
+        model_name=round_item.model_name,
+        provider_name=round_item.provider_name,
+        prompt_version=round_item.prompt_version,
+        generation_group_id=round_item.generation_group_id,
+        resource_group_id=resource_group_id,
+        candidate_index=round_item.candidate_index,
+        candidate_count=round_item.candidate_count,
+        provider_notes_json=[],
+        reference_images_json=[],
+        source_type="image_session_asset",
+        source_resource_id=asset.id,
+        **overrides,
+    )
+
+
 def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Path, db_session) -> None:
     app = create_app()
     client = TestClient(app)
@@ -96,7 +132,13 @@ def test_generated_image_can_be_saved_to_gallery_idempotently(configured_env: Pa
     assert len(items) == 1
     assert items[0]["id"] == payload["id"]
     assert items[0]["base_assets"] == []
-    assert items[0]["image"]["download_url"].startswith("/api/image-session-assets/")
+    assert items[0]["image"]["download_url"] == f"/api/gallery/{payload['id']}/image"
+
+    db_session.expire_all()
+    gallery_entry = db_session.get(ImageGalleryEntry, payload["id"])
+    assert gallery_entry is not None
+    assert gallery_entry.storage_path.startswith("gallery/")
+    assert gallery_entry.storage_object_key == gallery_entry.storage_path
 
 
 def test_gallery_entry_includes_base_assets(configured_env: Path) -> None:
@@ -154,6 +196,9 @@ def test_gallery_entry_includes_base_assets(configured_env: Path) -> None:
         "ref-a.png",
     ]
     assert all(asset["download_url"].startswith("/api/image-session-assets/") for asset in payload["base_assets"])
+    assert [item["source_id"] for item in payload["reference_images"]] == [first_asset["id"], reference_asset["id"]]
+    assert [item["role"] for item in payload["reference_images"]] == ["base_asset", "selected_reference"]
+    assert all(item["storage_path"].startswith("image_sessions/") for item in payload["reference_images"])
 
     listed = client.get("/api/gallery", params={"resource_group_id": DEFAULT_GENERATION_RESOURCE_GROUP_ID})
     assert listed.status_code == 200
@@ -219,14 +264,14 @@ def test_gallery_list_filters_resource_group_and_keeps_group_metadata(
     )
     db_session.add_all([default_round, premium_round])
     db_session.flush()
-    default_entry = ImageGalleryEntry(
-        image_session_asset_id=default_asset.id,
-        image_session_round_id=default_round.id,
+    default_entry = _make_gallery_entry(
+        default_asset,
+        default_round,
         resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
-    premium_entry = ImageGalleryEntry(
-        image_session_asset_id=premium_asset.id,
-        image_session_round_id=premium_round.id,
+    premium_entry = _make_gallery_entry(
+        premium_asset,
+        premium_round,
         resource_group_id=premium_group.id,
     )
     db_session.add_all([default_entry, premium_entry])
@@ -283,9 +328,9 @@ def test_gallery_list_supports_limit_offset(configured_env: Path, db_session) ->
         )
         db_session.add(round_item)
         db_session.flush()
-        entry = ImageGalleryEntry(
-            image_session_asset_id=asset.id,
-            image_session_round_id=round_item.id,
+        entry = _make_gallery_entry(
+            asset,
+            round_item,
             resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
             created_at=base_time + timedelta(minutes=index),
         )
@@ -399,6 +444,9 @@ def test_gallery_save_handles_integrity_race(
         mime_type="image/png",
         storage_path="image-sessions/race.png",
     )
+    source_path = configured_env / "image-sessions/race.png"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_bytes(_make_demo_image_bytes())
     db_session.add(asset)
     db_session.flush()
 
@@ -414,10 +462,7 @@ def test_gallery_save_handles_integrity_race(
     )
     db_session.add(round_item)
     db_session.commit()
-    existing = ImageGalleryEntry(
-        image_session_asset_id=asset.id,
-        image_session_round_id=round_item.id,
-    )
+    existing = _make_gallery_entry(asset, round_item)
     db_session.add(existing)
     db_session.commit()
     existing_id = existing.id
@@ -473,9 +518,9 @@ def _seed_gallery_entry(db_session, *, prompt: str = "点击计数图") -> str:
     )
     db_session.add(round_item)
     db_session.flush()
-    entry = ImageGalleryEntry(
-        image_session_asset_id=asset.id,
-        image_session_round_id=round_item.id,
+    entry = _make_gallery_entry(
+        asset,
+        round_item,
         resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     db_session.add(entry)
@@ -509,9 +554,9 @@ def _seed_gallery_entry_with_created_at(db_session, *, prompt: str, created_at: 
     )
     db_session.add(round_item)
     db_session.flush()
-    entry = ImageGalleryEntry(
-        image_session_asset_id=asset.id,
-        image_session_round_id=round_item.id,
+    entry = _make_gallery_entry(
+        asset,
+        round_item,
         resource_group_id=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
         created_at=created_at,
     )

@@ -261,7 +261,7 @@ def execute_image_to_code_job(job_id: str) -> None:
         _mark_image_to_code_job_succeeded(session, job_id=job.id, manifest=manifest)
     except Exception as exc:  # noqa: BLE001
         session.rollback()
-        _settle_image_to_code_failure(job_id, exc, storage=storage)
+        _settle_image_to_code_failure(job_id, exc)
     finally:
         session.close()
 
@@ -469,7 +469,7 @@ def _mark_image_to_code_job_succeeded(session: Session, *, job_id: str, manifest
     session.commit()
 
 
-def _settle_image_to_code_failure(job_id: str, exc: Exception, *, storage: LocalStorage) -> None:
+def _settle_image_to_code_failure(job_id: str, exc: Exception) -> None:
     failure_session = get_session_factory()()
     try:
         job = failure_session.get(ImageToCodeJob, job_id)
@@ -488,7 +488,6 @@ def _settle_image_to_code_failure(job_id: str, exc: Exception, *, storage: Local
         job.progress_updated_at = now_utc()
         job.result_manifest_json = None
         failure_session.commit()
-        storage.delete_image_to_code_artifacts(job_id)
     finally:
         failure_session.close()
 

@@ -30,11 +30,8 @@ import { ClassicTextInput, ClassicTextarea } from "../components/classicInputs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
-import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
-import {
-  actionButtonComponentForAppearance,
-  transparentActionToneVars,
-} from "../components/layoutActionButtons";
+import { MediaPreviewTrigger } from "../components/MediaPreviewTrigger";
+import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
 import { ModalShell } from "../components/ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges } from "../components/ResourceGovernance";
 import { TopNav } from "../components/TopNav";
@@ -174,7 +171,7 @@ function metadataRows(
   const rows = [
     ["gallery.meta.size", galleryEntrySizeLabel(entry, locale)],
     ["gallery.meta.model", [entry.provider_name, entry.model_name].filter(Boolean).join(" / ") || t("common.unknown")],
-    ["gallery.meta.session", entry.image_session_title],
+    ["gallery.meta.session", entry.image_session_title ?? t("common.unknown")],
     ["gallery.meta.inspiration", entry.inspiration_name ?? t("gallery.global")],
   ] as Array<readonly [TranslationKey, string]>;
   if (entry.owner_username) {
@@ -850,15 +847,12 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
               <div className="text-xs font-bold uppercase text-slate-400 dark:text-slate-500">{t("gallery.baseImages")}</div>
               <div className="mt-2 grid gap-2">
                 {previewEntry.base_assets.map((asset) => (
-                  <LayoutActionSurfaceButton
-                    type="button"
+                  <MediaPreviewTrigger
                     key={asset.id}
-                    appearance={galleryActionAppearance}
-                    preset="secondary"
-                    onClick={() => setPreviewBaseAsset(asset)}
+                    onPreview={() => setPreviewBaseAsset(asset)}
                     title={t("gallery.baseImagePreviewLabel")}
                     aria-label={`${t("gallery.baseImagePreviewLabel")}: ${asset.original_filename}`}
-                    className="flex min-w-0 items-center gap-3 p-2 text-left"
+                    className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-2 text-left transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/60 dark:hover:bg-slate-900"
                   >
                     <img
                       src={api.toApiUrl(asset.thumbnail_url)}
@@ -876,7 +870,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                       </div>
                       <ResourceMetaBadges resource={asset} className="mt-1" />
                     </div>
-                  </LayoutActionSurfaceButton>
+                  </MediaPreviewTrigger>
                 ))}
               </div>
             </section>
@@ -1144,12 +1138,8 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                           className={`group relative min-w-0 overflow-hidden rounded-md bg-transparent text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-[#0b4eea]/20 ${tileLayout.className}`}
                           style={tileStyle}
                         >
-                          <LayoutActionSurfaceButton
-                            appearance={galleryActionAppearance}
-                            preset="secondary"
-                            focusWithin
-                            onClick={() => handleEntryClick(entry)}
-                            toneVars={transparentActionToneVars}
+                          <MediaPreviewTrigger
+                            onPreview={() => handleEntryClick(entry)}
                             className={`block h-full w-full overflow-hidden rounded-none p-0 text-left ${
                               isWorkspaceManage ? "pf-gallery-grid-card-surface" : ""
                             }`}
@@ -1190,7 +1180,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                                 </div>
                               </div>
                             </div>
-                          </LayoutActionSurfaceButton>
+                          </MediaPreviewTrigger>
                           {canModerateGallery ? (
                             <GalleryActionButton
                               type="button"

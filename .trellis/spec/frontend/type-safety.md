@@ -77,6 +77,103 @@ Form uploads build `FormData` in API methods such as `createProduct(...)`, `addR
 `addImageSessionReferenceImages(...)`. The fetch wrapper omits `Content-Type` for `FormData` so the browser can set the
 multipart boundary.
 
+### Scenario: Settings text generation config test context
+
+#### 1. Scope / Trigger
+
+- Trigger: changing settings-page text generation config tests, `POST /api/settings/generation-configs/test-text`, text
+  provider prompt construction, or the local text/image config-test scene presets.
+- Goal: every configurable value that enters the supplier-facing brief/copy test request stays visible in the settings UI
+  and mirrored in frontend DTOs.
+
+#### 2. Signatures
+
+- Backend API: `POST /api/settings/generation-configs/test-text`.
+- Request DTO mirror: `TextGenerationConfigTestRequest`.
+- Copy context DTO mirror: `TextGenerationConfigTestCopyRequest`.
+- Slot DTO mirror: `CopySlotRequest { key, label, required?, hint? }`.
+- Response preview DTO mirror: `TextGenerationConfigTestResponse.request_context`.
+- Text preset source: `DEFAULT_TEXT_CONFIG_TEST_PRESETS` in `web/src/pages/settings/configTestState.ts`.
+- Image preset source: `DEFAULT_IMAGE_CONFIG_TEST_PRESETS` in `web/src/pages/settings/configTestState.ts`.
+
+#### 3. Contracts
+
+- `copy_request` must carry the visible UI values:
+  `instruction`, `purpose`, `channel`, `tone`, `output_mode`, and `requested_slots`.
+- `output_mode` is exactly `"freeform" | "blocks" | "layout_brief"`.
+- `requested_slots` is edited locally as JSON text, parsed into `CopySlotRequest[]`, and submitted as backend snake_case
+  `requested_slots`.
+- The response must include `request_context.brief.system_instructions`,
+  `request_context.brief.user_content`, `request_context.copy.system_instructions`,
+  `request_context.copy.user_content`, and `request_context.reference_text`.
+- The text test panel should expose fixed test state that is still part of the request context, such as reference images
+  being `"未连接"` and the generated brief feeding the copy request.
+- Built-in text test presets should stay creative-scene defaults. Do not reintroduce ecommerce-only defaults such as
+  `channel="电商"` or `purpose="main_image"` for the settings text-test scene data.
+- Built-in image test presets should use the same six scene ids, labels, descriptions, and order as text test presets.
+- Image generation config tests are a separate supplier-request contract. Scene presets may change local `size/prompt`
+  defaults, but do not change image-test payload construction or automatic parameter behavior while editing text-test
+  context.
+
+#### 4. Validation & Error Matrix
+
+- Empty `requestedSlotsText` -> submit `requested_slots: []`.
+- Invalid JSON -> block the text test locally with a visible parse error.
+- Non-array `requestedSlotsText` -> block locally with `"可选槽位必须是 JSON 数组。"` or localized equivalent.
+- Slot without non-empty `key` and `label` -> block locally before the API call.
+- Backend response missing `request_context` -> frontend build/test factories should fail because
+  `TextGenerationConfigTestResponse` requires the field.
+
+#### 5. Good/Base/Bad Cases
+
+- Good: switching a preset changes the editable draft and persists user edits for that preset in localStorage.
+- Good: starting a text config test submits the same `purpose/channel/tone/output_mode/requested_slots` shown in the panel.
+- Good: starting an image config test submits the selected image preset's `size/prompt` through the existing image test
+  payload shape, without adding hidden fields.
+- Base: old single-draft localStorage data migrates into the primary preset while other built-in presets remain available.
+- Bad: hard-coding `purpose`, `channel`, `tone`, or `output_mode` inside `textGenerationConfigTestPayload(...)` while the
+  panel shows different values.
+- Bad: building the request-context preview with strings that duplicate provider prompt construction instead of a shared
+  helper also used by the providers.
+
+#### 6. Tests Required
+
+- Frontend tests for text/image preset count/order, legacy draft migration, per-preset local overrides, requested-slot JSON
+  parsing, `textGenerationConfigTestPayload(...)`, and unchanged `imageGenerationConfigTestPayload(...)` shape.
+- Backend API tests asserting `request_context` contains brief/copy user content and fixed reference state.
+- Backend provider-route tests asserting `CopyNodeConfigV2` receives UI-submitted `purpose`, `channel`, `tone`,
+  `output_mode`, and `requested_slots`.
+- Provider payload tests should still pass after prompt-context helper extraction.
+- Run `pnpm --dir web test:run`, `pnpm --dir web lint`, `just web-build`, and focused backend pytest for settings/provider
+  payload behavior.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```ts
+copy_request: {
+  instruction: draft.instruction,
+  purpose: "main_image",
+  channel: "电商",
+  tone: "清晰直接",
+  output_mode: "blocks",
+}
+```
+
+Correct:
+
+```ts
+copy_request: {
+  instruction: testDraft.instruction,
+  purpose: testDraft.purpose,
+  channel: testDraft.channel,
+  tone: testDraft.tone,
+  output_mode: testDraft.outputMode,
+  requested_slots: parseTextConfigRequestedSlots(testDraft.requestedSlotsText),
+}
+```
+
 ### Scenario: Image-session generated asset gallery state
 
 #### 1. Scope / Trigger
@@ -92,6 +189,9 @@ multipart boundary.
 - Frontend mirror: `ImageSessionAsset.gallery_saved: boolean` and `gallery_entry_id: string | null`.
 - Gallery save API: `api.saveGalleryEntry(imageSessionAssetId, { tag_ids? }): Promise<GalleryEntry>` posts
   `{ image_session_asset_id, tag_ids }` to `POST /api/gallery`.
+- `GalleryEntry` mirrors gallery-owned fields: nullable `image_session_*` compatibility ids, `prompt`, `size`,
+  `actual_size`, `aspect_ratio`, `generation_config_id`, `reference_images`, `provider_notes`, `tags`, and
+  `image.download_url` / `preview_url` / `thumbnail_url` served from `/api/gallery/{entry_id}/image`.
 - Gallery tag mirrors:
   - `GalleryTag { id, name, description, priority, enabled, created_at, updated_at }`.
   - `GalleryEntry.tags: GalleryTag[]`.
@@ -100,8 +200,9 @@ multipart boundary.
 
 #### 3. Contracts
 
-- Gallery entries reference the original `image_session_asset_id`; saving to gallery must not create a second
-  `ImageSessionAsset` or copy image files.
+- Gallery entries keep the original `image_session_asset_id` as lineage/idempotency, but gallery cards and previews use the
+  gallery-owned image URLs from `GalleryEntry.image`.
+- Saving to gallery must not create a second `ImageSessionAsset`.
 - Image-session detail and generated round responses must mark generated assets already present in gallery with
   `gallery_saved=true` and the matching `gallery_entry_id`.
 - `GalleryEntry.image` must also serialize the same generated asset with `gallery_saved=true` and `gallery_entry_id`
@@ -118,6 +219,8 @@ multipart boundary.
 - Generated asset already saved -> button is disabled and displays an already-in-gallery label.
 - Repeated `POST /api/gallery` for the same asset -> returns existing entry with HTTP 200 and does not create another
   `ImageGalleryEntry` or `ImageSessionAsset`.
+- `GalleryEntry.image_session_id` / `image_session_title` may be `null`; gallery UI must fall back to gallery snapshot
+  fields and must not require a source session.
 - Missing/non-generated/sessionless asset -> backend validation remains the source of truth through `ApiError.detail`.
 - Required gallery tags with no selected ids -> backend returns the validation detail; frontend pickers should block this
   locally using runtime config where possible.
@@ -126,17 +229,22 @@ multipart boundary.
 
 - Good: after a gallery save succeeds, update the `["image-session", sessionId]` cache for the saved asset and invalidate
   gallery queries.
+- Good: gallery pages render prompt, dimensions, reference images, and image URL from `GalleryEntry` even when
+  `image_session_id` is `null`.
 - Base: a freshly generated unsaved asset has `gallery_saved=false` until it is posted to `/api/gallery`.
 - Bad: listing `/api/gallery` in the image chat page just to infer whether the selected asset has been saved.
 - Bad: copying a generated image into a new image-session asset or local file when creating a gallery entry.
+- Bad: rendering a gallery card by calling `/api/image-session-assets/{image_session_asset_id}/download`.
 
 #### 6. Tests Required
 
 - Backend gallery test asserts first generated asset response has `gallery_saved=false`.
-- Backend gallery save test asserts the returned gallery image uses the same asset id, has `gallery_saved=true`, and
+- Backend gallery save test asserts the returned gallery image has `gallery_saved=true`, uses gallery-owned URLs, and
   `ImageSessionAsset` count is unchanged.
 - Backend session-detail test path asserts the saved generated asset later returns `gallery_saved=true` and the saved
   `gallery_entry_id`.
+- Frontend build must catch test factories missing required nullable fields such as `aspect_ratio`,
+  `generation_config_id`, and `reference_images`.
 - Backend gallery tag tests assert `GalleryEntry.tags` contains only active tags, and frontend build catches missing `tags`
   in test factories.
 - Frontend build and tests must pass after any DTO field change.
@@ -165,6 +273,85 @@ api.saveGalleryEntry(selectedRound.generated_asset.id);
 
 ```tsx
 api.saveGalleryEntry(selectedRound.generated_asset.id, { tag_ids: selectedTagIds });
+```
+
+### Scenario: Settings image generation config test lifecycle
+
+#### 1. Scope / Trigger
+
+- Trigger: changing Settings-page image generation config tests, temporary test result dialogs, or
+  `/api/settings/generation-configs/test-image` lifecycle APIs.
+- Goal: image config tests are temporary until the operator chooses exactly one target.
+
+#### 2. Signatures
+
+- Request mirror: `ImageGenerationConfigTestRequest { generation_config_id?, generation_config?, resource_group_id, prompt, size }`.
+- Test response mirror: `ImageGenerationConfigTestResponse { image_session_id, is_temporary, round, generated_asset, ... }`.
+- Lifecycle response mirror: `ImageGenerationConfigTestLifecycleResponse { image_session_id, is_temporary, abandoned }`.
+- API helpers:
+  - `api.testImageGenerationConfig(payload)`
+  - `api.keepImageGenerationConfigTest(imageSessionId)`
+  - `api.abandonImageGenerationConfigTest(imageSessionId)`
+- Target actions in the UI:
+  - save to resource library through `SaveToResourceLibraryDialog`
+  - save to gallery through `api.saveGalleryEntry(...)`
+  - keep to image chat through `api.keepImageGenerationConfigTest(...)`
+
+#### 3. Contracts
+
+- Test success opens a temporary result preview and does not make the session visible in normal image-chat lists.
+- The three target actions are mutually exclusive. After one succeeds, close the preview and invalidate only the queries
+  that can show that target.
+- Closing the preview without a target action calls abandon when `is_temporary=true`.
+- Save to resource library uses the resource-library group dialog; it does not imply keep-to-image-chat.
+- Save to gallery creates a gallery-owned entry; it does not imply keep-to-image-chat.
+- Keep to image chat makes the temporary image session visible in the normal image-session list.
+- UI text must keep the terms distinct: resource library, gallery, and image chat/session list.
+
+#### 4. Validation & Error Matrix
+
+- Test response `is_temporary=true` -> close calls abandon unless a target action is already pending or completed.
+- Target action pending -> disable other target actions and close controls that would double-submit.
+- Target action returns `404` because another target already consumed the result -> show `ApiError.detail` and do not retry
+  through a different target.
+- Resource-library save needs selected groups according to the existing resource-library dialog contract.
+
+#### 5. Good/Base/Bad Cases
+
+- Good: save to resource library closes the preview and refreshes resource-library/source-status queries only.
+- Good: save to gallery closes the preview and refreshes gallery plus affected image-session cache for gallery-save state.
+- Good: keep to image chat closes the preview and refreshes image-session list/detail queries.
+- Base: abandoning a temporary result leaves object-storage cleanup to lifecycle policy; the UI only reflects DB lifecycle.
+- Bad: closing the modal by only clearing React state while leaving the temporary session accessible.
+- Bad: showing "keep to gallery" for the gallery action; "keep" means image-chat/session-list retention.
+
+#### 6. Tests Required
+
+- Frontend tests for dialog button labels/callbacks and disabled pending state.
+- SettingsPage tests for close-abandon behavior, keep action, save-to-gallery action, and save-to-resource-library dialog
+  handoff when helper logic is importable.
+- Backend settings tests for default hidden temporary sessions, keep, abandon, target-action mutual exclusion, and no
+  object-storage delete calls.
+- Run `pnpm --dir web lint`, `pnpm --dir web test:run`, `pnpm --dir web build`, and focused backend
+  settings/gallery/resource-library tests.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```tsx
+onClose={() => setImageConfigTestPreview(null)}
+```
+
+Correct:
+
+```tsx
+onClose={() => {
+  if (preview?.is_temporary) {
+    api.abandonImageGenerationConfigTest(preview.image_session_id);
+  }
+  setImageConfigTestPreview(null);
+}}
 ```
 
 ### Scenario: Create-inspiration API input typing

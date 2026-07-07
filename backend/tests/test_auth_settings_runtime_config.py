@@ -29,9 +29,11 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationConfigState,
     GenerationConfigTestResult,
     GenerationResourceGroup,
+    ImageGalleryEntry,
     ImageSession,
     ImageSessionRound,
     ProviderProfile,
+    ResourceLibraryAsset,
     UserUiPreference,
 )
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
@@ -1671,7 +1673,14 @@ def test_text_generation_config_test_api_runs_mock_without_persistence(configure
                 "enabled": True,
             },
             "inspiration": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
-            "copy_request": {"instruction": "突出保温和便携", "output_mode": "blocks"},
+            "copy_request": {
+                "instruction": "突出保温和便携",
+                "purpose": "visual_creation",
+                "channel": "视觉创作",
+                "tone": "克制、诗意",
+                "output_mode": "layout_brief",
+                "requested_slots": [{"key": "headline", "label": "主标题", "required": True, "hint": "不超过 12 字"}],
+            },
         },
     )
 
@@ -1683,6 +1692,16 @@ def test_text_generation_config_test_api_runs_mock_without_persistence(configure
     assert payload["copy_model"] == "mock-copy-v2"
     assert payload["brief"]["positioning"]
     assert payload["copy_result"]["summary"]
+    request_context = payload["request_context"]
+    assert "灵感产物名：便携咖啡杯" in request_context["brief"]["user_content"]
+    assert "文案用途：visual_creation" in request_context["copy"]["user_content"]
+    assert "输出模式：layout_brief" in request_context["copy"]["user_content"]
+    assert "渠道：视觉创作" in request_context["copy"]["user_content"]
+    assert "语气：克制、诗意" in request_context["copy"]["user_content"]
+    assert "本轮文案要求：突出保温和便携" in request_context["copy"]["user_content"]
+    assert "headline" in request_context["copy"]["user_content"]
+    assert "主标题" in request_context["copy"]["user_content"]
+    assert request_context["reference_text"] == "未连接"
 
     session = get_session_factory()()
     try:
@@ -1785,18 +1804,12 @@ def test_text_generation_config_test_api_reports_missing_real_provider_config(co
     assert "真实供应商必须选择供应商档案" in response.json()["detail"]
 
 
-def test_image_generation_config_test_api_runs_mock_and_returns_gallery_saveable_asset(configured_env: Path) -> None:
-    from inspiration_one_backend.presentation.api import create_app
-
-    app = create_app()
-    client = TestClient(app)
-    _login(client)
-
-    response = client.post(
+def _run_mock_image_generation_config_test(client: TestClient, *, name: str = "测试图片配置"):
+    return client.post(
         "/api/settings/generation-configs/test-image",
         json={
             "generation_config": {
-                "name": "测试图片配置",
+                "name": name,
                 "purpose": "image",
                 "provider_kind": "mock",
                 "provider_profile_id": None,
@@ -1812,6 +1825,16 @@ def test_image_generation_config_test_api_runs_mock_and_returns_gallery_saveable
         },
     )
 
+
+def test_image_generation_config_test_api_runs_mock_and_returns_gallery_saveable_asset(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = _run_mock_image_generation_config_test(client)
+
     assert response.status_code == 200
     payload = response.json()
     assert payload["generation_config_id"] is None
@@ -1825,11 +1848,30 @@ def test_image_generation_config_test_api_runs_mock_and_returns_gallery_saveable
     assert payload["generated_asset"]["id"] == payload["round"]["generated_asset"]["id"]
     assert payload["generated_asset"]["gallery_saved"] is False
     assert payload["generated_asset"]["preview_url"].endswith("variant=preview")
+    assert payload["is_temporary"] is True
+
+    hidden_list = client.get("/api/image-sessions")
+    assert hidden_list.status_code == 200
+    assert payload["image_session_id"] not in {item["id"] for item in hidden_list.json()["items"]}
+
+    hidden_detail = client.get(f"/api/image-sessions/{payload['image_session_id']}")
+    assert hidden_detail.status_code == 404
 
     saved = client.post("/api/gallery", json={"image_session_asset_id": payload["generated_asset"]["id"]})
     assert saved.status_code == 201
     assert saved.json()["image"]["id"] == payload["generated_asset"]["id"]
     assert saved.json()["image"]["gallery_saved"] is True
+    assert saved.json()["image"]["download_url"] == f"/api/gallery/{saved.json()['id']}/image"
+    group_id = client.get("/api/resource-library/groups").json()["items"][0]["id"]
+    rejected_library_save = client.post(
+        "/api/resource-library/assets/save",
+        json={
+            "source_type": "image_session_asset",
+            "source_id": payload["generated_asset"]["id"],
+            "group_ids": [group_id],
+        },
+    )
+    assert rejected_library_save.status_code == 404
 
     session = get_session_factory()()
     try:
@@ -1837,15 +1879,129 @@ def test_image_generation_config_test_api_runs_mock_and_returns_gallery_saveable
         test_results = session.scalars(select(GenerationConfigTestResult)).all()
         image_session = session.get(ImageSession, payload["image_session_id"])
         round_item = session.get(ImageSessionRound, payload["round"]["id"])
+        gallery_entry = session.get(ImageGalleryEntry, saved.json()["id"])
     finally:
         session.close()
     assert configs == []
     assert test_results == []
     assert image_session is not None
     assert image_session.title.startswith("图片配置测试 - 测试图片配置")
+    assert image_session.is_temporary_test is True
+    assert image_session.deleted_at is not None
     assert round_item is not None
     assert round_item.session_id == payload["image_session_id"]
     assert round_item.generation_config_id is None
+    assert gallery_entry is not None
+    assert gallery_entry.storage_path.startswith("gallery/")
+
+
+def test_image_generation_config_test_keep_makes_session_visible(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = _run_mock_image_generation_config_test(client, name="保留图片配置")
+    assert response.status_code == 200
+    image_session_id = response.json()["image_session_id"]
+
+    hidden_list = client.get("/api/image-sessions")
+    assert hidden_list.status_code == 200
+    assert image_session_id not in {item["id"] for item in hidden_list.json()["items"]}
+
+    kept = client.post(f"/api/settings/generation-configs/test-image/{image_session_id}/keep")
+    assert kept.status_code == 200
+    assert kept.json() == {"image_session_id": image_session_id, "is_temporary": False, "abandoned": False}
+
+    visible_list = client.get("/api/image-sessions")
+    assert visible_list.status_code == 200
+    assert image_session_id in {item["id"] for item in visible_list.json()["items"]}
+    visible_detail = client.get(f"/api/image-sessions/{image_session_id}")
+    assert visible_detail.status_code == 200
+
+    rejected_abandon = client.post(f"/api/settings/generation-configs/test-image/{image_session_id}/abandon")
+    assert rejected_abandon.status_code == 404
+
+
+def test_image_generation_config_test_abandon_hides_and_closes_session(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = _run_mock_image_generation_config_test(client, name="放弃图片配置")
+    assert response.status_code == 200
+    image_session_id = response.json()["image_session_id"]
+
+    abandoned = client.post(f"/api/settings/generation-configs/test-image/{image_session_id}/abandon")
+    assert abandoned.status_code == 200
+    assert abandoned.json() == {"image_session_id": image_session_id, "is_temporary": True, "abandoned": True}
+
+    hidden_list = client.get("/api/image-sessions")
+    assert hidden_list.status_code == 200
+    assert image_session_id not in {item["id"] for item in hidden_list.json()["items"]}
+    hidden_detail = client.get(f"/api/image-sessions/{image_session_id}")
+    assert hidden_detail.status_code == 404
+    rejected_keep = client.post(f"/api/settings/generation-configs/test-image/{image_session_id}/keep")
+    assert rejected_keep.status_code == 404
+
+    session = get_session_factory()()
+    try:
+        image_session = session.get(ImageSession, image_session_id)
+    finally:
+        session.close()
+    assert image_session is not None
+    assert image_session.is_temporary_test is True
+    assert image_session.deleted_at is not None
+
+
+def test_image_generation_config_test_save_to_resource_library_keeps_session_hidden(configured_env: Path) -> None:
+    from inspiration_one_backend.presentation.api import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    response = _run_mock_image_generation_config_test(client, name="资源库图片配置")
+    assert response.status_code == 200
+    payload = response.json()
+    group_id = client.get("/api/resource-library/groups").json()["items"][0]["id"]
+
+    saved = client.post(
+        "/api/resource-library/assets/save",
+        json={
+            "source_type": "image_session_asset",
+            "source_id": payload["generated_asset"]["id"],
+            "group_ids": [group_id],
+        },
+    )
+    assert saved.status_code == 201
+    assert saved.json()["source_resource_id"] == payload["generated_asset"]["id"]
+    rejected_gallery_save = client.post(
+        "/api/gallery",
+        json={"image_session_asset_id": payload["generated_asset"]["id"]},
+    )
+    assert rejected_gallery_save.status_code == 404
+
+    hidden_list = client.get("/api/image-sessions")
+    assert hidden_list.status_code == 200
+    assert payload["image_session_id"] not in {item["id"] for item in hidden_list.json()["items"]}
+    rejected_keep = client.post(f"/api/settings/generation-configs/test-image/{payload['image_session_id']}/keep")
+    assert rejected_keep.status_code == 404
+
+    session = get_session_factory()()
+    try:
+        image_session = session.get(ImageSession, payload["image_session_id"])
+        resource_asset = session.get(ResourceLibraryAsset, saved.json()["id"])
+    finally:
+        session.close()
+    assert image_session is not None
+    assert image_session.is_temporary_test is True
+    assert image_session.deleted_at is not None
+    assert resource_asset is not None
+    assert resource_asset.storage_path.startswith("resource_library/")
 
 
 def test_image_generation_config_test_api_persists_latest_result_for_saved_config(configured_env: Path) -> None:
@@ -2127,6 +2283,7 @@ def test_text_generation_config_test_api_runs_openai_chat_completions_provider(
     from inspiration_one_backend.presentation.api import create_app
 
     calls: list[str] = []
+    copy_configs = []
 
     def fake_generate_brief(self, inspiration):
         calls.append(f"brief:{self.provider_name}:{inspiration.name}")
@@ -2143,6 +2300,7 @@ def test_text_generation_config_test_api_runs_openai_chat_completions_provider(
 
     def fake_generate_copy(self, inspiration, brief, config=None, reference_images=None):
         calls.append(f"copy:{self.provider_name}:{brief.positioning}:{len(reference_images or [])}")
+        copy_configs.append(config)
         return (
             CopyPayloadV2(
                 summary=f"{inspiration.name} 主图文案",
@@ -2196,7 +2354,14 @@ def test_text_generation_config_test_api_runs_openai_chat_completions_provider(
                 "enabled": True,
             },
             "inspiration": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
-            "copy_request": {"instruction": "突出保温和便携", "output_mode": "blocks"},
+            "copy_request": {
+                "instruction": "突出保温和便携",
+                "purpose": "mood_board",
+                "channel": "视觉脚本",
+                "tone": "安静、留白",
+                "output_mode": "freeform",
+                "requested_slots": [{"key": "summary", "label": "摘要", "hint": "一句话"}],
+            },
         },
     )
 
@@ -2211,6 +2376,18 @@ def test_text_generation_config_test_api_runs_openai_chat_completions_provider(
         "brief:openai-chat-completions:便携咖啡杯",
         "copy:openai-chat-completions:通勤杯定位:0",
     ]
+    assert len(copy_configs) == 1
+    copy_config = copy_configs[0]
+    assert copy_config.instruction == "突出保温和便携"
+    assert copy_config.purpose == "mood_board"
+    assert copy_config.channel == "视觉脚本"
+    assert copy_config.tone == "安静、留白"
+    assert copy_config.output_mode == "freeform"
+    assert [slot.model_dump(mode="json") for slot in copy_config.requested_slots] == [
+        {"key": "summary", "label": "摘要", "required": False, "hint": "一句话"}
+    ]
+    assert "文案用途：mood_board" in payload["request_context"]["copy"]["user_content"]
+    assert "参考图：未连接" in payload["request_context"]["copy"]["user_content"]
 
 
 def test_text_generation_config_json_response_format_test_api_sends_response_format(

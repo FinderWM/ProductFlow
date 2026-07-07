@@ -5,7 +5,6 @@ import {
   useEffect,
   useId,
   useState,
-  type CSSProperties,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -44,7 +43,6 @@ import {
   actionButtonClassNameForAppearance,
   actionButtonComponentForAppearance,
   actionSurfaceClassNameForAppearance,
-  transparentActionToneVars,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
 import type { BaseActionButtonProps } from "../../components/actionButtonShared";
@@ -60,8 +58,8 @@ import { ImageGenerationSettingsPanel } from "../../components/ImageGenerationSe
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../../components/ImageGenerationSettingsTabs";
 import { ImageSizePicker } from "../../components/ImageSizePicker";
 import { ImageToolControls } from "../../components/ImageToolControls";
-import { LayoutActionSurfaceButton } from "../../components/LayoutActionSurfaceButton";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
+import { MediaPreviewTrigger } from "../../components/MediaPreviewTrigger";
 import { ModalShell } from "../../components/ModalShell";
 import { ParameterHelpButton } from "../../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
@@ -240,10 +238,6 @@ function inspectorImageDropzoneClassName(appearance: LayoutActionAppearance) {
     className: "pf-action-surface--dashed flex cursor-pointer items-center justify-center px-3 py-6 text-xs font-medium",
   });
 }
-
-const INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE: CSSProperties = {
-  ["--pf-action-radius" as string]: "var(--pf-radius-sm)",
-};
 
 function referenceRolePresetValue(role: string): string {
   return REFERENCE_ROLE_OPTIONS.some((option) => option.value === role) ? role : "__custom__";
@@ -882,23 +876,27 @@ function InspirationContextInspector({
 
   return (
     <div className="space-y-3">
-      <div
-        className={`group relative flex h-40 items-center justify-center overflow-hidden rounded-2xl border pf-hairline bg-[rgba(255,255,255,0.5)] p-2 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME} ${sourceImage ? "cursor-zoom-in" : ""}`}
-        onClick={sourceImage ? () => onPreviewImage(sourceImage) : undefined}
-      >
-        {sourceImage ? (
-          <>
-            <img
-              src={sourceImage.previewUrl}
-              alt={sourceImage.alt}
-              className="h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03]"
-            />
-            <DownloadLink image={sourceImage} appearance={actionAppearance} variant="overlay" />
-          </>
-        ) : (
+      {sourceImage ? (
+        <MediaPreviewTrigger
+          onPreview={() => onPreviewImage(sourceImage)}
+          className={`group relative flex h-40 items-center justify-center overflow-hidden rounded-2xl border pf-hairline bg-[rgba(255,255,255,0.5)] p-2 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
+          aria-label={t("detail.previewImage", { alt: sourceImage.alt })}
+          title={t("detail.previewImage", { alt: sourceImage.alt })}
+        >
+          <img
+            src={sourceImage.previewUrl}
+            alt={sourceImage.alt}
+            className="h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+          />
+          <DownloadLink image={sourceImage} appearance={actionAppearance} variant="overlay" />
+        </MediaPreviewTrigger>
+      ) : (
+        <div
+          className={`group relative flex h-40 items-center justify-center overflow-hidden rounded-2xl border pf-hairline bg-[rgba(255,255,255,0.5)] p-2 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
+        >
           <div className="text-xs pf-ink-muted dark:text-[color:var(--pf-muted)]">{t("detail.inspector.noSourceImage")}</div>
-        )}
-      </div>
+        </div>
+      )}
       <SaveCurrentImageToResourceLibraryButton
         sourceAsset={sourceAsset}
         onSaveSourceAssetToResourceLibrary={onSaveSourceAssetToResourceLibrary}
@@ -1214,21 +1212,16 @@ function ReferenceImageInspector({
         <div
           className={`group relative flex aspect-[4/3] min-h-[180px] w-full items-center justify-center overflow-hidden rounded-2xl border pf-hairline bg-[rgba(255,255,255,0.5)] p-3 shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-indigo-300 dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:hover:border-violet-400/50 hover:shadow-[0_8px_20px_-6px_rgba(99,102,241,0.15)] dark:hover:shadow-[0_8px_20px_-6px_rgba(139,92,246,0.3)] ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}
         >
-          <LayoutActionSurfaceButton
-            onClick={() => onPreviewImage(image)}
-            appearance={actionAppearance}
-            preset="secondary"
-            focusWithin
-            toneVars={transparentActionToneVars}
-            style={INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE}
-            className="relative flex h-full w-full items-center justify-center overflow-hidden p-0"
+          <MediaPreviewTrigger
+            onPreview={() => onPreviewImage(image)}
+            className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg"
             aria-label={t("detail.inspector.preview", { alt: image.alt })}
           >
             <img src={image.previewUrl} alt={image.alt} className="h-full w-full object-contain transition-transform duration-300 ease-out group-hover:scale-[1.03]" />
             <span className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-[color:var(--pf-deep)] px-2 py-1 text-[11px] font-medium text-[#fff] opacity-0 transition-opacity group-hover:opacity-100">
               {t("detail.inspector.clickPreview")}
             </span>
-          </LayoutActionSurfaceButton>
+          </MediaPreviewTrigger>
           <DownloadLink image={image} appearance={actionAppearance} variant="overlay" />
           <ActionButton
             onClick={(event) => {
@@ -1621,12 +1614,9 @@ function DeckPreviewSurface({
       </div>
       {image ? (
         <div className={`relative ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`}>
-          <LayoutActionSurfaceButton
-            appearance={actionAppearance}
-            preset="secondary"
-            onClick={() => onPreviewImage(image)}
-            className={`group relative w-full overflow-hidden p-0 ${aspectClassName}`}
-            style={INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE}
+          <MediaPreviewTrigger
+            onPreview={() => onPreviewImage(image)}
+            className={`group relative w-full overflow-hidden rounded-lg ${aspectClassName}`}
             aria-label={t("detail.previewImage", { alt: image.alt })}
           >
             <img
@@ -1637,7 +1627,7 @@ function DeckPreviewSurface({
             <span className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-[color:var(--pf-deep)] px-2 py-1 text-[10px] font-medium text-[#fff] opacity-0 transition-opacity group-hover:opacity-100">
               {t("detail.inspector.clickPreview")}
             </span>
-          </LayoutActionSurfaceButton>
+          </MediaPreviewTrigger>
           <DownloadLink image={image} appearance={actionAppearance} variant="overlay" />
         </div>
       ) : (
@@ -1689,8 +1679,6 @@ function DeckSourceSection({
   onMoveSource: (sourceItemId: string, direction: -1 | 1) => void;
   t: TFunction;
 }) {
-  const actionAppearance = useInspectorActionAppearance();
-
   return (
     <div className="space-y-1.5">
       <div className="text-[11px] font-medium pf-ink-muted dark:text-[color:var(--pf-muted)]">{title}</div>
@@ -1710,12 +1698,9 @@ function DeckSourceSection({
               <div className="flex items-start justify-between gap-2">
                 <div className="flex min-w-0 flex-1 gap-2.5">
                   {previewImage ? (
-                    <LayoutActionSurfaceButton
-                      appearance={actionAppearance}
-                      preset="secondary"
-                      onClick={() => onPreviewImage(previewImage)}
-                      className="group relative h-12 w-12 shrink-0 overflow-hidden p-0"
-                      style={INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE}
+                    <MediaPreviewTrigger
+                      onPreview={() => onPreviewImage(previewImage)}
+                      className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-md"
                       aria-label={t("detail.previewImage", { alt: previewImage.alt })}
                       title={t("detail.previewImage", { alt: previewImage.alt })}
                     >
@@ -1724,7 +1709,7 @@ function DeckSourceSection({
                         alt={previewImage.alt}
                         className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                       />
-                    </LayoutActionSurfaceButton>
+                    </MediaPreviewTrigger>
                   ) : null}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -2743,7 +2728,6 @@ function DeckNodeSlideRow({
   const generatedImage = deckGeneratedSlidePreviewImage(slide, t);
   const materialPreviewImage = deckMaterialPreviewImage(slide, selectedBoundSource, t);
   const hasPreviewRail = Boolean(generatedImage || materialPreviewImage);
-  const actionAppearance = useInspectorActionAppearance();
 
   useEffect(() => {
     setTitleDraft(slide.title);
@@ -3025,12 +3009,9 @@ function DeckNodeSlideRow({
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     {previewImage ? (
-                      <LayoutActionSurfaceButton
-                        appearance={actionAppearance}
-                        preset="secondary"
-                        onClick={() => onPreviewImage(previewImage)}
-                        className="group relative h-11 w-11 shrink-0 overflow-hidden p-0"
-                        style={INSPECTOR_THUMBNAIL_ACTION_SURFACE_STYLE}
+                      <MediaPreviewTrigger
+                        onPreview={() => onPreviewImage(previewImage)}
+                        className="group relative h-11 w-11 shrink-0 overflow-hidden rounded-md"
                         aria-label={t("detail.previewImage", { alt: previewImage.alt })}
                         title={t("detail.previewImage", { alt: previewImage.alt })}
                       >
@@ -3039,7 +3020,7 @@ function DeckNodeSlideRow({
                           alt={previewImage.alt}
                           className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                         />
-                      </LayoutActionSurfaceButton>
+                      </MediaPreviewTrigger>
                     ) : (
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-dashed pf-hairline-strong pf-surface-soft pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]">
                         <ImageIcon size={14} />

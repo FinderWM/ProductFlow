@@ -9,12 +9,11 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ClipboardImageButton } from "../components/ClipboardImageButton";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { LayoutActionDropZone } from "../components/LayoutActionDropZone";
-import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
+import { MediaPreviewTrigger } from "../components/MediaPreviewTrigger";
 import {
   actionButtonClassNameForAppearance,
   actionButtonComponentForAppearance,
   renderActionButtonInner,
-  transparentActionToneVars,
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
 import { ModalShell } from "../components/ModalShell";
@@ -883,13 +882,9 @@ function ResourceLibraryManagePage({
                       key={asset.id}
                       className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#0f1726]"
                     >
-                      <LayoutActionSurfaceButton
-                        type="button"
-                        appearance={resourceLibraryActionAppearance(workspaceSubpage)}
-                        preset="secondary"
-                        onClick={() => setPreviewAsset(asset)}
-                        toneVars={transparentActionToneVars}
-                        className="block w-full overflow-hidden rounded-none bg-slate-100 p-0 dark:bg-slate-950"
+                      <MediaPreviewTrigger
+                        onPreview={() => setPreviewAsset(asset)}
+                        className="block w-full bg-slate-100 dark:bg-slate-950"
                         aria-label={t("detail.previewImage", { alt: asset.original_filename })}
                         title={t("common.preview")}
                       >
@@ -900,7 +895,7 @@ function ResourceLibraryManagePage({
                           decoding="async"
                           className="aspect-square w-full object-cover"
                         />
-                      </LayoutActionSurfaceButton>
+                      </MediaPreviewTrigger>
                       <div className="space-y-3 p-3">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">

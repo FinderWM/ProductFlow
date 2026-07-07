@@ -1262,6 +1262,7 @@ class ImageSession(Base, TimestampMixin):
         Index("ix_image_sessions_owner_user_id", "owner_user_id"),
         Index("ix_image_sessions_resource_group_id", "resource_group_id"),
         Index("ix_image_sessions_deleted_at", "deleted_at"),
+        Index("ix_image_sessions_temporary_test", "is_temporary_test"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -1278,6 +1279,7 @@ class ImageSession(Base, TimestampMixin):
         default=DEFAULT_GENERATION_RESOURCE_GROUP_ID,
     )
     title: Mapped[str] = mapped_column(String(255))
+    is_temporary_test: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     disabled_by_user_id: Mapped[str | None] = mapped_column(
@@ -1617,12 +1619,19 @@ class ImageToCodeJob(Base, TimestampMixin):
 
 
 class ImageGalleryEntry(Base):
-    """全局精选画廊条目，引用连续生图生成资产，不复制图片文件。"""
+    """全局精选画廊条目，保存画廊自有主图与生成快照。"""
 
     __tablename__ = "image_gallery_entries"
     __table_args__ = (
-        Index("uq_image_gallery_entries_asset_id", "image_session_asset_id", unique=True),
+        Index(
+            "uq_image_gallery_entries_asset_id",
+            "image_session_asset_id",
+            unique=True,
+            postgresql_where=text("image_session_asset_id IS NOT NULL"),
+            sqlite_where=text("image_session_asset_id IS NOT NULL"),
+        ),
         Index("ix_image_gallery_entries_round_id", "image_session_round_id"),
+        Index("ix_image_gallery_entries_source", "source_type", "source_resource_id"),
         Index("ix_image_gallery_entries_created_at", "created_at"),
         Index("ix_image_gallery_entries_enabled_created", "enabled", "created_at"),
         Index("ix_image_gallery_entries_group_enabled_created", "resource_group_id", "enabled", "created_at"),
@@ -1633,13 +1642,37 @@ class ImageGalleryEntry(Base):
         String(36),
         default=ADMIN_USER_ID,
     )
-    image_session_asset_id: Mapped[str] = mapped_column(
+    image_session_asset_id: Mapped[str | None] = mapped_column(
         String(36),
+        nullable=True,
     )
     image_session_round_id: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,
     )
+    original_filename: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(100))
+    storage_path: Mapped[str] = mapped_column(String(500))
+    storage_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    storage_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    storage_object_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    actual_size: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    aspect_ratio: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    provider_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_response_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    image_generation_call_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    generation_config_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    generation_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    candidate_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    candidate_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_notes_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    reference_images_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_resource_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     resource_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1658,7 +1691,7 @@ class ImageGalleryEntry(Base):
         primaryjoin=lambda: child_parent_join(ImageGalleryEntry.disabled_by_user_id, AuthUser.id),
         foreign_keys=lambda: [ImageGalleryEntry.disabled_by_user_id],
     )
-    asset: Mapped[ImageSessionAsset] = relationship(
+    asset: Mapped[ImageSessionAsset | None] = relationship(
         back_populates="gallery_entry",
         primaryjoin=lambda: child_parent_join(ImageGalleryEntry.image_session_asset_id, ImageSessionAsset.id),
         foreign_keys=lambda: [ImageGalleryEntry.image_session_asset_id],

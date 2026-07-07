@@ -76,7 +76,7 @@ def _create_poster_variant(db_session, storage_root: Path, inspiration_id: str) 
     return poster.id
 
 
-def _assert_resource_asset_reuses_source_storage(
+def _assert_resource_asset_uses_resource_library_storage(
     db_session,
     *,
     resource_asset_id: str,
@@ -89,9 +89,9 @@ def _assert_resource_asset_reuses_source_storage(
     assert resource_asset is not None
     assert source_object is not None
     source_object_key = source_object.storage_object_key or source_object.storage_path
-    assert resource_asset.storage_path == source_object_key
-    assert resource_asset.storage_object_key == source_object_key
-    assert not resource_asset.storage_path.startswith("resource_library/")
+    assert resource_asset.storage_path.startswith("resource_library/")
+    assert resource_asset.storage_object_key == resource_asset.storage_path
+    assert resource_asset.storage_path != source_object_key
 
 
 def test_resource_library_group_crud_and_default_group(configured_env: Path) -> None:
@@ -225,7 +225,7 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     assert saved_source.json()["source_type"] == "source_asset"
     assert saved_source.json()["group_ids"] == [first_group]
     assert saved_source.json()["thumbnail_url"].endswith("variant=thumbnail")
-    _assert_resource_asset_reuses_source_storage(
+    _assert_resource_asset_uses_resource_library_storage(
         db_session,
         resource_asset_id=source_resource_id,
         source_model=SourceAsset,
@@ -269,7 +269,7 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     )
     assert saved_poster.status_code == 201
     assert saved_poster.json()["source_type"] == "poster_variant"
-    _assert_resource_asset_reuses_source_storage(
+    _assert_resource_asset_uses_resource_library_storage(
         db_session,
         resource_asset_id=saved_poster.json()["id"],
         source_model=PosterVariant,
@@ -290,7 +290,7 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     assert saved_generated.status_code == 201
     assert saved_generated.json()["source_type"] == "image_session_asset"
     assert saved_generated.json()["group_ids"] == [first_group]
-    _assert_resource_asset_reuses_source_storage(
+    _assert_resource_asset_uses_resource_library_storage(
         db_session,
         resource_asset_id=saved_generated.json()["id"],
         source_model=ImageSessionAsset,
@@ -306,17 +306,17 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     listed_after_inspiration_disable = client.get("/api/resource-library/assets")
     assert listed_after_inspiration_disable.status_code == 200
     disabled_items = {item["id"]: item for item in listed_after_inspiration_disable.json()["items"]}
-    assert disabled_items[source_resource_id]["effective_enabled"] is False
-    assert disabled_items[source_resource_id]["effective_disabled_resource_type"] == "inspiration"
-    assert disabled_items[saved_poster.json()["id"]]["effective_enabled"] is False
-    assert disabled_items[saved_poster.json()["id"]]["effective_disabled_resource_type"] == "inspiration"
+    assert disabled_items[source_resource_id]["effective_enabled"] is True
+    assert disabled_items[source_resource_id]["effective_disabled_resource_type"] is None
+    assert disabled_items[saved_poster.json()["id"]]["effective_enabled"] is True
+    assert disabled_items[saved_poster.json()["id"]]["effective_disabled_resource_type"] is None
 
     blocked_load = client.post(
         f"/api/resource-library/assets/{source_resource_id}/load-to-workflow-node",
         json={"node_id": "missing-node"},
     )
-    assert blocked_load.status_code == 400
-    assert blocked_load.json()["detail"] == "资源已被管理员屏蔽，暂不可使用"
+    assert blocked_load.status_code == 404
+    assert blocked_load.json()["detail"] == "工作流节点不存在"
 
     restored_inspiration = client.post(f"/api/resources/inspiration/{inspiration_id}/restore")
     assert restored_inspiration.status_code == 200
@@ -335,11 +335,8 @@ def test_resource_library_saves_sources_idempotently_with_multiple_groups(
     listed_after_generated_disable = client.get("/api/resource-library/assets")
     assert listed_after_generated_disable.status_code == 200
     generated_disabled_items = {item["id"]: item for item in listed_after_generated_disable.json()["items"]}
-    assert generated_disabled_items[saved_generated.json()["id"]]["effective_enabled"] is False
-    assert (
-        generated_disabled_items[saved_generated.json()["id"]]["effective_disabled_resource_type"]
-        == "image_session_asset"
-    )
+    assert generated_disabled_items[saved_generated.json()["id"]]["effective_enabled"] is True
+    assert generated_disabled_items[saved_generated.json()["id"]]["effective_disabled_resource_type"] is None
 
     restored_generated_asset = client.post(f"/api/resources/image_session_asset/{generated_asset_id}/restore")
     assert restored_generated_asset.status_code == 200

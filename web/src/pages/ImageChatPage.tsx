@@ -30,6 +30,7 @@ import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDial
 import { ImageGenerationSettingsPanel } from "../components/ImageGenerationSettingsPanel";
 import { ImageGenerationSettingsTabs, type ImageGenerationSettingsTab } from "../components/ImageGenerationSettingsTabs";
 import { ImageToolControls } from "../components/ImageToolControls";
+import { MediaPreviewTrigger } from "../components/MediaPreviewTrigger";
 import { ModalShell } from "../components/ModalShell";
 import { ParameterHelpLabel } from "../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../components/PromptPreviewDialog";
@@ -331,11 +332,6 @@ function ImageChatWorkbenchPage() {
   const dangerIconCompactButtonClassName = actionButtonClassNameForAppearance(actionAppearance, {
     preset: "danger",
     size: "icon-sm",
-  });
-  const previewSurfaceClassName = actionSurfaceClassNameForAppearance(actionAppearance, {
-    preset: "secondary",
-    focusWithin: true,
-    className: "block w-full rounded-none border-0 shadow-none",
   });
   const ghostSurfaceToneVars: ActionButtonToneVars = {
     ...transparentActionToneVars,
@@ -1691,37 +1687,41 @@ function ImageChatWorkbenchPage() {
       return api.saveGalleryEntry(assetId, { tag_ids: tagIds });
     },
     onSuccess: async (entry, variables) => {
-      queryClient.setQueryData<ImageSessionDetail>(["image-session", entry.image_session_id], (current) => {
-        if (!current) {
-          return current;
-        }
-        const markAssetSavedToGallery = (asset: ImageSessionAsset): ImageSessionAsset =>
-          asset.id === variables.assetId
-            ? {
-                ...asset,
-                gallery_saved: true,
-                gallery_entry_id: entry.id,
-              }
-            : asset;
-        return {
-          ...current,
-          assets: current.assets.map(markAssetSavedToGallery),
-          rounds: current.rounds.map((round) =>
-            round.generated_asset.id === variables.assetId
+      if (entry.image_session_id) {
+        queryClient.setQueryData<ImageSessionDetail>(["image-session", entry.image_session_id], (current) => {
+          if (!current) {
+            return current;
+          }
+          const markAssetSavedToGallery = (asset: ImageSessionAsset): ImageSessionAsset =>
+            asset.id === variables.assetId
               ? {
-                  ...round,
-                  generated_asset: markAssetSavedToGallery(round.generated_asset),
+                  ...asset,
+                  gallery_saved: true,
+                  gallery_entry_id: entry.id,
                 }
-              : round,
-          ),
-        };
-      });
+              : asset;
+          return {
+            ...current,
+            assets: current.assets.map(markAssetSavedToGallery),
+            rounds: current.rounds.map((round) =>
+              round.generated_asset.id === variables.assetId
+                ? {
+                    ...round,
+                    generated_asset: markAssetSavedToGallery(round.generated_asset),
+                  }
+                : round,
+            ),
+          };
+        });
+      }
       setGalleryTagPickerAsset(null);
       setGalleryTagPickerError("");
       setSuccessMessage(t("chat.savedGallery"));
       setErrorMessage("");
       await queryClient.invalidateQueries({ queryKey: ["gallery"] });
-      await queryClient.invalidateQueries({ queryKey: ["image-session", entry.image_session_id] });
+      if (entry.image_session_id) {
+        await queryClient.invalidateQueries({ queryKey: ["image-session", entry.image_session_id] });
+      }
     },
     onError: (error) => {
       const message = error instanceof ApiError ? error.detail : t("chat.saveGalleryFailed");
@@ -2599,13 +2599,11 @@ function ImageChatWorkbenchPage() {
                 key={asset.id}
                 className="group relative overflow-hidden rounded-xl border border-indigo-200 bg-slate-50 ring-2 ring-indigo-100 dark:border-violet-400/45 dark:bg-[#0b1220] dark:ring-violet-400/35"
               >
-                <button
-                  type="button"
-                  onClick={() => setReferencePreview({ asset, title: t("chat.baseImages") })}
-                  className={previewSurfaceClassName}
+                <MediaPreviewTrigger
+                  onPreview={() => setReferencePreview({ asset, title: t("chat.baseImages") })}
+                  className="block w-full"
                   title={asset.original_filename}
                   aria-label={t("detail.previewImage", { alt: asset.original_filename })}
-                  style={actionButtonToneStyle(transparentActionToneVars)}
                 >
                   <img
                     src={api.toApiUrl(asset.thumbnail_url)}
@@ -2614,7 +2612,7 @@ function ImageChatWorkbenchPage() {
                     decoding="async"
                     className="h-20 w-full object-cover"
                   />
-                </button>
+                </MediaPreviewTrigger>
                 <div className="absolute left-1 top-1 rounded-md bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm dark:bg-violet-500/90">
                   {asset.kind === "generated_image" ? t("chat.historyImage") : t("chat.sessionReferenceShort")}
                 </div>
@@ -2991,23 +2989,21 @@ function ImageChatWorkbenchPage() {
               />
             </label>
             {selectedEnhanceSourceAsset ? (
-              <button
-                type="button"
-                onClick={() =>
+              <MediaPreviewTrigger
+                onPreview={() =>
                   setReferencePreview({
                     asset: selectedEnhanceSourceAsset,
                     title: t("chat.enhance.source"),
                   })
                 }
-                className={`${previewSurfaceClassName} overflow-hidden rounded-xl text-left`}
-                style={actionButtonToneStyle(transparentActionToneVars)}
+                className="block w-full overflow-hidden rounded-xl text-left"
               >
                 <img
                   src={api.toApiUrl(selectedEnhanceSourceAsset.thumbnail_url || selectedEnhanceSourceAsset.preview_url)}
                   alt={selectedEnhanceSourceAsset.original_filename}
                   className="h-28 w-full object-cover"
                 />
-              </button>
+              </MediaPreviewTrigger>
             ) : null}
           </div>
 

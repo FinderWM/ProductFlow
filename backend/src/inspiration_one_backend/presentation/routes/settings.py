@@ -18,6 +18,10 @@ from inspiration_one_backend.application.auth_sessions import revoke_all_auth_se
 from inspiration_one_backend.application.contracts import CopyNodeConfigV2, InspirationInput
 from inspiration_one_backend.application.image_generation_failures import classify_image_generation_failure
 from inspiration_one_backend.application.image_sessions import (
+    abandon_image_generation_config_test_session,
+    keep_image_generation_config_test_session,
+)
+from inspiration_one_backend.application.image_sessions import (
     test_image_generation_config as run_image_generation_config_test,
 )
 from inspiration_one_backend.application.time import now_utc
@@ -103,6 +107,13 @@ from inspiration_one_backend.infrastructure.provider_models import (
     list_provider_models,
 )
 from inspiration_one_backend.infrastructure.text.factory import get_text_provider_from_config
+from inspiration_one_backend.infrastructure.text.prompt_context import (
+    build_brief_system_instructions,
+    build_brief_user_content,
+    build_copy_reference_text,
+    build_copy_system_instructions,
+    build_copy_user_content,
+)
 from inspiration_one_backend.presentation.deps import (
     get_current_user,
     get_session,
@@ -146,6 +157,7 @@ from inspiration_one_backend.presentation.schemas.settings import (
     GenerationResourceGroupCreateRequest,
     GenerationResourceGroupResponse,
     GenerationResourceGroupUpdateRequest,
+    ImageGenerationConfigTestLifecycleResponse,
     ImageGenerationConfigTestRequest,
     ImageGenerationConfigTestResponse,
     LoginPageSelectionUpdateRequest,
@@ -1476,7 +1488,27 @@ def test_text_generation_config_endpoint(
             channel=payload.copy_request.channel,
             tone=payload.copy_request.tone,
             output_mode=payload.copy_request.output_mode,
+            requested_slots=payload.copy_request.requested_slots,
         )
+        runtime_settings = get_runtime_settings()
+        reference_text = build_copy_reference_text([])
+        request_context = {
+            "brief": {
+                "system_instructions": build_brief_system_instructions(
+                    runtime_settings.prompt_brief_system,
+                    resolved_config.structured_output,
+                ),
+                "user_content": build_brief_user_content(inspiration_input),
+            },
+            "copy": {
+                "system_instructions": build_copy_system_instructions(
+                    runtime_settings.prompt_copy_system,
+                    resolved_config.structured_output,
+                ),
+                "user_content": build_copy_user_content(inspiration_input, brief, copy_config, []),
+            },
+            "reference_text": reference_text,
+        }
         copy, copy_model = text_provider.generate_copy(inspiration_input, brief, copy_config)
         duration_ms = int((perf_counter() - brief_start) * 1000)
     except ValueError as exc:
@@ -1521,6 +1553,7 @@ def test_text_generation_config_endpoint(
         copy_model=copy_model,
         brief=brief.model_dump(mode="json"),
         copy_result=copy.model_dump(mode="json"),
+        request_context=request_context,
         duration_ms=duration_ms,
     )
 
@@ -1670,8 +1703,53 @@ def test_image_generation_config_endpoint(
         provider_name=round_response.provider_name,
         duration_ms=result.duration_ms,
         image_session_id=result.image_session.id,
+        is_temporary=result.image_session.is_temporary_test,
         round=round_response,
         generated_asset=round_response.generated_asset,
+    )
+
+
+@router.post(
+    "/generation-configs/test-image/{image_session_id}/keep",
+    response_model=ImageGenerationConfigTestLifecycleResponse,
+)
+def keep_image_generation_config_test_endpoint(
+    image_session_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_SETTINGS_PROVIDER_WRITE)),
+) -> ImageGenerationConfigTestLifecycleResponse:
+    image_session = keep_image_generation_config_test_session(
+        session,
+        image_session_id=image_session_id,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
+    return ImageGenerationConfigTestLifecycleResponse(
+        image_session_id=image_session.id,
+        is_temporary=image_session.is_temporary_test,
+        abandoned=False,
+    )
+
+
+@router.post(
+    "/generation-configs/test-image/{image_session_id}/abandon",
+    response_model=ImageGenerationConfigTestLifecycleResponse,
+)
+def abandon_image_generation_config_test_endpoint(
+    image_session_id: str,
+    session: Session = Depends(get_session),
+    current_user: AuthUser = Depends(require_api_permission(API_SETTINGS_PROVIDER_WRITE)),
+) -> ImageGenerationConfigTestLifecycleResponse:
+    abandon_image_generation_config_test_session(
+        session,
+        image_session_id=image_session_id,
+        actor_user_id=current_user.id,
+        actor_is_admin=current_user.is_admin,
+    )
+    return ImageGenerationConfigTestLifecycleResponse(
+        image_session_id=image_session_id,
+        is_temporary=True,
+        abandoned=True,
     )
 
 

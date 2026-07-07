@@ -630,7 +630,6 @@ def delete_reference_image(
     asset_id: str,
     actor_user_id: str | None = None,
     actor_is_admin: bool = False,
-    storage: LocalStorage | None = None,
 ) -> Inspiration:
     asset = session.scalar(
         select(SourceAsset).options(selectinload(SourceAsset.inspiration)).where(SourceAsset.id == asset_id)
@@ -648,13 +647,10 @@ def delete_reference_image(
     ensure_resource_usable(asset)
 
     inspiration_id = asset.inspiration_id
-    storage = storage or LocalStorage()
-    storage_path = storage.object_key_for(asset)
     inspiration = _get_inspiration_or_raise(session, inspiration_id)
     inspiration.updated_at = now_utc()
     session.delete(asset)
     session.commit()
-    storage.delete_image_with_variants(storage_path)
     session.expire_all()
     return _get_inspiration_or_raise(session, inspiration_id)
 

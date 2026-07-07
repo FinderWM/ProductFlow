@@ -12,6 +12,7 @@ import {
   actionButtonClassNameForAppearance,
   actionButtonComponentForAppearance,
 } from "../layoutActionButtons";
+import { MediaPreviewTrigger } from "../MediaPreviewTrigger";
 import { ModalShell } from "../ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../ResourceGovernance";
 
@@ -187,9 +188,8 @@ export function ResourceLibraryModal({
                           key={asset.id}
                           className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950/60"
                         >
-                          <button
-                            type="button"
-                            onClick={() => setPreviewAsset(asset)}
+                          <MediaPreviewTrigger
+                            onPreview={() => setPreviewAsset(asset)}
                             className="block w-full bg-slate-100 dark:bg-slate-900"
                             aria-label={t("detail.previewImage", { alt: asset.original_filename })}
                             title={t("common.preview")}
@@ -201,7 +201,7 @@ export function ResourceLibraryModal({
                               decoding="async"
                               className="aspect-square w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
                             />
-                          </button>
+                          </MediaPreviewTrigger>
                           <div className="space-y-2 border-t border-slate-100 p-2 dark:border-slate-800">
                             <div className="truncate text-xs font-semibold text-slate-800 dark:text-slate-100">
                               {asset.original_filename}

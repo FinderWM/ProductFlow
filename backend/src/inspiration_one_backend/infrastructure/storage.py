@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import mimetypes
-import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -49,23 +48,10 @@ def _write_file(destination: Path, content: bytes) -> None:
     destination.write_bytes(content)
 
 
-def _delete_cached_path(cache_path: Path, *, glob_pattern: str | None = None) -> None:
-    if glob_pattern is not None:
-        if not cache_path.exists():
-            return
-        for cached_file in cache_path.glob(glob_pattern):
-            cached_file.unlink(missing_ok=True)
-        return
-    if cache_path.is_dir():
-        shutil.rmtree(cache_path)
-        return
-    cache_path.unlink(missing_ok=True)
-
-
 class StorageBackend(ABC):
     """对象存储后端接口。
 
-    后端只负责持久化、读取到本地缓存和删除对象；业务路径组织、路径校验、缩略图派生由 StorageService 统一处理。
+    后端只负责持久化和读取到本地缓存；业务路径组织、路径校验、缩略图派生由 StorageService 统一处理。
     """
 
     name: str
@@ -78,14 +64,6 @@ class StorageBackend(ABC):
     def resolve(self, relative: Path, cache_path: Path) -> Path:
         raise NotImplementedError
 
-    @abstractmethod
-    def delete(self, relative: Path, cache_path: Path) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def delete_prefix(self, prefix: str, cache_path: Path, *, glob_pattern: str | None = None) -> None:
-        raise NotImplementedError
-
 
 class LocalFilesystemStorageBackend(StorageBackend):
     name = "local"
@@ -95,12 +73,6 @@ class LocalFilesystemStorageBackend(StorageBackend):
 
     def resolve(self, relative: Path, cache_path: Path) -> Path:
         return cache_path
-
-    def delete(self, relative: Path, cache_path: Path) -> None:
-        _delete_cached_path(cache_path)
-
-    def delete_prefix(self, prefix: str, cache_path: Path, *, glob_pattern: str | None = None) -> None:
-        _delete_cached_path(cache_path, glob_pattern=glob_pattern)
 
 
 class S3CompatibleStorageBackend(StorageBackend):
@@ -150,28 +122,6 @@ class S3CompatibleStorageBackend(StorageBackend):
             raise RuntimeError(f"{self.display_name}访问失败") from exc
         _write_file(cache_path, response["Body"].read())
         return cache_path
-
-    def delete(self, relative: Path, cache_path: Path) -> None:
-        try:
-            self._client.delete_object(Bucket=self.bucket, Key=relative.as_posix())
-        except ClientError:
-            pass
-        _delete_cached_path(cache_path)
-
-    def delete_prefix(self, prefix: str, cache_path: Path, *, glob_pattern: str | None = None) -> None:
-        paginator = self._client.get_paginator("list_objects_v2")
-        keys: list[dict[str, str]] = []
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            for item in page.get("Contents", []):
-                key = item.get("Key")
-                if isinstance(key, str):
-                    keys.append({"Key": key})
-        for start in range(0, len(keys), 1000):
-            self._client.delete_objects(
-                Bucket=self.bucket,
-                Delete={"Objects": keys[start : start + 1000], "Quiet": True},
-            )
-        _delete_cached_path(cache_path, glob_pattern=glob_pattern)
 
     def _is_missing_object(self, exc: ClientError) -> bool:
         error = exc.response.get("Error", {})
@@ -333,6 +283,18 @@ class StorageService:
         self._warm_image_variants(relative.as_posix())
         return relative.as_posix()
 
+    def save_gallery_entry_image(
+        self,
+        owner_user_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        suffix = Path(filename).suffix.lower() or ".bin"
+        relative = Path("gallery") / owner_user_id / "images" / f"{uuid4()}{suffix}"
+        self._write_relative(relative, content)
+        self._warm_image_variants(relative.as_posix())
+        return relative.as_posix()
+
     def save_deck_slide_image(
         self,
         deck_id: str,
@@ -414,27 +376,6 @@ class StorageService:
             self._warm_image_variants(relative.as_posix())
         return relative.as_posix()
 
-    def delete_enhance_artifacts(self, job_or_run_id: str) -> None:
-        normalized = job_or_run_id.strip().strip("/")
-        if not normalized:
-            raise ValueError("增强任务标识不能为空")
-        parts = normalized.split("/")
-        if len(parts) == 1:
-            if not _safe_storage_path_segment(normalized) or normalized in {"inputs", "node"}:
-                raise ValueError("增强产物删除前缀无效")
-            self._delete_tree(Path("enhance") / normalized)
-            return
-        if len(parts) == 2 and parts[0] == "node" and _safe_storage_path_segment(parts[1]):
-            self._delete_tree(Path("enhance") / "node" / parts[1])
-            return
-        raise ValueError("增强产物删除前缀无效")
-
-    def delete_image_to_code_artifacts(self, job_id: str) -> None:
-        normalized = job_id.strip().strip("/")
-        if not _safe_storage_path_segment(normalized):
-            raise ValueError("图片转代码任务标识无效")
-        self._delete_tree(Path("image-to-code") / normalized)
-
     def resolve(self, relative_path: str) -> Path:
         """相对路径转可读的本地路径，防路径穿越攻击。"""
 
@@ -509,18 +450,6 @@ class StorageService:
 
         return variant_path, self._guess_media_type(variant_path, fallback=fallback_media_type)
 
-    def delete_image_with_variants(self, relative_path: str) -> None:
-        relative = self._validated_relative_path(relative_path)
-        self._delete_relative(relative)
-        self._delete_variant_files(relative)
-        self._remove_empty_variant_dir(self._cache_path(relative))
-
-    def delete_image_session_tree(self, session_id: str) -> None:
-        self._delete_tree(Path("image_sessions") / session_id)
-
-    def delete_inspiration_tree(self, inspiration_id: str) -> None:
-        self._delete_tree(Path("inspirations") / inspiration_id)
-
     def _write_relative(self, relative: Path, content: bytes, *, content_type: str | None = None) -> None:
         self._backend.write(
             relative,
@@ -528,20 +457,6 @@ class StorageService:
             content,
             content_type or self._guess_media_type_by_name(relative.name),
         )
-
-    def _delete_relative(self, relative: Path) -> None:
-        self._backend.delete(relative, self._cache_path(relative))
-        self._prune_empty_parents(self._cache_path(relative).parent)
-
-    def _delete_variant_files(self, relative: Path) -> None:
-        variant_dir = self._cache_path(relative).parent / ".variants"
-        prefix = (relative.parent / ".variants" / f"{relative.stem}.").as_posix()
-        self._backend.delete_prefix(prefix, variant_dir, glob_pattern=f"{relative.stem}.*")
-        self._remove_empty_variant_dir(self._cache_path(relative))
-
-    def _delete_tree(self, prefix: Path) -> None:
-        cache_root = self._cache_path(prefix)
-        self._backend.delete_prefix(prefix.as_posix().rstrip("/") + "/", cache_root)
 
     def _cache_path(self, relative: Path) -> Path:
         return self.root / relative
@@ -575,22 +490,6 @@ class StorageService:
     def _variant_relative_path(self, relative: Path, variant: ImageVariantName) -> Path:
         output_suffix = self._variant_output_suffix()
         return relative.parent / ".variants" / f"{relative.stem}.{variant}{output_suffix}"
-
-    def _remove_empty_variant_dir(self, original_path: Path) -> None:
-        variant_dir = original_path.parent / ".variants"
-        try:
-            variant_dir.rmdir()
-        except OSError:
-            return
-
-    def _prune_empty_parents(self, path: Path) -> None:
-        current = path
-        while current != self.root and current != current.parent:
-            try:
-                current.rmdir()
-            except OSError:
-                break
-            current = current.parent
 
     def _variant_output_suffix(self) -> str:
         if features.check("webp"):

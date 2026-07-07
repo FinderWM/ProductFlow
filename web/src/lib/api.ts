@@ -47,6 +47,7 @@ import type {
   GenerationConfigUpdateRequest,
   GenerationQueueOverview,
   CreateUserTemplateGroupInput,
+  ImageGenerationConfigTestLifecycleResponse,
   ImageGenerationConfigTestRequest,
   ImageGenerationConfigTestResponse,
   ImageSessionDetail,
@@ -678,6 +679,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  },
+  keepImageGenerationConfigTest(imageSessionId: string): Promise<ImageGenerationConfigTestLifecycleResponse> {
+    return request(
+      `/api/settings/generation-configs/test-image/${encodeURIComponent(imageSessionId)}/keep`,
+      { method: "POST" },
+    );
+  },
+  abandonImageGenerationConfigTest(imageSessionId: string): Promise<ImageGenerationConfigTestLifecycleResponse> {
+    return request(
+      `/api/settings/generation-configs/test-image/${encodeURIComponent(imageSessionId)}/abandon`,
+      { method: "POST" },
+    );
   },
   getRuntimeConfig(): Promise<RuntimeConfig> {
     return request("/api/settings/runtime");

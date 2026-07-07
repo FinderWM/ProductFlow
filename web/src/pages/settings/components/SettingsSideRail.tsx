@@ -16,7 +16,9 @@ interface SettingsSideRailProps {
   onSearchChange: (value: string) => void;
   visibleSections: SettingsSection[];
   activeSection: SettingsSectionId;
+  dirtySectionIds?: readonly SettingsSectionId[];
   workspaceSubpage?: boolean;
+  onSectionPreview?: (section: SettingsSectionId) => void;
   onSectionChange: (section: SettingsSectionId) => void;
 }
 
@@ -117,7 +119,9 @@ export function SettingsSideRail({
   onSearchChange,
   visibleSections,
   activeSection,
+  dirtySectionIds = [],
   workspaceSubpage = false,
+  onSectionPreview,
   onSectionChange,
 }: SettingsSideRailProps) {
   const { t } = useI18n();
@@ -466,12 +470,15 @@ export function SettingsSideRail({
               {sections.map((section) => {
                 const Icon = section.icon;
                 const active = section.id === activeSection;
+                const dirty = dirtySectionIds.includes(section.id);
                 return (
                   <button
                     key={section.id}
                     ref={active ? activeItemRef : null}
                     type="button"
                     aria-current={active ? "page" : undefined}
+                    onFocus={() => onSectionPreview?.(section.id)}
+                    onPointerEnter={() => onSectionPreview?.(section.id)}
                     onClick={() => handleSectionSelect(section.id)}
                     className={`pf-settings-nav-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-all ${
                       active ? "font-semibold text-slate-950 dark:text-white" : "text-slate-500 dark:text-slate-400"
@@ -481,7 +488,13 @@ export function SettingsSideRail({
                       size={15}
                       className={active ? "shrink-0" : "shrink-0 text-slate-400 dark:text-slate-500"}
                     />
-                    <span className="truncate">{t(section.labelKey)}</span>
+                    <span className="min-w-0 flex-1 truncate">{t(section.labelKey)}</span>
+                    {dirty ? (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-300"
+                        aria-label={t("settings.unsavedChanges")}
+                      />
+                    ) : null}
                   </button>
                 );
               })}

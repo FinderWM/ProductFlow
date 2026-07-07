@@ -6,6 +6,8 @@ import {
   configValuesFromChangedDrafts,
   clearTextConfigJsonResponseFormatTestRecord,
   clearTextConfigTestRecord,
+  DEFAULT_IMAGE_CONFIG_TEST_PRESETS,
+  DEFAULT_TEXT_CONFIG_TEST_PRESETS,
   draftsFromConfig,
   filterConfigResponseForSettingsSection,
   filterGenerationConfigsByLatestTestFailure,
@@ -22,6 +24,7 @@ import {
   type GenerationConfigDraft,
   generationConfigDraft as generationConfigDraftFromConfig,
   generationConfigDraftAfterProviderProfileSelection,
+  generationConfigsAfterArchive,
   generationConfigBatchFailedSelectableIds,
   generationConfigBatchSelectableIds,
   generationConfigsUsingProvider,
@@ -36,7 +39,9 @@ import {
   markTextConfigTestSucceeded,
   newGenerationConfigDraft,
   normalizeImageConfigTestDraft,
+  normalizeImageConfigTestDraftState,
   normalizeTextConfigTestDraft,
+  normalizeTextConfigTestDraftState,
   providerDisableBlocked,
   providerConfigWithGenerationConfig,
   providerConfigWithGenerationResourceGroup,
@@ -46,6 +51,7 @@ import {
   providerFormFromProfile,
   providerProfilesForGenerationConfig,
   providerProfileCreatePayload,
+  providerProfilesAfterArchive,
   providerProfileUpdatePayload,
   providerUsageFromGenerationConfigs,
   providerUsageLabelKeys,
@@ -54,8 +60,11 @@ import {
   settingsPathForSection,
   settingsSectionFromPathSegment,
   serializeLoginPageTemplateConfigDraft,
+  generationResourceGroupsAfterArchive,
+  settingsSectionHasRuntimeDraftChanges,
   settingsSectionIds,
   settingsGenerationResourceGroupsInApiOrder,
+  shouldScrollSettingsContentToTop,
   shouldShowSettingsMigrationPanel,
   runGenerationConfigBatchTests,
   textConfigJsonResponseFormatTestRecordForKey,
@@ -68,6 +77,11 @@ import {
   settingsExportFilename,
   settingsImportSummaryCounts,
 } from "./settings/importExport";
+import {
+  imageGenerationConfigTestPayload,
+  parseTextConfigRequestedSlots,
+  textGenerationConfigTestPayload,
+} from "./settings/providerConfigOps";
 import { ApiError } from "../lib/api";
 import { translate } from "../lib/i18n";
 import type {
@@ -236,14 +250,9 @@ function providerConfigResponse(overrides: Partial<ProviderConfigResponse> = {})
 }
 
 function textConfigTestState(): TextConfigTestState {
+  const draftState = normalizeTextConfigTestDraftState(null);
   return {
-    draft: {
-      inspirationName: "蓝天白云青草地",
-      category: "自然风景场景",
-      price: "",
-      sourceNote: "画面包含蓝天、白云和青草地。",
-      instruction: "输出清新的短文案",
-    },
+    ...draftState,
     latestKey: null,
     records: {},
   };
@@ -257,6 +266,11 @@ function textConfigTestResponse(model: string): TextGenerationConfigTestResponse
     copy_model: model,
     brief: { positioning: model },
     copy_result: { summary: model },
+    request_context: {
+      brief: { system_instructions: "brief-system", user_content: "brief-user" },
+      copy: { system_instructions: "copy-system", user_content: "copy-user" },
+      reference_text: "未连接",
+    },
     duration_ms: 1200,
   };
 }
@@ -387,6 +401,67 @@ describe("SettingsPage draft helpers", () => {
     ]);
   });
 
+  it("detects unsaved runtime config drafts without treating untouched secrets as changed", () => {
+    const items = [
+      configItem({ key: "title", value: "before" }),
+      configItem({ key: "api_key", value: null, secret: true, has_value: true }),
+    ];
+    const snapshots = draftsFromConfig(configResponse(items));
+
+    expect(settingsSectionHasRuntimeDraftChanges(items, snapshots.drafts, snapshots.snapshots, {})).toBe(false);
+    expect(
+      settingsSectionHasRuntimeDraftChanges(
+        items,
+        { ...snapshots.drafts, title: "after", api_key: "" },
+        snapshots.snapshots,
+        {},
+      ),
+    ).toBe(true);
+    expect(
+      settingsSectionHasRuntimeDraftChanges(
+        items,
+        { ...snapshots.drafts, api_key: "new-secret" },
+        snapshots.snapshots,
+        {},
+      ),
+    ).toBe(false);
+    expect(
+      settingsSectionHasRuntimeDraftChanges(
+        items,
+        { ...snapshots.drafts, api_key: "new-secret" },
+        snapshots.snapshots,
+        { api_key: true },
+      ),
+    ).toBe(true);
+  });
+
+  it("scrolls settings content only when the content region is outside the visible window", () => {
+    expect(
+      shouldScrollSettingsContentToTop({
+        contentTop: 160,
+        contentBottom: 900,
+        safeTop: 80,
+        viewportHeight: 720,
+      }),
+    ).toBe(false);
+    expect(
+      shouldScrollSettingsContentToTop({
+        contentTop: 760,
+        contentBottom: 1100,
+        safeTop: 80,
+        viewportHeight: 720,
+      }),
+    ).toBe(true);
+    expect(
+      shouldScrollSettingsContentToTop({
+        contentTop: -500,
+        contentBottom: 60,
+        safeTop: 80,
+        viewportHeight: 720,
+      }),
+    ).toBe(true);
+  });
+
   it("documents every supported prompt placeholder in settings help", () => {
     const t = (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) =>
       translate("zh-CN", key, params);
@@ -512,10 +587,15 @@ describe("SettingsPage draft helpers", () => {
       price: "12",
       sourceNote: "",
       instruction: "输出短句",
+      purpose: DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft.purpose,
+      channel: DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft.channel,
+      tone: DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft.tone,
+      outputMode: DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft.outputMode,
+      requestedSlotsText: DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft.requestedSlotsText,
     });
 
     expect(normalizeImageConfigTestDraft({ size: "", prompt: "" })).toEqual({
-      size: "1024x1024",
+      size: DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].draft.size,
       prompt: "",
     });
   });
@@ -529,13 +609,7 @@ describe("SettingsPage draft helpers", () => {
         sourceNote: "用于验证当前文案生成配置的测试输入。",
         instruction: "输出适合主图的短文案。",
       }),
-    ).toEqual({
-      inspirationName: "蓝天白云青草地",
-      category: "自然风景场景",
-      price: "",
-      sourceNote: "画面包含明亮蓝天、轻盈白云和连片青草地，氛围清新开阔，适合表达户外自然与舒展感。",
-      instruction: "围绕蓝天白云青草地生成清晰、自然、适合画面展示的短文案。",
-    });
+    ).toEqual(DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft);
 
     expect(
       normalizeImageConfigTestDraft({
@@ -544,8 +618,155 @@ describe("SettingsPage draft helpers", () => {
       }),
     ).toEqual({
       size: "1536x1024",
-      prompt: "蓝天白云下，一片开阔柔软的青草地延伸到远处，阳光明亮，画面清新自然，空气通透，构图干净。",
+      prompt: DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].draft.prompt,
     });
+    expect(
+      normalizeImageConfigTestDraft({
+        size: "1024x1024",
+        prompt: "蓝天白云下，一片开阔柔软的青草地延伸到远处，阳光明亮，画面清新自然，空气通透，构图干净。",
+      }),
+    ).toEqual({
+      size: "1024x1024",
+      prompt: DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].draft.prompt,
+    });
+  });
+
+  it("provides six editable creative scene presets for text config tests", () => {
+    const normalized = normalizeTextConfigTestDraftState(null);
+
+    expect(DEFAULT_TEXT_CONFIG_TEST_PRESETS).toHaveLength(6);
+    expect(DEFAULT_TEXT_CONFIG_TEST_PRESETS.map((preset) => preset.label)).toEqual([
+      "雨后山谷与古村石桥",
+      "海边灯塔与独行旅人",
+      "老街清晨与早点摊",
+      "雪山营地与星空观测",
+      "博物馆修复室与古画细节",
+      "近未来雨夜车站",
+    ]);
+    expect(normalized.selectedPresetId).toBe(DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].id);
+    expect(normalized.draft).toEqual(DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft);
+    expect(Object.keys(normalized.presets)).toEqual(DEFAULT_TEXT_CONFIG_TEST_PRESETS.map((preset) => preset.id));
+    expect(DEFAULT_TEXT_CONFIG_TEST_PRESETS.map((preset) => preset.draft.channel)).not.toContain("电商");
+  });
+
+  it("keeps local edits per text config test preset while normalizing the selected preset", () => {
+    const customizedPrimary = {
+      ...DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft,
+      tone: "克制、湿润、低饱和",
+      requestedSlotsText: JSON.stringify([{ key: "opening", label: "开场句", required: true }]),
+    };
+    const selectedPreset = DEFAULT_TEXT_CONFIG_TEST_PRESETS[2];
+
+    expect(
+      normalizeTextConfigTestDraftState({
+        selectedPresetId: selectedPreset.id,
+        presets: {
+          [DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].id]: customizedPrimary,
+          [selectedPreset.id]: {
+            ...selectedPreset.draft,
+            instruction: "写一段清晨老街的镜头提示",
+          },
+        },
+      }),
+    ).toEqual({
+      selectedPresetId: selectedPreset.id,
+      draft: {
+        ...selectedPreset.draft,
+        instruction: "写一段清晨老街的镜头提示",
+      },
+      presets: {
+        [DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].id]: customizedPrimary,
+        [DEFAULT_TEXT_CONFIG_TEST_PRESETS[1].id]: DEFAULT_TEXT_CONFIG_TEST_PRESETS[1].draft,
+        [DEFAULT_TEXT_CONFIG_TEST_PRESETS[2].id]: {
+          ...selectedPreset.draft,
+          instruction: "写一段清晨老街的镜头提示",
+        },
+        [DEFAULT_TEXT_CONFIG_TEST_PRESETS[3].id]: DEFAULT_TEXT_CONFIG_TEST_PRESETS[3].draft,
+        [DEFAULT_TEXT_CONFIG_TEST_PRESETS[4].id]: DEFAULT_TEXT_CONFIG_TEST_PRESETS[4].draft,
+        [DEFAULT_TEXT_CONFIG_TEST_PRESETS[5].id]: DEFAULT_TEXT_CONFIG_TEST_PRESETS[5].draft,
+      },
+    });
+  });
+
+  it("migrates edited legacy single text config test drafts into the primary preset", () => {
+    const migrated = normalizeTextConfigTestDraftState({
+      inspirationName: "自定义旧草稿",
+      category: "影像诗",
+      price: "",
+      sourceNote: "旧版本只保存单套草稿。",
+      instruction: "保持旧草稿可继续测试",
+    });
+
+    expect(migrated.selectedPresetId).toBe(DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].id);
+    expect(migrated.draft).toMatchObject({
+      inspirationName: "自定义旧草稿",
+      category: "影像诗",
+      sourceNote: "旧版本只保存单套草稿。",
+      instruction: "保持旧草稿可继续测试",
+    });
+    expect(migrated.presets[DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].id]).toEqual(migrated.draft);
+    expect(migrated.presets[DEFAULT_TEXT_CONFIG_TEST_PRESETS[1].id]).toEqual(DEFAULT_TEXT_CONFIG_TEST_PRESETS[1].draft);
+  });
+
+  it("provides six corresponding creative scene presets for image config tests", () => {
+    const normalized = normalizeImageConfigTestDraftState(null);
+
+    expect(DEFAULT_IMAGE_CONFIG_TEST_PRESETS).toHaveLength(6);
+    expect(DEFAULT_IMAGE_CONFIG_TEST_PRESETS.map((preset) => preset.id)).toEqual(
+      DEFAULT_TEXT_CONFIG_TEST_PRESETS.map((preset) => preset.id),
+    );
+    expect(DEFAULT_IMAGE_CONFIG_TEST_PRESETS.map((preset) => preset.label)).toEqual(
+      DEFAULT_TEXT_CONFIG_TEST_PRESETS.map((preset) => preset.label),
+    );
+    expect(normalized.selectedPresetId).toBe(DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].id);
+    expect(normalized.draft).toEqual(DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].draft);
+    expect(Object.keys(normalized.presets)).toEqual(DEFAULT_IMAGE_CONFIG_TEST_PRESETS.map((preset) => preset.id));
+    expect(DEFAULT_IMAGE_CONFIG_TEST_PRESETS.map((preset) => preset.draft.prompt).join("\n")).not.toContain("产品");
+  });
+
+  it("keeps local edits per image config test preset while normalizing the selected preset", () => {
+    const customizedPrimary = {
+      ...DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].draft,
+      size: "1024x768",
+      prompt: "自定义雨雾山谷图像提示",
+    };
+    const selectedPreset = DEFAULT_IMAGE_CONFIG_TEST_PRESETS[3];
+    const customizedSelected = {
+      ...selectedPreset.draft,
+      prompt: "自定义雪山星空宽幅提示",
+    };
+    const normalized = normalizeImageConfigTestDraftState({
+      selectedPresetId: selectedPreset.id,
+      presets: {
+        [DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].id]: customizedPrimary,
+        [selectedPreset.id]: customizedSelected,
+      },
+    });
+
+    expect(normalized.selectedPresetId).toBe(selectedPreset.id);
+    expect(normalized.draft).toEqual(customizedSelected);
+    expect(normalized.presets[DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].id]).toEqual(customizedPrimary);
+    expect(normalized.presets[selectedPreset.id]).toEqual(customizedSelected);
+    expect(normalized.presets[DEFAULT_IMAGE_CONFIG_TEST_PRESETS[1].id]).toEqual(
+      DEFAULT_IMAGE_CONFIG_TEST_PRESETS[1].draft,
+    );
+  });
+
+  it("migrates edited legacy single image config test drafts into the primary preset", () => {
+    const migrated = normalizeImageConfigTestDraftState({
+      size: "1024x768",
+      prompt: "旧版本只保存单套图片测试提示。",
+    });
+
+    expect(migrated.selectedPresetId).toBe(DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].id);
+    expect(migrated.draft).toEqual({
+      size: "1024x768",
+      prompt: "旧版本只保存单套图片测试提示。",
+    });
+    expect(migrated.presets[DEFAULT_IMAGE_CONFIG_TEST_PRESETS[0].id]).toEqual(migrated.draft);
+    expect(migrated.presets[DEFAULT_IMAGE_CONFIG_TEST_PRESETS[1].id]).toEqual(
+      DEFAULT_IMAGE_CONFIG_TEST_PRESETS[1].draft,
+    );
   });
 
   it("groups global generation config items by backend category suffix", () => {
@@ -1079,6 +1300,90 @@ describe("SettingsPage provider profile helpers", () => {
     });
   });
 
+  it("builds text generation test payloads from visible copy context fields", () => {
+    expect(
+      textGenerationConfigTestPayload(
+        generationConfigDraft({
+          id: "text-config-1",
+          purpose: "text",
+          name: "Primary text",
+          provider_kind: "openai_chat_completions",
+          provider_profile_id: "profile-chat",
+          brief_model: "grok-brief",
+          copy_model: "grok-copy",
+        }),
+        {
+          inspirationName: "  海边灯塔与独行旅人  ",
+          category: "旅行纪实",
+          price: "",
+          sourceNote: "  黄昏海风、湿润礁石和灯塔。  ",
+          instruction: "  写成电影感短文案  ",
+          purpose: "  mood_board  ",
+          channel: "  视觉脚本  ",
+          tone: "  安静、留白  ",
+          outputMode: "layout_brief",
+          requestedSlotsText: JSON.stringify([
+            { key: "headline", label: "主标题", required: true, hint: "不超过 12 字" },
+          ]),
+        },
+      ),
+    ).toMatchObject({
+      generation_config_id: "text-config-1",
+      inspiration: {
+        name: "海边灯塔与独行旅人",
+        category: "旅行纪实",
+        price: null,
+        source_note: "黄昏海风、湿润礁石和灯塔。",
+      },
+      copy_request: {
+        instruction: "写成电影感短文案",
+        purpose: "mood_board",
+        channel: "视觉脚本",
+        tone: "安静、留白",
+        output_mode: "layout_brief",
+        requested_slots: [{ key: "headline", label: "主标题", required: true, hint: "不超过 12 字" }],
+      },
+    });
+  });
+
+  it("validates editable requested slot JSON before submitting text tests", () => {
+    expect(parseTextConfigRequestedSlots("")).toEqual([]);
+    expect(parseTextConfigRequestedSlots('[{"key":"body","label":"正文"}]')).toEqual([
+      { key: "body", label: "正文", required: false, hint: null },
+    ]);
+    expect(() => parseTextConfigRequestedSlots('{"key":"body"}')).toThrow("可选槽位必须是 JSON 数组。");
+    expect(() => parseTextConfigRequestedSlots('[{"key":"body"}]')).toThrow("可选槽位第 1 项必须包含 key 和 label。");
+  });
+
+  it("builds image generation test payloads from the selected scene without adding hidden fields", () => {
+    expect(
+      imageGenerationConfigTestPayload(
+        generationConfigDraft({
+          id: "image-config-1",
+          purpose: "image",
+          name: "Primary image",
+          provider_kind: "openai",
+          provider_profile_id: "profile-image",
+          model: "gpt-image-1",
+        }),
+        {
+          size: " 1024x1536 ",
+          prompt: "  近未来雨夜车站，地面反光和半透明电子屏。  ",
+        },
+        "group-landscape",
+      ),
+    ).toEqual({
+      generation_config_id: "image-config-1",
+      generation_config: expect.objectContaining({
+        name: "Primary image",
+        purpose: "image",
+      }),
+      resource_group_id: "group-landscape",
+      prompt: "近未来雨夜车站，地面反光和半透明电子屏。",
+      size: "1024x1536",
+    });
+  });
+
   it("preserves Chat Completions text generation config kind in drafts and payloads", () => {
     const draft = generationConfigDraftFromConfig(
       generationConfig({
@@ -1358,6 +1663,36 @@ describe("SettingsPage provider profile helpers", () => {
     ];
 
     expect(generationConfigBatchFailedSelectableIds(items)).toEqual(["failed"]);
+  });
+
+  it("removes archived provider resources from active settings query lists", () => {
+    expect(
+      providerProfilesAfterArchive(
+        [
+          providerProfile({ id: "profile-a" }),
+          providerProfile({ id: "profile-b" }),
+        ],
+        providerProfile({ id: "profile-a", archived_at: "2026-07-05T10:00:00Z" }),
+      )?.map((profile) => profile.id),
+    ).toEqual(["profile-b"]);
+    expect(
+      generationConfigsAfterArchive(
+        [
+          generationConfig({ id: "config-a", purpose: "text" }),
+          generationConfig({ id: "config-b", purpose: "text" }),
+        ],
+        generationConfig({ id: "config-a", purpose: "text", archived_at: "2026-07-05T10:00:00Z" }),
+      )?.map((config) => config.id),
+    ).toEqual(["config-b"]);
+    expect(
+      generationResourceGroupsAfterArchive(
+        [
+          generationResourceGroup({ id: "group-a" }),
+          generationResourceGroup({ id: "group-b" }),
+        ],
+        generationResourceGroup({ id: "group-a", archived_at: "2026-07-05T10:00:00Z" }),
+      )?.map((group) => group.id),
+    ).toEqual(["group-b"]);
   });
 
   it("filters generation config lists by failed latest test after name search", () => {

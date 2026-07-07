@@ -25,12 +25,14 @@ import layoutActionDropZoneSource from "../components/LayoutActionDropZone.tsx?r
 import layoutActionSurfaceButtonSource from "../components/LayoutActionSurfaceButton.tsx?raw";
 import layoutSwitchTabsSource from "../components/LayoutSwitchTabs.tsx?raw";
 import markdownEditorSource from "../components/MarkdownEditor.tsx?raw";
+import mediaPreviewTriggerSource from "../components/MediaPreviewTrigger.tsx?raw";
 import promptPreviewDialogSource from "../components/PromptPreviewDialog.tsx?raw";
 import resourceGroupChipEditorSource from "../components/ResourceGroupChipEditor.tsx?raw";
 import resourceLibraryModalSource from "../components/resource-library/ResourceLibraryModal.tsx?raw";
 import saveToResourceLibraryDialogSource from "../components/resource-library/SaveToResourceLibraryDialog.tsx?raw";
 import generationCanvasPlaceholderSource from "./image-chat/GenerationCanvasPlaceholder.tsx?raw";
 import imageChatHistoryPanelSource from "./image-chat/ImageChatHistoryPanel.tsx?raw";
+import imageChatMainStageSource from "./image-chat/ImageChatMainStage.tsx?raw";
 import imageChatSessionListSource from "./image-chat/ImageChatSessionList.tsx?raw";
 import referencePanelsSource from "./image-chat/ReferencePanels.tsx?raw";
 import deckPanelSource from "./inspiration-detail/DeckPanel.tsx?raw";
@@ -40,6 +42,7 @@ import runsPanelSource from "./inspiration-detail/RunsPanel.tsx?raw";
 import sidebarTabButtonSource from "./inspiration-detail/SidebarTabButton.tsx?raw";
 import tailSplitPlanDialogSource from "./inspiration-detail/TailSplitPlanDialog.tsx?raw";
 import templateGroupsPanelSource from "./inspiration-detail/TemplateGroupsPanel.tsx?raw";
+import workflowNodeCardSource from "./inspiration-detail/WorkflowNodeCard.tsx?raw";
 import settingsConfigTestPanelsSource from "./settings/components/ConfigTestPanels.tsx?raw";
 import settingsCollapsibleModuleSource from "./settings/components/SettingsCollapsibleModule.tsx?raw";
 import settingsSideRailSource from "./settings/components/SettingsSideRail.tsx?raw";
@@ -456,15 +459,20 @@ describe("button layout boundaries for shared classic/workspace pages", () => {
     expect(inspirationListPageSource).toContain('appearance={actionAppearance}');
   });
 
-  it("./GalleryPage.tsx uses the layout-aware surface button for base-asset preview cards", () => {
-    expect(galleryPageSource).toContain("LayoutActionSurfaceButton");
-    expect(galleryPageSource).toContain('appearance={galleryActionAppearance}');
+  it("./GalleryPage.tsx keeps image preview media outside action surface buttons", () => {
+    expect(galleryPageSource).not.toContain("LayoutActionSurfaceButton");
+    expect(galleryPageSource).not.toContain("transparentActionToneVars");
+    expect(galleryPageSource).toContain("MediaPreviewTrigger");
+    expect(galleryPageSource).toContain("setPreviewBaseAsset(asset)");
+    expect(galleryPageSource).toContain("handleEntryClick(entry)");
   });
 
-  it("./GalleryPage.tsx uses the layout-aware surface button for main gallery entry cards", () => {
-    expect(galleryPageSource).toMatch(
-      /<LayoutActionSurfaceButton[\s\S]*?onClick=\{\(\) => handleEntryClick\(entry\)\}[\s\S]*?toneVars=\{transparentActionToneVars\}/,
-    );
+  it("../components/MediaPreviewTrigger.tsx provides media preview interaction without action surface styling", () => {
+    expect(mediaPreviewTriggerSource).toContain("cursor-zoom-in");
+    expect(mediaPreviewTriggerSource).toContain('role = "button"');
+    expect(mediaPreviewTriggerSource).toContain('event.key === "Enter" || event.key === " "');
+    expect(mediaPreviewTriggerSource).not.toContain("actionSurfaceClassNameForAppearance");
+    expect(mediaPreviewTriggerSource).not.toContain("LayoutActionSurfaceButton");
   });
 
   it("./RbacPage.tsx keeps role selection cards on layout-aware surfaces instead of settings-only option classes", () => {
@@ -492,9 +500,17 @@ describe("button layout boundaries for shared classic/workspace pages", () => {
     expect(sidebarTabButtonSource).not.toContain("aria-pressed");
   });
 
-  it("./ResourceLibraryPage.tsx uses the layout-aware surface button for asset preview cards", () => {
-    expect(resourceLibraryPageSource).toContain("LayoutActionSurfaceButton");
-    expect(resourceLibraryPageSource).toContain('appearance={resourceLibraryActionAppearance(workspaceSubpage)}');
+  it("./ResourceLibraryPage.tsx keeps asset preview media outside action surface buttons", () => {
+    expect(resourceLibraryPageSource).not.toContain("LayoutActionSurfaceButton");
+    expect(resourceLibraryPageSource).toContain("MediaPreviewTrigger");
+    expect(resourceLibraryPageSource).toContain("setPreviewAsset(asset)");
+  });
+
+  it("../components/resource-library/ResourceLibraryModal.tsx keeps asset preview media outside raw/action buttons", () => {
+    expect(resourceLibraryModalSource).toContain("MediaPreviewTrigger");
+    expect(resourceLibraryModalSource).toContain("setPreviewAsset(asset)");
+    expect(resourceLibraryModalSource).not.toMatch(/<button[\s\S]{0,700}<img/);
+    expect(resourceLibraryModalSource).not.toContain("LayoutActionSurfaceButton");
   });
 
   it("./ResourceLibraryPage.tsx uses the layout-aware drop zone for manual image uploads", () => {
@@ -537,16 +553,29 @@ describe("button layout boundaries for shared classic/workspace pages", () => {
     expect(inspectorPanelSource).not.toContain("compactSecondaryButtonClassName");
   });
 
-  it("./inspiration-detail/InspectorPanel.tsx uses layout-aware surface buttons for deck/media preview thumbnails", () => {
-    expect(inspectorPanelSource).toContain("LayoutActionSurfaceButton");
-    expect(inspectorPanelSource).toMatch(/<LayoutActionSurfaceButton[\s\S]*?onClick=\{\(\) => onPreviewImage\(image\)\}/);
-    expect(inspectorPanelSource).toMatch(/<LayoutActionSurfaceButton[\s\S]*?onClick=\{\(\) => onPreviewImage\(previewImage\)\}/);
+  it("./inspiration-detail/InspectorPanel.tsx keeps deck/media preview thumbnails outside action surface buttons", () => {
+    expect(inspectorPanelSource).not.toContain("LayoutActionSurfaceButton");
+    expect(inspectorPanelSource).not.toContain("transparentActionToneVars");
+    expect(inspectorPanelSource).toContain("MediaPreviewTrigger");
+    expect(inspectorPanelSource).toContain("onPreviewImage(image)");
+    expect(inspectorPanelSource).toContain("onPreviewImage(previewImage)");
+    expect(inspectorPanelSource).not.toContain("onClick={sourceImage ? () => onPreviewImage(sourceImage) : undefined}");
   });
 
-  it("./inspiration-detail/InspectorPanel.tsx uses the layout-aware surface button for the main reference-image preview", () => {
-    expect(inspectorPanelSource).toMatch(
-      /<LayoutActionSurfaceButton[\s\S]*?onClick=\{\(\) => onPreviewImage\(image\)\}[\s\S]*?toneVars=\{transparentActionToneVars\}/,
-    );
+  it("./inspiration-detail/WorkflowNodeCard.tsx keeps node image previews on MediaPreviewTrigger", () => {
+    expect(workflowNodeCardSource).toContain("MediaPreviewTrigger");
+    expect(workflowNodeCardSource).toContain("stopPropagation");
+    expect(workflowNodeCardSource).not.toContain("onClick={onPreviewImage ?");
+    expect(workflowNodeCardSource).not.toContain("LayoutActionSurfaceButton");
+  });
+
+  it("image-chat preview media uses MediaPreviewTrigger instead of action surfaces", () => {
+    for (const source of [imageChatPageSource, imageChatMainStageSource, referencePanelsSource]) {
+      expect(source).toContain("MediaPreviewTrigger");
+    }
+    expect(imageChatMainStageSource).not.toContain("actionSurfaceClassNameForAppearance");
+    expect(referencePanelsSource).not.toContain("transparentActionToneVars");
+    expect(imageChatPageSource).not.toContain("previewSurfaceClassName");
   });
 
   it.each(LAYOUT_AWARE_DATE_RANGE_PAGES)(
@@ -607,7 +636,8 @@ describe("button layout boundaries for shared classic/workspace pages", () => {
   it("./inspiration-detail/ImageDownloadComponents.tsx uses explicit appearance-aware helpers", () => {
     expect(imageDownloadComponentsSource).toContain("actionButtonClassNameForAppearance(appearance");
     expect(imageDownloadComponentsSource).toContain("actionButtonComponentForAppearance(appearance)");
-    expect(imageDownloadComponentsSource).toContain("LayoutActionSurfaceButton");
+    expect(imageDownloadComponentsSource).toContain("MediaPreviewTrigger");
+    expect(imageDownloadComponentsSource).not.toContain("LayoutActionSurfaceButton");
     expect(imageDownloadComponentsSource).not.toContain("<button");
     expect(imageDownloadComponentsSource).not.toMatch(/btn-secondary-spring|pf-workspace-action-|pf-btn-(primary|secondary|danger)/);
   });

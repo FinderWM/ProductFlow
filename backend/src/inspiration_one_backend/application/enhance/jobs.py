@@ -175,7 +175,7 @@ def create_enhance_job(
     storage: LocalStorage | None = None,
 ) -> EnhanceJob:
     storage = storage or LocalStorage()
-    cleanup_expired_enhance_inputs(session, owner_user_id=actor_user_id, storage=storage)
+    cleanup_expired_enhance_inputs(session, owner_user_id=actor_user_id)
     source = load_enhance_source(
         session,
         source_kind=source_kind,
@@ -351,11 +351,9 @@ def execute_enhance_job(job_id: str) -> None:
             _requeue_enhance_job_after_capacity_wait(job_id)
         except EnhanceCancelledError:
             session.rollback()
-            storage.delete_enhance_artifacts(job_id)
             _mark_enhance_job_cancelled(session, job_id)
         except Exception as exc:
             session.rollback()
-            storage.delete_enhance_artifacts(job_id)
             _mark_enhance_job_failed(session, job_id, generation_failure_reason(exc))
     finally:
         session.close()
@@ -709,11 +707,9 @@ def cleanup_expired_enhance_inputs(
     *,
     owner_user_id: str | None = None,
     older_than: timedelta = ENHANCE_INPUT_TTL,
-    storage: LocalStorage | None = None,
 ) -> int:
     owns_session = session is None
     working_session = session or get_session_factory()()
-    storage = storage or LocalStorage()
     cutoff = utcnow() - older_than
     deleted = 0
     try:
@@ -729,8 +725,6 @@ def cleanup_expired_enhance_inputs(
             )
             if referenced is not None:
                 continue
-            with _suppress_storage_errors():
-                storage.delete_image_with_variants(storage.object_key_for(item))
             working_session.delete(item)
             deleted += 1
         if deleted:
@@ -1111,17 +1105,6 @@ def _loaded_source_from_storage(
     )
 
 
-def _suppress_storage_errors():
-    class _Suppress:
-        def __enter__(self) -> None:
-            return None
-
-        def __exit__(self, exc_type, exc, traceback) -> bool:
-            if exc is not None:
-                logger.warning("清理图片增强输入文件失败: %s", exc)
-            return True
-
-    return _Suppress()
 
 
 def enhance_job_final_storage_object(job: EnhanceJob) -> SimpleNamespace:

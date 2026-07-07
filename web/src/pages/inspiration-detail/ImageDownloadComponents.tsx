@@ -1,10 +1,9 @@
 import { Download, Sparkles } from "lucide-react";
 
-import { LayoutActionSurfaceButton } from "../../components/LayoutActionSurfaceButton";
+import { MediaPreviewTrigger } from "../../components/MediaPreviewTrigger";
 import {
   actionButtonClassNameForAppearance,
   actionButtonComponentForAppearance,
-  transparentActionToneVars,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
 import { formatDateTime } from "../../lib/format";
@@ -71,12 +70,9 @@ export function PosterThumb({
   const thumbnailImage = buildPosterDownload(inspirationName, poster, poster.thumbnail_url, t);
   return (
     <div className="group overflow-hidden rounded-2xl shadow-sm transition-all hover:scale-[1.01] config-bubble">
-      <LayoutActionSurfaceButton
-        appearance={appearance}
-        preset="secondary"
-        onClick={() => onPreview?.(image)}
-        toneVars={transparentActionToneVars}
-        className="block w-full overflow-hidden rounded-none p-0"
+      <MediaPreviewTrigger
+        onPreview={() => onPreview?.(image)}
+        className="block w-full overflow-hidden"
         aria-label={t("detail.previewImage", { alt: image.alt })}
       >
         <div className="aspect-square bg-zinc-100 dark:bg-[#0b1220]">
@@ -86,7 +82,7 @@ export function PosterThumb({
             className="h-full w-full object-cover transition-all duration-300 group-hover:scale-105"
           />
         </div>
-      </LayoutActionSurfaceButton>
+      </MediaPreviewTrigger>
       <div className="flex items-center justify-between gap-2 border-t border-zinc-100 px-2.5 py-1.5 text-[10px] text-zinc-500 dark:border-slate-800 dark:text-slate-400">
         <span className="min-w-0 truncate">
           {poster.kind === "main_image" ? t("detail.mainImage") : t("detail.promoImage")} ·{" "}
@@ -151,12 +147,9 @@ export function SourceAssetThumb({
   );
   return (
     <div className="group overflow-hidden rounded-2xl shadow-sm transition-all hover:scale-[1.01] config-bubble">
-      <LayoutActionSurfaceButton
-        appearance={appearance}
-        preset="secondary"
-        onClick={() => onPreview?.(image)}
-        toneVars={transparentActionToneVars}
-        className="block w-full overflow-hidden rounded-none p-0"
+      <MediaPreviewTrigger
+        onPreview={() => onPreview?.(image)}
+        className="block w-full overflow-hidden"
         aria-label={t("detail.previewImage", { alt: image.alt })}
       >
         <div className="flex aspect-square items-center justify-center bg-zinc-100 p-2 dark:bg-[#0b1220]">
@@ -166,7 +159,7 @@ export function SourceAssetThumb({
             className="h-full w-full object-contain transition-all duration-300 group-hover:scale-105"
           />
         </div>
-      </LayoutActionSurfaceButton>
+      </MediaPreviewTrigger>
       <div className="flex items-center justify-between gap-2 border-t border-zinc-100 px-2.5 py-1.5 text-[10px] text-zinc-500 dark:border-slate-800 dark:text-slate-400">
         <span className="min-w-0 truncate">
           {t("detail.referenceImage")} · {formatDateTime(asset.created_at)}

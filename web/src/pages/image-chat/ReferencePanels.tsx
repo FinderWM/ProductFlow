@@ -3,13 +3,12 @@ import { Check, Image as ImageIcon, ImagePlus, Library, Loader2, Trash2 } from "
 import {
   actionButtonComponentForAppearance,
   actionButtonClassNameForAppearance,
-  actionButtonToneStyle,
   actionSurfaceClassNameForAppearance,
-  transparentActionToneVars,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
 import { ClipboardImageButton } from "../../components/ClipboardImageButton";
 import { ImageDropZone } from "../../components/ImageDropZone";
+import { MediaPreviewTrigger } from "../../components/MediaPreviewTrigger";
 import { ParameterHelpLabel } from "../../components/ParameterHelp";
 import {
   getResourceBlockedActionTitle,
@@ -83,11 +82,6 @@ export function SessionReferencePanel({
   const secondaryActionClassName = imageChatSecondaryActionClassName(appearance);
   const dangerIconActionClassName = imageChatDangerIconActionClassName(appearance);
   const referenceLoadActionClassName = imageChatReferenceLoadActionClassName(appearance);
-  const previewButtonClassName = actionSurfaceClassNameForAppearance(appearance, {
-    preset: "secondary",
-    focusWithin: true,
-    className: "block w-full rounded-none border-0 shadow-none",
-  });
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
       <div className="mb-2 text-sm font-semibold text-slate-950 dark:text-white">
@@ -156,13 +150,11 @@ export function SessionReferencePanel({
                     : "border-slate-200 dark:border-slate-700"
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => onPreview(asset)}
+                <MediaPreviewTrigger
+                  onPreview={() => onPreview(asset)}
                   title={asset.original_filename}
                   aria-label={t("detail.previewImage", { alt: asset.original_filename })}
-                  className={previewButtonClassName}
-                  style={actionButtonToneStyle(transparentActionToneVars)}
+                  className="block w-full"
                 >
                   <img
                     src={api.toApiUrl(asset.thumbnail_url)}
@@ -171,7 +163,7 @@ export function SessionReferencePanel({
                     decoding="async"
                     className="h-20 w-full object-cover"
                   />
-                </button>
+                </MediaPreviewTrigger>
                 <ResourceMetaBadges
                   resource={asset}
                   className="absolute left-1 top-1 max-w-[calc(100%-2.5rem)]"
@@ -249,11 +241,6 @@ export function InspirationAssociationPanel({
   const ActionButton = actionButtonComponentForAppearance(appearance);
   const LayoutSelectField = appearance === "workspace" ? WorkspaceSelectField : ClassicSelectField;
   const dangerIconActionClassName = imageChatDangerIconActionClassName(appearance);
-  const previewButtonClassName = actionSurfaceClassNameForAppearance(appearance, {
-    preset: "secondary",
-    focusWithin: true,
-    className: "block w-full rounded-none border-0 shadow-none",
-  });
   const inspirationBlocked = isResourceBlocked(inspiration);
   const inspirationBlockedTitle = getResourceBlockedActionTitle(inspiration, t("resource.blockedAction"));
   const saveDisabled = attachBusy || !selectedRound || (!isInspirationMode && !targetInspirationId) || Boolean(saveBlockedTitle);
@@ -307,13 +294,11 @@ export function InspirationAssociationPanel({
             const assetBlockedTitle = inspirationBlocked ? inspirationBlockedTitle : getResourceBlockedActionTitle(asset, t("resource.blockedAction"));
             return (
               <div key={asset.id} className="group relative overflow-hidden rounded-md border border-zinc-200 bg-white dark:border-slate-700 dark:bg-slate-950/70">
-                <button
-                  type="button"
-                  onClick={() => onPreviewReference(asset)}
+                <MediaPreviewTrigger
+                  onPreview={() => onPreviewReference(asset)}
                   title={asset.original_filename}
                   aria-label={t("detail.previewImage", { alt: asset.original_filename })}
-                  className={previewButtonClassName}
-                  style={actionButtonToneStyle(transparentActionToneVars)}
+                  className="block w-full"
                 >
                   <img
                     src={api.toApiUrl(asset.thumbnail_url)}
@@ -322,7 +307,7 @@ export function InspirationAssociationPanel({
                     decoding="async"
                     className="h-16 w-full object-cover"
                   />
-                </button>
+                </MediaPreviewTrigger>
                 <ResourceMetaBadges
                   resource={assetBlocked && inspirationBlocked ? inspiration : asset}
                   className="absolute left-1 top-1 max-w-[calc(100%-2rem)]"

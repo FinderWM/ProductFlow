@@ -2,11 +2,12 @@
 
 import { Loader2, Save } from "lucide-react";
 
-import { ClassicTextInput, ClassicTextarea } from "../../../components/classicInputs";
+import { ClassicSelectField, ClassicTextInput, ClassicTextarea } from "../../../components/classicInputs";
 import { ImageSizePicker } from "../../../components/ImageSizePicker";
-import { WorkspaceTextInput, WorkspaceTextarea } from "../../../components/workspaceInputs";
+import { WorkspaceSelectField, WorkspaceTextInput, WorkspaceTextarea } from "../../../components/workspaceInputs";
 import { DEFAULT_IMAGE_SIZE_OPTIONS } from "../../../lib/imageSizes";
 import { useI18n } from "../../../lib/preferences";
+import { DEFAULT_IMAGE_CONFIG_TEST_PRESETS, DEFAULT_TEXT_CONFIG_TEST_PRESETS } from "../configTestState";
 import type {
   ImageConfigTestDraft,
   ImageConfigTestState,
@@ -20,15 +21,18 @@ import { useSettingsActionClassNames } from "./styles";
 export function TextConfigTestPanel({
   state,
   onDraftChange,
+  onPresetChange,
   workspaceSubpage = false,
 }: {
   state: TextConfigTestState;
   onDraftChange: (draft: TextConfigTestDraft) => void;
+  onPresetChange: (presetId: string) => void;
   workspaceSubpage?: boolean;
 }) {
   const { t } = useI18n();
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
   const activitySignal = runningCount > 0 ? `running:${runningCount}` : "";
+  const SelectComponent = workspaceSubpage ? WorkspaceSelectField : ClassicSelectField;
 
   return (
     <SettingsCollapsibleModule
@@ -40,6 +44,18 @@ export function TextConfigTestPanel({
       <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
         {t("settings.generation.localTestDraftNote")}
       </p>
+      <SettingsFormField label={t("settings.generation.testPreset")}>
+        <SelectComponent
+          value={state.selectedPresetId}
+          options={DEFAULT_TEXT_CONFIG_TEST_PRESETS.map((preset) => ({
+            value: preset.id,
+            label: `${preset.label} · ${preset.description}`,
+          }))}
+          onChange={onPresetChange}
+          size="tall"
+          radius="lg"
+        />
+      </SettingsFormField>
       <div className="grid gap-3 md:grid-cols-2">
         <SettingsFormField label={t("settings.generation.testInspirationName")}>
           {workspaceSubpage ? (
@@ -102,6 +118,71 @@ export function TextConfigTestPanel({
           )}
         </SettingsFormField>
       </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <SettingsFormField label={t("settings.generation.testPurpose")}>
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={state.draft.purpose}
+              onChange={(event) => onDraftChange({ ...state.draft, purpose: event.target.value })}
+              size="tall"
+            />
+          ) : (
+            <ClassicTextInput
+              value={state.draft.purpose}
+              onChange={(event) => onDraftChange({ ...state.draft, purpose: event.target.value })}
+              size="tall"
+            />
+          )}
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.testChannel")}>
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={state.draft.channel}
+              onChange={(event) => onDraftChange({ ...state.draft, channel: event.target.value })}
+              size="tall"
+            />
+          ) : (
+            <ClassicTextInput
+              value={state.draft.channel}
+              onChange={(event) => onDraftChange({ ...state.draft, channel: event.target.value })}
+              size="tall"
+            />
+          )}
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.testTone")}>
+          {workspaceSubpage ? (
+            <WorkspaceTextInput
+              value={state.draft.tone}
+              onChange={(event) => onDraftChange({ ...state.draft, tone: event.target.value })}
+              size="tall"
+            />
+          ) : (
+            <ClassicTextInput
+              value={state.draft.tone}
+              onChange={(event) => onDraftChange({ ...state.draft, tone: event.target.value })}
+              size="tall"
+            />
+          )}
+        </SettingsFormField>
+        <SettingsFormField label={t("settings.generation.testOutputMode")}>
+          <SelectComponent
+            value={state.draft.outputMode}
+            options={[
+              { value: "freeform", label: t("settings.generation.outputModeFreeform") },
+              { value: "blocks", label: t("settings.generation.outputModeBlocks") },
+              { value: "layout_brief", label: t("settings.generation.outputModeLayoutBrief") },
+            ]}
+            onChange={(outputMode) =>
+              onDraftChange({
+                ...state.draft,
+                outputMode: outputMode === "freeform" || outputMode === "layout_brief" ? outputMode : "blocks",
+              })
+            }
+            size="tall"
+            radius="lg"
+          />
+        </SettingsFormField>
+      </div>
       <SettingsFormField label={t("settings.generation.testSourceNote")}>
         {workspaceSubpage ? (
           <WorkspaceTextarea
@@ -117,6 +198,29 @@ export function TextConfigTestPanel({
           />
         )}
       </SettingsFormField>
+      <SettingsFormField label={t("settings.generation.testRequestedSlots")}>
+        {workspaceSubpage ? (
+          <WorkspaceTextarea
+            value={state.draft.requestedSlotsText}
+            onChange={(event) => onDraftChange({ ...state.draft, requestedSlotsText: event.target.value })}
+            className="min-h-24 font-mono"
+          />
+        ) : (
+          <ClassicTextarea
+            value={state.draft.requestedSlotsText}
+            onChange={(event) => onDraftChange({ ...state.draft, requestedSlotsText: event.target.value })}
+            className="min-h-24 font-mono"
+          />
+        )}
+      </SettingsFormField>
+      <div className="grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-[#0b1220]">
+          {t("settings.generation.testReferenceStatus")}
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-[#0b1220]">
+          {t("settings.generation.testBriefContextStatus")}
+        </div>
+      </div>
       {runningCount > 0 ? (
         <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
           <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
@@ -135,11 +239,13 @@ export function TextConfigTestPanel({
 export function ImageConfigTestPanel({
   state,
   onDraftChange,
+  onPresetChange,
   onSaveDraft,
   workspaceSubpage = false,
 }: {
   state: ImageConfigTestState;
   onDraftChange: (draft: ImageConfigTestDraft) => void;
+  onPresetChange: (presetId: string) => void;
   onSaveDraft: () => void;
   workspaceSubpage?: boolean;
 }) {
@@ -147,6 +253,7 @@ export function ImageConfigTestPanel({
   const { SETTINGS_COMPACT_ACTION_CLASS } = useSettingsActionClassNames();
   const runningCount = Object.values(state.records).filter((record) => record.testing).length;
   const activitySignal = runningCount > 0 ? `running:${runningCount}` : "";
+  const SelectComponent = workspaceSubpage ? WorkspaceSelectField : ClassicSelectField;
 
   return (
     <SettingsCollapsibleModule
@@ -158,6 +265,18 @@ export function ImageConfigTestPanel({
       <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-[#0b1220] dark:text-slate-400">
         {t("settings.generation.localTestDraftNote")}
       </p>
+      <SettingsFormField label={t("settings.generation.testPreset")}>
+        <SelectComponent
+          value={state.selectedPresetId}
+          options={DEFAULT_IMAGE_CONFIG_TEST_PRESETS.map((preset) => ({
+            value: preset.id,
+            label: `${preset.label} · ${preset.description}`,
+          }))}
+          onChange={onPresetChange}
+          size="tall"
+          radius="lg"
+        />
+      </SettingsFormField>
       <div className="flex justify-end">
         <button type="button" onClick={onSaveDraft} className={SETTINGS_COMPACT_ACTION_CLASS}>
           <Save size={14} className="mr-1.5" />

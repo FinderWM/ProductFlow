@@ -106,7 +106,9 @@ interface GenerationConfigPoolSectionProps {
   onArchive: (configId: string) => void;
   onUnfreeze: (configId: string) => void;
   onTextTestDraftChange?: (draft: TextConfigTestDraft) => void;
+  onTextTestPresetChange?: (presetId: string) => void;
   onImageTestDraftChange?: (draft: ImageConfigTestDraft) => void;
+  onImageTestPresetChange?: (presetId: string) => void;
   onSaveImageTestDraft?: () => void;
   onTestTextConfig?: (key: string, draft: GenerationConfigDraft) => Promise<void> | void;
   onTestImageConfig?: (key: string, draft: GenerationConfigDraft, resourceGroupId: string) => Promise<void> | void;
@@ -500,7 +502,9 @@ export function GenerationConfigPoolSection({
   onArchive,
   onUnfreeze,
   onTextTestDraftChange,
+  onTextTestPresetChange,
   onImageTestDraftChange,
+  onImageTestPresetChange,
   onSaveImageTestDraft,
   onTestTextConfig,
   onTestImageConfig,
@@ -644,17 +648,19 @@ export function GenerationConfigPoolSection({
 
   return (
     <section className="space-y-4">
-      {purpose === "text" && textTestState && onTextTestDraftChange ? (
+      {purpose === "text" && textTestState && onTextTestDraftChange && onTextTestPresetChange ? (
         <TextConfigTestPanel
           state={textTestState}
           onDraftChange={onTextTestDraftChange}
+          onPresetChange={onTextTestPresetChange}
           workspaceSubpage={workspaceSubpage}
         />
       ) : null}
-      {purpose === "image" && imageTestState && onImageTestDraftChange && onSaveImageTestDraft ? (
+      {purpose === "image" && imageTestState && onImageTestDraftChange && onImageTestPresetChange && onSaveImageTestDraft ? (
         <ImageConfigTestPanel
           state={imageTestState}
           onDraftChange={onImageTestDraftChange}
+          onPresetChange={onImageTestPresetChange}
           onSaveDraft={onSaveImageTestDraft}
           workspaceSubpage={workspaceSubpage}
         />
@@ -1034,22 +1040,42 @@ function GenerationConfigCard({
     </div>
   ) : null;
   const testResultPreview = testResult ? (
-    <div className="grid gap-3 lg:grid-cols-2">
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
-        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-          {t("settings.generation.testBriefResult", { model: testResult.brief_model })}
+    <div className="space-y-3">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            {t("settings.generation.testBriefResult", { model: testResult.brief_model })}
+          </div>
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+            {JSON.stringify(testResult.brief, null, 2)}
+          </pre>
         </div>
-        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
-          {JSON.stringify(testResult.brief, null, 2)}
-        </pre>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            {t("settings.generation.testCopyResult", { model: testResult.copy_model })}
+          </div>
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+            {JSON.stringify(testResult.copy_result, null, 2)}
+          </pre>
+        </div>
       </div>
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-[#0b1220]">
-        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-          {t("settings.generation.testCopyResult", { model: testResult.copy_model })}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            {t("settings.generation.testBriefRequestContext")}
+          </div>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+            {`${t("settings.generation.testSystemInstructions")}\n${testResult.request_context.brief.system_instructions}\n\n${t("settings.generation.testUserContent")}\n${testResult.request_context.brief.user_content}`}
+          </pre>
         </div>
-        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
-          {JSON.stringify(testResult.copy_result, null, 2)}
-        </pre>
+        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-[#0b1220]">
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            {t("settings.generation.testCopyRequestContext")}
+          </div>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-slate-700 dark:text-slate-200">
+            {`${t("settings.generation.testSystemInstructions")}\n${testResult.request_context.copy.system_instructions}\n\n${t("settings.generation.testReferenceText")}\n${testResult.request_context.reference_text}\n\n${t("settings.generation.testUserContent")}\n${testResult.request_context.copy.user_content}`}
+          </pre>
+        </div>
       </div>
     </div>
   ) : null;

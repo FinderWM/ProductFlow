@@ -253,7 +253,7 @@ function UsageStatsDetailPage() {
 
         <div className="space-y-5">
           <section className={`${PANEL_CLASS} p-5`}>
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
               {isWorkspaceSubpage ? (
                 <WorkspaceDateTimeRangeField
                   idPrefix="usage-stats-range"
@@ -267,7 +267,7 @@ function UsageStatsDetailPage() {
                     setRange(workspaceQuickDateTimeRange(id));
                     setActiveQuickRange(id);
                   }}
-                  className="w-full xl:max-w-2xl"
+                  className="w-full lg:w-[30rem] lg:shrink-0"
                 />
               ) : (
                 <ClassicDateTimeRangeField
@@ -282,10 +282,10 @@ function UsageStatsDetailPage() {
                     setRange(workspaceQuickDateTimeRange(id));
                     setActiveQuickRange(id);
                   }}
-                  className="w-full xl:max-w-2xl"
+                  className="w-full lg:w-[30rem] lg:shrink-0"
                 />
               )}
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end lg:flex-1">
                 {isAdmin ? (
                   <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
                     <span>{t("usageStats.userFilter")}</span>
@@ -318,7 +318,7 @@ function UsageStatsDetailPage() {
                   loading={usageQuery.isFetching}
                   preset="primary"
                   size="md"
-                  className="shrink-0"
+                  className="self-end shrink-0 sm:ml-auto"
                   leadingIcon={<RefreshCw size={14} />}
                 >
                   {t("statusPage.refresh")}

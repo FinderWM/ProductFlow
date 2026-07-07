@@ -37,7 +37,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     SourceAsset,
 )
 from inspiration_one_backend.infrastructure.image.base import infer_extension
-from inspiration_one_backend.infrastructure.storage import LocalStorage, StorageObjectMetadata
+from inspiration_one_backend.infrastructure.storage import LocalStorage
 
 DEFAULT_RESOURCE_LIBRARY_GROUP_NAME = "默认分组"
 SOURCE_ASSET_IMAGE_KINDS = frozenset(
@@ -63,6 +63,13 @@ class ResourceLibrarySourceStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class ResourceLibraryStorageBackfillResult:
+    scanned: int
+    updated: int
+    skipped: int
+
+
+@dataclass(frozen=True, slots=True)
 class ResourceLibraryUploadImage:
     filename: str
     mime_type: str
@@ -80,10 +87,29 @@ class _SourceImage:
 
 
 def _read_resource_library_asset_content(asset: ResourceLibraryAsset, storage: LocalStorage) -> bytes:
+    return _read_stored_object_content(asset, storage, missing_message="资源文件不存在")
+
+
+def _read_stored_object_content(stored_object: object, storage: LocalStorage, *, missing_message: str) -> bytes:
     try:
-        return storage.resolve(storage.object_key_for(asset)).read_bytes()
+        return storage.resolve(storage.object_key_for(stored_object)).read_bytes()
     except (OSError, ValueError) as exc:
-        raise BusinessValidationError("资源文件不存在") from exc
+        raise BusinessValidationError(missing_message) from exc
+
+
+def _finish_temporary_source_image_session(source: _SourceImage, *, actor_user_id: str) -> bool:
+    if source.source_type != ResourceLibrarySourceType.IMAGE_SESSION_ASSET:
+        return False
+    image_asset = source.storage_object
+    image_session = getattr(image_asset, "session", None)
+    if not isinstance(image_session, ImageSession):
+        return False
+    if not image_session.is_temporary_test or image_session.deleted_at is not None:
+        return False
+    image_session.deleted_at = now_utc()
+    image_session.deleted_by_user_id = actor_user_id
+    image_session.updated_at = image_session.deleted_at
+    return True
 
 
 def _group_query():
@@ -267,6 +293,48 @@ def list_resource_library_source_statuses(
     ]
 
 
+def backfill_resource_library_asset_storage(
+    session: Session,
+    *,
+    storage: LocalStorage | None = None,
+    limit: int | None = None,
+) -> ResourceLibraryStorageBackfillResult:
+    """Copy legacy source-owned resource-library assets into resource-library-owned paths."""
+    storage = storage or LocalStorage()
+    statement = (
+        _asset_query()
+        .where(
+            ResourceLibraryAsset.kind == ResourceLibraryAssetKind.IMAGE,
+            ResourceLibraryAsset.source_type != ResourceLibrarySourceType.UPLOAD,
+            ResourceLibraryAsset.archived_at.is_(None),
+        )
+        .order_by(None)
+        .order_by(ResourceLibraryAsset.created_at, ResourceLibraryAsset.id)
+    )
+    if limit is not None:
+        statement = statement.limit(max(1, int(limit)))
+    scanned = 0
+    updated = 0
+    skipped = 0
+    for asset in list(session.scalars(statement).unique().all()):
+        scanned += 1
+        if (asset.storage_path or "").startswith("resource_library/"):
+            continue
+        try:
+            content = _read_resource_library_asset_content(asset, storage)
+        except BusinessValidationError:
+            skipped += 1
+            continue
+        relative_path = storage.save_resource_library_asset(asset.owner_user_id, asset.original_filename, content)
+        for key, value in storage.metadata_for(relative_path).as_model_kwargs().items():
+            setattr(asset, key, value)
+        asset.updated_at = now_utc()
+        updated += 1
+    if updated:
+        session.commit()
+    return ResourceLibraryStorageBackfillResult(scanned=scanned, updated=updated, skipped=skipped)
+
+
 def save_resource_library_asset_from_source(
     session: Session,
     *,
@@ -302,6 +370,7 @@ def save_resource_library_asset_from_source(
     if existing is not None:
         ensure_resource_usable(existing)
         _add_asset_group_links(session, existing, normalized_group_ids)
+        _finish_temporary_source_image_session(source, actor_user_id=actor_user_id)
         existing.updated_at = now_utc()
         session.commit()
         session.expire_all()
@@ -311,10 +380,13 @@ def save_resource_library_asset_from_source(
         )
 
     storage = storage or LocalStorage()
-    try:
-        storage_metadata = _metadata_for_reused_storage_object(storage, source.storage_object)
-    except ValueError as exc:
-        raise BusinessValidationError("资源文件不存在") from exc
+    source_content = _read_stored_object_content(source.storage_object, storage, missing_message="资源文件不存在")
+    relative_path = storage.save_resource_library_asset(
+        actor_user_id,
+        source.filename,
+        source_content,
+    )
+    storage_metadata = storage.metadata_for(relative_path)
     asset = ResourceLibraryAsset(
         owner_user_id=actor_user_id,
         kind=ResourceLibraryAssetKind.IMAGE,
@@ -324,6 +396,7 @@ def save_resource_library_asset_from_source(
         source_resource_id=source.source_resource_id,
         **storage_metadata.as_model_kwargs(),
     )
+    _finish_temporary_source_image_session(source, actor_user_id=actor_user_id)
     session.add(asset)
     try:
         session.flush()
@@ -342,6 +415,7 @@ def save_resource_library_asset_from_source(
             raise
         ensure_resource_usable(existing)
         _add_asset_group_links(session, existing, normalized_group_ids)
+        _finish_temporary_source_image_session(source, actor_user_id=actor_user_id)
         existing.updated_at = now_utc()
         session.commit()
         session.expire_all()
@@ -642,6 +716,8 @@ def _load_source_image(
         if asset.kind != ImageSessionAssetKind.GENERATED_IMAGE:
             raise BusinessValidationError("只有生成结果可以保存到资源库")
         ensure_resource_usable(asset)
+        if asset.session.is_temporary_test and asset.session.deleted_at is not None:
+            raise NotFoundError("图片配置测试结果不存在")
         return _SourceImage(
             source_type=source_type,
             source_resource_id=asset.id,
@@ -758,21 +834,6 @@ def _get_asset_by_source(
             ResourceLibraryAsset.source_resource_id == source_resource_id,
             ResourceLibraryAsset.archived_at.is_(None),
         )
-    )
-
-
-def _metadata_for_reused_storage_object(storage: LocalStorage, stored_object: object) -> StorageObjectMetadata:
-    object_key = storage.object_key_for(stored_object)
-    fallback_metadata = storage.metadata_for(object_key)
-    storage_backend = getattr(stored_object, "storage_backend", None) or fallback_metadata.storage_backend
-    storage_bucket = getattr(stored_object, "storage_bucket", None)
-    if not isinstance(storage_bucket, str) or not storage_bucket.strip():
-        storage_bucket = fallback_metadata.storage_bucket
-    return StorageObjectMetadata(
-        storage_path=fallback_metadata.storage_path,
-        storage_backend=storage_backend,
-        storage_bucket=storage_bucket,
-        storage_object_key=fallback_metadata.storage_object_key,
     )
 
 

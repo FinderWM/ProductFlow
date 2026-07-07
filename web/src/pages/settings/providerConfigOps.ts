@@ -10,6 +10,7 @@ import type {
   ImageGenerationConfigTestResponse,
   ProviderConfigResponse,
   ProviderProfile,
+  CopySlotRequest,
   TextGenerationConfigJsonResponseFormatTestRequest,
   TextGenerationConfigTestRequest,
 } from "../../lib/types";
@@ -73,6 +74,7 @@ export function textGenerationConfigTestPayload(
   testDraft: TextConfigTestDraft,
 ): TextGenerationConfigTestRequest {
   const generationConfig = generationConfigPayloadFromDraft(generationConfigDraft) as GenerationConfigCreateRequest;
+  const requestedSlots = parseTextConfigRequestedSlots(testDraft.requestedSlotsText);
   return {
     generation_config_id: generationConfigDraft.id,
     generation_config: generationConfig,
@@ -84,12 +86,46 @@ export function textGenerationConfigTestPayload(
     },
     copy_request: {
       instruction: testDraft.instruction.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.instruction,
-      purpose: "main_image",
-      channel: "电商",
-      tone: "清晰直接",
-      output_mode: "blocks",
+      purpose: testDraft.purpose.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.purpose,
+      channel: testDraft.channel.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.channel,
+      tone: testDraft.tone.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.tone,
+      output_mode: testDraft.outputMode,
+      requested_slots: requestedSlots,
     },
   };
+}
+
+export function parseTextConfigRequestedSlots(value: string): CopySlotRequest[] {
+  const normalized = value.trim();
+  if (!normalized) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(normalized);
+  } catch {
+    throw new Error("可选槽位必须是有效 JSON 数组。");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("可选槽位必须是 JSON 数组。");
+  }
+  return parsed.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`可选槽位第 ${index + 1} 项必须是对象。`);
+    }
+    const record = item as Record<string, unknown>;
+    const key = typeof record.key === "string" ? record.key.trim() : "";
+    const label = typeof record.label === "string" ? record.label.trim() : "";
+    if (!key || !label) {
+      throw new Error(`可选槽位第 ${index + 1} 项必须包含 key 和 label。`);
+    }
+    return {
+      key,
+      label,
+      required: typeof record.required === "boolean" ? record.required : false,
+      hint: typeof record.hint === "string" && record.hint.trim() ? record.hint.trim() : null,
+    };
+  });
 }
 
 export function textGenerationConfigJsonResponseFormatTestPayload(

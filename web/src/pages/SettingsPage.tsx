@@ -3,7 +3,6 @@ import type { ChangeEvent, FormEvent } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Layers3,
-  Loader2,
   Settings as SettingsIcon,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -11,6 +10,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
+import {
+  SaveToResourceLibraryDialog,
+  type ResourceLibrarySaveSource,
+} from "../components/resource-library/SaveToResourceLibraryDialog";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
 import { cssLengthToPixels } from "../lib/cssLength";
@@ -33,6 +36,7 @@ import type {
   GenerationConfig,
   GenerationConfigCreateRequest,
   GenerationConfigUpdateRequest,
+  GenerationResourceGroup,
   GenerationResourceGroupCreateRequest,
   GenerationResourceGroupUpdateRequest,
   ProviderProfile,
@@ -60,6 +64,8 @@ import {
   clearImageConfigTestRecord,
   clearTextConfigJsonResponseFormatTestRecord,
   clearTextConfigTestRecord,
+  DEFAULT_IMAGE_CONFIG_TEST_PRESETS,
+  DEFAULT_TEXT_CONFIG_TEST_PRESETS,
   markImageConfigTestAssetSaved,
   markImageConfigTestFailed,
   markImageConfigTestStarted,
@@ -71,13 +77,15 @@ import {
   markTextConfigTestStarted,
   markTextConfigTestSucceeded,
   normalizeImageConfigTestDraft,
+  normalizeImageConfigTestDraftState,
   normalizeTextConfigTestDraft,
-  readImageConfigTestDraft,
-  readTextConfigTestDraft,
+  normalizeTextConfigTestDraftState,
+  readImageConfigTestDraftState,
+  readTextConfigTestDraftState,
   textConfigJsonResponseFormatTestRecordForKey,
   textConfigTestRecordForKey,
-  writeImageConfigTestDraft,
-  writeTextConfigTestDraft,
+  writeImageConfigTestDraftState,
+  writeTextConfigTestDraftState,
   type ImageConfigTestState,
   type TextConfigJsonResponseFormatTestState,
   type TextConfigTestState,
@@ -197,6 +205,8 @@ export type { GenerationConfigDraft };
 export {
   clearTextConfigJsonResponseFormatTestRecord,
   clearTextConfigTestRecord,
+  DEFAULT_IMAGE_CONFIG_TEST_PRESETS,
+  DEFAULT_TEXT_CONFIG_TEST_PRESETS,
   markTextConfigJsonResponseFormatTestFailed,
   markTextConfigJsonResponseFormatTestStarted,
   markTextConfigJsonResponseFormatTestSucceeded,
@@ -204,7 +214,9 @@ export {
   markTextConfigTestStarted,
   markTextConfigTestSucceeded,
   normalizeImageConfigTestDraft,
+  normalizeImageConfigTestDraftState,
   normalizeTextConfigTestDraft,
+  normalizeTextConfigTestDraftState,
   textConfigJsonResponseFormatTestRecordForKey,
   textConfigTestRecordForKey,
 };
@@ -250,6 +262,7 @@ type PendingGenerationArchive =
   | { kind: "generationConfig"; id: string; name: string };
 
 const SETTINGS_SAVED_MESSAGE_AUTO_DISMISS_MS = 1000;
+const SETTINGS_SECTION_PREFETCH_STALE_TIME_MS = 30_000;
 const SETTINGS_RUNTIME_CONFIG_SECTIONS = [
   "prompts",
   "upload",
@@ -287,6 +300,111 @@ function setRuntimeConfigSectionCaches(queryClient: ReturnType<typeof useQueryCl
       filterConfigResponseForSettingsSection(config, section),
     );
   }
+}
+
+async function loadRuntimeConfigForSettingsSection(section: SettingsRuntimeConfigSection): Promise<ConfigResponse> {
+  return filterConfigResponseForSettingsSection(await api.getConfig({ section }), section);
+}
+
+export function settingsSectionHasRuntimeDraftChanges(
+  items: ConfigItem[],
+  drafts: Record<string, DraftValue>,
+  snapshots: Record<string, DraftSnapshot>,
+  secretTouched: Record<string, boolean>,
+): boolean {
+  return Object.keys(configValuesFromChangedDrafts(items, drafts, snapshots, secretTouched)).length > 0;
+}
+
+interface ShouldScrollSettingsContentToTopInput {
+  contentTop: number;
+  contentBottom: number;
+  safeTop: number;
+  viewportHeight: number;
+}
+
+export function shouldScrollSettingsContentToTop({
+  contentTop,
+  contentBottom,
+  safeTop,
+  viewportHeight,
+}: ShouldScrollSettingsContentToTopInput): boolean {
+  const visibleTop = Math.max(contentTop, safeTop);
+  const visibleBottom = Math.min(contentBottom, viewportHeight);
+  return visibleBottom <= visibleTop;
+}
+
+function SettingsSectionLoadingState({ label }: { label: string }) {
+  return (
+    <div role="status" aria-live="polite" className="space-y-4">
+      <span className="sr-only">{label}</span>
+      <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-5`}>
+        <div className="space-y-2">
+          <div className="h-4 w-36 animate-pulse rounded pf-surface-soft" />
+          <div className="h-3 w-2/3 animate-pulse rounded pf-surface-soft opacity-70" />
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {Array.from({ length: 4 }, (_, index) => (
+            <div
+              key={index}
+              className="min-h-28 rounded-lg border pf-hairline pf-surface p-4"
+            >
+              <div className="h-3 w-28 animate-pulse rounded pf-surface-soft" />
+              <div className="mt-4 h-9 animate-pulse rounded pf-surface-soft opacity-70" />
+              <div className="mt-3 h-3 w-3/4 animate-pulse rounded pf-surface-soft opacity-70" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function providerProfilesAfterArchive(
+  profiles: ProviderProfile[] | undefined,
+  archivedProfile: Pick<ProviderProfile, "id">,
+): ProviderProfile[] | undefined {
+  return profiles?.filter((profile) => profile.id !== archivedProfile.id);
+}
+
+export function generationConfigsAfterArchive(
+  generationConfigs: GenerationConfig[] | undefined,
+  archivedConfig: Pick<GenerationConfig, "id">,
+): GenerationConfig[] | undefined {
+  return generationConfigs?.filter((generationConfig) => generationConfig.id !== archivedConfig.id);
+}
+
+export function generationResourceGroupsAfterArchive(
+  resourceGroups: GenerationResourceGroup[] | undefined,
+  archivedGroup: Pick<GenerationResourceGroup, "id">,
+): GenerationResourceGroup[] | undefined {
+  return resourceGroups?.filter((group) => group.id !== archivedGroup.id);
+}
+
+function removeProviderProfileFromSettingsCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  profile: Pick<ProviderProfile, "id">,
+) {
+  queryClient.setQueryData<ProviderProfile[]>(["provider-profiles"], (current) =>
+    providerProfilesAfterArchive(current, profile),
+  );
+}
+
+function removeGenerationConfigFromSettingsCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  generationConfig: Pick<GenerationConfig, "id">,
+) {
+  queryClient.setQueriesData<GenerationConfig[]>({ queryKey: ["generation-configs"] }, (current) =>
+    generationConfigsAfterArchive(current, generationConfig),
+  );
+}
+
+function removeGenerationResourceGroupFromSettingsCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  group: Pick<GenerationResourceGroup, "id">,
+) {
+  queryClient.setQueryData<GenerationResourceGroup[]>(["generation-resource-groups", "settings"], (current) =>
+    generationResourceGroupsAfterArchive(current, group),
+  );
 }
 
 export function SettingsPage() {
@@ -327,8 +445,9 @@ export function SettingsPage() {
   const [importPayload, setImportPayload] = useState<SettingsExportPayload | null>(null);
   const [importPreview, setImportPreview] = useState<SettingsImportPreviewResponse | null>(null);
   const [importFileName, setImportFileName] = useState("");
+  const [pendingSectionNavigation, setPendingSectionNavigation] = useState<SettingsSectionId | null>(null);
   const [textConfigTestState, setTextConfigTestState] = useState<TextConfigTestState>(() => ({
-    draft: readTextConfigTestDraft(),
+    ...readTextConfigTestDraftState(),
     latestKey: null,
     records: {},
   }));
@@ -338,13 +457,15 @@ export function SettingsPage() {
       records: {},
     });
   const [imageConfigTestState, setImageConfigTestState] = useState<ImageConfigTestState>(() => ({
-    draft: readImageConfigTestDraft(),
+    ...readImageConfigTestDraftState(),
     latestKey: null,
     records: {},
   }));
   const [imageConfigTestPreview, setImageConfigTestPreview] = useState<ImageGenerationConfigTestResponse | null>(null);
   const [imageConfigTestGalleryAssetId, setImageConfigTestGalleryAssetId] = useState<string | null>(null);
   const [imageConfigTestGalleryTagError, setImageConfigTestGalleryTagError] = useState("");
+  const [imageConfigTestResourceLibrarySource, setImageConfigTestResourceLibrarySource] =
+    useState<ResourceLibrarySaveSource | null>(null);
   const matchedSection = settingsSectionFromPathSegment(sectionSlug);
   const activeSection = matchedSection ?? SETTINGS_DEFAULT_SECTION_ID;
   const previousActiveSectionRef = useRef<SettingsSectionId>(activeSection);
@@ -356,15 +477,12 @@ export function SettingsPage() {
   const shouldLoadGenerationResourceGroups =
     activeSection === "resourceGroups" || activeSection === "text" || activeSection === "image";
   const shouldLoadAllGenerationConfigs = activeSection === "resourceGroups";
-  const shouldLoadImageTestSupport = activeSection === "image" || Boolean(imageConfigTestGalleryAssetId);
+  const shouldLoadImageTestSupport =
+    activeSection === "image" || Boolean(imageConfigTestGalleryAssetId) || Boolean(imageConfigTestResourceLibrarySource);
 
   const configQuery = useQuery({
     queryKey: activeRuntimeConfigSection ? configQueryKeyForSettingsSection(activeRuntimeConfigSection) : ["config", "inactive"],
-    queryFn: async () =>
-      filterConfigResponseForSettingsSection(
-        await api.getConfig({ section: activeRuntimeConfigSection ?? undefined }),
-        activeSection,
-      ),
+    queryFn: () => loadRuntimeConfigForSettingsSection(activeRuntimeConfigSection as SettingsRuntimeConfigSection),
     enabled: shouldLoadConfig,
   });
 
@@ -542,6 +660,99 @@ export function SettingsPage() {
           t(section.descriptionKey).toLowerCase().includes(normalizedSectionSearch),
       )
     : SETTINGS_SECTIONS;
+  const activeRuntimeConfigDraftDirty =
+    shouldLoadConfig && settingsSectionHasRuntimeDraftChanges(activeItems, drafts, draftSnapshots, secretTouched);
+  const dirtySectionIds = activeRuntimeConfigDraftDirty ? [activeSection] : [];
+  const navigateToSettingsSection = useCallback(
+    (section: SettingsSectionId) => {
+      navigate(settingsPathForSection(section));
+    },
+    [navigate],
+  );
+  const prefetchSettingsSection = useCallback(
+    (section: SettingsSectionId) => {
+      const runtimeConfigSection = runtimeConfigSectionForSettingsSection(section);
+      if (runtimeConfigSection) {
+        void queryClient.prefetchQuery({
+          queryKey: configQueryKeyForSettingsSection(runtimeConfigSection),
+          queryFn: () => loadRuntimeConfigForSettingsSection(runtimeConfigSection),
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
+      }
+      if (section === "providers" || section === "text" || section === "image") {
+        void queryClient.prefetchQuery({
+          queryKey: ["provider-profiles"],
+          queryFn: api.listProviderProfiles,
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
+      }
+      if (section === "resourceGroups" || section === "text" || section === "image") {
+        void queryClient.prefetchQuery({
+          queryKey: ["generation-resource-groups", "settings"],
+          queryFn: () => api.listGenerationResourceGroups({ include_image_max_dimension: false }),
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
+      }
+      if (section === "resourceGroups") {
+        void queryClient.prefetchQuery({
+          queryKey: ["generation-configs", "all", "resource-groups"],
+          queryFn: () => api.listGenerationConfigs(),
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
+      }
+      if (section === "text" || section === "image") {
+        const cachedResourceGroups = queryClient.getQueryData<GenerationResourceGroup[]>([
+          "generation-resource-groups",
+          "settings",
+        ]);
+        if (cachedResourceGroups) {
+          const resourceGroupsInApiOrder = settingsGenerationResourceGroupsInApiOrder(cachedResourceGroups);
+          const selectedResourceGroupId =
+            section === "text" ? selectedTextResourceGroupId : selectedImageResourceGroupId;
+          const effectiveResourceGroupId =
+            selectedResourceGroupId ?? resourceGroupsInApiOrder.find((group) => group.enabled)?.id ?? "";
+          void queryClient.prefetchQuery({
+            queryKey: [
+              "generation-configs",
+              section,
+              effectiveResourceGroupId || "__unbound__",
+            ],
+            queryFn: () =>
+              effectiveResourceGroupId
+                ? api.listGenerationConfigs({
+                    purpose: section,
+                    resource_group_id: effectiveResourceGroupId,
+                  })
+                : api.listGenerationConfigs({
+                    purpose: section,
+                    unbound_only: true,
+                  }),
+            staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+          });
+        }
+      }
+      if (section === "image") {
+        void queryClient.prefetchQuery({
+          queryKey: ["runtime-config"],
+          queryFn: api.getRuntimeConfig,
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
+        void queryClient.prefetchQuery({
+          queryKey: ["gallery-tags", "active"],
+          queryFn: () => api.listGalleryTags(),
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
+      }
+      if (section === "loginPage") {
+        void queryClient.prefetchQuery({
+          queryKey: ["resource-library-assets", "login-page"],
+          queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
+      }
+    },
+    [queryClient, selectedImageResourceGroupId, selectedTextResourceGroupId],
+  );
   const scrollActiveSectionToTop = useCallback(() => {
     if (typeof window === "undefined" || typeof document === "undefined") {
       return;
@@ -554,7 +765,18 @@ export function SettingsPage() {
     const computedRootStyle = window.getComputedStyle(root);
     const rootFontSize = Number.parseFloat(computedRootStyle.fontSize) || 16;
     const safeTop = cssLengthToPixels(computedRootStyle.getPropertyValue("--pf-top-chrome-safe-height"), rootFontSize);
-    const nextTop = Math.max(window.scrollY + contentSection.getBoundingClientRect().top - safeTop, 0);
+    const contentRect = contentSection.getBoundingClientRect();
+    if (
+      !shouldScrollSettingsContentToTop({
+        contentTop: contentRect.top,
+        contentBottom: contentRect.bottom,
+        safeTop,
+        viewportHeight: window.innerHeight,
+      })
+    ) {
+      return;
+    }
+    const nextTop = Math.max(window.scrollY + contentRect.top - safeTop, 0);
     window.scrollTo({ top: nextTop, behavior: "auto" });
   }, []);
 
@@ -579,8 +801,44 @@ export function SettingsPage() {
     if (section === activeSection) {
       return;
     }
-    navigate(settingsPathForSection(section));
-  }, [activeSection, navigate]);
+    if (activeRuntimeConfigDraftDirty) {
+      setPendingSectionNavigation(section);
+      return;
+    }
+    navigateToSettingsSection(section);
+  }, [activeRuntimeConfigDraftDirty, activeSection, navigateToSettingsSection]);
+
+  const retryActiveSectionLoad = useCallback(() => {
+    if (shouldLoadConfig) {
+      void configQuery.refetch();
+    }
+    if (activeSection === "providers") {
+      void providerProfilesQuery.refetch();
+    }
+    if (activeSection === "resourceGroups") {
+      void generationResourceGroupsQuery.refetch();
+      void resourceGroupGenerationConfigsQuery.refetch();
+    }
+    if (activeSection === "text") {
+      void providerProfilesQuery.refetch();
+      void generationResourceGroupsQuery.refetch();
+      void textGenerationConfigsQuery.refetch();
+    }
+    if (activeSection === "image") {
+      void providerProfilesQuery.refetch();
+      void generationResourceGroupsQuery.refetch();
+      void imageGenerationConfigsQuery.refetch();
+    }
+  }, [
+    activeSection,
+    configQuery,
+    generationResourceGroupsQuery,
+    imageGenerationConfigsQuery,
+    providerProfilesQuery,
+    resourceGroupGenerationConfigsQuery,
+    shouldLoadConfig,
+    textGenerationConfigsQuery,
+  ]);
 
   const refreshSettingsQueries = useCallback(
     async ({
@@ -911,9 +1169,7 @@ export function SettingsPage() {
   const deleteProviderProfileMutation = useMutation({
     mutationFn: (profileId: string) => api.archiveProviderProfile(profileId),
     onSuccess: async (profile) => {
-      queryClient.setQueryData<ProviderProfile[]>(["provider-profiles"], (current = []) =>
-        current.filter((item) => item.id !== profile.id),
-      );
+      removeProviderProfileFromSettingsCaches(queryClient, profile);
       await refreshSettingsQueries({
         includeProviderModels: true,
         includeProviderProfiles: true,
@@ -922,6 +1178,7 @@ export function SettingsPage() {
         includeGenerationConfigStatus: true,
         includeMyGenerationResourceGroups: true,
       });
+      removeProviderProfileFromSettingsCaches(queryClient, profile);
       setPendingDeleteProviderProfile(null);
       setError("");
       setSavedMessage(t("settings.provider.deletedMessage"));
@@ -1005,6 +1262,7 @@ export function SettingsPage() {
         delete nextDrafts[generationConfig.id];
         return nextDrafts;
       });
+      removeGenerationConfigFromSettingsCaches(queryClient, generationConfig);
       await refreshSettingsQueries({
         includeConfig: true,
         includeRuntimeConfig: true,
@@ -1014,6 +1272,7 @@ export function SettingsPage() {
         includeGenerationConfigStatus: true,
         includeMyGenerationResourceGroups: true,
       });
+      removeGenerationConfigFromSettingsCaches(queryClient, generationConfig);
       setPendingGenerationArchive(null);
       setPendingGenerationArchiveError("");
       setError("");
@@ -1090,6 +1349,7 @@ export function SettingsPage() {
         delete nextDrafts[group.id];
         return nextDrafts;
       });
+      removeGenerationResourceGroupFromSettingsCaches(queryClient, group);
       await refreshSettingsQueries({
         includeGenerationResourceGroups: true,
         includeGenerationConfigs: true,
@@ -1097,6 +1357,7 @@ export function SettingsPage() {
         includeGenerationConfigStatus: true,
         includeMyGenerationResourceGroups: true,
       });
+      removeGenerationResourceGroupFromSettingsCaches(queryClient, group);
       setPendingGenerationArchive(null);
       setPendingGenerationArchiveError("");
       setError("");
@@ -1128,7 +1389,11 @@ export function SettingsPage() {
         markTextConfigTestFailed(
           current,
           key,
-          mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.testFailed"),
+          mutationError instanceof ApiError
+            ? mutationError.detail
+            : mutationError instanceof Error
+              ? mutationError.message
+              : t("settings.generation.testFailed"),
         ),
       );
     },
@@ -1173,6 +1438,8 @@ export function SettingsPage() {
     onMutate: ({ key }) => {
       setImageConfigTestState((current) => markImageConfigTestStarted(current, key));
       setImageConfigTestPreview(null);
+      setImageConfigTestResourceLibrarySource(null);
+      setImageConfigTestGalleryAssetId(null);
       setSavedMessage("");
       setError("");
     },
@@ -1191,6 +1458,38 @@ export function SettingsPage() {
     },
     onSettled: () => {
       void refreshSettingsQueries({ includeGenerationConfigs: true });
+    },
+  });
+
+  const keepImageConfigTestMutation = useMutation({
+    mutationFn: (imageSessionId: string) => api.keepImageGenerationConfigTest(imageSessionId),
+    onSuccess: async () => {
+      setImageConfigTestPreview(null);
+      setImageConfigTestResourceLibrarySource(null);
+      setImageConfigTestGalleryAssetId(null);
+      setImageConfigTestGalleryTagError("");
+      await queryClient.invalidateQueries({ queryKey: ["image-sessions"] });
+    },
+    onError: (mutationError) => {
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.detail
+          : t("settings.generation.imageTestKeepSessionFailed"),
+      );
+    },
+  });
+
+  const abandonImageConfigTestMutation = useMutation({
+    mutationFn: (imageSessionId: string) => api.abandonImageGenerationConfigTest(imageSessionId),
+    onError: (mutationError) => {
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.detail
+          : t("settings.generation.imageTestAbandonFailed"),
+      );
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["image-sessions"] });
     },
   });
 
@@ -1214,11 +1513,15 @@ export function SettingsPage() {
           imageGenerationConfigTestResultWithGalleryEntry(recordResult, entry),
         );
       });
+      setImageConfigTestPreview(null);
       setImageConfigTestGalleryAssetId(null);
+      setImageConfigTestResourceLibrarySource(null);
       setImageConfigTestGalleryTagError("");
       setError("");
       await queryClient.invalidateQueries({ queryKey: ["gallery"] });
-      await queryClient.invalidateQueries({ queryKey: ["image-session", entry.image_session_id] });
+      if (entry.image_session_id) {
+        await queryClient.invalidateQueries({ queryKey: ["image-session", entry.image_session_id] });
+      }
       await queryClient.invalidateQueries({ queryKey: ["image-sessions"] });
     },
     onError: (mutationError) => {
@@ -1342,6 +1645,27 @@ export function SettingsPage() {
               : null;
   const isWorkspaceSubpage = activeScheme === "workspace";
   const PageActionButton = actionButtonComponentForAppearance(isWorkspaceSubpage ? "workspace" : "classic");
+  const pendingNavigationMeta = pendingSectionNavigation
+    ? SETTINGS_SECTIONS.find((section) => section.id === pendingSectionNavigation)
+    : null;
+  const imageConfigTestActionBusy =
+    saveImageConfigTestGalleryMutation.isPending ||
+    keepImageConfigTestMutation.isPending ||
+    abandonImageConfigTestMutation.isPending ||
+    Boolean(imageConfigTestResourceLibrarySource);
+  const closeImageConfigTestPreview = useCallback(() => {
+    if (imageConfigTestActionBusy) {
+      return;
+    }
+    const current = imageConfigTestPreview;
+    setImageConfigTestPreview(null);
+    setImageConfigTestGalleryAssetId(null);
+    setImageConfigTestGalleryTagError("");
+    setImageConfigTestResourceLibrarySource(null);
+    if (current?.is_temporary) {
+      abandonImageConfigTestMutation.mutate(current.image_session_id);
+    }
+  }, [abandonImageConfigTestMutation, imageConfigTestActionBusy, imageConfigTestPreview]);
 
   return (
     <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} flex min-h-dvh flex-col dark:text-slate-100`}>
@@ -1390,43 +1714,56 @@ export function SettingsPage() {
               </div>
             </div>
 
-            {loadingMain ? (
-              <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
-                <Loader2 size={22} className="animate-spin" />
-              </div>
-            ) : activeSectionError ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                {activeSectionError instanceof ApiError ? activeSectionError.detail : t("settings.loadFailed")}
-              </div>
-            ) : (
-              <div className="pf-side-shell pf-settings-shell min-h-0 flex-1">
-                <SettingsSideRail
-                  search={sectionSearch}
-                  onSearchChange={setSectionSearch}
-                  visibleSections={visibleSections}
-                  activeSection={activeSection}
-                  workspaceSubpage={isWorkspaceSubpage}
-                  onSectionChange={handleActiveSectionChange}
-                />
+            <div className="pf-side-shell pf-settings-shell min-h-0 flex-1">
+              <SettingsSideRail
+                search={sectionSearch}
+                onSearchChange={setSectionSearch}
+                visibleSections={visibleSections}
+                activeSection={activeSection}
+                dirtySectionIds={dirtySectionIds}
+                workspaceSubpage={isWorkspaceSubpage}
+                onSectionPreview={prefetchSettingsSection}
+                onSectionChange={handleActiveSectionChange}
+              />
 
-                <section
-                  ref={contentSectionRef}
-                  className="pf-side-content pf-settings-content min-h-0 px-3 py-6 sm:px-5 sm:py-8 lg:px-12 lg:py-10"
-                >
-                  <div className="mx-auto max-w-4xl">
-                    <div className="mb-8 sm:mb-10">
-                      <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
-                        <span>{t("settings.title")}</span>
-                        <span>/</span>
-                        <span>{t(activeMeta.labelKey)}</span>
-                      </div>
-                      <h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
-                        {t(activeMeta.labelKey)}
-                      </h1>
-                      <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-                        {t(activeMeta.descriptionKey)}
-                      </p>
+              <section
+                ref={contentSectionRef}
+                className="pf-side-content pf-settings-content min-h-0 px-3 py-6 sm:px-5 sm:py-8 lg:px-12 lg:py-10"
+              >
+                <div className="mx-auto max-w-4xl">
+                  <div className="mb-8 sm:mb-10">
+                    <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
+                      <span>{t("settings.title")}</span>
+                      <span>/</span>
+                      <span>{t(activeMeta.labelKey)}</span>
                     </div>
+                    <h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
+                      {t(activeMeta.labelKey)}
+                    </h1>
+                    <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500 dark:text-slate-400">
+                      {t(activeMeta.descriptionKey)}
+                    </p>
+                  </div>
+                  {loadingMain ? (
+                    <SettingsSectionLoadingState label={t("app.loading")} />
+                  ) : activeSectionError ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+                      <p>
+                        {activeSectionError instanceof ApiError ? activeSectionError.detail : t("settings.loadFailed")}
+                      </p>
+                      <div className="mt-4">
+                        <PageActionButton
+                          type="button"
+                          onClick={retryActiveSectionLoad}
+                          preset="secondary"
+                          size="sm"
+                        >
+                          {t("common.retry")}
+                        </PageActionButton>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
                   {shouldShowSettingsMigrationPanel(activeSection) ? (
                     <SettingsMigrationPanel
                       importInputRef={importInputRef}
@@ -1683,9 +2020,35 @@ export function SettingsPage() {
                           unfreezeGenerationConfigMutation.mutate(configId);
                         }}
                         onTextTestDraftChange={(draft) => {
-                          const normalizedDraft = normalizeTextConfigTestDraft(draft);
-                          writeTextConfigTestDraft(normalizedDraft);
-                          setTextConfigTestState((current) => ({ ...current, draft: normalizedDraft }));
+                          setTextConfigTestState((current) => {
+                            const selectedPresetId = current.selectedPresetId;
+                            const normalizedDraft = normalizeTextConfigTestDraft(
+                              draft,
+                              current.presets[selectedPresetId] ?? current.draft,
+                            );
+                            const draftState = {
+                              selectedPresetId,
+                              draft: normalizedDraft,
+                              presets: {
+                                ...current.presets,
+                                [selectedPresetId]: normalizedDraft,
+                              },
+                            };
+                            writeTextConfigTestDraftState(draftState);
+                            return { ...current, ...draftState };
+                          });
+                        }}
+                        onTextTestPresetChange={(presetId) => {
+                          setTextConfigTestState((current) => {
+                            const draft = current.presets[presetId] ?? current.draft;
+                            const draftState = {
+                              selectedPresetId: presetId,
+                              draft,
+                              presets: current.presets,
+                            };
+                            writeTextConfigTestDraftState(draftState);
+                            return { ...current, ...draftState };
+                          });
                         }}
                         onTestTextConfig={async (key, draft) => {
                           if (!canWriteProviderSettings) {
@@ -1765,12 +2128,42 @@ export function SettingsPage() {
                           unfreezeGenerationConfigMutation.mutate(configId);
                         }}
                         onImageTestDraftChange={(draft) => {
-                          const normalizedDraft = normalizeImageConfigTestDraft(draft);
-                          writeImageConfigTestDraft(normalizedDraft);
-                          setImageConfigTestState((current) => ({ ...current, draft: normalizedDraft }));
+                          setImageConfigTestState((current) => {
+                            const selectedPresetId = current.selectedPresetId;
+                            const normalizedDraft = normalizeImageConfigTestDraft(
+                              draft,
+                              current.presets[selectedPresetId] ?? current.draft,
+                            );
+                            const draftState = {
+                              selectedPresetId,
+                              draft: normalizedDraft,
+                              presets: {
+                                ...current.presets,
+                                [selectedPresetId]: normalizedDraft,
+                              },
+                            };
+                            writeImageConfigTestDraftState(draftState);
+                            return { ...current, ...draftState };
+                          });
+                        }}
+                        onImageTestPresetChange={(presetId) => {
+                          setImageConfigTestState((current) => {
+                            const draft = current.presets[presetId] ?? current.draft;
+                            const draftState = {
+                              selectedPresetId: presetId,
+                              draft,
+                              presets: current.presets,
+                            };
+                            writeImageConfigTestDraftState(draftState);
+                            return { ...current, ...draftState };
+                          });
                         }}
                         onSaveImageTestDraft={() => {
-                          writeImageConfigTestDraft(imageConfigTestState.draft);
+                          writeImageConfigTestDraftState({
+                            selectedPresetId: imageConfigTestState.selectedPresetId,
+                            draft: imageConfigTestState.draft,
+                            presets: imageConfigTestState.presets,
+                          });
                           setError("");
                           setSavedMessage(t("settings.generation.imageTestDraftSaved"));
                         }}
@@ -1879,10 +2272,11 @@ export function SettingsPage() {
                       />
                     ) : null}
                   </div>
-                  </div>
-                </section>
-              </div>
-            )}
+                    </>
+                  )}
+                </div>
+              </section>
+            </div>
 
           </div>
         </div>
@@ -1892,22 +2286,93 @@ export function SettingsPage() {
           onCloseSuccess={() => setSavedMessage("")}
           onCloseError={() => setError("")}
         />
+        <ConfirmDialog
+          open={Boolean(pendingSectionNavigation)}
+          appearance={isWorkspaceSubpage ? "workspace" : "classic"}
+          title={t("settings.unsavedNavigationConfirmTitle")}
+          description={
+            pendingNavigationMeta
+              ? t("settings.unsavedNavigationConfirm", {
+                  from: t(activeMeta.labelKey),
+                  to: t(pendingNavigationMeta.labelKey),
+                })
+              : ""
+          }
+          confirmLabel={t("settings.unsavedNavigationConfirmLabel")}
+          cancelLabel={t("common.cancel")}
+          destructive={false}
+          onClose={() => setPendingSectionNavigation(null)}
+          onConfirm={() => {
+            if (!pendingSectionNavigation) {
+              return;
+            }
+            const nextSection = pendingSectionNavigation;
+            setPendingSectionNavigation(null);
+            resetDraftsFromConfig(configQuery.data);
+            navigateToSettingsSection(nextSection);
+          }}
+        />
         {imageConfigTestPreview ? (
           <ImageConfigTestResultDialog
             appearance={isWorkspaceSubpage ? "workspace" : "classic"}
             result={imageConfigTestPreview}
             canSaveGallery={canSaveImageConfigTestGallery}
-            saving={saveImageConfigTestGalleryMutation.isPending}
-            onSave={() => {
-              if (!canSaveImageConfigTestGallery || imageConfigTestPreview.generated_asset.gallery_saved) {
+            canSaveResourceLibrary
+            canKeepSession={canWriteProviderSettings}
+            busy={imageConfigTestActionBusy}
+            savingGallery={saveImageConfigTestGalleryMutation.isPending}
+            keepingSession={keepImageConfigTestMutation.isPending}
+            onSaveResourceLibrary={() => {
+              if (imageConfigTestActionBusy) {
+                return;
+              }
+              setImageConfigTestResourceLibrarySource({
+                source_type: "image_session_asset",
+                source_id: imageConfigTestPreview.generated_asset.id,
+                title: imageConfigTestPreview.generated_asset.original_filename,
+                thumbnail_url:
+                  imageConfigTestPreview.generated_asset.thumbnail_url ??
+                  imageConfigTestPreview.generated_asset.preview_url,
+              });
+            }}
+            onSaveGallery={() => {
+              if (
+                !canSaveImageConfigTestGallery ||
+                imageConfigTestPreview.generated_asset.gallery_saved ||
+                imageConfigTestActionBusy
+              ) {
                 return;
               }
               setImageConfigTestGalleryAssetId(imageConfigTestPreview.generated_asset.id);
               setImageConfigTestGalleryTagError("");
             }}
-            onClose={() => setImageConfigTestPreview(null)}
+            onKeepSession={() => {
+              if (!canWriteProviderSettings || imageConfigTestActionBusy) {
+                return;
+              }
+              keepImageConfigTestMutation.mutate(imageConfigTestPreview.image_session_id);
+            }}
+            onClose={closeImageConfigTestPreview}
           />
         ) : null}
+        <SaveToResourceLibraryDialog
+          source={imageConfigTestResourceLibrarySource}
+          canWrite
+          appearance={isWorkspaceSubpage ? "workspace" : "classic"}
+          onSaved={async () => {
+            setImageConfigTestPreview(null);
+            setImageConfigTestResourceLibrarySource(null);
+            setImageConfigTestGalleryAssetId(null);
+            setImageConfigTestGalleryTagError("");
+            await queryClient.invalidateQueries({ queryKey: ["image-sessions"] });
+          }}
+          onClose={() => {
+            if (!imageConfigTestResourceLibrarySource) {
+              return;
+            }
+            setImageConfigTestResourceLibrarySource(null);
+          }}
+        />
         <GalleryTagPickerDialog
           open={Boolean(imageConfigTestGalleryAssetId)}
           appearance={isWorkspaceSubpage ? "workspace" : "classic"}

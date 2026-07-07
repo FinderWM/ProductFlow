@@ -1196,52 +1196,71 @@ return serialize_image_session_status(snapshot)
 
 ### Persistence and external side effects
 
-The current pattern commits database changes before performing non-transactional file deletion:
+Business application services must not physically delete object-storage files during normal cleanup, abandon, archive, or
+delete flows. They may soft-delete database rows, mark rows disabled/deleted, detach links, or leave unreferenced objects for
+storage lifecycle policies / a separate controlled cleanup process.
 
-- `delete_reference_image(...)` deletes the DB row, commits, then calls `storage.delete_image_with_variants(...)`.
-- `delete_image_session(...)` deletes the DB row, commits, then calls `storage.delete_image_session_tree(...)`.
+- Do not expose route/use-case helpers such as `delete_image_with_variants(...)`, `delete_image_session_tree(...)`, or
+  `delete_inspiration_tree(...)` from `LocalStorage`.
+- Do not call `StorageBackend.delete(...)` or `delete_prefix(...)` from application business flows.
+- For create/update operations, file writes happen before adding the final DB asset rows.
+- Keep storage paths relative to the storage root; `LocalStorage.resolve()` guards against path traversal.
 
-For create/update operations, file writes happen before adding the final DB asset rows. Keep storage paths relative to the
-storage root; `LocalStorage.resolve()` guards against path traversal.
-
-## Scenario: Global generated-image gallery entries
+## Scenario: Gallery-owned generated-image entries
 
 ### 1. Scope / Trigger
 
 - Trigger: changing gallery persistence, gallery API response fields, or continuous image-session "save to gallery"
   behavior.
-- Gallery is a global display surface over generated image-session assets. It is not a inspiration library replacement and not
-  a file-copying workflow.
+- Gallery is a global display surface with its own primary-image storage and generation metadata snapshot.
 
 ### 2. Signatures
 
-- DB table: `image_gallery_entries(id, owner_user_id, image_session_asset_id, image_session_round_id, resource_group_id,
-  enabled, disabled_at, disabled_by_user_id, disabled_reason, created_at)`.
-- Unique index: `uq_image_gallery_entries_asset_id` on `image_session_asset_id`.
+- DB table: `image_gallery_entries` includes:
+  - lineage: nullable `image_session_asset_id`, nullable `image_session_round_id`, `source_type`, `source_resource_id`
+  - owned image fields: `original_filename`, `mime_type`, `storage_path`, `storage_backend`, `storage_bucket`,
+    `storage_object_key`
+  - generation snapshot fields: `prompt`, `size`, `actual_size`, `aspect_ratio`, `model_name`, `provider_name`,
+    `prompt_version`, `provider_response_id`, `image_generation_call_id`, `generation_config_id`,
+    `generation_group_id`, `candidate_index`, `candidate_count`, `provider_notes_json`, `reference_images_json`
+  - ownership/governance fields: `owner_user_id`, `resource_group_id`, `enabled`, `disabled_at`,
+    `disabled_by_user_id`, `disabled_reason`, `created_at`
+- Unique index: partial `uq_image_gallery_entries_asset_id` on non-null `image_session_asset_id`.
+- Lineage index: `ix_image_gallery_entries_source` on `(source_type, source_resource_id)`.
 - List indexes: `ix_image_gallery_entries_enabled_created` on `(enabled, created_at)` and
   `ix_image_gallery_entries_group_enabled_created` on `(resource_group_id, enabled, created_at)`.
 - API:
   - `GET /api/gallery?resource_group_id=<id>&include_disabled=<bool>&limit=<n>&offset=<n>` ->
     `{items: GalleryEntryResponse[], total: int, has_more: bool, next_offset: int | null}`.
-  - `POST /api/gallery` with `{image_session_asset_id: string}` -> `GalleryEntryResponse`.
+  - `POST /api/gallery` with `{image_session_asset_id: string, tag_ids?: string[]}` -> `GalleryEntryResponse`.
+  - `GET /api/gallery/{entry_id}/image?variant=original|preview|thumbnail` -> gallery-owned file response.
+- Storage helper: `LocalStorage.save_gallery_entry_image(owner_user_id, filename, content)` writes
+  `gallery/{owner_user_id}/images/{uuid}{suffix}`.
 
 ### 3. Contracts
 
-- `image_session_asset_id` must point to an `image_session_assets.kind == generated_image` row.
-- `image_session_round_id` references the round that generated the asset and must be nulled or rejected by application
-  code if a cleanup path removes the referenced round.
-- Gallery entries reference existing generated files through `/api/image-session-assets/{asset_id}/download` URLs; they
-  must not duplicate image bytes into inspiration storage or a gallery-specific storage tree.
-- Repeated saves for the same generated asset are idempotent and return the existing gallery entry.
+- `POST /api/gallery` accepts an image-session generated asset as the source input for compatibility.
+- Saving copies the source image bytes into gallery-owned storage and persists gallery storage metadata on
+  `ImageGalleryEntry`; gallery list, preview, and download URLs use `GET /api/gallery/{entry_id}/image`.
+- `image_session_asset_id`, `image_session_round_id`, `source_type`, and `source_resource_id` are lineage/idempotency
+  fields. Gallery runtime reads must not require the source session, round, or asset to remain visible.
+- Repeated saves for the same generated asset are idempotent and return the existing gallery entry without creating a
+  second gallery row or a second `ImageSessionAsset`.
+- `reference_images_json` stores path snapshots for source/reference images. Reference images are not copied; each item
+  records `storage_path`, `storage_backend`, `storage_bucket`, `storage_object_key`, `original_filename`, `mime_type`,
+  `role`, `source_kind`, and `source_id` when available.
 - List queries apply availability, optional `resource_group_id`, pagination, and count in SQL. Default lists return only
   effectively enabled entries; `include_disabled=true` is honored only for callers with `resources:moderate`.
-- A concrete `resource_group_id` matches `ImageGalleryEntry.resource_group_id`. Legacy rows with a null entry group may
-  fall back to `ImageSessionRound.resource_group_id`; never infer gallery group membership from `ImageSessionAsset`.
-- Response metadata should include prompt, requested size, actual size, provider/model, candidate metadata, session ID/title,
-  inspiration ID/name when available, owner, resource group, moderation fields, `view_count`, and `created_at`.
+- A concrete `resource_group_id` matches `ImageGalleryEntry.resource_group_id`. Legacy rows with a null entry group may use
+  compatibility fallback during backfill, but new rows must persist the gallery entry group directly.
+- Response metadata should include prompt, requested size, actual size, aspect ratio, provider/model, candidate metadata,
+  reference-image snapshots, nullable session/inspiration compatibility fields, owner, resource group, moderation fields,
+  `view_count`, and `created_at`.
 - The visual gallery remains image-led. Compact admin remove/restore controls are compatible with this contract when they
   use `resources:moderate`; table-first management and bulk moderation belong to a separate workflow. Gallery tags are a
   separate global-tag contract and must not be mixed with generation resource groups.
+- Historical rows whose `storage_path` still points at the source module require the idempotent application backfill
+  `backfill_gallery_entry_storage(...)`; Alembic only adds columns and performs database-local snapshots.
 
 ### 4. Validation & Error Matrix
 
@@ -1249,30 +1268,37 @@ storage root; `LocalStorage.resolve()` guards against path traversal.
 - Reference upload asset -> `400`, `{"detail": "只有生成结果可以保存到画廊"}`.
 - Generated asset without a generating round -> `404`, `{"detail": "生成记录不存在"}`.
 - Duplicate generated asset save -> existing gallery entry, no duplicate database row.
+- Gallery-owned file missing -> `404`, `{"detail": "画廊图片文件不存在"}` from the gallery image endpoint.
 - Missing `resource_group_id` on list -> all visible, effectively enabled gallery entries.
 - Concrete `resource_group_id` on list -> only entries in that generation group, with `total`, `has_more`, and
   `next_offset` computed from the same filtered SQL query.
 - Disabled gallery entry in default list -> omitted before pagination/count.
+- Source image-session asset later disabled/deleted/hidden -> existing gallery entry remains readable unless the gallery
+  entry itself is disabled or its gallery-owned file is missing.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: a continuous image candidate can be saved once, then repeated clicks keep one gallery row.
+- Good: saving a config-test image to gallery finishes the temporary test session while the gallery entry still previews
+  from `gallery/{owner_user_id}/images/...`.
 - Good: default and premium generation groups each return only their matching gallery entries when a concrete group filter
   is supplied.
 - Good: admin governance controls remove or restore one gallery entry while preserving the image-led browsing layout.
 - Base: inspiration-scoped and standalone image sessions both appear in the same global gallery list.
-- Bad: copying generated image bytes into `source_assets` or inspiration storage when the user only chose "save to gallery".
+- Bad: using `/api/image-session-assets/{asset_id}/download` as the gallery card's primary image URL after save.
+- Bad: copying generated image bytes into `source_assets` or inspiration storage when the user chose "save to gallery".
 - Bad: implementing gallery list visibility by fetching all rows and filtering disabled/group state in Python or React.
 - Bad: adding table-first bulk management, inspiration-level grouping, or search inside this global gallery task.
 
 ### 6. Tests Required
 
-- Backend route test saves a generated image and verifies prompt, image URLs, size/actual size, provider/model, candidate,
-  session, inspiration, and creation metadata.
+- Backend route test saves a generated image and verifies gallery-owned image URLs, storage path, prompt, size/actual size,
+  aspect ratio, provider/model, candidate, reference snapshots, nullable compatibility fields, and creation metadata.
 - Backend route test repeats the same save and asserts one database row.
 - Backend route test rejects reference-upload assets.
 - Backend route/list test covers omitted group, concrete group, disabled default hiding, `include_disabled` permissions,
   pagination counts, and legacy null entry-group fallback.
+- Storage/backfill test covers copying legacy source-backed gallery rows into `gallery/...`.
 - Migration test path must keep Alembic upgrade-to-head green on SQLite and PostgreSQL-compatible schema definitions.
 
 ### 7. Wrong vs Correct
@@ -1285,13 +1311,99 @@ storage.save_reference_upload(inspiration.id, asset.original_filename, image_byt
 
 This writes to the inspiration library and changes inspiration state.
 
-#### Correct
+Correct:
 
 ```python
-ImageGalleryEntry(image_session_asset_id=asset.id, image_session_round_id=round_item.id)
+relative_path = storage.save_gallery_entry_image(asset.owner_user_id, asset.original_filename, source_content)
+ImageGalleryEntry(
+    image_session_asset_id=asset.id,
+    image_session_round_id=round_item.id,
+    storage_path=relative_path,
+    source_type="image_session_asset",
+    source_resource_id=asset.id,
+)
 ```
 
-The gallery keeps a curated pointer to the generated asset and reuses existing download URLs.
+The gallery owns the saved image path while retaining source lineage.
+
+---
+
+## Scenario: Resource-library owned source saves
+
+### 1. Scope / Trigger
+
+- Trigger: changing resource-library save-from-source behavior, resource-library storage fields, source status APIs, or
+  source-to-library backfill.
+- Resource-library assets own their stored image bytes after save.
+
+### 2. Signatures
+
+- DB table: `resource_library_assets` keeps `storage_path`, `storage_backend`, `storage_bucket`, `storage_object_key`,
+  `source_type`, and `source_resource_id`.
+- API: `POST /api/resource-library/assets/save` with `{source_type, source_id, group_ids}`.
+- Storage helper: `LocalStorage.save_resource_library_asset(owner_user_id, filename, content)` writes
+  `resource_library/{owner_user_id}/images/{uuid}{suffix}`.
+- Backfill helper: `backfill_resource_library_asset_storage(session, storage=None, limit=None)`.
+
+### 3. Contracts
+
+- Uploads already write to `resource_library/...` and remain unchanged.
+- Save-from-source reads the source object and writes a new resource-library-owned object. The asset's storage fields point
+  at the `resource_library/...` path.
+- `source_type` and `source_resource_id` are lineage/idempotency fields. Runtime preview/download/load uses the
+  `resource_library_assets` storage fields.
+- Repeated saves for the same `(owner_user_id, source_type, source_resource_id)` return the existing asset and add requested
+  group links; they do not create another asset.
+- Saving from a temporary image-config test source finishes the temporary session without requiring "keep to image chat".
+- Historical non-upload assets whose path is outside `resource_library/` require the idempotent application backfill.
+
+### 4. Validation & Error Matrix
+
+- Missing source -> source-specific `404` / business validation detail.
+- Source owned by another user -> `400`, `只能保存自己的资源到个人资源库`.
+- Empty `group_ids` on save-from-source -> `400`, `请选择至少一个资源分组`.
+- Duplicate source save -> existing resource-library asset, group links updated, no new asset.
+- Source later disabled/deleted/hidden -> saved resource-library asset remains governed by its own row; loading fails only
+  when the resource-library asset itself is disabled or its file is missing.
+- Stored file missing -> load/download path returns the resource-file-missing validation detail.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a generated image saved to the resource library uses `resource_library/{owner}/images/...`, and image-chat cleanup
+  does not break its preview.
+- Good: source-status APIs still report that a source has already been saved by using `source_type/source_resource_id`.
+- Base: uploaded resource-library assets use `source_type=upload` and their own storage path.
+- Bad: serving a saved resource-library asset from `image_sessions/...`, `inspirations/...`, or another source module path.
+- Bad: using source disabled state to hide or block an already-saved resource-library asset.
+
+### 6. Tests Required
+
+- Backend resource-library save tests assert source saves use `resource_library/...` and differ from the source object key.
+- Idempotency tests assert repeated source saves add groups without duplicating assets.
+- Moderation tests assert saved resource-library assets are not effectively disabled by their source lineage.
+- Backfill tests assert legacy source-backed paths are copied into resource-library-owned storage.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```python
+asset.storage_path = source.storage_object.storage_path
+asset.source_type = source.source_type
+asset.source_resource_id = source.source_resource_id
+```
+
+Correct:
+
+```python
+content = _read_stored_object_content(source.storage_object, storage)
+relative_path = storage.save_resource_library_asset(actor_user_id, source.filename, content)
+asset = ResourceLibraryAsset(
+    storage_path=relative_path,
+    source_type=source.source_type,
+    source_resource_id=source.source_resource_id,
+)
+```
 
 ---
 
@@ -2065,13 +2177,14 @@ with op.batch_alter_table("inspirations") as batch_op:
 ### 3. Contracts
 
 - A resource can be visible to its owner while unavailable for continued use.
-- Effective availability cascades through parent resources:
+- Effective availability cascades through ownership/runtime parents:
   - Source assets and poster variants follow their inspiration.
   - Image sessions follow their optional inspiration.
   - Image-session assets follow their session and inspiration.
-  - Gallery entries follow their asset, session, and inspiration.
-  - Resource-library assets first follow their own moderation state, then inherit from `source_type` /
-    `source_resource_id` when the source is `source_asset`, `poster_variant`, or `image_session_asset`.
+  - Gallery entries use their own moderation state and gallery-owned file; source asset/session lineage must not make a
+    saved gallery entry unavailable.
+  - Resource-library assets use their own moderation state and resource-library-owned file; `source_type` /
+    `source_resource_id` lineage must not make a saved asset unavailable.
 - Parent disablement must not bulk-update child rows. Runtime checks compute `effective_enabled` from the chain.
 - Historical resource-library rows with no source id or a missing source must only use their own moderation state, so old
   data is not blocked by an unresolvable reference.
@@ -2079,9 +2192,9 @@ with op.batch_alter_table("inspirations") as batch_op:
   availability before using the resource.
 - Admin cross-user reads are governance-only: saving another user's generated image to gallery/resource library, editing,
   deleting, uploading, or writing back to another user's resource remains rejected by ownership mutation guards.
-- Saving generated images to gallery stores the original `image_session_asset_id`; resource-library saves preserve
-  `source_type` / `source_resource_id` and source storage metadata. These save paths must not copy image files into new
-  image-session assets.
+- Saving generated images to gallery stores gallery-owned image metadata plus lineage. Saving existing sources to the
+  resource library stores resource-library-owned image metadata plus lineage. These save paths must not create new
+  `ImageSessionAsset` rows or keep runtime reads dependent on the source module's storage row.
 - Admin users can read all disabled resources and see `disabled_by_username` through detail/governance views; ordinary
   owners can read their own disabled non-gallery resources when the owning detail API supports that state.
 - Gallery list visibility is stricter than owner visibility: disabled gallery entries are hidden by default for every
@@ -2104,20 +2217,23 @@ with op.batch_alter_table("inspirations") as batch_op:
 - Existing gallery entry disabled -> repeated save must not bypass the disabled entry through idempotency.
 - Admin tries to save another user's generated image to gallery or resource library -> `400`,
   `管理员不能直接编辑其他用户资源`.
-- Resource-library asset inherits a disabled source -> list/detail shows `effective_enabled=false`; loading it into a
-  workflow node or image session -> `400`, `资源已被管理员屏蔽，暂不可使用`.
+- Gallery entry source asset/session disabled after save -> gallery entry remains available unless the gallery entry itself
+  is disabled or its gallery-owned file is missing.
+- Resource-library asset source disabled after save -> resource-library asset remains available unless the asset itself is
+  disabled or its resource-library-owned file is missing.
 - Resource-library asset source is missing or empty -> only the asset's own `enabled` state decides availability.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: disabling an inspiration makes its source assets, poster variants, image-session assets, gallery entries, and
-  resource-library assets effectively unavailable without updating child rows.
+- Good: disabling an inspiration makes its source assets, poster variants, and image-session assets effectively unavailable
+  without updating child rows.
+- Good: gallery entries and resource-library assets saved before the disable remain governed by their own rows because they
+  own their saved file paths.
 - Good: a gallery subpage requests `include_disabled=true` only for sessions with `resources:moderate`; a workspace home
   gallery preview omits the flag so disabled images are not fetched for admins, owners, or regular users.
 - Good: restoring a parent resource makes child resources usable again when they are not directly disabled.
 - Base: a resource-library upload with `source_type=upload` is governed only by its own moderation state.
-- Bad: copying a generated file while saving to gallery or resource library, because moderation and ownership should follow
-  the original generated asset/source reference.
+- Bad: checking a saved gallery/resource-library row's source lineage to decide whether its own image can still be used.
 - Bad: letting admin cross-user gallery/resource-library save bypass `ensure_actor_can_mutate_owner(...)`.
 - Bad: filtering disabled gallery entries only in React after fetching them for the workspace home; the backend list
   request itself must omit `include_disabled`.
@@ -2127,8 +2243,8 @@ with op.batch_alter_table("inspirations") as batch_op:
 - API regression for inspiration disable/restore, parent cascade to source asset, and blocked download/mutation.
 - API regression for image-session asset disable, blocked gallery save, gallery-entry disable, owner visibility, and
   default gallery hiding plus `resources:moderate` gallery visibility.
-- API regression for resource-library assets inheriting `source_asset`, `poster_variant`, and `image_session_asset`
-  effective disabled state, plus restore behavior.
+- API regression proving gallery/resource-library assets saved from sources remain governed by their own moderation state
+  after source disable/restore.
 - API regression that admin cannot save another user's generated image to gallery or resource library.
 - Migration/model regression proving moderation columns and indexes exist.
 - Full backend gate plus frontend build when moderation fields are added to DTOs.
@@ -2138,14 +2254,14 @@ with op.batch_alter_table("inspirations") as batch_op:
 Wrong:
 
 ```python
-return ResourceModerationState(enabled=resource_library_asset.enabled)
+state = _direct_resource_disabled_source(resource_library_asset)
+return state or _resource_library_source_disabled_source(session, resource_library_asset)
 ```
 
 Correct:
 
 ```python
-state = _direct_resource_disabled_source(resource_library_asset)
-return state or _resource_library_source_disabled_source(session, resource_library_asset)
+return ResourceModerationState(enabled=resource_library_asset.enabled)
 ```
 
 Wrong:
@@ -2157,7 +2273,11 @@ gallery_entry = ImageGalleryEntry(image_session_asset_id=copy_generated_image(as
 Correct:
 
 ```python
-gallery_entry = ImageGalleryEntry(image_session_asset_id=asset.id)
+gallery_path = storage.save_gallery_entry_image(asset.owner_user_id, asset.original_filename, content)
+gallery_entry = ImageGalleryEntry(
+    image_session_asset_id=asset.id,
+    storage_path=gallery_path,
+)
 ```
 
 ## Scenario: Database-backed canvas template catalog
@@ -2690,6 +2810,12 @@ latest_group = image_session.resource_group
   - `image_session_id`
   - `round: ImageSessionRoundResponse`
   - `generated_asset: ImageSessionAssetResponse`
+  - `is_temporary: bool`
+- Image test lifecycle APIs:
+  - `POST /api/settings/generation-configs/test-image/{image_session_id}/keep` ->
+    `ImageGenerationConfigTestLifecycleResponse`
+  - `POST /api/settings/generation-configs/test-image/{image_session_id}/abandon` ->
+    `ImageGenerationConfigTestLifecycleResponse`
 
 ### 3. Contracts
 
@@ -2698,10 +2824,19 @@ latest_group = image_session.resource_group
   create a `GenerationConfig`, `GenerationConfigState`, daily stat row, or scheduler claim.
 - If only `generation_config_id` is present, load the non-archived config with the matching purpose and resolve it through
   the same draft resolver path so persisted and unsaved configs share validation.
-- Image tests create a standalone `ImageSession`, generated `ImageSessionAsset`, and `ImageSessionRound` so the result can
-  be saved through `POST /api/gallery` without copying files or special-case gallery logic.
+- Image tests create a standalone temporary `ImageSession` (`is_temporary_test=true`), generated `ImageSessionAsset`, and
+  `ImageSessionRound`. Ordinary image-session list/detail APIs hide temporary test sessions by default.
 - Image test sessions use an explicit test title prefix and the selected `resource_group_id`; they do not enqueue durable
   image-generation tasks or update generation-config health/stat counters.
+- Image test results are single-choice lifecycle objects:
+  - keep to image chat: mark `is_temporary_test=false`, making the session visible in the normal image-session list.
+  - save to gallery: copy the generated image into gallery-owned storage, create a gallery snapshot, then soft-end the
+    temporary session.
+  - save to resource library: copy the generated image into resource-library-owned storage, create/update the library asset,
+    then soft-end the temporary session.
+  - abandon: mark the temporary session `deleted_at` without physically deleting object-storage files.
+- After any successful lifecycle action, later lifecycle/save actions for the same temporary source return "not found"
+  semantics.
 - Frontend SettingsPage stores image test prompt and size in browser local storage only; do not add app settings or a new
   table for these operator-local test inputs.
 - Save-to-gallery state for image test results still comes from `ImageSessionAssetResponse.gallery_saved` and
@@ -2717,24 +2852,35 @@ latest_group = image_session.resource_group
 - Image test with unauthorized or disabled `resource_group_id` -> resource-group validation error.
 - Provider/client validation failure raised as `ValueError` during a test -> `400`, preserve the failure detail.
 - Unexpected provider failure during image test -> `502`, sanitized `classify_image_generation_failure(...)` reason.
-- Gallery save for a returned generated asset -> first save `201`, repeated save `200`, with returned `GalleryEntry.image`
-  marking the same asset as saved.
+- Temporary image test session appears in normal image-session list/detail without keep -> hidden or `404`.
+- Keep temporary image test session -> visible in normal image-session list/detail.
+- Abandon temporary image test session -> later keep/gallery/resource-library action returns `404`,
+  `图片配置测试结果不存在`.
+- Gallery save for a returned generated asset -> first save `201`, with returned `GalleryEntry.image` served from
+  `/api/gallery/{entry_id}/image`; later keep/resource-library action for the same temporary test returns `404`.
+- Resource-library save for a returned generated asset -> asset storage path starts with `resource_library/`; later
+  keep/gallery action for the same temporary test returns `404`.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: test an unsaved image config draft, preview the returned generated asset, then call `api.saveGalleryEntry(asset.id)`
-  and update the local result from `GalleryEntry.image`.
+- Good: test an unsaved image config draft, preview the temporary generated asset, then choose exactly one of save to
+  resource library, save to gallery, or keep to image chat.
+- Good: closing the temporary preview calls abandon and does not show the session in image chat.
 - Good: test a saved config by id while still passing the current draft when the Settings form has unsaved edits.
 - Base: text tests run provider calls and return structured JSON but do not persist generation config drafts.
 - Bad: sending users to the image-chat page just to verify provider settings.
 - Bad: saving image test parameters in `app_settings` or adding a database migration for browser-local test defaults.
-- Bad: creating a gallery entry from a copied file or a second `ImageSessionAsset`.
+- Bad: treating "save to gallery" as implicit "keep to image chat".
 
 ### 6. Tests Required
 
 - Backend API test: mock image config draft returns `ImageGenerationConfigTestResponse` with a generated asset and no
-  persisted `GenerationConfig`.
-- Backend API test: returned image test asset can be saved to gallery and keeps the same asset id.
+  persisted `GenerationConfig`, and the temporary session is hidden from normal image-session reads.
+- Backend API test: keep makes the temporary session visible.
+- Backend API test: abandon hides/ends the temporary session without object-storage delete calls.
+- Backend API test: returned image test asset can be saved to gallery/resource library and each target owns its storage
+  path while the temporary session stays hidden.
+- Backend API test: target actions are mutually exclusive for one temporary test result.
 - Backend API test: provider `ValueError` from image testing preserves the detail and rolls back the test session.
 - Existing text test APIs keep coverage for draft resolution, missing real provider config, and structured-output mode.
 - Frontend build/type check must pass after adding or changing test request/response DTOs in `web/src/lib/types.ts` and
@@ -2751,8 +2897,8 @@ const saved = galleryEntries.some((entry) => entry.image_session_asset_id === re
 Correct:
 
 ```tsx
-const entry = await api.saveGalleryEntry(result.generated_asset.id);
-setResult(imageGenerationConfigTestResultWithGalleryEntry(result, entry));
+await api.keepImageGenerationConfigTest(result.image_session_id);
+queryClient.invalidateQueries({ queryKey: ["image-sessions", "standalone"] });
 ```
 
 ---

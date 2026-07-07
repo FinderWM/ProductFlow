@@ -1421,21 +1421,23 @@ export interface GalleryEntry extends ModerationFields {
   id: string;
   owner_user_id?: string;
   owner_username?: string | null;
-  image_session_asset_id: string;
+  image_session_asset_id: string | null;
   image_session_round_id: string | null;
-  image_session_id: string;
-  image_session_title: string;
+  image_session_id: string | null;
+  image_session_title: string | null;
   inspiration_id: string | null;
   inspiration_name: string | null;
   image: ImageSessionAsset;
   prompt: string | null;
   size: string | null;
   actual_size: string | null;
+  aspect_ratio: string | null;
   model_name: string | null;
   provider_name: string | null;
   prompt_version: string | null;
   provider_response_id: string | null;
   image_generation_call_id: string | null;
+  generation_config_id: string | null;
   generation_group_id: string | null;
   resource_group_id?: string | null;
   resource_group: GenerationResourceGroupTag;
@@ -1445,6 +1447,7 @@ export interface GalleryEntry extends ModerationFields {
   base_assets: ImageSessionAsset[];
   base_asset_id: string | null;
   selected_reference_asset_ids: string[];
+  reference_images: Array<Record<string, unknown>>;
   provider_notes: string[];
   tags: GalleryTag[];
   view_count: number;
@@ -1826,12 +1829,20 @@ export interface TextGenerationConfigTestInspirationRequest {
   source_note?: string | null;
 }
 
+export interface CopySlotRequest {
+  key: string;
+  label: string;
+  required?: boolean;
+  hint?: string | null;
+}
+
 export interface TextGenerationConfigTestCopyRequest {
   instruction?: string;
   purpose?: string | null;
   channel?: string | null;
   tone?: string | null;
   output_mode?: "freeform" | "blocks" | "layout_brief";
+  requested_slots?: CopySlotRequest[];
 }
 
 export interface TextGenerationConfigTestRequest {
@@ -1841,6 +1852,17 @@ export interface TextGenerationConfigTestRequest {
   copy_request?: TextGenerationConfigTestCopyRequest;
 }
 
+export interface TextGenerationConfigTestPromptContext {
+  system_instructions: string;
+  user_content: string;
+}
+
+export interface TextGenerationConfigTestRequestContext {
+  brief: TextGenerationConfigTestPromptContext;
+  copy: TextGenerationConfigTestPromptContext;
+  reference_text: string;
+}
+
 export interface TextGenerationConfigTestResponse {
   generation_config_id: string | null;
   provider_kind: string;
@@ -1848,6 +1870,7 @@ export interface TextGenerationConfigTestResponse {
   copy_model: string;
   brief: Record<string, unknown>;
   copy_result: Record<string, unknown>;
+  request_context: TextGenerationConfigTestRequestContext;
   duration_ms: number;
 }
 
@@ -1879,8 +1902,15 @@ export interface ImageGenerationConfigTestResponse {
   provider_name: string;
   duration_ms: number;
   image_session_id: string;
+  is_temporary: boolean;
   round: ImageSessionRound;
   generated_asset: ImageSessionAsset;
+}
+
+export interface ImageGenerationConfigTestLifecycleResponse {
+  image_session_id: string;
+  is_temporary: boolean;
+  abandoned: boolean;
 }
 
 export interface ProviderConfigResponse {

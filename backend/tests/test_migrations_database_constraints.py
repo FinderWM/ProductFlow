@@ -307,8 +307,37 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
     assert table.c.id.default is not None
     assert table.c.id.default.arg.__name__ == new_id.__name__
     assert table.c.image_session_asset_id.type.length == 36
-    assert not table.c.image_session_asset_id.nullable
+    assert table.c.image_session_asset_id.nullable
     assert table.c.image_session_round_id.nullable
+    assert table.c.original_filename.type.length == 255
+    assert not table.c.original_filename.nullable
+    assert table.c.mime_type.type.length == 100
+    assert not table.c.mime_type.nullable
+    assert table.c.storage_path.type.length == 500
+    assert not table.c.storage_path.nullable
+    assert table.c.storage_backend.type.length == 50
+    assert table.c.storage_backend.nullable
+    assert table.c.storage_bucket.type.length == 255
+    assert table.c.storage_bucket.nullable
+    assert table.c.storage_object_key.type.length == 500
+    assert table.c.storage_object_key.nullable
+    assert table.c.prompt.nullable
+    assert table.c.size.type.length == 32
+    assert table.c.actual_size.type.length == 32
+    assert table.c.aspect_ratio.type.length == 32
+    assert table.c.model_name.type.length == 100
+    assert table.c.provider_name.type.length == 50
+    assert table.c.prompt_version.type.length == 32
+    assert table.c.provider_response_id.type.length == 128
+    assert table.c.image_generation_call_id.type.length == 128
+    assert table.c.generation_config_id.type.length == 36
+    assert table.c.generation_group_id.type.length == 36
+    assert table.c.candidate_index.nullable
+    assert table.c.candidate_count.nullable
+    assert table.c.provider_notes_json.nullable
+    assert table.c.reference_images_json.nullable
+    assert table.c.source_type.type.length == 50
+    assert table.c.source_resource_id.type.length == 36
     assert not table.c.enabled.nullable
     assert table.c.disabled_at.nullable
     assert table.c.disabled_by_user_id.nullable
@@ -319,6 +348,7 @@ def test_gallery_entry_model_matches_migration_contract() -> None:
     assert {index.name for index in table.indexes} == {
         "uq_image_gallery_entries_asset_id",
         "ix_image_gallery_entries_round_id",
+        "ix_image_gallery_entries_source",
         "ix_image_gallery_entries_created_at",
         "ix_image_gallery_entries_enabled_created",
         "ix_image_gallery_entries_group_enabled_created",
@@ -1075,12 +1105,38 @@ def test_gallery_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, m
     assert "image_gallery_entries" in inspector.get_table_names()
     columns = {column["name"]: column for column in inspector.get_columns("image_gallery_entries")}
     assert columns["id"]["nullable"] is False
-    assert columns["image_session_asset_id"]["nullable"] is False
+    assert columns["image_session_asset_id"]["nullable"] is True
     assert columns["image_session_round_id"]["nullable"] is True
+    assert columns["original_filename"]["nullable"] is False
+    assert columns["mime_type"]["nullable"] is False
+    assert columns["storage_path"]["nullable"] is False
+    assert {
+        "storage_backend",
+        "storage_bucket",
+        "storage_object_key",
+        "prompt",
+        "size",
+        "actual_size",
+        "aspect_ratio",
+        "model_name",
+        "provider_name",
+        "prompt_version",
+        "provider_response_id",
+        "image_generation_call_id",
+        "generation_config_id",
+        "generation_group_id",
+        "candidate_index",
+        "candidate_count",
+        "provider_notes_json",
+        "reference_images_json",
+        "source_type",
+        "source_resource_id",
+    } <= set(columns)
     assert columns["created_at"]["nullable"] is False
     indexes = {index["name"]: index for index in inspector.get_indexes("image_gallery_entries")}
     assert bool(indexes["uq_image_gallery_entries_asset_id"]["unique"])
     assert indexes["uq_image_gallery_entries_asset_id"]["column_names"] == ["image_session_asset_id"]
+    assert indexes["ix_image_gallery_entries_source"]["column_names"] == ["source_type", "source_resource_id"]
     assert indexes["ix_image_gallery_entries_round_id"]["column_names"] == ["image_session_round_id"]
     assert indexes["ix_image_gallery_entries_created_at"]["column_names"] == ["created_at"]
     assert indexes["ix_image_gallery_entries_enabled_created"]["column_names"] == ["enabled", "created_at"]
@@ -1090,6 +1146,11 @@ def test_gallery_migration_schema_and_downgrade_support_sqlite(tmp_path: Path, m
         "created_at",
     ]
     assert not inspector.get_foreign_keys("image_gallery_entries")
+    image_session_columns = {column["name"]: column for column in inspector.get_columns("image_sessions")}
+    assert image_session_columns["is_temporary_test"]["nullable"] is False
+    assert "ix_image_sessions_temporary_test" in {
+        index["name"] for index in inspector.get_indexes("image_sessions")
+    }
 
     engine.dispose()
     command.downgrade(config, "20260427_0015")

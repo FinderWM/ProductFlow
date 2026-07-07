@@ -1,6 +1,6 @@
-// 图片生成配置测试结果预览弹窗（含保存到画廊）。纯展示组件。
+// 图片生成配置测试结果预览弹窗。纯展示组件，生命周期动作由 SettingsPage 管。
 
-import { GalleryHorizontalEnd } from "lucide-react";
+import { GalleryHorizontalEnd, MessageSquareText, Save } from "lucide-react";
 
 import { GalleryImagePreviewDialog } from "../../../components/GalleryImagePreviewDialog";
 import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "../../../components/layoutActionButtons";
@@ -13,25 +13,37 @@ export function ImageConfigTestResultDialog({
   appearance,
   result,
   canSaveGallery,
-  saving,
-  onSave,
+  canSaveResourceLibrary,
+  canKeepSession,
+  busy,
+  savingGallery,
+  keepingSession,
+  onSaveGallery,
+  onSaveResourceLibrary,
+  onKeepSession,
   onClose,
 }: {
   appearance: LayoutActionAppearance;
   result: ImageGenerationConfigTestResponse;
   canSaveGallery: boolean;
-  saving: boolean;
-  onSave: () => void;
+  canSaveResourceLibrary: boolean;
+  canKeepSession: boolean;
+  busy: boolean;
+  savingGallery: boolean;
+  keepingSession: boolean;
+  onSaveGallery: () => void;
+  onSaveResourceLibrary: () => void;
+  onKeepSession: () => void;
   onClose: () => void;
 }) {
   const { t } = useI18n();
   const ActionButtonComponent = actionButtonComponentForAppearance(appearance);
   const saved = result.generated_asset.gallery_saved;
-  const saveTitle = !canSaveGallery
+  const saveGalleryTitle = !canSaveGallery
     ? t("chat.permission.galleryWriteRequired")
     : saved
       ? t("chat.alreadyInGallery")
-      : t("settings.generation.imageTestKeep");
+      : t("settings.generation.imageTestSaveToGallery");
 
   return (
     <GalleryImagePreviewDialog
@@ -66,19 +78,46 @@ export function ImageConfigTestResultDialog({
       closeLabel={t("common.close")}
       onClose={onClose}
       footerExtra={
-        <ActionButtonComponent
-          onClick={onSave}
-          disabled={!canSaveGallery || saved}
-          loading={saving}
-          title={saveTitle}
-          aria-label={saveTitle}
-          preset="primary"
-          size="md"
-          fullWidth
-          leadingIcon={<GalleryHorizontalEnd size={16} />}
-        >
-          {saved ? t("chat.alreadyInGallery") : t("settings.generation.imageTestKeep")}
-        </ActionButtonComponent>
+        <div className="grid gap-2">
+          <ActionButtonComponent
+            onClick={onSaveResourceLibrary}
+            disabled={!canSaveResourceLibrary || busy}
+            title={t("settings.generation.imageTestSaveToResourceLibrary")}
+            aria-label={t("settings.generation.imageTestSaveToResourceLibrary")}
+            preset="secondary"
+            size="md"
+            fullWidth
+            leadingIcon={<Save size={16} />}
+          >
+            {t("settings.generation.imageTestSaveToResourceLibrary")}
+          </ActionButtonComponent>
+          <ActionButtonComponent
+            onClick={onSaveGallery}
+            disabled={!canSaveGallery || saved || busy}
+            loading={savingGallery}
+            title={saveGalleryTitle}
+            aria-label={saveGalleryTitle}
+            preset="primary"
+            size="md"
+            fullWidth
+            leadingIcon={<GalleryHorizontalEnd size={16} />}
+          >
+            {saved ? t("chat.alreadyInGallery") : t("settings.generation.imageTestSaveToGallery")}
+          </ActionButtonComponent>
+          <ActionButtonComponent
+            onClick={onKeepSession}
+            disabled={!canKeepSession || busy}
+            loading={keepingSession}
+            title={t("settings.generation.imageTestKeepSession")}
+            aria-label={t("settings.generation.imageTestKeepSession")}
+            preset="secondary"
+            size="md"
+            fullWidth
+            leadingIcon={<MessageSquareText size={16} />}
+          >
+            {t("settings.generation.imageTestKeepSession")}
+          </ActionButtonComponent>
+        </div>
       }
     />
   );

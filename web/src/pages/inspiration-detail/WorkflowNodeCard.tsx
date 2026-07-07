@@ -13,6 +13,7 @@ import { formatDateTime } from "../../lib/format";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
 import type { LayoutActionAppearance } from "../../components/layoutActionButtons";
+import { MediaPreviewTrigger } from "../../components/MediaPreviewTrigger";
 import type { WorkflowNode } from "../../lib/types";
 import { readDeckNodeCardState } from "./deckNodeCardState";
 import { DownloadLink } from "./ImageDownloadComponents";
@@ -73,6 +74,23 @@ export function WorkflowNodeCard({
   const deckNodeState = readDeckNodeCardState(node);
   const statusTone = deckNodeState?.badgeTone ?? node.status;
   const statusLabel = deckNodeState ? t(deckNodeState.badgeLabelKey) : workflowNodeStatusLabel(node, t);
+  const imagePreviewClassName = `relative mb-2 flex h-28 items-center justify-center overflow-hidden rounded-xl border pf-hairline p-2 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME}`;
+  const imagePreviewContent = image ? (
+    <>
+      <img
+        src={image.previewUrl}
+        alt={image.alt}
+        className="h-full w-full object-contain"
+      />
+      <DownloadLink image={image} appearance={appearance} variant="overlay" />
+      {imageWaiting ? (
+        <div className="absolute inset-x-2 bottom-2 flex items-center justify-center rounded-lg bg-[rgba(255,255,255,0.9)] px-2 py-1 text-[11px] font-medium text-indigo-700 shadow-sm ring-1 ring-indigo-100 backdrop-blur dark:bg-[color:var(--pf-deep)] dark:text-indigo-100 dark:ring-indigo-400/30">
+          <Loader2 size={11} className="mr-1 animate-spin" />
+          {waitingLabel}
+        </div>
+      ) : null}
+    </>
+  ) : null;
   const selectedClassName = primarySelected
     ? "border-indigo-300 shadow-lg shadow-indigo-950/10 ring-2 ring-indigo-200/70 dark:border-violet-400 dark:shadow-indigo-950/30 dark:ring-violet-300/60"
     : secondarySelected || previewSelected
@@ -127,23 +145,19 @@ export function WorkflowNodeCard({
           </span>
         </div>
         {image ? (
-          <div
-            className={`relative mb-2 flex h-28 items-center justify-center overflow-hidden rounded-xl border pf-hairline p-2 ${IMAGE_PREVIEW_SURFACE_CLASS_NAME} ${onPreviewImage ? "cursor-zoom-in" : ""}`}
-            onClick={onPreviewImage ? (e) => { e.stopPropagation(); onPreviewImage(image); } : undefined}
-          >
-            <img
-              src={image.previewUrl}
-              alt={image.alt}
-              className="h-full w-full object-contain"
-            />
-            <DownloadLink image={image} appearance={appearance} variant="overlay" />
-            {imageWaiting ? (
-              <div className="absolute inset-x-2 bottom-2 flex items-center justify-center rounded-lg bg-[rgba(255,255,255,0.9)] px-2 py-1 text-[11px] font-medium text-indigo-700 shadow-sm ring-1 ring-indigo-100 backdrop-blur dark:bg-[color:var(--pf-deep)] dark:text-indigo-100 dark:ring-indigo-400/30">
-                <Loader2 size={11} className="mr-1 animate-spin" />
-                {waitingLabel}
-              </div>
-            ) : null}
-          </div>
+          onPreviewImage ? (
+            <MediaPreviewTrigger
+              onPreview={() => onPreviewImage(image)}
+              stopPropagation
+              className={imagePreviewClassName}
+              aria-label={t("detail.previewImage", { alt: image.alt })}
+              title={t("detail.previewImage", { alt: image.alt })}
+            >
+              {imagePreviewContent}
+            </MediaPreviewTrigger>
+          ) : (
+            <div className={imagePreviewClassName}>{imagePreviewContent}</div>
+          )
         ) : imageWaiting ? (
           <div className="relative mb-2 flex h-28 flex-col items-center justify-center overflow-hidden rounded-xl border border-indigo-200/50 bg-indigo-950/10 text-indigo-700 dark:border-indigo-400/20 dark:bg-[color:var(--pf-deep)] dark:text-indigo-100 shadow-inner">
             <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-xl">

@@ -1,12 +1,8 @@
 import { Sparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode, type UIEvent as ReactUIEvent } from "react";
 
-import {
-  actionButtonToneStyle,
-  actionSurfaceClassNameForAppearance,
-  transparentActionToneVars,
-  type LayoutActionAppearance,
-} from "../../components/layoutActionButtons";
+import { type LayoutActionAppearance } from "../../components/layoutActionButtons";
+import { MediaPreviewTrigger } from "../../components/MediaPreviewTrigger";
 import { SensitiveImageOverlay, sensitiveImageClassName } from "../../components/SensitiveImageMask";
 import { api } from "../../lib/api";
 import { shouldMaskSensitiveImage } from "../../lib/sensitiveImages";
@@ -56,12 +52,8 @@ export function ImageChatMainStage({
   onRegenerateGenerationTask,
   t,
 }: ImageChatMainStageProps) {
-  const previewButtonClassName = actionSurfaceClassNameForAppearance(appearance, {
-    preset: "secondary",
-    focusWithin: true,
-    className: "relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl border-0 shadow-none",
-  });
-  const previewButtonStyle = actionButtonToneStyle(transparentActionToneVars, { display: "flex" });
+  const previewButtonClassName =
+    "relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl";
   const selectedImageMasked = shouldMaskSensitiveImage(maskSensitiveImages, selectedRound?.resource_group);
   const selectedRoundIndex = selectedRound
     ? sessionRounds.findIndex((round) => round.generated_asset.id === selectedRound.generated_asset.id)
@@ -142,13 +134,11 @@ export function ImageChatMainStage({
               const imageMasked = shouldMaskSensitiveImage(maskSensitiveImages, round.resource_group);
               return (
                 <div key={round.id} className="h-full w-full shrink-0 snap-start [scroll-snap-stop:always] px-2 py-2 sm:px-3 sm:py-3">
-                  <button
-                    type="button"
-                    onClick={() => onPreviewRound(round)}
+                  <MediaPreviewTrigger
+                    onPreview={() => onPreviewRound(round)}
                     className={previewButtonClassName}
                     aria-label={t("chat.previewCurrent")}
                     title={t("chat.previewCurrent")}
-                    style={previewButtonStyle}
                   >
                     <img
                       src={api.toApiUrl(round.generated_asset.preview_url)}
@@ -162,19 +152,17 @@ export function ImageChatMainStage({
                       )}
                     />
                     <SensitiveImageOverlay masked={imageMasked} label={t("common.sensitiveImageMasked")} intensity="strong" />
-                  </button>
+                  </MediaPreviewTrigger>
                 </div>
               );
             })}
           </div>
           <div className="absolute inset-0 z-0 hidden min-h-0 w-full items-center justify-center px-2 py-2 sm:px-3 sm:py-3 lg:flex">
-            <button
-              type="button"
-              onClick={() => onPreviewRound(selectedRound)}
+            <MediaPreviewTrigger
+              onPreview={() => onPreviewRound(selectedRound)}
               className={previewButtonClassName}
               aria-label={t("chat.previewCurrent")}
               title={t("chat.previewCurrent")}
-              style={previewButtonStyle}
             >
               <img
                 src={api.toApiUrl(selectedRound.generated_asset.preview_url)}
@@ -192,7 +180,7 @@ export function ImageChatMainStage({
                 label={t("common.sensitiveImageMasked")}
                 intensity="strong"
               />
-            </button>
+            </MediaPreviewTrigger>
           </div>
           {sessionRounds.length > 1 && selectedRoundIndex >= 0 ? (
             <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex justify-center lg:hidden">

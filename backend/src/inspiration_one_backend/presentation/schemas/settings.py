@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from inspiration_one_backend.application.contracts import CopySlotRequest
 from inspiration_one_backend.presentation.schemas.image_sessions import (
     ImageSessionAssetResponse,
     ImageSessionRoundResponse,
@@ -338,18 +339,25 @@ class GenerationConfigUpdateRequest(BaseModel):
 
 
 class TextGenerationConfigTestInspirationRequest(BaseModel):
-    name: str = Field(default="测试灵感产物", min_length=1, max_length=255)
-    category: str | None = Field(default="电商灵感产物", max_length=120)
+    name: str = Field(default="雨后山谷与古村石桥", min_length=1, max_length=255)
+    category: str | None = Field(default="人文与自然景观创作", max_length=120)
     price: str | None = Field(default=None, max_length=40)
-    source_note: str | None = Field(default="用于验证当前文案生成配置的测试输入。", max_length=1000)
+    source_note: str | None = Field(
+        default="雨后的山谷云雾缓慢升起，远处有青瓦古村、石桥和溪流，画面融合自然景观与人文生活痕迹，氛围安静、湿润、带有旅行纪实感。",
+        max_length=1000,
+    )
 
 
 class TextGenerationConfigTestCopyRequest(BaseModel):
-    instruction: str = Field(default="输出适合主图的短文案。", max_length=1000)
-    purpose: str | None = Field(default="main_image", max_length=80)
-    channel: str | None = Field(default="电商", max_length=80)
-    tone: str | None = Field(default="清晰直接", max_length=80)
-    output_mode: str = "blocks"
+    instruction: str = Field(
+        default="围绕雨后山谷、古村石桥和人与自然共处的氛围，生成适合视觉创作参考的中文文案。",
+        max_length=1000,
+    )
+    purpose: str | None = Field(default="visual_creation", max_length=80)
+    channel: str | None = Field(default="视觉创作", max_length=80)
+    tone: str | None = Field(default="克制、诗意、具象", max_length=80)
+    output_mode: Literal["freeform", "blocks", "layout_brief"] = "blocks"
+    requested_slots: list[CopySlotRequest] = Field(default_factory=list)
 
 
 class TextGenerationConfigTestRequest(BaseModel):
@@ -361,6 +369,17 @@ class TextGenerationConfigTestRequest(BaseModel):
     copy_request: TextGenerationConfigTestCopyRequest = Field(default_factory=TextGenerationConfigTestCopyRequest)
 
 
+class TextGenerationConfigTestPromptContext(BaseModel):
+    system_instructions: str
+    user_content: str
+
+
+class TextGenerationConfigTestRequestContext(BaseModel):
+    brief: TextGenerationConfigTestPromptContext
+    copy_context: TextGenerationConfigTestPromptContext = Field(alias="copy")
+    reference_text: str
+
+
 class TextGenerationConfigTestResponse(BaseModel):
     generation_config_id: str | None = None
     provider_kind: str
@@ -368,6 +387,7 @@ class TextGenerationConfigTestResponse(BaseModel):
     copy_model: str
     brief: dict[str, Any]
     copy_result: dict[str, Any]
+    request_context: TextGenerationConfigTestRequestContext
     duration_ms: int
 
 
@@ -404,8 +424,15 @@ class ImageGenerationConfigTestResponse(BaseModel):
     provider_name: str
     duration_ms: int
     image_session_id: str
+    is_temporary: bool = True
     round: ImageSessionRoundResponse
     generated_asset: ImageSessionAssetResponse
+
+
+class ImageGenerationConfigTestLifecycleResponse(BaseModel):
+    image_session_id: str
+    is_temporary: bool
+    abandoned: bool = False
 
 
 class SettingsExportMetadataResponse(BaseModel):
