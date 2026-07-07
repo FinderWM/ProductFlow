@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ProviderProfile } from "../../lib/types";
 import {
   coerceProviderImageMaxDimension,
+  filterProviderProfilesByName,
   parseProviderImageMaxDimensionDraft,
   providerFormFromProfile,
   providerImageMaxDimensionFormInvalid,
@@ -27,6 +28,25 @@ function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProf
     updated_at: overrides.updated_at ?? "2026-05-13T00:00:00Z",
   };
 }
+
+describe("provider profile search helpers", () => {
+  it("filters provider profiles by visible name only", () => {
+    const profiles = [
+      providerProfile({
+        id: "free-provider",
+        name: "DGB",
+        base_url: "https://free.example.com/v1",
+      }),
+      providerProfile({
+        id: "profile-2",
+        name: "freeai-api",
+        base_url: "https://example.com/v1",
+      }),
+    ];
+
+    expect(filterProviderProfilesByName(profiles, "free")).toEqual([profiles[1]]);
+  });
+});
 
 describe("provider image max dimension helpers", () => {
   it("coerces provider max dimension to the system step", () => {

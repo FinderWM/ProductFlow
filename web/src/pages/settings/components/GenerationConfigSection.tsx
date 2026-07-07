@@ -68,7 +68,7 @@ import {
   textStructuredOutputProviderInterfaceLabelKey,
   type GenerationConfigDraft,
 } from "../generationConfig";
-import { filterProviderProfiles } from "../providerForm";
+import { filterProviderProfilesByName } from "../providerForm";
 import { generationConfigResourceGroupIds } from "../resourceGroups";
 import { ImageConfigTestPanel, TextConfigTestPanel } from "./ConfigTestPanels";
 import { GenerationConfigImageFields } from "./GenerationConfigImageFields";
@@ -995,7 +995,7 @@ function GenerationConfigCard({
   const activeFrozen = isActiveFrozenUntil(config?.state?.frozen_until);
   const busy = pending || unfreezing;
   const controlsDisabled = busy || !canWrite;
-  const filteredProfiles = filterProviderProfiles(profiles, providerProfileSearch);
+  const filteredProfiles = filterProviderProfilesByName(profiles, providerProfileSearch);
   const selectedProfile = profiles.find((profile) => profile.id === draft.provider_profile_id);
   const selectableProfiles =
     selectedProfile && !filteredProfiles.some((profile) => profile.id === selectedProfile.id)
