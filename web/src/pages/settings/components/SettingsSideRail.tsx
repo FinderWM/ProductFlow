@@ -23,6 +23,8 @@ interface SettingsSideRailProps {
 }
 
 const SETTINGS_MOBILE_NAV_DRAWER_DESKTOP_QUERY = "(min-width: 1024px)";
+const SETTINGS_DESKTOP_RAIL_TOP = "var(--pf-top-chrome-safe-height)";
+const SETTINGS_DESKTOP_RAIL_HEIGHT = "calc(100dvh - var(--pf-top-chrome-safe-height))";
 
 function shouldUseDesktopSettingsRail(): boolean {
   return typeof window !== "undefined" && window.matchMedia(SETTINGS_MOBILE_NAV_DRAWER_DESKTOP_QUERY).matches;
@@ -96,6 +98,71 @@ export function shouldRestoreDesktopRailOnReload({
   }
   const itemBottom = itemTop + itemHeight;
   return itemTop < visibleTop || itemBottom > visibleBottom;
+}
+
+interface SettingsDesktopRailLayoutStylesInput {
+  isPinned: boolean;
+  forceScrollableDesktopRail: boolean;
+}
+
+interface SettingsDesktopRailLayoutStyles {
+  railStyle: CSSProperties;
+  scrollAreaStyle: CSSProperties;
+}
+
+export function settingsDesktopRailLayoutStyles({
+  isPinned,
+  forceScrollableDesktopRail,
+}: SettingsDesktopRailLayoutStylesInput): SettingsDesktopRailLayoutStyles {
+  if (isPinned) {
+    return {
+      railStyle: {
+        position: "sticky",
+        top: SETTINGS_DESKTOP_RAIL_TOP,
+        height: SETTINGS_DESKTOP_RAIL_HEIGHT,
+        maxHeight: SETTINGS_DESKTOP_RAIL_HEIGHT,
+        overflow: "hidden",
+      },
+      scrollAreaStyle: {
+        height: "100%",
+        maxHeight: "100%",
+        overflowY: "auto",
+        overscrollBehaviorY: "contain",
+      },
+    };
+  }
+
+  if (forceScrollableDesktopRail) {
+    return {
+      railStyle: {
+        position: "static",
+        top: "auto",
+        height: "auto",
+        maxHeight: SETTINGS_DESKTOP_RAIL_HEIGHT,
+        overflow: "hidden",
+      },
+      scrollAreaStyle: {
+        maxHeight: SETTINGS_DESKTOP_RAIL_HEIGHT,
+        overflowY: "auto",
+        overscrollBehaviorY: "contain",
+      },
+    };
+  }
+
+  return {
+    railStyle: {
+      position: "static",
+      top: "auto",
+      height: "auto",
+      maxHeight: "none",
+      overflow: "visible",
+    },
+    scrollAreaStyle: {
+      maxHeight: "none",
+      overflow: "visible",
+      overscrollBehavior: "auto",
+    },
+  };
 }
 
 function readNavigationEntryType(): string | null {
@@ -520,34 +587,10 @@ export function SettingsSideRail({
     </>
   );
 
-  const railStyle: CSSProperties = isPinned
-    ? {
-        position: "sticky",
-        top: "var(--pf-top-chrome-safe-height)",
-        height: "auto",
-      }
-    : {
-        position: "static",
-        top: "auto",
-        height: "auto",
-      };
-  const scrollAreaStyle: CSSProperties = isPinned
-    ? {
-        maxHeight: "calc(100dvh - var(--pf-top-chrome-safe-height))",
-        overflowY: "auto",
-        overscrollBehaviorY: "contain",
-      }
-    : forceScrollableDesktopRail
-      ? {
-          maxHeight: "calc(100dvh - var(--pf-top-chrome-safe-height))",
-          overflowY: "auto",
-          overscrollBehaviorY: "contain",
-        }
-      : {
-        maxHeight: "none",
-        overflow: "visible",
-        overscrollBehavior: "auto",
-      };
+  const { railStyle, scrollAreaStyle } = settingsDesktopRailLayoutStyles({
+    isPinned,
+    forceScrollableDesktopRail,
+  });
 
   return (
     <>

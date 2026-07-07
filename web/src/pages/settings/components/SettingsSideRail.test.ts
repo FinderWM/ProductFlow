@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   centeredRailScrollTop,
   railVisibleWindow,
+  settingsDesktopRailLayoutStyles,
   shouldRestoreDesktopRailOnReload,
 } from "./SettingsSideRail";
 
@@ -111,5 +112,74 @@ describe("SettingsSideRail shouldRestoreDesktopRailOnReload", () => {
         itemHeight: 60,
       }),
     ).toBe(false);
+  });
+});
+
+describe("SettingsSideRail settingsDesktopRailLayoutStyles", () => {
+  it("lets the page move the rail before it reaches the top chrome", () => {
+    expect(
+      settingsDesktopRailLayoutStyles({
+        isPinned: false,
+        forceScrollableDesktopRail: false,
+      }),
+    ).toEqual({
+      railStyle: {
+        position: "static",
+        top: "auto",
+        height: "auto",
+        maxHeight: "none",
+        overflow: "visible",
+      },
+      scrollAreaStyle: {
+        maxHeight: "none",
+        overflow: "visible",
+        overscrollBehavior: "auto",
+      },
+    });
+  });
+
+  it("pins the rail to the top chrome and gives it the remaining viewport height", () => {
+    expect(
+      settingsDesktopRailLayoutStyles({
+        isPinned: true,
+        forceScrollableDesktopRail: false,
+      }),
+    ).toEqual({
+      railStyle: {
+        position: "sticky",
+        top: "var(--pf-top-chrome-safe-height)",
+        height: "calc(100dvh - var(--pf-top-chrome-safe-height))",
+        maxHeight: "calc(100dvh - var(--pf-top-chrome-safe-height))",
+        overflow: "hidden",
+      },
+      scrollAreaStyle: {
+        height: "100%",
+        maxHeight: "100%",
+        overflowY: "auto",
+        overscrollBehaviorY: "contain",
+      },
+    });
+  });
+
+  it("can restore a lower active item on reload without making the rail sticky early", () => {
+    expect(
+      settingsDesktopRailLayoutStyles({
+        isPinned: false,
+        forceScrollableDesktopRail: true,
+      }),
+    ).toEqual({
+      railStyle: {
+        position: "static",
+        top: "auto",
+        height: "auto",
+        maxHeight: "calc(100dvh - var(--pf-top-chrome-safe-height))",
+        overflow: "hidden",
+      },
+      scrollAreaStyle: {
+        maxHeight: "calc(100dvh - var(--pf-top-chrome-safe-height))",
+        overflowY: "auto",
+        overscrollBehaviorY: "contain",
+      },
+    });
   });
 });
