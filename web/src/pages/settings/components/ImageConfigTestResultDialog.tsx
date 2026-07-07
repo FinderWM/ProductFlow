@@ -84,7 +84,7 @@ export function ImageConfigTestResultDialog({
             disabled={!canSaveResourceLibrary || busy}
             title={t("settings.generation.imageTestSaveToResourceLibrary")}
             aria-label={t("settings.generation.imageTestSaveToResourceLibrary")}
-            preset="secondary"
+            preset="primary"
             size="md"
             fullWidth
             leadingIcon={<Save size={16} />}
@@ -110,7 +110,7 @@ export function ImageConfigTestResultDialog({
             loading={keepingSession}
             title={t("settings.generation.imageTestKeepSession")}
             aria-label={t("settings.generation.imageTestKeepSession")}
-            preset="secondary"
+            preset="primary"
             size="md"
             fullWidth
             leadingIcon={<MessageSquareText size={16} />}

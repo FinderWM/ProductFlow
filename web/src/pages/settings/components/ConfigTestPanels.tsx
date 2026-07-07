@@ -1,6 +1,6 @@
 // 生成配置的本地测试草稿面板（文本 / 图像）。从 SettingsPage.tsx 抽出，行为不变。
 
-import { Loader2, Save } from "lucide-react";
+import { Save } from "lucide-react";
 
 import { ClassicSelectField, ClassicTextInput, ClassicTextarea } from "../../../components/classicInputs";
 import { ImageSizePicker } from "../../../components/ImageSizePicker";
@@ -221,17 +221,6 @@ export function TextConfigTestPanel({
           {t("settings.generation.testBriefContextStatus")}
         </div>
       </div>
-      {runningCount > 0 ? (
-        <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
-          <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
-          <div>
-            <div className="font-semibold">{t("settings.generation.testRunning")}</div>
-            <div className="mt-0.5 text-xs text-indigo-700/80 dark:text-violet-100/75">
-              {t("settings.generation.testRunningDetail")}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </SettingsCollapsibleModule>
   );
 }
@@ -304,17 +293,6 @@ export function ImageConfigTestPanel({
           />
         )}
       </SettingsFormField>
-      {runningCount > 0 ? (
-        <div className="flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-800 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
-          <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
-          <div>
-            <div className="font-semibold">{t("settings.generation.imageTestRunning")}</div>
-            <div className="mt-0.5 text-xs text-indigo-700/80 dark:text-violet-100/75">
-              {t("settings.generation.imageTestRunningDetail")}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </SettingsCollapsibleModule>
   );
 }
