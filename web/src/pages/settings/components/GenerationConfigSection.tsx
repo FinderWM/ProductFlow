@@ -890,7 +890,7 @@ export function GenerationConfigPoolSection({
                   ? activeResourceGroupId
                   : savedResourceGroupIds[0] ?? "";
                 onSelectedResourceGroupIdChange(savedResourceGroupId);
-                setConfigSearch("");
+                setFailedOnly(false);
                 setCreateDialogOpen(false);
                 resetNewDraft();
               },
