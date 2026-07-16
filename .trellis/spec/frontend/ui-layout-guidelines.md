@@ -57,7 +57,7 @@ Contract:
 Required family matrix:
 
 | Current render branch | Inputs/selects/toggles | Buttons/action surfaces | Shared leaf requirement |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Confirmed `classic` | `ClassicTextInput`, `ClassicTextarea`, `ClassicSelectField`, `ClassicCheckbox`, `ClassicOptionToggle`, `ClassicSwitch`, `ClassicDateTimeRangeField`, or `LayoutDateTimeRangeField` with `appearance="classic"` | `ClassicActionButton`, `classicActionButtonClassName(...)`, `classicActionSurfaceClassName(...)` | Pass `appearance="classic"` or pass selected classic helpers |
 | Confirmed `workspace` | `WorkspaceTextInput`, `WorkspaceTextarea`, `WorkspaceSelectField`, `WorkspaceCheckbox`, `WorkspaceOptionToggle`, `WorkspaceSwitch`, `WorkspaceDateTimeRangeField`, or `LayoutDateTimeRangeField` with `appearance="workspace"` | `WorkspaceActionButton`, `workspaceActionButtonClassName(...)`, `workspaceActionSurfaceClassName(...)` | Pass `appearance="workspace"` or pass selected workspace helpers |
 | Unknown or mixed | No component family may be chosen yet | No component family may be chosen yet | Trace the caller and add an explicit layout contract |
@@ -177,11 +177,12 @@ panel actions than to workspace pills.
 ### Classic Button Radius
 
 | Style | Radius | Description |
-|---|---|---|
+| --- | --- | --- |
 | `ClassicActionButton` / `classicActionButtonClassName(...)` | `var(--pf-radius-sm)` (8px) | Classic primary / secondary / danger action buttons |
 | `classicActionSurfaceClassName(...)` | `var(--pf-radius-sm)` (8px) | Classic button-like surfaces such as upload/drop zones |
 
 Mechanism:
+
 - Classic buttons must resolve through a classic-only component layer. Do not reuse workspace button classes in classic
   routes just because the JSX structure is similar.
 - The target entry points are `ClassicActionButton`, `classicActionButtonClassName(...)`, and
@@ -211,6 +212,25 @@ Mechanism:
 - Focus-visible must remain obvious in both `light` and `dark`.
 - Upload/drop zones that are visually button-like should use the classic surface helper instead of a workspace surface or
   ad-hoc page-local chrome.
+
+## Image Chat Button Hierarchy
+
+Use this contract for `/image-chat/workbench` and `/inspirations/:inspirationId/image-chat` in both `classic` and
+`workspace` render branches.
+
+- Keep only these flows on `primary` action buttons:
+  - session creation entry points labeled `chat.newSession` / `chat.newSessionShort`
+  - history or mobile draft entry points labeled `chat.newRound` / `chat.newRoundShort`
+  - normal generation submit buttons labeled `chat.startGenerate` / `chat.startGenerateCount`
+- Treat prompt polish, polished-prompt apply, rename/save session name, result-to-library save, attach-as-reference,
+  set-main-source, enhance result reuse, regenerate-cancelled-task, and modal confirmation choices as non-primary
+  actions. Use `secondary` unless the action is destructive.
+- When the mobile floating CTA switches from "new round" into a sheet opener or other helper affordance, demote it from
+  `primary` unless it is still the direct generation submit button.
+- `chat.enhance.start` reuses the same action slot as generation submit but is not automatically a primary CTA. Keep it
+  on `secondary` unless product explicitly promotes enhance submit to a top-level action in both layouts.
+- Validation: search `web/src/pages/ImageChatPage.tsx` and `web/src/pages/image-chat/*.tsx` for `preset="primary"`.
+  Remaining page-local `primary` usage should map only to create-session, new-round, and normal generate entry points.
 
 ## Classic Visual Signature — Inputs
 
@@ -313,7 +333,7 @@ export function SharedFilterRow({
 ### Classic Input Entry Points
 
 | Entry | Description |
-|---|---|
+| --- | --- |
 | `ClassicTextInput` / `classicTextInputClassName(...)` | Classic short text inputs |
 | `ClassicTextarea` / `classicTextareaClassName(...)` | Classic long text / prompt inputs with autosize support |
 | `ClassicSelectField` | Classic wrapper around `SelectField` for density and sizing |
@@ -322,6 +342,7 @@ export function SharedFilterRow({
 | `ClassicSwitch` | Classic binary switch control |
 
 Mechanism:
+
 - Preferred classic input entry points live in `web/src/components/classicInputs.tsx`.
 - `ClassicTextInput` and `ClassicTextarea` must use `.input-premium` / `.textarea-premium` as the base visual contract.
   They may add size, prompt, autosize, or layout classes, but must not depend on workspace-only `pf-workspace-*` tokens.
@@ -358,10 +379,11 @@ from the classic layout. These conventions are enforced via CSS scope overrides 
 ### Input Radius
 
 | Token | Value | Scope |
-|---|---|---|
+| --- | --- | --- |
 | `--pf-radius-workspace-input` | `20px` | All inputs/textareas/selects under workspace scheme |
 
 Mechanism:
+
 - `.input-premium`, `.textarea-premium`, `.pf-shell-input`, and native `input`/`textarea`/`select` elements all receive
   `border-radius: var(--pf-radius-workspace-input)` when inside the workspace scheme selector.
 - Classic scheme continues to use `--pf-radius-md` (14px) for `.input-premium`/`.textarea-premium`.
@@ -398,7 +420,7 @@ Mechanism:
 ### Workspace Buttons
 
 | Style | Radius | Description |
-|---|---|---|
+| --- | --- | --- |
 | `WorkspaceActionButton` / `workspaceActionButtonClassName(...)` | `var(--pf-radius-pill)` (999px) | Workspace primary / secondary / danger actions |
 | `workspaceActionSurfaceClassName(...)` | `var(--pf-radius-pill)` (999px) | Workspace button-like surface for upload/drop zones and other non-button interactions |
 | Legacy `ActionButton` / `actionButtonClassName(...)` | classic default, workspace under root scope | Compatibility adapter for existing callers during migration |
@@ -406,6 +428,7 @@ Mechanism:
 | `.btn-secondary-spring` | `var(--pf-radius-pill)` (999px) | Legacy spring secondary button still supported during migration |
 
 Mechanism:
+
 - Workspace buttons must resolve through a workspace-only component layer for new code.
 - `ActionButton.tsx` remains as a legacy compatibility adapter. Its legacy `pf-action-button*` / `pf-action-surface*`
   classes now render classic by default and switch to workspace visuals only when the root carries
@@ -448,7 +471,7 @@ Mechanism:
 ### When to Use Each Button Class
 
 | Scenario | Class |
-|---|---|
+| --- | --- |
 | New workspace primary / secondary / danger action | Workspace button component/helper |
 | New classic primary / secondary / danger action | Classic button component/helper |
 | Existing caller being migrated gradually | Legacy `ActionButton` / helper, then move to explicit layout entry |
@@ -613,7 +636,7 @@ Semantic classes are defined in `web/src/index.css` after `.pf-table-panel` and 
 appearance:
 
 | Semantic class | Token | light value (equals bare class) |
-|---|---|---|
+| --- | --- | --- |
 | `pf-surface` | `--pf-panel` | `bg-white` |
 | `pf-surface-soft` | `--pf-panel-soft` | `bg-slate-50` / `bg-zinc-50` |
 | `pf-ink` | `--pf-text` | `text-slate-900` / `text-slate-950` |
@@ -653,6 +676,58 @@ it blocks net-new bare colors and records reductions. It is not yet wired into `
 A true leak is a bare neutral class that is **not** in the dusk override allow-list, after stripping `dark:` / `hover:` /
 `focus:` variants. Extract the allow-list from the `data-workspace-appearance="dusk"` block in `index.css` and diff against
 the classes a component actually uses; do not rely on memory of which classes are covered.
+
+## Repeated Card Section Alignment Contract
+
+### Scope / Trigger
+
+Use this contract when cards in a responsive multi-column grid contain the same ordered sections and each corresponding
+section must align with its peers in the same visual row while retaining content-driven heights.
+
+### Layout Contract
+
+- Let the parent grid own the shared row tracks. Each card spans the section count and adopts those rows through CSS
+  Subgrid; section elements must participate in the card grid in the same order.
+- Keep each visual row independent. A single-column layout and an unpaired final card retain natural content height.
+- Keep heights content-driven. Do not synchronize sections with fixed heights or JavaScript measurements.
+- Absolutely positioned card actions do not participate in the shared tracks. Reserve their horizontal space only in the
+  section they overlap.
+- Responsive child layout must account for the card's actual width. A viewport breakpoint such as `lg` can still produce a
+  narrow card inside a side-rail shell; flexible text uses `min-w-0`, fixed controls use `shrink-0`, and unrelated sections
+  must not inherit header action padding.
+
+```tsx
+<div className="grid gap-4 lg:grid-cols-2">
+  {items.map((item) => (
+    <article key={item.id} className="row-span-4 grid grid-rows-subgrid">
+      <header data-card-section="identity">...</header>
+      <section data-card-section="capabilities">...</section>
+      <section data-card-section="generation-config">...</section>
+      <footer data-card-section="enabled-status">...</footer>
+    </article>
+  ))}
+</div>
+```
+
+### Validation Matrix
+
+- Multi-column desktop: compare every paired section's `getBoundingClientRect().top` and `.bottom`; each delta must be at
+  most 1 pixel, and paired card heights must match.
+- First multi-column breakpoint: verify the narrowest cards produced by the page shell, including long URLs, maximum
+  capability counts, wrapping badges, help text, and fixed-width switches.
+- Single-column mobile: verify one card per visual row, natural section heights, and zero document/card horizontal overflow.
+- Layout/theme coverage: verify both `classic` and `workspace`, including one light and one dark state, in an isolated
+  browser context.
+- Regression coverage: assert the section order and Subgrid classes in a focused component test; keep lint, TypeScript,
+  deterministic frontend tests, and the production build gate green.
+
+Good: paired cards use shared Subgrid tracks, and their flexible/fixed children remain shrink-safe at the page's narrowest
+multi-column width.
+
+Base: a single-column list keeps the same four-section structure; each card sizes from its own content.
+
+Bad: cards use independent internal grids, per-card `min-height` guesses, or runtime DOM measurements, so content changes
+move later section boundaries out of alignment.
 
 ## Adding A New UI Layout Scheme
 

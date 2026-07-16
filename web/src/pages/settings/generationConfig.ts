@@ -34,6 +34,7 @@ export interface GenerationConfigDraft {
   images_quality: string;
   images_style: string;
   responses_background_enabled: boolean;
+  supports_image_understanding: boolean;
   structured_output_enabled: boolean;
   structured_output_mode: TextStructuredOutputMode;
   structured_json_response_format_enabled: boolean;
@@ -55,6 +56,10 @@ function textValue(record: Record<string, unknown> | undefined, key: string): st
 function boolValue(record: Record<string, unknown> | undefined, key: string, fallback: boolean): boolean {
   const value = record?.[key];
   return typeof value === "boolean" ? value : fallback;
+}
+
+export function textGenerationConfigSupportsImageUnderstanding(config: Record<string, unknown> | undefined): boolean {
+  return boolValue(config, "supports_image_understanding", false);
 }
 
 export function isTextStructuredOutputProviderKind(providerKind: TextProviderKind | ImageProviderKind): boolean {
@@ -201,6 +206,7 @@ function emptyGenerationConfigDraft(purpose: "text" | "image"): GenerationConfig
     images_quality: "",
     images_style: "",
     responses_background_enabled: true,
+    supports_image_understanding: false,
     structured_output_enabled: false,
     structured_output_mode: "json_schema",
     structured_json_response_format_enabled: false,
@@ -251,6 +257,7 @@ export function generationConfigDraft(config: GenerationConfig): GenerationConfi
     images_quality: textValue(config.config, "images_quality"),
     images_style: textValue(config.config, "images_style"),
     responses_background_enabled: boolValue(config.config, "responses_background_enabled", true),
+    supports_image_understanding: textGenerationConfigSupportsImageUnderstanding(config.config),
     structured_output_enabled: structuredOutput.enabled,
     structured_output_mode: structuredOutput.mode,
     structured_json_response_format_enabled: structuredOutput.enabled,
@@ -278,12 +285,17 @@ export function generationConfigPayloadFromDraft(
         ? { model: draft.model.trim() }
         : {};
   const config =
-    draft.purpose === "text" && isTextStructuredOutputProviderKind(draft.provider_kind)
+    draft.purpose === "text"
       ? {
-          structured_output: {
-            enabled: draft.structured_output_enabled,
-            mode: draft.structured_output_mode,
-          },
+          supports_image_understanding: draft.supports_image_understanding,
+          ...(isTextStructuredOutputProviderKind(draft.provider_kind)
+            ? {
+                structured_output: {
+                  enabled: draft.structured_output_enabled,
+                  mode: draft.structured_output_mode,
+                },
+              }
+            : {}),
         }
       : draft.provider_kind === "openai_responses"
       ? { responses_background_enabled: draft.responses_background_enabled }
@@ -370,17 +382,32 @@ export async function runGenerationConfigBatchTests<T>(
 }
 
 export function generationConfigBatchSelectableIds(
-  items: Array<{ config: Pick<GenerationConfig, "id">; disabled: boolean }>,
+  items: Array<{ config: Pick<GenerationConfig, "id" | "enabled">; disabled: boolean }>,
+  options?: { includeDisabledConfigs?: boolean },
 ): string[] {
-  return items.filter((item) => !item.disabled).map((item) => item.config.id);
+  return items
+    .filter((item) => !item.disabled && (options?.includeDisabledConfigs || item.config.enabled))
+    .map((item) => item.config.id);
 }
 
 export function generationConfigBatchFailedSelectableIds(
-  items: Array<{ config: Pick<GenerationConfig, "id" | "latest_test_result">; disabled: boolean }>,
+  items: Array<{ config: Pick<GenerationConfig, "id" | "enabled" | "latest_test_result">; disabled: boolean }>,
+  options?: { includeDisabledConfigs?: boolean },
 ): string[] {
   return items
-    .filter((item) => !item.disabled && generationConfigHasFailedLatestTest(item.config))
+    .filter(
+      (item) =>
+        !item.disabled &&
+        (options?.includeDisabledConfigs || item.config.enabled) &&
+        generationConfigHasFailedLatestTest(item.config),
+    )
     .map((item) => item.config.id);
+}
+
+export function generationConfigManualTestBlocked(
+  config: Pick<GenerationConfig, "enabled" | "effective_enabled">,
+): boolean {
+  return config.enabled && !config.effective_enabled;
 }
 
 export function generationConfigSuccessRate(config: GenerationConfig): string {

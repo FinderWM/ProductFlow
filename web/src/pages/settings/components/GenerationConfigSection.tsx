@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { ClassicSelectField, ClassicTextInput } from "../../../components/classicInputs";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import { ModalShell } from "../../../components/ModalShell";
 import {
   WorkspaceSelectField,
@@ -28,11 +29,13 @@ import {
 } from "../../../components/workspaceInputs";
 import { formatDateTime } from "../../../lib/format";
 import { useI18n } from "../../../lib/preferences";
+import { useUiLayoutScheme } from "../../../lib/uiLayoutSchemePreference";
 import type {
   GenerationConfig,
   GenerationResourceGroup,
   ImageGenerationConfigTestResponse,
   ProviderProfile,
+  ResourceLibraryAsset,
   TextGenerationConfigJsonResponseFormatTestResponse,
   TextGenerationConfigTestResponse,
 } from "../../../lib/types";
@@ -55,6 +58,7 @@ import {
   generationConfigDraftAfterProviderProfileSelection,
   generationConfigLatestTestDetail,
   generationConfigLatestTestTypeLabelKey,
+  generationConfigManualTestBlocked,
   generationConfigProviderInterfaceLabelKey,
   generationConfigSuccessRate,
   sortGenerationConfigsForDisplay,
@@ -101,12 +105,16 @@ interface GenerationConfigPoolSectionProps {
   textTestState?: TextConfigTestState;
   jsonResponseFormatTestState?: TextConfigJsonResponseFormatTestState;
   imageTestState?: ImageConfigTestState;
+  textTestReferenceAssets?: ResourceLibraryAsset[];
+  canReadResourceLibrary?: boolean;
   onChange: (key: string, next: GenerationConfigDraft, options?: { clearSavedMessage?: boolean }) => void;
   onSave: (draft: GenerationConfigDraft, options?: GenerationConfigSaveOptions) => void;
   onArchive: (configId: string) => void;
   onUnfreeze: (configId: string) => void;
   onTextTestDraftChange?: (draft: TextConfigTestDraft) => void;
   onTextTestPresetChange?: (presetId: string) => void;
+  onTextTestReferenceAssetAdd?: (asset: ResourceLibraryAsset) => void;
+  onTextTestReferenceAssetRemove?: (assetId: string) => void;
   onImageTestDraftChange?: (draft: ImageConfigTestDraft) => void;
   onImageTestPresetChange?: (presetId: string) => void;
   onSaveImageTestDraft?: () => void;
@@ -195,13 +203,24 @@ function GenerationConfigBatchTestDialog({
   onRun,
 }: GenerationConfigBatchTestDialogProps) {
   const { t } = useI18n();
+  const { activeScheme } = useUiLayoutScheme();
   const { SETTINGS_COMPACT_ACTION_CLASS, SETTINGS_ICON_ACTION_CLASS, SETTINGS_MAIN_ACTION_CLASS } =
     useSettingsActionClassNames();
   const titleId = useId();
+  const [disabledSelectionConfirmOpen, setDisabledSelectionConfirmOpen] = useState(false);
   const selectedSet = new Set(selectedIds);
   const selectedCount = selectedIds.length;
   const selectableIds = generationConfigBatchSelectableIds(items);
   const failedSelectableIds = generationConfigBatchFailedSelectableIds(items);
+  const selectedDisabledIds = items
+    .filter((item) => selectedSet.has(item.config.id) && !item.disabled && !item.config.enabled)
+    .map((item) => item.config.id);
+
+  useEffect(() => {
+    if (!open) {
+      setDisabledSelectionConfirmOpen(false);
+    }
+  }, [open]);
 
   if (!open) {
     return null;
@@ -213,182 +232,212 @@ function GenerationConfigBatchTestDialog({
     );
   };
 
+  const handleRun = () => {
+    if (busy || selectedCount === 0) {
+      return;
+    }
+    if (selectedDisabledIds.length > 0) {
+      setDisabledSelectionConfirmOpen(true);
+      return;
+    }
+    onRun();
+  };
+
   return (
-    <ModalShell
-      open={open}
-      onClose={onClose}
-      closeDisabled={busy}
-      ariaLabelledBy={titleId}
-      overlayClassName="z-[85] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
-      panelClassName="flex max-h-[calc(100dvh-3rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
-    >
-      <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
-        <div className="min-w-0">
-          <h2 id={titleId} className="truncate text-lg font-semibold text-slate-950 dark:text-white">
-            {t("settings.generation.batchTestTitle")}
-          </h2>
-          <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-            {t("settings.generation.batchTestSubtitle", {
-              purpose: t(purpose === "text" ? "settings.section.text" : "settings.section.image"),
-              group: resourceGroupName,
-            })}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={busy}
-          className={SETTINGS_ICON_ACTION_CLASS}
-          aria-label={t("create.close")}
-          title={t("create.close")}
-        >
-          <X size={16} />
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => onSelectedIdsChange(selectableIds)}
-            disabled={busy || selectableIds.length === 0}
-            className={SETTINGS_COMPACT_ACTION_CLASS}
-          >
-            <Check size={14} className="mr-1.5" />
-            {t("settings.generation.batchSelectAll")}
-          </button>
-          {failedSelectableIds.length ? (
-            <button
-              type="button"
-              onClick={() => onSelectedIdsChange(failedSelectableIds)}
-              disabled={busy}
-              className={SETTINGS_COMPACT_ACTION_CLASS}
-            >
-              <RotateCcw size={14} className="mr-1.5" />
-              {t("settings.generation.batchSelectFailed")}
-            </button>
-          ) : null}
-        </div>
-        {items.length ? (
-          items.map((item) => {
-            const latestTestResult = item.config.latest_test_result;
-            const latestDetail = latestTestResult ? generationConfigLatestTestDetail(latestTestResult, t) : "";
-            const selected = selectedSet.has(item.config.id);
-            return (
-              <SettingsOptionToggle
-                key={item.config.id}
-                checked={selected}
-                disabled={busy || item.disabled}
-                workspaceSubpage={workspaceSubpage}
-                layout="card"
-                className={`w-full ${
-                  item.disabled
-                    ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900/45 dark:text-slate-400"
-                    : selected
-                      ? "border-indigo-300 bg-indigo-50/70 dark:border-violet-400/45 dark:bg-violet-500/12"
-                      : "border-slate-200 bg-white dark:border-slate-700 dark:bg-[#111b2d]"
-                }`}
-                onChange={() => toggleItem(item.config.id)}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-slate-950 dark:text-white">{item.config.name}</span>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-                        item.config.effective_enabled
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200"
-                          : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200"
-                      }`}
-                    >
-                      {item.config.effective_enabled
-                        ? t("settings.generation.effectiveEnabled")
-                        : t("settings.generation.effectiveDisabled")}
-                    </span>
-                    {!item.config.enabled ? (
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                        {t("settings.provider.disabled")}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-                    {t("settings.generation.batchProviderLine", {
-                      provider: item.providerName,
-                      interfaceName: t(generationConfigProviderInterfaceLabelKey(item.config.provider_kind)),
-                    })}
-                  </span>
-                  <span className="mt-2 block text-xs leading-5 text-slate-600 dark:text-slate-300">
-                    {latestTestResult
-                      ? [
-                          t(generationConfigLatestTestTypeLabelKey(latestTestResult.test_type)),
-                          t(
-                            latestTestResult.status === "failed"
-                              ? "settings.generation.latestTestFailed"
-                              : "settings.generation.latestTestPassed",
-                          ),
-                          formatDateTime(latestTestResult.tested_at),
-                          latestDetail,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")
-                      : t("settings.generation.batchNoLatestTest")}
-                  </span>
-                </span>
-              </SettingsOptionToggle>
-            );
-          })
-        ) : (
-          <div className="rounded-xl border border-dashed pf-hairline-strong bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/45 dark:text-slate-400">
-            {t("settings.generation.batchEmpty")}
+    <>
+      <ModalShell
+        open={open}
+        onClose={onClose}
+        closeDisabled={busy}
+        ariaLabelledBy={titleId}
+        overlayClassName="z-[85] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+        panelClassName="flex max-h-[calc(100dvh-3rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border pf-hairline pf-surface shadow-2xl shadow-slate-950/20 dark:shadow-black/45"
+      >
+        <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b pf-hairline px-5">
+          <div className="min-w-0">
+            <h2 id={titleId} className="truncate text-lg font-semibold pf-ink">
+              {t("settings.generation.batchTestTitle")}
+            </h2>
+            <p className="mt-0.5 truncate text-xs pf-ink-muted">
+              {t("settings.generation.batchTestSubtitle", {
+                purpose: t(purpose === "text" ? "settings.section.text" : "settings.section.image"),
+                group: resourceGroupName,
+              })}
+            </p>
           </div>
-        )}
-      </div>
-      <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-950/45 sm:flex-row sm:items-center sm:justify-between">
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-          <span>{t("settings.generation.batchConcurrency")}</span>
-          {workspaceSubpage ? (
-            <WorkspaceTextInput
-              type="number"
-              min={1}
-              max={20}
-              value={concurrency}
-              disabled={busy}
-              onChange={(event) => onConcurrencyChange(event.target.value)}
-              size="compact"
-              className="w-20"
-            />
-          ) : (
-            <ClassicTextInput
-              type="number"
-              min={1}
-              max={20}
-              value={concurrency}
-              disabled={busy}
-              onChange={(event) => onConcurrencyChange(event.target.value)}
-              size="compact"
-              className="w-20"
-            />
-          )}
-        </label>
-        <div className="flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
             disabled={busy}
-            className={SETTINGS_COMPACT_ACTION_CLASS}
+            className={SETTINGS_ICON_ACTION_CLASS}
+            aria-label={t("create.close")}
+            title={t("create.close")}
           >
-            {t("common.cancel")}
-          </button>
-          <button
-            type="button"
-            onClick={onRun}
-            disabled={busy || selectedCount === 0}
-            className={SETTINGS_MAIN_ACTION_CLASS}
-          >
-            {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Check size={14} className="mr-1.5" />}
-            {t("settings.generation.batchRun", { count: String(selectedCount) })}
+            <X size={16} />
           </button>
         </div>
-      </div>
-    </ModalShell>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onSelectedIdsChange(selectableIds)}
+              disabled={busy || selectableIds.length === 0}
+              className={SETTINGS_COMPACT_ACTION_CLASS}
+            >
+              <Check size={14} className="mr-1.5" />
+              {t("settings.generation.batchSelectAll")}
+            </button>
+            {failedSelectableIds.length ? (
+              <button
+                type="button"
+                onClick={() => onSelectedIdsChange(failedSelectableIds)}
+                disabled={busy}
+                className={SETTINGS_COMPACT_ACTION_CLASS}
+              >
+                <RotateCcw size={14} className="mr-1.5" />
+                {t("settings.generation.batchSelectFailed")}
+              </button>
+            ) : null}
+          </div>
+          {items.length ? (
+            items.map((item) => {
+              const latestTestResult = item.config.latest_test_result;
+              const latestDetail = latestTestResult ? generationConfigLatestTestDetail(latestTestResult, t) : "";
+              const selected = selectedSet.has(item.config.id);
+              return (
+                <SettingsOptionToggle
+                  key={item.config.id}
+                  checked={selected}
+                  disabled={busy || item.disabled}
+                  workspaceSubpage={workspaceSubpage}
+                  layout="card"
+                  className={`w-full ${
+                    item.disabled
+                      ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-900/45 dark:text-slate-400"
+                      : selected
+                        ? "border-indigo-300 bg-indigo-50/70 dark:border-violet-400/45 dark:bg-violet-500/12"
+                        : "border-slate-200 bg-white dark:border-slate-700 dark:bg-[#111b2d]"
+                  }`}
+                  onChange={() => toggleItem(item.config.id)}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-slate-950 dark:text-white">{item.config.name}</span>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                          item.config.effective_enabled
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200"
+                            : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/12 dark:text-amber-200"
+                        }`}
+                      >
+                        {item.config.effective_enabled
+                          ? t("settings.generation.effectiveEnabled")
+                          : t("settings.generation.effectiveDisabled")}
+                      </span>
+                      {!item.config.enabled ? (
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                          {t("settings.provider.disabled")}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                      {t("settings.generation.batchProviderLine", {
+                        provider: item.providerName,
+                        interfaceName: t(generationConfigProviderInterfaceLabelKey(item.config.provider_kind)),
+                      })}
+                    </span>
+                    <span className="mt-2 block text-xs leading-5 text-slate-600 dark:text-slate-300">
+                      {latestTestResult
+                        ? [
+                            t(generationConfigLatestTestTypeLabelKey(latestTestResult.test_type)),
+                            t(
+                              latestTestResult.status === "failed"
+                                ? "settings.generation.latestTestFailed"
+                                : "settings.generation.latestTestPassed",
+                            ),
+                            formatDateTime(latestTestResult.tested_at),
+                            latestDetail,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                        : t("settings.generation.batchNoLatestTest")}
+                    </span>
+                  </span>
+                </SettingsOptionToggle>
+              );
+            })
+          ) : (
+            <div className="rounded-xl border border-dashed pf-hairline-strong bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/45 dark:text-slate-400">
+              {t("settings.generation.batchEmpty")}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-950/45 sm:flex-row sm:items-center sm:justify-between">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+            <span>{t("settings.generation.batchConcurrency")}</span>
+            {workspaceSubpage ? (
+              <WorkspaceTextInput
+                type="number"
+                min={1}
+                max={20}
+                value={concurrency}
+                disabled={busy}
+                onChange={(event) => onConcurrencyChange(event.target.value)}
+                size="compact"
+                className="w-20"
+              />
+            ) : (
+              <ClassicTextInput
+                type="number"
+                min={1}
+                max={20}
+                value={concurrency}
+                disabled={busy}
+                onChange={(event) => onConcurrencyChange(event.target.value)}
+                size="compact"
+                className="w-20"
+              />
+            )}
+          </label>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className={SETTINGS_COMPACT_ACTION_CLASS}
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={handleRun}
+              disabled={busy || selectedCount === 0}
+              className={SETTINGS_MAIN_ACTION_CLASS}
+            >
+              {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Check size={14} className="mr-1.5" />}
+              {t("settings.generation.batchRun", { count: String(selectedCount) })}
+            </button>
+          </div>
+        </div>
+      </ModalShell>
+      <ConfirmDialog
+        open={disabledSelectionConfirmOpen}
+        appearance={activeScheme}
+        title={t("settings.generation.batchDisabledConfirmTitle")}
+        description={t("settings.generation.batchDisabledConfirmDescription", {
+          count: String(selectedDisabledIds.length),
+        })}
+        confirmLabel={t("settings.generation.batchDisabledConfirmLabel")}
+        cancelLabel={t("common.cancel")}
+        destructive={false}
+        busy={busy}
+        onClose={() => setDisabledSelectionConfirmOpen(false)}
+        onConfirm={() => {
+          setDisabledSelectionConfirmOpen(false);
+          onRun();
+        }}
+      />
+    </>
   );
 }
 
@@ -432,14 +481,14 @@ function GenerationConfigCreateDialog({
       closeDisabled={pending}
       ariaLabelledBy={titleId}
       overlayClassName="z-[85] bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
-      panelClassName="flex max-h-[calc(100dvh-3rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 dark:border-slate-700/80 dark:bg-[#0f1726] dark:shadow-black/45"
+      panelClassName="flex max-h-[calc(100dvh-3rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border pf-hairline pf-surface shadow-2xl shadow-slate-950/20 dark:shadow-black/45"
     >
-        <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 dark:border-slate-800">
+        <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b pf-hairline px-5">
           <div className="flex min-w-0 items-center gap-3">
             <span className="text-indigo-600 dark:text-violet-300">
               <Plus size={18} />
             </span>
-            <h2 id={titleId} className="truncate text-lg font-semibold text-slate-950 dark:text-white">
+            <h2 id={titleId} className="truncate text-lg font-semibold pf-ink">
               {title}
             </h2>
           </div>
@@ -497,12 +546,16 @@ export function GenerationConfigPoolSection({
   textTestState,
   jsonResponseFormatTestState,
   imageTestState,
+  textTestReferenceAssets = [],
+  canReadResourceLibrary = false,
   onChange,
   onSave,
   onArchive,
   onUnfreeze,
   onTextTestDraftChange,
   onTextTestPresetChange,
+  onTextTestReferenceAssetAdd,
+  onTextTestReferenceAssetRemove,
   onImageTestDraftChange,
   onImageTestPresetChange,
   onSaveImageTestDraft,
@@ -578,7 +631,7 @@ export function GenerationConfigPoolSection({
           : providerProfile?.name ?? t("settings.provider.selectProfile"),
       resourceGroupId,
       disabled:
-        !config.effective_enabled ||
+        generationConfigManualTestBlocked(config) ||
         alreadyTesting ||
         !draft.name.trim() ||
         providerMissing ||
@@ -651,8 +704,12 @@ export function GenerationConfigPoolSection({
       {purpose === "text" && textTestState && onTextTestDraftChange && onTextTestPresetChange ? (
         <TextConfigTestPanel
           state={textTestState}
+          selectedReferenceAssets={textTestReferenceAssets}
+          canReadResourceLibrary={canReadResourceLibrary}
           onDraftChange={onTextTestDraftChange}
           onPresetChange={onTextTestPresetChange}
+          onAddReferenceAsset={(asset) => onTextTestReferenceAssetAdd?.(asset)}
+          onRemoveReferenceAsset={(assetId) => onTextTestReferenceAssetRemove?.(assetId)}
           workspaceSubpage={workspaceSubpage}
         />
       ) : null}
@@ -1168,7 +1225,7 @@ function GenerationConfigCard({
   ) : null;
   const latestTestResult = config?.latest_test_result ?? null;
   const latestTestDetail = latestTestResult ? generationConfigLatestTestDetail(latestTestResult, t) : "";
-  const effectiveDisabled = Boolean(config && !config.effective_enabled);
+  const manualTestBlocked = config ? generationConfigManualTestBlocked(config) : false;
 
   return (
     <div className={`${SETTINGS_FIELD_CARD_CLASS} relative rounded-2xl border pf-hairline bg-white/80 p-6 shadow-none backdrop-blur-sm dark:border-slate-700/55 dark:bg-[#0f1726]/80 ${onArchive ? "pr-16" : ""}`}>
@@ -1417,7 +1474,17 @@ function GenerationConfigCard({
               workspaceSubpage={workspaceSubpage}
               onChange={(copy_model) => onChange({ ...draft, copy_model })}
             />
-            </div>
+          </div>
+          <div className="sm:max-w-md">
+            <SettingsSwitchToggle
+              checked={draft.supports_image_understanding}
+              disabled={controlsDisabled}
+              workspaceSubpage={workspaceSubpage}
+              onChange={(supports_image_understanding) => onChange({ ...draft, supports_image_understanding })}
+            >
+              {t("settings.generation.supportsImageUnderstanding")}
+            </SettingsSwitchToggle>
+          </div>
           {isTextStructuredOutputProviderKind(draft.provider_kind) ? (
             <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)] sm:items-end">
               <SettingsOptionToggle
@@ -1616,7 +1683,7 @@ function GenerationConfigCard({
               disabled={
                 controlsDisabled ||
                 jsonResponseFormatTesting ||
-                effectiveDisabled ||
+                manualTestBlocked ||
                 !draft.structured_output_enabled ||
                 !draft.name.trim() ||
                 !draft.provider_profile_id
@@ -1638,7 +1705,7 @@ function GenerationConfigCard({
               disabled={
                 controlsDisabled ||
                 testing ||
-                effectiveDisabled ||
+                manualTestBlocked ||
                 !draft.name.trim() ||
                 (draft.provider_kind !== "mock" && !draft.provider_profile_id)
               }
@@ -1655,7 +1722,7 @@ function GenerationConfigCard({
               disabled={
                 controlsDisabled ||
                 imageTesting ||
-                effectiveDisabled ||
+                manualTestBlocked ||
                 !draft.name.trim() ||
                 !draft.model.trim() ||
                 (draft.provider_kind !== "mock" && !draft.provider_profile_id)

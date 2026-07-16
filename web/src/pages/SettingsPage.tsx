@@ -39,6 +39,7 @@ import type {
   GenerationResourceGroup,
   GenerationResourceGroupCreateRequest,
   GenerationResourceGroupUpdateRequest,
+  ResourceLibraryAsset,
   ProviderProfile,
   SettingsExportPayload,
   SettingsImportPreviewResponse,
@@ -435,6 +436,7 @@ export function SettingsPage() {
   const [generationConfigDrafts, setGenerationConfigDrafts] = useState<Record<string, GenerationConfigDraft>>({});
   const [selectedTextResourceGroupId, setSelectedTextResourceGroupId] = useState<string | null>(null);
   const [selectedImageResourceGroupId, setSelectedImageResourceGroupId] = useState<string | null>(null);
+  const [savingGenerationConfigId, setSavingGenerationConfigId] = useState<string | null>(null);
   const [archivingGenerationConfigId, setArchivingGenerationConfigId] = useState<string | null>(null);
   const [unfreezingGenerationConfigId, setUnfreezingGenerationConfigId] = useState<string | null>(null);
   const [generationResourceGroupDrafts, setGenerationResourceGroupDrafts] = useState<
@@ -477,6 +479,8 @@ export function SettingsPage() {
   const shouldLoadGenerationResourceGroups =
     activeSection === "resourceGroups" || activeSection === "text" || activeSection === "image";
   const shouldLoadAllGenerationConfigs = activeSection === "resourceGroups";
+  const shouldLoadProviderGenerationConfigs = activeSection === "providers";
+  const shouldLoadTextTestSupport = activeSection === "text";
   const shouldLoadImageTestSupport =
     activeSection === "image" || Boolean(imageConfigTestGalleryAssetId) || Boolean(imageConfigTestResourceLibrarySource);
 
@@ -539,6 +543,12 @@ export function SettingsPage() {
     enabled: shouldLoadAllGenerationConfigs,
   });
 
+  const providerGenerationConfigsQuery = useQuery({
+    queryKey: ["generation-configs", "all", "providers"],
+    queryFn: () => api.listGenerationConfigs(),
+    enabled: shouldLoadProviderGenerationConfigs,
+  });
+
   const textGenerationConfigsQuery = useQuery({
     queryKey: [
       "generation-configs",
@@ -584,12 +594,20 @@ export function SettingsPage() {
     queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
     enabled: activeSection === "loginPage",
   });
+  const textTestReferenceAssetsQuery = useQuery({
+    queryKey: ["resource-library-assets", "all"],
+    queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
+    enabled: shouldLoadTextTestSupport,
+  });
   const galleryEntryTagMaxSelection = Math.max(
     1,
     Math.floor(runtimeConfigQuery.data?.gallery_entry_tag_max_selection ?? 10),
   );
   const galleryTagRequiredOnSave = runtimeConfigQuery.data?.gallery_tag_required_on_save ?? false;
   const galleryTags = galleryTagsQuery.data ?? [];
+  const textTestReferenceAssets = textConfigTestState.draft.referenceAssetIds
+    .map((assetId) => textTestReferenceAssetsQuery.data?.items.find((asset) => asset.id === assetId) ?? null)
+    .filter((asset): asset is ResourceLibraryAsset => asset !== null);
 
   const resetDraftsFromConfig = useCallback((config: ConfigResponse | undefined) => {
     if (!config) {
@@ -623,6 +641,10 @@ export function SettingsPage() {
   useEffect(() => {
     hydrateGenerationConfigDrafts(resourceGroupGenerationConfigsQuery.data);
   }, [hydrateGenerationConfigDrafts, resourceGroupGenerationConfigsQuery.data]);
+
+  useEffect(() => {
+    hydrateGenerationConfigDrafts(providerGenerationConfigsQuery.data);
+  }, [hydrateGenerationConfigDrafts, providerGenerationConfigsQuery.data]);
 
   useEffect(() => {
     hydrateGenerationConfigDrafts(textGenerationConfigsQuery.data);
@@ -686,6 +708,13 @@ export function SettingsPage() {
           staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
         });
       }
+      if (section === "providers") {
+        void queryClient.prefetchQuery({
+          queryKey: ["generation-configs", "all", "providers"],
+          queryFn: () => api.listGenerationConfigs(),
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
+      }
       if (section === "resourceGroups" || section === "text" || section === "image") {
         void queryClient.prefetchQuery({
           queryKey: ["generation-resource-groups", "settings"],
@@ -730,6 +759,13 @@ export function SettingsPage() {
             staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
           });
         }
+      }
+      if (section === "text") {
+        void queryClient.prefetchQuery({
+          queryKey: ["resource-library-assets", "all"],
+          queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
+          staleTime: SETTINGS_SECTION_PREFETCH_STALE_TIME_MS,
+        });
       }
       if (section === "image") {
         void queryClient.prefetchQuery({
@@ -823,6 +859,7 @@ export function SettingsPage() {
       void providerProfilesQuery.refetch();
       void generationResourceGroupsQuery.refetch();
       void textGenerationConfigsQuery.refetch();
+      void textTestReferenceAssetsQuery.refetch();
     }
     if (activeSection === "image") {
       void providerProfilesQuery.refetch();
@@ -837,6 +874,7 @@ export function SettingsPage() {
     providerProfilesQuery,
     resourceGroupGenerationConfigsQuery,
     shouldLoadConfig,
+    textTestReferenceAssetsQuery,
     textGenerationConfigsQuery,
   ]);
 
@@ -894,6 +932,45 @@ export function SettingsPage() {
     },
     [queryClient],
   );
+
+  const updateTextConfigTestDraftState = useCallback(
+    (recipe: (draft: TextConfigTestState["draft"]) => TextConfigTestState["draft"]) => {
+      setTextConfigTestState((current) => {
+        const selectedPresetId = current.selectedPresetId;
+        const normalizedDraft = normalizeTextConfigTestDraft(
+          recipe(current.draft),
+          current.presets[selectedPresetId] ?? current.draft,
+        );
+        const draftState = {
+          selectedPresetId,
+          draft: normalizedDraft,
+          presets: {
+            ...current.presets,
+            [selectedPresetId]: normalizedDraft,
+          },
+        };
+        writeTextConfigTestDraftState(draftState);
+        return { ...current, ...draftState };
+      });
+    },
+    [],
+  );
+
+  const syncGenerationConfigDraftImageUnderstanding = useCallback((key: string, enabled: boolean) => {
+    setGenerationConfigDrafts((current) => {
+      const draft = current[key];
+      if (!draft || draft.purpose !== "text") {
+        return current;
+      }
+      return {
+        ...current,
+        [key]: {
+          ...draft,
+          supports_image_understanding: enabled,
+        },
+      };
+    });
+  }, []);
 
   const refreshProviderProfilesFromApi = useCallback(async (): Promise<ProviderProfile[] | null> => {
     setError("");
@@ -1228,6 +1305,11 @@ export function SettingsPage() {
         ? api.updateGenerationConfig(draft.id, payload as GenerationConfigUpdateRequest)
         : api.createGenerationConfig(payload as GenerationConfigCreateRequest);
     },
+    onMutate: (draft) => {
+      setSavingGenerationConfigId(draft.id);
+      setError("");
+      setSavedMessage("");
+    },
     onSuccess: async (generationConfig) => {
       setGenerationConfigDrafts((current) => ({ ...current, [generationConfig.id]: generationConfigDraft(generationConfig) }));
       await refreshSettingsQueries({
@@ -1246,6 +1328,7 @@ export function SettingsPage() {
       setSavedMessage("");
       setError(mutationError instanceof ApiError ? mutationError.detail : t("settings.generation.saveFailed"));
     },
+    onSettled: () => setSavingGenerationConfigId(null),
   });
 
   const archiveGenerationConfigMutation = useMutation({
@@ -1381,10 +1464,13 @@ export function SettingsPage() {
       setSavedMessage("");
       setError("");
     },
-    onSuccess: (result, { key }) => {
+    onSuccess: (result, { key, payload }) => {
       setTextConfigTestState((current) => markTextConfigTestSucceeded(current, key, result));
+      if (payload.reference_asset_ids?.length) {
+        syncGenerationConfigDraftImageUnderstanding(key, true);
+      }
     },
-    onError: (mutationError, { key }) => {
+    onError: (mutationError, { key, payload }) => {
       setTextConfigTestState((current) =>
         markTextConfigTestFailed(
           current,
@@ -1393,9 +1479,12 @@ export function SettingsPage() {
             ? mutationError.detail
             : mutationError instanceof Error
               ? mutationError.message
-              : t("settings.generation.testFailed"),
+          : t("settings.generation.testFailed"),
         ),
       );
+      if (payload.reference_asset_ids?.length) {
+        syncGenerationConfigDraftImageUnderstanding(key, false);
+      }
     },
     onSettled: () => {
       void refreshSettingsQueries({ includeGenerationConfigs: true });
@@ -1570,6 +1659,7 @@ export function SettingsPage() {
     deleteProviderProfileMutation.isPending ||
     updateProviderProfileEnabledMutation.isPending;
   const providerPending = providerProfilePending || saveGenerationConfigMutation.isPending;
+  const providerGenerationConfigs = providerGenerationConfigsQuery.data ?? [];
   const resourceGroupPending =
     saveGenerationResourceGroupMutation.isPending || archiveGenerationResourceGroupMutation.isPending;
   const providerProfiles = providerProfilesQuery.data ?? [];
@@ -1577,7 +1667,9 @@ export function SettingsPage() {
   const textGenerationConfigs = textGenerationConfigsQuery.data ?? [];
   const imageGenerationConfigs = imageGenerationConfigsQuery.data ?? [];
   const visibleGenerationConfigs =
-    activeSection === "text"
+    activeSection === "providers"
+      ? providerGenerationConfigs
+      : activeSection === "text"
       ? textGenerationConfigs
       : activeSection === "image"
         ? imageGenerationConfigs
@@ -1624,7 +1716,7 @@ export function SettingsPage() {
         : "";
   const loadingMain =
     (shouldLoadConfig && configQuery.isLoading) ||
-    (activeSection === "providers" && providerProfilesQuery.isLoading) ||
+    (activeSection === "providers" && (providerProfilesQuery.isLoading || providerGenerationConfigsQuery.isLoading)) ||
     (activeSection === "resourceGroups" &&
       (generationResourceGroupsQuery.isLoading || resourceGroupGenerationConfigsQuery.isLoading)) ||
     (activeSection === "text" &&
@@ -1633,7 +1725,7 @@ export function SettingsPage() {
       (providerProfilesQuery.isLoading || generationResourceGroupsQuery.isLoading || imageGenerationConfigsQuery.isLoading));
   const activeSectionError =
     activeSection === "providers"
-      ? providerProfilesQuery.error
+      ? providerProfilesQuery.error ?? providerGenerationConfigsQuery.error
       : activeSection === "resourceGroups"
         ? generationResourceGroupsQuery.error ?? resourceGroupGenerationConfigsQuery.error
         : activeSection === "text"
@@ -1841,11 +1933,14 @@ export function SettingsPage() {
                     {activeSection === "providers" ? (
                       <ProvidersSection
                         profiles={providerProfiles}
+                        generationConfigs={providerGenerationConfigs}
                         profileForm={providerProfileForm}
                         editingProfileId={editingProviderProfileId}
                         drawerOpen={providerDrawerOpen}
-                        pending={providerProfilePending}
+                        pending={providerPending || archiveGenerationConfigMutation.isPending}
                         togglingProfileId={togglingProviderProfileId}
+                        savingGenerationConfigId={savingGenerationConfigId}
+                        archivingGenerationConfigId={archivingGenerationConfigId}
                         canWrite={canWriteProviderSettings}
                         workspaceSubpage={isWorkspaceSubpage}
                         onProfileFormChange={setProviderProfileForm}
@@ -1938,6 +2033,21 @@ export function SettingsPage() {
                           }
                           updateProviderProfileEnabledMutation.mutate({ profileId, enabled });
                         }}
+                        onToggleGenerationConfigEnabled={(config) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
+                          saveGenerationConfigMutation.mutate({
+                            ...generationConfigDraft(config),
+                            enabled: !config.enabled,
+                          });
+                        }}
+                        onDeleteGenerationConfig={(configId) => {
+                          if (!canWriteProviderSettings) {
+                            return;
+                          }
+                          requestGenerationConfigArchive(configId);
+                        }}
                       />
                     ) : null}
 
@@ -2020,23 +2130,7 @@ export function SettingsPage() {
                           unfreezeGenerationConfigMutation.mutate(configId);
                         }}
                         onTextTestDraftChange={(draft) => {
-                          setTextConfigTestState((current) => {
-                            const selectedPresetId = current.selectedPresetId;
-                            const normalizedDraft = normalizeTextConfigTestDraft(
-                              draft,
-                              current.presets[selectedPresetId] ?? current.draft,
-                            );
-                            const draftState = {
-                              selectedPresetId,
-                              draft: normalizedDraft,
-                              presets: {
-                                ...current.presets,
-                                [selectedPresetId]: normalizedDraft,
-                              },
-                            };
-                            writeTextConfigTestDraftState(draftState);
-                            return { ...current, ...draftState };
-                          });
+                          updateTextConfigTestDraftState(() => draft);
                         }}
                         onTextTestPresetChange={(presetId) => {
                           setTextConfigTestState((current) => {
@@ -2049,6 +2143,22 @@ export function SettingsPage() {
                             writeTextConfigTestDraftState(draftState);
                             return { ...current, ...draftState };
                           });
+                        }}
+                        textTestReferenceAssets={textTestReferenceAssets}
+                        canReadResourceLibrary={Boolean(session?.authenticated)}
+                        onTextTestReferenceAssetAdd={(asset) => {
+                          updateTextConfigTestDraftState((draft) => ({
+                            ...draft,
+                            referenceAssetIds: draft.referenceAssetIds.includes(asset.id)
+                              ? draft.referenceAssetIds
+                              : [...draft.referenceAssetIds, asset.id],
+                          }));
+                        }}
+                        onTextTestReferenceAssetRemove={(assetId) => {
+                          updateTextConfigTestDraftState((draft) => ({
+                            ...draft,
+                            referenceAssetIds: draft.referenceAssetIds.filter((currentId) => currentId !== assetId),
+                          }));
                         }}
                         onTestTextConfig={async (key, draft) => {
                           if (!canWriteProviderSettings) {

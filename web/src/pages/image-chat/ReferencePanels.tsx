@@ -342,7 +342,7 @@ export function InspirationAssociationPanel({
         )}
         <div className="grid gap-2">
           <ActionButton
-            preset="primary"
+            preset="secondary"
             size="md"
             onClick={() => onAttach("reference")}
             disabled={saveDisabled}
@@ -355,7 +355,7 @@ export function InspirationAssociationPanel({
           </ActionButton>
           {isInspirationMode ? (
             <ActionButton
-              preset="primary"
+              preset="secondary"
               size="md"
               onClick={() => onAttach("main_source")}
               disabled={saveDisabled}

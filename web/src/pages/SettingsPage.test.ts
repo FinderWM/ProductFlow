@@ -209,6 +209,7 @@ function generationConfigDraft(overrides: Partial<GenerationConfigDraft> & Pick<
     images_quality: "",
     images_style: "",
     responses_background_enabled: true,
+    supports_image_understanding: false,
     structured_output_enabled: false,
     structured_output_mode: "json_schema",
     structured_json_response_format_enabled: false,
@@ -592,6 +593,7 @@ describe("SettingsPage draft helpers", () => {
       tone: DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft.tone,
       outputMode: DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft.outputMode,
       requestedSlotsText: DEFAULT_TEXT_CONFIG_TEST_PRESETS[0].draft.requestedSlotsText,
+      referenceAssetIds: [],
     });
 
     expect(normalizeImageConfigTestDraft({ size: "", prompt: "" })).toEqual({
@@ -1290,7 +1292,10 @@ describe("SettingsPage provider profile helpers", () => {
         brief_model: "gpt-5.4",
         copy_model: "gpt-5.4",
       },
-      config: { structured_output: { enabled: false, mode: "json_schema" } },
+      config: {
+        supports_image_understanding: false,
+        structured_output: { enabled: false, mode: "json_schema" },
+      },
       priority: 100,
       max_concurrency: 1,
       enabled: true,
@@ -1325,10 +1330,12 @@ describe("SettingsPage provider profile helpers", () => {
           requestedSlotsText: JSON.stringify([
             { key: "headline", label: "主标题", required: true, hint: "不超过 12 字" },
           ]),
+          referenceAssetIds: ["asset-1", "asset-2"],
         },
       ),
     ).toMatchObject({
       generation_config_id: "text-config-1",
+      reference_asset_ids: ["asset-1", "asset-2"],
       inspiration: {
         name: "海边灯塔与独行旅人",
         category: "旅行纪实",
@@ -1412,7 +1419,10 @@ describe("SettingsPage provider profile helpers", () => {
         brief_model: "grok-brief",
         copy_model: "grok-copy",
       },
-      config: { structured_output: { enabled: false, mode: "json_schema" } },
+      config: {
+        supports_image_understanding: false,
+        structured_output: { enabled: false, mode: "json_schema" },
+      },
     });
   });
 
@@ -1432,7 +1442,10 @@ describe("SettingsPage provider profile helpers", () => {
     expect(draft.structured_json_response_format_enabled).toBe(true);
     expect(generationConfigPayloadFromDraft(draft)).toMatchObject({
       provider_kind: "openai_chat_completions",
-      config: { structured_output: { enabled: true, mode: "json_object" } },
+      config: {
+        supports_image_understanding: false,
+        structured_output: { enabled: true, mode: "json_object" },
+      },
     });
   });
 
@@ -1451,7 +1464,31 @@ describe("SettingsPage provider profile helpers", () => {
     expect(draft.structured_output_mode).toBe("json_schema");
     expect(generationConfigPayloadFromDraft(draft)).toMatchObject({
       provider_kind: "openai",
-      config: { structured_output: { enabled: true, mode: "json_schema" } },
+      config: {
+        supports_image_understanding: false,
+        structured_output: { enabled: true, mode: "json_schema" },
+      },
+    });
+  });
+
+  it("round-trips text image understanding support config", () => {
+    const draft = generationConfigDraftFromConfig(
+      generationConfig({
+        purpose: "text",
+        provider_kind: "openai",
+        provider_profile_id: "profile-responses",
+        model_settings: { brief_model: "gpt-brief", copy_model: "gpt-copy" },
+        config: { supports_image_understanding: true },
+      }),
+    );
+
+    expect(draft.supports_image_understanding).toBe(true);
+    expect(generationConfigPayloadFromDraft(draft)).toMatchObject({
+      provider_kind: "openai",
+      config: {
+        supports_image_understanding: true,
+        structured_output: { enabled: false, mode: "json_schema" },
+      },
     });
   });
 

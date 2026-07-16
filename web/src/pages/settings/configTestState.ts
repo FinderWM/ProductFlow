@@ -18,6 +18,7 @@ export interface TextConfigTestDraft {
   tone: string;
   outputMode: "freeform" | "blocks" | "layout_brief";
   requestedSlotsText: string;
+  referenceAssetIds: string[];
 }
 
 export interface TextConfigTestPreset {
@@ -124,6 +125,7 @@ function textConfigDraft({
     tone,
     outputMode,
     requestedSlotsText: EMPTY_REQUESTED_SLOTS_JSON,
+    referenceAssetIds: [],
   };
 }
 
@@ -223,6 +225,7 @@ const PREVIOUS_DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
   tone: "克制、诗意、具象",
   outputMode: "blocks",
   requestedSlotsText: EMPTY_REQUESTED_SLOTS_JSON,
+  referenceAssetIds: [],
 };
 const LEGACY_DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
   inspirationName: "测试灵感产物",
@@ -235,6 +238,7 @@ const LEGACY_DEFAULT_TEXT_CONFIG_TEST_DRAFT: TextConfigTestDraft = {
   tone: "清晰直接",
   outputMode: "blocks",
   requestedSlotsText: EMPTY_REQUESTED_SLOTS_JSON,
+  referenceAssetIds: [],
 };
 
 const TEXT_CONFIG_TEST_STORAGE_KEY = "inspiration-one.settings.text-config-test";
@@ -337,7 +341,7 @@ function isLegacyDefaultTextConfigTestDraft(record: Record<string, unknown>): bo
 }
 
 function cloneTextConfigTestDraft(draft: TextConfigTestDraft): TextConfigTestDraft {
-  return { ...draft };
+  return { ...draft, referenceAssetIds: [...draft.referenceAssetIds] };
 }
 
 function defaultTextConfigTestPresetDrafts(): Record<string, TextConfigTestDraft> {
@@ -384,6 +388,11 @@ export function normalizeTextConfigTestDraft(
     outputMode: isOutputMode(record.outputMode) ? record.outputMode : fallback.outputMode,
     requestedSlotsText:
       typeof record.requestedSlotsText === "string" ? record.requestedSlotsText : fallback.requestedSlotsText,
+    referenceAssetIds: Array.isArray(record.referenceAssetIds)
+      ? record.referenceAssetIds
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter((item, index, array) => item && array.indexOf(item) === index)
+      : [...fallback.referenceAssetIds],
   };
 }
 

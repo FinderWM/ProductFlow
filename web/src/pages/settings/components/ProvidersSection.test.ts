@@ -31,11 +31,14 @@ function renderProvidersSection(workspaceSubpage: boolean): string {
         providerProfile({ id: "enabled", name: "Enabled Provider" }),
         providerProfile({ id: "disabled", name: "Disabled Provider", enabled: false }),
       ],
+      generationConfigs: [],
       profileForm: EMPTY_PROVIDER_FORM,
       editingProfileId: null,
       drawerOpen: false,
       pending: false,
       togglingProfileId: null,
+      savingGenerationConfigId: null,
+      archivingGenerationConfigId: null,
       canWrite: true,
       workspaceSubpage,
       onProfileFormChange: () => undefined,
@@ -45,6 +48,8 @@ function renderProvidersSection(workspaceSubpage: boolean): string {
       onSubmitProfile: () => undefined,
       onDeleteProfile: () => undefined,
       onToggleProfileEnabled: () => undefined,
+      onToggleGenerationConfigEnabled: () => undefined,
+      onDeleteGenerationConfig: () => undefined,
     }),
   );
 }
@@ -73,5 +78,20 @@ describe("ProvidersSection status tabs", () => {
     expect(markup).toContain("pf-workspace-horizontal-switch-tabs");
     expect(markup).not.toContain("pf-classic-horizontal-switch-tabs");
     expect(markup).toContain("flex flex-wrap gap-1");
+  });
+
+  it("renders each provider card as four ordered subgrid sections", () => {
+    const markup = renderProvidersSection(false);
+    const identityIndex = markup.indexOf('data-provider-card-section="identity"');
+    const capabilitiesIndex = markup.indexOf('data-provider-card-section="capabilities"');
+    const generationConfigIndex = markup.indexOf('data-provider-card-section="generation-config"');
+    const enabledStatusIndex = markup.indexOf('data-provider-card-section="enabled-status"');
+
+    expect(markup).toContain("row-span-4 grid grid-rows-subgrid");
+    expect(markup.match(/data-provider-card-section=/g)).toHaveLength(4);
+    expect(identityIndex).toBeGreaterThanOrEqual(0);
+    expect(capabilitiesIndex).toBeGreaterThan(identityIndex);
+    expect(generationConfigIndex).toBeGreaterThan(capabilitiesIndex);
+    expect(enabledStatusIndex).toBeGreaterThan(generationConfigIndex);
   });
 });

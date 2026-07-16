@@ -7,6 +7,7 @@ import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup } from "../../lib/types";
+import type { ActionButtonPreset } from "../ActionButton";
 import { GalleryImagePreviewDialog } from "../GalleryImagePreviewDialog";
 import {
   actionButtonClassNameForAppearance,
@@ -30,6 +31,7 @@ interface ResourceLibraryModalProps {
   selectingAssetId?: string | null;
   isAssetSelectable?: (asset: ResourceLibraryAsset) => boolean;
   assetSelectDisabledTitle?: string | null;
+  selectButtonPreset?: ActionButtonPreset;
   footer?: ReactNode;
 }
 
@@ -48,6 +50,7 @@ export function ResourceLibraryModal({
   selectingAssetId = null,
   isAssetSelectable,
   assetSelectDisabledTitle = null,
+  selectButtonPreset = "primary",
   footer = null,
 }: ResourceLibraryModalProps) {
   const { t } = useI18n();
@@ -239,7 +242,7 @@ export function ResourceLibraryModal({
                               </a>
                               {onSelectAsset ? (
                                 <ActionButtonComponent
-                                  preset="primary"
+                                  preset={selectButtonPreset}
                                   size="sm"
                                   onClick={() => onSelectAsset(asset)}
                                   disabled={actionDisabled}

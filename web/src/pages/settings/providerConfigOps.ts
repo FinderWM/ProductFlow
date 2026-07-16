@@ -78,6 +78,7 @@ export function textGenerationConfigTestPayload(
   return {
     generation_config_id: generationConfigDraft.id,
     generation_config: generationConfig,
+    reference_asset_ids: [...testDraft.referenceAssetIds],
     inspiration: {
       name: testDraft.inspirationName.trim() || DEFAULT_TEXT_CONFIG_TEST_DRAFT.inspirationName,
       category: testDraft.category.trim() || null,

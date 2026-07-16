@@ -5,6 +5,7 @@ import { Check, CheckCircle2, Image as ImageIcon, Loader2, Save, X } from "lucid
 import { api, ApiError } from "../../lib/api";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup, ResourceLibrarySourceType } from "../../lib/types";
+import type { ActionButtonPreset } from "../ActionButton";
 import { actionButtonComponentForAppearance } from "../layoutActionButtons";
 import { ModalShell } from "../ModalShell";
 import { WorkspaceOptionToggle } from "../workspaceInputs";
@@ -22,6 +23,7 @@ interface SaveToResourceLibraryDialogProps {
   source: ResourceLibrarySaveSource | null;
   canWrite: boolean;
   appearance?: SaveToResourceLibraryDialogAppearance;
+  saveButtonPreset?: ActionButtonPreset;
   onClose: () => void;
   onSaved?: (asset: ResourceLibraryAsset) => void;
 }
@@ -104,6 +106,7 @@ export function SaveToResourceLibraryDialog({
   source,
   canWrite,
   appearance = "classic",
+  saveButtonPreset = "primary",
   onClose,
   onSaved,
 }: SaveToResourceLibraryDialogProps) {
@@ -343,7 +346,7 @@ export function SaveToResourceLibraryDialog({
             {t("common.cancel")}
           </ActionButtonComponent>
           <ActionButtonComponent
-            preset="primary"
+            preset={saveButtonPreset}
             size="md"
             onClick={handleSave}
             disabled={

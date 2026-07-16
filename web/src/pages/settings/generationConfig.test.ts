@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { GenerationConfig } from "../../lib/types";
-import { generationConfigsForPurpose, sortGenerationConfigsForDisplay } from "./generationConfig";
+import {
+  generationConfigBatchFailedSelectableIds,
+  generationConfigBatchSelectableIds,
+  generationConfigManualTestBlocked,
+  generationConfigsForPurpose,
+  sortGenerationConfigsForDisplay,
+} from "./generationConfig";
 
 function generationConfig(overrides: Partial<GenerationConfig> & Pick<GenerationConfig, "id" | "purpose">): GenerationConfig {
   return {
@@ -78,5 +84,82 @@ describe("generation config display sorting", () => {
         "text",
       ).map((config) => config.id),
     ).toEqual(["text-enabled", "text-disabled"]);
+  });
+});
+
+describe("generation config testing helpers", () => {
+  it("allows manual test for disabled configs but blocks provider-unavailable enabled configs", () => {
+    expect(
+      generationConfigManualTestBlocked(
+        generationConfig({ id: "enabled-ok", purpose: "text", enabled: true, effective_enabled: true }),
+      ),
+    ).toBe(false);
+    expect(
+      generationConfigManualTestBlocked(
+        generationConfig({ id: "config-disabled", purpose: "text", enabled: false, effective_enabled: false }),
+      ),
+    ).toBe(false);
+    expect(
+      generationConfigManualTestBlocked(
+        generationConfig({ id: "provider-disabled", purpose: "text", enabled: true, effective_enabled: false }),
+      ),
+    ).toBe(true);
+  });
+
+  it("excludes disabled configs from batch auto-selection unless explicitly included", () => {
+    const failedResult = {
+      id: "test-result-failed",
+      generation_config_id: "generation-config-under-test",
+      test_type: "text" as const,
+      status: "failed" as const,
+      tested_at: "2026-07-08T00:00:00Z",
+      duration_ms: 100,
+      provider_kind: "openai",
+      message: "failed",
+      error_detail: "failed",
+      model_summary: {},
+    };
+    const items = [
+      {
+        config: generationConfig({ id: "enabled", purpose: "text", enabled: true, effective_enabled: true }),
+        disabled: false,
+      },
+      {
+        config: generationConfig({
+          id: "disabled-config",
+          purpose: "text",
+          enabled: false,
+          effective_enabled: false,
+          latest_test_result: failedResult,
+        }),
+        disabled: false,
+      },
+      {
+        config: generationConfig({
+          id: "enabled-failed",
+          purpose: "text",
+          enabled: true,
+          effective_enabled: true,
+          latest_test_result: failedResult,
+        }),
+        disabled: false,
+      },
+      {
+        config: generationConfig({ id: "blocked", purpose: "text", enabled: true, effective_enabled: true }),
+        disabled: true,
+      },
+    ];
+
+    expect(generationConfigBatchSelectableIds(items)).toEqual(["enabled", "enabled-failed"]);
+    expect(generationConfigBatchSelectableIds(items, { includeDisabledConfigs: true })).toEqual([
+      "enabled",
+      "disabled-config",
+      "enabled-failed",
+    ]);
+    expect(generationConfigBatchFailedSelectableIds(items)).toEqual(["enabled-failed"]);
+    expect(generationConfigBatchFailedSelectableIds(items, { includeDisabledConfigs: true })).toEqual([
+      "disabled-config",
+      "enabled-failed",
+    ]);
   });
 });

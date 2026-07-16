@@ -2850,7 +2850,7 @@ function ImageChatWorkbenchPage() {
                   disabled: Boolean(generationSettingsBlockedTitle),
                 })}
                 <ActionButton
-                  preset="primary"
+                  preset="secondary"
                   size="sm"
                   onClick={handlePolishPrompt}
                   disabled={
@@ -2879,7 +2879,7 @@ function ImageChatWorkbenchPage() {
                     <div className="whitespace-pre-wrap">{polishedPrompt}</div>
                     <div className="mt-2 flex gap-2">
                       <ActionButton
-                        preset="primary"
+                        preset="secondary"
                         size="sm"
                         onClick={handleUsePolishedPrompt}
                         disabled={Boolean(generationSettingsBlockedTitle)}
@@ -3135,7 +3135,7 @@ function ImageChatWorkbenchPage() {
               {activeEnhanceAttachedRound ? (
                 <div className="flex flex-wrap gap-2">
                   <ActionButton
-                    preset="primary"
+                    preset="secondary"
                     size="sm"
                     onClick={handleUseAttachedEnhanceAsBase}
                     leadingIcon={<Layers3 size={14} />}
@@ -3300,7 +3300,7 @@ function ImageChatWorkbenchPage() {
           {selectedGeneratedSavedToGallery ? t("chat.alreadyInGallery") : t("chat.sendGallery")}
         </ActionButton>
         <ActionButton
-          preset="primary"
+          preset="secondary"
           size="sm"
           onClick={handleSaveSelectedToResourceLibrary}
           disabled={saveSelectedResourceLibraryDisabled}
@@ -3474,7 +3474,7 @@ function ImageChatWorkbenchPage() {
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <ActionButton
-                  preset="primary"
+                  preset="secondary"
                   size="icon-lg"
                   onClick={() => {
                     if (renameEnabled) {
@@ -3631,7 +3631,7 @@ function ImageChatWorkbenchPage() {
                 />
                 {renameEnabled ? (
                   <ActionButton
-                    preset="primary"
+                    preset="secondary"
                     size="icon-lg"
                     onClick={handleRename}
                     disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
@@ -3669,7 +3669,7 @@ function ImageChatWorkbenchPage() {
               </div>
             ) : null}
             <ActionButton
-              preset="primary"
+              preset={chatMode === "enhance" ? "secondary" : "primary"}
               size="lg"
               onClick={chatMode === "enhance" ? handleSubmitEnhance : handleGenerate}
               disabled={primaryActionDisabled}
@@ -3844,7 +3844,7 @@ function ImageChatWorkbenchPage() {
         <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_-6px_18px_rgba(15,23,42,0.12)] dark:border-slate-700 dark:bg-slate-950 dark:shadow-[0_-12px_28px_rgba(0,0,0,0.30)]">
           <ActionButton
             ref={mobileSettingsButtonRef}
-            preset="primary"
+            preset={generationDraftOpen ? "secondary" : "primary"}
             size="lg"
             onClick={() => {
               if (!generationDraftOpen) {
@@ -3927,7 +3927,7 @@ function ImageChatWorkbenchPage() {
                 </div>
               ) : null}
               <ActionButton
-                preset="primary"
+                preset={chatMode === "enhance" ? "secondary" : "primary"}
                 size="lg"
                 onClick={chatMode === "enhance" ? handleSubmitEnhance : handleGenerate}
                 disabled={primaryActionDisabled}
@@ -4038,6 +4038,7 @@ function ImageChatWorkbenchPage() {
         onClose={() => setResourceLibraryOpen(false)}
         appearance={actionAppearance}
         canRead
+        selectButtonPreset="secondary"
         onSelectAsset={handleResourceLibraryAssetSelect}
         selectLabel={t("resourceLibrary.loadToImageSession")}
         selectDisabled={Boolean(resourceLibraryLoadReferenceBlockedTitle)}
@@ -4048,6 +4049,7 @@ function ImageChatWorkbenchPage() {
         appearance={actionAppearance}
         source={resourceLibrarySaveSource}
         canWrite={!resourceLibrarySaveGeneratedBlockedTitle}
+        saveButtonPreset="secondary"
         onClose={() => setResourceLibrarySaveSource(null)}
         onSaved={() => {
           setSuccessMessage(t("resourceLibrary.saved"));
@@ -4133,7 +4135,7 @@ function ImageChatWorkbenchPage() {
                 {t("common.cancel")}
               </ActionButton>
               <ActionButton
-                preset="primary"
+                preset="secondary"
                 size="md"
                 onClick={handleConfirmCreateSession}
                 disabled={createSessionMutation.isPending || !createSessionResourceGroupId}
@@ -4214,7 +4216,7 @@ function ImageChatWorkbenchPage() {
               {t("chat.newRoundFreshConfig")}
             </ActionButton>
             <ActionButton
-              preset="primary"
+              preset="secondary"
               size="md"
               onClick={() => {
                 setNewRoundChoiceOpen(false);

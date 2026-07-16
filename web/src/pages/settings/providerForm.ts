@@ -16,6 +16,7 @@ import type {
   ProviderProfileUpdateRequest,
   ProviderType,
 } from "../../lib/types";
+import { sortGenerationConfigsForDisplay } from "./generationConfig";
 
 export function filterProviderProfiles(profiles: ProviderProfile[], query: string): ProviderProfile[] {
   const normalizedQuery = query.trim().toLowerCase();
@@ -292,6 +293,21 @@ export function generationConfigsUsingProvider(
 ): GenerationConfig[] {
   return generationConfigs.filter(
     (generationConfig) => generationConfig.provider_profile_id === profileId && !generationConfig.archived_at,
+  );
+}
+
+export function providerGenerationConfigsForUsage(
+  generationConfigs: GenerationConfig[],
+  profileId: string,
+  purpose: "text" | "image",
+): GenerationConfig[] {
+  return sortGenerationConfigsForDisplay(
+    generationConfigs.filter(
+      (generationConfig) =>
+        generationConfig.provider_profile_id === profileId &&
+        generationConfig.purpose === purpose &&
+        !generationConfig.archived_at,
+    ),
   );
 }
 

@@ -140,7 +140,7 @@ export function GenerationCanvasPlaceholder({
           ) : null}
           {cancelled && regeneratable ? (
             <ActionButton
-              preset="primary"
+              preset="secondary"
               size="lg"
               onClick={() => onRegenerate(candidate.task)}
               disabled={regenerating || Boolean(actionBlockedTitle)}

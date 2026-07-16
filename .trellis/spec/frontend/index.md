@@ -14,7 +14,7 @@ These files document the frontend conventions that are actually present in this 
 ## Guidelines Index
 
 | Guide | Description | Status |
-|-------|-------------|--------|
+| ------- | ------------- | -------- |
 | [Directory Structure](./directory-structure.md) | React/Vite app layout, pages, components, lib boundaries | Filled |
 | [Component Guidelines](./component-guidelines.md) | Function components, props, Tailwind styling, forms/accessibility | Filled |
 | [Hook Guidelines](./hook-guidelines.md) | React Query, mutations/cache updates, polling, local hooks | Filled |
@@ -46,6 +46,9 @@ Use this map when the change is feature-driven rather than file-driven:
 - Image-chat handoff, generated asset gallery state, and resource-group URL state: read `./type-safety.md`,
   `./state-management.md`, `./component-guidelines.md`, `./resource-governance-guidelines.md`, and
   `../backend/database-guidelines.md`.
+- Image-chat session creation, new-round entry, generate CTA hierarchy, or layout-sensitive image-chat button styling:
+  read `./ui-layout-guidelines.md`, `./component-guidelines.md`, `./state-management.md`, and
+  `./resource-governance-guidelines.md` when result actions touch gallery or resource-library flows.
 - Image-to-code menu, preview iframe, local Figma summary/download UI, or image-to-code query/mutation state: read
   `./image-to-code-page.md`, `./ui-layout-guidelines.md`, `./state-management.md`, and
   `../backend/image-to-code-pipeline.md`.

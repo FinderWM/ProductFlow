@@ -91,6 +91,7 @@ multipart boundary.
 - Backend API: `POST /api/settings/generation-configs/test-text`.
 - Request DTO mirror: `TextGenerationConfigTestRequest`.
 - Copy context DTO mirror: `TextGenerationConfigTestCopyRequest`.
+- Generation-config draft mirror: `GenerationConfigDraft.supports_image_understanding`.
 - Slot DTO mirror: `CopySlotRequest { key, label, required?, hint? }`.
 - Response preview DTO mirror: `TextGenerationConfigTestResponse.request_context`.
 - Text preset source: `DEFAULT_TEXT_CONFIG_TEST_PRESETS` in `web/src/pages/settings/configTestState.ts`.
@@ -100,14 +101,22 @@ multipart boundary.
 
 - `copy_request` must carry the visible UI values:
   `instruction`, `purpose`, `channel`, `tone`, `output_mode`, and `requested_slots`.
+- `TextGenerationConfigTestRequest.reference_asset_ids` mirrors the selected resource-library images that should enter the
+  real copy-generation context during the test call.
 - `output_mode` is exactly `"freeform" | "blocks" | "layout_brief"`.
 - `requested_slots` is edited locally as JSON text, parsed into `CopySlotRequest[]`, and submitted as backend snake_case
   `requested_slots`.
+- `supports_image_understanding` belongs to the text generation-config draft/payload itself, not the provider-profile
+  draft. Settings save/update/import/export must keep the boolean in `config`.
 - The response must include `request_context.brief.system_instructions`,
   `request_context.brief.user_content`, `request_context.copy.system_instructions`,
   `request_context.copy.user_content`, and `request_context.reference_text`.
-- The text test panel should expose fixed test state that is still part of the request context, such as reference images
-  being `"未连接"` and the generated brief feeding the copy request.
+- The text test panel should expose the same reference-image state that is sent to the backend: no selected asset renders
+  the disconnected/empty hint, selected assets render the connected count, and the generated brief still feeds the copy
+  request preview.
+- Image-aware text tests auto-sync only the active generation-config draft: success with selected reference assets turns
+  `supports_image_understanding` on, failure with selected reference assets turns it off, and text tests without selected
+  reference assets must not change the current draft value.
 - Built-in text test presets should stay creative-scene defaults. Do not reintroduce ecommerce-only defaults such as
   `channel="电商"` or `purpose="main_image"` for the settings text-test scene data.
 - Built-in image test presets should use the same six scene ids, labels, descriptions, and order as text test presets.
@@ -121,6 +130,7 @@ multipart boundary.
 - Invalid JSON -> block the text test locally with a visible parse error.
 - Non-array `requestedSlotsText` -> block locally with `"可选槽位必须是 JSON 数组。"` or localized equivalent.
 - Slot without non-empty `key` and `label` -> block locally before the API call.
+- Selecting the same reference asset twice -> block locally with the localized duplicate-image message.
 - Backend response missing `request_context` -> frontend build/test factories should fail because
   `TextGenerationConfigTestResponse` requires the field.
 
@@ -128,19 +138,26 @@ multipart boundary.
 
 - Good: switching a preset changes the editable draft and persists user edits for that preset in localStorage.
 - Good: starting a text config test submits the same `purpose/channel/tone/output_mode/requested_slots` shown in the panel.
+- Good: starting a text config test with selected resource-library images submits `reference_asset_ids`, shows the same
+  selected thumbnails in the panel, and syncs `supports_image_understanding` from the test result.
 - Good: starting an image config test submits the selected image preset's `size/prompt` through the existing image test
   payload shape, without adding hidden fields.
 - Base: old single-draft localStorage data migrates into the primary preset while other built-in presets remain available.
+- Base: an operator can manually flip `supports_image_understanding` without running an image-aware test, and a later
+  text-only test keeps that manual value unchanged.
 - Bad: hard-coding `purpose`, `channel`, `tone`, or `output_mode` inside `textGenerationConfigTestPayload(...)` while the
   panel shows different values.
+- Bad: keeping the image-understanding switch inside provider-profile state or mutating it from a text test that did not
+  include any reference image.
 - Bad: building the request-context preview with strings that duplicate provider prompt construction instead of a shared
   helper also used by the providers.
 
 #### 6. Tests Required
 
 - Frontend tests for text/image preset count/order, legacy draft migration, per-preset local overrides, requested-slot JSON
-  parsing, `textGenerationConfigTestPayload(...)`, and unchanged `imageGenerationConfigTestPayload(...)` shape.
-- Backend API tests asserting `request_context` contains brief/copy user content and fixed reference state.
+  parsing, `textGenerationConfigTestPayload(...)`, `reference_asset_ids`, `supports_image_understanding` round-trip, and
+  unchanged `imageGenerationConfigTestPayload(...)` shape.
+- Backend API tests asserting `request_context` contains brief/copy user content and the selected reference-image state.
 - Backend provider-route tests asserting `CopyNodeConfigV2` receives UI-submitted `purpose`, `channel`, `tone`,
   `output_mode`, and `requested_slots`.
 - Provider payload tests should still pass after prompt-context helper extraction.
@@ -251,25 +268,25 @@ copy_request: {
 
 #### 7. Wrong vs Correct
 
-#### Wrong
+#### Wrong: derive gallery state from a second list
 
 ```tsx
 const saved = galleryEntries.some((entry) => entry.image_session_asset_id === selectedRound.generated_asset.id);
 ```
 
-#### Correct
+#### Correct: consume the asset gallery state
 
 ```tsx
 const saved = selectedRound.generated_asset.gallery_saved;
 ```
 
-#### Wrong
+#### Wrong: omit selected gallery tags
 
 ```tsx
 api.saveGalleryEntry(selectedRound.generated_asset.id);
 ```
 
-#### Correct
+#### Correct: submit selected gallery tags
 
 ```tsx
 api.saveGalleryEntry(selectedRound.generated_asset.id, { tag_ids: selectedTagIds });
@@ -531,12 +548,14 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
 ### Scenario: Settings migration API typing
 
 #### 1. Scope / Trigger
+
 - Trigger: changes to settings export/import API methods, SettingsPage import/export UI, or backend
   `SettingsExportDocument` / `SettingsImportPreviewResponse` / `SettingsImportCommitResponse` schemas.
 - Settings migration is a cross-layer DTO contract. Keep TypeScript types aligned with backend Pydantic schemas and keep
   backend `snake_case` field names.
 
 #### 2. Signatures
+
 - API methods:
   - `api.exportSettings(): Promise<SettingsExportDocument>`
   - `api.previewSettingsImport(payload: SettingsExportDocument): Promise<SettingsImportPreview>`
@@ -556,6 +575,7 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   - `GenerationConfig`, `GenerationConfigOption`, `GenerationConfigStatus`
 
 #### 3. Contracts
+
 - `runtime_config` is a map of config key to JSON scalar/list values from the backend export.
 - `runtime_config` must not include legacy `admin_access_required`; account login is always required by the backend.
 - `provider_profiles` may include `api_key`; SettingsPage must treat exported files as sensitive and show confirmation
@@ -600,6 +620,7 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   backend or imported legacy rows. New exports and save payloads must include `resource_group_ids`.
 
 #### 4. Validation & Error Matrix
+
 - Invalid JSON file -> SettingsPage shows a local invalid-file error before calling the API.
 - API 400 from preview/commit -> show `ApiError.detail`.
 - User cancels export/import confirmation -> do not call the API.
@@ -614,6 +635,7 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
   permission.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: export downloads exactly the typed backend payload, including `generation_resource_groups` and
   `generation_configs`, then importing that JSON previews the same counts.
 - Good: export/import previews include template category/template counts and key/name summaries.
@@ -640,6 +662,7 @@ const thumbUrl = inspiration.latest_generated_image_thumbnail_url ?? inspiration
 - Bad: treating non-null `frozen_until` as frozen without checking whether the timestamp is still in the future.
 
 #### 6. Tests Required
+
 - SettingsPage tests for export confirmation and generated JSON download path.
 - SettingsPage tests for import preview summary, API-key warning, commit confirmation, and query invalidation.
 - Helper tests proving workflow/image-chat payloads round-trip `resource_group_id`; auto generation keeps
@@ -708,12 +731,14 @@ resource_group_ids: draft.resource_group_ids,
 ### Scenario: Generation resource group frontend DTOs
 
 #### 1. Scope / Trigger
+
 - Trigger: changes to generation group settings UI, RBAC user grants, image-chat generation, workflow inspector
   generation settings, gallery/inspiration-history filters, generated-result DTOs, or sensitive-image list masking.
 - This is a cross-layer DTO contract. Frontend types mirror backend `snake_case` fields and page code must keep group
   selection separate from concrete provider config management.
 
 #### 2. Signatures
+
 - Shared DTOs in `web/src/lib/types.ts`:
   - `GenerationResourceGroup` includes `blur_images_by_default: boolean`.
   - `GenerationResourceGroupTag` includes `blur_images_by_default: boolean`.
@@ -736,6 +761,7 @@ resource_group_ids: draft.resource_group_ids,
 - Settings export/import DTOs that carry `generation_resource_groups` preserve `blur_images_by_default`.
 
 #### 3. Contracts
+
 - SettingsPage owns group CRUD and generation config group assignment. Generation config assignment is multi-select:
   settings filters and counts use `resource_group_ids.includes(group.id)`, while the unbound tab uses
   `resource_group_ids.length === 0`. Mutations invalidate `['provider-config']`,
@@ -776,6 +802,7 @@ resource_group_ids: draft.resource_group_ids,
   filter points at a sensitive group.
 
 #### 4. Validation & Error Matrix
+
 - `listMyGenerationResourceGroups()` returns no enabled groups -> generation controls are disabled and show the
   group-required message.
 - Selected group disappears, becomes disabled, or is archived after refetch -> page resets to the first enabled group or
@@ -791,6 +818,7 @@ resource_group_ids: draft.resource_group_ids,
 - `personalMaskEnabled=true` with missing/null/false `resource_group.blur_images_by_default` -> do not mask.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: image-chat displays a compact "生成分组" selector with `default`, and generated round metadata shows the same
   group label.
 - Good: inspiration history, image-session list, and gallery filter options keep "所有分组" but initially select the first
@@ -815,6 +843,7 @@ resource_group_ids: draft.resource_group_ids,
 - Bad: using the thumbnail-strength mask on the image-chat center current-result image.
 
 #### 6. Tests Required
+
 - SettingsPage tests cover group payloads, import/export counts, generation config `resource_group_ids`, and legacy
   `resource_group_id` fallback.
 - Image-chat helper tests include `resource_group_id` in submit signatures, task placeholders, and regenerate payloads.

@@ -1848,6 +1848,7 @@ export interface TextGenerationConfigTestCopyRequest {
 export interface TextGenerationConfigTestRequest {
   generation_config_id?: string | null;
   generation_config?: GenerationConfigCreateRequest | null;
+  reference_asset_ids?: string[];
   inspiration?: TextGenerationConfigTestInspirationRequest;
   copy_request?: TextGenerationConfigTestCopyRequest;
 }
