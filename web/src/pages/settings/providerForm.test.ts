@@ -4,6 +4,7 @@ import type { ProviderProfile } from "../../lib/types";
 import {
   coerceProviderImageMaxDimension,
   filterProviderProfilesByName,
+  filterProviderProfilesForList,
   parseProviderImageMaxDimensionDraft,
   providerFormFromProfile,
   providerImageMaxDimensionFormInvalid,
@@ -45,6 +46,22 @@ describe("provider profile search helpers", () => {
     ];
 
     expect(filterProviderProfilesByName(profiles, "free")).toEqual([profiles[1]]);
+  });
+
+  it("combines archive, enabled-state, and visible-name filters for the provider list", () => {
+    const profiles = [
+      providerProfile({ id: "enabled-alpha", name: "Alpha", enabled: true }),
+      providerProfile({ id: "disabled-alpha", name: "Alpha Disabled", enabled: false }),
+      providerProfile({ id: "disabled-beta", name: "Beta", enabled: false }),
+      providerProfile({ id: "archived-alpha", name: "Alpha Archived", archived_at: "2026-07-16T00:00:00Z" }),
+    ];
+
+    expect(filterProviderProfilesForList(profiles, "alpha", true).map((profile) => profile.id)).toEqual([
+      "enabled-alpha",
+    ]);
+    expect(filterProviderProfilesForList(profiles, "alpha", false).map((profile) => profile.id)).toEqual([
+      "disabled-alpha",
+    ]);
   });
 });
 

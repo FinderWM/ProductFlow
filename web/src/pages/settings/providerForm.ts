@@ -37,6 +37,17 @@ export function filterProviderProfilesByName(profiles: ProviderProfile[], query:
   return profiles.filter((profile) => profile.name.toLowerCase().includes(normalizedQuery));
 }
 
+export function filterProviderProfilesForList(
+  profiles: ProviderProfile[],
+  query: string,
+  enabled: boolean,
+): ProviderProfile[] {
+  return filterProviderProfilesByName(
+    profiles.filter((profile) => !profile.archived_at && profile.enabled === enabled),
+    query,
+  );
+}
+
 export function providerCapabilityLabelKey(capability: ProviderCapability): TranslationKey {
   return (
     PROVIDER_CAPABILITY_OPTIONS.find((option) => option.value === capability)?.labelKey ??

@@ -6,6 +6,7 @@ import { useId, useState } from "react";
 import { Box, KeyRound, Link2, Loader2, Pencil, Plus, Save, Search, ServerCog, Trash2, X } from "lucide-react";
 
 import { ClassicSelectField, ClassicTextInput } from "../../../components/classicInputs";
+import { LayoutSwitchTabs, type LayoutSwitchTabItem } from "../../../components/LayoutSwitchTabs";
 import { ModalShell } from "../../../components/ModalShell";
 import { ParameterHelpLabel } from "../../../components/ParameterHelp";
 import { WorkspaceSelectField, WorkspaceTextInput } from "../../../components/workspaceInputs";
@@ -25,7 +26,7 @@ import {
   providerImageMaxDimensionSelectValue,
   parseProviderImageMaxDimensionDraft,
   defaultCapabilitiesForProviderType,
-  filterProviderProfilesByName,
+  filterProviderProfilesForList,
   providerCapabilityLabelKey,
   providerDefaultEndpointLabelKey,
   providerDisableBlocked,
@@ -66,6 +67,8 @@ interface ProvidersSectionProps {
   onToggleProfileEnabled: (profileId: string, enabled: boolean) => void;
 }
 
+type ProviderStatusFilter = "enabled" | "disabled";
+
 export function ProvidersSection({
   profiles,
   profileForm,
@@ -86,8 +89,17 @@ export function ProvidersSection({
   const { t } = useI18n();
   const { SETTINGS_MAIN_ACTION_CLASS } = useSettingsActionClassNames();
   const [profileSearch, setProfileSearch] = useState("");
+  const [profileStatusFilter, setProfileStatusFilter] = useState<ProviderStatusFilter>("enabled");
   const activeProfiles = profiles.filter((profile) => !profile.archived_at);
-  const filteredProfiles = filterProviderProfilesByName(activeProfiles, profileSearch);
+  const filteredProfiles = filterProviderProfilesForList(
+    profiles,
+    profileSearch,
+    profileStatusFilter === "enabled",
+  );
+  const profileStatusTabs: readonly LayoutSwitchTabItem<ProviderStatusFilter>[] = [
+    { value: "enabled", label: t("settings.provider.filterEnabled") },
+    { value: "disabled", label: t("settings.provider.filterDisabled") },
+  ];
   const editingProfile = editingProfileId
     ? activeProfiles.find((profile) => profile.id === editingProfileId)
     : undefined;
@@ -142,6 +154,16 @@ export function ProvidersSection({
             />
           )}
         </label>
+      ) : null}
+
+      {activeProfiles.length ? (
+        <LayoutSwitchTabs
+          appearance={workspaceSubpage ? "workspace" : "classic"}
+          value={profileStatusFilter}
+          items={profileStatusTabs}
+          ariaLabel={t("settings.provider.filterAria")}
+          onChange={setProfileStatusFilter}
+        />
       ) : null}
 
       {activeProfiles.length ? (
