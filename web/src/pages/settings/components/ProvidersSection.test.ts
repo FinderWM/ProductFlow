@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -6,8 +5,6 @@ import { describe, expect, it } from "vitest";
 import type { ProviderProfile } from "../../../lib/types";
 import { EMPTY_PROVIDER_FORM } from "../providerForm";
 import { ProvidersSection } from "./ProvidersSection";
-
-const appCss = readFileSync(new URL("../../../index.css", import.meta.url), "utf8");
 
 function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
@@ -75,11 +72,6 @@ describe("ProvidersSection status tabs", () => {
 
     expect(markup).toContain("pf-workspace-horizontal-switch-tabs");
     expect(markup).not.toContain("pf-classic-horizontal-switch-tabs");
-  });
-
-  it("keeps both layout tab variants from forcing a mobile minimum width", () => {
-    expect(appCss).toMatch(
-      /@media \(max-width: 640px\) \{[\s\S]*?:is\(\.pf-classic-horizontal-switch-tabs, \.pf-workspace-horizontal-switch-tabs\)[\s\S]*?min-width: 0;/,
-    );
+    expect(markup).toContain("flex flex-wrap gap-1");
   });
 });
