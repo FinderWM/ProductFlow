@@ -2,7 +2,7 @@
 name: trellis-check
 description: |
   Code quality check expert. Reviews code changes against specs and self-fixes issues.
-tools: Read, Write, Edit, Bash, Glob, Grep, mcp__exa__web_search_exa, mcp__exa__get_code_context_exa
+tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 # Check Agent
 
@@ -26,6 +26,7 @@ Look for the `<!-- trellis-hook-injected -->` marker in your input above.
 ## Context
 
 Before checking, read:
+
 - `.trellis/spec/` - Development guidelines
 - Task `prd.md` - Requirements document
 - Task `design.md` - Technical design (if exists)
